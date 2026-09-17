@@ -11,6 +11,7 @@ import { WsTestView } from './WsTestView'
 import { SettingsView } from './SettingsView'
 import { StatusBar } from './StatusBar'
 import { api } from './api'
+import { parseHash } from './routing'
 
 // VS Code 风格活动栏图标按钮:通栏占满活动栏宽度(悬停/选中底色左右贴边,无留白差),
 // 选中态灰色底色(无左侧蓝条),未选中悬停给半档底色(与手风琴表头一致的 hover 反馈)
@@ -107,10 +108,33 @@ export function App() {
   useEffect(() => {
     if (jumpedRef.current) return
     jumpedRef.current = true
+    // 先认 URL 片段:深链接必须优先于下面那条兜底 —— 字典页的「设置」入口指向
+    // /debug/#settings/data-dict,若先跑"没有环境就跳设置",用户点过来会落在站点管理,
+    // 而不是他要的那个分区。
+    const r = parseHash(location.hash)
+    if (r.view) {
+      useStore.getState().setView(r.view)
+      if (r.view === 'settings' && r.section) useStore.getState().setSettingsSection(r.section)
+      return
+    }
+    // 还没有任何服务器环境时(桌面版首启、或本地还没配过):直接落到「设置 → 站点管理」,
+    // 而不是把用户丢在一个什么都干不了的调试页。只在本页首次加载时判一次。
     void api.settings().then((c) => {
       const sshs = (c as { sshs?: unknown[] })?.sshs
       if (!Array.isArray(sshs) || sshs.length === 0) useStore.getState().setView('settings')
     }).catch(() => { /* 服务未就绪时不动:等用户自己操作 */ })
+  }, [])
+  // 浏览器前进/后退,以及从别处再点一次同样的深链接:跟着片段走
+  useEffect(() => {
+    const onHash = () => {
+      const r = parseHash(location.hash)
+      if (!r.view) return
+      const st = useStore.getState()
+      st.setView(r.view)
+      if (r.view === 'settings' && r.section) st.setSettingsSection(r.section)
+    }
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
   }, [])
   useEffect(() => {
     const close = connectWS()

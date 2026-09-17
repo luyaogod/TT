@@ -1,26 +1,41 @@
-// 设置页:VS Code 式左侧一级分类(外观/环境/高级)。
-// 「环境」:左侧环境(SSH 服务器)列表 + 右侧表单区拆两个 Tab —— 「SSH 服务器」与
-// 「数据库」一对一编辑同一个环境:SSH Tab 维护登录连接/区域/TOPENT;DB Tab 维护该
-// 环境的数据库连接(显式 host/port/service|库名 + 账号列表,无主账号)。
-// 账号语义:运行时由 TOPENT 决定(服务器 gzou_t 解析账号名,密码查账号列表);
-// 账号列表为账号=密码的常用账号清单,逐行可用 Zap 在服务器侧验证连接(只读)。
+// 统一设置页:左侧两级导航(分区 → 卡片),右侧按分区渲染卡片。
 //
-// 环境清单走**共享**端点 /api/hosts(顶层,不带 API_BASE 前缀):一个进程同时挂着
-// 两套 SPA,而环境只有一份数据源 —— config.json 的 hosts 节,字典页的环境页读写的
-// 也是它。合并前这份清单藏在 debug 节里(所以老代码收发的是整个 debug 节点),
-// 现在收发的是 hosts 节;「高级」里除监听地址(顶层 listen)外都仍落在 debug 节。
-// 保存时**按节提交**:两套页面各改各的部分,不拿陈旧快照覆盖对方刚改好的节。
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Plus, Trash2, Monitor, Server, Database, SlidersHorizontal, Sun, Moon, Eye, EyeOff, RefreshCw, Zap } from 'lucide-react'
+// 「站点管理」环境清单 + SSH/数据库(原调试页「环境」节与字典页「环境配置」的并集,只留一份);
+// 「数据字典」查询数据源 / 源码镜像 / 数据同步 / BDL 文档;
+// 「DEBUG」调试参数 / 默认环境;
+// 「应用设置」外观 / 服务 / 运行信息。
+//
+// 环境清单走**共享**端点 /api/hosts(顶层,不带 API_BASE 前缀):一个进程同时挂着两套 SPA,
+// 而环境只有一份数据源 —— config.json 的 hosts 节。合并前这份清单藏在 debug 节里
+// (所以老代码收发的是整个 debug 节点),现在收发的是 hosts 节。
+//
+// 保存**按节提交**:两套页面各改各的部分,不拿陈旧快照覆盖对方刚改好的节
+// (后端约定:PUT /api/hosts 里省略的节保持原样)。
+//
+// ⚠ 后端的 PUT 是**整节替换**,而这些结构体每个字段都带 omitempty —— 省略的键等于删除。
+// 所以每张卡片的保存都必须提交**完整的节**(从读到的快照 + 编辑项构造),绝不能只发表单里
+// 那几个字段:老代码在「高级」里只发了 5 个键,于是 fglserver / persistBreakpoints /
+// activeEnv 在用户每次保存时被静默抹掉。debugPatchOf 就是为了堵这个。
+import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  Bug, Database, Eye, EyeOff, Folder, HardDrive, Monitor, Plus, RefreshCw, RotateCcw,
+  Server, SlidersHorizontal, Star, Sun, Moon, Trash2, Zap, ExternalLink,
+} from 'lucide-react'
 import { api, type HostsDb, type HostsPatch, type HostsSsh, type HostsView } from './api'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-  Button, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Separator,
+  Button, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from './ui'
+import { Card, Field, InfoRow, SettingRow } from '../../shared/settings'
 import { useStore, type ThemeMode } from './store'
 import { cn } from './lib/utils'
+import {
+  SETTINGS_SECTIONS, settingsHash, type SettingsSectionKey,
+} from './routing'
+
+// ---------- 表单模型 ----------
 
 interface SshDb {
   type: string // oracle | kingbase
@@ -46,13 +61,64 @@ interface SshItem {
   db: SshDb | null
 }
 
-type Section = 'appearance' | 'envs' | 'advanced'
-type EnvTab = 'ssh' | 'db'
+// debug 节的完整表单。字段与 internal/config/schema.go 的 DebugSettings 一一对应 ——
+// 少一个键就意味着保存时把它删了(整节替换),所以这里必须是全集。
+interface DebugForm {
+  activeEnv: string // 留空 = 继承 hosts.activeEnv
+  launchArgs: string
+  watchdogSeconds: number
+  fglserver: string
+  termWidth: number
+  termHeight: number
+  printElements: number
+  // *bool 三态:nil = 跟随默认(开启)。复选框写不了三态,所以用下拉。
+  persistBreakpoints: 'default' | 'on' | 'off'
+}
 
-const SECTIONS: { key: Section; label: string; icon: typeof Monitor }[] = [
-  { key: 'envs', label: '环境', icon: Server },
-  { key: 'appearance', label: '外观', icon: Monitor },
-  { key: 'advanced', label: '高级', icon: SlidersHorizontal },
+interface DictForm {
+  querySource: string // '' | 'local' | <环境名>
+  mirrorDir: string
+  syncTarget: string
+  bdldocDir: string
+}
+
+/** 可保存的配置节。脏标记与保存按钮都按它划分。 */
+type ConfigKey = 'hosts' | 'debug' | 'listen' | 'query' | 'mirror' | 'sync' | 'bdldoc'
+
+// 每个分区由哪些卡片组成;卡片 id 既是左树点击的滚动锚点,也是深链接的落点粒度。
+// 图标放在这里(而不是 routing.ts)是因为它是纯 UI 关注点 —— 路由那边只需要键与中文名。
+const NAV: {
+  key: SettingsSectionKey
+  icon: typeof Server
+  cards: { id: string; label: string; icon: typeof Server }[]
+}[] = [
+  {
+    key: 'sites', icon: Server, cards: [
+      { id: 'card-sites-list', label: '环境清单', icon: Server },
+      { id: 'card-sites-conn', label: '服务器与数据库', icon: Database },
+    ],
+  },
+  {
+    key: 'data-dict', icon: Database, cards: [
+      { id: 'card-dict-query', label: '查询数据源', icon: Database },
+      { id: 'card-dict-mirror', label: '源码镜像', icon: Folder },
+      { id: 'card-dict-sync', label: '数据同步', icon: HardDrive },
+      { id: 'card-dict-bdldoc', label: 'BDL 文档', icon: Folder },
+    ],
+  },
+  {
+    key: 'debug', icon: Bug, cards: [
+      { id: 'card-debug-params', label: '调试参数', icon: SlidersHorizontal },
+      { id: 'card-debug-env', label: '默认环境', icon: Server },
+    ],
+  },
+  {
+    key: 'app', icon: Monitor, cards: [
+      { id: 'card-app-theme', label: '外观', icon: Monitor },
+      { id: 'card-app-service', label: '服务', icon: Server },
+      { id: 'card-app-info', label: '运行信息', icon: Server },
+    ],
+  },
 ]
 
 // 主题切换卡片(shadcn 主题切换卡样式):三张卡各带一张迷你界面预览,选中卡描边+底色高亮。
@@ -117,6 +183,8 @@ function ThemeCards({ value, onChange }: { value: ThemeMode; onChange: (t: Theme
 
 const input = 'h-7 text-xs'
 const cell = 'h-7 w-full min-w-0 text-xs'
+// 单元格「正在编辑」提示环:用 ring 语义 token,不写死颜色(共享层里也只有这一份)
+const CELL_EDITING = 'focus-within:ring-1 focus-within:ring-inset focus-within:ring-ring/60'
 
 const blankDb = (): SshDb => ({ type: 'oracle', host: '', port: 1521, service: '', database: '', accounts: [] })
 // 新增环境默认带三个常用账号(账号=密码),省去手工录入
@@ -126,28 +194,101 @@ const blankSsh = (): SshItem => ({
   db: { ...blankDb(), accounts: defaultAccounts() },
 })
 
+// ---------- 表单 ↔ 配置节的互转 ----------
+
+/**
+ * 环境清单 → hosts 节。**整节提交**,所以这里必须给出完整的 sshs 列表。
+ *
+ * 仍未覆盖的字段:`hosts.sshs[].launchArgs` / `watchdogSeconds`(每环境的调试覆盖项,
+ * 本页不暴露)。它们由服务端的保留机制补回(见 internal/web 的 preserveUngovernedDBFields)。
+ * 纯客户端没法保住它们 —— 表单模型里根本没有这两个字段。
+ */
+function hostsPatchOf(list: SshItem[], prevActiveEnv: string) {
+  const sshsOut: HostsSsh[] = list.filter((x) => x.host).map((x) => {
+    const o: HostsSsh = {
+      name: x.name || `${x.host}-${x.zone}`.replace(/-$/, ''),
+      host: x.host, port: x.port || 22, user: x.user, password: x.password,
+    }
+    if (x.zone.trim()) o.zone = x.zone.trim()
+    if (x.topent.trim()) o.topent = x.topent.trim()
+    if (x.db) {
+      const db: HostsDb = { type: x.db.type || 'oracle', host: x.db.host.trim(), port: x.db.port || 0 }
+      if (x.db.type === 'oracle') { if (x.db.service.trim()) db.service = x.db.service.trim() }
+      else { if (x.db.database.trim()) db.database = x.db.database.trim() }
+      const accounts = x.db.accounts.map((a) => ({ account: a.account.trim(), password: a.password })).filter((a) => a.account)
+      if (accounts.length) db.accounts = accounts
+      // 只有"显式关掉"才写:没配 = 默认开启,不必往 JSON 里塞一堆 true
+      if (x.db.readonlySql === false) db.readonlySql = false
+      o.db = db
+    }
+    return o
+  })
+  // 默认环境本页只在「环境清单」里改它,但 PUT 提交的是**整节**,必须原样回传:
+  // 若它刚好被这次删除带走了,就顺延到首条 —— 否则后端会以「默认环境不在环境列表里」整次 400 拒掉。
+  return {
+    activeEnv: sshsOut.some((e) => e.name === prevActiveEnv) ? prevActiveEnv : (sshsOut[0]?.name || ''),
+    sshs: sshsOut,
+  }
+}
+
+/**
+ * debug 节 → 完整节对象。
+ *
+ * **这里是那个数据丢失 bug 的修法**:不按表单里"用户改过哪些"挑选,而是把 debug 节的
+ * 每个键都给出来(空/默认的键省略 = 恢复该键的默认值)。老代码只发 5 个键,
+ * 于是 fglserver / persistBreakpoints / activeEnv 每次保存都被删掉。
+ */
+function debugPatchOf(d: DebugForm): NonNullable<HostsPatch['debug']> {
+  const out: NonNullable<HostsPatch['debug']> = {}
+  if (d.launchArgs) out.launchArgs = d.launchArgs
+  if (d.watchdogSeconds) out.watchdogSeconds = d.watchdogSeconds
+  if (d.fglserver.trim()) out.fglserver = d.fglserver.trim()
+  if (d.termWidth) out.termWidth = d.termWidth
+  if (d.termHeight) out.termHeight = d.termHeight
+  if (d.printElements) out.printElements = d.printElements
+  if (d.persistBreakpoints === 'on') out.persistBreakpoints = true
+  else if (d.persistBreakpoints === 'off') out.persistBreakpoints = false
+  if (d.activeEnv) out.activeEnv = d.activeEnv
+  return out
+}
+
 export function SettingsView() {
+  const section = useStore((s) => s.settingsSection)
+  const setSection = useStore((s) => s.setSettingsSection)
   const theme = useStore((s) => s.theme)
   const setTheme = useStore((s) => s.setTheme)
-  const [section, setSection] = useState<Section>('envs')
-  const [envTab, setEnvTab] = useState<EnvTab>('ssh')
+
+  const [envTab, setEnvTab] = useState<'ssh' | 'db'>('ssh')
   const [cfg, setCfg] = useState<HostsView | null>(null)
   const [sshs, setSshs] = useState<SshItem[]>([])
-  // 「高级」的六个本机参数单独存:保存时要按节提交,只改了它们就只发 debug/listen
-  const [adv, setAdv] = useState({
-    launchArgs: '', listen: '', watchdogSeconds: 0, printElements: 0, termWidth: 200, termHeight: 50,
+  const [dbg, setDbg] = useState<DebugForm>({
+    activeEnv: '', launchArgs: '', watchdogSeconds: 0, fglserver: '',
+    termWidth: 200, termHeight: 50, printElements: 1000, persistBreakpoints: 'default',
   })
+  const [dict, setDict] = useState<DictForm>({ querySource: '', mirrorDir: '', syncTarget: '', bdldocDir: '' })
+  const [listen, setListen] = useState('')
   const [selSsh, setSelSsh] = useState(0)
   const [err, setErr] = useState('')
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle')
-  // 脏标记按节记(envs / adv):保存时只提交改过的节 —— 两套页面共用 /api/hosts,
-  // 把没改的节一起发过去就是用陈旧快照覆盖字典页刚改好的部分(后端约定:省略的节不动)
-  const dirtyRef = useRef({ envs: false, adv: false })
+  // 脏标记按**配置节**记。保存时只提交改过的节 —— 两套页面共用 /api/hosts,
+  // 把没改的节一起发过去就是用陈旧快照覆盖字典页刚改好的部分。
+  const dirtyRef = useRef<Record<ConfigKey, boolean>>({
+    hosts: false, debug: false, listen: false, query: false, mirror: false, sync: false, bdldoc: false,
+  })
   const [dirty, setDirty] = useState(false)
-  const markDirty = (which: 'envs' | 'adv') => { dirtyRef.current[which] = true; setDirty(true) }
-  const cleanDirty = () => { dirtyRef.current = { envs: false, adv: false }; setDirty(false) }
+  const markDirty = (...keys: ConfigKey[]) => {
+    keys.forEach((k) => { dirtyRef.current[k] = true })
+    setDirty(true)
+  }
+  const cleanDirty = (keys?: ConfigKey[]) => {
+    if (keys) keys.forEach((k) => { dirtyRef.current[k] = false })
+    else (Object.keys(dirtyRef.current) as ConfigKey[]).forEach((k) => { dirtyRef.current[k] = false })
+    setDirty((Object.keys(dirtyRef.current) as ConfigKey[]).some((k) => dirtyRef.current[k]))
+  }
+  const isDirty = (...keys: ConfigKey[]) => keys.some((k) => dirtyRef.current[k])
+
   const [showPwd, setShowPwd] = useState(false)
-  // DB Tab 操作状态
+  // 数据库页操作状态
   const [busy, setBusy] = useState<string>('')
   const [note, setNote] = useState<{ kind: 'ok' | 'err' | 'info'; text: string } | null>(null)
   const [accProbe, setAccProbe] = useState<{ i: number; state: 'testing' | 'ok' | 'err'; msg: string } | null>(null)
@@ -172,88 +313,76 @@ export function SettingsView() {
           } : null,
         }
       }))
-      // 高级:监听地址在顶层,其余在 debug 节(合并前它们平铺在 debug 节点上)
-      setAdv({
+      setDbg({
+        activeEnv: c.debug?.activeEnv || '',
         launchArgs: c.debug?.launchArgs || '',
-        listen: c.listen || '',
         watchdogSeconds: c.debug?.watchdogSeconds || 0,
-        printElements: c.debug?.printElements || 0,
+        fglserver: c.debug?.fglserver || '',
         termWidth: c.debug?.termWidth || 200,
         termHeight: c.debug?.termHeight || 50,
+        printElements: c.debug?.printElements || 1000,
+        persistBreakpoints: c.debug?.persistBreakpoints === true ? 'on'
+          : c.debug?.persistBreakpoints === false ? 'off' : 'default',
       })
-      // 列表默认选中第一条(当前环境由会话决定,设置页不涉及)
+      setDict({
+        querySource: c.query?.source || '',
+        mirrorDir: c.mirror?.dir || '',
+        syncTarget: c.sync?.target || '',
+        bdldocDir: c.bdldoc?.dir || '',
+      })
+      setListen(c.listen || '')
       cleanDirty(); setSaveState('idle'); setErr('')
     }).catch((e) => setErr(e.message))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => { loadSettings() }, [loadSettings])
-  // keep-alive 常驻挂载:再次切到「环境」时回读(无未保存修改时)
+  // 本页被 keep-alive 常驻挂载(切走只是 display:none),所以**不能轮询** ——
+  // 改为"每次切回本页、且没有未保存修改时"回读一次,拿别处(字典页/命令行)改过的值。
+  const dirtyRefAny = () => (Object.keys(dirtyRef.current) as ConfigKey[]).some((k) => dirtyRef.current[k])
+  const visibleRef = useRef(false)
+  const view = useStore((s) => s.view)
   useEffect(() => {
-    if (section !== 'envs' || dirtyRef.current.envs || dirtyRef.current.adv) return
-    void loadSettings()
+    const visible = view === 'settings'
+    if (visible && !visibleRef.current && !dirtyRefAny()) void loadSettings()
+    visibleRef.current = visible
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view])
+
+  // 分区变化 → 同步到 URL 片段(用 replace 而不是 push:否则浏览器后退会一格一格走遍所有分区)
+  useEffect(() => {
+    const want = settingsHash(section)
+    if (window.location.hash !== want) window.history.replaceState(null, '', want)
   }, [section])
 
-  // ---- 统一保存:按节提交(整环境:SSH 字段 + db);list 可覆盖当前列表(删除环境后立即落盘用) ----
-  const saveAll = async (list?: SshItem[]) => {
+  // ---- 统一保存:按节提交;keys 指明这次要提交哪些节 ----
+  const save = async (keys: ConfigKey[], list?: SshItem[]) => {
     if (saveState === 'saving' || !cfg) return
-    const src = list || sshs
-    const d = dirtyRef.current
     const body: HostsPatch = {}
-    if (d.envs || list) {
-      const sshsOut: HostsSsh[] = src.filter((x) => x.host).map((x) => {
-        const o: HostsSsh = {
-          name: sshName(x), host: x.host, port: x.port || 22, user: x.user, password: x.password,
-        }
-        if (x.zone.trim()) o.zone = x.zone.trim()
-        if (x.topent.trim()) o.topent = x.topent.trim()
-        if (x.db) {
-          const db: HostsDb = { type: x.db.type || 'oracle', host: x.db.host.trim(), port: x.db.port || 0 }
-          if (x.db.type === 'oracle') { if (x.db.service.trim()) db.service = x.db.service.trim() }
-          else { if (x.db.database.trim()) db.database = x.db.database.trim() }
-          const accounts = x.db.accounts.map((a) => ({ account: a.account.trim(), password: a.password })).filter((a) => a.account)
-          if (accounts.length) db.accounts = accounts
-          // 只有"显式关掉"才写:没配 = 默认开启,不必往 JSON 里塞一堆 true
-          if (x.db.readonlySql === false) db.readonlySql = false
-          o.db = db
-        }
-        return o
-      })
-      // 默认环境本页不管它,但 PUT 提交的是**整节**,必须原样回传:若它刚好被这次删除
-      // 带走了,就顺延到首条 —— 否则后端会以「默认环境不在环境列表里」整次 400 拒掉。
-      body.hosts = {
-        activeEnv: sshsOut.some((e) => e.name === cfg.activeEnv) ? cfg.activeEnv : (sshsOut[0]?.name || ''),
-        sshs: sshsOut,
-      }
-    }
-    if (d.adv) {
-      // 监听地址是顶层键(合并前在 debug.listen 里),其余仍归 debug 节
-      body.listen = adv.listen.trim()
-      body.debug = {
-        launchArgs: adv.launchArgs,
-        watchdogSeconds: adv.watchdogSeconds,
-        printElements: adv.printElements,
-        termWidth: adv.termWidth,
-        termHeight: adv.termHeight,
-      }
-    }
-    if (!body.hosts && !d.adv) { cleanDirty(); return }
+    if (keys.includes('hosts')) body.hosts = hostsPatchOf(list || sshs, cfg.activeEnv)
+    if (keys.includes('debug')) body.debug = debugPatchOf(dbg)
+    if (keys.includes('listen')) body.listen = listen.trim()
+    if (keys.includes('query')) body.query = { source: dict.querySource }
+    if (keys.includes('mirror')) body.mirror = { dir: dict.mirrorDir.trim() }
+    if (keys.includes('sync')) body.sync = { target: dict.syncTarget.trim() }
+    if (keys.includes('bdldoc')) body.bdldoc = { dir: dict.bdldocDir.trim() }
     setErr(''); setSaveState('saving')
     try {
       const next = await api.saveSettings(body)
       setCfg(next)
       setSshs((prev) => prev.map((x) => ({ ...x, name: sshName(x) })))
-      cleanDirty(); setSaveState('saved')
+      cleanDirty(keys); setSaveState('saved')
     } catch (ex: any) {
       // 服务端是校验的权威(环境名重复 / 端口越界 / 至少要有一个环境…),
       // 它给的中文说明原样显示,不要用本地判断把它盖掉
       setErr(ex.message || String(ex)); setSaveState('idle')
     }
   }
+
+  // ---- 环境编辑 ----
   const patchSsh = (i: number, patch: Partial<SshItem>) => {
     const next = sshs.map((x, j) => (j === i ? { ...x, ...patch } : x))
-    setSshs(next); markDirty('envs')
+    setSshs(next); markDirty('hosts')
   }
   const patchDb = (i: number, patch: Partial<SshDb>) => {
     const cur = sshs[i]
@@ -278,7 +407,12 @@ export function SettingsView() {
     patchDb(selSsh, { accounts: [...cur.db.accounts, { account, password: addAcct.password }] })
     setAddAcct({ account: '', password: '' })
   }
-  const addSsh = () => { setSelSsh(sshs.length); setSshs([...sshs, blankSsh()]); markDirty('envs') }
+  const addSsh = () => { setSelSsh(sshs.length); setSshs([...sshs, blankSsh()]); markDirty('hosts') }
+  const setDefaultEnv = (name: string) => {
+    if (!cfg || name === cfg.activeEnv) return
+    setCfg({ ...cfg, activeEnv: name })
+    void save(['hosts'])
+  }
   // 删除环境:先弹窗二次确认(误删代价高且不可撤销),确定后立即落盘保存
   const askDelSsh = () => { if (sshs[selSsh]) setDelTarget(selSsh) }
   const confirmDelSsh = async () => {
@@ -288,10 +422,10 @@ export function SettingsView() {
     const next = sshs.filter((_, j) => j !== i)
     setSelSsh(Math.max(0, Math.min(i, next.length - 1)))
     setSshs(next)
-    await saveAll(next) // 点击「确定」= 删除并直接保存,不再需要手动点保存
+    await save(['hosts'], next) // 点击「确定」= 删除并直接保存,不再需要手动点保存
   }
 
-  // ---- DB Tab 操作(针对当前环境的 db) ----
+  // ---- 数据库页操作(针对当前环境的 db) ----
   // 从服务器获取:登录当前环境的 SSH 自动探测连接要素回填(辅助)
   const fetchFromServer = async () => {
     const s = sshs[selSsh]
@@ -351,6 +485,24 @@ export function SettingsView() {
       setAccProbe({ i: j, state: 'err', msg: ex.message || String(ex) })
     }
   }
+  // 客户端直连测试:验证「本机 → 库」这条链路真的通(与服务器侧验证互补)
+  const testConn = async () => {
+    const d = sshs[selSsh]?.db
+    if (!d?.host.trim()) { setNote({ kind: 'err', text: '请先填写数据库主机地址' }); return }
+    setBusy('conn'); setNote(null)
+    try {
+      const r = await api.connTest({
+        type: d.type || 'oracle', host: d.host.trim(), port: d.port || 0,
+        service: d.service.trim(), database: d.database.trim(),
+        accounts: d.accounts.map((a) => ({ account: a.account.trim(), password: a.password })).filter((a) => a.account),
+      })
+      const ver = (r.serverVersion || '').split('\n')[0]
+      setNote({ kind: r.ok ? 'ok' : 'err', text: r.ok ? `连接正常:${ver}` : `${r.stage === 'version' ? '取版本失败' : '连接失败'}:${r.error}` })
+    } catch (ex: any) {
+      setNote({ kind: 'err', text: '连接失败: ' + (ex.message || String(ex)) })
+    } finally { setBusy('') }
+  }
+
   // 「已保存」提示短暂停留后回到空闲
   useEffect(() => {
     if (saveState !== 'saved') return
@@ -361,324 +513,515 @@ export function SettingsView() {
   if (!cfg) return <div className="p-6 text-sm text-muted-foreground">{err || '加载配置中…'}</div>
   const cur = sshs[selSsh]
   const curDb = cur?.db
+  const envNames = sshs.map((e) => sshName(e)).filter(Boolean)
+
+  // 卡片的保存按钮:按节脏标记决定可用性,保存中显示进行态
+  const SaveBtn = ({ keys }: { keys: ConfigKey[] }) => (
+    <Button size="sm" disabled={!isDirty(...keys) || saveState === 'saving'} onClick={() => void save(keys)}>
+      {saveState === 'saving' && isDirty(...keys) ? '保存中…' : '保存'}
+    </Button>
+  )
+
   return (
     <div className="flex h-full min-h-0 text-xs">
-      {/* VS Code 式左侧一级分类 */}
-      <div className="w-36 shrink-0 space-y-0.5 overflow-auto border-r border-border p-2">
-        {SECTIONS.map(({ key, label, icon: Icon }) => (
-          <button key={key} onClick={() => setSection(key)}
-            className={`flex w-full items-center gap-2 px-2 py-1.5 text-left transition-colors ${
-              section === key ? 'bg-accent text-accent-foreground font-medium' : 'text-muted-foreground hover:bg-accent/60'
-            }`}>
-            <Icon className="h-3.5 w-3.5" />{label}
-          </button>
-        ))}
-      </div>
-
-      {/* 右侧内容区 */}
-      <div className="min-h-0 flex-1 overflow-auto">
-        <div className="mx-auto max-w-3xl p-4">
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-sm font-medium text-foreground">环境设置</h2>
-            <span className="flex items-center gap-2">
-              {err && <span className="text-[11px] text-red-600 dark:text-red-400">{err}</span>}
-              <span className={`text-[11px] ${saveState === 'saved' ? 'text-emerald-600 dark:text-emerald-400' : dirty ? 'text-amber-600 dark:text-amber-400' : ''}`}>
-                {saveState === 'saving' ? '保存中…' : saveState === 'saved' ? '已保存 ✓' : dirty ? '有未保存的修改' : ''}
-              </span>
-            </span>
-          </div>
-
-          {section === 'envs' && (
-            <>
-              {/* 环境清单与字典页共用一份数据源,写清楚免得「一边改了另一边没变」被当成 bug */}
-              <p className="mb-2 border-l-2 border-sky-500/50 bg-sky-500/5 px-2 py-1 text-[11px] text-muted-foreground">
-                环境清单与字典页共用同一份(config.json 的 hosts 节):这里保存后,字典页重新进入「环境配置」即可看到;
-                反过来字典页改过的环境,本页切回「环境」也会回读。删掉一个环境,字典页的镜像/数据同步里也就没有它了。
-              </p>
-              <div className="flex">
-              {/* 环境列表(左侧;右侧表单区分 SSH/DB 两 Tab 编辑同一环境) */}
-              <div className="w-44 shrink-0 border-r border-border pr-1.5">
-                <div className="py-1">
-                  {sshs.length === 0 && <div className="p-2 text-muted-foreground">(空)</div>}
-                  {sshs.map((e, i) => (
-                    <button key={i} onClick={() => setSelSsh(i)}
-                      className={`flex w-full items-center gap-1.5 px-2 py-1.5 text-left transition-colors ${
-                        selSsh === i ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/60'
-                      }`}>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate font-medium">{e.name || e.host || '(新环境)'}</span>
-                        <span className="block truncate text-muted-foreground">
-                          {e.zone ? `${e.zone} · ` : ''}{e.port || 22}{e.db ? ' · 库' : ''}
-                        </span>
-                      </span>
+      {/* 左侧两级导航:分区(可折叠) → 卡片 */}
+      <div className="flex w-44 shrink-0 flex-col overflow-auto border-r border-border">
+        <div className="border-b border-border px-2 py-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+          设置
+        </div>
+        {NAV.map((g) => {
+          const GIcon = g.icon
+          const active = section === g.key
+          return (
+            <div key={g.key}>
+              <button
+                onClick={() => setSection(g.key)}
+                className={cn('flex w-full items-center gap-2 px-2 py-1.5 text-left transition-colors',
+                  active ? 'bg-accent font-medium text-accent-foreground' : 'text-muted-foreground hover:bg-accent/60')}
+              >
+                <GIcon className="h-3.5 w-3.5 shrink-0" />
+                <span className="min-w-0 flex-1 truncate">{SETTINGS_SECTIONS.find((s) => s.key === g.key)?.label}</span>
+              </button>
+              {/* 二级:当前分区的卡片,点击滚动到对应卡片 */}
+              {active && (
+                <div className="pb-1">
+                  {g.cards.map((c) => (
+                    <button
+                      key={c.id}
+                      onClick={() => document.getElementById(c.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                      className="flex w-full items-center gap-2 py-1 pr-2 pl-7 text-left text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      <span className="min-w-0 truncate">{c.label}</span>
                     </button>
                   ))}
                 </div>
-                <Button size="sm" variant="outline" className="mt-2 w-full" onClick={addSsh}>
-                  <Plus className="mr-1 h-3 w-3" />新增环境
-                </Button>
-              </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
 
-              {cur && (
-                <section className="min-w-0 flex-1 pl-3">
-                  <div className="mb-2 flex items-center justify-between">
-                    <h3 className="font-medium text-foreground">环境参数</h3>
-                    <div className="flex gap-1.5">
-                      <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-red-600 dark:hover:text-red-400"
-                        title="删除该环境(弹窗确认后立即保存)" onClick={askDelSsh}>
+      {/* 右侧内容区:当前分区的全部卡片,整体滚动 */}
+      <div className="min-h-0 flex-1 overflow-auto">
+        <div className="mx-auto max-w-3xl space-y-3 p-4">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-sm font-medium text-foreground">
+              {SETTINGS_SECTIONS.find((s) => s.key === section)?.label}
+            </h2>
+            <span className="flex min-w-0 items-center gap-2">
+              {err && <span className="truncate text-[11px] text-red-600 dark:text-red-400" title={err}>{err}</span>}
+              {!err && (
+                <span className={cn('text-[11px]',
+                  saveState === 'saved' ? 'text-emerald-600 dark:text-emerald-400'
+                    : dirty ? 'text-amber-600 dark:text-amber-400' : '')}>
+                  {saveState === 'saving' ? '保存中…' : saveState === 'saved' ? '已保存 ✓' : dirty ? '有未保存的修改' : ''}
+                </span>
+              )}
+              {/* 本页常驻挂载、不轮询(轮询会一直 os.Stat 配置里的路径),所以给一个显式回读入口:
+                  命令行或字典页改过配置后,点它就能看到最新值 */}
+              <Button variant="ghost" size="sm" disabled={dirty || saveState === 'saving'}
+                title={dirty ? '有未保存的修改,先保存或放弃再回读' : '从 config.json 重新读取'}
+                onClick={() => loadSettings()}>
+                <RefreshCw className="h-3.5 w-3.5" />
+              </Button>
+            </span>
+          </div>
+
+          {/* ============ 站点管理 ============ */}
+          {section === 'sites' && (
+            <>
+              <Card
+                id="card-sites-list"
+                title="环境清单"
+                description="与字典页共用同一份(config.json 的 hosts 节):这里保存后字典页也能看到,反之亦然。删掉一个环境,字典页的镜像/数据同步里也就没有它了。"
+                right={<SaveBtn keys={['hosts']} />}
+              >
+                <div className="max-h-48 space-y-0.5 overflow-auto">
+                  {sshs.length === 0 && <div className="py-2 text-muted-foreground">(空)</div>}
+                  {sshs.map((e, i) => {
+                    const isDefault = cfg.activeEnv === sshName(e)
+                    return (
+                      <div key={i}
+                        className={cn('flex items-center gap-1 px-1.5 py-1 transition-colors',
+                          i === selSsh ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50')}>
+                        <button className="min-w-0 flex-1 text-left" onClick={() => setSelSsh(i)}>
+                          <span className="block truncate">{sshName(e) || '(新环境)'}</span>
+                          <span className="block truncate text-[11px] text-muted-foreground">
+                            {e.zone || '-'} · {e.port || '-'} · {e.db ? (e.db.type === 'kingbase' ? '金仓' : 'Oracle') : '无库'}
+                          </span>
+                        </button>
+                        <button
+                          title={isDefault ? '当前默认环境' : '设为默认环境(会话未指定环境时用它)'}
+                          disabled={isDefault}
+                          onClick={() => setDefaultEnv(sshName(e))}
+                          className="shrink-0 p-0.5 transition-colors hover:bg-accent/60 disabled:opacity-100"
+                        >
+                          <Star className={cn('h-3.5 w-3.5', isDefault ? 'fill-amber-400 text-amber-400' : 'text-muted-foreground')} />
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+                <div className="mt-2 flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={addSsh}><Plus className="h-3.5 w-3.5" />新增环境</Button>
+                  <span className="text-[11px] text-muted-foreground">星标 = 默认环境({cfg.activeEnv || '未设置'})</span>
+                </div>
+              </Card>
+
+              <Card
+                id="card-sites-conn"
+                title="服务器与数据库"
+                description="SSH 登录与数据库连接按环境一对一挂载。运行时用哪个数据库账号由 TOPENT 决定(服务器侧解析),客户端直连取账号列表首项。"
+                right={<SaveBtn keys={['hosts']} />}
+              >
+                {!cur ? (
+                  <div className="py-2 text-muted-foreground">先在上面的「环境清单」里选一个环境,或新增一个。</div>
+                ) : (
+                  <>
+                    <div className="mb-3 flex items-center justify-between gap-2 border-b border-border pb-2">
+                      <span className="min-w-0 truncate text-xs font-medium text-foreground">{sshName(cur) || '(新环境)'}</span>
+                      <Button variant="ghost" size="sm" title="删除该环境" onClick={askDelSsh}>
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
-                      {(dirty || saveState === 'saving') && (
-                        <Button size="sm" variant="secondary" className="h-7" disabled={saveState === 'saving'} onClick={() => void saveAll()}>
-                          {saveState === 'saving' ? '保存中…' : '保存'}
-                        </Button>
-                      )}
                     </div>
-                  </div>
+                    <div className="mb-3 flex gap-0.5 border-b border-border">
+                      {([['ssh', 'SSH 服务器'], ['db', '数据库']] as const).map(([k, label]) => (
+                        <button key={k} onClick={() => setEnvTab(k)}
+                          className={cn('px-2.5 py-1.5 transition-colors',
+                            envTab === k ? 'tab-active font-medium text-foreground' : 'text-muted-foreground hover:text-foreground')}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
 
-                  {/* 右侧表单区:SSH 服务器 | 数据库(同一环境的一对一两组字段) */}
-                  <div className="mb-2 flex items-center gap-1 border-b border-border">
-                    {([
-                      { key: 'ssh', label: 'SSH 服务器', icon: Server },
-                      { key: 'db', label: '数据库', icon: Database },
-                    ] as { key: EnvTab; label: string; icon: typeof Server }[]).map(({ key, label, icon: Icon }) => (
-                      <button key={key} onClick={() => setEnvTab(key)}
-                        className={`relative flex items-center gap-1.5 px-3 py-1.5 text-xs transition-colors ${
-                          envTab === key ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
-                        }`}>
-                        <Icon className="h-3.5 w-3.5" />{label}
-                        {envTab === key && <span className="absolute inset-x-0 bottom-0 h-px bg-primary" />}
-                      </button>
-                    ))}
-                  </div>
-
-                  {envTab === 'ssh' && (
-                    <div className="grid grid-cols-2 gap-2">
-                      <Field label="环境名称(留空自动为主机-区域)" className="col-span-2">
-                        <Input className={cell} value={cur.name} onChange={(e) => patchSsh(selSsh, { name: e.target.value.trim() })} />
-                      </Field>
-                      <Field label="IP 主机"><Input className={cell} value={cur.host} onChange={(e) => patchSsh(selSsh, { host: e.target.value.trim() })} /></Field>
-                      <Field label="端口"><Input className={cell} type="number" value={cur.port || ''} onChange={(e) => patchSsh(selSsh, { port: Number(e.target.value) || 22 })} /></Field>
-                      <Field label="登录区域"><Input className={cell} value={cur.zone} onChange={(e) => patchSsh(selSsh, { zone: e.target.value.trim() })} /></Field>
-                      <Field label="账号"><Input className={cell} value={cur.user} onChange={(e) => patchSsh(selSsh, { user: e.target.value.trim() })} /></Field>
-                      <Field label="密码">
-                        <div className="relative">
-                          <Input className={`${cell} pr-8`} type={showPwd ? 'text' : 'password'} value={cur.password}
-                            onChange={(e) => patchSsh(selSsh, { password: e.target.value })} />
-                          <button type="button" title={showPwd ? '隐藏密码' : '显示密码'}
-                            onClick={() => setShowPwd((v) => !v)}
-                            className="absolute inset-y-0 right-0.5 flex w-6 items-center justify-center text-muted-foreground hover:text-foreground">
-                            {showPwd ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                          </button>
+                    {envTab === 'ssh' && (
+                      <>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                          <Field label="环境名称(留空自动为主机-区域)">
+                            <Input className={input} value={cur.name} placeholder="如 正式区"
+                              onChange={(e) => patchSsh(selSsh, { name: e.target.value })} />
+                          </Field>
+                          <Field label="IP 主机">
+                            <Input className={input} value={cur.host} onChange={(e) => patchSsh(selSsh, { host: e.target.value })} />
+                          </Field>
+                          <Field label="端口">
+                            <Input className={input} type="number" value={cur.port || ''}
+                              onChange={(e) => patchSsh(selSsh, { port: Number(e.target.value) || 22 })} />
+                          </Field>
+                          <Field label="登录区域">
+                            <Input className={input} value={cur.zone} placeholder="31开发/35测试/36正式/39PATCH/t出货"
+                              onChange={(e) => patchSsh(selSsh, { zone: e.target.value })} />
+                          </Field>
+                          <Field label="账号">
+                            <Input className={input} value={cur.user} onChange={(e) => patchSsh(selSsh, { user: e.target.value })} />
+                          </Field>
+                          <Field label="密码">
+                            <div className="relative">
+                              <Input className={input} type={showPwd ? 'text' : 'password'} value={cur.password}
+                                onChange={(e) => patchSsh(selSsh, { password: e.target.value })} />
+                              <button type="button" title={showPwd ? '隐藏密码' : '显示密码'}
+                                onClick={() => setShowPwd((v) => !v)}
+                                className="absolute top-1/2 right-1 -translate-y-1/2 p-0.5 text-muted-foreground hover:text-foreground">
+                                {showPwd ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                              </button>
+                            </div>
+                          </Field>
+                          <Field label="TOPENT(默认企业;连接会话即下发,可数字或文本)" className="col-span-2">
+                            <Input className={input} value={cur.topent} onChange={(e) => patchSsh(selSsh, { topent: e.target.value })} />
+                          </Field>
                         </div>
-                      </Field>
-                      <Field label="TOPENT(默认企业;连接会话即下发,数字或文本)" className="col-span-2"><Input className={cell} value={cur.topent} onChange={(e) => patchSsh(selSsh, { topent: e.target.value })} /></Field>
-                      <p className="col-span-2 text-muted-foreground">
-                        调试会话按该服务器登录(区域/TOPENT)。该环境的数据库连接在「数据库」Tab 维护(一对一)。
-                      </p>
-                    </div>
-                  )}
+                        <p className="mt-2 text-[11px] text-muted-foreground">
+                          调试会话按该服务器登录区域(区域 + TOPENT)。该环境的数据库连接在「数据库」Tab 维护,一对一。
+                        </p>
+                      </>
+                    )}
 
-                  {envTab === 'db' && (
-                    <div>
-                      {!curDb ? (
-                        <div className="flex flex-col items-start gap-2 border border-dashed border-border p-4 text-muted-foreground">
-                          该环境未配置数据库(调试的作业解析/gzou_t 查询需要)。
-                          <Button size="sm" variant="outline" className="h-7" onClick={() => patchDb(selSsh, {})}>
-                            <Plus className="mr-1 h-3 w-3" />添加数据库
-                          </Button>
+                    {envTab === 'db' && (
+                      curDb == null ? (
+                        <div className="border border-dashed border-border p-4 text-center text-muted-foreground">
+                          <p className="mb-2">该环境尚未挂载数据库连接</p>
+                          <Button variant="outline" size="sm" onClick={() => patchDb(selSsh, {})}>添加数据库</Button>
                         </div>
                       ) : (
-                        <div className="grid grid-cols-2 gap-2">
-                          {/* 顶部操作:从服务器获取数据库配置(登录该环境 SSH 自动探测连接要素回填) */}
-                          <div className="col-span-2 flex items-center justify-end">
-                            <Button size="sm" variant="outline" className="h-7 text-xs" disabled={busy === 'fetch' || !cur.host || !cur.user} onClick={() => void fetchFromServer()}>
-                              <RefreshCw className={`mr-0.5 h-3 w-3 ${busy === 'fetch' ? 'animate-spin' : ''}`} />从服务器获取数据库配置
+                        <>
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                            <Field label="类型">
+                              <Select value={curDb.type || 'oracle'} onValueChange={(v) => patchDb(selSsh, { type: v })}>
+                                <SelectTrigger className="h-7 w-full text-xs"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="oracle">Oracle</SelectItem>
+                                  <SelectItem value="kingbase">金仓(KingbaseES)</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </Field>
+                            <Field label="主机地址">
+                              <Input className={input} value={curDb.host} placeholder="客户端与服务器侧均可达"
+                                onChange={(e) => patchDb(selSsh, { host: e.target.value })} />
+                            </Field>
+                            <Field label="端口">
+                              <Input className={input} type="number" value={curDb.port || ''}
+                                placeholder={curDb.type === 'kingbase' ? '54321' : '1521'}
+                                onChange={(e) => patchDb(selSsh, { port: Number(e.target.value) || 0 })} />
+                            </Field>
+                            {curDb.type === 'kingbase' ? (
+                              <Field label="库名">
+                                <Input className={input} value={curDb.database} placeholder="如 topprd"
+                                  onChange={(e) => patchDb(selSsh, { database: e.target.value })} />
+                              </Field>
+                            ) : (
+                              <Field label="服务名(SERVICE_NAME)">
+                                <Input className={input} value={curDb.service} placeholder="如 t35prd"
+                                  onChange={(e) => patchDb(selSsh, { service: e.target.value })} />
+                              </Field>
+                            )}
+                          </div>
+                          <label className="mt-3 flex items-center gap-2 text-[11px] text-muted-foreground">
+                            <input type="checkbox" checked={curDb.readonlySql !== false}
+                              onChange={(e) => patchDb(selSsh, { readonlySql: e.target.checked ? undefined : false })} />
+                            允许 AI 执行只读 SQL(默认开启;关掉后调试端点的 SQL 查询直接 403)
+                          </label>
+                          <div className="mt-3 flex items-center gap-2">
+                            <Button variant="outline" size="sm" disabled={busy !== '' || !cur.host || !cur.user}
+                              title={!cur.host || !cur.user ? '先填 SSH 主机与账号' : '按区域登录服务器,解析库地址/service 并回填'}
+                              onClick={() => void fetchFromServer()}>
+                              <RefreshCw className={cn('h-3.5 w-3.5', busy === 'fetch' && 'animate-spin')} />从服务器获取
+                            </Button>
+                            <Button variant="outline" size="sm" disabled={busy !== '' || !curDb.host.trim()}
+                              title="从本机直连该库,验证网络与账号"
+                              onClick={() => void testConn()}>
+                              <Zap className={cn('h-3.5 w-3.5', busy === 'conn' && 'animate-spin')} />测试连接
                             </Button>
                           </div>
-                          <Field label="类型">
-                            <Select value={curDb.type || 'oracle'} onValueChange={(v) => patchDb(selSsh, { type: v })}>
-                              <SelectTrigger className={cell}>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="oracle" className="text-xs">Oracle</SelectItem>
-                                <SelectItem value="kingbase" className="text-xs">人大金仓(PG 引擎)</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </Field>
-                          <Field label="主机地址"><Input className={cell} placeholder="客户端与服务器均可达" value={curDb.host} onChange={(e) => patchDb(selSsh, { host: e.target.value.trim() })} /></Field>
-                          <Field label="端口"><Input className={cell} type="number" placeholder={curDb.type === 'oracle' ? '1521' : '54321'} value={curDb.port || ''} onChange={(e) => patchDb(selSsh, { port: Number(e.target.value) || 0 })} /></Field>
-                          {curDb.type === 'oracle' ? (
-                            <Field label="服务名 (SERVICE_NAME)" className="col-span-2"><Input className={cell} placeholder="如 t35prd" value={curDb.service} onChange={(e) => patchDb(selSsh, { service: e.target.value.trim() })} /></Field>
-                          ) : (
-                            <Field label="库名 (database)" className="col-span-2"><Input className={cell} placeholder="如 topprd" value={curDb.database} onChange={(e) => patchDb(selSsh, { database: e.target.value.trim() })} /></Field>
+                          {note && (
+                            <p className={cn('mt-2 border-l-2 px-2 py-1 text-[11px]',
+                              note.kind === 'ok' ? 'border-emerald-500/50 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300'
+                                : note.kind === 'err' ? 'border-red-500/50 bg-red-500/5 text-red-700 dark:text-red-300'
+                                  : 'border-sky-500/50 bg-sky-500/5 text-muted-foreground')}>
+                              {note.text}
+                            </p>
                           )}
 
-                          {/* 只读 SQL 开关:默认开启(未配置即开),显式关掉才写进配置 */}
-                          <label className="col-span-2 mt-1 flex cursor-pointer items-start gap-2 rounded border border-border bg-muted/30 px-3 py-2">
-                            <input type="checkbox" className="mt-0.5" checked={curDb.readonlySql !== false}
-                              onChange={(e) => patchDb(selSsh, { readonlySql: e.target.checked ? undefined : false })} />
-                            <span className="text-xs leading-relaxed">
-                              <span className="font-medium">允许 AI 执行只读 SQL(默认开启)</span>
-                              <span className="text-muted-foreground">
-                                　让 AI 能直接查业务数据、而不是靠反复重放去猜。账号由 TOPENT 决定(上错号会查不到数据,
-                                所以结果头会回显「企业→账号」)。语句受白名单 + 库侧只读事务双重约束,但仍挡不住
-                                <b>自治事务/函数副作用</b>这类"披着 SELECT 外衣的写",也挡不住账号本身跨 schema 的读权限。
-                              </span>
-                            </span>
-                          </label>
-
-                          {/* 账号列表(无主账号;TOPENT 决定账号,密码查本表;逐行 Zap 可验证连接) */}
-                          <div className="col-span-2 mt-1">
-                            <div className="mb-1 flex items-center gap-2">
-                              <span className="shrink-0 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">账号列表(账号=schema)</span>
-                              <Separator className="flex-1" />
+                          <div className="mt-4">
+                            <div className="mb-1 text-[11px] text-muted-foreground">
+                              账号列表(账号即 schema 名;客户端直连取首项,服务器侧调试按 TOPENT 解析出账号后在此查密码)
                             </div>
-                            <div className="space-y-1">
-                              {/* 账号表:可编辑表格(每格直接是输入框,网格线由 TableCell 承担) */}
-                              <Table>
-                                <TableHeader>
-                                  <TableRow>
-                                    <TableHead className="w-40">账号(schema)</TableHead>
-                                    <TableHead>密码(缺省=账号)</TableHead>
-                                    <TableHead className="w-20 text-center">操作</TableHead>
-                                  </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                  {/* 新增行放第一行:填好账号后「添加」落到下方账号列表末尾 */}
-                                  <TableRow>
-                                    <TableCell className="focus-within:ring-1 focus-within:ring-inset focus-within:ring-ring/60">
-                                      <input className="cell-input font-mono" value={addAcct.account} placeholder="账号(如 ds)"
-                                        onChange={(e) => setAddAcct({ ...addAcct, account: e.target.value })} />
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead className="w-1/2">账号(schema)</TableHead>
+                                  <TableHead>密码(缺省 = 账号)</TableHead>
+                                  <TableHead className="w-16">操作</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                <TableRow>
+                                  <TableCell className={CELL_EDITING}>
+                                    <input className={cn('cell-input font-mono')} placeholder="新增账号…" value={addAcct.account}
+                                      onChange={(e) => setAddAcct((s) => ({ ...s, account: e.target.value }))}
+                                      onKeyDown={(e) => { if (e.key === 'Enter') pushAcct() }} />
+                                  </TableCell>
+                                  <TableCell className={CELL_EDITING}>
+                                    <input className="cell-input font-mono" placeholder="留空 = 与账号相同" value={addAcct.password}
+                                      onChange={(e) => setAddAcct((s) => ({ ...s, password: e.target.value }))}
+                                      onKeyDown={(e) => { if (e.key === 'Enter') pushAcct() }} />
+                                  </TableCell>
+                                  <TableCell className="text-center">
+                                    <Button variant="ghost" size="sm" title="添加账号" disabled={!addAcct.account.trim()} onClick={pushAcct}>
+                                      <Plus className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </TableCell>
+                                </TableRow>
+                                {curDb.accounts.map((a, j) => (
+                                  <TableRow key={j}>
+                                    <TableCell className={CELL_EDITING}>
+                                      <input className="cell-input font-mono" value={a.account}
+                                        onChange={(e) => patchAcct(selSsh, j, { account: e.target.value })} />
                                     </TableCell>
-                                    <TableCell className="relative focus-within:ring-1 focus-within:ring-inset focus-within:ring-ring/60">
-                                      <input className="cell-input font-mono pr-7" type={showPwd ? 'text' : 'password'} value={addAcct.password}
-                                        placeholder="密码(缺省=账号)"
-                                        onChange={(e) => setAddAcct({ ...addAcct, password: e.target.value })}
-                                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); pushAcct() } }} />
-                                      <button type="button" title={showPwd ? '隐藏密码' : '显示密码'} onClick={() => setShowPwd((v) => !v)}
-                                        className="absolute right-0.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center text-muted-foreground hover:text-foreground">
-                                        {showPwd ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                                      </button>
+                                    <TableCell className={cn(CELL_EDITING, 'relative')}>
+                                      <input className="cell-input font-mono" value={a.password}
+                                        onChange={(e) => patchAcct(selSsh, j, { password: e.target.value })} />
                                     </TableCell>
-                                    <TableCell className="text-center">
-                                      <Button size="sm" variant="outline" className="h-6 text-xs" onClick={pushAcct} disabled={!addAcct.account.trim()}>
-                                        <Plus className="mr-0.5 h-3 w-3" />添加
+                                    <TableCell className="text-center whitespace-nowrap">
+                                      <Button variant="ghost" size="sm" title="在服务器侧验证该账号"
+                                        disabled={busy !== '' || accProbe?.state === 'testing'}
+                                        onClick={() => void verifyAcct(j)}>
+                                        <Zap className={cn('h-3.5 w-3.5', accProbe?.i === j && accProbe.state === 'testing' && 'animate-spin')} />
+                                      </Button>
+                                      <Button variant="ghost" size="sm" title="删除该账号" onClick={() => delAcct(selSsh, j)}>
+                                        <Trash2 className="h-3.5 w-3.5" />
                                       </Button>
                                     </TableCell>
                                   </TableRow>
-                                  {(curDb.accounts || []).map((a, j) => (
-                                    <TableRow key={j}>
-                                      <TableCell className="focus-within:ring-1 focus-within:ring-inset focus-within:ring-ring/60">
-                                        <input className="cell-input font-mono" value={a.account} placeholder="如 ds"
-                                          onChange={(e) => patchAcct(selSsh, j, { account: e.target.value })} />
-                                      </TableCell>
-                                      <TableCell className="relative focus-within:ring-1 focus-within:ring-inset focus-within:ring-ring/60">
-                                        <input className="cell-input font-mono pr-7" type={showPwd ? 'text' : 'password'} value={a.password}
-                                          placeholder="密码(缺省=账号)"
-                                          onChange={(e) => patchAcct(selSsh, j, { password: e.target.value })} />
-                                        <button type="button" title={showPwd ? '隐藏密码' : '显示密码'} onClick={() => setShowPwd((v) => !v)}
-                                          className="absolute right-0.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center text-muted-foreground hover:text-foreground">
-                                          {showPwd ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                                        </button>
-                                      </TableCell>
-                                      <TableCell className="text-center">
-                                        <div className="flex items-center justify-center gap-1">
-                                          <button type="button"
-                                            className={`flex h-6 w-6 items-center justify-center ${accProbe?.i === j && accProbe.state === 'testing' ? 'animate-pulse text-sky-600 dark:text-sky-400' : 'text-muted-foreground hover:text-foreground'}`}
-                                            title="服务器上以该账号+密码连显式目标库验证(只读)"
-                                            onClick={() => void verifyAcct(j)}>
-                                            <Zap className="h-3.5 w-3.5" />
-                                          </button>
-                                          <button type="button" className="flex h-6 w-6 items-center justify-center text-muted-foreground hover:text-red-600 dark:hover:text-red-400"
-                                            title="删除该账号" onClick={() => delAcct(selSsh, j)}>
-                                            <Trash2 className="h-3.5 w-3.5" />
-                                          </button>
-                                        </div>
-                                      </TableCell>
-                                    </TableRow>
-                                  ))}
-                                </TableBody>
-                              </Table>
-                              {accProbe && accProbe.i < (curDb.accounts || []).length && curDb.accounts[accProbe.i] && (
-                                <div className={`text-[11px] ${accProbe.state === 'ok' ? 'text-emerald-600 dark:text-emerald-400' : accProbe.state === 'err' ? 'text-red-600 dark:text-red-400' : 'text-sky-600 dark:text-sky-400'}`}>
-                                  账号 {curDb.accounts[accProbe.i].account}: {accProbe.msg}
-                                </div>
-                              )}
-                              {!(curDb.accounts || []).length && (
-                                <div className="text-[11px] text-muted-foreground">
-                                  账号无主次之分:调试时按 TOPENT 经服务器 gzou_t 解析出账号,密码查本表(未收录按 账号=密码 惯例)。
-                                </div>
-                              )}
-                            </div>
+                                ))}
+                              </TableBody>
+                            </Table>
+                            {accProbe && (
+                              <p className={cn('mt-1 text-[11px]',
+                                accProbe.state === 'ok' ? 'text-emerald-600 dark:text-emerald-400'
+                                  : accProbe.state === 'err' ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground')}>
+                                {accProbe.msg || '验证中…'}
+                              </p>
+                            )}
                           </div>
-                          {note && (
-                            <div className={`col-span-2 mt-1 px-3 py-2 text-xs ${note.kind === 'ok' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : note.kind === 'err' ? 'bg-red-500/10 text-red-600 dark:text-red-400' : 'bg-sky-500/10 text-sky-700 dark:text-sky-300'}`}>
-                              {note.text}
-                            </div>
-                          )}
-                          <p className="col-span-2 mt-1 text-muted-foreground">
-                            显式统一模型(主机/端口/服务名或库名 + 账号列表),服务器侧调试与库探查共用;服务器执行工具(sqlplus/ksql)自动探测,无需配置。
+                          <p className="mt-2 text-[11px] text-muted-foreground">
+                            库连接显式给出地址与 service|库名,不依赖服务器侧的 TNS 配置;服务器上的 sqlplus/ksql 路径自动探测,不存入配置。
                           </p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </section>
-              )}
-            </div>
+                        </>
+                      )
+                    )}
+                  </>
+                )}
+              </Card>
             </>
           )}
 
-          {/* 外观 */}
-          {section === 'appearance' && (
-            <section>
-              <h3 className="mb-2 font-medium text-foreground">主题</h3>
-              <ThemeCards value={theme} onChange={setTheme} />
-              <p className="mt-2 text-xs text-muted-foreground">
-                「跟随系统」随操作系统的明暗设置实时切换(改系统主题后无需重启)。
-              </p>
-            </section>
+          {/* ============ 数据字典 ============ */}
+          {section === 'data-dict' && (
+            <>
+              <Card id="card-dict-query" title="查询数据源"
+                description="r.t / r.v / desc / scc / r.q 等查询命令用哪个数据源。缺省是在线优先:用默认环境的远程库直查;一个环境都没配时才用本地镜像。"
+                right={<SaveBtn keys={['query']} />}>
+                <SettingRow
+                  id="query.source"
+                  label="数据源"
+                  description="本地镜像由 tt dict db sync 生成;连不上不会静默回落本地 —— 那会让你以为查到的是实时数据。"
+                  control={
+                    <Select value={dict.querySource || '__auto__'}
+                      onValueChange={(v) => { setDict((s) => ({ ...s, querySource: v === '__auto__' ? '' : v })); markDirty('query') }}>
+                      <SelectTrigger className="h-7 w-full text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__auto__">在线(默认环境)</SelectItem>
+                        <SelectItem value="local">本地 SQLite 镜像</SelectItem>
+                        {envNames.map((n) => <SelectItem key={n} value={n}>在线({n})</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  }
+                />
+              </Card>
+
+              <Card id="card-dict-mirror" title="源码镜像"
+                description="把 T100 服务器的源码(4gl / 4fd / 42s 中文 / *.inc)拉到本地,供 AI 直接检索。"
+                right={<SaveBtn keys={['mirror']} />}>
+                <SettingRow
+                  id="mirror.dir"
+                  label="镜像根目录"
+                  description="绝对路径。留空 = 未设置,镜像功能不可用。"
+                  control={<Input className={input} value={dict.mirrorDir} placeholder="如 D:\t100\mirror"
+                    onChange={(e) => { setDict((s) => ({ ...s, mirrorDir: e.target.value })); markDirty('mirror') }} />}
+                />
+                <div className="mt-2 border-t border-border pt-2">
+                  <a href="/dict/#mirror" className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline">
+                    <ExternalLink className="h-3 w-3" />去「源码镜像」页拉取 / 重建
+                  </a>
+                </div>
+              </Card>
+
+              <Card id="card-dict-sync" title="数据同步"
+                description="把远程 ERP 的字典表同步成本地 SQLite,查询命令再读它。"
+                right={<SaveBtn keys={['sync']} />}>
+                <SettingRow
+                  id="sync.target"
+                  label="目标数据库文件"
+                  description="绝对路径。留空 = 用默认位置(exe 同目录或当前目录的 erp_data.db)。"
+                  control={
+                    <div className="flex items-center gap-1.5">
+                      <Input className={input} value={dict.syncTarget} placeholder="留空 = 默认位置"
+                        onChange={(e) => { setDict((s) => ({ ...s, syncTarget: e.target.value })); markDirty('sync') }} />
+                      <Button variant="outline" size="sm" title="清空 = 恢复默认位置"
+                        disabled={!dict.syncTarget}
+                        onClick={() => { setDict((s) => ({ ...s, syncTarget: '' })); markDirty('sync') }}>
+                        <RotateCcw className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  }
+                />
+                <div className="mt-2 border-t border-border pt-2">
+                  <a href="/dict/#sync" className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline">
+                    <ExternalLink className="h-3 w-3" />去「数据同步」页开始同步
+                  </a>
+                </div>
+              </Card>
+
+              <Card id="card-dict-bdldoc" title="BDL 文档"
+                description="Genero BDL 语言文档的本地落点(随发行包不附带,指向你自己的文档目录)。"
+                right={<SaveBtn keys={['bdldoc']} />}>
+                <SettingRow
+                  id="bdldoc.dir"
+                  label="文档目录"
+                  description="绝对路径。留空 = 未设置。"
+                  control={<Input className={input} value={dict.bdldocDir} placeholder="如 D:\t100\bdldoc"
+                    onChange={(e) => { setDict((s) => ({ ...s, bdldocDir: e.target.value })); markDirty('bdldoc') }} />}
+                />
+              </Card>
+            </>
           )}
 
-          {/* 高级:本机参数(不随环境走) */}
-          {section === 'advanced' && (
-            <section>
-              <h3 className="mb-2 font-medium text-foreground">本机参数</h3>
-              <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
-                <Field label="启动参数模板({prog} 替换)" className="col-span-2 md:col-span-3">
-                  <Input className={input} value={adv.launchArgs} onChange={(e) => { setAdv({ ...adv, launchArgs: e.target.value }); markDirty('adv') }} />
-                </Field>
-                <Field label="监听地址"><Input className={input} value={adv.listen} onChange={(e) => { setAdv({ ...adv, listen: e.target.value }); markDirty('adv') }} /></Field>
-                <Field label="停站看门狗默认(秒)"><Input className={input} value={adv.watchdogSeconds} onChange={(e) => { setAdv({ ...adv, watchdogSeconds: Number(e.target.value) || 0 }); markDirty('adv') }} /></Field>
-                <Field label="print 数组元素上限"><Input className={input} value={adv.printElements} onChange={(e) => { setAdv({ ...adv, printElements: Number(e.target.value) || 0 }); markDirty('adv') }} /></Field>
-                <Field label="终端宽"><Input className={input} value={adv.termWidth} onChange={(e) => { setAdv({ ...adv, termWidth: Number(e.target.value) || 200 }); markDirty('adv') }} /></Field>
-                <Field label="终端高"><Input className={input} value={adv.termHeight} onChange={(e) => { setAdv({ ...adv, termHeight: Number(e.target.value) || 50 }); markDirty('adv') }} /></Field>
-              </div>
-              {/* 保存按钮不再以「没有环境」为前提:改了本机参数就是脏的,而保存只提交改过的
-                  节(与环境清单各存各的),没道理逼用户绕回「环境」页去点保存 */}
-              {(dirty || saveState === 'saving') && (
-                <div className="mt-3">
-                  <Button size="sm" variant="secondary" className="h-7" disabled={saveState === 'saving'} onClick={() => void saveAll()}>
-                    {saveState === 'saving' ? '保存中…' : '保存'}
-                  </Button>
-                </div>
-              )}
-            </section>
+          {/* ============ DEBUG ============ */}
+          {section === 'debug' && (
+            <>
+              <Card id="card-debug-params" title="调试参数"
+                description="本机调试会话的默认参数。清空某一项 = 恢复该项的内置默认值。"
+                right={<SaveBtn keys={['debug']} />}>
+                <SettingRow id="debug.launchArgs" label="启动参数模板"
+                  description="{prog} 会替换为作业编号。清空 = 用内置默认。"
+                  control={<Input className={input} value={dbg.launchArgs} placeholder="BBDL512840855a 2 12345 'N' {prog}"
+                    onChange={(e) => { setDbg((s) => ({ ...s, launchArgs: e.target.value })); markDirty('debug') }} />} />
+                <SettingRow id="debug.watchdogSeconds" label="停站看门狗(秒)"
+                  description="停站后原地停留超过该时长就判定会话失联。"
+                  control={<Input className={input} type="number" value={dbg.watchdogSeconds || ''} placeholder="180"
+                    onChange={(e) => { setDbg((s) => ({ ...s, watchdogSeconds: Number(e.target.value) || 0 })); markDirty('debug') }} />} />
+                <SettingRow id="debug.fglserver" label="FGLServer"
+                  description="留空 = 由 T100 按 SSH 来源 IP 自动设置;自定义时才填。"
+                  control={<Input className={input} value={dbg.fglserver} placeholder="留空 = 自动"
+                    onChange={(e) => { setDbg((s) => ({ ...s, fglserver: e.target.value })); markDirty('debug') }} />} />
+                <SettingRow id="debug.printElements" label="print 数组元素上限"
+                  description="fgldb 单次 print 的数组元素上限。清空 = 内置默认 1000。"
+                  control={<Input className={input} type="number" value={dbg.printElements || ''} placeholder="1000"
+                    onChange={(e) => { setDbg((s) => ({ ...s, printElements: Number(e.target.value) || 0 })); markDirty('debug') }} />} />
+                <SettingRow id="debug.term" label="终端尺寸(宽 × 高)"
+                  description="驱动 PTY 时用的终端大小,影响远端输出换行。"
+                  control={
+                    <div className="flex items-center gap-1.5">
+                      <Input className={input} type="number" value={dbg.termWidth || ''} placeholder="200"
+                        onChange={(e) => { setDbg((s) => ({ ...s, termWidth: Number(e.target.value) || 0 })); markDirty('debug') }} />
+                      <span className="text-muted-foreground">×</span>
+                      <Input className={input} type="number" value={dbg.termHeight || ''} placeholder="50"
+                        onChange={(e) => { setDbg((s) => ({ ...s, termHeight: Number(e.target.value) || 0 })); markDirty('debug') }} />
+                    </div>
+                  } />
+                <SettingRow id="debug.persistBreakpoints" label="断点持久化"
+                  description="停站断点按 模块/作业 存到数据目录,重开会话时恢复。"
+                  control={
+                    <Select value={dbg.persistBreakpoints}
+                      onValueChange={(v) => { setDbg((s) => ({ ...s, persistBreakpoints: v as DebugForm['persistBreakpoints'] })); markDirty('debug') }}>
+                      <SelectTrigger className="h-7 w-full text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="default">跟随默认(开启)</SelectItem>
+                        <SelectItem value="on">开启</SelectItem>
+                        <SelectItem value="off">关闭</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  } />
+              </Card>
+
+              <Card id="card-debug-env" title="默认环境"
+                description="调试会话未显式指定环境时用哪个。与「站点管理」的默认环境是两层:这里是调试工具的覆盖,留空即继承站点默认。"
+                right={<SaveBtn keys={['debug']} />}>
+                <SettingRow id="debug.activeEnv" label="调试默认环境"
+                  control={
+                    <Select value={dbg.activeEnv || '__inherit__'}
+                      onValueChange={(v) => { setDbg((s) => ({ ...s, activeEnv: v === '__inherit__' ? '' : v })); markDirty('debug') }}>
+                      <SelectTrigger className="h-7 w-full text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__inherit__">继承站点默认({cfg.activeEnv || '未设置'})</SelectItem>
+                        {envNames.map((n) => <SelectItem key={n} value={n}>{n}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  } />
+                <p className="mt-2 border-l-2 border-amber-500/50 bg-amber-500/5 px-2 py-1 text-[11px] text-muted-foreground">
+                  注意:「调试参数」与「默认环境」两张卡改的是**同一个** debug 配置节,任一张点保存都会提交整节
+                  (后端的 PUT 是整节替换)。所以两处会一起落盘,不会互相覆盖。
+                </p>
+              </Card>
+            </>
+          )}
+
+          {/* ============ 应用设置 ============ */}
+          {section === 'app' && (
+            <>
+              <Card id="card-app-theme" title="外观"
+                description="两套页面共用同一份选择:这里切换后,字典页也跟着变。">
+                <ThemeCards value={theme} onChange={setTheme} />
+              </Card>
+
+              <Card id="card-app-service" title="服务"
+                description="统一 Web 服务的监听地址 —— 调试工作台与字典页都挂在它上面。"
+                right={<SaveBtn keys={['listen']} />}>
+                <SettingRow id="listen" label="监听地址"
+                  description="改完需要重启 tt serve 才生效(监听只在启动时绑定一次)。端口被占用时会自动向后顺延。"
+                  control={<Input className={input} value={listen} placeholder="127.0.0.1:28670"
+                    onChange={(e) => { setListen(e.target.value); markDirty('listen') }} />} />
+              </Card>
+
+              <Card id="card-app-info" title="运行信息">
+                <InfoRow label="配置文件" value={cfg.config} />
+                <InfoRow label="版本" value={cfg.version || '(未知)'} />
+                <InfoRow label="默认环境" value={cfg.activeEnv || '(未设置)'} />
+                <InfoRow label="环境数" value={String(cfg.sshs?.length ?? 0)} />
+              </Card>
+            </>
           )}
         </div>
       </div>
 
-      {/* 删除环境二次确认(shadcn AlertDialog):确定 = 立即删除并保存到 config.json */}
+      {/* 删除环境二次确认 */}
       <AlertDialog open={delTarget !== null} onOpenChange={(o) => { if (!o) setDelTarget(null) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>
-              删除环境「{delTarget !== null && sshs[delTarget] ? (sshName(sshs[delTarget]) || '(未命名环境)') : ''}」?
-            </AlertDialogTitle>
+            <AlertDialogTitle>删除环境「{delTarget !== null ? sshName(sshs[delTarget]) : ''}」?</AlertDialogTitle>
             <AlertDialogDescription>
-              {'该环境的 SSH 连接、登录区域、TOPENT 与数据库账号配置将一并移除。\n点击「删除」后立即写入 config.json,不可撤销。'}
+              该环境的 SSH 连接、登录区域、TOPENT 与数据库账号配置将一并移除。
+              点击「删除」后立即写入 config.json,不可撤销。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -688,14 +1031,5 @@ export function SettingsView() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
-  )
-}
-
-function Field({ label, children, className = '' }: { label: string; children: ReactNode; className?: string }) {
-  return (
-    <label className={`block ${className}`}>
-      <div className="mb-1 text-muted-foreground">{label}</div>
-      {children}
-    </label>
   )
 }

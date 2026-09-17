@@ -1,6 +1,9 @@
 import { create } from 'zustand'
 import { api, API_BASE, type Event, type StopInfo, type Breakpoint, type Frame, type VarItem, type WSLogItem, type WSLogContent, type WSLogQuery, type WSTestResult, type InflightInfo } from './api'
 import { THEME_KEY, applyDark, readStoredTheme, resolveDark, watchSystemTheme, type ThemeMode } from './theme'
+// 只取类型:routing.ts 里有 DOM 相关逻辑,虽然都在函数体内,这里也只导入类型
+// —— 打包后可确保 store 与路由模块之间没有运行时依赖(check:store 在 Node 里跑)。
+import type { SettingsSectionKey } from './routing'
 export type { ThemeMode }
 
 // timeline 条目(人/AI/系统 的操作与事件,可审计)
@@ -67,6 +70,9 @@ interface Store {
   runProg: string // gzzz_t 解析出的实体程序(源码命名/预取用);空 = 与 prog 相同
   // 视图与接口日志(VS Code 活动栏切换)
   view: 'debug' | 'wslogs' | 'wstest' | 'settings'
+  // 设置页当前分区(站点管理/数据字典/DEBUG/应用设置)。放在 store 而不是 SettingsView 局部
+  // 是因为 App 的首屏深链接解析要写它。写在这里的是"纯状态",URL 片段由 SettingsView 同步。
+  settingsSection: SettingsSectionKey
   theme: ThemeMode // 外观选择:暗色/亮色/跟随系统(html.dark 挂点,localStorage tt.theme 持久化)
   dark: boolean // 解析结果(system 时随系统变化);html.dark 与 Monaco 主题都按它渲染
   // 服务测试(复刻 awsq990 集成服务测试)
@@ -118,6 +124,7 @@ interface Store {
   // WS 开场补发:只把历史填进时间线,不触发任何副作用
   onReplay: (ev: Event) => void
   setView: (v: 'debug' | 'wslogs' | 'wstest' | 'settings') => void
+  setSettingsSection: (s: SettingsSectionKey) => void
   setLaunchError: (msg: string) => void
   setTheme: (t: ThemeMode) => void
   setActiveTab: (key: string) => void
@@ -280,6 +287,7 @@ export const useStore = create<Store>((set, get) => ({
   timeline: [], rawLog: [],
   runProg: '',
   view: 'debug',
+  settingsSection: 'sites',
   theme: initialTheme,
   dark: resolveDark(initialTheme),
   wsLogs: [], wsLogsLoading: false, wsLogsPage: 1, wsLogsHasMore: false,
@@ -483,6 +491,7 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   setView: (v) => set({ view: v }),
+  setSettingsSection: (s) => set({ settingsSection: s }),
   setLaunchError: (msg) => set({ launchError: msg }),
   // 外观:选择 → 持久化 + 立即应用(跟随系统时 dark 取当前系统偏好)
   setTheme: (t) => {
