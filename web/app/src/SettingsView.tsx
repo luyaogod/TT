@@ -1,4 +1,4 @@
-// 统一设置页:左侧两级导航(分区 → 卡片),右侧按分区渲染卡片。
+// 统一设置页:左侧四个分区的导航,右侧按分区渲染卡片。
 //
 // 「站点管理」环境清单 + SSH/数据库(原调试页「环境」节与原字典页「环境配置」的并集,只留一份);
 // 「数据字典」查询数据源 / 源码镜像 / 数据同步 / BDL 文档;
@@ -18,8 +18,8 @@
 // activeEnv 在用户每次保存时被静默抹掉。debugPatchOf 就是为了堵这个。
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
-  AlertCircle, Bug, CheckCircle2, Database, Download, Eye, EyeOff, Folder, HardDrive,
-  Monitor, Plus, RefreshCw, RotateCcw, Server, SlidersHorizontal, Star, Sun, Moon,
+  AlertCircle, CheckCircle2, Download, Eye, EyeOff,
+  Monitor, Plus, RefreshCw, RotateCcw, Star, Sun, Moon,
   Terminal, Trash2, Zap,
 } from 'lucide-react'
 import {
@@ -37,9 +37,7 @@ import {
 import { Card, Field, InfoRow, SettingRow } from '../../shared/settings'
 import { useStore, type ThemeMode } from './store'
 import { cn } from '../../shared/utils'
-import {
-  SETTINGS_SECTIONS, settingsHash, type SettingsSectionKey,
-} from './routing'
+import { SETTINGS_SECTIONS, settingsHash } from './routing'
 
 // ---------- 表单模型 ----------
 
@@ -90,43 +88,6 @@ interface DictForm {
 
 /** 可保存的配置节。脏标记与保存按钮都按它划分。 */
 type ConfigKey = 'hosts' | 'debug' | 'listen' | 'query' | 'mirror' | 'sync' | 'bdldoc'
-
-// 每个分区由哪些卡片组成;卡片 id 既是左树点击的滚动锚点,也是深链接的落点粒度。
-// 图标放在这里(而不是 routing.ts)是因为它是纯 UI 关注点 —— 路由那边只需要键与中文名。
-const NAV: {
-  key: SettingsSectionKey
-  icon: typeof Server
-  cards: { id: string; label: string; icon: typeof Server }[]
-}[] = [
-  {
-    key: 'sites', icon: Server, cards: [
-      { id: 'card-sites-list', label: '环境清单', icon: Server },
-      { id: 'card-sites-conn', label: '服务器与数据库', icon: Database },
-    ],
-  },
-  {
-    key: 'data-dict', icon: Database, cards: [
-      { id: 'card-dict-query', label: '查询数据源', icon: Database },
-      { id: 'card-dict-mirror', label: '源码镜像', icon: Folder },
-      { id: 'card-dict-sync', label: '数据同步', icon: HardDrive },
-      { id: 'card-dict-bdldoc', label: 'BDL 文档', icon: Folder },
-    ],
-  },
-  {
-    key: 'debug', icon: Bug, cards: [
-      { id: 'card-debug-params', label: '调试参数', icon: SlidersHorizontal },
-      { id: 'card-debug-env', label: '默认环境', icon: Server },
-    ],
-  },
-  {
-    key: 'app', icon: Monitor, cards: [
-      { id: 'card-app-theme', label: '外观', icon: Monitor },
-      { id: 'card-app-service', label: '服务', icon: Server },
-      { id: 'card-app-install', label: '命令行集成', icon: Terminal },
-      { id: 'card-app-info', label: '运行信息', icon: Server },
-    ],
-  },
-]
 
 // 主题切换卡片(shadcn 主题切换卡样式):三张卡各带一张迷你界面预览,选中卡描边+底色高亮。
 const THEME_OPTIONS: { value: ThemeMode; label: string; icon: typeof Sun }[] = [
@@ -195,7 +156,7 @@ function JobProgress({ env, phaseLabel, pct, indeterminate, elapsed, error, mess
 }) {
   const failed = !!error
   return (
-    <div className="mt-2 border border-border bg-muted/20 p-2">
+    <div className="border border-border bg-muted/20 p-2">
       <div className="mb-1.5 flex items-center gap-2 text-xs">
         <span className="font-medium">{env}</span>
         <span className="text-muted-foreground">{phaseLabel}</span>
@@ -670,55 +631,50 @@ ${sync?.target || ''}
   const curDb = cur?.db
   const envNames = sshs.map((e) => sshName(e)).filter(Boolean)
 
-  // 卡片的保存按钮:按节脏标记决定可用性,保存中显示进行态
-  const SaveBtn = ({ keys }: { keys: ConfigKey[] }) => (
-    <Button size="sm" disabled={!isDirty(...keys) || saveState === 'saving'} onClick={() => void save(keys)}>
-      {saveState === 'saving' && isDirty(...keys) ? '保存中…' : '保存'}
-    </Button>
-  )
+  // 卡片的保存按钮:只在真的有改动时才出现。
+  // 常驻一个灰着的「保存」挂在每张卡右上角,既不传达信息(它一直是灰的),又让人以为
+  // 有什么东西没保存。有没有未保存的改动看内容区右上角那行状态文字就够了,这条按钮
+  // 是「动手保存」的入口,没得保存时它就不该在。
+  const SaveBtn = ({ keys }: { keys: ConfigKey[] }) => {
+    if (!isDirty(...keys)) return null
+    return (
+      <Button size="sm" disabled={saveState === 'saving'} onClick={() => void save(keys)}>
+        {saveState === 'saving' ? '保存中…' : '保存'}
+      </Button>
+    )
+  }
 
   return (
-    <div className="flex h-full min-h-0 text-xs">
-      {/* 左侧两级导航:分区(可折叠) → 卡片 */}
+    // flex-1 + min-w-0:填满活动栏右侧的整块区域。少了它这个根会按内容宽度撑开,
+    // 于是外层的滚动条落在内容列的右缘(页面中间),右边留一大片空白 —— 滚动条看着像没贴着边。
+    // 填满之后里面的 mx-auto max-w-3xl 才真正居中,标题与卡片始终对齐在同一条竖线上。
+    <div className="flex h-full min-h-0 min-w-0 flex-1 text-xs">
+      {/* 左侧导航:四个分区各一行。
+          分区不带图标,也不给「设置」这类标题 —— 这一栏本身就在设置页里,
+          重复一遍栏名是废话,而图标只是把每个分区名往右推了一格。
+          原先选中项下面还会展开该分区的卡片清单,已经去掉:右边一屏就是那个分区的全部卡片,
+          清单只是把它们再念一遍。 */}
       <div className="flex w-44 shrink-0 flex-col overflow-auto border-r border-border">
-        <div className="border-b border-border px-2 py-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-          设置
-        </div>
-        {NAV.map((g) => {
-          const GIcon = g.icon
-          const active = section === g.key
+        {SETTINGS_SECTIONS.map((s) => {
+          const active = section === s.key
           return (
-            <div key={g.key}>
-              <button
-                onClick={() => setSection(g.key)}
-                className={cn('flex w-full items-center gap-2 px-2 py-1.5 text-left transition-colors',
-                  active ? 'bg-accent font-medium text-accent-foreground' : 'text-muted-foreground hover:bg-accent/60')}
-              >
-                <GIcon className="h-3.5 w-3.5 shrink-0" />
-                <span className="min-w-0 flex-1 truncate">{SETTINGS_SECTIONS.find((s) => s.key === g.key)?.label}</span>
-              </button>
-              {/* 二级:当前分区的卡片,点击滚动到对应卡片 */}
-              {active && (
-                <div className="pb-1">
-                  {g.cards.map((c) => (
-                    <button
-                      key={c.id}
-                      onClick={() => document.getElementById(c.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                      className="flex w-full items-center gap-2 py-1 pr-2 pl-7 text-left text-[11px] text-muted-foreground transition-colors hover:text-foreground"
-                    >
-                      <span className="min-w-0 truncate">{c.label}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            <button
+              key={s.key}
+              onClick={() => setSection(s.key)}
+              className={cn('flex w-full items-center px-2 py-1.5 text-left transition-colors',
+                active ? 'bg-accent font-medium text-accent-foreground' : 'text-muted-foreground hover:bg-accent/60')}
+            >
+              <span className="min-w-0 flex-1 truncate">{s.label}</span>
+            </button>
           )
         })}
       </div>
 
-      {/* 右侧内容区:当前分区的全部卡片,整体滚动 */}
+      {/* 右侧内容区:当前分区的全部卡片,整体滚动。
+          站点管理是左右两栏(左边环境清单、右边连接表单),列宽放宽一档给表单留出原来的舒适宽度;
+          其余分区都是单列设置列表,仍然收在 max-w-3xl。 */}
       <div className="min-h-0 flex-1 overflow-auto">
-        <div className="mx-auto max-w-3xl space-y-3 p-4">
+        <div className={cn('mx-auto space-y-3 p-4', section === 'sites' ? 'max-w-5xl' : 'max-w-3xl')}>
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-sm font-medium text-foreground">
               {SETTINGS_SECTIONS.find((s) => s.key === section)?.label}
@@ -742,16 +698,20 @@ ${sync?.target || ''}
             </span>
           </div>
 
-          {/* ============ 站点管理 ============ */}
+          {/* ============ 站点管理(左右两栏:环境清单 | 连接表单) ============ */}
           {section === 'sites' && (
-            <>
+            <div className="grid h-[40rem] grid-cols-[16rem_1fr] gap-3">
+              {/* 两栏定高:跟环境数量、表单长短都无关,两栏永远一样高,页面也不会跟着内容忽长忽短。
+                  高度取 40rem —— 常见窗口高度下装得下,也不需要跟着视口算。 */}
               <Card
                 id="card-sites-list"
+                panel
                 title="环境清单"
-                description="与「数据字典」分区共用同一份(config.json 的 hosts 节):这里保存后那边也能看到,反之亦然。删掉一个环境,那边的镜像/数据同步里也就没有它了。"
                 right={<SaveBtn keys={['hosts']} />}
               >
-                <div className="max-h-48 space-y-0.5 overflow-auto">
+                {/* 列表撑满卡片余下的高度、自己滚:环境再多也不顶高卡片,
+                    「新增环境」钉在卡片底部,不用翻到列表末尾去找 */}
+                <div className="min-h-0 flex-1 space-y-0.5 overflow-auto">
                   {sshs.length === 0 && <div className="py-2 text-muted-foreground">(空)</div>}
                   {sshs.map((e, i) => {
                     const isDefault = cfg.activeEnv === sshName(e)
@@ -777,7 +737,7 @@ ${sync?.target || ''}
                     )
                   })}
                 </div>
-                <div className="mt-2 flex items-center gap-2">
+                <div className="flex items-center gap-2">
                   <Button variant="outline" size="sm" onClick={addSsh}><Plus className="h-3.5 w-3.5" />新增环境</Button>
                   <span className="text-[11px] text-muted-foreground">星标 = 默认环境({cfg.activeEnv || '未设置'})</span>
                 </div>
@@ -785,25 +745,28 @@ ${sync?.target || ''}
 
               <Card
                 id="card-sites-conn"
+                panel
                 title="服务器与数据库"
                 description="SSH 登录与数据库连接按环境一对一挂载。运行时用哪个数据库账号由 TOPENT 决定(服务器侧解析),客户端直连取账号列表首项。"
                 right={<SaveBtn keys={['hosts']} />}
               >
                 {!cur ? (
-                  <div className="py-2 text-muted-foreground">先在上面的「环境清单」里选一个环境,或新增一个。</div>
+                  <div className="py-2 text-muted-foreground">先在左边的「环境清单」里选一个环境,或新增一个。</div>
                 ) : (
                   <>
-                    <div className="mb-3 flex items-center justify-between gap-2 border-b border-border pb-2">
+                    <div className="flex items-center justify-between gap-2">
                       <span className="min-w-0 truncate text-xs font-medium text-foreground">{sshName(cur) || '(新环境)'}</span>
                       <Button variant="ghost" size="sm" title="删除该环境" onClick={askDelSsh}>
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
                     </div>
-                    <div className="mb-3 flex gap-0.5 border-b border-border">
+                    {/* 两个子页签做成一排小按钮(选中给 accent 底色),不画下边框 ——
+                        卡片内部不打分割线,靠底色区分选中态 */}
+                    <div className="flex gap-1">
                       {([['ssh', 'SSH 服务器'], ['db', '数据库']] as const).map(([k, label]) => (
                         <button key={k} onClick={() => setEnvTab(k)}
-                          className={cn('px-2.5 py-1.5 transition-colors',
-                            envTab === k ? 'tab-active font-medium text-foreground' : 'text-muted-foreground hover:text-foreground')}>
+                          className={cn('px-2.5 py-1 text-xs transition-colors',
+                            envTab === k ? 'bg-accent font-medium text-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground')}>
                           {label}
                         </button>
                       ))}
@@ -920,56 +883,62 @@ ${sync?.target || ''}
                             <div className="mb-1 text-[11px] text-muted-foreground">
                               账号列表(账号即 schema 名;客户端直连取首项,服务器侧调试按 TOPENT 解析出账号后在此查密码)
                             </div>
-                            <Table>
-                              <TableHeader>
-                                <TableRow>
-                                  <TableHead className="w-1/2">账号(schema)</TableHead>
-                                  <TableHead>密码(缺省 = 账号)</TableHead>
-                                  <TableHead className="w-16">操作</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                <TableRow>
-                                  <TableCell className={CELL_EDITING}>
-                                    <input className={cn('cell-input font-mono')} placeholder="新增账号…" value={addAcct.account}
-                                      onChange={(e) => setAddAcct((s) => ({ ...s, account: e.target.value }))}
-                                      onKeyDown={(e) => { if (e.key === 'Enter') pushAcct() }} />
-                                  </TableCell>
-                                  <TableCell className={CELL_EDITING}>
-                                    <input className="cell-input font-mono" placeholder="留空 = 与账号相同" value={addAcct.password}
-                                      onChange={(e) => setAddAcct((s) => ({ ...s, password: e.target.value }))}
-                                      onKeyDown={(e) => { if (e.key === 'Enter') pushAcct() }} />
-                                  </TableCell>
-                                  <TableCell className="text-center">
-                                    <Button variant="ghost" size="sm" title="添加账号" disabled={!addAcct.account.trim()} onClick={pushAcct}>
-                                      <Plus className="h-3.5 w-3.5" />
-                                    </Button>
-                                  </TableCell>
-                                </TableRow>
-                                {curDb.accounts.map((a, j) => (
-                                  <TableRow key={j}>
+                            {/* 账号可能很多:表格封顶 16rem 后就地滚,表头 sticky 常驻。
+                                滚动容器由我们自己提供(container={false}) —— 用 Table 自带的
+                                那个 overflow-x-auto 包一层的话,它就成了滚动祖先,th 的 sticky 会失效。
+                                表头底色必须不透明(默认 bg-muted/50 是半透明的),否则行会从表头透出来。 */}
+                            <div className="max-h-64 overflow-auto">
+                              <Table container={false}>
+                                <TableHeader>
+                                  <TableRow className="hover:bg-transparent">
+                                    <TableHead className="sticky top-0 z-10 w-1/2 bg-muted">账号(schema)</TableHead>
+                                    <TableHead className="sticky top-0 z-10 bg-muted">密码(缺省 = 账号)</TableHead>
+                                    <TableHead className="sticky top-0 z-10 w-16 bg-muted">操作</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  <TableRow>
                                     <TableCell className={CELL_EDITING}>
-                                      <input className="cell-input font-mono" value={a.account}
-                                        onChange={(e) => patchAcct(selSsh, j, { account: e.target.value })} />
+                                      <input className={cn('cell-input font-mono')} placeholder="新增账号…" value={addAcct.account}
+                                        onChange={(e) => setAddAcct((s) => ({ ...s, account: e.target.value }))}
+                                        onKeyDown={(e) => { if (e.key === 'Enter') pushAcct() }} />
                                     </TableCell>
-                                    <TableCell className={cn(CELL_EDITING, 'relative')}>
-                                      <input className="cell-input font-mono" value={a.password}
-                                        onChange={(e) => patchAcct(selSsh, j, { password: e.target.value })} />
+                                    <TableCell className={CELL_EDITING}>
+                                      <input className="cell-input font-mono" placeholder="留空 = 与账号相同" value={addAcct.password}
+                                        onChange={(e) => setAddAcct((s) => ({ ...s, password: e.target.value }))}
+                                        onKeyDown={(e) => { if (e.key === 'Enter') pushAcct() }} />
                                     </TableCell>
-                                    <TableCell className="text-center whitespace-nowrap">
-                                      <Button variant="ghost" size="sm" title="在服务器侧验证该账号"
-                                        disabled={busy !== '' || accProbe?.state === 'testing'}
-                                        onClick={() => void verifyAcct(j)}>
-                                        <Zap className={cn('h-3.5 w-3.5', accProbe?.i === j && accProbe.state === 'testing' && 'animate-spin')} />
-                                      </Button>
-                                      <Button variant="ghost" size="sm" title="删除该账号" onClick={() => delAcct(selSsh, j)}>
-                                        <Trash2 className="h-3.5 w-3.5" />
+                                    <TableCell className="text-center">
+                                      <Button variant="ghost" size="sm" title="添加账号" disabled={!addAcct.account.trim()} onClick={pushAcct}>
+                                        <Plus className="h-3.5 w-3.5" />
                                       </Button>
                                     </TableCell>
                                   </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
+                                  {curDb.accounts.map((a, j) => (
+                                    <TableRow key={j}>
+                                      <TableCell className={CELL_EDITING}>
+                                        <input className="cell-input font-mono" value={a.account}
+                                          onChange={(e) => patchAcct(selSsh, j, { account: e.target.value })} />
+                                      </TableCell>
+                                      <TableCell className={cn(CELL_EDITING, 'relative')}>
+                                        <input className="cell-input font-mono" value={a.password}
+                                          onChange={(e) => patchAcct(selSsh, j, { password: e.target.value })} />
+                                      </TableCell>
+                                      <TableCell className="text-center whitespace-nowrap">
+                                        <Button variant="ghost" size="sm" title="在服务器侧验证该账号"
+                                          disabled={busy !== '' || accProbe?.state === 'testing'}
+                                          onClick={() => void verifyAcct(j)}>
+                                          <Zap className={cn('h-3.5 w-3.5', accProbe?.i === j && accProbe.state === 'testing' && 'animate-spin')} />
+                                        </Button>
+                                        <Button variant="ghost" size="sm" title="删除该账号" onClick={() => delAcct(selSsh, j)}>
+                                          <Trash2 className="h-3.5 w-3.5" />
+                                        </Button>
+                                      </TableCell>
+                                    </TableRow>
+                                  ))}
+                                </TableBody>
+                              </Table>
+                            </div>
                             {accProbe && (
                               <p className={cn('mt-1 text-[11px]',
                                 accProbe.state === 'ok' ? 'text-emerald-600 dark:text-emerald-400'
@@ -987,7 +956,7 @@ ${sync?.target || ''}
                   </>
                 )}
               </Card>
-            </>
+            </div>
           )}
 
           {/* ============ 数据字典 ============ */}
@@ -1030,11 +999,11 @@ ${sync?.target || ''}
                   control={<Input className={input} value={dict.mirrorDir} placeholder="如 D:\t100\mirror"
                     onChange={(e) => { setDict((s) => ({ ...s, mirrorDir: e.target.value })); markDirty('mirror') }} />}
                 />
-                <div className="mt-3 space-y-2 border-t border-border pt-3">
-                  <div className="flex items-center gap-2">
-                    <span className="shrink-0 text-[11px] text-muted-foreground">拉取环境</span>
+                <SettingRow
+                  label="拉取环境"
+                  control={
                     <Select value={mirrorEnv} onValueChange={setMirrorEnv} disabled={mirrorRunning}>
-                      <SelectTrigger className="h-7 min-w-0 flex-1 text-xs"><SelectValue placeholder="选择环境" /></SelectTrigger>
+                      <SelectTrigger className="h-7 w-full text-xs"><SelectValue placeholder="选择环境" /></SelectTrigger>
                       <SelectContent>
                         {(mirror?.envs || []).map((e) => (
                           <SelectItem key={e.name} value={e.name}>
@@ -1043,41 +1012,41 @@ ${sync?.target || ''}
                         ))}
                       </SelectContent>
                     </Select>
-                  </div>
-                  {mirror && mirror.envs.length === 0 && (
-                    <p className="text-[11px] text-muted-foreground">还没有 SSH 环境,先去「站点管理」添加。</p>
-                  )}
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button size="sm" disabled={mirrorRunning || opBusy !== '' || !mirrorEnv || !dict.mirrorDir.trim() || isDirty('mirror')}
-                      title={isDirty('mirror') ? '镜像根目录有未保存的修改,先保存' : '只拉服务器上变过的文件'}
-                      onClick={() => void pullMirror(false)}>
-                      <RefreshCw className={cn('h-3.5 w-3.5', mirrorRunning && 'animate-spin')} />增量更新
-                    </Button>
-                    <Button variant="outline" size="sm" disabled={mirrorRunning || opBusy !== '' || !mirrorEnv || !dict.mirrorDir.trim() || isDirty('mirror')}
-                      title={isDirty('mirror') ? '镜像根目录有未保存的修改,先保存' : '整目录替换(含服务器上已删的残留)'}
-                      onClick={() => void pullMirror(true)}>
-                      <Download className="h-3.5 w-3.5" />全量重建
-                    </Button>
-                    <span className="text-[11px] text-muted-foreground">增量按服务器 marker 记基线;本地无完整镜像时自动转全量。</span>
-                  </div>
-                  {mirror?.job && (mirror.job.running || mirror.job.done) && (
-                    <JobProgress
-                      env={mirror.job.env}
-                      phaseLabel={MIRROR_PHASE[mirror.job.phase] || mirror.job.phase}
-                      pct={mirror.job.total > 0
-                        ? Math.min(100, Math.round((mirror.job.bytes * 100) / mirror.job.total))
-                        : mirror.job.phase === 'done' ? 100 : 0}
-                      indeterminate={mirror.job.running && mirror.job.total === 0}
-                      elapsed={mirror.job.running ? mirror.job.elapsed : (mirror.job.elapsed ? '用时 ' + mirror.job.elapsed : '')}
-                      error={mirror.job.phase === 'error' ? (mirror.job.error || mirror.job.message) : undefined}
-                      message={mirror.job.phase === 'done' ? mirror.job.message : undefined}
-                    >
-                      <span>已传输:{fmtBytes(mirror.job.bytes)}{mirror.job.total > 0 ? ` / ${fmtBytes(mirror.job.total)}` : ''}</span>
-                      <span>文件数:{mirror.job.files || '—'}</span>
-                      <span>{mirror.job.full ? '全量' : '增量'} · {mirror.job.running ? '进行中…' : '已结束'}</span>
-                    </JobProgress>
-                  )}
+                  }
+                />
+                {mirror && mirror.envs.length === 0 && (
+                  <p className="text-[11px] text-muted-foreground">还没有 SSH 环境,先去「站点管理」添加。</p>
+                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button size="sm" disabled={mirrorRunning || opBusy !== '' || !mirrorEnv || !dict.mirrorDir.trim() || isDirty('mirror')}
+                    title={isDirty('mirror') ? '镜像根目录有未保存的修改,先保存' : '只拉服务器上变过的文件'}
+                    onClick={() => void pullMirror(false)}>
+                    <RefreshCw className={cn('h-3.5 w-3.5', mirrorRunning && 'animate-spin')} />增量更新
+                  </Button>
+                  <Button variant="outline" size="sm" disabled={mirrorRunning || opBusy !== '' || !mirrorEnv || !dict.mirrorDir.trim() || isDirty('mirror')}
+                    title={isDirty('mirror') ? '镜像根目录有未保存的修改,先保存' : '整目录替换(含服务器上已删的残留)'}
+                    onClick={() => void pullMirror(true)}>
+                    <Download className="h-3.5 w-3.5" />全量重建
+                  </Button>
+                  <span className="text-[11px] text-muted-foreground">增量按服务器 marker 记基线;本地无完整镜像时自动转全量。</span>
                 </div>
+                {mirror?.job && (mirror.job.running || mirror.job.done) && (
+                  <JobProgress
+                    env={mirror.job.env}
+                    phaseLabel={MIRROR_PHASE[mirror.job.phase] || mirror.job.phase}
+                    pct={mirror.job.total > 0
+                      ? Math.min(100, Math.round((mirror.job.bytes * 100) / mirror.job.total))
+                      : mirror.job.phase === 'done' ? 100 : 0}
+                    indeterminate={mirror.job.running && mirror.job.total === 0}
+                    elapsed={mirror.job.running ? mirror.job.elapsed : (mirror.job.elapsed ? '用时 ' + mirror.job.elapsed : '')}
+                    error={mirror.job.phase === 'error' ? (mirror.job.error || mirror.job.message) : undefined}
+                    message={mirror.job.phase === 'done' ? mirror.job.message : undefined}
+                  >
+                    <span>已传输:{fmtBytes(mirror.job.bytes)}{mirror.job.total > 0 ? ` / ${fmtBytes(mirror.job.total)}` : ''}</span>
+                    <span>文件数:{mirror.job.files || '—'}</span>
+                    <span>{mirror.job.full ? '全量' : '增量'} · {mirror.job.running ? '进行中…' : '已结束'}</span>
+                  </JobProgress>
+                )}
               </Card>
 
               <Card id="card-dict-sync" title="数据同步"
@@ -1103,11 +1072,11 @@ ${sync?.target || ''}
                     </div>
                   }
                 />
-                <div className="mt-3 space-y-2 border-t border-border pt-3">
-                  <div className="flex items-center gap-2">
-                    <span className="shrink-0 text-[11px] text-muted-foreground">同步环境</span>
+                <SettingRow
+                  label="同步环境"
+                  control={
                     <Select value={syncEnv} onValueChange={setSyncEnv} disabled={syncRunning}>
-                      <SelectTrigger className="h-7 min-w-0 flex-1 text-xs"><SelectValue placeholder="选择环境" /></SelectTrigger>
+                      <SelectTrigger className="h-7 w-full text-xs"><SelectValue placeholder="选择环境" /></SelectTrigger>
                       <SelectContent>
                         {(sync?.envs || []).map((e) => (
                           <SelectItem key={e.name} value={e.name}>
@@ -1116,41 +1085,41 @@ ${sync?.target || ''}
                         ))}
                       </SelectContent>
                     </Select>
-                  </div>
-                  {sync && sync.envs.length === 0 && (
-                    <p className="text-[11px] text-muted-foreground">
-                      没有可同步的环境 —— 需要先在「站点管理」为环境挂上数据库连接。
-                    </p>
-                  )}
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button size="sm" disabled={syncRunning || opBusy !== '' || !syncEnv || isDirty('sync')}
-                      title={isDirty('sync') ? '同步目标有未保存的修改,先保存' : '从远程 ERP 拉取字典数据到本地 SQLite'}
-                      onClick={() => void runSync()}>
-                      <RefreshCw className={cn('h-3.5 w-3.5', syncRunning && 'animate-spin')} />{syncRunning ? '同步中…' : '开始同步'}
-                    </Button>
-                    <span className="text-[11px] text-muted-foreground">
-                      逐表拉取 → 建索引 → 原子替换;原库自动备份为 <code>.bak</code>,失败不影响原库。
-                    </span>
-                  </div>
-                  {sync?.job && (sync.job.running || sync.job.done) && (
-                    <JobProgress
-                      env={sync.job.env}
-                      phaseLabel={SYNC_PHASE[sync.job.phase] || sync.job.phase}
-                      pct={sync.job.phase === 'done' ? 100
-                        : sync.job.tableTotal > 0 ? Math.min(100, Math.round((sync.job.tableIndex * 100) / sync.job.tableTotal)) : 0}
-                      indeterminate={sync.job.running && sync.job.tableTotal === 0}
-                      elapsed={sync.job.running ? sync.job.elapsed : (sync.job.elapsed ? '用时 ' + sync.job.elapsed : '')}
-                      error={sync.job.phase === 'error' ? (sync.job.error || sync.job.message) : undefined}
-                      message={sync.job.phase === 'done' ? sync.job.message : undefined}
-                    >
-                      <span>数据表:{sync.job.tableTotal > 0 ? `${sync.job.tableIndex}/${sync.job.tableTotal}` : '—'}{sync.job.tables > 0 ? `(完成 ${sync.job.tables})` : ''}</span>
-                      <span>当前表:{(sync.job.table || '—') + (sync.job.tableRows > 0 ? ` ${sync.job.tableRows} 行` : '')}</span>
-                      <span>累计行数:{sync.job.totalRows > 0 ? sync.job.totalRows.toLocaleString() : '—'}</span>
-                    </JobProgress>
-                  )}
-                  {sync?.job?.backup && <p className="text-[11px] text-muted-foreground">原库已备份:{sync.job.backup}</p>}
-                  {sync?.job?.warning && <pre className="whitespace-pre-wrap text-[11px] text-amber-600 dark:text-amber-400">{sync.job.warning}</pre>}
+                  }
+                />
+                {sync && sync.envs.length === 0 && (
+                  <p className="text-[11px] text-muted-foreground">
+                    没有可同步的环境 —— 需要先在「站点管理」为环境挂上数据库连接。
+                  </p>
+                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button size="sm" disabled={syncRunning || opBusy !== '' || !syncEnv || isDirty('sync')}
+                    title={isDirty('sync') ? '同步目标有未保存的修改,先保存' : '从远程 ERP 拉取字典数据到本地 SQLite'}
+                    onClick={() => void runSync()}>
+                    <RefreshCw className={cn('h-3.5 w-3.5', syncRunning && 'animate-spin')} />{syncRunning ? '同步中…' : '开始同步'}
+                  </Button>
+                  <span className="text-[11px] text-muted-foreground">
+                    逐表拉取 → 建索引 → 原子替换;原库自动备份为 <code>.bak</code>,失败不影响原库。
+                  </span>
                 </div>
+                {sync?.job && (sync.job.running || sync.job.done) && (
+                  <JobProgress
+                    env={sync.job.env}
+                    phaseLabel={SYNC_PHASE[sync.job.phase] || sync.job.phase}
+                    pct={sync.job.phase === 'done' ? 100
+                      : sync.job.tableTotal > 0 ? Math.min(100, Math.round((sync.job.tableIndex * 100) / sync.job.tableTotal)) : 0}
+                    indeterminate={sync.job.running && sync.job.tableTotal === 0}
+                    elapsed={sync.job.running ? sync.job.elapsed : (sync.job.elapsed ? '用时 ' + sync.job.elapsed : '')}
+                    error={sync.job.phase === 'error' ? (sync.job.error || sync.job.message) : undefined}
+                    message={sync.job.phase === 'done' ? sync.job.message : undefined}
+                  >
+                    <span>数据表:{sync.job.tableTotal > 0 ? `${sync.job.tableIndex}/${sync.job.tableTotal}` : '—'}{sync.job.tables > 0 ? `(完成 ${sync.job.tables})` : ''}</span>
+                    <span>当前表:{(sync.job.table || '—') + (sync.job.tableRows > 0 ? ` ${sync.job.tableRows} 行` : '')}</span>
+                    <span>累计行数:{sync.job.totalRows > 0 ? sync.job.totalRows.toLocaleString() : '—'}</span>
+                  </JobProgress>
+                )}
+                {sync?.job?.backup && <p className="text-[11px] text-muted-foreground">原库已备份:{sync.job.backup}</p>}
+                {sync?.job?.warning && <pre className="whitespace-pre-wrap text-[11px] text-amber-600 dark:text-amber-400">{sync.job.warning}</pre>}
               </Card>
 
               <Card id="card-dict-bdldoc" title="BDL 文档"
@@ -1185,7 +1154,7 @@ ${sync?.target || ''}
                     onChange={(e) => { setDbg((s) => ({ ...s, launchArgs: e.target.value })); markDirty('debug') }} />} />
                 <SettingRow id="debug.watchdogSeconds" label="停站看门狗(秒)"
                   description="停站后原地停留超过该时长就判定会话失联。"
-                  control={<Input className={input} type="number" value={dbg.watchdogSeconds || ''} placeholder="180"
+                  control={<Input className={input} type="number" value={dbg.watchdogSeconds || ''} placeholder="1800"
                     onChange={(e) => { setDbg((s) => ({ ...s, watchdogSeconds: Number(e.target.value) || 0 })); markDirty('debug') }} />} />
                 <SettingRow id="debug.fglserver" label="FGLServer"
                   description="留空 = 由 T100 按 SSH 来源 IP 自动设置;自定义时才填。"
@@ -1235,7 +1204,7 @@ ${sync?.target || ''}
                       </SelectContent>
                     </Select>
                   } />
-                <p className="mt-2 border-l-2 border-amber-500/50 bg-amber-500/5 px-2 py-1 text-[11px] text-muted-foreground">
+                <p className="border-l-2 border-amber-500/50 bg-amber-500/5 px-2 py-1 text-[11px] text-muted-foreground">
                   注意:「调试参数」与「默认环境」两张卡改的是**同一个** debug 配置节,任一张点保存都会提交整节
                   (后端的 PUT 是整节替换)。所以两处会一起落盘,不会互相覆盖。
                 </p>
@@ -1290,10 +1259,10 @@ ${sync?.target || ''}
                 />
                 {status?.install.exeDir && <InfoRow label="程序目录" value={status.install.exeDir} />}
                 {!status?.install.supported && status?.install.manual && (
-                  <pre className="mt-1 overflow-x-auto border border-border bg-muted/30 p-2 text-[11px]">{status.install.manual}</pre>
+                  <pre className="overflow-x-auto border border-border bg-muted/30 p-2 text-[11px]">{status.install.manual}</pre>
                 )}
                 {installNote && (
-                  <p className="mt-1 text-[11px] text-muted-foreground">{installNote}</p>
+                  <p className="text-[11px] text-muted-foreground">{installNote}</p>
                 )}
               </Card>
 

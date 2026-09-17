@@ -9,19 +9,27 @@ import { SessionPanel } from './SessionPanel'
 import { WsLogView } from './WsLogView'
 import { WsTestView } from './WsTestView'
 import { SettingsView } from './SettingsView'
-import { StatusBar } from './StatusBar'
+import { StatusBar, STATUS_BAR_H } from './StatusBar'
 import { api } from './api'
 import { parseHash } from './routing'
 
-// VS Code 风格活动栏图标按钮:通栏占满活动栏宽度(悬停/选中底色左右贴边,无留白差),
-// 选中态灰色底色(无左侧蓝条),未选中悬停给半档底色(与手风琴表头一致的 hover 反馈)
+// 活动栏图标按钮(左右两条栏共用):悬停/选中都是浮在栏底上的小方块,不贴边 ——
+// 直角色块贴到栏壁会看起来像"栏被切掉一块",而留白 + 圆角让选中成为一个明确的"按钮"。
+//
+// 底色走 accent 语义 token,不再是半透明的 bg-foreground/10:
+// 半透明叠加的灰会随栏底色变化(亮暗两套因此是两个不同的灰),而 accent 是调色板里
+// 已经定好的"选中/悬停"色,与下拉项、设置页导航的选中态同色。
+// 悬停给半档(bg-accent/60),选中给整档,层级关系保住。
+//
+// 圆角是对全站零圆角(tokens.css 把 radius 全部清零)的一处刻意例外:参照的是
+// "Ghost 按钮选中"的观感,直角做不出那个形状。
 function ActivityIcon({ icon: Icon, label, active, onClick }: {
   icon: LucideIcon; label: string; active: boolean; onClick: () => void
 }) {
   return (
     <button title={label} onClick={onClick}
-      className={`flex h-8 w-full shrink-0 items-center justify-center transition-colors ${
-        active ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground hover:bg-foreground/5 hover:text-foreground'
+      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] transition-colors ${
+        active ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'
       }`}>
       <Icon className="h-5 w-5" />
     </button>
@@ -219,10 +227,14 @@ export function App() {
     window.addEventListener('mouseup', up)
   }
 
-  // 布局:上 Toolbar / 下 StatusBar 整条;中部 = 活动栏 + [中间列(编辑区/时间线上下) + 整高右面板]
+  // 布局:上一条与状态栏同高的留白 / 下一条状态栏;中部 = 活动栏 + 主内容面板 + 右侧栏,
+  // 三块各自成块、彼此留间隙,面板带边线与圆角。
+  // (顶层那条横栏已撤掉:它只剩两个面板收展按钮,而那两个只管这一屏,
+  //  现在钉在调试页签栏右端;浮动调试工具条归调试视图,所以跟着挪进 ViewPane)
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
-      <Toolbar />
+      {/* 顶部留白,高度取状态栏那一份:内容不贴着窗口上沿,上下留白也就对称了 */}
+      <div className={`${STATUS_BAR_H} shrink-0`} />
       {/* 启动失败横幅:显眼红色,可关闭;下次启动/下次成功时自动清除 */}
       {launchError && (
         <div className="flex shrink-0 items-center gap-2 border-b border-red-500/20 bg-red-500/10 px-3 py-1.5 text-xs text-red-600 dark:text-red-400">
@@ -249,68 +261,80 @@ export function App() {
           )}
         </div>
       )}
-      <div className="flex min-h-0 flex-1">
-        {/* VS Code 经典活动栏:与侧栏同底色,右缘 1px 分割线与内容区分隔 */}
-        <div className="flex w-10 shrink-0 flex-col items-center gap-1 border-r border-border bg-background py-2">
+      {/* 四周留白对称:行内边距与栏-面板间隙都取 4px,于是栏里的小按钮**居中**在
+          「窗口边」与「面板边」之间 —— 钮宽 32、栏宽 40,栏内本就留了 4px,
+          两边各再加 4px,两侧都是 8px。之前间隙给 8px,内侧就成了 12px、外侧 8px,
+          看上去按钮贴着窗口而离面板远。底部 8px 与状态栏隔开。 */}
+      <div className="flex min-h-0 flex-1 gap-1 px-1 pb-2">
+        {/* VS Code 经典活动栏:栏与内容各自成块,靠间隙分开,不再用分割线 */}
+        <div className="flex w-10 shrink-0 flex-col items-center gap-1 py-2">
           <ActivityIcon icon={Bug} label="调试" active={view === 'debug'} onClick={() => setView('debug')} />
           <ActivityIcon icon={Globe} label="接口日志" active={view === 'wslogs'} onClick={() => setView('wslogs')} />
           <ActivityIcon icon={FlaskConical} label="服务测试" active={view === 'wstest'} onClick={() => setView('wstest')} />
           <ActivityIcon icon={Settings} label="设置(站点 / 数据字典 / DEBUG / 应用)" active={view === 'settings'} onClick={() => setView('settings')} />
         </div>
-        {/* 四个视图全部 keep-alive:首次访问后常驻挂载,切换仅改 display */}
-        <ViewPane show={view === 'debug'}>
-          {/* 面板紧贴(VS Code 经典密度):无外边距,仅靠 sash 分割线分区
-             min-w-0 + overflow-hidden:Monaco 会给编辑器写内联像素宽度,
-             否则 flex 最小宽度被钉死,收起再展开时编辑区不回缩、右面板被挤出屏幕 */}
-          <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-              <div className="min-h-0 flex-1 overflow-hidden bg-card">
-                <SourceView />
-              </div>
-              {showBottom && (
-                <div className="flex shrink-0 flex-col">
-                  <div className="row-resizer" onMouseDown={onBottomResizeDown} title="拖拽调整下方面板高度" />
-                  <div style={{ height: bottomH }} className="shrink-0">
-                    <TimelinePanel />
-                  </div>
+        {/* 主内容面板:四套视图都装在这一个带边线的圆角面板里,四周与活动栏/右侧栏/状态栏留出间隙。
+            overflow-hidden 让四个圆角真正裁掉里面的直角内容(页签栏、编辑器底色)。 */}
+        <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-[6px] border border-border">
+          {/* 四个视图全部 keep-alive:首次访问后常驻挂载,切换仅改 display */}
+          <ViewPane show={view === 'debug'}>
+            <Toolbar />
+            {/* 面板紧贴(VS Code 经典密度):无外边距,仅靠 sash 分割线分区
+               min-w-0 + overflow-hidden:Monaco 会给编辑器写内联像素宽度,
+               否则 flex 最小宽度被钉死,收起再展开时编辑区不回缩、右面板被挤出屏幕 */}
+            <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                <div className="min-h-0 flex-1 overflow-hidden bg-card">
+                  <SourceView />
                 </div>
+                {showBottom && (
+                  <div className="flex shrink-0 flex-col">
+                    <div className="row-resizer" onMouseDown={onBottomResizeDown} title="拖拽调整下方面板高度" />
+                    <div style={{ height: bottomH }} className="shrink-0">
+                      <TimelinePanel />
+                    </div>
+                  </div>
+                )}
+              </div>
+              {showRight && (
+                <>
+                  <div className="col-resizer" onMouseDown={onResizeDown} title="拖拽调整代码区与侧边栏宽度" />
+                  <div style={{ width: panelW }} className="min-h-0 shrink-0">
+                    {/* 多 sheet keep-alive:切换仅改 display,保留手风琴展开/监视输入等本地状态 */}
+                    <div className={rightView === 'session' ? 'h-full min-h-0 w-full' : 'hidden'}>
+                      <SessionPanel />
+                    </div>
+                    <div className={rightView === 'debug' ? 'h-full min-h-0 w-full' : 'hidden'}>
+                      <RightPanels />
+                    </div>
+                    <div className={rightView === 'outline' ? 'h-full min-h-0 w-full' : 'hidden'}>
+                      <OutlinePanel />
+                    </div>
+                  </div>
+                </>
               )}
             </div>
-            {showRight && (
-              <>
-                  <div className="col-resizer" onMouseDown={onResizeDown} title="拖拽调整代码区与侧边栏宽度" />
-                <div style={{ width: panelW }} className="min-h-0 shrink-0">
-                  {/* 多 sheet keep-alive:切换仅改 display,保留手风琴展开/监视输入等本地状态 */}
-                  <div className={rightView === 'session' ? 'h-full min-h-0 w-full' : 'hidden'}>
-                    <SessionPanel />
-                  </div>
-                  <div className={rightView === 'debug' ? 'h-full min-h-0 w-full' : 'hidden'}>
-                    <RightPanels />
-                  </div>
-                  <div className={rightView === 'outline' ? 'h-full min-h-0 w-full' : 'hidden'}>
-                    <OutlinePanel />
-                  </div>
-                </div>
-                {/* 右侧 sheet 切换栏(仿左侧活动栏):与右侧边栏一同受折叠按钮控制
-                    —— 顺序即主次:会话(选环境/看状态)→ 调试面板 → 大纲 */}
-                <div className="flex w-10 shrink-0 flex-col border-l border-border bg-background py-2">
-                  <ActivityIcon icon={Server} label="会话" active={rightView === 'session'} onClick={() => setRightView('session')} />
-                  <ActivityIcon icon={Sword} label="调试面板" active={rightView === 'debug'} onClick={() => setRightView('debug')} />
-                  <ActivityIcon icon={ListTree} label="大纲" active={rightView === 'outline'} onClick={() => setRightView('outline')} />
-                </div>
-              </>
-            )}
+          </ViewPane>
+          <ViewPane show={view === 'wslogs'}>
+            <WsLogView />
+          </ViewPane>
+          <ViewPane show={view === 'wstest'}>
+            <WsTestView />
+          </ViewPane>
+          <ViewPane show={view === 'settings'}>
+            <SettingsView />
+          </ViewPane>
+        </div>
+        {/* 右侧 sheet 切换栏(仿左侧活动栏):与右侧边栏一同受折叠按钮控制
+            —— 顺序即主次:会话(选环境/看状态)→ 调试面板 → 大纲。
+            它是这一屏的栏、不是视图内容,所以留在面板外面做面板的右邻。 */}
+        {view === 'debug' && showRight && (
+          <div className="flex w-10 shrink-0 flex-col items-center gap-1 py-2">
+            <ActivityIcon icon={Server} label="会话" active={rightView === 'session'} onClick={() => setRightView('session')} />
+            <ActivityIcon icon={Sword} label="调试面板" active={rightView === 'debug'} onClick={() => setRightView('debug')} />
+            <ActivityIcon icon={ListTree} label="大纲" active={rightView === 'outline'} onClick={() => setRightView('outline')} />
           </div>
-        </ViewPane>
-        <ViewPane show={view === 'wslogs'}>
-          <WsLogView />
-        </ViewPane>
-        <ViewPane show={view === 'wstest'}>
-          <WsTestView />
-        </ViewPane>
-        <ViewPane show={view === 'settings'}>
-          <SettingsView />
-        </ViewPane>
+        )}
       </div>
       <StatusBar />
     </div>

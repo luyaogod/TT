@@ -482,7 +482,7 @@ export function TimelinePanel() {
               <div key={i} className="flex gap-2">
                 <span className="shrink-0 text-muted-foreground">{t.time}</span>
                 <Badge tone={t.origin === 'ai' ? 'blue' : t.origin === 'human' ? 'green' : 'gray'} className="mt-0.5 h-4 shrink-0">
-                  {t.origin === 'ai' ? 'AI' : t.origin === 'human' ? '人' : '系统'}
+                  {t.origin === 'ai' ? 'AI' : t.origin === 'human' ? '用户' : '系统'}
                 </Badge>
                 <span className={`min-w-0 ${kindTone[t.kind] || 'text-muted-foreground'}`}>{t.text}</span>
               </div>

@@ -2,7 +2,10 @@
    配色对齐 VS Code Dark / Light Modern(侧栏 #181818 / 编辑区 #1f1f1f / 分割线 #2b2b2b);
    组件一律用语义工具类(bg-background/border-border/text-muted-foreground...),
    亮暗两套取值集中在这里维护,禁止在组件里写死 zinc 色板。
-   布局密度对齐 VS Code 经典 UI:面板紧贴,仅以 1px 分割线(sash)相隔,全站零圆角。
+   布局密度对齐 VS Code 经典 UI:面板紧贴,仅以 1px 分割线(sash)相隔,默认零圆角。
+   圆角集中在少数几处,一律取 6px(rounded-[6px]):Button(shared/ui.tsx)、
+   ToolIcon 与左右活动栏的图标按钮、主内容面板(App.tsx)。别处不要再引入圆角 ——
+   直角仍是这个界面的基调,输入框、下拉、表格、卡片都还是直角。
 
    合并前这份在 web/app/src/index.css 里,只服务调试工作台 —— 字典页因此完全没有主题机制
    (它的 dark: 类走 Tailwind v4 默认的 prefers-color-scheme,跟随系统且不可切换)。

@@ -3,6 +3,12 @@
 import { useEffect, useState } from 'react'
 import { useStore } from './store'
 
+/**
+ * 状态栏高度。页面顶部留了一块同样高的空白与它对称(见 App.tsx),所以高度从这里导出共用,
+ * 免得两处各写一份,改了一处另一处悄悄错位。
+ */
+export const STATUS_BAR_H = 'h-7'
+
 export function StatusBar() {
   const sourcePath = useStore((s) => s.sourcePath)
   const prog = useStore((s) => s.prog)
@@ -51,7 +57,10 @@ export function StatusBar() {
   const chip = 'shrink-0 rounded-sm bg-black/20 px-1.5 py-px'
 
   return (
-    <div className={`flex h-7 shrink-0 items-center gap-3 border-t border-border px-3 text-[11px] transition-colors ${bar}`}>
+    // 不画上分割线:状态栏整条自带底色(停站橙/运行蓝/空闲灰),靠色块与内容区分隔就够了;
+    // 顶上加的那条线在有色状态下是多余的,在空闲态(bg-background)反而把一条淡淡的横线
+    // 悬在内容与状态栏之间,像没对齐的边框。
+    <div className={`flex ${STATUS_BAR_H} shrink-0 items-center gap-3 px-3 text-[11px] transition-colors ${bar}`}>
       {/* 左:源码文件路径 */}
       <span className="min-w-0 flex-1 truncate font-mono" title={sourcePath || ''}>
         {sourcePath || ' '}
