@@ -114,7 +114,7 @@ func Edit(path string, validate func(root map[string]any) error, mutate func(roo
 }
 
 // NewSkeleton 返回一份最小可用的新配置：空环境清单 + 缺省监听地址。
-// 首次运行（以及桌面版首启）用它落一个骨架，用户随后在配置页里填。
+// 首次运行用它落一个骨架，用户随后在配置页里填。
 func NewSkeleton() map[string]any {
 	return map[string]any{
 		"schemaVersion": SchemaVersion,
@@ -129,8 +129,7 @@ func NewSkeleton() map[string]any {
 
 // EnsureExists 在配置不存在时落一份骨架（已存在则什么都不做）。
 //
-// 服务启动路径需要它：桌面/首次运行时还没有任何环境，但配置页要有文件可编辑，
-// 而 Electron 外壳也会检查数据目录里是否建出了 config.json。
+// 服务启动路径需要它：首次运行时还没有任何环境，但配置页要有文件可编辑。
 // 沿用与 Save 相同的原子写，所以不会留下半截文件。
 func EnsureExists(path string) error {
 	if _, err := os.Stat(path); err == nil {

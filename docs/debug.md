@@ -30,32 +30,11 @@ Windows 一键打包，两种交付形态任选（互不影响，用的是同一
 
 | 形态 | 命令 | 产物 |
 | --- | --- | --- |
-| **纯 CLI**（exe + config + README，浏览器用界面） | `build_portable.bat` | `dist/tt-portable.zip` |
-| **桌面软件**（Electron 外壳，免装浏览器） | `build_desktop.bat` | `dist/desktop/TT-<版本>-setup.exe`（安装版）、`dist/desktop/TT-<版本>-portable.zip`（绿色版，解压即用） |
+| **便携包**（exe + config + README，浏览器用界面） | `build_portable.bat` | `dist/tt-portable.zip` |
+| **MSI 安装包**（用户级安装，免管理员） | `build_msi.bat` | `dist/TT-<版本>-x64.msi` |
 
-桌面版细节见 [`desktop/README.md`](desktop/README.md)。绿色版特意做成 **zip 而不是单文件 exe**：
-自解压 exe 长得像安装包，容易让人以为要先安装。
-
-### 桌面版（Electron）
-
-桌面版不复制界面：窗口加载的就是 Go 二进制里 `go:embed` 的 `web/dist/debug`，所以与 CLI 版行为完全一致；
-Electron 只负责窗口、生命周期与打包。
-
-```powershell
-# 打包（前置:Node 18+；国内建议先设 electron 镜像）
-$env:ELECTRON_MIRROR='https://npmmirror.com/mirrors/electron/'
-build_desktop.bat
-
-# 开发（Vite 热更新 + 后端直出日志，数据目录 desktop/.dev-data）
-cd desktop; npm install; npm run dev
-```
-
-- 数据目录：绿色版（`-portable.zip` 解压后）= **程序所在目录**（与 CLI 便携包布局一致，可共用 config.json，
-  由包内 `.portable` 标记决定）；安装版 = `%APPDATA%\T100\tt`（与 CLI 直接调用**同一位置**，
-  桌面版和命令行看到的是同一份配置）。统一位置可用 `T100_HOME` 整体改写。
-- 桌面窗口无原生菜单栏（界面自带工具栏）；`Ctrl+Shift+D` / `Ctrl+Shift+L` 打开配置目录 / 日志，其余快捷键见 desktop/README。
-- 端口：桌面版首启写 `127.0.0.1:28675`（CLI 版 28670），被占用自动顺延，真实地址见 `tt debug status`。
-- 关窗即优雅停止后端；CLI（`status`/`start`/`exec`…）能自动发现并驱动桌面版的会话，反之亦然。
+界面在浏览器里（`tt serve` 后打开 http://127.0.0.1:28670/debug/）。MSI 的细节见
+[README 的安装一节](../README.md#msi-安装包用户级免管理员)。
 
 ## 快速开始
 
@@ -89,7 +68,6 @@ cd desktop; npm install; npm run dev
 | 命令 | 作用 |
 | --- | --- |
 | `serve` | 启动本地调试服务（默认后台常驻单实例；`--listen`/`--foreground`/`--stop`） |
-| ~~`desktop`~~ | 已并入统一的 `tt serve --desktop`（Electron 壳用它拉起服务、读 `TT_READY {json}` 就绪行） |
 | `status` | 查看服务状态与活动会话 |
 | `start <作业>` | 连接 SSH、启动调试并等到入口停站（`--module/-m`、`--zone`、`--ssh`、`--timeout`） |
 | `exec "<命令>" [更多…]` | 透传标准调试命令（print/break/next/where/info/watch…），原样返回输出；**可一次给多条**（或 `--file` 从文件读）省掉每条一次进程启动，逐条标注 `[i/N]`；resume 类命令执行后读一次现场，停住了就继续往下跑（「走一步再取一批值」一次调用做完），没停住才中止并把剩余标为未执行；resume 类命令用 `--wait N` 软等待（到点返回，不发 SIGINT），`--timeout` 才是会发 SIGINT 的硬超时 |
@@ -113,7 +91,8 @@ cd desktop; npm install; npm run dev
 | `tt install path` | 把 exe 所在目录加入**用户** PATH（HKCU，不需管理员；`--dry-run` 只预览）；合并后一次安装覆盖全部工具 |
 
 全局参数：`--config <路径>`（缺省取统一用户目录 `%APPDATA%\T100\tt\config.json`，见「config.json」）、`--json`、`-v`；
-控制端命令（start/exec/status/quit/stop/source/logs/locate/resolve/interrupt/env/topent/wslogs/wsdebug）另有 `--url` 覆盖自动发现的地址。
+控制端命令（start/exec/status/quit/stop/source/logs/locate/resolve/interrupt/env/topent/wslogs/wsdebug）另有 `--url` 覆盖自动发现的地址
+（`tt serve` 与 `tt debug serve` 的调试 API 挂在不同前缀下，自动寻址会从状态文件里带上；手工指定的地址若已写到 `/api`，按原样用）。
 
 ## config.json
 
@@ -165,15 +144,13 @@ cd desktop; npm install; npm run dev
 | `TT_CONFIG` | 覆盖配置文件路径（优先级高于 `--config`）；旧名 `TDEBUG_CONFIG` / `TDICT_CONFIG` 仍识别 |
 | `T100_HOME` | 改写**统一用户目录**的父目录（缺省 `%APPDATA%\T100`）；三个工具共用，改一处一起生效 |
 | `TT_PROXY` | 前端开发模式的后端地址（端口顺延时用，如 `TT_PROXY=http://127.0.0.1:<实际端口>`；原 `TDEBUG_PROXY`） |
-| `TDEBUG_SERVE_LOG` | 后台服务子进程写入的日志路径（由 `serve`/桌面壳自动设置） |
+| `TDEBUG_SERVE_LOG` | 后台服务子进程写入的日志路径（由 `serve` 自动设置） |
 | `TDBG_RAW=1` | 把 fgldb 协议原始行打到服务日志（排障用） |
-| `TT_DESKTOP_DATA` | 桌面版数据目录（优先于便携/安装默认值；见 desktop/README.md） |
-| `TT_DESKTOP_PORT` | 桌面版监听地址覆盖（如 `127.0.0.1:0` 让系统分配） |
-| `ELECTRON_MIRROR` | 仅打包桌面版时用：electron 二进制下载镜像 |
 
 ### 运行时产物（均已在 .gitignore 中）
 
-- `.tt-serve.json` —— 后台实例状态（pid/地址/日志），控制端命令据此自动寻址
+- `.tt-serve.json` —— 后台实例状态（pid/地址/**调试 API 前缀**/日志），控制端命令据此自动寻址：
+  `tt serve` 与 `tt debug serve` 写同一份，`apiBase` 区分对面把调试面挂在 `/debug/api` 还是 `/api`
 - `.tt-serve.log` —— 后台服务日志
 - `debug-bps/<模块>__<作业>.json` —— 断点持久化
 
@@ -192,5 +169,4 @@ internal/host/             ★ 远程服务器共享层（与字典侧共用）�
 internal/config/           ★ 统一配置层：路径解析 / 读写 / schema / 旧配置迁移
 internal/web/              统一 HTTP 服务：页面 + 共享 /api/*（配置读写、派生状态、字典类动作）
 web/app/                   前端(React 18 + Vite 6 + Monaco + Tailwind v4 + zustand)
-desktop/                   Electron 桌面壳（现拉起统一的 tt serve --desktop）
 ```

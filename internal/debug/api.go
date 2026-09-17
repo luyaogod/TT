@@ -29,7 +29,7 @@ type Server struct {
 	mgr     *Manager
 
 	// mu 同时保护两类运行态:
-	//   stop —— Serve 期间指向该次运行的 cancel(POST /api/shutdown 用,桌面壳退出时优雅停止);
+	//   stop —— Serve 期间指向该次运行的 cancel(POST /api/shutdown 用,优雅停止);
 	//   *cfg 的替换 —— 配置热替换必须整个换掉,不能让别人看到半个新配置。
 	// 合并后 hosts 节由统一服务的 /api/hosts 统一读写,调试服务要能安全地重读并热替换,
 	// 所以 cfg 的替换也收进这把锁(原来是直接 *s.cfg = nc,没有任何同步)。
@@ -115,7 +115,7 @@ func (s *Server) Listen() (net.Listener, string, error) {
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	srv := &http.Server{Handler: s.Handler()}
 
-	// 记下本次运行的 cancel,供 POST /api/shutdown(桌面壳退出)优雅停止
+	// 记下本次运行的 cancel,供 POST /api/shutdown 优雅停止
 	runCtx, cancelRun := context.WithCancel(ctx)
 	s.setStop(cancelRun)
 	defer s.setStop(nil)
@@ -416,8 +416,9 @@ func (s *Server) hEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 // hShutdown 优雅停止服务:POST /api/shutdown {}。
-// 桌面壳(Electron)关闭窗口时用它,效果等同 Ctrl+C —— ctx 取消 → http 收口 + mgr.CloseAll
-// 收掉会话与 SSH 连接;CLI 侧仍走 `tt debug serve --stop`(按 pid)。
+// 效果等同 Ctrl+C —— ctx 取消 → http 收口 + mgr.CloseAll 收掉会话与 SSH 连接。
+// 停服务的主要路径是 `tt serve --stop` / `tt debug serve --stop`(按 pid 杀进程);
+// 这个端点留给"说得上话但拿不到 pid"的调用方(曾经是桌面外壳的关窗动作)。
 // 要求 JSON 请求体(与全站一致):浏览器跨站发不出这个 Content-Type(会先被预检挡下),
 // 所以只有本机同源调用方能用,不额外加鉴权。
 func (s *Server) hShutdown(w http.ResponseWriter, r *http.Request) {

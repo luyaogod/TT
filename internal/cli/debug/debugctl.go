@@ -52,14 +52,34 @@ var (
 	wsDebugReqFile string   // wsdebug --request-file:整份替换入参报文
 )
 
+// dbgAPIBase 返回调试 API 的根地址(含挂载前缀)。
+//
+// 两种服务把调试面挂在不同地方:独立调试服务在根(/api/…),统一服务在
+// /debug/api/…。前缀记在状态文件里(见 servebg.go 的 ServeInfo.APIBase),
+// 所以控制端命令不必知道对面是哪个服务。
+func dbgAPIBase() string {
+	prefix := apiBaseFromState()
+	if dbgAPIURL != "" {
+		return joinAPIBase(dbgAPIURL, prefix)
+	}
+	// 自动寻址:优先取后台实例状态文件里的真实地址(端口被占用顺延过);
+	// 无实例时回退 config debug.listen / 内置默认,再给出"请先启动"提示。
+	return joinAPIBase(debugAutoURL(), prefix)
+}
+
+// joinAPIBase 给服务地址补上挂载前缀。URL 自己已经带了 API 路径的(如 …/debug/api)
+// 原样返回 —— 否则 --url 显式指到 API 上时会被再拼一次前缀。
+func joinAPIBase(url, prefix string) string {
+	u := strings.TrimRight(url, "/")
+	if strings.HasSuffix(u, "/api") {
+		return u
+	}
+	return u + prefix
+}
+
 // dbgAPI 调 serve REST;非 2xx 时解析 {"error": ...} 返回错误
 func dbgAPI(method, path string, body any) ([]byte, error) {
-	base := dbgAPIURL
-	if base == "" {
-		// 自动寻址:优先取后台实例状态文件里的真实地址(端口被占用顺延过);
-		// 无实例时回退 config debug.listen / 内置默认,再给出"请先启动"提示。
-		base = debugAutoURL()
-	}
+	base := dbgAPIBase()
 	var rd io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -81,7 +101,7 @@ func dbgAPI(method, path string, body any) ([]byte, error) {
 	cli := &http.Client{Timeout: 5 * time.Minute}
 	resp, err := cli.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("无法连接调试服务(%s): %w —— 请先运行 tt debug serve", base, err)
+		return nil, fmt.Errorf("无法连接调试服务(%s): %w —— 请先运行 tt serve(或 tt debug serve)", base, err)
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
@@ -1164,7 +1184,7 @@ func boolInt(b bool) int {
 // 只挂在真正连接服务的命令上,serve/probe/db 不需要。
 func addClientURLFlag(cmds ...*cobra.Command) {
 	for _, c := range cmds {
-		c.Flags().StringVar(&dbgAPIURL, "url", "", "调试服务地址(默认自动发现运行中的后台实例;也可显式指定)")
+		c.Flags().StringVar(&dbgAPIURL, "url", "", "调试服务地址(默认自动发现运行中的后台实例;已带 /api 路径的按原样用,只给主机端口的自动补挂载前缀)")
 	}
 }
 

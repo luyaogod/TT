@@ -51,7 +51,7 @@ func TestListenReportsRealPort(t *testing.T) {
 	}
 }
 
-// LoadConfig 严格要求至少一个环境;桌面版用的 LoadConfigAllowEmpty 允许为空。
+// LoadConfig 严格要求至少一个环境;LoadConfigAllowEmpty(服务启动用)允许为空。
 // 配置是合并后的拆分结构:环境清单在顶层 hosts.sshs,监听地址在顶层 listen,
 // 调试设置在 debug 节 —— 不再是从前那种 {debug:{sshs,listen,…}} 的合体节。
 func TestLoadConfigAllowEmpty(t *testing.T) {
@@ -129,7 +129,7 @@ func TestLoadConfigSplitSections(t *testing.T) {
 	}
 }
 
-// NewDefaultConfig 落盘后应能被宽松加载读回(桌面首启骨架)。
+// NewDefaultConfig 落盘后应能被宽松加载读回(首次运行的配置骨架)。
 func TestNewDefaultConfigRoundTrip(t *testing.T) {
 	cfg := NewDefaultConfig()
 	if cfg.Listen == "" || cfg.LaunchArgs == "" || cfg.WatchdogSeconds == 0 ||
@@ -138,7 +138,7 @@ func TestNewDefaultConfigRoundTrip(t *testing.T) {
 	}
 }
 
-// POST /api/shutdown 取消 Serve 上下文(桌面壳关窗走这条优雅停止)。
+// POST /api/shutdown 取消 Serve 上下文(走这条优雅停止)。
 func TestShutdownEndpoint(t *testing.T) {
 	srv := NewServer(&Config{Listen: "127.0.0.1:0"}, nil, "")
 	ln, addr, err := srv.Listen()

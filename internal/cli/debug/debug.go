@@ -127,7 +127,7 @@ var debugProbeCmd = &cobra.Command{
 	},
 }
 
-// debugServeCmd M1+:启动本地服务(REST+WS+MCP+Web 前端)。
+// debugServeCmd M1+:启动本地调试服务(REST+WS+Web 前端)。
 // 默认在后台常驻(单实例):打印实际地址后立即返回,终端不被占用;
 // 端口被占用时自动顺延到下一个空闲端口,并把真实地址写入状态文件供 debugctl 自动发现。
 var debugServeCmd = &cobra.Command{
@@ -135,11 +135,12 @@ var debugServeCmd = &cobra.Command{
 	Short: "后台常驻调试服务(tt debug start/exec/status 等控制命令自动发现的守护进程)",
 	Long: `后台常驻调试服务 —— tt debug 各条控制命令(start/exec/status/quit/wait/…)自动发现的守护进程。
 
-它与 tt serve 是两件事,别混:
-  · tt serve       前台常驻的**网页界面**:一个进程同时提供调试工作台 /debug/ 与
-                   设置页,不写状态文件;
-  · tt debug serve 本命令。后台守护进程,把实际监听地址写进 config.json 同目录的
-                   .tt-serve.json,tt debug 的控制命令据此自动寻址(端口顺延后也能找到)。
+它与 tt serve 是同一个服务的两种装法,服务端能力完全相同:
+  · tt debug serve  只服务调试面:工作台 API 直接在根的 /api/… 下;
+  · tt serve        统一服务:调试工作台 /debug/ + 统一设置页,调试面在 /debug/api/… 下。
+两者默认都后台常驻、都写同一份状态文件(.tt-serve.json),控制端命令据此自动寻址
+(各自的前缀也记在里面),所以 tt debug start/exec/status 对着哪个跑着的实例都能用。
+同一个配置目录下只能起一个 —— 两条件会争同一份状态文件。
 
 默认后台运行(单实例):命令打印服务地址与 pid 后立即返回,当前会话可继续输入其它命令;
 已有一个实例在跑时打印它的地址后直接返回。
@@ -171,7 +172,7 @@ var debugServeCmd = &cobra.Command{
 		if dbgServeForeground {
 			return debugServeForeground(cfg, cfgPath)
 		}
-		return debugServeBackground(cfg, cfgPath)
+		return debugServeBackground(cfgPath)
 	},
 }
 

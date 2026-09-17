@@ -76,7 +76,6 @@ TT/
 │  │                        覆盖三个工具的统一设置页（站点管理/数据字典/DEBUG/应用设置）
 │  └─ shared/               共享层：主题变量与机制、UI 基元、设置页布局件、cn
 │
-├─ desktop/                 Electron 外壳（原 TDebug/desktop）
 ├─ skills/                  AI 技能：tt-debug / tt-dev / tt-dict / erp-read
 ├─ docs/                    本设计与迁移记录
 └─ testdata/                FGL 夹具（原 TDev/testdata）
@@ -183,10 +182,18 @@ TT/
 
 - `/debug/`             → 调试工作台 SPA
 - `/debug/#settings/*`  → 统一设置页（站点管理 / 数据字典 / DEBUG / 应用设置）
+- `/debug/api/*`        → 调试子系统的 REST/WS（挂在统一前缀下，见下）
 - `/api/*`              → 统一 REST API：`/api/hosts` 读写配置的各节，
                           `/api/config/status` 给派生状态（路径存不存在），
                           `/api/install` 管 PATH，`/api/mirror` `/api/dbsync` `/api/bdldoc`
                           是字典类的长跑动作
+
+**默认后台常驻**（`--foreground` 前台、`--stop` 停止）。运行状态写在与
+`tt debug serve` 同一份 `.tt-serve.json` 里，其中 `apiBase` 记着调试 API 挂在哪 ——
+`tt serve` 是 `/debug/api`，独立的 `tt debug serve` 是 `/api`。控制端命令
+（`tt debug start/exec/status/…`）据此寻址，所以对着哪个实例都能用，
+不必知道对面是哪种装法。同一份配置目录下只允许一个实例：两条进程会争同一份状态文件，
+`--stop` 与自动寻址就都指错人了。
 
 **配置**（环境与数据库、查询数据源、镜像目录、同步目标、BDL 目录）全部走 `/api/hosts`
 的分节写入；**动作**（拉源码镜像、跑字典同步）留在设置页「数据字典」分区的对应卡片里。
@@ -208,7 +215,7 @@ TDict 的设置页保持原样（它本来就是 `hosts`），并新增指向调
 ## 6. 命令面
 
 ```
-tt debug …                 原 tdebug：probe / serve / db / desktop
+tt debug …                 原 tdebug：probe / serve / db
                            start / exec / status / quit / wslogs / sql / wsdebug / why / wait / mode
                            stop / source / logs / locate / resolve / interrupt
 tt dev …                   原 tdev：tzc export|status|verify|apply|unlock|rename|newfn|selftest
@@ -238,8 +245,7 @@ tt version
   与 `config.json`：配置该落在 `%APPDATA%\T100\tt\config.json`。定义在
   `installer/tt.wxs`，文件清单由 `heat.exe` 采集，卸载要删的目录由
   `tools/wix_removefolders.py` 补（MSI 的 ICE64/ICE38 对用户级安装的要求）。
-  需要 WiX v3 工具集，`WIX_BIN` 指向它。
-- 桌面版：`build_desktop.bat` → Electron 安装包（复用原 TDebug desktop 外壳，改为拉起 `tt.exe serve`）
+  需要 WiX v3 工具集，`WIX_BIN` 指向它。图标取 `installer/icon.ico`。
 
 `//go:embed all:web/dist` 要求前端先构建，`main.go` 已带空目录占位与引导页兜底。
 

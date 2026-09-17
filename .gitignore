@@ -12,8 +12,6 @@
 !/web/dist/.gitkeep
 /web/node_modules/
 /web/app/node_modules/
-/desktop/node_modules/
-/desktop/dist/
 
 # 配置：含明文 SSH / 数据库口令，绝不入库
 /config.json

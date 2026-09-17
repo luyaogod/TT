@@ -95,9 +95,6 @@ function useDocTitleBlink() {
 
 export function App() {
   useDocTitleBlink()
-  // 还没有任何服务器环境时(桌面版首启、或本地还没配过):直接落到「设置 → 环境」,
-  // 而不是把用户丢在一个什么都干不了的调试页。设置页默认就停在「环境」分区。
-  // 只在本页首次加载时判一次,之后用户自己怎么切视图都不再干涉。
   const jumpedRef = useRef(false)
   useEffect(() => {
     if (jumpedRef.current) return
@@ -110,7 +107,7 @@ export function App() {
       if (r.view === 'settings' && r.section) useStore.getState().setSettingsSection(r.section)
       return
     }
-    // 还没有任何服务器环境时(桌面版首启、或本地还没配过):直接落到「设置 → 站点管理」,
+    // 还没有任何服务器环境时(首次运行、或本地还没配过):直接落到「设置 → 站点管理」,
     // 而不是把用户丢在一个什么都干不了的调试页。只在本页首次加载时判一次。
     void api.settings().then((c) => {
       const sshs = (c as { sshs?: unknown[] })?.sshs

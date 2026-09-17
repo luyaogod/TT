@@ -273,9 +273,9 @@ PUT 只接受要改的节（缺省 = 不动），交给 `internal/config` 的原
 - `internal/web`：`PUT /api/hosts` 的分节写入、校验、拒绝时不落盘、`viaSsh` 保留、
   SPA 静态服务的五个路径形态 —— 见 `server_test.go`。
 - `internal/host`、`internal/pathinstall`、`internal/safesql`、`internal/dict`：原测试随包搬入并通过。
-- **桌面链路**：`desktop/scripts/smoke.mjs` 无 GUI 跑通 —— 首启建配置骨架、打出 `TT_READY`、
-  `/api/health` 可达、`/debug/` 返回界面、`/` 跳转到 `/debug/`、
-  `POST /api/shutdown` 优雅退出（code=0）。
+- **桌面链路**（随桌面外壳一并作废，见文末「后续变更」）：`desktop/scripts/smoke.mjs`
+  无 GUI 跑通 —— 首启建配置骨架、打出 `TT_READY`、`/api/health` 可达、`/debug/` 返回界面、
+  `/` 跳转到 `/debug/`、`POST /api/shutdown` 优雅退出（code=0）。
 
 ### 未做 / 已知取舍
 
@@ -398,7 +398,7 @@ workspace 名从 `debug` 改成 `app`（`npm run build:app` / `dev:app` / `check
 - `grep` 确认 `web/app/src` 无写死色板；产物 CSS 里 `.dark` 是类驱动、
   `prefers-color-scheme` 归零、明暗两套 `--background` 都在。
 - 实机核对四个分区渲染、深链接落位、明暗切换、`/dict/*` 全部 404、
-  桌面冒烟全通（`desktop/scripts/smoke.mjs`）。
+  桌面冒烟全通（`desktop/scripts/smoke.mjs`；该脚本随桌面外壳一并移除）。
 - **全新克隆可构建**：`web/dist/.gitkeep` 一直被 `.gitignore` 挡住、从未入库，
   而 `//go:embed all:web/dist` 在该目录不存在时会直接报错 —— 意思是从仓库克隆下来
   `go build` 过不去。已改为 `/web/dist/*` + `!/web/dist/.gitkeep`，并实测克隆后
@@ -410,3 +410,26 @@ workspace 名从 `debug` 改成 `app`（`npm run build:app` / `dev:app` / `check
   但用户明确说不做。
 - **每环境的 `launchArgs`/`watchdogSeconds` 仍不在界面上暴露**：靠服务端保留机制保证
   不被丢掉（见第 2 期）。要真正可编辑，得给站点编辑器的每个环境加两个控件。
+
+## 后续变更
+
+合并交付之后又做的调整，记录在这里，免得上面那些"当时如何"的段落被当成现状读。
+
+- **移除桌面版（Electron 外壳）**：`desktop/` 与 `build_desktop.bat` 整体删除；
+  `tt serve --desktop` 这个隐藏开关、`TT_READY {json}` 就绪行、`TT_DESKTOP_DATA` /
+  `TT_DESKTOP_PORT` / `ELECTRON_MIRROR` 三个环境变量一并去掉。界面统一走浏览器：
+  `tt serve` 后打开 `/debug/`。
+  - 桌面目录里唯一还被别处引用的文件是 MSI 的图标，已搬到 `installer/icon.ico`
+    （`build_msi.bat` 的三处引用同步改了）。
+  - `internal/config/paths.go` 里"桌面版旧数据目录"的兜底路径**保留**：那是给曾装过
+    桌面版的机器读旧配置用的，删掉会让它们的配置突然读不到。
+  - `POST /api/shutdown` 保留。它原本的主要调用方是桌面壳的关窗动作，现在没有界面在调，
+    但它仍是这个服务对外的优雅停止入口（也可 curl），且带测试，删了只有净损失。
+- **`tt serve` 改为默认后台常驻**：与 `tt debug serve` 共用同一套 spawn / 状态文件 /
+  停止机制（`internal/cli/debug/servebg.go`），`--foreground` 前台、`--stop` 停止。
+  随之修掉两个既有缺陷：
+  - 两种服务的调试 API 挂载前缀不同（`tt serve` 在 `/debug/api`，`tt debug serve` 在 `/api`），
+    而控制端命令永远拼 `/api/…` —— 于是 `tt debug start/exec/status` 对着 `tt serve`
+    （以及当时的桌面版）全是 404。现在前缀记进 `.tt-serve.json` 的 `apiBase`，按状态文件寻址。
+  - `internal/cli/root.go` 的 `Execute` 注释写着"错误只由这里打一次"，但那里并没有打印，
+    于是任何命令失败都是静默退出 1。已补上 stderr 输出。

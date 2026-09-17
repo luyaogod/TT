@@ -10,6 +10,7 @@
 package cli
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 
@@ -90,8 +91,11 @@ func Execute(web fs.FS) {
 	}
 
 	if err := rootCmd.Execute(); err != nil {
-		// cobra 的 SilenceErrors 让错误只由这里打一次；
+		// cobra 的 SilenceErrors 让错误只由这里打一次（各子命令只管 return err）。
+		// 少了这一行，命令失败就**一声不响**地退出 1 —— 用户看不到原因，
+		// 而这恰恰是最需要说清楚的时候（"为什么服务没起来/为什么没输出"）。
 		// 带退出码的错误（TDev 的 0/2/3/4/5 契约）按码退出。
+		fmt.Fprintf(os.Stderr, "错误: %v\n", err)
 		if code := exitCodeOf(err); code != 0 {
 			os.Exit(code)
 		}

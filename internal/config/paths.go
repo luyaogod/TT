@@ -234,7 +234,7 @@ func ResolvePath(flagPath string, allowMissing bool) (string, error) {
 	if allowMissing {
 		// 写路径。用户显式指定了路径时，那就是答案 —— 文件还不存在正是要新建它，
 		// 不能悄悄改用默认落点：那会让便携版把配置写到用户目录里去，
-		// 也会让 --config <临时目录> 的调用（桌面外壳、冒烟测试）落在别处。
+		// 也会让 --config <临时目录> 的调用（测试与脚本）落在别处。
 		if explicit && len(candidates) > 0 {
 			if abs, err := filepath.Abs(candidates[0]); err == nil {
 				return migrateInPlace(abs), nil

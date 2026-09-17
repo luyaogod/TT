@@ -12,7 +12,8 @@ tt dict …    ERP 数据字典查询：r.t / r.v / desc / scc / r.q / prog，�
 
 tt env …     环境管理（三个工具共用同一份环境清单）
 tt config …  配置管理：位置 / 查看 / 读写 / 迁移 / 校验
-tt serve     启动本地 Web 服务（工作台 + 统一设置页）
+tt serve     启动本地 Web 服务（工作台 + 统一设置页；默认后台常驻，打印地址后返回）
+tt serve --foreground / --stop   前台运行看实时日志 / 停止后台实例
 tt install   安装 AI skills 到当前目录，或把 tt 加进用户 PATH
 tt version
 ```
@@ -154,6 +155,14 @@ tt config migrate --dry-run
 tt serve
 ```
 
+**默认后台常驻**（单实例）：打印实际地址后立即返回，终端可以接着敲别的命令；
+`tt debug start/exec/status` 等控制命令会自动找到它。已在运行时打印它的地址后返回。
+
+```
+tt serve --foreground    # 前台运行，日志直出终端（Ctrl+C 停止）
+tt serve --stop          # 停止后台实例
+```
+
 一个进程、一个端口、一套页面：
 
 - `/debug/` — 调试工作台
@@ -252,7 +261,6 @@ TT/
 │  │                        其中的设置视图是三个工具的统一配置页
 │  ├─ shared/               整套 SPA 共用的主题层 / UI 基元 / 设置页布局件
 │  └─ package.json          npm workspace 根
-├─ desktop/                 Electron 外壳
 ├─ skills/                  AI 技能：tt-debug / tt-dev / tt-dict / erp-read
 ├─ docs/                    分册文档与设计说明
 └─ testdata/                FGL 夹具
@@ -301,7 +309,6 @@ cd web && npm run dev:debug   # 工作台与设置页，热更新，代理到后
 | [docs/dev.md](docs/dev.md) | 设计器包工具手册（原 TDev README） |
 | [docs/dict.md](docs/dict.md) | 数据字典手册（原 TDictCli README） |
 | [docs/tzc-model.md](docs/tzc-model.md) | `.tzc` 包模型与不变量 |
-| [desktop/README.md](desktop/README.md) | Electron 桌面外壳 |
 
 ## 兼容性
 

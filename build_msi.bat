@@ -31,7 +31,7 @@ if not exist "%WIX_BIN%\candle.exe" (
     echo Set WIX_BIN to the WiX v3 binaries directory ^(candle.exe / light.exe / heat.exe^).
     exit /b 1
 )
-if not exist "desktop\build\icon.ico" (echo MISSING desktop\build\icon.ico & exit /b 1)
+if not exist "installer\icon.ico" (echo MISSING installer\icon.ico & exit /b 1)
 
 echo [1/4] Building the payload ^(same as the portable package^) ...
 rem Call by absolute path: with NoDefaultCurrentDirectoryInExePath set, a bare
@@ -70,11 +70,11 @@ rem directory to -out needs a trailing backslash, and cmd hands "%OBJ%\" to the
 rem program as a literal quote (the backslash escapes it), which merges the rest
 rem of the command line into the path. Explicit file names sidestep that.
 "%WIX_BIN%\candle.exe" -nologo -arch x64 -dVersion=%VERSION% ^
-    -dSourceDir="%STAGE%" -dIconPath="desktop\build\icon.ico" ^
+    -dSourceDir="%STAGE%" -dIconPath="installer\icon.ico" ^
     -out "%OBJ%\tt.wixobj" installer\tt.wxs
 if errorlevel 1 (echo CANDLE FAILED & exit /b 1)
 "%WIX_BIN%\candle.exe" -nologo -arch x64 -dVersion=%VERSION% ^
-    -dSourceDir="%STAGE%" -dIconPath="desktop\build\icon.ico" ^
+    -dSourceDir="%STAGE%" -dIconPath="installer\icon.ico" ^
     -out "%OBJ%\msi-files.wixobj" dist\msi-files.wxs
 if errorlevel 1 (echo CANDLE FAILED & exit /b 1)
 "%WIX_BIN%\light.exe" -nologo -out "dist\TT-%VERSION%-x64.msi" ^

@@ -65,8 +65,7 @@ type Options struct {
 	Reloaders []ConfigReloader
 
 	// Shutdown 收到 POST /api/shutdown 时调用；nil 表示不注册该端点。
-	// 桌面版（Electron 外壳）靠它让关窗时 Go 侧优雅收尾（会话/SSH 连接收口），
-	// 而不是被直接 kill。
+	// 让 Go 侧优雅收尾（会话/SSH 连接收口），而不是被直接 kill。
 	Shutdown func()
 
 	// SyncDefaultTarget 字典同步目标的缺省位置。
@@ -226,10 +225,14 @@ func (s *Server) configPath(allowMissing bool) (string, error) {
 
 // ---------- 统一 API 处理器 ----------
 
+// hHealth 健康检查。server 字段是**探活标记**：服务的单实例判断（见
+// internal/cli/debug/servebg.go 的 serveUp）靠它认领"这个端口上跑的是我们自己"，
+// 而不是恰好占着同一端口的别的 HTTP 服务。改这个值会让 --stop 认不出在跑的实例。
 func (s *Server) hHealth(w http.ResponseWriter, r *http.Request) {
 	path, _ := s.configPath(true)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
+		"server":  "tt-unified",
 		"version": s.opt.Version,
 		"config":  path,
 		"debug":   s.opt.Debug != nil,
@@ -532,8 +535,7 @@ func (s *Server) hConfigMeta(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// hShutdown 桌面版关窗时调用：让 Go 侧优雅收尾（会话/SSH 连接收口），
-// 而不是被外壳直接 kill 掉进程。
+// hShutdown 让 Go 侧优雅收尾（会话/SSH 连接收口），而不是被直接 kill 掉进程。
 //
 // 只在本机监听时可用 —— 服务默认绑 127.0.0.1，但用户可以把 listen 配成
 // 0.0.0.0；那种情况下暴露一个能停服务的端点是不合适的，所以这里显式挡掉。

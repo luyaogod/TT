@@ -83,7 +83,7 @@ func (c *Config) applySsh(e *host.NamedSsh) {
 // ApplyDefaultEnv 把当前环境(envName;未确定时取 sshs 首条)的 SSH/zone/topent/库引用
 // 合并到运行时字段。无任何 ssh 时(设置页可删空)清空当前环境,运行时字段保持为空。
 func (c *Config) ApplyDefaultEnv() {
-	// 环境可能为空(桌面版首启还没配、或配置文件被手改成空;统一服务的 /api/hosts
+	// 环境可能为空(首次运行还没配、或配置文件被手改成空;统一服务的 /api/hosts
 	// 保存路径会拦下空列表,此处仍须兜底):清空当前环境与全部运行时合并结果。
 	// 只清 envName 不够 —— EnvName() 会用 c.SSH.Host+Zone 兜底拼出幽灵环境名,
 	// 且下面的回落分支会对空切片取下标 panic。
@@ -266,12 +266,12 @@ func (c *Config) FGLSOURCEPath(module string) string {
 func LoadConfig(path string) (*Config, error) { return loadConfig(path, true) }
 
 // LoadConfigAllowEmpty 同 LoadConfig,但允许环境清单为空。
-// 桌面版(Electron)首启时还没有任何环境,服务要能先起来,用户再到「设置 → 环境」里添加;
+// 服务首次启动时可能一个环境都还没配,这时它要能先起来,用户再到「设置 → 环境」里添加;
 // CLI 路径不用它,保持"没配环境就报错"的既有语义。
 func LoadConfigAllowEmpty(path string) (*Config, error) { return loadConfig(path, false) }
 
 // NewDefaultConfig 返回一份填好默认值的空配置(不含任何服务器环境):
-// 桌面版首启写 config.json 骨架用,默认值与 fillDefaults 永远一致(不重复硬编码)。
+// 首次运行写 config.json 骨架用,默认值与 fillDefaults 永远一致(不重复硬编码)。
 func NewDefaultConfig() *Config {
 	c := &Config{}
 	c.fillDefaults()

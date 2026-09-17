@@ -551,8 +551,7 @@ func TestLoadHosts_Errors(t *testing.T) {
 	}
 }
 
-// 首次运行要能落一份骨架：配置页得有个文件可编辑，桌面外壳也会检查
-// 数据目录里有没有建出 config.json。
+// 首次运行要能落一份骨架：配置页得有个文件可编辑。
 func TestEnsureExists(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sub", "config.json")

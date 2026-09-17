@@ -80,8 +80,7 @@ func FileStatusOf(configured, defaultTarget string) FileStatus {
 // DefaultSyncTarget 同步目标的缺省位置:当前目录下的 erp_data.db(绝对化)。
 //
 // 与 `tt dict -d` 的解析顺序(cwd → exe 目录)第一条候选一致,所以
-// "服务在这里同步、命令行在这里读"天然对得上。桌面外壳启动时 cwd 就是数据目录
-// (见 desktop/main.js 的 spawn cwd),于是桌面场景下它自然落在配置旁边。
+// "服务在这里同步、命令行在这里读"天然对得上。
 func DefaultSyncTarget() string {
 	if abs, err := filepath.Abs(DefaultSyncFileName); err == nil {
 		return abs
