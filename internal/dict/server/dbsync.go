@@ -56,7 +56,7 @@ func (s *Server) dbSyncView() dbSyncResp {
 	target := s.syncTarget()
 	resp := dbSyncResp{Target: target, DefaultTarget: s.defaultDBTarget(), Envs: []dbSyncEnv{}}
 	if root, err := loadConfig(s.cfgPath); err == nil {
-		resp.Configured = absPath(root.Sync.Target)
+		resp.Configured = config.AbsPath(root.Sync.Target)
 	}
 	if _, err := os.Stat(target); err == nil {
 		resp.Exists = true
@@ -89,7 +89,7 @@ func (s *Server) hDBSyncPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t := strings.TrimSpace(req.Target)
-	abs := absPath(t)
+	abs := config.AbsPath(t)
 	if t != "" && abs == "" {
 		fail(w, 400, fmt.Errorf("解析路径失败: %q", req.Target))
 		return

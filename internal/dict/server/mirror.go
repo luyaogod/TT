@@ -47,7 +47,7 @@ type mirrorResp struct {
 func (s *Server) hMirrorGet(w http.ResponseWriter, r *http.Request) {
 	dir := ""
 	if root, err := loadConfig(s.cfgPath); err == nil {
-		dir = absPath(root.Mirror.Dir)
+		dir = config.AbsPath(root.Mirror.Dir)
 	}
 	resp := mirrorResp{MirrorDir: dir, Envs: []mirrorEnv{}}
 	if hosts, err := config.LoadHosts(s.cfgPath); err == nil {
@@ -75,7 +75,7 @@ func (s *Server) hMirrorPut(w http.ResponseWriter, r *http.Request) {
 	if !readBody(w, r, &req) {
 		return
 	}
-	abs := absPath(req.Dir)
+	abs := config.AbsPath(req.Dir)
 	if abs == "" {
 		writeJSON(w, 200, map[string]any{"ok": false, "error": "请填写镜像根目录"})
 		return
@@ -106,7 +106,7 @@ func (s *Server) hMirrorPull(w http.ResponseWriter, r *http.Request) {
 	}
 	dir := ""
 	if root, err := loadConfig(s.cfgPath); err == nil {
-		dir = absPath(root.Mirror.Dir)
+		dir = config.AbsPath(root.Mirror.Dir)
 	}
 	if dir == "" {
 		writeJSON(w, 200, map[string]any{"ok": false, "error": "请先设置镜像根目录"})

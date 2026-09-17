@@ -6,23 +6,12 @@ package server
 // 再手工读-改-写整份文件,合并后统一到 internal/config 的一份实现。
 
 import (
-	"path/filepath"
-	"strings"
-
 	"tt/internal/config"
 )
 
 // loadConfig 读类型化配置。文件不存在不是错误(首次运行返回填好缺省值的空配置)。
 func loadConfig(path string) (*config.Root, error) { return config.Load(path) }
 
-// absPath 相对路径转绝对;空串原样返回空串(表示"未配置")。
-func absPath(p string) string {
-	p = strings.TrimSpace(p)
-	if p == "" {
-		return ""
-	}
-	if abs, err := filepath.Abs(p); err == nil {
-		return abs
-	}
-	return p
-}
+// 路径型取值的解析(AbsPath / DirStatusOf / FileStatusOf / DefaultSyncTarget)
+// 已上移到 internal/config —— 统一设置页要用同一份判断,两边各算一遍会让同一个
+// sync.target 在两个页面上解析成不同结果。

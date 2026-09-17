@@ -68,6 +68,15 @@ type Options struct {
 	// 桌面版（Electron 外壳）靠它让关窗时 Go 侧优雅收尾（会话/SSH 连接收口），
 	// 而不是被直接 kill。
 	Shutdown func()
+
+	// SyncDefaultTarget 字典同步目标的缺省位置。
+	//
+	// 由挂载方注入，好让统一层与字典子系统**对同一个值**达成一致：设置页会显示
+	// 「默认位置：X」，而字典页真正往那儿写。两边各算一次的话，显示的那个路径
+	// 可能不是实际写入的那个 —— 用户按显示去核对会发现文件不在那里。
+	//
+	// 留空 = 用 config.DefaultSyncTarget()（当前目录的 erp_data.db）。
+	SyncDefaultTarget string
 }
 
 // ConfigReloader 由持有配置内存态的子系统实现；本服务在配置写入成功后调用它。
@@ -117,6 +126,12 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/dbaccverify", s.hDBAccVerify)
 	m.HandleFunc("POST /api/conntest", s.hConnTest)
 	m.HandleFunc("GET /api/config/meta", s.hConfigMeta)
+	m.HandleFunc("GET /api/config/status", s.hConfigStatus)
+	// 命令行安装(PATH):应用级动作,归统一层 —— 合并前它在 /dict/api/install 下,
+	// 于是共用的设置页要用它就得去调字典子系统的私有 API。
+	m.HandleFunc("GET /api/install", s.hInstallGet)
+	m.HandleFunc("POST /api/install", s.hInstallAdd)
+	m.HandleFunc("DELETE /api/install", s.hInstallRemove)
 	if s.opt.Shutdown != nil {
 		m.HandleFunc("POST /api/shutdown", s.hShutdown)
 	}
@@ -288,7 +303,7 @@ func (s *Server) hHostsPut(w http.ResponseWriter, r *http.Request) {
 			// 配置页只编辑 type/host/port/service/database/readonlySql/accounts，
 			// 整节替换会把手工配的 SSH 隧道悄悄抹掉 —— 那是"保存一次就丢配置"，
 			// 而用户完全看不出发生过什么。按环境名对齐，缺什么补什么。
-			preserveUngovernedDBFields(root, sec)
+			preserveUngovernedFields(root, sec)
 			root["hosts"] = sec
 		}
 		if req.Listen != nil {
@@ -365,14 +380,19 @@ func (s *Server) hHostsPut(w http.ResponseWriter, r *http.Request) {
 	s.hHostsGet(w, r)
 }
 
-// preserveUngovernedDBFields 把旧配置里、配置页表单不管理的 db 字段补进新节。
+// preserveUngovernedFields 把旧配置里、配置页表单不管理的字段补进新节。
 //
-// 目前只有 viaSsh（SSH 端口转发隧道）：配置页没有它的输入控件，整节替换会把它抹掉。
-// 做法是按环境名对齐，新条目缺该字段而旧条目有时原样搬过来。
+// 有两层：
 //
-// 权衡：这样也就无法通过配置页删掉 viaSsh —— 想删就在 config.json 里手工删，
-// 或 `tt config` 改。宁可"删不掉"也不要"保存一次就静默丢配置"。
-func preserveUngovernedDBFields(oldRoot, newSec map[string]any) {
+//	环境级  hosts.sshs[].launchArgs / watchdogSeconds —— 该环境的调试参数覆盖
+//	db 级   hosts.sshs[].db.viaSsh                  —— SSH 端口转发隧道
+//
+// 表单里都没有对应的输入控件，而 PUT 是整节替换，所以不做这一步就会"打开设置页点一次
+// 保存，手工配的东西静默消失"。做法是按环境名对齐，新条目缺该键而旧条目有时原样搬过来。
+//
+// 权衡：这样也就无法通过配置页删掉它们 —— 想删就手改 config.json，或 `tt config` 改。
+// 宁可"删不掉"也不要"保存一次就静默丢配置"。
+func preserveUngovernedFields(oldRoot, newSec map[string]any) {
 	oldHosts, _ := oldRoot["hosts"].(map[string]any)
 	oldList, _ := oldHosts["sshs"].([]any)
 	if len(oldList) == 0 {
@@ -400,26 +420,32 @@ func preserveUngovernedDBFields(oldRoot, newSec map[string]any) {
 		if !ok {
 			continue
 		}
+		carryOver(old, m, ungovernedEnvKeys)
 		oldDB, _ := old["db"].(map[string]any)
-		if oldDB == nil {
-			continue
-		}
 		newDB, _ := m["db"].(map[string]any)
-		if newDB == nil {
+		if oldDB == nil || newDB == nil {
 			continue
 		}
-		for _, k := range ungovernedDBKeys {
-			if _, has := newDB[k]; has {
-				continue
-			}
-			if v, has := oldDB[k]; has {
-				newDB[k] = v
-			}
+		carryOver(oldDB, newDB, ungovernedDBKeys)
+	}
+}
+
+// carryOver 把 from 里、to 中缺席的键原样搬过去。
+func carryOver(from, to map[string]any, keys []string) {
+	for _, k := range keys {
+		if _, has := to[k]; has {
+			continue
+		}
+		if v, has := from[k]; has {
+			to[k] = v
 		}
 	}
 }
 
-// ungovernedDBKeys 配置页表单没有输入控件的 db 子键，保存时需从旧配置补回。
+// ungovernedEnvKeys 配置页表单没有输入控件的**环境级**子键，保存时需从旧配置补回。
+var ungovernedEnvKeys = []string{"launchArgs", "watchdogSeconds"}
+
+// ungovernedDBKeys 配置页表单没有输入控件的 **db 级**子键，保存时需从旧配置补回。
 var ungovernedDBKeys = []string{"viaSsh"}
 
 // hDBProbe 「从服务器获取」：登录 SSH 后探测库连接要素，结果仅作回填参考。

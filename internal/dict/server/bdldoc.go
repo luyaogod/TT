@@ -18,7 +18,7 @@ type bdldocStatus struct {
 func (s *Server) bdldocStatus() bdldocStatus {
 	st := bdldocStatus{OK: true, ConfigPath: s.cfgPath}
 	if root, err := loadConfig(s.cfgPath); err == nil {
-		st.Dir = absPath(root.Bdldoc.Dir)
+		st.Dir = config.AbsPath(root.Bdldoc.Dir)
 	}
 	if st.Dir != "" {
 		if fi, err := os.Stat(st.Dir); err == nil && fi.IsDir() {
@@ -42,7 +42,7 @@ func (s *Server) hBdldocPut(w http.ResponseWriter, r *http.Request) {
 	if !readBody(w, r, &req) {
 		return
 	}
-	abs := absPath(req.Dir)
+	abs := config.AbsPath(req.Dir)
 	if abs == "" {
 		writeJSON(w, 200, map[string]any{"ok": false, "error": "请填写 BDL 文档目录"})
 		return

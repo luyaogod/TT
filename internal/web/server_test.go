@@ -284,6 +284,112 @@ func TestSPAHandler_NotBuilt(t *testing.T) {
 	}
 }
 
+// 与 viaSsh 同源的另一处:每环境的调试覆盖项(launchArgs / watchdogSeconds)表单里
+// 没有输入控件,保存站点会把它们丢掉。服务端按环境名补回。
+func TestHostsPut_PreservesEnvDebugOverrides(t *testing.T) {
+	seed := `{
+  "schemaVersion": 2,
+  "hosts": {"activeEnv": "开发环境", "sshs": [{
+    "name": "开发环境", "host": "10.0.0.1", "port": 22, "user": "u", "password": "p",
+    "zone": "36", "topent": "10001",
+    "launchArgs": "BBDL512840855a 9 9 'Y' {prog}",
+    "watchdogSeconds": 300
+  }]}
+}`
+	s, path := newTestServer(t, seed)
+
+	// 配置页提交:它只有 SSH/DB 那些字段,没有这两个覆盖项
+	rec, _ := doJSON(t, s, http.MethodPut, "/api/hosts", map[string]any{
+		"hosts": map[string]any{
+			"activeEnv": "开发环境",
+			"sshs": []any{map[string]any{
+				"name": "开发环境", "host": "10.0.0.9", "port": 22, "user": "u", "password": "p",
+				"zone": "36", "topent": "10001",
+			}},
+		},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT 失败 HTTP %d: %s", rec.Code, rec.Body.String())
+	}
+
+	root, _ := config.Open(path)
+	hosts, _ := root["hosts"].(map[string]any)
+	sshs, _ := hosts["sshs"].([]any)
+	e, _ := sshs[0].(map[string]any)
+
+	if e["host"] != "10.0.0.9" {
+		t.Errorf("表单改的 host 未生效: %v", e["host"])
+	}
+	if e["launchArgs"] != "BBDL512840855a 9 9 'Y' {prog}" {
+		t.Errorf("每环境的 launchArgs 被抹掉了: %v", e["launchArgs"])
+	}
+	if e["watchdogSeconds"] != float64(300) {
+		t.Errorf("每环境的 watchdogSeconds 被抹掉了: %v", e["watchdogSeconds"])
+	}
+}
+
+// 配置文件不存在时也要能答,设置页在首次运行下就得渲染。
+func TestConfigStatus_NoConfig(t *testing.T) {
+	s, _ := newTestServer(t, "")
+	rec, out := doJSON(t, s, http.MethodGet, "/api/config/status", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("HTTP %d", rec.Code)
+	}
+	if out["ok"] != true {
+		t.Error("ok 应为 true")
+	}
+	for _, k := range []string{"config", "mirror", "bdldoc", "sync", "install"} {
+		if _, has := out[k]; !has {
+			t.Errorf("响应缺少 %q", k)
+		}
+	}
+}
+
+// 派生状态要真的去查磁盘:目录/文件存不存在只有服务端算得出来。
+func TestConfigStatus_DerivedFromDisk(t *testing.T) {
+	dir := t.TempDir()
+	realDir := filepath.Join(dir, "mirror")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	missingDir := filepath.Join(dir, "nope")
+	syncFile := filepath.Join(dir, "erp_data.db")
+	if err := os.WriteFile(syncFile, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	seed := `{"schemaVersion":2,"hosts":{"sshs":[]},
+	  "mirror":{"dir":` + jsonStr(realDir) + `},
+	  "bdldoc":{"dir":` + jsonStr(missingDir) + `},
+	  "sync":{"target":` + jsonStr(syncFile) + `}}`
+	s, _ := newTestServer(t, seed)
+
+	rec, out := doJSON(t, s, http.MethodGet, "/api/config/status", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("HTTP %d", rec.Code)
+	}
+	mirror, _ := out["mirror"].(map[string]any)
+	if mirror["exists"] != true {
+		t.Errorf("存在的镜像目录应报 exists=true: %v", mirror)
+	}
+	bdldoc, _ := out["bdldoc"].(map[string]any)
+	if bdldoc["exists"] != false {
+		t.Errorf("不存在的目录应报 exists=false: %v", bdldoc)
+	}
+	sync, _ := out["sync"].(map[string]any)
+	if sync["exists"] != true {
+		t.Errorf("存在的同步目标应报 exists=true: %v", sync)
+	}
+	if sync["configured"] == "" || sync["defaultTarget"] == "" {
+		t.Errorf("应同时给出显式配置值与缺省位置: %v", sync)
+	}
+}
+
+func jsonStr(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
 func contains(s, sub string) bool {
 	return len(sub) == 0 || (len(s) >= len(sub) && bytes.Contains([]byte(s), []byte(sub)))
 }

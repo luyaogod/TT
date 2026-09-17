@@ -17,9 +17,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"sync"
 	"time"
+
+	"tt/internal/config"
 )
 
 // Server 字典页配置服务:config.json 读写 + REST 接口 + 后台任务状态。
@@ -49,23 +50,22 @@ func New(cfgPath string) *Server {
 // SetDBTarget 注入数据同步的默认目标(便携版:exe 同目录的 erp_data.db,由挂载方传入)。
 func (s *Server) SetDBTarget(p string) { s.dbPath = p }
 
-// defaultDBTarget 返回默认同步目标(未注入时用当前目录下 erp_data.db)。
+// defaultDBTarget 返回默认同步目标(未注入时用 config.DefaultSyncTarget)。
+//
+// 默认位置只有 config 里那一份实现:统一设置页会显示「默认位置:X」,
+// 而这里真正往那儿写 —— 两边各算一次的话,显示的路径可能不是实际写入的那个。
 func (s *Server) defaultDBTarget() string {
 	if s.dbPath != "" {
 		return s.dbPath
 	}
-	abs, err := filepath.Abs("erp_data.db")
-	if err != nil {
-		return "erp_data.db"
-	}
-	return abs
+	return config.DefaultSyncTarget()
 }
 
 // syncTarget 返回当前同步目标:优先 config.json 顶层 sync.target(页面可改),
 // 否则用默认目标(exe 同目录)。文件不存在时由同步过程创建(含父目录)。
 func (s *Server) syncTarget() string {
 	if r, err := loadConfig(s.cfgPath); err == nil {
-		if d := absPath(r.Sync.Target); d != "" {
+		if d := config.AbsPath(r.Sync.Target); d != "" {
 			return d
 		}
 	}
@@ -86,16 +86,17 @@ func (s *Server) syncTarget() string {
 //	GET    /api/dbsync         同步目标 + 可同步环境 + 同步任务状态
 //	PUT    /api/dbsync         保存同步目标(sync.target;空=清除回默认)
 //	POST   /api/dbsync         启动一次字典同步
-//	GET    /api/install        用户 PATH 安装状态
-//	POST   /api/install        把 exe 目录加入用户 PATH
-//	DELETE /api/install        从用户 PATH 移除
 //	GET    /api/bdldoc         BDL 文档目录
 //	PUT    /api/bdldoc         保存 BDL 文档目录
+//	(未知 /api/ 路径)        404 JSON(见 hUnknownAPI)
 //	GET    /                  兜底页(见 hStatic)
 //
 // 主机/环境的读写走共享的顶层 /api/hosts;dbprobe / dbaccverify / conntest /
 // 健康检查也由 internal/web 在顶层各提供一份,故本包不注册这些端点
 // (它们两边都有,挂在同一进程里会撞名)。
+//
+// 用户 PATH 安装(/api/install)也**已移到** internal/web:把 tt 加进 PATH 是应用级
+// 动作,与字典查询无关;先前挂在这里,导致共用的设置页要用它就得去调本子系统的私有 API。
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/mirror", s.hMirrorGet)
@@ -104,13 +105,23 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/dbsync", s.hDBSyncGet)
 	mux.HandleFunc("POST /api/dbsync", s.hDBSyncPost)
 	mux.HandleFunc("PUT /api/dbsync", s.hDBSyncPut)
-	mux.HandleFunc("GET /api/install", s.hInstallGet)
-	mux.HandleFunc("POST /api/install", s.hInstallAdd)
-	mux.HandleFunc("DELETE /api/install", s.hInstallRemove)
 	mux.HandleFunc("GET /api/bdldoc", s.hBdldocGet)
 	mux.HandleFunc("PUT /api/bdldoc", s.hBdldocPut)
+	// API 路径掉到这里说明接口不存在(写错了,或者是已经移到统一层的那些,如
+	// /api/install)。必须回 404 JSON 而不是落到下面的 HTML 兜底页 —— 后者会让调用方
+	// 拿到 200 + HTML,解析失败时报的错与真实原因(接口不存在)完全对不上。
+	// 注意 Go 1.22 起具体模式优先于前缀模式,所以上面那些具名路由不受影响。
+	mux.HandleFunc("/api/", s.hUnknownAPI)
 	mux.HandleFunc("/", s.hStatic)
 	return mux
+}
+
+// hUnknownAPI 未知的字典接口:明确 404,并提示它可能已经搬到统一层。
+func (s *Server) hUnknownAPI(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 404, map[string]any{
+		"ok":    false,
+		"error": "未知的字典接口: " + r.URL.Path + "(共享类接口在 /api/ 下,如 /api/hosts、/api/install、/api/config/status)",
+	})
 }
 
 // ---------- 工具 ----------
@@ -147,7 +158,7 @@ func (s *Server) hStatic(w http.ResponseWriter, r *http.Request) {
 <h2>字典配置接口</h2>
 <p>页面由 <code>tt serve</code> 提供;本页只说明接口。</p>
 <p>API:<code>GET/PUT /api/mirror</code>、<code>POST /api/mirror/pull</code>、
-<code>GET/PUT/POST /api/dbsync</code>、<code>GET/POST/DELETE /api/install</code>、
-<code>GET/PUT /api/bdldoc</code>。</p>
+<code>GET/PUT/POST /api/dbsync</code>、<code>GET/PUT /api/bdldoc</code>。</p>
+<p>PATH 安装与配置状态由统一层提供:<code>/api/install</code>、<code>/api/config/status</code>。</p>
 <p>主机与环境清单由共享端点 <code>/api/hosts</code> 读写。</p></body>`)
 }

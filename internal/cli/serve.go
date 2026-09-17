@@ -92,12 +92,16 @@ func newServeCmd() *cobra.Command {
 			// （统一服务自身只把 /debug/api/ 转给它，页面由 internal/web 提供；
 			//   子 FS 是为了 `tt debug serve` 单独跑时也能出页面。）
 			debugSrv := debug.NewServer(cfg, common.WebSub("debug"), path)
-			// 这里不调 SetDBTarget：字典页的同步目标缺省取**当前目录**的 erp_data.db，
-			// 与 `tt dict -d` 的解析顺序（cwd → exe 目录）第一条候选一致，所以
-			// "服务在这里同步、命令行在这里读"天然对得上。
+			// 字典页的同步目标缺省取**当前目录**的 erp_data.db，与 `tt dict -d` 的解析顺序
+			// （cwd → exe 目录）第一条候选一致，所以"服务在这里同步、命令行在这里读"天然对得上。
 			// 桌面外壳启动时 cwd 就是数据目录（见 desktop/main.js 的 spawn cwd），
 			// 于是桌面场景下它自然落在配置旁边。要换地方用 sync.target 或 -d。
+			//
+			// 把这个值**同时**交给统一层与字典子系统：设置页会显示「默认位置：X」，
+			// 而字典页真正往那儿写；两边各算一次的话，显示的那个路径可能不是实际写入的那个。
+			syncDefault := config.DefaultSyncTarget()
 			dictSrv := dictserver.New(path)
+			dictSrv.SetDBTarget(syncDefault)
 
 			// 停止路径有两条（Ctrl+C 与 /api/shutdown），两条都可能先到，
 			// 所以统一收口到 sync.Once —— 否则会重复 close 同一个 channel 而 panic。
@@ -117,6 +121,8 @@ func newServeCmd() *cobra.Command {
 				// 否则它内存里还是旧环境，表现是"改了没生效"。
 				Reloaders: []web.ConfigReloader{debugSrv},
 				Shutdown:  stop,
+				// 与字典子系统同一个值，见上面的 syncDefault
+				SyncDefaultTarget: syncDefault,
 			})
 
 			addr := listen

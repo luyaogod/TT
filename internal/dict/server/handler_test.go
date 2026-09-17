@@ -36,21 +36,41 @@ func TestHandlerMountedUnderPrefix(t *testing.T) {
 
 // 共享给 internal/web 的端点不在本包注册(同进程里两边都有会撞名):
 // /api/dbprobe、/api/dbaccverify、/api/conntest、/api/status、/api/config
-// 落到兜底页,而不是本包的 JSON 接口。
+// 应明确报"未知接口",而不是本包的 JSON 接口。
+//
+// 这里断言 404 JSON 而不是兜底 HTML 页:API 路径落到 HTML 页会让调用方拿到
+// 200 + HTML,解析失败时报的错与真实原因(接口不存在)完全对不上。
 func TestSharedEndpointsNotServedHere(t *testing.T) {
 	s := New(writeTempConfig(t, `{}`))
 	h := s.Handler()
 
 	for _, path := range []string{
 		"/api/dbprobe", "/api/dbaccverify", "/api/conntest", "/api/status", "/api/config",
+		"/api/install", // 已移到统一层
 	} {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest("POST", path, nil))
 		if strings.Contains(rec.Body.String(), `"configPath"`) {
 			t.Errorf("%s 不该由本包提供: %s", path, rec.Body.String())
 		}
-		if !strings.Contains(rec.Body.String(), "<!doctype html>") {
-			t.Errorf("%s 应落到兜底页, got %s", path, rec.Body.String())
+		if rec.Code != 404 {
+			t.Errorf("%s 应回 404, got %d %s", path, rec.Code, rec.Body.String())
 		}
+		if strings.Contains(rec.Body.String(), "<!doctype html>") {
+			t.Errorf("%s 不该落到 HTML 兜底页: %s", path, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), "未知的字典接口") {
+			t.Errorf("%s 应给出可读的说明, got %s", path, rec.Body.String())
+		}
+	}
+}
+
+// 非 API 路径仍走兜底页(只有 API 路径才该 404 JSON)。
+func TestNonAPIPathStillFallsBackToPage(t *testing.T) {
+	s := New(writeTempConfig(t, `{}`))
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/whatever", nil))
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "<!doctype html>") {
+		t.Fatalf("非 API 路径应给接口说明页: code=%d", rec.Code)
 	}
 }

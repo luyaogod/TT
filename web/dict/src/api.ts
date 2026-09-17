@@ -225,9 +225,11 @@ export const api = {
   saveDBSyncTarget: (target: string) =>
     req<DBSyncResp>(`${API_BASE}/dbsync`, { method: 'PUT', body: JSON.stringify({ target }) }),
   // 命令行安装:查看/加入/移出用户 PATH(用户级,无需管理员)
-  installStatus: () => req<InstallStatus>(`${API_BASE}/install`),
-  installAdd: () => req<InstallStatus>(`${API_BASE}/install`, { method: 'POST' }),
-  installRemove: () => req<InstallStatus>(`${API_BASE}/install`, { method: 'DELETE' }),
+  // 命令行安装(PATH):**共享端点**(不带 API_BASE)—— 把 tt 加进 PATH 是应用级动作,
+  // 与字典查询无关,合并后已从 /dict/api/install 移到统一层。
+  installStatus: () => req<InstallStatus>('/api/install'),
+  installAdd: () => req<InstallStatus>('/api/install', { method: 'POST' }),
+  installRemove: () => req<InstallStatus>('/api/install', { method: 'DELETE' }),
   // BDL 语言文档目录。读取仍走本包的 /dict/api/bdldoc —— 它比共享的 hosts 多返回
   // 「目录是否存在于本机」(exists),设置页靠它给提示;写入则统一走 PUT /api/hosts
   // 的顶层 bdldoc 节(与 query 一样,本包不再有 PUT /api/bdldoc 的写入入口)。
