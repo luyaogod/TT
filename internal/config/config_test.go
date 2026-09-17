@@ -492,6 +492,102 @@ func TestSave_CreatesMissingDir(t *testing.T) {
 	}
 }
 
+// LoadHosts 是读环境清单的入口（合并前 TDictCli/host.LoadHosts 的替代）。
+// 它要求至少配了一个环境 —— CLI 命令都按"有环境可连"的前提工作。
+//
+// 合并前那两份 LoadHosts 测试里有一条断言"旧键 debug 也能读"，那条随旧结构一起
+// 取消了：兼容性由 migrate.go 一次性做掉，读路径只认 hosts。
+func TestLoadHosts(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, DefaultConfigName)
+	seed := `{
+  "schemaVersion": 2,
+  "hosts": {"activeEnv": "b", "sshs": [
+    {"name": "a", "host": "1.1.1.1", "user": "u"},
+    {"name": "b", "host": "2.2.2.2", "user": "u", "db": {"type": "oracle", "host": "d", "service": "t35prd"}}
+  ]}
+}`
+	if err := os.WriteFile(path, []byte(seed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	h, err := LoadHosts(path)
+	if err != nil {
+		t.Fatalf("LoadHosts: %v", err)
+	}
+	if h.ActiveEnv != "b" {
+		t.Errorf("ActiveEnv = %q, 期望 b", h.ActiveEnv)
+	}
+	if len(h.SSHs) != 2 {
+		t.Fatalf("环境数 = %d, 期望 2", len(h.SSHs))
+	}
+	if got := h.ByName(""); got == nil || got.Name != "b" {
+		t.Errorf("ByName(\"\") 应回退 activeEnv: %+v", got)
+	}
+	// db 要能正常解析出来
+	e := h.ByName("b")
+	if e.DB == nil || e.DB.Type != "oracle" || e.DB.Svc() != "t35prd" {
+		t.Errorf("db 未正确解析: %+v", e.DB)
+	}
+}
+
+func TestLoadHosts_Errors(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+
+	// 没有 hosts 节
+	if _, err := LoadHosts(write("a.json", `{"schemaVersion":2,"query":{"source":"local"}}`)); err == nil {
+		t.Error("缺少 hosts 节应报错")
+	}
+	// 有节但一个环境都没有
+	if _, err := LoadHosts(write("b.json", `{"schemaVersion":2,"hosts":{"sshs":[]}}`)); err == nil {
+		t.Error("sshs 为空应报错")
+	}
+}
+
+// 首次运行要能落一份骨架：配置页得有个文件可编辑，桌面外壳也会检查
+// 数据目录里有没有建出 config.json。
+func TestEnsureExists(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sub", "config.json")
+
+	if err := EnsureExists(path); err != nil {
+		t.Fatalf("EnsureExists: %v", err)
+	}
+	r, err := Load(path)
+	if err != nil {
+		t.Fatalf("骨架应当可被读回: %v", err)
+	}
+	if r.SchemaVersion != SchemaVersion {
+		t.Errorf("骨架的 schemaVersion = %d, 期望 %d（写对了才不会被就地迁移）", r.SchemaVersion, SchemaVersion)
+	}
+	if r.Listen != DefaultListen {
+		t.Errorf("骨架的 listen = %q, 期望 %q", r.Listen, DefaultListen)
+	}
+	if len(r.Hosts.SSHs) != 0 {
+		t.Errorf("骨架不该预置环境: %+v", r.Hosts.SSHs)
+	}
+
+	// 已存在时原样不动
+	if err := Save(path, map[string]any{"schemaVersion": SchemaVersion, "listen": "127.0.0.1:9999", "hosts": map[string]any{"sshs": []any{}}}); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(path)
+	if err := EnsureExists(path); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.ReadFile(path)
+	if string(before) != string(after) {
+		t.Error("EnsureExists 覆盖了已存在的配置")
+	}
+}
+
 func TestHostsByName(t *testing.T) {
 	h := &Hosts{
 		ActiveEnv: "b",
