@@ -224,8 +224,14 @@ func TestRouting_NoSubsystems(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Errorf("/debug/ → HTTP %d, 期望 200（引导页）", rec.Code)
 	}
-	if !contains(rec.Body.String(), "前端尚未构建") {
+	body := rec.Body.String()
+	if !contains(body, "前端尚未构建") {
 		t.Errorf("/debug/ 没有给出引导页")
+	}
+	// 标题也要在：这条兜底路径上有过一版把 title 丢了，只剩一个光秃秃的「TT」——
+	// 而那正是全新克隆第一次访问看到的页面。
+	if !contains(body, "界面未构建") {
+		t.Errorf("/debug/ 引导页丢了标题: %.120s", body)
 	}
 }
 

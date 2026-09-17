@@ -38,14 +38,14 @@ func SPAHandler(fsys fs.FS, prefix, title string) http.Handler {
 				writeLanding(w, title)
 				return
 			}
-			serveIndex(w, fsys)
+			serveIndex(w, fsys, title)
 			return
 		}
 		if rel == "." {
 			// 挂载点本身与它下面的目录都直接给入口 HTML。
 			// 交给 FileServer 处理目录会得到一次到 "/" 的 301 —— 前缀被丢掉，
 			// 用户会从 /debug/ 被弹到根路径。
-			serveIndex(w, fsys)
+			serveIndex(w, fsys, title)
 			return
 		}
 		// FileServer 要的是相对 FS 根的路径，所以重写后再交给它
@@ -56,10 +56,12 @@ func SPAHandler(fsys fs.FS, prefix, title string) http.Handler {
 }
 
 // serveIndex 直接吐出 index.html（不经过 FileServer，避免它对目录做重定向）。
-func serveIndex(w http.ResponseWriter, fsys fs.FS) {
+// title 只是给兜底用的：index.html 读不到时（前端没构建）要回落成引导页，
+// 而那条路径上不该把标题丢掉 —— 全新克隆的第一次访问走的就是这里。
+func serveIndex(w http.ResponseWriter, fsys fs.FS, title string) {
 	b, err := fs.ReadFile(fsys, "index.html")
 	if err != nil {
-		writeLanding(w, "")
+		writeLanding(w, title)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
