@@ -58,7 +58,7 @@
   "debug": {
     "activeEnv": "",
     "launchArgs": "BBDL512840855a 2 12345 'N' {prog}",
-    "watchdogSeconds": 180,
+    "watchdogSeconds": 1800,
     "fglserver": "",
     "termWidth": 200,
     "termHeight": 50,

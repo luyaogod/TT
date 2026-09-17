@@ -16,7 +16,7 @@ const SchemaVersion = 2
 const (
 	DefaultListen          = "127.0.0.1:28670"
 	DefaultLaunchArgs      = "BBDL512840855a 2 12345 'N' {prog}"
-	DefaultWatchdogSeconds = 180
+	DefaultWatchdogSeconds = 1800
 	DefaultTermWidth       = 200
 	DefaultTermHeight      = 50
 	DefaultPrintElements   = 1000

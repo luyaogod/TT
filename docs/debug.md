@@ -14,7 +14,7 @@
 - **命令行控制端**：`start` / `exec` / `stop` / `source` / `logs` / `locate` / `resolve` / `interrupt`
   等，自动发现后台服务地址；`exec` 透传全部 fgldb 标准调试命令并返回原生文本。
 - **人机协同**：程序跑到 INPUT/MENU 等交互语句时会阻塞在 GDC 等人操作（从调试器看与死循环无法区分），
-  技能文档给出了判断信号与交接话术（见 `skills/tdebug-debug/SKILL.md`）。
+  技能文档给出了判断信号与交接话术（见 `skills/tt-debug/SKILL.md`）。
 - **防呆**：停站停留超时看门狗自动放行（默认 1800s，保护生产区行锁）、断点持久化、单实例服务。
 
 ## 构建

@@ -83,7 +83,7 @@ GOPROXY=https://goproxy.cn,direct go build -o tt.exe .
 
 ### 安装 Skill（推荐）
 
-AI 技能文件（`tdict`、`erp-code-reader`）以普通目录 **`skills/`** 与 `tt.exe` 放在一起（便携版/仓库里都是），**不内嵌进二进制**，可直接编辑。每个技能是一个带 `SKILL.md` 的目录：
+AI 技能文件（`tt-dict`、`erp-read`）以普通目录 **`skills/`** 与 `tt.exe` 放在一起（便携版/仓库里都是），**不内嵌进二进制**，可直接编辑。每个技能是一个带 `SKILL.md` 的目录：
 
 ```bash
 # 装到 Claude Code 直接读取的位置

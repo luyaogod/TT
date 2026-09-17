@@ -1,5 +1,5 @@
 ---
-name: tdev
+name: tt-dev
 description: 安全编辑 T100 设计器包：.tzc 代码包（4GL/TAP/TGL）走 export→改围栏工作区→verify→apply；.tzs 表单包只走 tzs export 纯解压只读查看。当用户要改 T100 客制程序、新增/改名/改签名自订函数、解锁框架区段、或查看 .tzc/.tzs 包里有什么时使用。
 license: 与 tt 仓库一致（见随包 README.md）
 metadata:

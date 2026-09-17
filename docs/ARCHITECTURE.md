@@ -74,7 +74,7 @@ TT/
 │  └─ shared/               共享层：主题变量与机制、UI 基元、设置页布局件、cn
 │
 ├─ desktop/                 Electron 外壳（原 TDebug/desktop）
-├─ skills/                  tdebug-debug / tdev / tdict / erp-code-reader
+├─ skills/                  AI 技能：tt-debug / tt-dev / tt-dict / erp-read
 ├─ docs/                    本设计与迁移记录
 └─ testdata/                FGL 夹具（原 TDev/testdata）
 ```
@@ -117,7 +117,7 @@ TT/
   "listen": "127.0.0.1:28670",
 
   // 工具自有设置
-  "debug": { "activeEnv": "", "launchArgs": "…", "watchdogSeconds": 180,
+  "debug": { "activeEnv": "", "launchArgs": "…", "watchdogSeconds": 1800,
              "fglserver": "", "termWidth": 200, "termHeight": 50,
              "printElements": 1000, "persistBreakpoints": true },
   "query": { "source": "auto" },        // auto（缺省=在线优先）| local | <环境名>

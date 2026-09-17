@@ -61,8 +61,9 @@ tt install skills                    # 复制到 <当前目录>/skills
 tt install skills --to .claude/skills   # 装到 Claude Code 直接读的位置
 ```
 
-合并后 `skills/` 下是四套：`tdebug-debug`（调试）、`tdev`（设计器包）、
-`tdict` 与 `erp-code-reader`（数据字典）。装一次全部到位。
+合并后 `skills/` 下是四套：`tt-debug`（调试）、`tt-dev`（设计器包）、
+`tt-dict`（数据字典）、`erp-read`（读 ERP 代码）。一个技能一个目录、目录里是 `SKILL.md`
+（Claude 技能规范：目录名必须等于 frontmatter 里的 `name`）。装一次全部到位。
 
 ## 配置
 
@@ -97,7 +98,7 @@ tt install skills --to .claude/skills   # 装到 Claude Code 直接读的位置
     }]
   },
 
-  "debug": { "activeEnv": "", "launchArgs": "…", "watchdogSeconds": 180,
+  "debug": { "activeEnv": "", "launchArgs": "…", "watchdogSeconds": 1800,
              "fglserver": "", "termWidth": 200, "termHeight": 50,
              "printElements": 1000, "persistBreakpoints": true },
   "query":  { "source": "auto" },   // auto（缺省=在线优先）| local | <环境名>
@@ -240,7 +241,7 @@ TT/
 │  ├─ shared/               整套 SPA 共用的主题层 / UI 基元 / 设置页布局件
 │  └─ package.json          npm workspace 根
 ├─ desktop/                 Electron 外壳
-├─ skills/                  AI 技能：tdebug-debug / tdev / tdict / erp-code-reader
+├─ skills/                  AI 技能：tt-debug / tt-dev / tt-dict / erp-read
 ├─ docs/                    分册文档与设计说明
 └─ testdata/                FGL 夹具
 ```
