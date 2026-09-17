@@ -4,8 +4,8 @@
 // 但 theme 仍然是 'system'(用户的选择没变)。
 //
 // 合并前只有调试工作台有主题机制,字典页的 dark: 类走的是 Tailwind v4 默认的
-// prefers-color-scheme(跟随系统、不可切换)。两套页面统一到这一份之后,
-// 两边都按 html.dark 走,用户的选择在两页之间共享。
+// prefers-color-scheme(跟随系统、不可切换)。合并后前端收敛成这一份,
+// 整套 SPA 都按 html.dark 走,用户的选择全站共享。
 export type ThemeMode = 'dark' | 'light' | 'system'
 
 export const THEME_KEY = 'tt.theme'

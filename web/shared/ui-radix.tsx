@@ -1,5 +1,5 @@
 // shadcn/ui 规范里**需要 Radix 的那部分**:下拉、弹层、复选、日历、确认弹窗、手风琴。
-// 拆成单独文件是为了让字典页只引 ui.tsx(不拉 Radix 全家桶)。
+// 拆成单独文件是为了让不依赖 Radix 的视图只引 ui.tsx(不拉 Radix 全家桶)。
 import * as React from 'react'
 import * as AccordionPrimitive from '@radix-ui/react-accordion'
 import * as AlertDialogPrimitive from '@radix-ui/react-alert-dialog'

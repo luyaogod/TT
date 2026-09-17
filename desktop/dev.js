@@ -1,13 +1,13 @@
 // 桌面版开发启动器(无额外依赖):
-//   1) 起调试工作台的 Vite(web/debug,端口 5173,热更新);
+//   1) 起调试工作台的 Vite(web/app,端口 5173,热更新);
 //   2) 起 Go 后端(`tt serve --desktop`,默认 127.0.0.1:28670,
-//      匹配 web/debug/vite.config.ts 的 /debug/api 与 /api 代理),
+//      匹配 web/app/vite.config.ts 的 /debug/api 与 /api 代理),
 //      数据目录 desktop/.dev-data(独立于正式配置,随便折腾);
 //   3) 等两者就绪后拉起 Electron,并让其加载 Vite 地址(TT_DEV_URL),
 //      于是改前端代码即时生效,后端日志同时打到本终端。
 // 退出:本进程收到退出/异常时一并结束两个子进程。
 //
-// 注:合并后有两套前端,这里只热更新调试工作台(桌面版的默认页)。
+// 注:合并后前端只剩这一套(web/app),桌面版默认页是调试工作台。
 // 设置页是同一套 SPA 里的一个视图(/debug/#settings),改它同样走热更新。
 'use strict'
 
@@ -64,8 +64,8 @@ async function main() {
   const serveURL = await waitServeURL()
   log(`后端就绪:${serveURL}`)
 
-  log(`启动前端 Vite(web/debug),/debug/api 与 /api 代理到 ${serveURL}`)
-  kids.push(spawn('npm', ['run', 'dev:debug'], {
+  log(`启动前端 Vite(web/app),/debug/api 与 /api 代理到 ${serveURL}`)
+  kids.push(spawn('npm', ['run', 'dev:app'], {
     cwd: path.join(root, 'web'),
     shell: true,
     stdio: 'inherit',

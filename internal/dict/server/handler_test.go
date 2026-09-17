@@ -13,12 +13,12 @@ func TestHandlerRoutes(t *testing.T) {
 	s := New(p)
 
 	rec := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/api/bdldoc", nil))
+	s.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/api/mirror", nil))
 	if rec.Code != 200 {
-		t.Fatalf("GET /api/bdldoc code=%d", rec.Code)
+		t.Fatalf("GET /api/mirror code=%d", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), `"configPath"`) {
-		t.Fatalf("应返回 bdldoc 状态: %s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), `"envs"`) {
+		t.Fatalf("应返回镜像状态: %s", rec.Body.String())
 	}
 }
 

@@ -89,7 +89,7 @@ cd desktop; npm install; npm run dev
 | 命令 | 作用 |
 | --- | --- |
 | `serve` | 启动本地调试服务（默认后台常驻单实例；`--listen`/`--foreground`/`--stop`） |
-| ~~`desktop`~~ | 已并入统一的 `tt serve --desktop`（Electron 壳用它拉起服务、读 `TT_READY {json}` 就绪行）；桌面版现已同时覆盖 /debug/ 与 /dict/ 两套页面 |
+| ~~`desktop`~~ | 已并入统一的 `tt serve --desktop`（Electron 壳用它拉起服务、读 `TT_READY {json}` 就绪行） |
 | `status` | 查看服务状态与活动会话 |
 | `start <作业>` | 连接 SSH、启动调试并等到入口停站（`--module/-m`、`--zone`、`--ssh`、`--timeout`） |
 | `exec "<命令>" [更多…]` | 透传标准调试命令（print/break/next/where/info/watch…），原样返回输出；**可一次给多条**（或 `--file` 从文件读）省掉每条一次进程启动，逐条标注 `[i/N]`；resume 类命令执行后读一次现场，停住了就继续往下跑（「走一步再取一批值」一次调用做完），没停住才中止并把剩余标为未执行；resume 类命令用 `--wait N` 软等待（到点返回，不发 SIGINT），`--timeout` 才是会发 SIGINT 的硬超时 |
@@ -122,7 +122,7 @@ cd desktop; npm install; npm run dev
 ```jsonc
 {
   "schemaVersion": 2,
-  "listen": "127.0.0.1:28670",      // 统一 Web 服务的监听地址(调试工作台 /debug/ + 字典页 /dict/)
+  "listen": "127.0.0.1:28670",      // 统一 Web 服务的监听地址(工作台 /debug/ + 设置页 /debug/#settings)
   "hosts": {                        // ★ 共用环境清单：三个工具都读这一份
     "activeEnv": "示例测试区",        // 默认环境；调试侧可用下面的 debug.activeEnv 覆盖
     "sshs": [                       // 环境列表(设置-环境 页维护；原来在 debug.sshs)
@@ -190,7 +190,7 @@ internal/cli/debug/        命令行：cobra 的 tt debug 命令组 + 后台守�
 internal/host/             ★ 远程服务器共享层（与字典侧共用）：SSH/PTY、终端行解析、
                            登录区动态路径探测、DB 环境探测、环境模型、源码镜像
 internal/config/           ★ 统一配置层：路径解析 / 读写 / schema / 旧配置迁移
-internal/web/              统一 HTTP 服务：/debug/ 与 /dict/ 两套页面 + 共享 /api/hosts
-web/debug/                 前端(React 18 + Vite 6 + Monaco + Tailwind v4 + zustand)
+internal/web/              统一 HTTP 服务：页面 + 共享 /api/*（配置读写、派生状态、字典类动作）
+web/app/                   前端(React 18 + Vite 6 + Monaco + Tailwind v4 + zustand)
 desktop/                   Electron 桌面壳（现拉起统一的 tt serve --desktop）
 ```

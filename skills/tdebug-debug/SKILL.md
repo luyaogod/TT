@@ -14,7 +14,7 @@ description: 通过 TDebug 命令行调试 T100 ERP 作业(4GL/Genero)——对�
   tt serve --foreground   # 前台运行,日志直出终端(调试用)
   ```
   重复执行 serve 不会起第二个实例,只会提示已在运行;控制端命令(start/exec/…)自动发现后台实例真实地址。
-  合并后调试页与字典页由这一个 `tt serve` 同时提供(不再各起一个服务),**并共用同一份环境列表**。
+  合并后这一个 `tt serve` 提供一套页面(调试工作台,含统一设置页),设置覆盖三个工具,**并共用同一份环境列表**。
 - 若用户开的是**桌面版**(TDebug.exe,Electron),不要另起 `serve`:桌面实例照写状态文件,
   start/exec/… 会自动发现它并驱动同一个会话;停服务用 `tt serve --stop`(数据目录用 `--config` 指向
   桌面的 config.json,安装版在 `%APPDATA%\TDebug`,免安装版在 exe 同目录)。

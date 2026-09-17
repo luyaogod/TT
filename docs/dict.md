@@ -792,14 +792,16 @@ internal/dict/
   db/         本地 SQLite 数据源（Source 接口 + 各查询族）
   live/       远程库数据源（金仓 / Oracle，同一 Source 接口）
   dbsync/     字典表同步（Family 表是"哪个命令需要哪几张表"的唯一出处）
-  server/     字典页的 HTTP 接口（由统一服务挂在 /dict/api/ 下）
+  server/     字典类动作的 HTTP 接口（源码镜像拉取 / 字典同步 / BDL 文档），
+              由统一服务挂在共享层 /api/ 下
 internal/cli/dict/   cobra 的 tt dict 命令组
 internal/host/       ★ 远程服务器共享层（与调试侧共用）：SSH/PTY、环境探测、源码镜像
 internal/config/     ★ 统一配置层：环境清单、query/mirror/bdldoc/sync 各节
 internal/erpdb/      Oracle(go-ora) / Kingbase(pgx) 连接器
 internal/sshtun/     SSH 端口转发隧道
 internal/output/     表格 / JSON / CSV 输出（CJK 宽度感知）
-web/dict/            前端(React 18 + Vite 6 + Tailwind v4)
+（本工具没有自己的前端：两个动作已并入统一设置页的「数据字典」分区，
+  页面在 web/app/，共享层在 web/shared/）
 ```
 
 

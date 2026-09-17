@@ -1,15 +1,15 @@
 // 统一设置页:左侧两级导航(分区 → 卡片),右侧按分区渲染卡片。
 //
-// 「站点管理」环境清单 + SSH/数据库(原调试页「环境」节与字典页「环境配置」的并集,只留一份);
+// 「站点管理」环境清单 + SSH/数据库(原调试页「环境」节与原字典页「环境配置」的并集,只留一份);
 // 「数据字典」查询数据源 / 源码镜像 / 数据同步 / BDL 文档;
 // 「DEBUG」调试参数 / 默认环境;
 // 「应用设置」外观 / 服务 / 运行信息。
 //
-// 环境清单走**共享**端点 /api/hosts(顶层,不带 API_BASE 前缀):一个进程同时挂着两套 SPA,
-// 而环境只有一份数据源 —— config.json 的 hosts 节。合并前这份清单藏在 debug 节里
+// 环境清单走**共享**端点 /api/hosts(顶层,不带 API_BASE 前缀):一个进程里它是唯一的数据源
+// —— config.json 的 hosts 节。合并前这份清单藏在 debug 节里
 // (所以老代码收发的是整个 debug 节点),现在收发的是 hosts 节。
 //
-// 保存**按节提交**:两套页面各改各的部分,不拿陈旧快照覆盖对方刚改好的节
+// 保存**按节提交**:设置页的各张卡片各改各的节,不拿陈旧快照覆盖对方刚改好的节
 // (后端约定:PUT /api/hosts 里省略的节保持原样)。
 //
 // ⚠ 后端的 PUT 是**整节替换**,而这些结构体每个字段都带 omitempty —— 省略的键等于删除。
@@ -27,14 +27,16 @@ import {
   type HostsDb, type HostsPatch, type HostsSsh, type HostsView, type MirrorJob, type MirrorResp,
 } from './api'
 import {
+  Button, Input, Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from '../../shared/ui'
+import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-  Button, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from './ui'
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '../../shared/ui-radix'
 import { Card, Field, InfoRow, SettingRow } from '../../shared/settings'
 import { useStore, type ThemeMode } from './store'
-import { cn } from './lib/utils'
+import { cn } from '../../shared/utils'
 import {
   SETTINGS_SECTIONS, settingsHash, type SettingsSectionKey,
 } from './routing'
@@ -336,8 +338,8 @@ export function SettingsView() {
   const [selSsh, setSelSsh] = useState(0)
   const [err, setErr] = useState('')
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle')
-  // 脏标记按**配置节**记。保存时只提交改过的节 —— 两套页面共用 /api/hosts,
-  // 把没改的节一起发过去就是用陈旧快照覆盖字典页刚改好的部分。
+  // 脏标记按**配置节**记。保存时只提交改过的节 —— 设置页的各张卡片共用 /api/hosts,
+  // 把没改的节一起发过去就是用陈旧快照覆盖别张卡片刚改好的节。
   const dirtyRef = useRef<Record<ConfigKey, boolean>>({
     hosts: false, debug: false, listen: false, query: false, mirror: false, sync: false, bdldoc: false,
   })
@@ -407,7 +409,7 @@ export function SettingsView() {
 
   useEffect(() => { loadSettings() }, [loadSettings])
   // 本页被 keep-alive 常驻挂载(切走只是 display:none),所以**不能轮询** ——
-  // 改为"每次切回本页、且没有未保存修改时"回读一次,拿别处(字典页/命令行)改过的值。
+  // 改为"每次切回本页、且没有未保存修改时"回读一次,拿别处(命令行)改过的值。
   const dirtyRefAny = () => (Object.keys(dirtyRef.current) as ConfigKey[]).some((k) => dirtyRef.current[k])
   const visibleRef = useRef(false)
   const view = useStore((s) => s.view)
@@ -441,6 +443,8 @@ export function SettingsView() {
       setCfg(next)
       setSshs((prev) => prev.map((x) => ({ ...x, name: sshName(x) })))
       cleanDirty(keys); setSaveState('saved')
+      // 路径型取值的 exists 是服务端算的,保存后要回读一次才对得上新值
+      void api.configStatus().then(setStatus).catch(() => { /* 提示性信息,取不到不影响 */ })
     } catch (ex: any) {
       // 服务端是校验的权威(环境名重复 / 端口越界 / 至少要有一个环境…),
       // 它给的中文说明原样显示,不要用本地判断把它盖掉
@@ -729,7 +733,7 @@ ${sync?.target || ''}
                 </span>
               )}
               {/* 本页常驻挂载、不轮询(轮询会一直 os.Stat 配置里的路径),所以给一个显式回读入口:
-                  命令行或字典页改过配置后,点它就能看到最新值 */}
+                  命令行改过配置后,点它就能看到最新值 */}
               <Button variant="ghost" size="sm" disabled={dirty || saveState === 'saving'}
                 title={dirty ? '有未保存的修改,先保存或放弃再回读' : '从 config.json 重新读取'}
                 onClick={() => loadSettings()}>
@@ -744,7 +748,7 @@ ${sync?.target || ''}
               <Card
                 id="card-sites-list"
                 title="环境清单"
-                description="与字典页共用同一份(config.json 的 hosts 节):这里保存后字典页也能看到,反之亦然。删掉一个环境,字典页的镜像/数据同步里也就没有它了。"
+                description="与「数据字典」分区共用同一份(config.json 的 hosts 节):这里保存后那边也能看到,反之亦然。删掉一个环境,那边的镜像/数据同步里也就没有它了。"
                 right={<SaveBtn keys={['hosts']} />}
               >
                 <div className="max-h-48 space-y-0.5 overflow-auto">
@@ -1016,7 +1020,13 @@ ${sync?.target || ''}
                 <SettingRow
                   id="mirror.dir"
                   label="镜像根目录"
-                  description="绝对路径。留空 = 未设置,镜像功能不可用。"
+                  description={
+                    !dict.mirrorDir.trim()
+                      ? '绝对路径。留空 = 未设置,镜像功能不可用。'
+                      : status?.mirror.exists
+                        ? '该目录存在于本机。'
+                        : '该目录在本机不存在 —— 拉取时会自动创建。'
+                  }
                   control={<Input className={input} value={dict.mirrorDir} placeholder="如 D:\t100\mirror"
                     onChange={(e) => { setDict((s) => ({ ...s, mirrorDir: e.target.value })); markDirty('mirror') }} />}
                 />
@@ -1076,7 +1086,11 @@ ${sync?.target || ''}
                 <SettingRow
                   id="sync.target"
                   label="目标数据库文件"
-                  description="绝对路径。留空 = 用默认位置(exe 同目录或当前目录的 erp_data.db)。"
+                  description={
+                    dict.syncTarget.trim()
+                      ? (status?.sync.exists ? '该文件已存在(同步时会自动备份为 .bak)。' : '该文件尚未创建,同步时自动创建。')
+                      : `绝对路径。留空 = 用默认位置:${status?.sync.defaultTarget || 'erp_data.db'}`
+                  }
                   control={
                     <div className="flex items-center gap-1.5">
                       <Input className={input} value={dict.syncTarget} placeholder="留空 = 默认位置"
@@ -1145,7 +1159,13 @@ ${sync?.target || ''}
                 <SettingRow
                   id="bdldoc.dir"
                   label="文档目录"
-                  description="绝对路径。留空 = 未设置。"
+                  description={
+                    !dict.bdldocDir.trim()
+                      ? '绝对路径。留空 = 未设置。'
+                      : status?.bdldoc.exists
+                        ? '该目录存在于本机。'
+                        : '该目录在本机不存在。'
+                  }
                   control={<Input className={input} value={dict.bdldocDir} placeholder="如 D:\t100\bdldoc"
                     onChange={(e) => { setDict((s) => ({ ...s, bdldocDir: e.target.value })); markDirty('bdldoc') }} />}
                 />
@@ -1227,12 +1247,12 @@ ${sync?.target || ''}
           {section === 'app' && (
             <>
               <Card id="card-app-theme" title="外观"
-                description="两套页面共用同一份选择:这里切换后,字典页也跟着变。">
+                description="各视图共用同一份选择:这里切换后,整个界面都跟着变。">
                 <ThemeCards value={theme} onChange={setTheme} />
               </Card>
 
               <Card id="card-app-service" title="服务"
-                description="统一 Web 服务的监听地址 —— 调试工作台与字典页都挂在它上面。"
+                description="统一 Web 服务的监听地址 —— 这套 SPA(调试工作台)就挂在它上面。"
                 right={<SaveBtn keys={['listen']} />}>
                 <SettingRow id="listen" label="监听地址"
                   description="改完需要重启 tt serve 才生效(监听只在启动时绑定一次)。端口被占用时会自动向后顺延。"

@@ -1,5 +1,5 @@
-// Package server 提供字典侧的 REST 接口:源码镜像拉取、字典同步、BDL 文档目录。
-// 只覆盖这几件事,不含任何调试能力。
+// Package server 提供字典侧的 REST 接口:源码镜像拉取与字典同步。
+// 只覆盖这两个长跑动作,不含任何调试能力。
 //
 // 它**不再对应一个独立页面** —— 合并前字典页有自己的 SPA(挂在 /dict/),本包的端点
 // 也挂在 /dict/api/ 下;那个页面已并入调试工作台里的统一设置页,于是本包的端点直接挂到
@@ -10,12 +10,12 @@
 // 客户端直连测试走 internal/erpdb(与 db ping / 远程直查同链路)。
 //
 // 对外只暴露两个东西:构造函数 New 与 Handler()。挂载方(tt serve / internal/web)
-// 用 http.StripPrefix("/dict", srv.Handler()) 把它挂在 /dict/ 下 —— 包内路径全部
-// 相对挂载点,于是包内的 /api/mirror 对外是 /dict/api/mirror。
+// 把它直接挂在共享层 /api/ 下 —— Handler 的路径是绝对 /api/…,不加 StripPrefix。
 //
-// 挂载前缀是必需的:同一个进程还挂着调试工作台(/debug/),两边各有自己的 /api/*,
-// 不分开就会撞名。凡是两个工具都要的端点(主机/环境的读写、dbprobe/dbaccverify/
-// conntest 探测、健康检查)由 internal/web 在顶层各提供一份,本包不再重复。
+// 合并前它靠一个挂载前缀与调试工作台分开:同一个进程里两边各有自己的 /api/*,
+// 不分开就会撞名。合并后共享层只有一套 /api/*,凡是两个工具都要的端点(主机/环境的
+// 读写、dbprobe/dbaccverify/conntest 探测、健康检查)由 internal/web 在顶层各提供
+// 一份,本包不再重复。
 package server
 
 import (
@@ -28,7 +28,7 @@ import (
 	"tt/internal/config"
 )
 
-// Server 字典页配置服务:config.json 读写 + REST 接口 + 后台任务状态。
+// Server 字典侧配置服务:config.json 读写 + REST 接口 + 后台任务状态。
 type Server struct {
 	cfgPath string // config.json 路径(读写;文件不存在时首次保存创建)
 	dbPath  string // 数据同步目标 SQLite(由挂载方注入;空=当前目录 erp_data.db)
@@ -84,31 +84,26 @@ func (s *Server) syncTarget() string {
 // 服务的路径(全部返回 JSON):
 //
 //	GET    /api/mirror         镜像根 + 各环境镜像现状 + 拉取任务状态
-//	PUT    /api/mirror         保存镜像根(mirror.dir)
 //	POST   /api/mirror/pull    启动一次源码镜像拉取
 //	GET    /api/dbsync         同步目标 + 可同步环境 + 同步任务状态
-//	PUT    /api/dbsync         保存同步目标(sync.target;空=清除回默认)
 //	POST   /api/dbsync         启动一次字典同步
-//	GET    /api/bdldoc         BDL 文档目录
-//	PUT    /api/bdldoc         保存 BDL 文档目录
 //	(未知 /api/ 路径)        404 JSON(见 hUnknownAPI)
 //
 // 主机/环境的读写走共享的顶层 /api/hosts;dbprobe / dbaccverify / conntest、
 // 健康检查、配置派生状态、PATH 安装也由 internal/web 各提供一份,故本包不注册这些端点
 // (它们两边都有,挂在同一进程里会撞名)。
 //
+// BDL 文档目录**不再有本包的端点**:它只是 config.json 里的一节(读写走 /api/hosts),
+// 「目录是否存在」由 /api/config/status 统一回答。原先那个 GET /api/bdldoc 与它们重复。
+//
 // 用户 PATH 安装(/api/install)也**已移到** internal/web:把 tt 加进 PATH 是应用级
 // 动作,与字典查询无关。
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/mirror", s.hMirrorGet)
-	mux.HandleFunc("PUT /api/mirror", s.hMirrorPut)
 	mux.HandleFunc("POST /api/mirror/pull", s.hMirrorPull)
 	mux.HandleFunc("GET /api/dbsync", s.hDBSyncGet)
 	mux.HandleFunc("POST /api/dbsync", s.hDBSyncPost)
-	mux.HandleFunc("PUT /api/dbsync", s.hDBSyncPut)
-	mux.HandleFunc("GET /api/bdldoc", s.hBdldocGet)
-	mux.HandleFunc("PUT /api/bdldoc", s.hBdldocPut)
 	// API 路径掉到这里说明接口不存在(写错了,或者是已经移到统一层的那些,如
 	// /api/install)。必须回 404 JSON 而不是落到下面的 HTML 兜底页 —— 后者会让调用方
 	// 拿到 200 + HTML,解析失败时报的错与真实原因(接口不存在)完全对不上。

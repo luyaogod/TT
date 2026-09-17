@@ -6,7 +6,7 @@
 //	/api/*        统一 API —— 环境/数据库配置（/api/hosts）、配置派生状态、
 //	              PATH 安装，以及字典类动作（源码镜像拉取、字典同步、BDL 文档）
 //
-// 合并前后是两套独立 SPA（调试工作台 /debug/ 与字典页 /dict/），各有自己的 /api/*
+// 合并前这里是两套独立 SPA（调试工作台 /debug/ 与字典页 /dict/），各有自己的 /api/*
 // 靠挂载前缀分开。字典页已并入调试工作台里的**统一设置页**，于是：
 //   - 「配置」（环境、数据库、查询数据源、镜像目录、同步目标、BDL 目录）统一走 /api/hosts；
 //   - 「动作」（拉源码镜像、跑字典同步）留在设置页「数据字典」分区的对应卡片里，
@@ -59,9 +59,9 @@ type Options struct {
 
 	// Reloaders 配置被本服务改写后需要重新加载内存态的子系统。
 	//
-	// 起作用的场景：两个配置页写的是同一份 hosts 节。调试服务在内存里持有一份
-	// *Config 并做了热替换，若从字典页改了环境，它得跟着重读 —— 否则一次页面写
-	// 下去，另一个服务还按旧环境连，表现是"改了没生效"。
+	// 起作用的场景：设置页写的是同一份 hosts 节。调试子系统在内存里持有一份
+	// *Config 并做了热替换，若从设置页改了环境，它得跟着重读 —— 否则一次页面写
+	// 下去，它还按旧环境连，表现是"改了没生效"。
 	Reloaders []ConfigReloader
 
 	// Shutdown 收到 POST /api/shutdown 时调用；nil 表示不注册该端点。
@@ -72,7 +72,7 @@ type Options struct {
 	// SyncDefaultTarget 字典同步目标的缺省位置。
 	//
 	// 由挂载方注入，好让统一层与字典子系统**对同一个值**达成一致：设置页会显示
-	// 「默认位置：X」，而字典页真正往那儿写。两边各算一次的话，显示的那个路径
+	// 「默认位置：X」，而字典子系统真正往那儿写。两边各算一次的话，显示的那个路径
 	// 可能不是实际写入的那个 —— 用户按显示去核对会发现文件不在那里。
 	//
 	// 留空 = 用 config.DefaultSyncTarget()（当前目录的 erp_data.db）。
@@ -105,14 +105,14 @@ func (s *Server) Handler() http.Handler { return s.mux }
 
 // routes 装配路由表。集中在一处，方便一眼看清整个服务的接口面。
 //
-// 两个子系统的挂载用带前缀的 API 路径 + 各自的 SPA，而不是把子系统 handler
+// 子系统的挂载用带前缀的 API 路径 + 本包统一提供的 SPA，而不是把子系统 handler
 // 整个挂在 /debug/ 下：后者的做法会让子系统的 "/" 兜底路由吃掉整个前缀下的
 // 所有请求（Go 的 ServeMux 匹配到前缀后不再向外回落），SPA 就永远出不来。
-// 只把 /*/api/ 转给子系统，页面由本包统一从 web/dist/<应用> 提供。
+// 只把 /*/api/ 转给子系统，页面由本包统一从 web/dist 提供。
 func (s *Server) routes() {
 	m := s.mux
 
-	// ---- 统一 API：两套页面共用的环境/数据库管理 ----
+	// ---- 统一 API：设置页用的环境/数据库管理 ----
 	m.HandleFunc("GET /api/health", s.hHealth)
 	m.HandleFunc("GET /api/hosts", s.hHostsGet)
 	m.HandleFunc("PUT /api/hosts", s.hHostsPut)
@@ -237,7 +237,7 @@ func (s *Server) hHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// hHostsGet 返回共用环境清单。两套页面的「设置 → 环境」都读它。
+// hHostsGet 返回共用环境清单。设置页的「设置 → 环境」读它。
 func (s *Server) hHostsGet(w http.ResponseWriter, r *http.Request) {
 	path, err := s.configPath(false)
 	if err != nil {
@@ -267,7 +267,7 @@ func (s *Server) hHostsGet(w http.ResponseWriter, r *http.Request) {
 
 // hostsPutReq 是 PUT /api/hosts 的请求体。
 //
-// 只带要改的节：nil 表示"这一节不动"。这样两套页面各改各的部分时不会互相覆盖 ——
+// 只带要改的节：nil 表示"这一节不动"。这样设置页的各张卡片各改各的节时不会互相覆盖 ——
 // 原来 TDebug 的 hSettingsPut 就只替换自己那一节，这里沿用同样的约定。
 type hostsPutReq struct {
 	Hosts  *config.Hosts         `json:"hosts,omitempty"`

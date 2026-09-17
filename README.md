@@ -12,7 +12,7 @@ tt dict …    ERP 数据字典查询：r.t / r.v / desc / scc / r.q / prog，�
 
 tt env …     环境管理（三个工具共用同一份环境清单）
 tt config …  配置管理：位置 / 查看 / 读写 / 迁移 / 校验
-tt serve     启动本地 Web 服务（调试工作台 + 字典页，两套页面互链）
+tt serve     启动本地 Web 服务（工作台 + 统一设置页）
 tt install   安装 AI skills 到当前目录，或把 tt 加进用户 PATH
 tt version
 ```
@@ -141,15 +141,16 @@ tt config migrate --dry-run
 tt serve
 ```
 
-一个进程、一个端口，同时提供：
+一个进程、一个端口、一套页面：
 
-- `/debug/` — 调试工作台（原 TDebug 前端）
-- `/dict/` — 字典 / 镜像 / 同步页（原 TDictCli 前端）
-- `/api/*` — 两套页面共用的接口，其中 `/api/hosts` 是共享的环境/数据库管理端点
+- `/debug/` — 调试工作台
+- `/debug/#settings` — 统一设置页：站点管理 / 数据字典 / DEBUG / 应用设置
+- `/api/*` — 统一接口：环境与数据库配置（`/api/hosts`）、配置派生状态、
+  PATH 安装，以及字典类动作（源码镜像拉取、字典同步、BDL 文档）
 
-两套页面保留各自原有的外观与交互，导航栏里互相有跳转入口。
-**共享的是环境配置数据**：在任意一边改环境，另一边立刻生效（保存后会通知持有
-配置内存态的子系统重新加载）。
+**三个工具的配置都在设置页里**：环境与数据库、查询数据源、镜像目录、同步目标、
+BDL 文档目录、调试参数、明暗色。环境清单只有一份数据源（config.json 的 hosts 节），
+调试、字典查询与源码镜像读的是同一份。
 
 ### 命令行也能改配置
 
@@ -234,9 +235,10 @@ TT/
 │  ├─ dbconfig/ erpdb/      数据库连接模型与连接器（两处合并）
 │  ├─ safesql/ sshtun/ output/ pathinstall/ atomic/
 ├─ web/
-│  ├─ debug/                调试工作台 SPA（React + Radix + zustand + Monaco）
-│  ├─ dict/                 字典页 SPA（React + Tailwind）
-│  └─ package.json          npm workspaces 根，一次构建两套
+│  ├─ app/                  调试工作台 SPA（React + Radix + zustand + Monaco）
+│  │                        其中的设置视图是三个工具的统一配置页
+│  ├─ shared/               整套 SPA 共用的主题层 / UI 基元 / 设置页布局件
+│  └─ package.json          npm workspace 根
 ├─ desktop/                 Electron 外壳
 ├─ skills/                  AI 技能：tdebug-debug / tdev / tdict / erp-code-reader
 ├─ docs/                    分册文档与设计说明
@@ -262,8 +264,7 @@ build_portable.bat        # → dist/tt-portable.zip
 
 ```bash
 tt serve                  # 后端（默认 127.0.0.1:28670）
-cd web && npm run dev:debug   # 调试工作台，热更新，代理到后端
-cd web && npm run dev:dict    # 字典页
+cd web && npm run dev:debug   # 工作台与设置页，热更新，代理到后端
 ```
 
 端口被占用时后端会自动顺延，用 `TT_PROXY=http://127.0.0.1:<实际端口>` 告诉前端。

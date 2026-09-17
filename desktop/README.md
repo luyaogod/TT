@@ -14,8 +14,8 @@ Electron 主进程 (main.js)
 
 > 合并说明：合并前只有 TDebug 有桌面外壳（TDev 与 TDictCli 都是纯 CLI），它拉起的是
 > 调试专用服务 `tdebug desktop`。现在外壳拉起的是统一服务 `tt serve --desktop`，
-> 窗口落在 `/debug/`，界面里的导航可以切到 `/dict/` —— **一个外壳同时覆盖两套页面**，
-> 三个工具都在里面。
+> 窗口落在 `/debug/`，界面里的导航可以切进**统一设置页**（站点管理 / 数据字典 /
+> DEBUG / 应用设置）—— 一个外壳覆盖三个工具的全部配置。
 
 ## 目录
 
@@ -27,7 +27,7 @@ Electron 主进程 (main.js)
 | `build/.portable` | 绿色版标记文件（进 zip）：有它就把数据放程序目录。文件里带说明文字，只判存在性 |
 | `build/README-portable.txt` | 绿色版随包说明（进 zip 后叫 `README-portable.txt`，内容为中文使用说明） |
 | `scripts/make-icon.mjs` | 生成 `build/icon.png` / `build/icon.ico`（零依赖，程序化绘制） |
-| `scripts/smoke.mjs` | 无 GUI 冒烟：验证 Go 侧的 `TT_READY` / 两套页面 / `/api/shutdown` 契约 |
+| `scripts/smoke.mjs` | 无 GUI 冒烟：验证 Go 侧的 `TT_READY` / 页面可达 / `/api/shutdown` 契约 |
 
 ## 构建与打包
 
@@ -51,7 +51,7 @@ build_desktop.bat
 只想单独跑某一步：
 
 ```powershell
-cd web   ; npm run build                  # 前端 → web/dist/debug 与 web/dist/dict
+cd web   ; npm run build                  # 前端 → web/dist
 cd ..    ; go build -o tt.exe .           # 后端（内含前端）
 cd desktop; npm run pack                  # 只解包出 dist/desktop/win-unpacked（调试打包用）
 cd desktop; npm run dist                  # 只出安装包（绿色 zip 由 build_desktop.bat 组装）
@@ -63,12 +63,12 @@ cd desktop; npm run dist                  # 只出安装包（绿色 zip 由 bui
 cd desktop; npm run dev
 ```
 
-`dev.js` 会：起调试工作台的 Vite（`web/debug`，5173，base `/debug/`）、起后端
-（固定 `127.0.0.1:28670`，配合 `web/debug/vite.config.ts` 的 `/debug/api` 与 `/api` 代理）、
+`dev.js` 会：起调试工作台的 Vite（`web/app`，5173，base `/debug/`）、起后端
+（固定 `127.0.0.1:28670`，配合 `web/app/vite.config.ts` 的 `/debug/api` 与 `/api` 代理）、
 再拉起 Electron 加载 Vite 地址 —— 改前端即时热更新，后端日志直出终端，
 数据目录是 `desktop/.dev-data`（与正式配置隔离，可随意删）。
 
-要热更新**字典页**，另开一个终端 `cd web && npm run dev:dict`，它同样代理到本后端。
+设置页是同一套 SPA 里的一个视图（`/debug/#settings`），改它同样走热更新。
 
 只想快速验证"打包后那样跑"（不启动 Vite）：
 
@@ -108,7 +108,7 @@ cd desktop; npm run smoke      # 无窗口冒烟（CI/命令行可用）
 
 | 命令 | 角色 |
 | --- | --- |
-| `tt serve` | 前台的两套页面 UI（桌面外壳拉的就是它）。**不写状态文件**，命令行的控制类命令发现不了它 |
+| `tt serve` | 前台的工作台 + 设置页（桌面外壳拉的就是它）。**不写状态文件**，命令行的控制类命令发现不了它 |
 | `tt debug serve` | 后台常驻的调试守护，写 `.tt-serve.json`，`tt debug …` 的控制类命令靠它自动寻址 |
 
 ## 环境变量

@@ -1,9 +1,9 @@
 // REST API 客户端
 //
 // 调试工作台**私有**接口(会话/断点/接口日志/WebSocket)一律经 API_BASE 拼前缀:
-// 合并后一个进程同时挂着两套 SPA,后端把本子系统用 http.StripPrefix 挂在 /debug 下,
-// 于是包内注册的 /api/sessions 对外是 /debug/api/sessions。两边的同名路径
-// (/api/status、/api/ws)靠这个前缀区分 —— 少了它,请求会落到字典页或共享层去。
+// 统一服务把本子系统用 http.StripPrefix 挂在 /debug 下,于是包内注册的 /api/sessions
+// 对外是 /debug/api/sessions。这套前缀把它与共享层 /api/* 的同名路径
+// (/api/status、/api/ws)区分开 —— 少了它,请求会落到共享层去。
 //
 // 共享端点(hosts 配置、dbprobe、dbaccverify、conntest)由统一服务在**顶层**各提供
 // 一份,所以不带前缀。注意 /debug/api/hosts 也能通,但那是调试子系统留给独立运行
@@ -71,7 +71,7 @@ export interface WSTestResult {
 }
 
 // ---- 共享配置端点 /api/hosts(顶层,无前缀)的读写形状 ----
-// 环境清单只有一份数据源(config.json 的 hosts 节),两套配置页共用它;
+// 环境清单只有一份数据源(config.json 的 hosts 节),设置页的各张卡片共用它;
 // 数据结构与 tt/internal/config 的 schema.go 一一对应。
 export interface HostsDb {
   type: string // oracle | kingbase
@@ -104,7 +104,7 @@ export interface HostsDebug {
   printElements?: number
   persistBreakpoints?: boolean
 }
-// GET /api/hosts 的响应:两套页面共用的那一份配置快照
+// GET /api/hosts 的响应:设置页用的那一份配置快照
 export interface HostsView {
   config: string
   activeEnv: string
@@ -119,7 +119,7 @@ export interface HostsView {
   version: string
 }
 // PUT /api/hosts 的请求体:只带要改的节,省略的节后端保持原样 ——
-// 两套页面各改各的部分时不会用陈旧快照把对方刚改好的节覆盖掉。
+// 设置页的各张卡片各改各的节时不会用陈旧快照把对方刚改好的节覆盖掉。
 export interface HostsPatch {
   hosts?: { activeEnv: string; sshs: HostsSsh[] }
   listen?: string
@@ -267,7 +267,7 @@ async function req<T>(url: string, opts?: RequestInit): Promise<T> {
 export const api = {
   status: () => req<any>(`${API_BASE}/status`),
   // 环境清单:读共享端点。合并前这里调 /api/settings(旧 debug 节的 sshs),
-  // 现在 hosts 节是唯一数据源,调试页与字典页看到的是同一份环境。
+  // 现在 hosts 节是唯一数据源,整个界面看到的是同一份环境。
   settings: () => req<HostsView>('/api/hosts'),
   // 保存:只发要改的节(见 HostsPatch),后端把 400 的中文 error 原样回给界面
   saveSettings: (cfg: HostsPatch) => req<HostsView>('/api/hosts', { method: 'PUT', body: JSON.stringify(cfg) }),
@@ -275,7 +275,7 @@ export const api = {
   probeDB: (body: { host: string; port: number; user: string; password: string; zone: string; type: string }) =>
     req<{ type: string; tns?: string; port?: number; database?: string; sqlplus?: string; oracleHome?: string; twoTask?: string; host?: string; service?: string; note?: string }>('/api/dbprobe', { method: 'POST', body: JSON.stringify(body) }),
   // 客户端直连测试(按表单显式字段连库,凭据取账号列表首项)。
-  // 共享端点要求 {connection: …} 包一层(与字典页同形),不再是平铺连接字段。
+  // 共享端点要求 {connection: …} 包一层(沿用字典侧的请求形状),不再是平铺连接字段。
   connTest: (connection: HostsDb) =>
     req<{ ok: boolean; type?: string; serverVersion?: string; address?: string; stage?: string; error?: string }>('/api/conntest', { method: 'POST', body: JSON.stringify({ connection }) }),
   // 账号清单「验证」:SSH 上服务器以该账号+密码连显式目标库 select 1(只读)

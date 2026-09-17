@@ -41,15 +41,15 @@ TT/
 ├─ internal/
 │  ├─ config/               ★ 统一配置层（本设计的核心）
 │  │  ├─ paths.go           配置位置解析：T100_HOME / .portable / %APPDATA%\T100\tt
-│  │  ├─ cfgfile.go         Open / Save(原子) / Edit —— 单一写入口
-│  │  ├─ schema.go          配置根结构体 + 各节类型
-│  │  ├─ migrate.go         旧配置迁移与合并（tdebug + tdict → tt）
-│  │  └─ validate.go        配置校验
+│  │  ├─ cfgfile.go         Open / Save(原子写) / Edit —— 单一写入口
+│  │  ├─ schema.go          配置根结构体 + 各节类型 + 缺省值
+│  │  ├─ pathutil.go        路径型取值的解析与派生状态（AbsPath / DirStatusOf / SyncTarget）
+│  │  └─ migrate.go         旧配置迁移与合并（tdebug + tdict → tt）
 │  ├─ cli/                  cobra 根命令与公共约定
 │  │  ├─ root.go            tt 根命令、全局 flag、--help 约定
 │  │  ├─ env.go             tt env …       统一环境管理（原 tdict env + tdebug env/topent）
-│  │  ├─ config.go          tt config …    路径/查看/修改/迁移/校验
-│  │  ├─ serve.go           tt serve …     统一本地 Web 配置服务
+│  │  ├─ config.go          tt config …    路径/查看/修改/迁移/校验（校验也在这里）
+│  │  ├─ serve.go           tt serve …     统一本地 Web 服务
 │  │  ├─ install.go         tt install skills|path
 │  │  ├─ debug/             tt debug …     ← 原 tdebug cli/
 │  │  ├─ dev/               tt dev …       ← 原 tdev internal/cli/
@@ -57,7 +57,7 @@ TT/
 │  │
 │  ├─ debug/                ← 原 TDebug debug/   调试内核：fgldb 驱动、会话、REST+WS API
 │  ├─ dev/                  ← 原 TDev internal/  管线：pkgfile/tapfile/tglfile/fgl/synth/fence/verify/split/store/model
-│  ├─ dict/                 ← 原 TDictCli db/ + live/ + dbsync/   数据源与字典查询
+│  ├─ dict/                 ← 原 TDictCli db/ + live/ + dbsync/ + server/  数据源、字典查询与两个长跑动作的 HTTP 面
 │  │
 │  ├─ host/                 ★ 合并 TDebug/host + TDictCli/host：SSH/PTY、终端解析、环境探测、DB 探测、镜像引擎
 │  ├─ dbconfig/             ★ 数据库连接模型（两边合并）
@@ -66,13 +66,12 @@ TT/
 │  ├─ sshtun/               ← 原 TDictCli sshtun：SSH 端口转发隧道
 │  ├─ output/               ← 原 TDictCli output：表格/JSON/CSV 输出（CJK 宽度感知）
 │  ├─ pathinstall/          ★ 用户 PATH 安装（两边合并，含 Windows 注册表实现）
-│  ├─ atomic/               ← 原 TDev internal/store/atomic.go：原子写（config 层复用）
-│  └─ web/                  统一 HTTP 服务：路由装配、静态资源、/api/* 处理器
+│  └─ web/                  统一 HTTP 服务：路由装配、配置与派生状态端点、SPA 静态服务
 │
 ├─ web/                     前端（React 18 + Vite 6 + TS + Tailwind 4）
-│  ├─ debug/                ← 原 TDebug/web  调试工作台（Radix UI + zustand + monaco）
-│  ├─ dict/                 ← 原 TDictCli/web  字典与镜像/同步页
-│  └─ shared/               两套页面共用：主题、REST 客户端、ui 原语、环境配置页
+│  ├─ app/                  ← 原 TDebug/web  唯一一套 SPA：调试工作台 +
+│  │                        覆盖三个工具的统一设置页（站点管理/数据字典/DEBUG/应用设置）
+│  └─ shared/               共享层：主题变量与机制、UI 基元、设置页布局件、cn
 │
 ├─ desktop/                 Electron 外壳（原 TDebug/desktop）
 ├─ skills/                  tdebug-debug / tdev / tdict / erp-code-reader
@@ -177,14 +176,19 @@ TT/
 ### 5.1 服务
 
 单进程、单端口（默认 `127.0.0.1:28670`，占用时自动向后探测），由 `tt serve` 启动，
-同时承载三件事：
+一套页面 + 一个统一 API：
 
-- `/`         → 调试工作台 SPA（原 TDebug web）
-- `/dict/`    → 字典/镜像/同步 SPA（原 TDictCli web）
-- `/api/*`    → 统一 REST API，其中 `/api/hosts` 为共享的环境/数据库管理端点
+- `/debug/`             → 调试工作台 SPA
+- `/debug/#settings/*`  → 统一设置页（站点管理 / 数据字典 / DEBUG / 应用设置）
+- `/api/*`              → 统一 REST API：`/api/hosts` 读写配置的各节，
+                          `/api/config/status` 给派生状态（路径存不存在），
+                          `/api/install` 管 PATH，`/api/mirror` `/api/dbsync` `/api/bdldoc`
+                          是字典类的长跑动作
 
-两套页面**并存并互链**：各自保留原有外观与交互，在导航栏加一个跳转到对方的入口。
-共享的只有环境配置数据与实现它的 `/api/hosts`。
+**配置**（环境与数据库、查询数据源、镜像目录、同步目标、BDL 目录）全部走 `/api/hosts`
+的分节写入；**动作**（拉源码镜像、跑字典同步）留在设置页「数据字典」分区的对应卡片里。
+初始设计是两套页面并存互链，但设置一旦统一，字典页就只剩这两个动作 —— 于是那个
+SPA 被删掉，动作并进设置页。
 
 ### 5.2 环境配置的单一数据源
 
@@ -209,8 +213,8 @@ tt dev …                   原 tdev：tzc export|status|verify|apply|unlock|re
 tt dict …                  原 tdict：r.t / r.v / desc / scc / r.q / msg / sysp / docp / prog
                            db status|sync|list|ping|discover / mirror / bdldoc
 tt env …                   统一环境管理：list / show / use / topent   （原 tdict env + tdebug env/topent）
-tt config …                统一配置：path / show / get / set / edit / migrate / validate
-tt serve                   统一本地 Web 配置服务
+tt config …                统一配置：path / show / get / set / migrate / validate
+tt serve                   统一本地 Web 服务（工作台 + 统一设置页）
 tt install skills|path     统一安装（原三份同形命令合并为一份）
 tt version
 ```
@@ -223,7 +227,7 @@ tt version
 
 ## 7. 构建与打包
 
-- 前端：`cd web && npm install && npm run build` → `web/dist/`（两套 SPA 一次构建）
+- 前端：`cd web && npm install && npm run build` → `web/dist/`
 - 后端：`go build -trimpath -ldflags "-X tt/internal/cli.Version=…" -o tt.exe .`
 - 便携包：`build_portable.bat` → `dist/tt-portable.zip`（`tt.exe` + `config.example.json` + `README.md` + `skills/` + `.portable`）
 - 桌面版：`build_desktop.bat` → Electron 安装包（复用原 TDebug desktop 外壳，改为拉起 `tt.exe serve`）

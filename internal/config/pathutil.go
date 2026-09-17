@@ -2,7 +2,7 @@
 //
 // 合并前这套逻辑散在 internal/dict/server 的 config.go / bdldoc.go / dbsync.go 里
 // (absPath + 各处自己 os.Stat),而设置页搬进调试工作台之后也需要同一份判断 ——
-// 两边各算一遍的话,同一个 sync.target 会在两个页面上解析成不同结果,那是最难查的一类 bug。
+// 两边各算一遍的话,同一个 sync.target 会解析成不同结果,那是最难查的一类 bug。
 // 所以收敛到这里,谁要用谁来取。
 package config
 

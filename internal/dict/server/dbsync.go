@@ -80,34 +80,6 @@ func (s *Server) hDBSyncGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, s.dbSyncView())
 }
 
-// hDBSyncPut 设置同步目标(config.json 顶层 sync.target);target 为空 = 清除,回到默认(exe 同目录)。
-func (s *Server) hDBSyncPut(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Target string `json:"target"`
-	}
-	if !readBody(w, r, &req) {
-		return
-	}
-	t := strings.TrimSpace(req.Target)
-	abs := config.AbsPath(t)
-	if t != "" && abs == "" {
-		fail(w, 400, fmt.Errorf("解析路径失败: %q", req.Target))
-		return
-	}
-	if err := config.Edit(s.cfgPath, nil, func(root map[string]any) error {
-		if t == "" {
-			delete(root, "sync")
-			return nil
-		}
-		config.SectionOrEmpty(root, "sync")["target"] = abs
-		return nil
-	}); err != nil {
-		fail(w, 500, err)
-		return
-	}
-	writeJSON(w, 200, s.dbSyncView())
-}
-
 // hDBSyncPost 启动一次同步(单实例:已有任务在跑返回 409);返回后前端轮询 /api/dbsync。
 func (s *Server) hDBSyncPost(w http.ResponseWriter, r *http.Request) {
 	var req struct {

@@ -66,30 +66,6 @@ func (s *Server) hMirrorGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, resp)
 }
 
-// hMirrorPut 保存镜像根目录(顶层 mirror.dir;其余节与本节未知子键原样保留;
-// 目录由拉取时创建)。
-func (s *Server) hMirrorPut(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Dir string `json:"dir"`
-	}
-	if !readBody(w, r, &req) {
-		return
-	}
-	abs := config.AbsPath(req.Dir)
-	if abs == "" {
-		writeJSON(w, 200, map[string]any{"ok": false, "error": "请填写镜像根目录"})
-		return
-	}
-	if err := config.EditSection(s.cfgPath, "mirror", nil, func(sec map[string]any) error {
-		sec["dir"] = abs
-		return nil
-	}); err != nil {
-		fail(w, 500, err)
-		return
-	}
-	writeJSON(w, 200, map[string]any{"ok": true, "mirrorDir": abs})
-}
-
 // hMirrorPull 启动一次拉取(单实例:已有任务在跑返回 409);返回后前端轮询 /api/mirror。
 func (s *Server) hMirrorPull(w http.ResponseWriter, r *http.Request) {
 	var req struct {

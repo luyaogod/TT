@@ -39,9 +39,9 @@ type Server struct {
 
 // NewServer 创建服务实例；cfgPath 为 config.json 路径(重读配置用,可为空=只读)。
 //
-// web 是**本应用 SPA 的根**（即 web/dist/debug 的内容），不是模块根的嵌入 FS ——
-// 两套前端合并后各占 dist 下的一个子目录，剥离那一层由调用方做
-// （tt serve 用 web.SubFS(common.WebFS, "debug")，tt debug serve 同理）。
+// web 是**本应用 SPA 的根**（即 web/dist 的内容），不是模块根的嵌入 FS ——
+// 合并前两套前端各占 dist 下的一个子目录，剥离那一层得由调用方做；合并后只剩一套 SPA、
+// 直接产出在 dist 根，调用方（tt serve / tt debug serve）传 common.WebFrontend() 即可。
 // 这里只确认 index.html 在；不在就当没前端，回落成纯 API + 引导页。
 func NewServer(cfg *Config, web fs.FS, cfgPath string) *Server {
 	// 先把默认环境(hosts.activeEnv,可被 debug.activeEnv 覆盖)的连接与启动参数
@@ -162,9 +162,9 @@ func (s *Server) ListenAddr() string {
 //
 // 统一服务(tt serve)用 http.StripPrefix("/debug", srv.Handler()) 把它挂在 /debug/ 下,
 // 于是面内的 /api/sessions/… 对外是 /debug/api/sessions/…,内嵌 SPA 的 / 对外是 /debug/。
-// 这样一个进程能同时挂调试工作台(/debug/)与字典页(/dict/),两边的 /api/status、
-// /api/ws 等同名路径不会互相覆盖 —— 合并前两个工具各起各的服务,压根不存在冲突;
-// 合并后靠挂载前缀区分。
+// 这样一个进程里,调试面内的 /api/status、/api/ws 等路径都落在 /debug/api/ 下,
+// 与共享层 /api/* 的同名路径不会互相覆盖 —— 合并前两个工具各起各的服务,压根不存在
+// 冲突;合并后靠挂载前缀区分。
 //
 // 注意:统一的 /api/health、/api/hosts、/api/dbprobe、/api/dbaccverify、/api/conntest、
 // /api/config/meta 由 tt/internal/web 在顶层持有。本面挂在 /debug/ 前缀下,与它们不在
@@ -1691,9 +1691,8 @@ func (s *Server) hHostsGet(w http.ResponseWriter, r *http.Request) {
 
 // ReloadConfig 重新从磁盘读取配置并热替换内存态。
 //
-// 统一服务(tt serve)的共享配置端点 /api/hosts 在写入后会调用它:两个配置页
-// (调试工作台与字典页)改的是同一份 hosts 节,不重读的话本服务还按旧环境连,
-// 表现就是"改了没生效"。
+// 统一服务(tt serve)的共享配置端点 /api/hosts 在写入后会调用它:统一设置页
+// 改的就是同一份 hosts 节,不重读的话本服务还按旧环境连,表现就是"改了没生效"。
 //
 // 三条约定:
 //   - 并发安全:整份配置的替换在 s.mu 里做,不会让读者看到半个新配置;
@@ -1709,7 +1708,7 @@ func (s *Server) ReloadConfig() error {
 		return err
 	}
 	// 运行时字段不随文件走:数据目录由服务注入,当前环境由会话选定 ——
-	// 保留它,字典页改一次 hosts 就不会把正在调试的会话悄悄切到默认环境。
+	// 保留它,设置页改一次 hosts 就不会把正在调试的会话悄悄切到默认环境。
 	cfg.DataDir = s.cfg.DataDir
 	if cur := s.cfg.envName; cur != "" {
 		cfg.envName = cur

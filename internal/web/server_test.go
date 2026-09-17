@@ -199,7 +199,7 @@ func TestHostsPut_RejectedWriteDoesNotTouchFile(t *testing.T) {
 	}
 }
 
-// GET /api/hosts 返回两套页面都需要的那几个节。
+// GET /api/hosts 返回设置页需要的那几个节。
 func TestHostsGet(t *testing.T) {
 	s, _ := newTestServer(t, seededConfig)
 	rec, out := doJSON(t, s, http.MethodGet, "/api/hosts", nil)

@@ -175,7 +175,7 @@ func Hosts(root map[string]any) (map[string]any, error) {
 | `tdebug start` | `tt debug start` |
 | `tdev tzc export` | `tt dev tzc export` |
 | `tdict r.t` | `tt dict r.t` |
-| `tdebug serve` / `tdict serve` | `tt serve`（一个服务，两套页面） |
+| `tdebug serve` / `tdict serve` | `tt serve`（一个服务，一套页面） |
 | `tdebug install skills` / `tdict install skills` / `tdev install skills` | `tt install skills` |
 | `tdebug env` + `tdebug topent` + `tdict env` | `tt env list/show/use/topent` |
 | — | `tt config path/show/get/set/migrate/validate` |
@@ -194,9 +194,8 @@ TDev 的两点被完整保留：位置无关的参数解析（`-o`/`--json` 可�
 |---|---|
 | `/debug/` | 调试工作台 SPA（前端构建产物 `web/dist/debug`） |
 | `/debug/api/*` | 调试专属 API（后端内部仍按 `/api/…` 注册，靠 `StripPrefix` 挂在前缀下） |
-| `/dict/` | 字典页 SPA（前端构建产物 `web/dist/dict`） |
-| `/dict/api/*` | 字典专属 API（同上） |
-| `/api/*` | 两套页面共用的端点 |
+| `/api/*` | 统一接口：配置读写、派生状态、PATH 安装，以及字典类动作 |
+| ~~`/dict/`~~ | 字典页 SPA 已删除（见第 4 期），其两个动作并入设置页 |
 
 ### 为什么必须按前缀分 API
 
@@ -211,7 +210,7 @@ TDev 的两点被完整保留：位置无关的参数解析（`-o`/`--json` 可�
 页面反而出不来。
 
 改成：`/debug/api/` 转给子系统，`/debug/` 由 `internal/web` 用
-`SPAHandler(common.WebSub("debug"), …)` 从构建产物直接服务。`/dict/` 同理。
+`SPAHandler(common.WebFrontend(), …)` 从构建产物直接服务。
 两个子系统因此只负责 API，页面归统一服务一家管。
 
 配套的两个坑，都在 `internal/web/spa.go` 里注释着：
@@ -237,12 +236,12 @@ PUT 只接受要改的节（缺省 = 不动），交给 `internal/config` 的原
   而用户完全看不出发生过什么。按环境名对齐补齐；代价是通过页面删不掉 `viaSsh`，
   想删就手改 `config.json`。宁可选"删不掉"。
 - **写入成功后调用子系统的 `ReloadConfig()`**（`internal/web.ConfigReloader`），
-  让持有配置内存态的调试服务重新加载。否则从字典页改了环境，调试侧仍按旧环境连，
+  让持有配置内存态的调试服务重新加载。否则从别处改了环境，调试侧仍按旧环境连，
   表现是"改了没生效"。重新加载失败只记日志：配置已经落盘成功，不该把成功的写报成失败，
   但必须让用户看见。
 
-前端保持**两套页面并存互链**（按用户选择，不做 UI 重建）：各自保留原有外观与交互，
-导航栏互相有跳转入口，共享的只有环境配置数据与实现它的 `/api/hosts`。
+前端最初按"两套页面并存互链"落地（各自保留原有外观与交互，导航栏互相有跳转入口）。
+第 3 期把字典页接入共享主题层之后，第 4 期进一步取消了那套 SPA —— 见下。
 
 ## 六之二、合并过程中修掉的两个 bug
 
@@ -275,7 +274,7 @@ PUT 只接受要改的节（缺省 = 不动），交给 `internal/config` 的原
   SPA 静态服务的五个路径形态 —— 见 `server_test.go`。
 - `internal/host`、`internal/pathinstall`、`internal/safesql`、`internal/dict`：原测试随包搬入并通过。
 - **桌面链路**：`desktop/scripts/smoke.mjs` 无 GUI 跑通 —— 首启建配置骨架、打出 `TT_READY`、
-  `/api/health` 可达、`/debug/` 与 `/dict/` 都返回各自界面、`/` 跳转到 `/debug/`、
+  `/api/health` 可达、`/debug/` 返回界面、`/` 跳转到 `/debug/`、
   `POST /api/shutdown` 优雅退出（code=0）。
 
 ### 未做 / 已知取舍
@@ -298,3 +297,116 @@ PUT 只接受要改的节（缺省 = 不动），交给 `internal/config` 的原
   `tt debug topent <值>` 是会话级覆盖，与 `tt env topent <名称> <编号>` 设的配置默认不同。
 - 原三个仓库未做任何改动，仍在 `D:\我的项目\` 下；`TT` 是全新仓库，
   没有合并 git 历史（按用户选择）。
+
+## 八、前端统一设置页（合并完成后的一次重构）
+
+三工具合并本身完成后，前端仍是两套 SPA（`web/debug` 与 `web/dict`），各带一个设置页，
+两边的环境编辑器近乎重复。用户要求：**前端只保留一个设置页签**，用多级管理组织成
+站点管理 / 数据字典 / DEBUG / 应用设置四块。这条要求最终把前端收敛成了一套页面。
+
+### 第 0 期：抽出共享层 `web/shared/`
+
+`docs/ARCHITECTURE.md` 本来就把 `web/shared/` 列在规划里，这一期把它落地：
+主题变量表（`tokens.css`）、主题机制（`theme.ts`）、`cn`、UI 基元。
+UI 基元按依赖拆成两个文件 —— `ui.tsx`（按钮/输入框/表格，不依赖 Radix）与
+`ui-radix.tsx`（下拉/弹层/日历/确认弹窗/手风琴）—— 字典页不该被拖着引 Radix 全家桶。
+
+顺带消掉一处重复：`Panels.tsx` 原来自己包了一层 `Accordion`/`AccordionItem`/`AccordionContent`。
+现在共享件只做**中性的壳**（布局类留给调用方），面板侧用 `PanelItem`/`PanelContent`
+加它需要的"撑满高度 + 条目间分割线"—— 设置页那套手风琴是轻量树形（不撑高、无分割线），
+需求正好相反，把任一套的样式写进共享件都会让另一套到处覆盖。
+
+### 第 1 期：设置页外壳 + 深链接，并修掉一处数据丢失 bug
+
+设置页从「外观/环境/高级」三个平级分类重做成两级导航（分区 → 卡片）。
+左树点分区展开它的卡片，点卡片滚到对应位置。
+
+深链接 `#settings/<分区>`：字典页当时还在，它的「设置」入口要能精确落到数据字典分区。
+`App.tsx` 的首屏逻辑改为**先认哈希再判空环境** —— 否则 `#settings/data-dict` 会被
+"没有环境就跳设置"的兜底覆盖成站点管理。
+
+**修掉的数据丢失 bug**（这是本期的主要动机之一）：`PUT /api/hosts` 是整节替换，
+而 `DebugSettings` 每个字段都带 `omitempty` —— 省略即删除。老代码在「高级」里只发
+5 个键，于是每次保存都会把 `debug.fglserver` / `persistBreakpoints` / `activeEnv`
+从 config.json 抹掉。现在保存一律按**读到的整节 + 编辑项**构造，从结构上堵死这一类。
+
+顺带把三个从没在界面上暴露过的字段补进 DEBUG（`fglserver`、`persistBreakpoints`
+—— 它是 `*bool` 三态，用下拉不用复选框；以及 `activeEnv`）。
+
+### 第 2 期：设置页只跟共享层说话
+
+新增 `GET /api/config/status`：路径型取值的**派生状态**（配置值 + 在本机是否真的存在）。
+单独一个端点而不并进 `/api/hosts`，因为它要 `os.Stat`，而后者是每次进设置都读的热路径。
+
+`/api/install`（用户 PATH）从字典子系统移到统一层 —— 把 tt 加进 PATH 是应用级动作，
+与字典查询无关。路径解析（`AbsPath` / `DirStatusOf` / `FileStatusOf` / `DefaultSyncTarget`）
+上移到 `internal/config/pathutil.go`：原先散在字典子系统的三个文件里，而设置页也要同一份判断，
+两边各算一遍会让同一个 `sync.target` 在两个页面上解析成不同结果。
+
+**补掉同源的第二个丢失洞**：`hosts.sshs[].launchArgs` / `watchdogSeconds` 表单里没有
+这两个控件，保存站点会把它们静默丢掉。服务端按环境名补回（把第 1 期的
+`preserveUngovernedDBFields` 扩展成 `preserveUngovernedFields`，同时管环境级与 db 级键）。
+
+### 第 3 期：字典页接入共享主题层
+
+字典侧原先**完全没有主题机制**：它的 `dark:` 类走 Tailwind v4 默认的
+`prefers-color-scheme`，跟随系统且不可切换。引入共享 `tokens.css` 之后 `.dark` 变体
+变成 `:is(.dark *)`，从此跟随 `html.dark`。
+
+这一期必须**原子提交**：一旦引入 `tokens.css` 而 `index.html` 的防闪色脚本或
+`main.tsx` 的 `applyDark` 没同时落地，字典页会永久停在亮色**且毫无报错** ——
+样式照常编译、构建照样绿。实机验证了暗色与亮色两种模式。
+
+配色改造：满屏写死的 `zinc-*`/`sky-*` 换成语义 token；状态色（emerald/amber/red）保留
+（调试页自己也是这么用的，那条"禁止写死"针对的是 zinc 色板）；进度条的**轨道与填充成对改**
+（`bg-muted` + `bg-primary`），只改填充会让暗色下的轨道消失。
+
+### 第 4 期：彻底移除字典页，两个拉取功能并入设置页
+
+字典侧只剩「拉源码镜像」与「跑字典同步」两个动作。它们并进设置页「数据字典」分区的
+同名卡片后，那套 SPA 就没有存在理由了 —— `web/dict/` 整体删除。
+
+- 字典类端点从 `/dict/api/*` 升到共享层 `/api/*`。那套前缀是"两套页面各有一套 `/api/*`
+  需要分开"的遗留。注意它带来一个反直觉的后果：包内的 `/api/` 兜底会接到与字典无关的
+  路径，所以那条 404 的文案改成了通用的「未知接口」。
+- 前端构建产物从 `dist/debug` 移到 dist 根：只剩一套 SPA，再套一层是多余的嵌套。
+- 运行按钮在**改动未保存时禁用** —— 服务端用的是配置里的值而不是表单里的值，
+  不这么做的话用户改了目录还没保存就点「全量重建」，镜像会拉到旧目录去而界面上看不出。
+
+### 第 5 期：目录改名（清理）
+
+`web/debug/` 装的是**整套应用**（工作台 + 覆盖三个工具的设置页），`web/shared/` 也只剩
+一个消费者 —— 两个名字的含义都过期了。改名为 `web/app/` + `web/shared/`，
+workspace 名从 `debug` 改成 `app`（`npm run build:app` / `dev:app` / `check:app`）。
+`base: '/debug/'` 不变 —— 那是 URL 前缀，与目录名无关。
+
+### 第 6 期：清理与文档
+
+- 删掉字典子系统里已无人调用的三个写端点（`PUT /api/mirror`、`PUT /api/dbsync`、
+  `PUT /api/bdldoc`）：它们写的三节现在统一由 `PUT /api/hosts` 的分节写入覆盖，
+  前端只调 GET 与两个动作端点，CLI 的写命令直接改配置文件、不走 HTTP。
+  留着就是三条重复的写路径。相应的测试改为直接落配置。
+- 去掉前端的三行 shim（`theme.ts` / `lib/utils.ts` / `ui.tsx` 的再导出），
+  调用点直接引 `shared/`。
+
+### 这一轮的验证
+
+- **omitempty 回归矩阵**（那个数据丢失 bug 的守门人）：逐节改一个字段保存，确认同节
+  兄弟键一个都没掉 —— `debug` 节改 `termWidth` 而 `fglserver`/`persistBreakpoints`/
+  `activeEnv` 原样；`hosts` 节 `sshs[0]` 10 个键进 10 个键出；`query`/`mirror`/`bdldoc`/
+  `sync`/`listen` 各自提交后其余节不受影响。
+- `grep` 确认 `web/app/src` 无写死色板；产物 CSS 里 `.dark` 是类驱动、
+  `prefers-color-scheme` 归零、明暗两套 `--background` 都在。
+- 实机核对四个分区渲染、深链接落位、明暗切换、`/dict/*` 全部 404、
+  桌面冒烟全通（`desktop/scripts/smoke.mjs`）。
+- **全新克隆可构建**：`web/dist/.gitkeep` 一直被 `.gitignore` 挡住、从未入库，
+  而 `//go:embed all:web/dist` 在该目录不存在时会直接报错 —— 意思是从仓库克隆下来
+  `go build` 过不去。已改为 `/web/dist/*` + `!/web/dist/.gitkeep`，并实测克隆后
+  未构建前端也能 `go build` 且 `go test ./...` 全绿。
+
+### 仍未做
+
+- **设置页的搜索框**（用户给的 VS Code 参考图里有）。字段数约 30 个，够用得上，
+  但用户明确说不做。
+- **每环境的 `launchArgs`/`watchdogSeconds` 仍不在界面上暴露**：靠服务端保留机制保证
+  不被丢掉（见第 2 期）。要真正可编辑，得给站点编辑器的每个环境加两个控件。

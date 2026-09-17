@@ -82,10 +82,11 @@ func TestDBSyncTargetSetting(t *testing.T) {
 		t.Fatalf("默认状态不符: %+v", r1)
 	}
 
+	// 设置自定义目标(直接改配置 —— 原先的 PUT /api/dbsync 与 PUT /api/hosts 重复,已删)
 	custom := filepath.Join(t.TempDir(), "sub", "erp.db")
-	body, _ := json.Marshal(map[string]string{"target": custom})
+	setSection(t, p, "sync", map[string]any{"target": custom})
 	rec2 := httptest.NewRecorder()
-	s.hDBSyncPut(rec2, httptest.NewRequest("PUT", "/api/dbsync", bytes.NewBuffer(body)))
+	s.hDBSyncGet(rec2, httptest.NewRequest("GET", "/api/dbsync", nil))
 	var r2 dbSyncResp
 	if err := json.Unmarshal(rec2.Body.Bytes(), &r2); err != nil {
 		t.Fatal(err)
@@ -104,16 +105,15 @@ func TestDBSyncTargetSetting(t *testing.T) {
 		t.Fatalf("sync.target 未写入: %v", root["sync"])
 	}
 
+	// 清空 sync.target = 回到默认位置
+	clearSectionKey(t, p, "sync", "target")
 	rec3 := httptest.NewRecorder()
-	s.hDBSyncPut(rec3, httptest.NewRequest("PUT", "/api/dbsync", bytes.NewBufferString(`{"target":"  "}`)))
+	s.hDBSyncGet(rec3, httptest.NewRequest("GET", "/api/dbsync", nil))
 	var r3 dbSyncResp
 	if err := json.Unmarshal(rec3.Body.Bytes(), &r3); err != nil {
 		t.Fatal(err)
 	}
 	if r3.Configured != "" || r3.Target != `D:\default-dir\erp_data.db` {
 		t.Fatalf("清除后不符: %+v", r3)
-	}
-	if _, ok := readRoot(t, p)["sync"]; ok {
-		t.Fatal("sync 键应被删除")
 	}
 }

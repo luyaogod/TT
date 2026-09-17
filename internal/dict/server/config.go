@@ -14,4 +14,4 @@ func loadConfig(path string) (*config.Root, error) { return config.Load(path) }
 
 // 路径型取值的解析(AbsPath / DirStatusOf / FileStatusOf / DefaultSyncTarget)
 // 已上移到 internal/config —— 统一设置页要用同一份判断,两边各算一遍会让同一个
-// sync.target 在两个页面上解析成不同结果。
+// sync.target 解析成不同结果。

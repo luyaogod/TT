@@ -1,12 +1,12 @@
-/* 两套页面共用的主题层(VS Code 经典风格,Tailwind v4):语义 token + .dark 变体。
+/* 主题层(VS Code 经典风格,Tailwind v4):语义 token + .dark 变体。
    配色对齐 VS Code Dark / Light Modern(侧栏 #181818 / 编辑区 #1f1f1f / 分割线 #2b2b2b);
    组件一律用语义工具类(bg-background/border-border/text-muted-foreground...),
    亮暗两套取值集中在这里维护,禁止在组件里写死 zinc 色板。
    布局密度对齐 VS Code 经典 UI:面板紧贴,仅以 1px 分割线(sash)相隔,全站零圆角。
 
-   合并前这份在 web/debug/src/index.css 里,只服务调试工作台 —— 字典页因此完全没有主题机制
+   合并前这份在 web/app/src/index.css 里,只服务调试工作台 —— 字典页因此完全没有主题机制
    (它的 dark: 类走 Tailwind v4 默认的 prefers-color-scheme,跟随系统且不可切换)。
-   抽到这里之后两套页面共用,用户的选择在页面之间也共享。
+   抽到这里之后整套 SPA 共用,用户的选择也就全站共享。
 
    注意:引入本文件会让 .dark 变体生效,从此 dark: 跟 html.dark 走而不是跟系统走 ——
    所以引入方必须同时具备「首屏防闪色脚本 + 启动时 applyDark」,否则会永久停在亮色且毫无报错。 */

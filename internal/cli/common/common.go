@@ -43,7 +43,7 @@ func ResolveConfig(allowMissing bool) (string, error) {
 // ConfigHint 给 --help 用的一行配置位置提示。
 func ConfigHint() string { return config.DefaultConfigPathHint() }
 
-// WebFrontend 返回内嵌前端的 FS（dist 根，即 web/debug 的构建产物）。
+// WebFrontend 返回内嵌前端的 FS（dist 根，即 web/app 的构建产物）。
 //
 // 合并前这里是 WebSub(name) —— 当时有两套 SPA（调试工作台与字典页）各占 dist 下一个
 // 子目录；字典页已并入统一设置页，只剩一套，所以不需要再按名字取子目录。

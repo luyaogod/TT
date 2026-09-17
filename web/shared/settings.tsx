@@ -1,8 +1,7 @@
 // 设置页的布局件(Card / SettingRow / Field / SectionTitle)。
 //
-// 两套页面共用:调试工作台用它搭统一设置页,字典页用它搭剩下的两个操作视图
-// (只读的路径行 + 区块标题)。合并前两边各有一套自己的"像卡片的 <section> + 标题"
-// 写法,样式靠各写一遍的 Tailwind 类维持一致。
+// 统一设置页用它搭各张卡片(含只读的路径行 + 区块标题)。合并前调试工作台与字典页
+// 两边各有一套自己的"像卡片的 <section> + 标题"写法,样式靠各写一遍的 Tailwind 类维持一致。
 import * as React from 'react'
 import { cn } from './utils'
 
@@ -82,7 +81,7 @@ export function Field({ label, children, className }: {
   )
 }
 
-/** 区块小标题:大写短标签 + 一条细线。字典页的两个操作视图用它分区。 */
+/** 区块小标题:大写短标签 + 一条细线。统一设置页的卡片用它分区。 */
 export function SectionTitle({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
     <div className={cn(

@@ -1,7 +1,7 @@
 // 哈希路由:把「当前视图 / 设置页的哪个分区」映射到 URL 片段,让界面可深链接。
 //
-// 为什么需要它:设置页搬进调试工作台之后,字典页的「设置」入口要能直接落到
-// 具体的分区(/debug/#settings/data-dict),而不是把用户丢在调试页让他自己找。
+// 为什么需要它:设置页搬进调试工作台之后,要能直接落到具体的分区
+// (/debug/#settings/data-dict),而不是把用户丢在调试页让他自己找。
 //
 // 约束(踩过):本文件**不得被 store.ts 导入**,且模块顶层不得访问 window/document/history。
 // check:store 用裸 esbuild 打包 store.ts 并在 Node 里跑(桩 window/document),

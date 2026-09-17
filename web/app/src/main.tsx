@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client'
 import { App } from './App'
 import { editorRef } from './SourceView'
 import { useStore } from './store'
-import { applyDark, readStoredTheme, resolveDark } from './theme'
+import { applyDark, readStoredTheme, resolveDark } from '../../shared/theme'
 import './index.css'
 
 // 启动即同步主题类(store 默认暗色,但只有手动切换时才挂 .dark,首帧不挂会闪一下亮色)——

@@ -1,7 +1,7 @@
 // shadcn/ui 规范基础组件(轻依赖):语义 token + cn/cva,颜色一律不写死(亮暗由 tokens.css 决定)。
 //
-// 这里只放**不依赖 Radix 的那部分** —— 字典页只需要按钮/输入框/表格这些,
-// 让它引 Radix 全套是无谓的依赖。带 Radix 的组件在同目录的 ui-radix.tsx。
+// 这里只放**不依赖 Radix 的那部分** —— 只用到按钮/输入框/表格这些的视图,
+// 就不必把 Radix 全套也拉进来。带 Radix 的组件在同目录的 ui-radix.tsx。
 import * as React from 'react'
 import { Slot } from '@radix-ui/react-slot'
 import { cva, type VariantProps } from 'class-variance-authority'

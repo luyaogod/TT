@@ -36,7 +36,7 @@ var rootCmd = &cobra.Command{
 
   tt env …     环境管理：列出/查看/切换 SSH 环境（三个工具共用同一份环境清单）
   tt config …  配置管理：位置/查看/修改/迁移/校验
-  tt serve     启动本地 Web 配置服务（调试工作台 + 字典页，两套页面互链）
+  tt serve     启动本地 Web 配置服务（调试工作台，含覆盖三个工具的统一设置页）
   tt install   安装 AI skills 到当前目录，或把 tt 加进用户 PATH
 
 所有输出使用简体中文 (zh_CN)。

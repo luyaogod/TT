@@ -9,7 +9,7 @@
 /web/dist/*
 !/web/dist/.gitkeep
 /web/node_modules/
-/web/debug/node_modules/
+/web/app/node_modules/
 /desktop/node_modules/
 /desktop/dist/
 
@@ -45,4 +45,4 @@ Thumbs.db
 /.claude/launch.json
 
 # 前端 check runner 的 esbuild 中间产物
-/web/debug/scripts/.tmp-*.mjs
+/web/app/scripts/.tmp-*.mjs

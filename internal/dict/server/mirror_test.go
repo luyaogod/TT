@@ -9,8 +9,8 @@ import (
 	"testing"
 )
 
-// GET/PUT /api/mirror:镜像根读写 + 环境路径/基线状态。
-func TestMirrorGetPut(t *testing.T) {
+// GET /api/mirror:镜像根 + 各环境的路径/基线状态。
+func TestMirrorGet(t *testing.T) {
 	p := writeTempConfig(t, `{"hosts":{"activeEnv":"a","sshs":[{"name":"a","host":"1.2.3.4","port":22,"user":"u","password":"p","zone":"36"}]}}`)
 	s := New(p)
 	dir := t.TempDir()
@@ -32,13 +32,8 @@ func TestMirrorGetPut(t *testing.T) {
 		t.Fatalf("环境信息不符: %+v", resp.Envs[0])
 	}
 
-	// 设置镜像根
-	body, _ := json.Marshal(map[string]string{"dir": dir})
-	rec2 := httptest.NewRecorder()
-	s.hMirrorPut(rec2, httptest.NewRequest("PUT", "/api/mirror", bytes.NewBuffer(body)))
-	if !bytes.Contains(rec2.Body.Bytes(), []byte(`"ok":true`)) {
-		t.Fatalf("PUT 失败: %s", rec2.Body.String())
-	}
+	// 设置镜像根(直接改配置 —— 原先的 PUT /api/mirror 与 PUT /api/hosts 重复,已删)
+	setSection(t, p, "mirror", map[string]any{"dir": dir})
 
 	// 写基线标记后应显示 ready + 环境路径
 	envDir := filepath.Join(dir, "a")
@@ -77,16 +72,5 @@ func TestMirrorPullValidation(t *testing.T) {
 	s.hMirrorPull(rec2, httptest.NewRequest("POST", "/api/mirror/pull", bytes.NewBufferString(`{"env":""}`)))
 	if rec2.Code != 400 {
 		t.Fatalf("空环境应 400, got %d", rec2.Code)
-	}
-}
-
-// 镜像根为空时 PUT 拒绝。
-func TestMirrorPutEmptyDir(t *testing.T) {
-	p := writeTempConfig(t, `{"hosts":{"sshs":[{"name":"a","host":"1.2.3.4"}]}}`)
-	s := New(p)
-	rec := httptest.NewRecorder()
-	s.hMirrorPut(rec, httptest.NewRequest("PUT", "/api/mirror", bytes.NewBufferString(`{"dir":"  "}`)))
-	if !bytes.Contains(rec.Body.Bytes(), []byte(`"ok":false`)) {
-		t.Fatalf("空目录应拒绝: %s", rec.Body.String())
 	}
 }
