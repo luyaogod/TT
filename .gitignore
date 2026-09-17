@@ -1,0 +1,39 @@
+# 构建产物
+/tt.exe
+/tt.exe~
+*.exe
+/dist/
+/web/dist/
+/web/node_modules/
+/web/debug/node_modules/
+/web/dict/node_modules/
+/desktop/node_modules/
+/desktop/dist/
+
+# 配置：含明文 SSH / 数据库口令，绝不入库
+/config.json
+/config.json.bak
+/config.local.json
+*/.tdev/
+/srccache/
+/debug-bps/
+/logs/
+.tt-serve.json
+.tt-serve.log
+.tdebug-serve.json
+.tdebug-serve.log
+
+# 本地数据
+/erp_data.db
+/erp_data.db-*
+
+# 本机构建缓存
+/.gocache/
+/.gotmp/
+
+# 编辑器与工具
+/.zcode/
+/.claude/skills/
+/.claude/settings.local.json
+.DS_Store
+Thumbs.db

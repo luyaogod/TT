@@ -1,0 +1,19 @@
+{
+  "name": "tt-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "TT 统一前端的构建入口：分别构建调试工作台与字典配置页两套 SPA",
+  "workspaces": [
+    "debug",
+    "dict"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace debug && npm run build --workspace dict",
+    "build:debug": "npm run build --workspace debug",
+    "build:dict": "npm run build --workspace dict",
+    "dev:debug": "npm run dev --workspace debug",
+    "dev:dict": "npm run dev --workspace dict",
+    "check:debug": "npm run check:tokens --workspace debug && npm run check:outline --workspace debug && npm run check:store --workspace debug"
+  }
+}
