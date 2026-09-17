@@ -226,7 +226,7 @@ func ResolvePath(flagPath string, allowMissing bool) (string, error) {
 	for _, p := range candidates {
 		abs, _ := filepath.Abs(p)
 		if _, err := os.Stat(abs); err == nil {
-			return abs, nil
+			return migrateInPlace(abs), nil
 		}
 		tried = append(tried, abs)
 	}
@@ -237,7 +237,7 @@ func ResolvePath(flagPath string, allowMissing bool) (string, error) {
 		// 也会让 --config <临时目录> 的调用（桌面外壳、冒烟测试）落在别处。
 		if explicit && len(candidates) > 0 {
 			if abs, err := filepath.Abs(candidates[0]); err == nil {
-				return abs, nil
+				return migrateInPlace(abs), nil
 			}
 			return candidates[0], nil
 		}
@@ -250,6 +250,40 @@ func ResolvePath(flagPath string, allowMissing bool) (string, error) {
 		"配置文件未找到。\n\n尝试了以下路径:\n%s\n\n缺省位置: %s\n设置 TT_CONFIG 环境变量或使用 --config 指定正确路径:\n  setx TT_CONFIG \"D:\\path\\to\\config.json\"\n  tt --config \"D:\\path\\to\\config.json\" debug status",
 		FormatTriedPaths(tried), DefaultConfigPath(),
 	)
+}
+
+// migrateInPlace 确保 p 处的配置是当前结构：若它还是合并前的旧结构，就地合并迁移。
+//
+// 为什么不能只依赖缺省落点上的那次迁移：
+//   - 便携包。`<exe 目录>\config.json` 在便携模式下优先于统一用户目录，所以
+//     迁移分支根本不会走；而便携用户最自然的做法就是把上一版的 config.json
+//     直接拷进新包 —— 不迁移的话，旧结构里的 `debug.sshs` 读不出来，环境清单
+//     会是空的，用户看到的是"我的环境全没了"。
+//   - `--config <路径>` 显式指定时同理。
+//
+// 文件不存在且没有可合并的旧配置时什么都不做（首次运行由调用方的 EnsureExists
+// 落骨架）。迁移失败不报错中断 —— 按未迁移的内容继续，读得出来多少算多少。
+func migrateInPlace(p string) string {
+	if b, err := os.ReadFile(p); err == nil && isCurrentSchema(b) {
+		return p
+	}
+	plan, err := PlanMigration(p)
+	if err != nil || plan == nil || len(plan.Sources) == 0 {
+		return p
+	}
+	if err := plan.Apply(); err != nil {
+		fmt.Fprintf(os.Stderr, "[tt] 合并旧配置到 %s 失败: %v\n", p, err)
+	}
+	return p
+}
+
+// isCurrentSchema 判断一段配置内容是否已是合并后的结构。
+func isCurrentSchema(b []byte) bool {
+	var root map[string]any
+	if json.Unmarshal(b, &root) != nil {
+		return false // 解析不了就当需要处理，交给 PlanMigration 去报
+	}
+	return intOf(root["schemaVersion"]) >= SchemaVersion
 }
 
 // FormatTriedPaths 把尝试过的路径渲染成 --help/报错里的清单。

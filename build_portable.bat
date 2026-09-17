@@ -1,23 +1,29 @@
 @echo off
 chcp 65001 >nul
-rem 构建 TT 的 Windows 便携包：前端 + exe + 空配置 + 示例配置 + README + skills，打包成 zip。
+rem Build the TT Windows portable package: frontend + exe + empty config + example
+rem + README + skills, zipped.
 rem
-rem NOTE: 绝不打包本机 config.json（含真实 SSH/数据库凭据）；便携版落地的是 config.empty.json，
-rem       用户首次用 `tt serve` 或手改自行配置。
-rem NOTE: 也不打包 erp_data.db（含客户表字典/schema/企业码等数据）；用户配好环境后自行
-rem       `tt dict db sync` 拉取本地字典库。
-rem NOTE: skills/ 以普通目录随包分发（不内嵌二进制），用户可直接编辑；
-rem       `tt install skills` 把它复制到当前目录。合并后这里是四套技能一起装。
+rem NOTE: this file must stay ASCII-only. cmd.exe parses .bat bytes in the OEM
+rem       codepage, so UTF-8 Chinese in a .bat breaks the parser (even after
+rem       chcp 65001) -- lines get split mid-character and cmd tries to run the
+rem       fragments. Chinese text belongs in README.md / docs/, not here.
+rem       The merged project's three source scripts carried the same warning.
 rem
-rem fmt: 合并前三个项目各有一份同形脚本（注释里写着"与另外两个一致，改动请三边同步"），
-rem      合并后只有这一份；唯一新增的是第 1 步的前端构建 —— main.go 的
-rem      //go:embed all:web/dist 要求产物先存在，否则 go build 会把空目录嵌进去。
+rem NOTE: never package this machine's config.json (it holds real SSH/DB
+rem       credentials). The portable package ships config.empty.json instead;
+rem       users configure it via `tt serve` or by editing config.json.
+rem NOTE: never package erp_data.db either (it holds the customer's table
+rem       dictionary / schema / enterprise codes); users run `tt dict db sync`
+rem       after configuring an environment.
+rem NOTE: skills/ ships as a plain directory (not embedded in the binary) so
+rem       users can edit it; `tt install skills` copies it to the target dir.
+rem       After the merge there are four skills in there, installed together.
 setlocal
 cd /d "%~dp0"
 
 set STAGE=dist\tt-portable
 set GOPROXY=https://goproxy.cn,direct
-rem 发布版本号：由 -ldflags 注入二进制（`tt version` 显示）；发新版改这一行
+rem Release version, injected into the binary via -ldflags (shown by `tt version`).
 set VERSION=0.1.0
 
 if exist dist rmdir /s /q dist
@@ -40,6 +46,7 @@ if errorlevel 1 (
     exit /b 1
 )
 popd
+rem main.go embeds web/dist, so the frontend must exist before go build.
 if not exist "web\dist\debug\index.html" (echo MISSING web\dist\debug\index.html & exit /b 1)
 if not exist "web\dist\dict\index.html"  (echo MISSING web\dist\dict\index.html  & exit /b 1)
 
@@ -57,11 +64,13 @@ copy /y README.md "%STAGE%\" >nul || (echo COPY README.md FAILED & exit /b 1)
 xcopy /e /i /y /q skills "%STAGE%\skills" >nul || (echo COPY skills FAILED & exit /b 1)
 if exist "%STAGE%\tt.exe" del /q "%STAGE%\tt.exe"
 copy /y tt.exe "%STAGE%\" >nul || (echo COPY tt.exe FAILED & exit /b 1)
-rem 便携标记：CLI 据此把配置留在包内而不是写用户目录（见 internal/config/paths.go 的 IsPortable）
+rem Portable marker: the CLI keeps its config inside the package instead of
+rem writing to the user directory (see internal/config/paths.go, IsPortable).
 type nul > "%STAGE%\.portable"
 
 echo [4/5] Packing zip ...
-rem 递归打包（含 skills/ 子目录）；shutil.make_archive 会保留 tt-portable/ 顶层目录
+rem Recursive zip (includes the skills/ subtree); shutil.make_archive keeps the
+rem tt-portable/ top-level directory inside the archive.
 python tools\zip.py >nul 2>nul
 if errorlevel 1 (
     python -c "import shutil; shutil.make_archive('dist/tt-portable','zip','dist','tt-portable')" >nul 2>nul

@@ -309,6 +309,78 @@ func TestResolvePath_EnvWinsWhenMissing(t *testing.T) {
 	}
 }
 
+// 便携包与 --config 显式指定都不会走"统一用户目录"那条迁移分支，
+// 所以旧结构的配置必须在选定路径上就地迁移 —— 否则用户把上一版的 config.json
+// 拷进新包后，环境清单会是空的。
+func TestMigrateInPlace_OldSchema(t *testing.T) {
+	home := isolateEnv(t)
+	_ = home
+
+	dir := t.TempDir()
+	p := filepath.Join(dir, DefaultConfigName)
+	if err := os.WriteFile(p, []byte(tdebugStyle), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := migrateInPlace(p); got != p {
+		t.Fatalf("migrateInPlace 返回 %q, 期望原路径", got)
+	}
+
+	// 迁移后必须是当前结构，且环境还在
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isCurrentSchema(b) {
+		t.Fatal("旧结构没有被迁移")
+	}
+	r, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(r.Hosts.SSHs) != 2 {
+		t.Errorf("环境数 = %d, 期望 2（旧 debug.sshs 里的两个）", len(r.Hosts.SSHs))
+	}
+	if r.Debug.WatchdogSeconds != 240 {
+		t.Errorf("调试设置丢失: %+v", r.Debug)
+	}
+	if r.Hosts.ByName("开发环境") == nil {
+		t.Error("环境名丢失")
+	}
+}
+
+// 已是当前结构的配置不该被就地迁移动到。
+func TestMigrateInPlace_AlreadyCurrent(t *testing.T) {
+	isolateEnv(t)
+
+	dir := t.TempDir()
+	p := filepath.Join(dir, DefaultConfigName)
+	seed := `{"schemaVersion":2,"listen":"127.0.0.1:9999","hosts":{"activeEnv":"x","sshs":[{"name":"x","host":"h","user":"u"}]}}`
+	if err := os.WriteFile(p, []byte(seed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(p)
+
+	migrateInPlace(p)
+
+	after, _ := os.ReadFile(p)
+	if string(before) != string(after) {
+		t.Error("已是当前结构的配置被改动了")
+	}
+}
+
+// 文件不存在且没有可合并的旧配置时，migrateInPlace 不该凭空造文件 ——
+// 首次运行的骨架由 EnsureExists 负责，那是调用方的决定。
+func TestMigrateInPlace_NothingToDo(t *testing.T) {
+	isolateEnv(t)
+
+	p := filepath.Join(t.TempDir(), DefaultConfigName)
+	migrateInPlace(p)
+	if _, err := os.Stat(p); err == nil {
+		t.Error("无可合并内容时不该创建文件")
+	}
+}
+
 func contains(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {

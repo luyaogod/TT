@@ -3,13 +3,17 @@ chcp 65001 >nul
 rem Build the TT Windows desktop packages (Electron shell + Go backend):
 rem   web/dist -> tt.exe (go:embed) -> electron-builder (NSIS installer)
 rem   -> green/portable: rename the unpacked dir, drop the .portable marker + readme, zip it.
-rem NOTE: keep this file ASCII-only. cmd.exe parses .bat bytes in the OEM codepage,
-rem       so UTF-8 Chinese in a .bat breaks the parser (Chinese text lives in
-rem       desktop/build/*.txt and desktop/README.md instead).
 rem
-rem 合并说明：合并前只有 TDebug 有桌面外壳（TDev 与 TDictCli 都是纯 CLI）。
-rem 现在外壳拉起的是统一服务 `tt.exe serve --desktop`，窗口落在 /debug/，
-rem 界面里的导航可以跳到 /dict/ —— 一个外壳同时覆盖两套页面。
+rem NOTE: this file must stay ASCII-only. cmd.exe parses .bat bytes in the OEM
+rem       codepage, so UTF-8 Chinese in a .bat breaks the parser (even after
+rem       chcp 65001) -- lines get split mid-character and cmd tries to run the
+rem       fragments. Chinese text belongs in desktop/build/*.txt and
+rem       desktop/README.md, not here.
+rem
+rem Merge note: before the merge only TDebug had a desktop shell (TDev and
+rem TDictCli were pure CLI). The shell now spawns the unified service
+rem `tt.exe serve --desktop`, and its window loads /debug/; the in-app nav
+rem switches to /dict/. One shell, both pages, all three tools.
 setlocal
 cd /d "%~dp0"
 
