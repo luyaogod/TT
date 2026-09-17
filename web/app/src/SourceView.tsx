@@ -152,13 +152,18 @@ export function SourceView() {
         },
       })
     }
-    if (cursorLine > 0 && (isDebug ? state === 'stopped' : true)) {
+    // 当前行高亮。停站时实心黄 + 左边距箭头;运行中(单步/continue 还在途、停站事件还没回来)
+    // 保留一条**暗色**高亮,不画箭头 —— 程序可能正卡在 GDC 等人工操作,那时 fgldb 不会再有
+    // 停站事件、会话合法地停在 running,高亮整条消失会让人丢掉"我读到哪了"。
+    // 暗色同时说明"这是上一次的位置,不是现在的位置"。
+    if (cursorLine > 0) {
+      const running = isDebug && state !== 'stopped'
       list.push({
         range: new monaco.Range(cursorLine, 1, cursorLine, 1),
         options: {
           isWholeLine: true,
-          className: isDebug ? 'cur-line-hl' : 'cur-line-hl',
-          glyphMarginClassName: isDebug ? 'cur-arrow' : 'cur-arrow',
+          className: running ? 'cur-line-hl cur-line-hl-pending' : 'cur-line-hl',
+          glyphMarginClassName: running ? undefined : 'cur-arrow',
           overviewRuler: { color: '#eab308', position: monaco.editor.OverviewRulerLane.Center },
         },
       })

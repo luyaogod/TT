@@ -29,6 +29,12 @@
 .cur-line-hl {
   background: rgba(234, 179, 8, 0.12);
 }
+/* 运行中(单步/continue 还在途)保留的暗色版本:位置还标着,但明显比停站浅 ——
+   程序可能已经离开这一行(甚至正卡在 GDC 等人工操作),暗色表达"这是上一次的位置"。
+   两个类合写是为了不依赖书写顺序压过上面那条。 */
+.cur-line-hl.cur-line-hl-pending {
+  background: rgba(234, 179, 8, 0.06);
+}
 /* 停站行同时有断点:两个 glyph 类合在同一元素上,cur-arrow 的 background 简写
    会整体覆盖 bp-dot 的红色渐变导致红点消失;这里把红点作为最上层叠加在黄箭头右侧 */
 .bp-dot.cur-arrow {
