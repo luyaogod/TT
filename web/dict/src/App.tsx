@@ -1,21 +1,26 @@
-import { useState, type ReactNode } from 'react'
-import { Server, Folder, Database, Settings, Bug } from 'lucide-react'
-import { SettingsView } from './SettingsView'
+import { useEffect, useState, type ReactNode } from 'react'
+import { Folder, Database, Settings, Bug } from 'lucide-react'
 import { MirrorView } from './MirrorView'
 import { SyncView } from './SyncView'
-import { AppSettingsView } from './AppSettingsView'
-import { cn } from './ui'
+import { api } from './api'
+import { cn } from '../../shared/utils'
 
-// 单页应用:左侧活动栏切换「环境配置」(SSH/数据库)、「源码镜像」、「数据同步」、「设置」(命令行安装)。
-// 栏底还有一个通往调试工作台的入口 —— 那是**另一套 SPA**(统一服务下挂在 /debug/),
-// 所以只能整页跳转,不在本页的 view 状态里。
+// 字典页:左侧活动栏只有**两个操作视图**(源码镜像 / 数据同步)加两个跨页入口。
+//
+// 环境与数据库的配置、查询数据源、镜像目录、同步目标、BDL 文档目录 —— 这些"配置"已全部
+// 收进调试工作台里的统一设置页(/debug/#settings/…)。本页保留的是**动作**:拉源码镜像、
+// 跑字典同步(各自带长跑任务与进度)。合并前这里还有「环境配置」与「设置」两个页签,
+// 与调试页的设置近乎重复,现在只留一份。
+//
+// 两个跨页入口都是普通 <a>:调试工作台是**另一套 SPA**(统一服务下挂在 /debug/),
+// 不在本页的 view 状态里。
 function ActivityIcon({ label, active, onClick, children }: {
   label: string; active: boolean; onClick: () => void; children: ReactNode
 }) {
   return (
     <button type="button" title={label} onClick={onClick}
       className={cn('flex h-8 w-full shrink-0 items-center justify-center transition-colors',
-        active ? 'bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-50' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100')}>
+        active ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground hover:bg-foreground/5')}>
       {children}
     </button>
   )
@@ -26,44 +31,65 @@ function ActivityIcon({ label, active, onClick, children }: {
 function ActivityLink({ label, href, children }: { label: string; href: string; children: ReactNode }) {
   return (
     <a href={href} title={label}
-      className="flex h-8 w-full shrink-0 items-center justify-center transition-colors text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">
+      className="flex h-8 w-full shrink-0 items-center justify-center text-muted-foreground transition-colors hover:bg-foreground/5">
       {children}
     </a>
   )
 }
 
-// 视图常驻挂载,切换只改 display:输入框/滚动位置/轮询状态不丢。
+// 视图常驻挂载,切换只改 display:下拉选择/滚动位置/轮询状态不丢。
 function ViewPane({ show, children }: { show: boolean; children: ReactNode }) {
   return <div className={cn('h-full min-h-0 min-w-0', show ? 'block' : 'hidden')}>{children}</div>
 }
 
+type View = 'mirror' | 'sync'
+
+function viewFromHash(): View {
+  return window.location.hash.replace(/^#/, '') === 'sync' ? 'sync' : 'mirror'
+}
+
 export function App() {
-  const [view, setView] = useState<'envs' | 'mirror' | 'sync' | 'settings'>('envs')
+  const [view, setView] = useState<View>(viewFromHash)
+  // 只有调试子系统在场时才显示「设置」入口:统一服务的路由允许只挂字典子系统,
+  // 那种部署下 /debug/ 是空的,给一个死链不如不给。
+  const [hasDebug, setHasDebug] = useState(true)
+
+  useEffect(() => {
+    void api.health().then((h) => setHasDebug(!!h.debug)).catch(() => { /* 探测不到就不显示 */ })
+  }, [])
+
+  // 片段 ↔ 视图:设置页里的「去运行」链接指向 /dict/#mirror 与 /dict/#sync
+  useEffect(() => {
+    const onHash = () => setView(viewFromHash())
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
+  const go = (v: View) => {
+    setView(v)
+    if (window.location.hash !== '#' + v) window.history.replaceState(null, '', '#' + v)
+  }
+
   return (
-    <div className="flex h-full min-h-0 bg-zinc-50 text-zinc-800 dark:bg-zinc-950 dark:text-zinc-100">
-      <nav className="flex w-10 shrink-0 flex-col items-center gap-1 border-r border-zinc-200 bg-white py-2 dark:border-zinc-800 dark:bg-zinc-900">
-        <ActivityIcon label="环境配置(SSH 与数据库)" active={view === 'envs'} onClick={() => setView('envs')}>
-          <Server className="h-5 w-5" />
-        </ActivityIcon>
-        <ActivityIcon label="源码镜像" active={view === 'mirror'} onClick={() => setView('mirror')}>
+    <div className="flex h-full min-h-0 bg-background text-foreground">
+      <nav className="flex w-10 shrink-0 flex-col items-center gap-1 border-r border-border bg-background py-2">
+        <ActivityIcon label="源码镜像" active={view === 'mirror'} onClick={() => go('mirror')}>
           <Folder className="h-5 w-5" />
         </ActivityIcon>
-        <ActivityIcon label="数据同步(ERP → 本地 SQLite)" active={view === 'sync'} onClick={() => setView('sync')}>
+        <ActivityIcon label="数据同步(ERP → 本地 SQLite)" active={view === 'sync'} onClick={() => go('sync')}>
           <Database className="h-5 w-5" />
         </ActivityIcon>
-        <ActivityIcon label="设置(命令行安装)" active={view === 'settings'} onClick={() => setView('settings')}>
-          <Settings className="h-5 w-5" />
-        </ActivityIcon>
-        {/* 跨页入口:调试工作台是另一套 SPA,整页跳过去(统一服务下挂在 /debug/) */}
+        {hasDebug && (
+          <ActivityLink label="设置(环境 / 数据库 / 镜像目录 / 同步目标)" href="/debug/#settings/data-dict">
+            <Settings className="h-5 w-5" />
+          </ActivityLink>
+        )}
         <ActivityLink label="调试工作台(切换到调试页)" href="/debug/">
           <Bug className="h-5 w-5" />
         </ActivityLink>
       </nav>
       <div className="min-h-0 min-w-0 flex-1">
-        <ViewPane show={view === 'envs'}><SettingsView /></ViewPane>
         <ViewPane show={view === 'mirror'}><MirrorView /></ViewPane>
         <ViewPane show={view === 'sync'}><SyncView /></ViewPane>
-        <ViewPane show={view === 'settings'}><AppSettingsView /></ViewPane>
       </div>
     </div>
   )
