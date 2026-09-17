@@ -1,5 +1,10 @@
-// Package server 提供字典页的 REST 接口与 config.json 读写:源码镜像、字典同步、
-// BDL 文档目录、用户 PATH 安装。只覆盖配置管理,不含任何调试能力。
+// Package server 提供字典侧的 REST 接口:源码镜像拉取、字典同步、BDL 文档目录。
+// 只覆盖这几件事,不含任何调试能力。
+//
+// 它**不再对应一个独立页面** —— 合并前字典页有自己的 SPA(挂在 /dict/),本包的端点
+// 也挂在 /dict/api/ 下;那个页面已并入调试工作台里的统一设置页,于是本包的端点直接挂到
+// 共享层 /api/ 下(见 internal/web 的 routes)。包结构保留是因为它持有两个长跑任务的
+// 状态与处理器,与"页面挂在哪"无关。
 //
 // SSH 连接与服务器侧数据库探测复用 internal/host(与 CLI 的 db discover 同源);
 // 客户端直连测试走 internal/erpdb(与 db ping / 远程直查同链路)。
@@ -72,13 +77,11 @@ func (s *Server) syncTarget() string {
 	return s.defaultDBTarget()
 }
 
-// Handler 返回字典页的全部 HTTP 面(镜像/同步/PATH 安装/BDL 文档的 REST 接口 +
-// 兜底页),所有路径相对于挂载点。
+// Handler 返回字典侧的 HTTP 面(镜像/同步/BDL 文档的 REST 接口)。
 //
-// tt serve 用 http.StripPrefix("/dict", srv.Handler()) 把它挂在 /dict/ 下,
-// 于是包内注册的 /api/mirror 对外是 /dict/api/mirror。
+// 路径是**绝对**的(/api/…),由 internal/web 直接挂在共享层 /api/ 下,不经 StripPrefix。
 //
-// 服务的路径(全部返回 JSON;前端在 web/ 下):
+// 服务的路径(全部返回 JSON):
 //
 //	GET    /api/mirror         镜像根 + 各环境镜像现状 + 拉取任务状态
 //	PUT    /api/mirror         保存镜像根(mirror.dir)
@@ -89,14 +92,13 @@ func (s *Server) syncTarget() string {
 //	GET    /api/bdldoc         BDL 文档目录
 //	PUT    /api/bdldoc         保存 BDL 文档目录
 //	(未知 /api/ 路径)        404 JSON(见 hUnknownAPI)
-//	GET    /                  兜底页(见 hStatic)
 //
-// 主机/环境的读写走共享的顶层 /api/hosts;dbprobe / dbaccverify / conntest /
-// 健康检查也由 internal/web 在顶层各提供一份,故本包不注册这些端点
+// 主机/环境的读写走共享的顶层 /api/hosts;dbprobe / dbaccverify / conntest、
+// 健康检查、配置派生状态、PATH 安装也由 internal/web 各提供一份,故本包不注册这些端点
 // (它们两边都有,挂在同一进程里会撞名)。
 //
 // 用户 PATH 安装(/api/install)也**已移到** internal/web:把 tt 加进 PATH 是应用级
-// 动作,与字典查询无关;先前挂在这里,导致共用的设置页要用它就得去调本子系统的私有 API。
+// 动作,与字典查询无关。
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/mirror", s.hMirrorGet)
@@ -112,15 +114,18 @@ func (s *Server) Handler() http.Handler {
 	// 拿到 200 + HTML,解析失败时报的错与真实原因(接口不存在)完全对不上。
 	// 注意 Go 1.22 起具体模式优先于前缀模式,所以上面那些具名路由不受影响。
 	mux.HandleFunc("/api/", s.hUnknownAPI)
-	mux.HandleFunc("/", s.hStatic)
 	return mux
 }
 
-// hUnknownAPI 未知的字典接口:明确 404,并提示它可能已经搬到统一层。
+// hUnknownAPI 未注册的 /api/ 路径:明确 404。
+//
+// 这条兜底挂在共享层 /api/ 下,所以它也会接到与字典无关的路径 —— 文案因此写得通用些。
+// 关键是**不能**落到 HTML 页:那样调用方拿到 200 + HTML,解析失败时报的错与真实原因
+// (接口不存在)完全对不上。
 func (s *Server) hUnknownAPI(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 404, map[string]any{
 		"ok":    false,
-		"error": "未知的字典接口: " + r.URL.Path + "(共享类接口在 /api/ 下,如 /api/hosts、/api/install、/api/config/status)",
+		"error": "未知接口: " + r.URL.Path,
 	})
 }
 
@@ -142,23 +147,4 @@ func readBody[T any](w http.ResponseWriter, r *http.Request, out *T) bool {
 		return false
 	}
 	return true
-}
-
-// hStatic 兜底页:本包只提供字典页的 REST 接口,页面本身(内嵌 SPA)由 internal/web
-// 统一提供(tt serve)。请求打到 /dict/ 下任何非 API 路径时给一页接口清单,
-// 避免只看到光秃秃的 404。
-//
-// 注意:这个 "/" 兜底会遮蔽挂载点下的其它页面路由。若 internal/web 要让自己的
-// SPA 接管 /dict/ 的页面路径,把 Handler 里最后那行 mux.HandleFunc("/", s.hStatic)
-// 删掉即可 —— API 路由不受影响。
-func (s *Server) hStatic(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(w, `<!doctype html><html lang="zh"><meta charset="utf-8">
-<title>tt dict</title><body style="font-family:system-ui;padding:40px;line-height:1.8">
-<h2>字典配置接口</h2>
-<p>页面由 <code>tt serve</code> 提供;本页只说明接口。</p>
-<p>API:<code>GET/PUT /api/mirror</code>、<code>POST /api/mirror/pull</code>、
-<code>GET/PUT/POST /api/dbsync</code>、<code>GET/PUT /api/bdldoc</code>。</p>
-<p>PATH 安装与配置状态由统一层提供:<code>/api/install</code>、<code>/api/config/status</code>。</p>
-<p>主机与环境清单由共享端点 <code>/api/hosts</code> 读写。</p></body>`)
 }

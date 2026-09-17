@@ -13,7 +13,8 @@ rem
 rem Merge note: before the merge only TDebug had a desktop shell (TDev and
 rem TDictCli were pure CLI). The shell now spawns the unified service
 rem `tt.exe serve --desktop`, and its window loads /debug/; the in-app nav
-rem switches to /dict/. One shell, both pages, all three tools.
+rem contains the whole settings UI (sites / data dictionary / debug / app). One shell,
+rem one page, all three tools.
 setlocal
 cd /d "%~dp0"
 
@@ -34,7 +35,7 @@ set GREEN=%STAGE%\TT-%VER%-portable
 if exist "%STAGE%" rmdir /s /q "%STAGE%"
 
 echo [1/6] Building web frontend ...
-if not exist web\dist\debug\index.html (
+if not exist web\dist\index.html (
     pushd web
     call npm install
     if errorlevel 1 (echo NPM INSTALL FAILED & popd & exit /b 1)

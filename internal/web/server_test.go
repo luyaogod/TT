@@ -216,17 +216,27 @@ func TestHostsGet(t *testing.T) {
 	}
 }
 
-// 没有任何子系统时，两个前缀都不能把请求吞掉而是给出引导页。
+// 没有前端构建产物时不能把请求吞掉，而是给出引导页。
 func TestRouting_NoSubsystems(t *testing.T) {
 	s, _ := newTestServer(t, seededConfig)
-	for _, p := range []string{"/debug/", "/dict/"} {
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/debug/", nil))
+	if rec.Code != http.StatusOK {
+		t.Errorf("/debug/ → HTTP %d, 期望 200（引导页）", rec.Code)
+	}
+	if !contains(rec.Body.String(), "前端尚未构建") {
+		t.Errorf("/debug/ 没有给出引导页")
+	}
+}
+
+// 字典页那套 SPA 已经并进统一设置页，/dict/ 不再存在。
+func TestRouting_DictPageRemoved(t *testing.T) {
+	s, _ := newTestServer(t, seededConfig)
+	for _, p := range []string{"/dict/", "/dict/api/mirror"} {
 		rec := httptest.NewRecorder()
 		s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, p, nil))
-		if rec.Code != http.StatusOK {
-			t.Errorf("%s → HTTP %d, 期望 200（引导页）", p, rec.Code)
-		}
-		if !contains(rec.Body.String(), "前端尚未构建") {
-			t.Errorf("%s 没有给出引导页", p)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s → HTTP %d, 期望 404（字典页已移除）", p, rec.Code)
 		}
 	}
 }

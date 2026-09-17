@@ -1,14 +1,17 @@
 // Package web 是统一本地服务的 HTTP 层。
 //
-// 一个进程、一个端口，同时承载三件事：
+// 一个进程、一个端口、一套页面：
 //
-//	/debug/  调试工作台 SPA（原 TDebug 的前端）与其 REST/WS API
-//	/dict/   字典/镜像/同步 SPA（原 TDictCli 的前端）与其 API
-//	/api/*   统一 API —— 其中 /api/hosts 是两套页面共用的环境/数据库管理端点
+//	/debug/       调试工作台 SPA（含其专属的 /debug/api/*）
+//	/api/*        统一 API —— 环境/数据库配置（/api/hosts）、配置派生状态、
+//	              PATH 安装，以及字典类动作（源码镜像拉取、字典同步、BDL 文档）
 //
-// 合并前两个工具各有自己的 HTTP 服务、各自一个配置页、各自读写配置的不同节；
-// 现在环境清单只有一份数据源（config.json 的 hosts 节），由本包的 /api/hosts 统一读写，
-// 两套页面共用它。这就是"统一配置管理"落在 HTTP 层的样子。
+// 合并前后是两套独立 SPA（调试工作台 /debug/ 与字典页 /dict/），各有自己的 /api/*
+// 靠挂载前缀分开。字典页已并入调试工作台里的**统一设置页**，于是：
+//   - 「配置」（环境、数据库、查询数据源、镜像目录、同步目标、BDL 目录）统一走 /api/hosts；
+//   - 「动作」（拉源码镜像、跑字典同步）留在设置页「数据字典」分区的对应卡片里，
+//     端点从 /dict/api/* 升到共享层 /api/*；
+//   - 环境清单只有一份数据源（config.json 的 hosts 节），这就是"统一配置管理"落地的样子。
 package web
 
 import (
@@ -39,23 +42,20 @@ const maxPortTries = 50
 
 // Options 装配一个统一服务所需的全部外部依赖。
 type Options struct {
-	// DebugFS / DictFS 两套前端各自的构建产物根目录（dist 下的 debug/ 与 dict/）。
-	// 由调用方经 common.WebSub 取好；nil 或没构建时该页面回落成引导页。
+	// DebugFS 前端构建产物根目录（dist/debug）。nil 或没构建时回落引导页。
 	DebugFS fs.FS
-	DictFS  fs.FS
 	// ConfigPath 配置文件路径。空则按统一规则解析（写路径允许缺省落点）。
 	ConfigPath string
 	// Version 版本号，出现在 /api/health 与引导页上。
 	Version string
 
-	// Debug 调试工作台的 handler（由 internal/cli/debug 装配）。nil = 未接入。
+	// Debug 调试子系统（工作台页面 + 其 /debug/api/*）。nil = 未接入。
 	Debug http.Handler
-	// DebugBase 调试工作台的挂载前缀，默认 "/debug"。
-	DebugBase string
-	// Dict 字典页的 handler（由 internal/dict/server 装配）。nil = 未接入。
+	// Dict 字典子系统（源码镜像拉取 / 字典同步 / BDL 文档）。nil = 未接入。
+	//
+	// 它不再是"另一个页面"——合并前字典页有自己的一套 SPA，两套页面各占一个挂载前缀；
+	// 那个页面已并入统一设置页，于是它的端点直接挂在共享层 /api/ 下。
 	Dict http.Handler
-	// DictBase 字典页的挂载前缀，默认 "/dict"。
-	DictBase string
 
 	// Reloaders 配置被本服务改写后需要重新加载内存态的子系统。
 	//
@@ -95,12 +95,6 @@ type Server struct {
 
 // New 装配路由。返回的 Server 可直接交给 http.Server 使用。
 func New(opt Options) *Server {
-	if opt.DebugBase == "" {
-		opt.DebugBase = "/debug"
-	}
-	if opt.DictBase == "" {
-		opt.DictBase = "/dict"
-	}
 	s := &Server{opt: opt, mux: http.NewServeMux()}
 	s.routes()
 	return s
@@ -136,17 +130,25 @@ func (s *Server) routes() {
 		m.HandleFunc("POST /api/shutdown", s.hShutdown)
 	}
 
-	// ---- 子系统：只接管各自的 API，前缀剥掉后交给它们 ----
+	// ---- 调试子系统：挂在 /debug/api/（它自己的页面在 /debug/） ----
 	if s.opt.Debug != nil {
-		m.Handle(s.opt.DebugBase+"/api/", http.StripPrefix(s.opt.DebugBase, s.opt.Debug))
-	}
-	if s.opt.Dict != nil {
-		m.Handle(s.opt.DictBase+"/api/", http.StripPrefix(s.opt.DictBase, s.opt.Dict))
+		m.Handle("/debug/api/", http.StripPrefix("/debug", s.opt.Debug))
 	}
 
-	// ---- 两套页面（前端构建产物） ----
-	m.Handle(s.opt.DebugBase+"/", SPAHandler(s.opt.DebugFS, s.opt.DebugBase+"/", "调试工作台未构建"))
-	m.Handle(s.opt.DictBase+"/", SPAHandler(s.opt.DictFS, s.opt.DictBase+"/", "数据字典页未构建"))
+	// ---- 字典子系统的端点：直接挂在共享层 /api/ 下 ----
+	//
+	// 合并前它们挂在 /dict/api/，因为那时还有一套独立的字典页 SPA，两套页面各有自己的
+	// /api/* 需要靠前缀分开。那个页面已并入统一设置页，「/dict」这套前缀不再有存在理由：
+	// 这些端点（源码镜像拉取、字典同步、BDL 文档）就是统一 API 的一部分。
+	//
+	// 包内注册的就是 /api/… 绝对路径，所以这里不加 StripPrefix。
+	// 上面那些更具体的具名路由优先于这条前缀模式，不会被它遮住。
+	if s.opt.Dict != nil {
+		m.Handle("/api/", s.opt.Dict)
+	}
+
+	// ---- 页面（只剩调试工作台一套 SPA） ----
+	m.Handle("/debug/", SPAHandler(s.opt.DebugFS, "/debug/", "界面未构建"))
 
 	// ---- 根路径 ----
 	m.HandleFunc("/", s.hRoot)
@@ -561,19 +563,14 @@ func isLoopback(remoteAddr string) bool {
 
 // ---------- 静态资源 ----------
 
-// hRoot 把根路径送到默认页面。两套页面都有自己的挂载前缀，这里只做跳转。
+// hRoot 把根路径送到工作台。合并后只剩一套 SPA，这里只做跳转。
 func (s *Server) hRoot(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
 	}
-	// 默认进调试工作台（它是桌面版的主页）；字典页在 /dict/。
 	if s.opt.Debug != nil {
-		http.Redirect(w, r, s.opt.DebugBase+"/", http.StatusFound)
-		return
-	}
-	if s.opt.Dict != nil {
-		http.Redirect(w, r, s.opt.DictBase+"/", http.StatusFound)
+		http.Redirect(w, r, "/debug/", http.StatusFound)
 		return
 	}
 	writeLanding(w, fmt.Sprintf("tt %s", s.opt.Version))

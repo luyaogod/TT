@@ -17,7 +17,9 @@ export default defineConfig(() => {
     base: '/debug/',
     plugins: [react(), tailwindcss()],
     build: {
-      outDir: '../dist/debug',
+      // 直接产出到 dist 根:合并后只剩这一套 SPA,再套一层 debug/ 是多余的嵌套。
+      // 注意 base 仍然是 /debug/ —— 它决定资源 URL 与路由前缀,与产出目录无关。
+      outDir: '../dist',
       emptyOutDir: true,
       chunkSizeWarningLimit: 9000,
     },

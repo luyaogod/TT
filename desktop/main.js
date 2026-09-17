@@ -227,9 +227,9 @@ async function restartBackend() {
 
 // appURL 给统一服务的地址补上调试工作台的挂载前缀。
 //
-// 合并后 `tt serve` 一个进程同时提供两套页面：/debug/（调试工作台）与 /dict/（字典页），
+// 合并后 `tt serve` 只提供一套页面：/debug/ —— 调试工作台，其中的统一设置页
 // 共享同一份环境配置。桌面版的主角是调试工作台，所以窗口直接落在 /debug/；
-// 界面里的导航有跳去 /dict/ 的入口，点过去即可，不需要另开窗口。
+// 覆盖三个工具的全部配置（站点管理 / 数据字典 / DEBUG / 应用设置）。
 function appURL(base) {
   return base.replace(/\/+$/, '') + '/debug/'
 }

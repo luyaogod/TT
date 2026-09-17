@@ -16,12 +16,16 @@
 // 所以每张卡片的保存都必须提交**完整的节**(从读到的快照 + 编辑项构造),绝不能只发表单里
 // 那几个字段:老代码在「高级」里只发了 5 个键,于是 fglserver / persistBreakpoints /
 // activeEnv 在用户每次保存时被静默抹掉。debugPatchOf 就是为了堵这个。
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
-  Bug, Database, Eye, EyeOff, Folder, HardDrive, Monitor, Plus, RefreshCw, RotateCcw,
-  Server, SlidersHorizontal, Star, Sun, Moon, Trash2, Zap, ExternalLink,
+  AlertCircle, Bug, CheckCircle2, Database, Download, Eye, EyeOff, Folder, HardDrive,
+  Monitor, Plus, RefreshCw, RotateCcw, Server, SlidersHorizontal, Star, Sun, Moon,
+  Terminal, Trash2, Zap,
 } from 'lucide-react'
-import { api, type HostsDb, type HostsPatch, type HostsSsh, type HostsView } from './api'
+import {
+  api, type ConfigMeta, type ConfigStatus, type DBSyncJob, type DBSyncResp,
+  type HostsDb, type HostsPatch, type HostsSsh, type HostsView, type MirrorJob, type MirrorResp,
+} from './api'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -116,6 +120,7 @@ const NAV: {
     key: 'app', icon: Monitor, cards: [
       { id: 'card-app-theme', label: '外观', icon: Monitor },
       { id: 'card-app-service', label: '服务', icon: Server },
+      { id: 'card-app-install', label: '命令行集成', icon: Terminal },
       { id: 'card-app-info', label: '运行信息', icon: Server },
     ],
   },
@@ -179,6 +184,54 @@ function ThemeCards({ value, onChange }: { value: ThemeMode; onChange: (t: Theme
       })}
     </div>
   )
+}
+
+// 长跑任务的进度块:镜像拉取与字典同步的阶段语义不同,样式与骨架相同。
+function JobProgress({ env, phaseLabel, pct, indeterminate, elapsed, error, message, children }: {
+  env: string; phaseLabel: string; pct: number; indeterminate: boolean; elapsed: string
+  error?: string; message?: string; children: ReactNode
+}) {
+  const failed = !!error
+  return (
+    <div className="mt-2 border border-border bg-muted/20 p-2">
+      <div className="mb-1.5 flex items-center gap-2 text-xs">
+        <span className="font-medium">{env}</span>
+        <span className="text-muted-foreground">{phaseLabel}</span>
+        <span className="ml-auto text-[11px] text-muted-foreground">{elapsed}</span>
+      </div>
+      {/* 轨道与填充成对用 token:只改填充会让暗色下的轨道消失 */}
+      <div className="h-2 w-full overflow-hidden bg-muted">
+        {indeterminate
+          ? <div className="bar-indeterminate h-full w-1/3 bg-primary" />
+          : <div className={cn('h-full transition-[width] duration-300', failed ? 'bg-destructive' : 'bg-primary')} style={{ width: pct + '%' }} />}
+      </div>
+      <div className="mt-1.5 grid grid-cols-3 gap-2 text-[11px] text-muted-foreground">{children}</div>
+      {message && (
+        <p className={cn('mt-1.5 flex items-center gap-1 text-xs',
+          failed ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400')}>
+          {failed ? <AlertCircle className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+          {error || message}
+        </p>
+      )}
+    </div>
+  )
+}
+
+// 阶段标签与字节格式化:原先在字典页的两个视图里,随功能一起搬进来。
+const MIRROR_PHASE: Record<string, string> = {
+  connect: '连接服务器…', probe: '探测 T100 目录…', pack: '服务器打包…',
+  download: '下载并解压…', done: '完成', error: '失败',
+}
+const SYNC_PHASE: Record<string, string> = {
+  open: '连接远程数据库…', table: '拉取数据表…', index: '创建主键索引…',
+  replace: '替换本地数据库…', done: '完成', error: '失败',
+}
+function fmtBytes(n: number): string {
+  if (!n) return '0 B'
+  if (n >= 1 << 30) return (n / (1 << 30)).toFixed(2) + ' GB'
+  if (n >= 1 << 20) return (n / (1 << 20)).toFixed(1) + ' MB'
+  if (n >= 1 << 10) return (n / (1 << 10)).toFixed(1) + ' KB'
+  return n + ' B'
 }
 
 const input = 'h-7 text-xs'
@@ -267,6 +320,19 @@ export function SettingsView() {
   })
   const [dict, setDict] = useState<DictForm>({ querySource: '', mirrorDir: '', syncTarget: '', bdldocDir: '' })
   const [listen, setListen] = useState('')
+  // 派生状态(路径存不存在只有服务端算得出来)与配置元信息,以及 PATH 安装状态
+  const [status, setStatus] = useState<ConfigStatus | null>(null)
+  const [meta, setMeta] = useState<ConfigMeta | null>(null)
+  const [installBusy, setInstallBusy] = useState(false)
+  const [installNote, setInstallNote] = useState('')
+  // 源码镜像 / 字典同步的运行态:它们是**动作**(长跑任务 + 进度),不再是独立页面,
+  // 就住在「数据字典」分区的对应卡片里。
+  const [mirror, setMirror] = useState<MirrorResp | null>(null)
+  const [mirrorEnv, setMirrorEnv] = useState('')
+  const [sync, setSync] = useState<DBSyncResp | null>(null)
+  const [syncEnv, setSyncEnv] = useState('')
+  const [opBusy, setOpBusy] = useState('')
+  const [opNote, setOpNote] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [selSsh, setSelSsh] = useState(0)
   const [err, setErr] = useState('')
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle')
@@ -333,6 +399,9 @@ export function SettingsView() {
       setListen(c.listen || '')
       cleanDirty(); setSaveState('idle'); setErr('')
     }).catch((e) => setErr(e.message))
+    // 派生状态与元信息:取不到不影响主流程(它们在卡片里只是提示)
+    void api.configStatus().then(setStatus).catch(() => { /* 静默:提示性信息 */ })
+    void api.configMeta().then(setMeta).catch(() => { /* 静默:提示性信息 */ })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -503,12 +572,94 @@ export function SettingsView() {
     } finally { setBusy('') }
   }
 
+  // ---- 命令行集成(用户 PATH) ----
+  const doInstall = async (add: boolean) => {
+    setInstallBusy(true); setInstallNote('')
+    try {
+      const st = add ? await api.installAdd() : await api.installRemove()
+      setStatus((prev) => (prev ? { ...prev, install: st } : prev))
+      setInstallNote(add ? `已把 ${st.exeDir} 加入用户 PATH,新开的终端即可直接敲 tt` : `已从用户 PATH 移除 ${st.exeDir}`)
+    } catch (ex: any) {
+      setInstallNote('操作失败: ' + (ex.message || String(ex)))
+    } finally { setInstallBusy(false) }
+  }
+
   // 「已保存」提示短暂停留后回到空闲
   useEffect(() => {
     if (saveState !== 'saved') return
     const t = window.setTimeout(() => setSaveState('idle'), 2000)
     return () => window.clearTimeout(t)
   }, [saveState])
+
+  // ---- 源码镜像 / 字典同步(动作) ----
+  // 只在「数据字典」分区且正在跑的时候轮询:本页是常驻挂载的,无脑轮询会一直打后端。
+  const refreshMirror = useCallback(async () => {
+    try {
+      const d = await api.mirror()
+      setMirror(d)
+      setMirrorEnv((prev) => {
+        if (prev && d.envs.some((e) => e.name === prev)) return prev
+        if (d.activeEnv && d.envs.some((e) => e.name === d.activeEnv)) return d.activeEnv
+        return d.envs[0]?.name || ''
+      })
+    } catch { /* 取不到就不显示操作区,不打扰 */ }
+  }, [])
+  const refreshSync = useCallback(async () => {
+    try {
+      const d = await api.dbsync()
+      setSync(d)
+      setSyncEnv((prev) => {
+        if (prev && d.envs.some((e) => e.name === prev)) return prev
+        if (d.activeEnv && d.envs.some((e) => e.name === d.activeEnv)) return d.activeEnv
+        return d.envs[0]?.name || ''
+      })
+    } catch { /* 同上 */ }
+  }, [])
+  useEffect(() => {
+    if (section !== 'data-dict') return
+    void refreshMirror(); void refreshSync()
+  }, [section, refreshMirror, refreshSync])
+  const mirrorRunning = !!mirror?.job?.running
+  const syncRunning = !!sync?.job?.running
+  useEffect(() => {
+    if (!mirrorRunning) return
+    const t = window.setInterval(() => { void refreshMirror() }, 800)
+    return () => window.clearInterval(t)
+  }, [mirrorRunning, refreshMirror])
+  useEffect(() => {
+    if (!syncRunning) return
+    const t = window.setInterval(() => { void refreshSync() }, 800)
+    return () => window.clearInterval(t)
+  }, [syncRunning, refreshSync])
+
+  const pullMirror = async (full: boolean) => {
+    if (!mirrorEnv) return
+    if (full && !window.confirm(`全量重建环境「${mirrorEnv}」?
+将整目录替换本地镜像(删除服务器已不存在的残留),首次或按需执行,耗时较长。`)) return
+    setOpBusy('mirror'); setOpNote(null)
+    try {
+      await api.mirrorPull(mirrorEnv, full)
+      await refreshMirror()
+      setOpNote({ kind: 'ok', text: `已开始${full ? '全量重建' : '增量更新'}:${mirrorEnv}` })
+    } catch (ex: any) {
+      setOpNote({ kind: 'err', text: '拉取失败: ' + (ex.message || String(ex)) })
+    } finally { setOpBusy('') }
+  }
+  const runSync = async () => {
+    if (!syncEnv) return
+    if (!window.confirm(`从环境「${syncEnv}」拉取字典数据到:
+${sync?.target || ''}
+
+将覆盖本地 SQLite(原库自动备份为 .bak),约 85 万行,需数分钟。继续?`)) return
+    setOpBusy('sync'); setOpNote(null)
+    try {
+      await api.dbsyncRun(syncEnv)
+      await refreshSync()
+      setOpNote({ kind: 'ok', text: `已开始同步:${syncEnv}` })
+    } catch (ex: any) {
+      setOpNote({ kind: 'err', text: '同步失败: ' + (ex.message || String(ex)) })
+    } finally { setOpBusy('') }
+  }
 
   if (!cfg) return <div className="p-6 text-sm text-muted-foreground">{err || '加载配置中…'}</div>
   const cur = sshs[selSsh]
@@ -869,10 +1020,53 @@ export function SettingsView() {
                   control={<Input className={input} value={dict.mirrorDir} placeholder="如 D:\t100\mirror"
                     onChange={(e) => { setDict((s) => ({ ...s, mirrorDir: e.target.value })); markDirty('mirror') }} />}
                 />
-                <div className="mt-2 border-t border-border pt-2">
-                  <a href="/dict/#mirror" className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline">
-                    <ExternalLink className="h-3 w-3" />去「源码镜像」页拉取 / 重建
-                  </a>
+                <div className="mt-3 space-y-2 border-t border-border pt-3">
+                  <div className="flex items-center gap-2">
+                    <span className="shrink-0 text-[11px] text-muted-foreground">拉取环境</span>
+                    <Select value={mirrorEnv} onValueChange={setMirrorEnv} disabled={mirrorRunning}>
+                      <SelectTrigger className="h-7 min-w-0 flex-1 text-xs"><SelectValue placeholder="选择环境" /></SelectTrigger>
+                      <SelectContent>
+                        {(mirror?.envs || []).map((e) => (
+                          <SelectItem key={e.name} value={e.name}>
+                            {e.name}{e.name === mirror?.activeEnv ? '（默认）' : ''}{e.ready ? ' · 已有镜像' : ' · 未拉取'}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {mirror && mirror.envs.length === 0 && (
+                    <p className="text-[11px] text-muted-foreground">还没有 SSH 环境,先去「站点管理」添加。</p>
+                  )}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button size="sm" disabled={mirrorRunning || opBusy !== '' || !mirrorEnv || !dict.mirrorDir.trim() || isDirty('mirror')}
+                      title={isDirty('mirror') ? '镜像根目录有未保存的修改,先保存' : '只拉服务器上变过的文件'}
+                      onClick={() => void pullMirror(false)}>
+                      <RefreshCw className={cn('h-3.5 w-3.5', mirrorRunning && 'animate-spin')} />增量更新
+                    </Button>
+                    <Button variant="outline" size="sm" disabled={mirrorRunning || opBusy !== '' || !mirrorEnv || !dict.mirrorDir.trim() || isDirty('mirror')}
+                      title={isDirty('mirror') ? '镜像根目录有未保存的修改,先保存' : '整目录替换(含服务器上已删的残留)'}
+                      onClick={() => void pullMirror(true)}>
+                      <Download className="h-3.5 w-3.5" />全量重建
+                    </Button>
+                    <span className="text-[11px] text-muted-foreground">增量按服务器 marker 记基线;本地无完整镜像时自动转全量。</span>
+                  </div>
+                  {mirror?.job && (mirror.job.running || mirror.job.done) && (
+                    <JobProgress
+                      env={mirror.job.env}
+                      phaseLabel={MIRROR_PHASE[mirror.job.phase] || mirror.job.phase}
+                      pct={mirror.job.total > 0
+                        ? Math.min(100, Math.round((mirror.job.bytes * 100) / mirror.job.total))
+                        : mirror.job.phase === 'done' ? 100 : 0}
+                      indeterminate={mirror.job.running && mirror.job.total === 0}
+                      elapsed={mirror.job.running ? mirror.job.elapsed : (mirror.job.elapsed ? '用时 ' + mirror.job.elapsed : '')}
+                      error={mirror.job.phase === 'error' ? (mirror.job.error || mirror.job.message) : undefined}
+                      message={mirror.job.phase === 'done' ? mirror.job.message : undefined}
+                    >
+                      <span>已传输:{fmtBytes(mirror.job.bytes)}{mirror.job.total > 0 ? ` / ${fmtBytes(mirror.job.total)}` : ''}</span>
+                      <span>文件数:{mirror.job.files || '—'}</span>
+                      <span>{mirror.job.full ? '全量' : '增量'} · {mirror.job.running ? '进行中…' : '已结束'}</span>
+                    </JobProgress>
+                  )}
                 </div>
               </Card>
 
@@ -895,10 +1089,53 @@ export function SettingsView() {
                     </div>
                   }
                 />
-                <div className="mt-2 border-t border-border pt-2">
-                  <a href="/dict/#sync" className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline">
-                    <ExternalLink className="h-3 w-3" />去「数据同步」页开始同步
-                  </a>
+                <div className="mt-3 space-y-2 border-t border-border pt-3">
+                  <div className="flex items-center gap-2">
+                    <span className="shrink-0 text-[11px] text-muted-foreground">同步环境</span>
+                    <Select value={syncEnv} onValueChange={setSyncEnv} disabled={syncRunning}>
+                      <SelectTrigger className="h-7 min-w-0 flex-1 text-xs"><SelectValue placeholder="选择环境" /></SelectTrigger>
+                      <SelectContent>
+                        {(sync?.envs || []).map((e) => (
+                          <SelectItem key={e.name} value={e.name}>
+                            {e.name}{e.name === sync?.activeEnv ? '（默认）' : ''} · {e.type}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {sync && sync.envs.length === 0 && (
+                    <p className="text-[11px] text-muted-foreground">
+                      没有可同步的环境 —— 需要先在「站点管理」为环境挂上数据库连接。
+                    </p>
+                  )}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button size="sm" disabled={syncRunning || opBusy !== '' || !syncEnv || isDirty('sync')}
+                      title={isDirty('sync') ? '同步目标有未保存的修改,先保存' : '从远程 ERP 拉取字典数据到本地 SQLite'}
+                      onClick={() => void runSync()}>
+                      <RefreshCw className={cn('h-3.5 w-3.5', syncRunning && 'animate-spin')} />{syncRunning ? '同步中…' : '开始同步'}
+                    </Button>
+                    <span className="text-[11px] text-muted-foreground">
+                      逐表拉取 → 建索引 → 原子替换;原库自动备份为 <code>.bak</code>,失败不影响原库。
+                    </span>
+                  </div>
+                  {sync?.job && (sync.job.running || sync.job.done) && (
+                    <JobProgress
+                      env={sync.job.env}
+                      phaseLabel={SYNC_PHASE[sync.job.phase] || sync.job.phase}
+                      pct={sync.job.phase === 'done' ? 100
+                        : sync.job.tableTotal > 0 ? Math.min(100, Math.round((sync.job.tableIndex * 100) / sync.job.tableTotal)) : 0}
+                      indeterminate={sync.job.running && sync.job.tableTotal === 0}
+                      elapsed={sync.job.running ? sync.job.elapsed : (sync.job.elapsed ? '用时 ' + sync.job.elapsed : '')}
+                      error={sync.job.phase === 'error' ? (sync.job.error || sync.job.message) : undefined}
+                      message={sync.job.phase === 'done' ? sync.job.message : undefined}
+                    >
+                      <span>数据表:{sync.job.tableTotal > 0 ? `${sync.job.tableIndex}/${sync.job.tableTotal}` : '—'}{sync.job.tables > 0 ? `(完成 ${sync.job.tables})` : ''}</span>
+                      <span>当前表:{(sync.job.table || '—') + (sync.job.tableRows > 0 ? ` ${sync.job.tableRows} 行` : '')}</span>
+                      <span>累计行数:{sync.job.totalRows > 0 ? sync.job.totalRows.toLocaleString() : '—'}</span>
+                    </JobProgress>
+                  )}
+                  {sync?.job?.backup && <p className="text-[11px] text-muted-foreground">原库已备份:{sync.job.backup}</p>}
+                  {sync?.job?.warning && <pre className="whitespace-pre-wrap text-[11px] text-amber-600 dark:text-amber-400">{sync.job.warning}</pre>}
                 </div>
               </Card>
 
@@ -1003,9 +1240,51 @@ export function SettingsView() {
                     onChange={(e) => { setListen(e.target.value); markDirty('listen') }} />} />
               </Card>
 
+              <Card id="card-app-install" title="命令行集成"
+                description="把 tt.exe 所在目录加入用户 PATH,之后在任意终端直接敲 tt。只改当前用户的环境变量,不需要管理员。">
+                <SettingRow
+                  id="app.install"
+                  label="用户 PATH"
+                  description={
+                    !status?.install.supported
+                      ? (status?.install.note || '本平台不支持自动写入')
+                      : status.install.inUserPath
+                        ? '已在用户 PATH 中'
+                        : '尚未加入 —— 加完之后新开的终端才能直接敲 tt'
+                  }
+                  control={
+                    <div className="flex items-center gap-1.5">
+                      {status?.install.inUserPath ? (
+                        <Button variant="outline" size="sm" disabled={installBusy}
+                          onClick={() => void doInstall(false)}>
+                          <Trash2 className="h-3.5 w-3.5" />{installBusy ? '处理中…' : '从 PATH 移除'}
+                        </Button>
+                      ) : (
+                        <Button size="sm" disabled={installBusy || !status?.install.supported}
+                          onClick={() => void doInstall(true)}>
+                          <Terminal className="h-3.5 w-3.5" />{installBusy ? '处理中…' : '加入用户 PATH'}
+                        </Button>
+                      )}
+                    </div>
+                  }
+                />
+                {status?.install.exeDir && <InfoRow label="程序目录" value={status.install.exeDir} />}
+                {!status?.install.supported && status?.install.manual && (
+                  <pre className="mt-1 overflow-x-auto border border-border bg-muted/30 p-2 text-[11px]">{status.install.manual}</pre>
+                )}
+                {installNote && (
+                  <p className="mt-1 text-[11px] text-muted-foreground">{installNote}</p>
+                )}
+              </Card>
+
               <Card id="card-app-info" title="运行信息">
-                <InfoRow label="配置文件" value={cfg.config} />
                 <InfoRow label="版本" value={cfg.version || '(未知)'} />
+                <InfoRow label="配置文件" value={cfg.config} />
+                <InfoRow label="缺省配置位置" value={meta?.defaultConfig || '—'} />
+                <InfoRow label="便携模式" value={meta ? (meta.portable ? '是(配置留在程序目录)' : '否') : '—'} />
+                <InfoRow label="统一工具目录" value={meta?.toolsHome || '—'} />
+                <InfoRow label="配置结构版本" value={meta ? String(meta.schemaVersion) : '—'} />
+                <InfoRow label="支持的库类型" value={meta?.supportedTypes?.join(' / ') || '—'} />
                 <InfoRow label="默认环境" value={cfg.activeEnv || '(未设置)'} />
                 <InfoRow label="环境数" value={String(cfg.sshs?.length ?? 0)} />
               </Card>

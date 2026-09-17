@@ -137,7 +137,7 @@ var debugServeCmd = &cobra.Command{
 
 它与 tt serve 是两件事,别混:
   · tt serve       前台常驻的**网页界面**:一个进程同时提供调试工作台 /debug/ 与
-                   字典页 /dict/,不写状态文件;
+                   设置页,不写状态文件;
   · tt debug serve 本命令。后台守护进程,把实际监听地址写进 config.json 同目录的
                    .tt-serve.json,tt debug 的控制命令据此自动寻址(端口顺延后也能找到)。
 

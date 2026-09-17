@@ -131,6 +131,112 @@ export interface HostsPatch {
   tdev?: { workspaceSuffix?: string; defaultOut?: string }
 }
 
+// 一个"目录型"配置值的状态:配置里的值 + 它在本机是否真的存在
+export interface DirStatus {
+  dir: string
+  exists: boolean
+}
+// 一个"文件型"配置值的状态
+export interface FileStatus {
+  target: string // 当前生效值
+  configured: string // 配置里显式写下的值(空 = 用缺省位置)
+  defaultTarget: string // 缺省位置
+  exists: boolean
+}
+// 命令行安装状态(用户 PATH);不是 config.json 里的东西
+export interface InstallStatus {
+  supported: boolean // 本平台是否支持自动写入
+  exePath: string
+  exeDir: string
+  inUserPath: boolean
+  userPath?: string
+  manual?: string
+  note?: string
+}
+// GET /api/config/status:配置里那些路径型取值的派生状态
+export interface ConfigStatus {
+  ok: boolean
+  config: string
+  mirror: DirStatus
+  bdldoc: DirStatus
+  sync: FileStatus
+  install: InstallStatus
+}
+// 源码镜像拉取的进度(host.MirrorPullProgress),经 GET /api/mirror 轮询
+export interface MirrorEnv {
+  name: string
+  zone: string
+  path: string
+  ready: boolean // 本地已有完整基线(增量前提)
+}
+export interface MirrorJob {
+  running: boolean
+  env: string
+  full: boolean
+  phase: string // connect|probe|pack|download|done|error
+  message: string
+  bytes: number
+  total: number // 下载阶段为归档总字节;0=未知(pack 阶段)
+  files: number
+  elapsed: string
+  error?: string
+  note?: string
+  done: boolean
+  startedAt?: string
+}
+export interface MirrorResp {
+  mirrorDir: string
+  activeEnv: string
+  envs: MirrorEnv[]
+  job: MirrorJob
+}
+// 字典同步的进度(dbsync.Run),经 GET /api/dbsync 轮询
+export interface DBSyncEnv {
+  name: string
+  type: string
+  address: string
+}
+export interface DBSyncJob {
+  running: boolean
+  env: string
+  phase: string // open|table|index|replace|done|error
+  message: string
+  table: string
+  tableIndex: number
+  tableTotal: number
+  tableRows: number
+  totalRows: number
+  tables: number
+  elapsed: string
+  target: string
+  backup?: string
+  warning?: string
+  error?: string
+  done: boolean
+  startedAt?: string
+}
+export interface DBSyncResp {
+  target: string
+  configured: string
+  defaultTarget: string
+  exists: boolean
+  activeEnv: string
+  envs: DBSyncEnv[]
+  job: DBSyncJob
+}
+
+// GET /api/config/meta:配置元信息
+export interface ConfigMeta {
+  config: string
+  defaultConfig: string
+  portable: boolean
+  toolsHome: string
+  schemaVersion: number
+  defaultListen: string
+  legacyTools: string[] | null
+  supportedTypes: string[]
+}
+
 export interface Event {
   type: string; sessionId: string; time: string
   state?: string; stop?: StopInfo; vars?: VarItem[]; text?: string
@@ -175,6 +281,23 @@ export const api = {
   // 账号清单「验证」:SSH 上服务器以该账号+密码连显式目标库 select 1(只读)
   dbAccVerify: (body: { host: string; port: number; user: string; password: string; zone: string; type: string; account: string; acctPassword: string; dbHost?: string; dbPort?: number; dbSvc?: string; dbDatabase?: string }) =>
     req<{ ok: boolean; error?: string }>('/api/dbaccverify', { method: 'POST', body: JSON.stringify(body) }),
+  // 配置派生状态:路径型取值的"在本机是否真的存在"只有服务端算得出来(要 os.Stat)。
+  // 单独一个端点而不并进 /api/hosts —— 后者是每次进设置都读的热路径。
+  configStatus: () => req<ConfigStatus>('/api/config/status'),
+  // 配置元信息:配置文件缺省落点、便携标记、schema 版本、支持的库类型…
+  configMeta: () => req<ConfigMeta>('/api/config/meta'),
+  // 命令行安装(PATH):应用级动作,统一层提供(合并前在字典子系统的私有 API 下)
+  installStatus: () => req<InstallStatus>('/api/install'),
+  installAdd: () => req<InstallStatus>('/api/install', { method: 'POST' }),
+  installRemove: () => req<InstallStatus>('/api/install', { method: 'DELETE' }),
+  // 字典类动作(源码镜像拉取、字典同步)。合并前它们在 /dict/api/* 下 —— 那是字典页
+  // 私有 API;字典页并进设置页之后升到共享层,设置页因此不必跨子系统调用。
+  mirror: () => req<MirrorResp>('/api/mirror'),
+  mirrorPull: (env: string, full: boolean) =>
+    req<{ ok: boolean }>('/api/mirror/pull', { method: 'POST', body: JSON.stringify({ env, full }) }),
+  dbsync: () => req<DBSyncResp>('/api/dbsync'),
+  dbsyncRun: (env: string) =>
+    req<{ ok: boolean }>('/api/dbsync', { method: 'POST', body: JSON.stringify({ env }) }),
   list: () => req<{ sessions: SessionBrief[] }>(`${API_BASE}/sessions`),
   launch: (module: string, prog: string, opts?: { ssh?: string; zone?: string }) =>
     req<{ sessionId: string; module?: string; prog?: string; runProg?: string }>(`${API_BASE}/sessions`, { method: 'POST', body: JSON.stringify({ module, prog, ...opts }) }),

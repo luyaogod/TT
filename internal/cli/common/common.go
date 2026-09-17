@@ -43,26 +43,16 @@ func ResolveConfig(allowMissing bool) (string, error) {
 // ConfigHint 给 --help 用的一行配置位置提示。
 func ConfigHint() string { return config.DefaultConfigPathHint() }
 
-// WebSub 返回内嵌前端里某个子应用的 FS。
+// WebFrontend 返回内嵌前端的 FS（dist 根，即 web/debug 的构建产物）。
 //
-// 合并后前端有两套 SPA，分别构建到 dist 根下的 debug/ 与 dict/
-// （见 web/debug/vite.config.ts 与 web/dict/vite.config.ts 的 outDir，
-//
-//	main.go 已把嵌入 FS 的根收敛到 dist）。
-//
-// "前端放在哪"这件事只在这里说一次，省得每个服务端各自去猜该不该剥一层。
+// 合并前这里是 WebSub(name) —— 当时有两套 SPA（调试工作台与字典页）各占 dist 下一个
+// 子目录；字典页已并入统一设置页，只剩一套，所以不需要再按名字取子目录。
+// main.go 已把嵌入 FS 的根收敛到 dist，这里直接用。
 //
 // 取不到时返回 nil —— 调用方应据此回落到引导页，而不是 panic：
 // 前端没构建（只有 .gitkeep 占位）是完全正常的状态。
-func WebSub(name string) fs.FS {
-	if WebFS == nil {
-		return nil
-	}
-	sub, err := fs.Sub(WebFS, name)
-	if err != nil {
-		return nil
-	}
-	return sub
+func WebFrontend() fs.FS {
+	return WebFS
 }
 
 // PrintJSON 以缩进 JSON 输出 v（各命令的 --json 通道统一走它，保证格式一致）。

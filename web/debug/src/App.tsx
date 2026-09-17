@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { RotateCcw, WifiOff, Bug, Globe, FlaskConical, Settings, X, ListTree, Sword, Server, BookOpen, type LucideIcon } from 'lucide-react'
+import { RotateCcw, WifiOff, Bug, Globe, FlaskConical, Settings, X, ListTree, Sword, Server, type LucideIcon } from 'lucide-react'
 import { connectWS, useStore } from './store'
 import { Toolbar } from './Toolbar'
 import { SourceView, editorRef } from './SourceView'
@@ -25,20 +25,6 @@ function ActivityIcon({ icon: Icon, label, active, onClick }: {
       }`}>
       <Icon className="h-5 w-5" />
     </button>
-  )
-}
-
-// 跳到另一套 SPA(字典页)的入口:它不在本页路由内 —— 统一服务把两个前端挂在两个
-// 前缀下(/debug/ 与 /dict/),跨过去只能整页跳转,所以用普通 <a> 而不是 setView。
-// 样式与 ActivityIcon 逐字一致,免得看起来像另一个控件。
-function ActivityLink({ icon: Icon, label, href }: {
-  icon: LucideIcon; label: string; href: string
-}) {
-  return (
-    <a href={href} title={label}
-      className="flex h-8 w-full shrink-0 items-center justify-center transition-colors text-muted-foreground hover:bg-foreground/5 hover:text-foreground">
-      <Icon className="h-5 w-5" />
-    </a>
   )
 }
 
@@ -108,9 +94,8 @@ export function App() {
   useEffect(() => {
     if (jumpedRef.current) return
     jumpedRef.current = true
-    // 先认 URL 片段:深链接必须优先于下面那条兜底 —— 字典页的「设置」入口指向
-    // /debug/#settings/data-dict,若先跑"没有环境就跳设置",用户点过来会落在站点管理,
-    // 而不是他要的那个分区。
+    // 先认 URL 片段:深链接必须优先于下面那条兜底 —— 形如 #settings/data-dict 的链接
+    // 要落到指定分区,若先跑"没有环境就跳设置"会被覆盖成站点管理。
     const r = parseHash(location.hash)
     if (r.view) {
       useStore.getState().setView(r.view)
@@ -270,9 +255,7 @@ export function App() {
           <ActivityIcon icon={Bug} label="调试" active={view === 'debug'} onClick={() => setView('debug')} />
           <ActivityIcon icon={Globe} label="接口日志" active={view === 'wslogs'} onClick={() => setView('wslogs')} />
           <ActivityIcon icon={FlaskConical} label="服务测试" active={view === 'wstest'} onClick={() => setView('wstest')} />
-          <ActivityIcon icon={Settings} label="设置" active={view === 'settings'} onClick={() => setView('settings')} />
-          {/* 跨页入口:字典配置页是另一套 SPA,整页跳过去(统一服务下挂在 /dict/) */}
-          <ActivityLink icon={BookOpen} label="数据字典(切换到字典页)" href="/dict/" />
+          <ActivityIcon icon={Settings} label="设置(站点 / 数据字典 / DEBUG / 应用)" active={view === 'settings'} onClick={() => setView('settings')} />
         </div>
         {/* 四个视图全部 keep-alive:首次访问后常驻挂载,切换仅改 display */}
         <ViewPane show={view === 'debug'}>

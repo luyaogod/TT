@@ -179,7 +179,7 @@ func runServe(cfg *debug.Config, cfgPath string) error {
 	removeServeInfo(dir) // 清理残留状态
 
 	requested := cfg.Listen
-	srv := debug.NewServer(cfg, common.WebSub("debug"), cfgPath)
+	srv := debug.NewServer(cfg, common.WebFrontend(), cfgPath)
 	ln, addr, err := srv.Listen()
 	if err != nil {
 		return err
@@ -230,7 +230,7 @@ func debugServeBackground(cfg *debug.Config, cfgPath string) error {
 		return fmt.Errorf("定位可执行文件失败: %w", err)
 	}
 	// 重新拉起自身时必须带上 debug 子命令:合并后二进制叫 tt,裸 serve 是
-	// **统一服务**(字典页 + 调试工作台),不是这里的独立调试服务。
+	// **统一服务**(调试工作台 + 统一设置页),不是这里的独立调试服务。
 	args := []string{"debug", "serve", "--foreground", "--config", cfgPath}
 	if dbgListen != "" {
 		args = append(args, "--listen", dbgListen)

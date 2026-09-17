@@ -47,8 +47,7 @@ if errorlevel 1 (
 )
 popd
 rem main.go embeds web/dist, so the frontend must exist before go build.
-if not exist "web\dist\debug\index.html" (echo MISSING web\dist\debug\index.html & exit /b 1)
-if not exist "web\dist\dict\index.html"  (echo MISSING web\dist\dict\index.html  & exit /b 1)
+if not exist "web\dist\index.html" (echo MISSING web\dist\index.html & exit /b 1)
 
 echo [2/5] Building tt.exe (v%VERSION%) ...
 call go build -trimpath -ldflags "-X tt/internal/cli.Version=%VERSION%" -o tt.exe .

@@ -1,7 +1,7 @@
 // 桌面链路冒烟（无 GUI）：验证 Electron 外壳依赖的 Go 侧契约。
 //
 //   1) `tt serve --desktop` 在空目录首启：建出 config.json，打印 TT_READY {json}；
-//   2) READY 里的地址真实可达：/api/health 报 ok，/debug/ 与 /dict/ 都返回界面 HTML；
+//   2) READY 里的地址真实可达：/api/health 报 ok，/debug/ 返回界面 HTML；
 //   3) POST /api/shutdown → 优雅退出（外壳关窗时走的就是它）。
 //
 // 用法：node desktop/scripts/smoke.mjs [--bin <tt.exe>]
@@ -104,20 +104,20 @@ try {
   if (!fs.existsSync(cfg)) fail('未自动创建 config.json: ' + cfg)
   log('✓ 首启建配置并打出 READY')
 
-  // ---- 2) READY 的地址真实可达：健康检查 + 两套页面 ----
+  // ---- 2) READY 的地址真实可达：健康检查 + 页面 ----
   const health = JSON.parse((await request(ready.url + '/api/health')).body)
   if (!health.ok) fail('/api/health 未报 ok: ' + JSON.stringify(health))
   if (!health.debug || !health.dict) fail('/api/health 应同时报 debug 与 dict 已接入: ' + JSON.stringify(health))
   if (health.config !== cfg) fail(`健康检查报的配置路径不对: ${health.config} != ${cfg}`)
   log('✓ /api/health 可达且与 READY 同端口、同配置')
 
-  for (const [p, title] of [['/debug/', '调试'], ['/dict/', '字典']]) {
-    const res = await request(ready.url + p)
-    if (res.status !== 200) fail(`GET ${p} → HTTP ${res.status}`)
-    if (!/<div id="root">/.test(res.body)) fail(`GET ${p} 未返回界面 HTML`)
-    if (!res.body.includes(title)) fail(`GET ${p} 的页面标题不含「${title}」`)
+  {
+    const res = await request(ready.url + '/debug/')
+    if (res.status !== 200) fail(`GET /debug/ → HTTP ${res.status}`)
+    if (!/<div id="root">/.test(res.body)) fail('GET /debug/ 未返回界面 HTML')
+    if (!res.body.includes('TT')) fail('GET /debug/ 的页面标题不含「TT」')
   }
-  log('✓ /debug/ 与 /dict/ 都返回各自的界面 HTML')
+  log('✓ /debug/ 返回界面 HTML')
 
   // 根路径应跳到调试工作台
   const home = await request(ready.url + '/')

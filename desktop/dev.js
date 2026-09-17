@@ -8,7 +8,7 @@
 // 退出:本进程收到退出/异常时一并结束两个子进程。
 //
 // 注:合并后有两套前端,这里只热更新调试工作台(桌面版的默认页)。
-// 要热更新字典页,另开终端 cd web && npm run dev:dict,它同样代理到本后端。
+// 设置页是同一套 SPA 里的一个视图(/debug/#settings),改它同样走热更新。
 'use strict'
 
 const { spawn, spawnSync } = require('node:child_process')
