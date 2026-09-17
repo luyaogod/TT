@@ -37,3 +37,6 @@
 /.claude/settings.local.json
 .DS_Store
 Thumbs.db
+
+# 本机预览用的启动配置(含沙箱绝对路径),不入库
+/.claude/launch.json

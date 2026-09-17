@@ -1,11 +1,10 @@
 // 右侧面板:运行/调试(VS Code 风格)+ 调用栈 / 变量监视 / 断点(一体化容器,分割线分区)
 import * as React from 'react'
-import * as AccordionPrimitive from '@radix-ui/react-accordion'
 import { useEffect, useRef, useState } from 'react'
 import { Eye, EyeOff, Play, Ruler } from 'lucide-react'
 import { useStore } from './store'
 import type { Breakpoint } from './api'
-import { Badge, Checkbox, Input } from './ui'
+import { Accordion, AccordionChevron, AccordionContent, AccordionItem, AccordionTrigger, Badge, Checkbox, Input } from './ui'
 import { parseFglTree, type TNode } from './fglparse'
 import { VarTreeNodes } from './VarTreeUi'
 import { progKey } from './fglPath'
@@ -84,34 +83,29 @@ function LaunchSection() {
   )
 }
 
-// shadcn 风格 Accordion 基础组件(Radix)
-const Accordion = AccordionPrimitive.Root
-
-const AccordionItem = React.forwardRef<
-  React.ElementRef<typeof AccordionPrimitive.Item>,
-  React.ComponentPropsWithoutRef<typeof AccordionPrimitive.Item>
+// 面板条目:在共享的 AccordionItem 之上加「撑满高度 + 条目间 1px 分割线」。
+// 共享件刻意做成中性的壳 —— 设置页那套手风琴是轻量树形(不撑高、无分割线),
+// 与这里的撑满布局需求相反;把任一套的样式写进共享件都会让另一套到处覆盖。
+const PanelItem = React.forwardRef<
+  React.ElementRef<typeof AccordionItem>,
+  React.ComponentPropsWithoutRef<typeof AccordionItem>
 >(({ className, ...props }, ref) => (
-  <AccordionPrimitive.Item
+  <AccordionItem
     ref={ref}
     className={`flex min-h-0 flex-col overflow-hidden border-b border-border data-[state=closed]:flex-none last:border-b-0 ${className || ''}`}
     {...props}
   />
 ))
-AccordionItem.displayName = 'AccordionItem'
+PanelItem.displayName = 'PanelItem'
 
-const AccordionContent = React.forwardRef<
-  React.ElementRef<typeof AccordionPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof AccordionPrimitive.Content>
->(({ className, children, ...props }, ref) => (
-  <AccordionPrimitive.Content
-    ref={ref}
-    className={`min-h-0 flex-1 overflow-auto ${className || ''}`}
-    {...props}
-  >
-    {children}
-  </AccordionPrimitive.Content>
+// 面板条目内容区:撑满剩余高度并自行滚动(共享 AccordionContent 只给了 min-h-0)
+const PanelContent = React.forwardRef<
+  React.ElementRef<typeof AccordionContent>,
+  React.ComponentPropsWithoutRef<typeof AccordionContent>
+>(({ className, ...props }, ref) => (
+  <AccordionContent ref={ref} className={`min-h-0 flex-1 overflow-auto ${className || ''}`} {...props} />
 ))
-AccordionContent.displayName = 'AccordionContent'
+PanelContent.displayName = 'PanelContent'
 
 // 面板头行:左侧固定位(自动开关或等宽占位),右侧手风琴触发区(整块点击开合)。
 // hover 底色挂在整行上(:hover 对父级同样生效),这样左侧图标位与右侧 chevron 一起变色;
@@ -120,25 +114,12 @@ function PanelHeader({ leading, children }: { leading?: React.ReactNode; childre
   return (
     <div className="group flex h-8 shrink-0 items-stretch transition-colors hover:bg-accent/50">
       {leading}
-      <AccordionPrimitive.Trigger
+      <AccordionTrigger
         className="flex h-full min-w-0 flex-1 items-center justify-between gap-2 pr-2.5 text-xs font-medium text-muted-foreground transition-colors group-hover:text-foreground [&[data-state=open]>svg]:rotate-180"
       >
         <span className="min-w-0 flex-1 truncate pl-1">{children}</span>
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className="shrink-0 text-muted-foreground transition-transform duration-200"
-        >
-          <path d="m6 9 6 6 6-6" />
-        </svg>
-      </AccordionPrimitive.Trigger>
+        <AccordionChevron />
+      </AccordionTrigger>
     </div>
   )
 }
@@ -191,45 +172,45 @@ export function RightPanels() {
     <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
       <LaunchSection />
       <Accordion type="multiple" value={open} onValueChange={setOpen} className="flex h-full min-h-0 w-full flex-col">
-        <AccordionItem value="stack">
+        <PanelItem value="stack">
           <PanelHeader leading={<AutoSwitch on={stackAuto} onToggle={() => toggleStackAuto()}
             onTip="自动刷新已开启:每次停站抓取调用栈(点击关闭,减少自动调度卡顿)"
             offTip="自动刷新已关闭(默认):停站后不再抓调用栈;点击开启" />}>
             <StackTitle />
           </PanelHeader>
-          <AccordionContent>
+          <PanelContent>
             <StackBody />
-          </AccordionContent>
-        </AccordionItem>
+          </PanelContent>
+        </PanelItem>
 
-        <AccordionItem value="autovars">
+        <PanelItem value="autovars">
           <PanelHeader leading={<AutoSwitch on={collab || autovarsAuto} onToggle={() => { if (!collab) toggleAutovarsAuto() }}
             onTip="自动求值已开启:每次停站求值源码窗变量并刷新本面板(点击关闭,减少自动调度卡顿)"
             offTip={collab ? '协作模式:自动求值开关由 AI 负责' : '自动求值已关闭(默认):停站后不再求值自动变量;点击开启'} />}>
             <AutovarsTitle />
           </PanelHeader>
-          <AccordionContent>
+          <PanelContent>
             <AutovarsBody />
-          </AccordionContent>
-        </AccordionItem>
+          </PanelContent>
+        </PanelItem>
 
-        <AccordionItem value="watches">
+        <PanelItem value="watches">
           <PanelHeader leading={<span className="block w-6 shrink-0" aria-hidden />}>
             <WatchesTitle />
           </PanelHeader>
-          <AccordionContent>
+          <PanelContent>
             <WatchesBody />
-          </AccordionContent>
-        </AccordionItem>
+          </PanelContent>
+        </PanelItem>
 
-        <AccordionItem value="bps">
+        <PanelItem value="bps">
           <PanelHeader leading={<span className="block w-6 shrink-0" aria-hidden />}>
             <BpsTitle />
           </PanelHeader>
-          <AccordionContent>
+          <PanelContent>
             <BpsBody />
-          </AccordionContent>
-        </AccordionItem>
+          </PanelContent>
+        </PanelItem>
       </Accordion>
     </div>
   )

@@ -2339,7 +2339,7 @@ var init_api = __esm({
   }
 });
 
-// src/theme.ts
+// ../shared/theme.ts
 function systemPrefersDark() {
   const m = mq();
   return m ? m.matches : true;
@@ -2371,11 +2371,18 @@ function watchSystemTheme(onChange) {
 }
 var THEME_KEY, THEME_MEDIA, mq;
 var init_theme = __esm({
-  "src/theme.ts"() {
-    "use strict";
+  "../shared/theme.ts"() {
     THEME_KEY = "tt.theme";
     THEME_MEDIA = "(prefers-color-scheme: dark)";
     mq = () => typeof window !== "undefined" && typeof window.matchMedia === "function" ? window.matchMedia(THEME_MEDIA) : null;
+  }
+});
+
+// src/theme.ts
+var init_theme2 = __esm({
+  "src/theme.ts"() {
+    "use strict";
+    init_theme();
   }
 });
 
@@ -2613,7 +2620,7 @@ var init_store = __esm({
     "use strict";
     init_esm();
     init_api();
-    init_theme();
+    init_theme2();
     initialTheme = readStoredTheme();
     retireID = null;
     retireUntil = 0;
