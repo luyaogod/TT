@@ -36,7 +36,10 @@ TT/
 ├─ go.mod                   module tt
 ├─ README.md
 ├─ build_portable.bat       构建便携包
+├─ build_msi.bat            构建用户级 MSI（需要 WiX v3）
+├─ installer/tt.wxs         MSI 的产品/目录/PATH/升级定义
 ├─ tools/zip.py             打包用 zip 助手
+├─ tools/wix_removefolders.py  给采集出的组件补删除目录(ICE64/ICE38)
 │
 ├─ internal/
 │  ├─ config/               ★ 统一配置层（本设计的核心）
@@ -230,6 +233,12 @@ tt version
 - 前端：`cd web && npm install && npm run build` → `web/dist/`
 - 后端：`go build -trimpath -ldflags "-X tt/internal/cli.Version=…" -o tt.exe .`
 - 便携包：`build_portable.bat` → `dist/tt-portable.zip`（`tt.exe` + `config.example.json` + `README.md` + `skills/` + `.portable`）
+- MSI：`build_msi.bat` → `dist/TT-<版本>-x64.msi`。**用户级安装**（装到
+  `%LOCALAPPDATA%\Programs\TT`、只追加用户 PATH、免管理员），刻意不带 `.portable`
+  与 `config.json`：配置该落在 `%APPDATA%\T100\tt\config.json`。定义在
+  `installer/tt.wxs`，文件清单由 `heat.exe` 采集，卸载要删的目录由
+  `tools/wix_removefolders.py` 补（MSI 的 ICE64/ICE38 对用户级安装的要求）。
+  需要 WiX v3 工具集，`WIX_BIN` 指向它。
 - 桌面版：`build_desktop.bat` → Electron 安装包（复用原 TDebug desktop 外壳，改为拉起 `tt.exe serve`）
 
 `//go:embed all:web/dist` 要求前端先构建，`main.go` 已带空目录占位与引导页兜底。

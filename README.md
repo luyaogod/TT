@@ -47,6 +47,18 @@ tt version
 把 `tt-portable.zip` 解压到任意目录，双击或命令行运行 `tt.exe` 即可。
 包内有 `.portable` 标记，配置就近留在包内（`config.json`），不写用户目录。
 
+### MSI 安装包（用户级，免管理员）
+
+`TT-0.1.0-x64.msi` 双击即可安装，**全程不需要管理员**：
+
+- 装到 `%LOCALAPPDATA%\Programs\TT`，不碰 `Program Files`；
+- 安装目录追加到**用户** PATH（HKCU），卸载时自动摘掉；
+- 刻意**不带** `.portable`，所以配置落在 `%APPDATA%\T100\tt\config.json`
+  而不是安装目录（程序目录不是放用户数据的地方）；
+- 也不带 `config.json`——装完是干净的一份，首次运行自己生成骨架。
+
+升级：装了新版 MSI 会先移除旧版（固定 UpgradeCode + 每次构建新 ProductCode）。
+
 ### 加进 PATH
 
 ```
@@ -259,7 +271,16 @@ cd .. && go build -o tt.exe .
 
 # 便携包
 build_portable.bat        # → dist/tt-portable.zip
+
+# 用户级 MSI（需要 WiX v3 的 candle/light/heat，见下）
+build_msi.bat             # → dist/TT-<版本>-x64.msi
 ```
+
+`build_msi.bat` 依赖 WiX v3 工具集（不需要装 .NET SDK，解压即用）：把
+`candle.exe` / `light.exe` / `heat.exe` 放到 `D:\tt-build-tools\wix3`，
+或用环境变量 `WIX_BIN` 指向它们所在的目录。脚本会先跑一遍 `build_portable.bat`
+复用同一份 `tt.exe`，再采集文件、补上卸载要删的目录（`tools/wix_removefolders.py`），
+最后编译链接成 MSI。
 
 开发模式：
 
