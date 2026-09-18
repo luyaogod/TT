@@ -20,6 +20,7 @@
 */.tdev/
 /srccache/
 /debug-bps/
+/ents/
 /logs/
 .tt-serve.json
 .tt-serve.log

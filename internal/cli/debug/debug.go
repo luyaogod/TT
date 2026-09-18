@@ -21,6 +21,7 @@ var (
 	dbgLine   int
 	dbgListen string
 	dbEnt     int
+	dbRefresh bool
 )
 
 // debugProbeCmd M0 尖刺:全自动跑通 登录→启动→下断点→步进→求值→退出
@@ -181,11 +182,14 @@ var debugDBCmd = &cobra.Command{
 	Use:   "db",
 	Short: "数据库连接探查:按企业(TOPENT)查账号并尝试连接",
 	Long: `登录服务器,读取 gzou_t 中企业编号与数据库账号(schema)的映射,
-并尝试用对应账号连接数据库(密码规则:账号=密码,取自 fglprofile 明文)。
+并尝试用对应账号连接数据库(密码优先取该连接的账号清单,未收录按"账号=密码"惯例)。
 
   tt debug db            列出全部企业→账号映射
   tt debug db --ent 99   验证企业 99 对应账号的连接(默认企业取该 SSH 环境的 topent)
-  tt debug db --ent 99 --json  输出 JSON`,
+  tt debug db --ent 99 --json  输出 JSON
+
+这条命令是**连接体检**:它会真的连一次库验证账号可用。
+只要清单(不验证连接)用 tt debug ents —— 那份带快照,不联网也能答。`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfgPath, err := resolveConfigPath()
 		if err != nil {
@@ -196,11 +200,13 @@ var debugDBCmd = &cobra.Command{
 			return err
 		}
 		cfg.ApplyDefaultEnv() // 默认环境的连接/参数合并到运行时字段
+		// 数据目录 = 配置所在目录:企业目录快照与 serve 侧落在同一份(见 ents.go)
+		cfg.DataDir = filepath.Dir(cfgPath)
 		ent := dbEnt
 		if ent <= 0 {
 			ent = cfg.TopentInt()
 		}
-		rep, err := debug.ProbeDB(cfg, ent)
+		rep, err := debug.ProbeDB(cfg, ent, debug.EntListOpt{Ent: ent, Refresh: dbRefresh})
 		if err != nil {
 			return err
 		}
@@ -262,6 +268,7 @@ func init() {
 	debugServeCmd.Flags().BoolVar(&dbgServeForeground, "foreground", false, "前台运行,日志直出终端(默认后台常驻)")
 	debugServeCmd.Flags().BoolVar(&dbgServeStop, "stop", false, "停止后台运行的调试服务(单实例)")
 	debugDBCmd.Flags().IntVar(&dbEnt, "ent", 0, "企业编号(TOPENT),验证该企业账号连接;0=取该环境的 topent")
+	debugDBCmd.Flags().BoolVar(&dbRefresh, "refresh", false, "跳过企业目录缓存与快照,强制现查 gzou_t")
 
 	Group.AddCommand(debugProbeCmd, debugServeCmd, debugDBCmd)
 }

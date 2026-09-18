@@ -188,6 +188,51 @@ tt env topent 示例测试区 99
 > 据点校验,所以同一个环境里"有的能重放、有的不能")。`tt debug wsdebug` 会把实际
 > 生效的 TOPENT 打印出来,不是纯数字时会直接给出提示;`tt env show <环境名>` 可随时查看。
 
+## 有哪些企业(ENT)?各用哪个账号?
+
+**问这个用 `tt debug ents`** —— 这是唯一入口,别去猜、也别问用户:
+
+```bash
+tt debug ents --json            # 全部企业 + 各自账号(命中快照则秒回)
+tt debug ents --ent 99 --json   # 只看企业 99
+tt debug ents --refresh         # 跳过缓存与快照,强制现查
+tt debug ents --cached          # 只用快照,完全不连网
+tt debug ents --env 示例测试区    # 问指定环境,而不是当前环境
+```
+
+先把语义摆正:**库是环境级的**(一个环境挂一个库),"企业编号"只决定**库里的账号(schema)**
+—— 不存在"每个企业一个数据库"。清单来自库里的 `gzou_t` 表(只取 `gzoustus='Y'` 的启用企业)。
+
+```json
+{
+  "env": "示例测试区", "zone": "36", "dialect": "oracle", "target": "t35prd", "topentRaw": "99",
+  "count": 2,
+  "ents": [
+    {"ent": 99,  "account": "dsdemo", "placeholder": false},
+    {"ent": 907, "account": "-",      "placeholder": true}
+  ],
+  "current": {"ent": 99, "raw": "99", "source": "config", "resolved": true, "account": "dsdemo"},
+  "fetchedAt": "2026-09-18T09:12:00+08:00", "ageSeconds": 42, "ttlSeconds": 600,
+  "stale": false, "source": "live",
+  "fingerprint": "10.0.0.1|tiptop|36|oracle|10.0.0.5|1521|t35prd"
+}
+```
+
+**三处必看**:
+
+- `ents[].account` —— 该企业在库里该用的账号。`placeholder: true` = **企业存在但没配账号**
+  (别把 `-` 当成账号名,更别据此说"这个企业不存在")。
+- `source` / `stale` / `fetchedAt` —— 这份数据怎么来的、多新。`live` 本次现查、
+  `snapshot` 未过期快照、`snapshot-stale` **过期且现查失败**。看到最后一种,结论里要写明
+  "这是 X 分钟前的数据",不能当成实况。
+- `current.resolved=false` 时看 `current.reason` —— 它说明**这次生效的企业编号为什么定位不到账号**
+  (没配 / 不是数字(比如误填了据点码) / 不在清单)。用法见下面只读 SQL 一节。
+
+清单会落一份快照到配置目录的 `ents/<环境>.json`,10 分钟内再问秒回;断网、没起 serve 也能答
+(那时 `stale` 为真)。快照按环境身份(`fingerprint` = 机器+账号+区域+库)绑定,**换环境/换库会自动作废**
+—— 所以切完环境第一次问会慢一下,那是正常的,不是卡住了。**不要自己再缓存一层** ——
+缓存与现查怎么取舍是这个命令的职责,多存一份只会和它对不上。
+
 ## AI 信息通道(fgldb 原生命令给不了的信息)
 
 原生命令行负责**操作**(exec 透传),以下命令负责**看**:可复取现场、读服务器源码、
@@ -291,6 +336,39 @@ tt debug sql "select * from t" --ent 907   # 显式指定企业(默认取会话�
 实测同一个查询,企业 99 下是 368950 行、企业 907 下是 62 行 —— 认错的代价是**得出错误的业务结论**。
 
 改企业:`tt env topent <环境名> <企业编号>`,或 `--ent <企业编号>`(单次)。
+**不知道某个环境有哪些企业、编号该填几** —— `tt debug ents` 列出来(见上面「有哪些企业(ENT)?」)。
+
+### 查临时表(名字带 `_TMP` 的那种)
+
+T100 的临时表是**运行时才建、跑完就删**的,而且真名不是程序里写的那个:程序里叫
+`Q010_TMP`,库里实际叫 `TT1843221_Q010_TMP`(建表时加了 `TT<数字>` 前缀)。所以要两步:
+**先问库里的真名,再拿真名查内容**。
+
+```bash
+# ① 查真名(object_name 就是要的那个名字)
+tt debug sql "SELECT object_name, owner, created FROM all_objects WHERE object_name LIKE '%Q010_TMP%' ORDER BY created DESC" --ent 99
+
+# ② 用①查到的那一行,原样查内容
+tt debug sql "SELECT * FROM TT1843221_Q010_TMP" --ent 99
+```
+
+**几个必踩的坑**:
+
+- **企业要对。** 临时表建在**该企业自己的 schema** 里(企业 99 名下查到的那批 owner 全是
+  `DSDEMO`)。换个企业就是另一个 schema,同一个名字在那边**根本看不见** —— 那不是"没有数据",
+  是"看不到这张表"。①查不到先换 `--ent` 再试。
+- **它是临时的。** 程序跑完(或会话断开)就没了。①查不到,多半不是 SQL 写错,而是那次运行已经
+  结束 —— 要么让程序再跑一遍,要么趁它停站时查。`ORDER BY created DESC` 别省:同名表会被反复
+  建,最新的那个才是本次的。
+- **真名照抄 `object_name`(大写),别手敲。**
+  - **Oracle**:不加引号时大小写都能查到(它会自动折成大写);但**加了双引号就必须一模一样**,
+    小写加引号会报 `ORA-00942: table or view does not exist` —— 那句话极容易被读成
+    "临时表不存在/已经删了",其实只是引号里的写法不对。
+  - **人大金仓**:别依赖这套自动转换 —— 库里存的就是大写,真名**照抄大写**,别自己改成小写;
+    照抄了还查不到,就加双引号原样再试一次(`"TT1843221_Q010_TMP"`)。
+    (两条建议在任何折行规则下都成立,所以不用先去确认金仓到底折不折。)
+- **元数据视图只用 `all_*` / `user_*` 开头。** `dba_` / `v$` / `gv$` / `x$` / `wri$_` 被
+  `safesql` 挡着(跨 schema / 跨会话的元数据面);`all_objects` 这类是放行的。
 
 ### 限制(都是刻意的,不是没做)
 
@@ -424,6 +502,15 @@ tt debug wsdebug <rowid> --set digi-body.std_data.parameter.production_item_no=
 tt debug wsdebug <rowid> --set a.b=123 --set c.d=abc     # 可重复;值按 JSON 解析,留空则清空
 tt debug wsdebug <rowid> --request-file my_req.json      # 整份替换(大改用这个)
 ```
+
+**接口日志用哪个账号查?恒用系统账号 `ds`。** `wsfa_t` 是 ds 下的**共享表**,接口日志
+**不按企业分 schema**(报文里的企业只是行上的一个属性)。所以这里与只读 SQL 相反:
+**企业编号填错不影响日志查询**。每次输出会带一行 `[账号] ds —— …` 说明这件事,
+`--json` 里是 `acct` 字段。
+
+但"查不到日志"仍要先核两件事:① `--from/--to` 时间窗(不给就只查最近一段);
+② `acct.topentWarning` —— 它提醒当前 TOPENT 不是有效企业编号。那个只影响**重放**
+(框架的据点校验,见上面 TOPENT 一节),不影响日志本身,别把两件事混起来。
 
 **`--set` 只改 JSON 报文。** 报文是 XML 的(MES 侧的接口大多是)只能走文件:
 

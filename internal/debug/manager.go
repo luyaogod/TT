@@ -43,11 +43,10 @@ type Manager struct {
 	srcMu sync.Mutex
 	src   *srcConn
 
-	// 企业→账号映射的缓存(见 dbsql.go):只读 SQL 每次都要先查一次 gzou_t,
-	// 同一个 (主机,账号,区域) 下缓存 10 分钟。**只缓存映射,不缓存账号选择** ——
-	// 选哪个企业每次都由调用方现给,缓存错了就是"上错号"。
-	entMu    sync.Mutex
-	entCache map[string]sqlEntCacheEntry
+	// 企业目录(ENT→账号):只读 SQL / 接口日志都要先问一次 gzou_t,
+	// 同一个环境(主机+账号+区域+库)下缓存 10 分钟,并落一份快照供离线使用。
+	// 见 ents.go —— 取值顺序、降级规则、新鲜度口径都在那里,**只有那一份实现**。
+	ents *EntCatalog
 }
 
 // maxBufferedEvents 环形缓冲上限。
@@ -64,8 +63,9 @@ func NewManager(cfg *Config) *Manager {
 		sessions: map[string]*Session{},
 		subs:     map[chan Event]string{},
 		envCache: map[string]cachedEnv{},
-		entCache: map[string]sqlEntCacheEntry{},
-		Epoch:    strconv.FormatInt(time.Now().UnixNano(), 36),
+		// cfg.DataDir 可能为空(单测里的 NewManager(&Config{})):那一档只走内存不落盘
+		ents:  NewEntCatalog(cfg.DataDir),
+		Epoch: strconv.FormatInt(time.Now().UnixNano(), 36),
 	}
 }
 

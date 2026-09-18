@@ -73,6 +73,29 @@ func TestParseSQLOutErrors(t *testing.T) {
 	}
 }
 
+// 报错**说了什么**同样重要 —— 光"有报错"不够。
+//
+// sqlplus 的错是两行:头 `ERROR at line 1:` + 真原因 `ORA-00942: …`。取第一行匹配的话
+// 永远只报那句没信息量的头,真原因被吞掉;而"表是不是已经没了"这类判断全靠它。
+// (上面那个测试只验了"报不报错",所以这个 bug 一直能溜过去。)
+func TestSQLErrOf_PrefersTheCodedLine(t *testing.T) {
+	cases := []struct{ name, raw, want string }{
+		{"sqlplus 两行式:要的是 ORA- 那行",
+			"select * from nope\n*\nERROR at line 1:\nORA-00942: table or view does not exist",
+			"ORA-00942: table or view does not exist"},
+		{"金仓单行式:没有码,靠通用行兜住",
+			`ERROR:  relation "nope" does not exist`,
+			`ERROR:  relation "nope" does not exist`},
+		{"只有头没有码:有总比没有好", "ERROR at line 1:", "ERROR at line 1:"},
+		{"没报错", "A|B\n1|2", ""},
+	}
+	for _, c := range cases {
+		if got := sqlErrOf(c.raw); got != c.want {
+			t.Errorf("[%s] sqlErrOf = %q, 期望 %q", c.name, got, c.want)
+		}
+	}
+}
+
 func TestParseSQLOutEmpty(t *testing.T) {
 	// 0 行不是错误
 	for _, raw := range []string{"", "\n\n", "GLOBAL_NAME\n----\nds/x@Y\n"} {

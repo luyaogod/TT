@@ -49,41 +49,17 @@ type DBQueryResult struct {
 	Notes         []string   `json:"notes,omitempty"`
 }
 
-// sqlEntCacheEntry 企业→账号映射的缓存(与 ensureRuntimeEnv 的 5 分钟缓存同风格)
-type sqlEntCacheEntry struct {
-	maps []EntMapping
-	at   time.Time
-}
-
-const sqlEntCacheTTL = 10 * time.Minute
-
 // entAccount 由企业编号解析出该企业该用的数据库账号(经 gzou_t)。
 //
 // 这一步是"上错号查不到数据"的解药:账号不再由调用方硬编码,而是从会话的 TOPENT
 // 现查。解析不到就**报错**,不静默回退 —— 回退到 ds 会安安静静地查另一个 schema,
 // 拿到 0 行,然后被当成"没有这条数据"。
+//
+// 取值顺序(内存 → 快照 → 现查)、降级规则与新鲜度口径全在 ents.go 的 EntCatalog,
+// **这里不再自己存一份缓存** —— 两处各存一份必然漂移,而"企业 99 到底在不在"这种事
+// 两条命令给出不同答案比慢一点坏得多。
 func (m *Manager) entAccount(conn *host.SSHConn, d *dbRun, ent int) (string, error) {
-	if ent <= 0 {
-		return "", fmt.Errorf("企业编号无效: %d", ent)
-	}
-	cc := conn.Cfg()
-	key := cc.Host + "|" + cc.User + "|" + d.zone
-	m.entMu.Lock()
-	if e, ok := m.entCache[key]; ok && time.Since(e.at) < sqlEntCacheTTL {
-		maps := e.maps
-		m.entMu.Unlock()
-		return pickEntAccount(maps, ent)
-	}
-	m.entMu.Unlock()
-
-	maps, err := dbAllMappings(conn, d)
-	if err != nil {
-		return "", err
-	}
-	m.entMu.Lock()
-	m.entCache[key] = sqlEntCacheEntry{maps: maps, at: time.Now()}
-	m.entMu.Unlock()
-	return pickEntAccount(maps, ent)
+	return m.ents.account(conn, d, m.cfg, ent)
 }
 
 // pickEntAccount 是纯函数,便于单测。
@@ -353,17 +329,31 @@ func splitRow(s string) []string {
 	return parts
 }
 
-// sqlErrOf 从输出里挑出数据库报错(取第一段,别把整坨噪声都塞回去)
+// sqlErrOf 从输出里挑出数据库报错(取一行,别把整坨噪声都塞回去)
+//
+// 为什么不能"取第一行匹配":sqlplus 的报错是**两行** ——
+//
+//	ERROR at line 1:
+//	ORA-00942: table or view does not exist
+//
+// 先匹配到的是上面那行没有任何信息量的头,真原因被吞掉。对排查(和 AI)来说,
+// "ERROR at line 1:" 等于没说。所以先找**带错误码的那行**,找不到再退回通用行 —
+// 金仓报的是单行 `ERROR: relation "x" does not exist`,没有码,靠第二趟兜住。
 func sqlErrOf(out string) string {
+	generic := ""
 	for _, ln := range strings.Split(out, "\n") {
 		t := strings.TrimSpace(ln)
-		if strings.HasPrefix(t, "ORA-") || strings.HasPrefix(t, "SP2-") ||
-			strings.HasPrefix(t, "ERROR") || strings.HasPrefix(t, "FATAL") ||
-			strings.Contains(t, "cannot execute") {
+		switch {
+		case strings.HasPrefix(t, "ORA-"), strings.HasPrefix(t, "SP2-"),
+			strings.HasPrefix(t, "FATAL"), strings.Contains(t, "cannot execute"):
 			return t
+		case strings.HasPrefix(t, "ERROR"):
+			if generic == "" {
+				generic = t
+			}
 		}
 	}
-	return ""
+	return generic
 }
 
 // applyValueCap 单字段值上限。**必须逐字段切,而不是逐行丢** ——

@@ -1482,7 +1482,8 @@ func (s *Server) hWSLogs(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"ok": true, "items": items, "hasMore": hasMore})
+	writeJSON(w, 200, map[string]any{"ok": true, "items": items, "hasMore": hasMore,
+		"acct": wslogAcctFor(s.wslogTopent())})
 }
 
 // hWSLogContent GET /api/wslogs/content?rowid=
@@ -1504,7 +1505,8 @@ func (s *Server) hWSLogContent(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"ok": true, "item": item, "content": content})
+	writeJSON(w, 200, map[string]any{"ok": true, "item": item, "content": content,
+		"acct": wslogAcctFor(s.wslogTopent())})
 }
 
 // hWSLogDebug POST /api/wslogs/debug {rowid, request?} → 用该日志的报文重放调试。
@@ -1580,7 +1582,21 @@ func (s *Server) hWSLogDebug(w http.ResponseWriter, r *http.Request) {
 	// warn 非空 = 这次重放用的是入库的截断文本,结果可能不可信(见 WriteReplayFiles)。
 	// 随回包一起给出去,让 CLI 能当场说清,而不是等人自己去翻事件日志。
 	writeJSON(w, 200, map[string]any{"ok": true, "sessionId": sess.ID,
-		"module": sess.Module, "prog": sess.Prog, "runProg": sess.RunProg, "warn": replayWarn})
+		"module": sess.Module, "prog": sess.Prog, "runProg": sess.RunProg, "warn": replayWarn,
+		"acct": wslogAcctFor(s.wslogTopent())})
+}
+
+// wslogTopent 取"此刻的 TOPENT 是什么"。
+//
+// **只用于说明** —— 查 wsfa_t 恒用系统账号 ds(见 wslogAcctFor),这个值不影响用哪个账号。
+// 优先会话里的生效值(会话级覆盖 > 环境配置),没有会话就用环境配置。
+func (s *Server) wslogTopent() string {
+	if cur := s.mgr.Current(); cur != nil {
+		if v := cur.TopentOverride(); v != "" {
+			return v
+		}
+	}
+	return string(s.cfg.Topent)
 }
 
 // hDBSQL 只读 SQL:POST /api/dbsql {sql, ent, timeout}

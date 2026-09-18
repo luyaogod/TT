@@ -200,7 +200,8 @@ tt config migrate [--dry-run]     # 合并旧配置
 ```
 tt debug serve [--stop|--foreground]     启动/停止调试服务
 tt debug probe                           探测：SSH / 区域 / 数据库
-tt debug db status|discover|ping         数据库连接检查
+tt debug ents [--ent N]                  企业目录：有哪些企业(ENT)、各用哪个账号（带快照，离线可答）
+tt debug db [--ent N]                    数据库连接体检：真连一次库验证账号可用
 
 tt debug start <作业> [-m <模块>] [-z <区域>]   拉起调试会话
 tt debug exec "<命令>"                    下断点/继续/求值（fgldb 原生命令）

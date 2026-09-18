@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"regexp"
 	"sync"
 	"time"
 
@@ -141,8 +142,28 @@ func (c *SSHConn) run(cmd string, stdin io.Reader, timeout time.Duration) (strin
 		}
 		return string(r.out), nil
 	case <-time.After(timeout):
-		return "", fmt.Errorf("命令超时: %s", cmd)
+		return "", fmt.Errorf("命令超时: %s", redactCmd(cmd))
 	}
+}
+
+// 口令抹除用的两套形态 —— 命令行里凭据只有这两种拼法(见 SqlplusCmd / KbCmd)。
+var (
+	// oracle: `账号/口令@//host:port/service`(整串被 shQuote 包在单引号里)
+	reOraCred = regexp.MustCompile(`([A-Za-z0-9_$#.]+)/[^@'\s]+@`)
+	// 金仓: `KINGBASE_PASSWORD='口令'`
+	reKbPass = regexp.MustCompile(`(KINGBASE_PASSWORD=)('[^']*'|\S+)`)
+)
+
+// redactCmd 回报命令行之前先把口令抹掉。
+//
+// 为什么必须过这一道:这些命令**超时是常事**(库慢、表大、网络抖),而命令行里带着
+// `账号/口令` —— 原样打出去就等于把口令写进终端、服务日志,以及 AI 的上下文里。
+// 凡是"回报整条命令行"的地方都要过这里。
+//
+// 只抹口令,保留账号、主机、工具路径:那些正是排障时要看的。
+func redactCmd(cmd string) string {
+	cmd = reOraCred.ReplaceAllString(cmd, "$1/****@")
+	return reKbPass.ReplaceAllString(cmd, "$1****")
 }
 
 // Close 关闭连接

@@ -85,7 +85,8 @@ Windows 一键打包，两种交付形态任选（互不影响，用的是同一
 | `sql "<语句>"` | 执行一条**只读** SQL 查业务数据（单条 SELECT/WITH；账号由 TOPENT 经 `gzou_t` 解析并在结果头回显「企业→账号」；白名单 + 库侧只读事务双重约束，最多回 200 行；`--ent` 指定企业、`--file` 从文件读；可用 `hosts.sshs[].db.readonlySql=false` 关闭） |
 | `wslogs` | 接口报文日志列表（`--job` 作业编号(支持通配，按作业找日志用这个)、`--service` 服务名、`--server`、`--origin`、`--result`、`--pid`、`--from`/`--to`、`--fail`、`--page`、`--show <rowid>` 看单条报文；条件口径对齐 T100 原生 awsq990） |
 | `wsdebug <rowid>` | 按日志报文参数重放调试，停在入口；`--set 路径=值` 改入参再重放（可重复）、`--request-file` 整份替换报文；启动后打印实际生效的 TOPENT（它不是数字时会提示） |
-| `db [--ent N]` | 数据库连接探查：企业(TOPENT) → 账号映射与连接验证 |
+| `db [--ent N]` | 数据库连接探查：企业(TOPENT) → 账号映射与连接验证（`--refresh` 跳过企业目录缓存强制现查） |
+| `ents [--ent N]` | 企业目录：当前环境有哪些企业编号、各用哪个账号（`--refresh` 强制现查、`--cached` 只用快照不连网、`--env` 指定环境）。**带落盘快照，断网也能答，并用 `stale`/`fetchedAt` 标注新鲜度**；查数据前先问它 |
 | `probe` | 协议驱动器自检尖刺：登录→启动→下断点→步进→求值（`-m/-p/-l`） |
 | `tt install skills` | 把 exe 同目录的 `skills/` 复制到目标目录（`--to <dir>` 换目标、`--force` 覆盖；默认 `<当前目录>/skills`） |
 | `tt install path` | 把 exe 所在目录加入**用户** PATH（HKCU，不需管理员；`--dry-run` 只预览）；合并后一次安装覆盖全部工具 |
@@ -153,6 +154,8 @@ Windows 一键打包，两种交付形态任选（互不影响，用的是同一
   `tt serve` 与 `tt debug serve` 写同一份，`apiBase` 区分对面把调试面挂在 `/debug/api` 还是 `/api`
 - `.tt-serve.log` —— 后台服务日志
 - `debug-bps/<模块>__<作业>.json` —— 断点持久化
+- `ents/<环境>.json` —— 企业目录快照（ENT→账号，`tt debug ents` 用）。**是可丢弃的缓存**：
+  换了机器/区域/库（指纹不符）或超过 10 分钟就当没有，重新现查；文件坏了也不影响命令失败
 
 ## 目录结构
 

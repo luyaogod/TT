@@ -102,9 +102,9 @@ func removeServeInfo(dir string) { _ = os.Remove(serveInfoFile(dir)) }
 // 运行的统一服务误判成"没在跑" —— 于是单实例判断失效(会再拉一个起来抢端口),
 // --stop 也会说找不到它。标记取自各服务 /api/status 里的 server 字段。
 var serveProbe = []struct{ Path, Mark string }{
-	{"/api/status", "tdebug-debug"},          // 独立调试服务(根布局)
-	{"/debug/api/status", "tdebug-debug"},    // 统一服务:调试面在前缀下
-	{"/api/health", "tt-unified"},            // 统一服务自己的健康检查
+	{"/api/status", "tdebug-debug"},       // 独立调试服务(根布局)
+	{"/debug/api/status", "tdebug-debug"}, // 统一服务:调试面在前缀下
+	{"/api/health", "tt-unified"},         // 统一服务自己的健康检查
 }
 
 // serveUp 探活:任一布局命中已知标记才算运行中,

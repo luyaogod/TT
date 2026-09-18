@@ -36,18 +36,26 @@ func TestListenReportsRealPort(t *testing.T) {
 		t.Fatalf("ListenAddr 应为 %s,实际 %s", addr, s.ListenAddr())
 	}
 
-	// 该端口再起一个 → 自动顺延到下一个端口(且报出的是顺延后的真实地址)
+	// 该端口再起一个 → 自动顺延到**另一个**空闲端口(且报出的是顺延后的真实地址)
+	//
+	// 只钉"顺延了、落在契约范围内(最多往后 maxPortTries 个)、报的地址是真的",
+	// **不钉正好 +1**:顺延到哪个端口取决于这台机器此刻哪些端口空着 —— 别的进程,
+	// 甚至刚释放、还在 TIME_WAIT 的端口都算。钉死 +1 会在那种时候**假失败**
+	// (实测本机单跑 5 次挂 2 次),因为那断言的是机器状态,不是代码行为。
 	s2 := NewServer(&Config{Listen: addr}, nil, "")
 	ln2, addr2, err := s2.Listen()
 	if err != nil {
 		t.Fatalf("顺延监听失败: %v", err)
 	}
 	defer ln2.Close()
+	if got := ln2.Addr().String(); got != addr2 {
+		t.Fatalf("顺延后上报地址应与真实监听一致: 上报 %s,实际 %s", addr2, got)
+	}
 	p1, _ := strconv.Atoi(port)
 	_, port2, _ := net.SplitHostPort(addr2)
 	p2, _ := strconv.Atoi(port2)
-	if p2 != p1+1 {
-		t.Fatalf("端口 %d 被占用时应顺延到 %d,实际 %s", p1, p1+1, addr2)
+	if p2 <= p1 || p2 > p1+maxPortTries {
+		t.Fatalf("端口 %d 被占用时应向后顺延(最多 %d 个),实际落到 %s", p1, maxPortTries, addr2)
 	}
 }
 

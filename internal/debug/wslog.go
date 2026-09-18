@@ -170,6 +170,65 @@ func wslogWhere(f WSLogFilter) (string, error) {
 	return wc, nil
 }
 
+// wsSysAccount 查接口日志(wsfa_t)固定用系统账号 ds。
+//
+// 为什么不按企业解析:wsfa_t 是 **ds 下的共享表** —— 接口日志不按企业分 schema,
+// 报文里的企业只是行上的一个属性(与 gzou_t/gzzz_t 同一类)。所以这里没有"选哪个账号"
+// 这回事,也就没有"回退"可言:压根不存在第二个候选。
+//
+// 对照:只读 SQL(tt debug sql)查的是**按企业分 schema 的业务表**,那边必须由 TOPENT
+// 解析账号(见 dbsql.go 的 entAccount)。两者不一样,别把规矩搬错方向。
+const wsSysAccount = "ds"
+
+// WSLogAcct 说明这次查 wsfa_t 用了哪个账号、为什么,以及当前 TOPENT 是什么情况。
+//
+// 为什么要带它出去:"接口日志为空"这个结果,调用方必须能分辨是"这段时间确实没调用",
+// 还是"企业/账号用错了"。只读 SQL 那边靠结果头的"企业 N → 账号 X"回答这个问题,
+// 接口日志这边则要回答"它压根不按企业走"。
+type WSLogAcct struct {
+	Account string `json:"account"`
+	Reason  string `json:"reason"`
+	// TopentWarning 非空 = 当前 TOPENT 不是有效企业编号。
+	//
+	// **它不影响接口日志查询**(共享表),但会影响重放(wsdebug)时的框架据点校验,
+	// 所以照样报出来 —— 免得把"日志查得到"和"重放跑得通"当成同一件事。
+	TopentWarning string `json:"topentWarning,omitempty"`
+}
+
+// wslogAcctFor 决定查接口日志用的账号并说明理由。纯函数(不碰 SSH),便于单测。
+func wslogAcctFor(rawTopent string) WSLogAcct {
+	a := WSLogAcct{
+		Account: wsSysAccount,
+		Reason:  "wsfa_t 是系统账号 ds 下的共享表,接口日志不按企业分 schema",
+	}
+	raw := strings.TrimSpace(rawTopent)
+	if raw == "" {
+		a.TopentWarning = "当前没有生效的 TOPENT(企业编号);不影响接口日志查询,但重放时框架按空企业走"
+		return a
+	}
+	if n, ok := host.EntValue(raw).Int(); !ok || n <= 0 {
+		a.TopentWarning = fmt.Sprintf("TOPENT 不是有效企业编号(%s);不影响接口日志查询,但框架的据点校验会用到它", raw)
+	}
+	return a
+}
+
+// isDBErrorLine 判断这是不是一行数据库报错。
+//
+// **不能只认 ORA-**:金仓报的是 `ERROR: relation "wsfa_t" does not exist` 或 `FATAL: …`。
+// 漏掉它们,"表不存在/连不上"会被当成"这段时间没有日志" —— 一个静默的错误结论。
+//
+// 故意用"行首匹配"而不是 Contains:报文里的报文字段本身可能带 ORA- 字样,
+// 那不该让整次查询失败。
+func isDBErrorLine(ln string) bool {
+	t := strings.TrimSpace(ln)
+	for _, p := range []string{"ORA-", "SP2-", "ERROR", "FATAL"} {
+		if strings.HasPrefix(t, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // listWSLogs 查询接口日志列表(Oracle: rowid + OFFSET/FETCH;金仓: ctid + OFFSET/LIMIT)
 func listWSLogs(conn *host.SSHConn, dbc *dbRun, f WSLogFilter) (items []WSLogItem, hasMore bool, err error) {
 	size := f.PageSize
@@ -184,7 +243,7 @@ func listWSLogs(conn *host.SSHConn, dbc *dbRun, f WSLogFilter) (items []WSLogIte
 	if err != nil {
 		return nil, false, err
 	}
-	connStr, err := dbc.dbConnStr("ds")
+	connStr, err := dbc.dbConnStr(wsSysAccount)
 	if err != nil {
 		return nil, false, err
 	}
@@ -207,8 +266,8 @@ from wsfa_t wsfa where %s order by wsfa003 desc, wsfa004 desc offset %d rows fet
 	}
 	var all []WSLogItem
 	for _, ln := range strings.Split(out, "\n") {
-		if strings.Contains(ln, "ORA-") {
-			return nil, false, fmt.Errorf("wsfa_t 查询出错: %s", host.FirstLines(ln, 2))
+		if isDBErrorLine(ln) {
+			return nil, false, fmt.Errorf("wsfa_t 查询出错: %s", strings.TrimSpace(ln))
 		}
 		m := reWSLogRow.FindStringSubmatch(strings.TrimRight(ln, " \r"))
 		if m == nil {
@@ -235,7 +294,7 @@ func WSLogDetail(conn *host.SSHConn, dbc *dbRun, rowid string) (*WSLogItem, *WSL
 	}
 	var out string
 	var err error
-	connStr, err := dbc.dbConnStr("ds")
+	connStr, err := dbc.dbConnStr(wsSysAccount)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -258,8 +317,8 @@ from wsfa_t wsfa where rowid='%s';`, sqlWSLogCols(false), rowid)
 	}
 	var item *WSLogItem
 	for _, ln := range strings.Split(out, "\n") {
-		if strings.Contains(ln, "ORA-") {
-			return nil, nil, fmt.Errorf("wsfa_t 查询出错: %s", host.FirstLines(ln, 2))
+		if isDBErrorLine(ln) {
+			return nil, nil, fmt.Errorf("wsfa_t 查询出错: %s", strings.TrimSpace(ln))
 		}
 		if m := reWSLogRow.FindStringSubmatch(strings.TrimRight(ln, " \r")); m != nil {
 			item = &WSLogItem{

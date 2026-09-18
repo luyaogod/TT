@@ -771,12 +771,34 @@ func printWSLogItem(it wsLogItem) {
 
 // wslOut 单条日志的报文内容(/api/wslogs/content)
 type wslOut struct {
-	Item    wsLogItem `json:"item"`
+	Item    wsLogItem  `json:"item"`
+	Acct    *wsLogAcct `json:"acct"`
 	Content struct {
 		Request        string `json:"request"`
 		Response       string `json:"response"`
 		RequestPartial bool   `json:"requestPartial"`
 	} `json:"content"`
+}
+
+// wsLogAcct 接口日志是用哪个账号查的、为什么(服务端随回包带出来)。
+//
+// 为什么值得单独打一行:空结果时这是唯一能区分"这段时间确实没调用"与
+// "账号/企业用错了"的线索。只读 SQL 那边靠结果头的"企业 N → 账号 X",
+// 接口日志这边则要说明"它压根不按企业走"。
+type wsLogAcct struct {
+	Account       string `json:"account"`
+	Reason        string `json:"reason"`
+	TopentWarning string `json:"topentWarning"`
+}
+
+func printWSLogAcct(a *wsLogAcct) {
+	if a == nil || a.Account == "" {
+		return
+	}
+	fmt.Printf("[账号] %s —— %s\n", a.Account, a.Reason)
+	if a.TopentWarning != "" {
+		fmt.Printf("[账号] 注意: %s\n", a.TopentWarning)
+	}
 }
 
 func fetchWSLog(rowid string) (*wslOut, error) {
@@ -955,10 +977,12 @@ var debugWslogsCmd = &cobra.Command{
 		}
 		var r struct {
 			Items []wsLogItem `json:"items"`
+			Acct  *wsLogAcct  `json:"acct"`
 		}
 		if err := json.Unmarshal(data, &r); err != nil {
 			return err
 		}
+		printWSLogAcct(r.Acct)
 		for _, it := range r.Items {
 			printWSLogItem(it)
 		}
@@ -988,6 +1012,7 @@ func showWSLog(rowid string, asJSON bool, reqSave string) error {
 		return err
 	}
 	printWSLogItem(r.Item)
+	printWSLogAcct(r.Acct)
 	if reqSave != "" {
 		// 报文可能是 XML(不是 JSON),那样 --set 用不了,只能导出原文改完再 --request-file ——
 		// 这个开关就是那条路的起点。

@@ -181,3 +181,64 @@ func TestWSLogPageClamp(t *testing.T) {
 		}
 	}
 }
+
+// wsfa_t 是 ds 下的共享表,查接口日志恒用系统账号 —— 这个"为什么"必须随结果带出去,
+// 否则"日志为空"会被读成"这段时间没有调用",而不是"账号/企业可能用错了"。
+func TestWSLogAcctFor(t *testing.T) {
+	cases := []struct {
+		name       string
+		topent     string
+		wantWarn   bool // 期望带 TOPENT 警告
+		wantInWarn string
+	}{
+		{name: "有效企业编号", topent: "99"},
+		{name: "据点码填错位置", topent: "SITE01", wantWarn: true, wantInWarn: "SITE01"},
+		{name: "空", topent: "", wantWarn: true, wantInWarn: "没有生效的 TOPENT"},
+		{name: "零", topent: "0", wantWarn: true, wantInWarn: "0"},
+		{name: "带空白", topent: "  99  "},
+	}
+	for _, c := range cases {
+		a := wslogAcctFor(c.topent)
+		if a.Account != wsSysAccount {
+			t.Errorf("[%s] 账号应当恒为系统账号 %s,得到 %q", c.name, wsSysAccount, a.Account)
+		}
+		if a.Reason == "" {
+			t.Errorf("[%s] 必须说明为什么用这个账号", c.name)
+		}
+		if (a.TopentWarning != "") != c.wantWarn {
+			t.Errorf("[%s] TOPENT 警告 = %q, 期望有无=%v", c.name, a.TopentWarning, c.wantWarn)
+		}
+		if c.wantInWarn != "" && !strings.Contains(a.TopentWarning, c.wantInWarn) {
+			t.Errorf("[%s] 警告里应当点出原始值 %q: %q", c.name, c.wantInWarn, a.TopentWarning)
+		}
+	}
+}
+
+// 数据库报错行不能只认 ORA-:金仓报的是 `ERROR: relation "wsfa_t" does not exist`,
+// 漏掉它会让"表不存在"被静默当成"这段时间没有日志"。
+// 反过来也要挡住:数据行里的报文字段本身可能带 ORA- 字样,那不该让整次查询失败。
+func TestIsDBErrorLine(t *testing.T) {
+	yes := []string{
+		`ORA-00942: table or view does not exist`,
+		`  SP2-0306: invalid option`, // 前导空白也要认
+		`ERROR: relation "wsfa_t" does not exist`,
+		`FATAL: password authentication failed`,
+	}
+	for _, ln := range yes {
+		if !isDBErrorLine(ln) {
+			t.Errorf("%q 应当被认成数据库报错", ln)
+		}
+	}
+	no := []string{
+		"",
+		"AAJp0sAATAAFn8UAAA|wssp01131|1234|2026-09-17 21:00:00|0.1|Y|bsft001_wf",
+		// 报文里出现了 ORA- 字样,但这是**数据行**,不是报错行
+		"ctid|wssp01131|||||ORA-01403 在业务里被 catch 了|||||||",
+		"12 rows selected.",
+	}
+	for _, ln := range no {
+		if isDBErrorLine(ln) {
+			t.Errorf("%q 不该被当成数据库报错(会让一次正常查询整批失败)", ln)
+		}
+	}
+}
