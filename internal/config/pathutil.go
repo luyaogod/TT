@@ -77,8 +77,30 @@ func FileStatusOf(configured, defaultTarget string) FileStatus {
 	return st
 }
 
-// DefaultSyncTarget 同步目标的缺省位置:当前目录下的 erp_data.db(绝对化)。
+// TzsStatus 是 .tzs 引擎那几样东西的派生状态(见 schema.go 的 TzsSettings)。
 //
+// Engine 与另外两个**故意分开**:Engine 是随包分发的那个 exe(在 tt.exe 旁边),它不在
+// 说明分包或部署坏了;Install/Workspace 在用户自己的机器上、由用户配置,它们不在是配置
+// 问题。混成一个字段会让设置页把"你自己没配"说成"程序坏了"。
+type TzsStatus struct {
+	// Engine 引擎 exe:生效值可以是配置里覆盖的 serverExe,否则是 <tt.exe 目录>\tzs\ 下那个。
+	Engine FileStatus `json:"engine"`
+	// Install 设计器安装目录(第三方软件,不随包分发)。
+	Install DirStatus `json:"install"`
+	// Workspace 引擎 Boot 的工作区(含 mta/ 的目录)。
+	Workspace DirStatus `json:"workspace"`
+}
+
+// TzsStatusOf 汇总引擎那几样东西的状态。defaultEngineExe 由调用方算(它要知道 tt.exe 在哪)。
+func TzsStatusOf(s TzsSettings, defaultEngineExe string) TzsStatus {
+	return TzsStatus{
+		Engine:    FileStatusOf(s.ServerExe, defaultEngineExe),
+		Install:   DirStatusOf(s.InstallDir),
+		Workspace: DirStatusOf(s.Workspace),
+	}
+}
+
+// DefaultSyncTarget 同步目标的缺省位置:当前目录下的 erp_data.db(绝对化)。//
 // 与 `tt dict -d` 的解析顺序(cwd → exe 目录)第一条候选一致,所以
 // "服务在这里同步、命令行在这里读"天然对得上。
 func DefaultSyncTarget() string {

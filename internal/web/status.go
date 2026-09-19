@@ -2,6 +2,8 @@ package web
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 
 	"tt/internal/config"
 	"tt/internal/pathinstall"
@@ -28,6 +30,19 @@ type configStatus struct {
 	Sync config.FileStatus `json:"sync"`
 	// Install 命令行安装状态(用户 PATH),不是 config.json 里的东西。
 	Install pathinstall.Status `json:"install"`
+	// Tzs .tzs 表单引擎的运行时依赖:引擎 exe(随包分发)、设计器目录与工作区(用户配的)。
+	Tzs config.TzsStatus `json:"tzs"`
+}
+
+// defaultEngineExe 引擎 exe 的缺省位置:<tt.exe 所在目录>\tzs\tzs-server.exe。
+// 与 internal/dev/cli 那侧是同一条规则 —— 那边算出来是为了真的启动它,这里只是为了
+// 让设置页能显示它在不在。放同一处的理由:两边算出不同的路径,设置页就会说"有"而命令说"没有"。
+func defaultEngineExe() string {
+	self, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(self), "tzs", "tzs-server.exe")
 }
 
 // hConfigStatus 返回上述派生状态。配置读不到时不报错,返回缺省值 —— 设置页在没有
@@ -36,12 +51,16 @@ func (s *Server) hConfigStatus(w http.ResponseWriter, r *http.Request) {
 	path, _ := s.configPath(true)
 	st := configStatus{OK: true, Config: path, Sync: config.FileStatusOf("", s.syncDefaultTarget())}
 
+	var tzsCfg config.TzsSettings
 	root, err := config.Load(path)
 	if err == nil {
 		st.Mirror = config.DirStatusOf(root.Mirror.Dir)
 		st.Bdldoc = config.DirStatusOf(root.Bdldoc.Dir)
 		st.Sync = config.FileStatusOf(root.Sync.Target, s.syncDefaultTarget())
+		tzsCfg = root.Tzs
 	}
+	// 引擎 exe 的状态与配置读没读到无关(它随包分发),所以放在分支外。
+	st.Tzs = config.TzsStatusOf(tzsCfg, defaultEngineExe())
 	st.Install = pathinstall.Get()
 	writeJSON(w, http.StatusOK, st)
 }
