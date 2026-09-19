@@ -1,0 +1,595 @@
+using System;
+using System.Collections.Generic;
+using Newtonsoft.Json.Linq;
+
+namespace TzsCli.Designer
+{
+    /// <summary>
+    /// The function table -- the single source of truth the CLI help, the argument validation and
+    /// the (later) MCP tool list are all generated from. SPEC §11.24 (c) is the frozen shape of
+    /// one entry; §11.22 is the list of the ~50 functions that will eventually exist.
+    ///
+    /// Every function in the eventual surface is declared here, including the ones whose bodies
+    /// are still being written in parallel (src/Designer/Fns/*.cs). A declaration without a body
+    /// is not a lie: dispatch answers E_NOT_IMPLEMENTED for it, which is a different answer from
+    /// E_UNKNOWN_METHOD, and the difference is exactly "this will work later" versus "you typed
+    /// it wrong". Declaring the whole surface up front is also what lets tzs-cli --help and the
+    /// CLI's own argument typing work before any Fn exists.
+    ///
+    /// The *types* (SpecFn / Param / PType / Fn / P / SpecSlots) are frozen in SpecFn.cs. This
+    /// file holds only the table, plus the validation that reads it.
+    ///
+    /// `slow:true` is on `validate` alone, and it is not decoration: SPEC §11.24 (c) measured
+    /// 1.6 s on a 114-element form and 10.4 s on a 670-element one. It is surfaced in --help so a
+    /// caller does not put it in a loop.
+    /// </summary>
+    public static class Manifest
+    {
+        // ---------------------------------------------------------------- groups
+        const string G_SESSION = "会话";
+        const string G_READ    = "读";
+        const string G_ATTR    = "属性";
+        const string G_STRUCT  = "结构";
+        const string G_PAGE    = "页签";
+        const string G_SEM     = "语义/Action";
+        const string G_MULTI   = "多语言/选项/串查";
+        const string G_TAB     = "Tab 顺序";
+        const string G_TOOL    = "校验/工具";
+
+        // ---------------------------------------------------------------- error vocabulary
+        /// <summary>The codes a declared function may put on the wire. Kept as arrays so the
+        /// help and the (future) MCP tool schema cannot drift from what the Fns throw.</summary>
+        static readonly string[] E_STD = { "E_NOT_FOUND", "E_BAD_PARAM", "E_DESIGNER", "E_INTERNAL" };
+        static readonly string[] E_SESS = { "E_NOT_FOUND", "E_BAD_PARAM", "E_DESIGNER", "E_KEY_IN_USE", "E_INTERNAL" };
+
+        /// <summary>The 控件箱 (WidgetBox.xaml, 31 items) minus the container/semantic families,
+        /// which get their own enums. It is an enum rather than a free string because
+        /// ComponentFactory.ModFdInfo.IsIncludeAttribute NREs natively on a type outside the
+        /// catalogue (SPEC §11.15) -- refusing it in validation turns a stack trace into a
+        /// message that names the parameter.</summary>
+        static readonly string[] WIDGETS = {
+            "Button", "ButtonEdit", "Canvas", "CheckBox", "ComboBox", "DateEdit", "DateTimeEdit",
+            "Edit", "FFImage", "FFLabel", "HLine", "Image", "Label", "ProgressBar", "RadioGroup",
+            "Slider", "SpinEdit", "TextEdit", "TimeEdit", "WebComponent"
+        };
+
+        /// <summary>UICreator.Create's six dispatch branches (SPEC §11.10) plus the three that
+        /// exist only as commands: HBox/VBox are AddToContainerUndoRedoCommand targets (§11.17),
+        /// Page is a Folder's only legal child.</summary>
+        static readonly string[] CONTAINERS = {
+            "None", "Grid", "Group", "ScrollGrid", "Table", "Tree", "Page", "HBox", "VBox", "Folder"
+        };
+
+        // ---------------------------------------------------------------- table builders
+        /// <summary>A handle-taking function. NeedsHandle=true is the default in SpecFn, and it
+        /// is also what makes the transport resolve args.handle before the body runs.</summary>
+        static SpecFn F(string name, string group, string summary, bool mutating, string returns,
+                        string[] errors, params Param[] ps) {
+            return new SpecFn {
+                Name = name, Group = group, Summary = summary, Params = ps,
+                NeedsHandle = true, Mutating = mutating, Slow = false, Returns = returns, Errors = errors
+            };
+        }
+
+        /// <summary>Same, but with no session: these answer from the workspace or from the
+        /// catalogue, so an open package is neither required nor touched.</summary>
+        static SpecFn N(string name, string group, string summary, string returns,
+                        string[] errors, params Param[] ps) {
+            SpecFn f = F(name, group, summary, false, returns, errors, ps);
+            f.NeedsHandle = false;
+            return f;
+        }
+
+        static Param Opt(PType t, string n, string desc) {
+            return new Param { Name = n, Type = t, Required = false, Desc = desc };
+        }
+
+        /// <summary>An optional enum still has to carry its Values: an Enum Param with a null
+        /// Values array would accept any string, which is the silent-typo hole this table
+        /// exists to close.</summary>
+        static Param OptEnum(string n, string[] values, string desc) {
+            return new Param { Name = n, Type = PType.Enum, Required = false, Values = values, Desc = desc };
+        }
+
+        /// <summary>All 49 declared functions, in §11.22's order. The order is the order --help
+        /// prints them in, which is why it is the spec's order and not alphabetical.</summary>
+        public static readonly SpecFn[] All = {
+
+            // ------------------------------------------------------------ 会话 (5)
+            N("open", G_SESSION, "加载包 + 注册会话，返回句柄", "handle", E_SESS,
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = ".tzs 路径" },
+                // `timeout` was read by Session.Open (Fns/Session.cs:220) but declared nowhere, and
+                // Manifest.Check refuses an argument that is not in Params -- so the parameter was
+                // unreachable from the wire. It lived only in Fns/Session.cs's `Descriptors`, a
+                // second copy of this table that nothing read; that copy is now deleted and the
+                // declaration moved here, where callers are actually validated against.
+                new Param { Name = "timeout", Type = PType.Int, Required = false,
+                            Desc = "加载看门狗秒数；默认 $TZSCLI_RELOAD_TIMEOUT 或 90" },
+                Opt(PType.Bool, "force", "占用者只是 Loaded 时强制接管（Mutable 的会被拒绝）")),
+            F("save", G_SESSION, "把句柄的模型写回新包（不改会话状态）", false, "void", E_STD,
+                P.Handle(),
+                P.Str("out", true, "输出 .tzs 路径")),
+            // Mutating=false, and the argument for it was sitting in Fns/Session.cs's dead
+            // `Descriptors` copy of this table, which said `true` -- the two disagreed and nothing
+            // read either. Resolved in favour of the argument: `close` releases a handle, it does
+            // not dirty a model, so it is not a write. Same reasoning as `save` below, which is
+            // false for the mirror-image reason (it writes a file but leaves the model Loaded,
+            // and that is exactly the fixed-point property the RoundTrip oracle tests).
+            F("close", G_SESSION, "释放句柄（发布 TzpFileClose + 摘 EAM；句柄串永不复用）", false, "void", E_STD,
+                P.Handle()),
+            F("verify", G_SESSION, "对句柄的模型跑设计器自己的校验器，报 delta", false, "delta", E_STD,
+                P.Handle(),
+                Opt(PType.Path, "path", "只校验这条子树")),
+            N("list_open", G_SESSION, "列出打开的句柄；回吐 ProgramKey 让碰撞可见", "list<el>", E_STD),
+
+            // ------------------------------------------------------------ 读 (9)
+            F("form_tree", G_READ, "表单结构树（画面结构页签），每节点带 name-path", false, "tree", E_STD,
+                P.Handle(),
+                Opt(PType.Path, "path", "从这条子树开始，默认整张表单"),
+                Opt(PType.Int, "depth", "限制层数")),
+            F("find_component", G_READ, "把控件代号解析成 name-path（精确优先，未中退化子串）", false, "list<el>", E_STD,
+                P.Handle(),
+                P.Str("query", true, "控件代号或其前缀")),
+            F("get_component", G_READ, "一个元素的布局属性 + 它持有的规格节点属性", false, "el", E_STD,
+                P.Handle(),
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
+                Opt(PType.Kind, "kind", "限定只回哪一类规格节点")),
+            F("list_spec_nodes", G_READ, "整张表单的规格节点清单（按 kind 过滤）", false, "list<el>", E_STD,
+                P.Handle(),
+                Opt(PType.Kind, "kind", "只列这一类")),
+            // Needs a handle, unlike its neighbours here. The attribute set is per-FILE, not
+            // per-kind: an aapp320 field carries 23 attributes, a cs_excel one carries 20,
+            // because the answer is read off the nodes a load actually produced. Answering
+            // without a package would mean answering from a fabricated canonical node and
+            // disagreeing with what set_spec_attr will accept. `kind` is optional so one call
+            // can return all seven.
+            F("describe_kind", G_READ, "某类规格节点运行时可写的属性白名单（§11.24(c) from:describe_kind）",
+              false, "kindmap", E_STD,
+                P.Handle(),
+                new Param { Name = "kind", Type = PType.Kind, Required = false,
+                            Desc = "七种之一；省略则返回全部七种" }),
+            N("list_tables", G_READ, "工作区数据字典里的表", "list<el>", E_STD,
+                Opt(PType.Str, "query", "名称子串")),
+            N("list_columns", G_READ, "一张表的列（含 widget/attribute/type/req 等列元数据）", "list<el>", E_STD,
+                P.Str("table", true, "表名，如 pmdl_t"),
+                Opt(PType.Str, "query", "列名子串")),
+            F("list_records", G_READ, ".4fd 的 Record / RecordField 清单", false, "list<el>", E_STD,
+                P.Handle()),
+            F("list_local_strings", G_READ, "本地化串（sfield）清单", false, "list<el>", E_STD,
+                P.Handle(),
+                Opt(PType.Path, "path", "限定某条子树")),
+
+            // ------------------------------------------------------------ 属性 (4)
+            F("set_spec_attr", G_ATTR, "改字段规格属性（白名单来自 describe_kind）", true, "delta", E_STD,
+                P.Handle(),
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
+                P.Kind(),
+                P.Attr("attr", "spec:<kind>"),
+                P.Str("value", true, "新值")),
+            F("set_layout_attr", G_ATTR, "改布局属性（走 XmlElement 索引器，铁律 §11.24(d)）", true, "delta", E_STD,
+                P.Handle(),
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
+                P.Attr("attr", "layout"),
+                P.Str("value", true, "新值"),
+                Opt(PType.PathList, "paths", "批量：对这些 path 一起改，忽略 path")),
+            F("set_tree_source", G_ATTR, "Tree 数据来源的某一格", true, "delta", E_STD,
+                P.Handle(),
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "Tree 的 name-path" },
+                P.Str("element", true, "子元素名"),
+                P.Str("property", true, "属性名"),
+                P.Str("value", true, "新值")),
+            F("rename_component", G_ATTR, "改控件代号（设计器强制全表单唯一）", true, "delta", E_STD,
+                P.Handle(),
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
+                P.Str("name", true, "新代号")),
+
+            // ------------------------------------------------------------ 结构 (12)
+            // with_label defaults TRUE, which is a behaviour change and the faithful one: the
+            // widget box never creates these eight types bare (ComponentFactory .cs:98-127 via
+            // CreateEmptyComponentWithLabel), so a form built through us looked different from one
+            // built by hand. Pass with_label=false for the old single-element behaviour.
+            F("add_widget", G_STRUCT, "往容器里加一个控件（走 AddComponetsUndoRedoCommand）", true, "el", E_STD,
+                P.Handle(),
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "父容器的 name-path" },
+                P.Enum("type", WIDGETS),
+                Opt(PType.Str, "name", "控件代号，默认走 ComponentFactory.GetNewName"),
+                Opt(PType.Bool, "with_label", "给需要标签的 8 种控件配一个 Label 并双向绑定+AddSpecBinding"
+                    + "（Edit/ComboBox/TextEdit/ButtonEdit/DateEdit/DateTimeEdit/SpinEdit/TimeEdit）。"
+                    + "默认 true = 设计器控件箱的行为；false 得到一个裸控件")),
+            // `columns` is the designer's OWN shape, not an invention: its WidgetBox button
+            // "Create a structure from database columns" (WidgetBox.xaml:138) opens
+            // DBStructureCreator, whose only non-UI line is one call to
+            // UICreator.Create(LayoutEditor, container, SelectedFields, key)
+            // (DBStructureCreator.xaml.cs:178) -- N columns in ONE construction. The legacy
+            // AddField.exe already did it that way (AddField.cs:242-275). Passing one column at a
+            // time makes the designer redo its whole per-call setup per field, and that setup
+            // costs more the larger the form already is: adding 84 columns one at a time measured
+            // 137 s, with per-field cost climbing 0.55 -> 3.25 s. It also gets the container
+            // WRONG -- CreateNoneContainerWidget (the default) makes label+widget per field, so
+            // filling a Table that way plants a <Label> beside every widget, which no Table in
+            // that form has; CreateTableContainer returns the Table alone.
+            F("add_field", G_STRUCT, "从数据字典加字段（控件类型由列元数据决定）", true, "el", E_STD,
+                P.Handle(),
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "父容器的 name-path" },
+                P.Str("table", true, "表名"),
+                P.Str("column", false, "单列名；与 columns 二选一"),
+                P.StrList("columns", false, "一次加多列；与 column 二选一。N 列走同一次构造调用，"
+                    + "所以 container=Table 得到的是「一个 Table 装 N 列」而不是每列一个容器"),
+                OptEnum("container", CONTAINERS, "容器模式，默认 None（就地放一对标签+控件）"),
+                // `name` used to be declared here and was never read by AddFieldFn -- an
+                // advertised parameter that silently does nothing is worse than an absent one.
+                // It is not simply implemented either: a column-backed field's name IS its
+                // binding key, so a caller-chosen name would have to match the column.
+                Opt(PType.Str, "widget", "覆盖列元数据给的控件类型")),
+            F("insert_at", G_STRUCT, "在指定序号插入控件（往前/往后新增栏位）", true, "el", E_STD,
+                P.Handle(),
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "父容器的 name-path" },
+                P.Enum("type", WIDGETS),
+                Opt(PType.Int, "index", "插入位置，默认追加"),
+                Opt(PType.Bool, "with_label", "同 add_widget：给需要标签的 8 种控件配一个 Label。"
+                    + "默认 true = 设计器控件箱的行为")),
+            F("delete", G_STRUCT, "删元素：布局真删、规格留墓碑（status=d）", true, "delta", E_STD,
+                P.Handle(),
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
+                Opt(PType.PathList, "paths", "批量：删这些 path，忽略 path")),
+            F("move", G_STRUCT, "改 Z 序（最前/前一个/下一个/最后）", true, "delta", E_STD,
+                P.Handle(),
+                P.List("paths", true),
+                P.Enum("to", new[] { "first", "prev", "next", "last" })),
+            // move's Z-order sibling: `move` stays inside one parent, this one changes the parent.
+            // DragComponentsUndoRedoCommand is the designer's drag-drop command and the only
+            // reparent primitive there is -- AddToContainer makes a NEW box, and cut+paste is
+            // cross-form and empties the source. Same form only, deliberately.
+            F("reparent", G_STRUCT, "把元素搬进另一个容器（同表单；DragComponentsUndoRedoCommand）",
+                true, "delta", E_STD,
+                P.Handle(),
+                P.List("paths", true),
+                new Param { Name = "into", Type = PType.Path, Required = true,
+                            Desc = "目标容器的 name-path" }),
+            F("nudge", G_STRUCT, "按方向平移（MoveComponentsUndoRedoCommand）", true, "delta", E_STD,
+                P.Handle(),
+                P.List("paths", true),
+                P.Enum("direction", new[] { "up", "down", "left", "right" }),
+                Opt(PType.Int, "offset", "格数，默认 1")),
+            F("align", G_STRUCT, "对齐（STRETCH/LEFT/RIGHT/TOP/BOTTOM）", true, "delta", E_STD,
+                P.Handle(),
+                P.List("paths", true),
+                P.Enum("option", new[] { "stretch", "left", "right", "top", "bottom" })),
+            F("fit_size", G_STRUCT, "尺寸自适应", true, "delta", E_STD,
+                P.Handle(),
+                P.List("paths", true)),
+            F("wrap", G_STRUCT, "把选中元素整体包进一个新容器（不是加字段）", true, "el", E_STD,
+                P.Handle(),
+                P.List("paths", true),
+                P.Enum("type", new[] { "hbox", "vbox", "grid", "group" })),
+            F("break_layout", G_STRUCT, "拆箱（wrap 的对称操作）", true, "delta", E_STD,
+                P.Handle(),
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "盒子元素的 name-path" }),
+            F("convert_widget", G_STRUCT, "转换控件类型（14 种）", true, "delta", E_STD,
+                P.Handle(),
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
+                P.Enum("type", WIDGETS)),
+            F("convert_container", G_STRUCT, "转换容器类型", true, "delta", E_STD,
+                P.Handle(),
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
+                P.Enum("type", CONTAINERS)),
+
+            // ------------------------------------------------------------ 页签 (2)
+            F("add_page", G_PAGE, "新增页签（Folder 下的 Page）", true, "el", E_STD,
+                P.Handle(),
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "Folder 的 name-path" },
+                Opt(PType.Str, "name", "页签名")),
+            F("delete_page", G_PAGE, "删除页签（含其子节点）", true, "delta", E_STD,
+                P.Handle(),
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "Page 的 name-path" }),
+
+            // ------------------------------------------------------------ 语义 / Action (4)
+            F("insert_semantic", G_SEM, "插入语义节点（REFERENCE/MULTILANG/PROGREL）", true, "el", E_STD,
+                P.Handle(),
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "父容器的 name-path" },
+                P.Enum("use", new[] { "reference", "multilang", "progrel" })),
+            F("add_action", G_SEM, "新增 Action（<act>，id=控件代号）", true, "el", E_STD,
+                P.Handle(),
+                new Param { Name = "path", Type = PType.Path, Required = true,
+                            Desc = "父容器的 name-path；空串 = 独立动作（无按钮）" },
+                // NOT a static enum. The vocabulary is the FORM's own: all / mi / di<n> / db<n>,
+                // where n comes from that form's s_detail<n> records -- aapp320 has 12 tokens,
+                // another form has 3. A fixed list cannot express that, and pinning one to
+                // {"all","none"} made every other token E_BAD_PARAM before the body could look at
+                // the form, so "adding db* evicts all" was unreachable over the wire. The body
+                // validates against the form and returns the real set as `vocabulary`; detail.legal
+                // carries it on rejection. W3-C found this.
+                P.Str("type", false, "型态，逗号分隔；合法集是该表单自己的（见返回体的 vocabulary）"),
+                Opt(PType.Str, "name", "action id")),
+            F("delete_action", G_SEM, "删除 Action", true, "delta", E_STD,
+                P.Handle(),
+                P.Str("id", true, "action id")),
+            F("set_action_types", G_SEM, "改 Action 的类型组合", true, "delta", E_STD,
+                P.Handle(),
+                P.Str("id", true, "action id"),
+                // Same reason as add_action's `type`: the legal set is per-form, so it cannot be
+                // an enum here. "none" requests the empty set, which rule 3 folds back to all.
+                P.Str("types", true, "型态，逗号分隔；合法集见返回体的 vocabulary，\"none\" 表示空集")),
+
+            // ------------------------------------------------------------ 多语言 / 选项 / 串查 (6)
+            F("set_local_string", G_MULTI, "写一条本地化串（sfield）", true, "delta", E_STD,
+                P.Handle(),
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
+                P.Str("name", true, "串名，如 lbl_pmdlud001"),
+                P.Str("text", true, "内容")),
+            F("set_items", G_MULTI, "ComboBox/RadioGroup 的选项值（<Item>）", true, "delta", E_STD,
+                P.Handle(),
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
+                P.StrList("items", true, "\"name|text|description\" 字符串数组（不是路径）")),
+            F("set_progrel_programs", G_MULTI, "串查程序的增删", true, "delta", E_STD,
+                P.Handle(),
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
+                P.Str("program", true, "程序名"),
+                Opt(PType.Bool, "isDelete", "true = 删掉这条串查")),
+            F("set_table_association", G_MULTI, "改表关联（<table> 段）", true, "delta", E_STD,
+                P.Handle(),
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
+                P.Str("table", true, "表名"),
+                Opt(PType.Str, "column", "列名")),
+            F("set_spec_description", G_MULTI, "写 SD 规格描述（CDATA）", true, "delta", E_STD,
+                P.Handle(),
+                P.Kind(),
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
+                P.Str("content", true, "新内容")),
+            F("set_cited", G_MULTI, "引用 / 取消引用标准（SpecCitedUndoRedoCommand）", true, "delta", E_STD,
+                P.Handle(),
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
+                P.Bool("cited", true, "true = 引用")),
+
+            // ------------------------------------------------------------ Tab 顺序 (2)
+            F("set_tab_order", G_TAB, "重排 tabIndex", true, "delta", E_STD,
+                P.Handle(),
+                P.List("paths", true)),
+            F("tab_action", G_TAB, "Tab 顺序动作六合一", true, "delta", E_STD,
+                P.Handle(),
+                P.List("paths", true),
+                P.Enum("action", new[] { "first", "prev", "next", "last", "clear", "auto" })),
+
+            // ------------------------------------------------------------ 校验 / 工具 (4)
+            Slow(F("validate", G_TOOL, "跑设计器自己的校验器，报 delta（慢，勿循环）", false, "delta", E_STD,
+                P.Handle(),
+                Opt(PType.Path, "path", "只校验这条子树"))),
+            N("base_data", G_TOOL, "基础资料（MasterDetailView）", "list<el>", E_STD,
+                Opt(PType.Str, "table", "表名"),
+                Opt(PType.Str, "column", "列名")),
+            F("set_excluded", G_TOOL, "排除 / 取消排除控件", true, "delta", E_STD,
+                P.Handle(),
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
+                P.Bool("excluded", true, "true = 排除")),
+            // The enum is the UNION across workspaces; the function body narrows it against the
+            // workspace's own mta/code_template.xml and reports detail.legal from the file. R was
+            // missing here, so a workspace that has it (hengshuo/prd does: F/P/Q/R/W) could never
+            // set it -- the manifest rejected the value before the body ever saw the file.
+            // W3-B found it. Keep this list a superset of what any workspace ships.
+            F("set_code_template", G_TOOL, "改 code_template（F/P/Q/R/W）", true, "delta", E_STD,
+                P.Handle(),
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path（只校验，作用域是整张表单）" },
+                P.Enum("template", new[] { "F", "P", "Q", "R", "W" })),
+        };
+
+        static SpecFn Slow(SpecFn f) { f.Slow = true; return f; }
+
+        static readonly Dictionary<string, SpecFn> _byName = Build();
+
+        static Dictionary<string, SpecFn> Build() {
+            var d = new Dictionary<string, SpecFn>(StringComparer.Ordinal);
+            foreach (SpecFn f in All) d[f.Name] = f;
+            return d;
+        }
+
+        /// <summary>The descriptor for a name, or null when nothing declares it. Null is what the
+        /// transport turns into E_UNKNOWN_METHOD, as opposed to E_NOT_IMPLEMENTED for a name that
+        /// is declared but has no body yet.</summary>
+        public static SpecFn Get(string name) {
+            if (name == null) return null;
+            SpecFn f;
+            return _byName.TryGetValue(name, out f) ? f : null;
+        }
+
+        // ================================================================ validation
+
+        /// <summary>
+        /// Checks a request's args against the descriptor: arity, type, enum membership, required.
+        /// Returns null when the call is well formed, else the wire-level reason -- callers put it
+        /// straight into error.detail (SPEC §11.24 (a) requires detail to name the parameter, or
+        /// the AI cannot self-correct).
+        ///
+        /// Arity is enforced in both directions: an undeclared key is refused, not ignored. That is
+        /// the same disease §11.24 (d) describes on the write side -- `Edit set` writing case="upper"
+        /// into the .tsd -- and a silently-ignored typo (`--attrr`) is indistinguishable from a
+        /// legal call until someone reads the file. A parameter that is not in this table does not
+        /// exist, so a Fn that needs one must declare it here.
+        ///
+        /// NOT checked here: the runtime attr whitelist behind describe_from. That set is
+        /// materialised from the live model (SPEC §11.24 (c)), and this method has no session --
+        /// it is the Fn's job, per §11.24 (d) 铁律 2.
+        /// </summary>
+        public static JObject Check(SpecFn fn, JObject args) {
+            if (args == null) args = new JObject();
+
+            foreach (JProperty p in args.Properties()) {
+                bool known = false;
+                foreach (Param d in fn.Params) if (d.Name == p.Name) { known = true; break; }
+                if (!known) {
+                    return Detail(p.Name, "unknown",
+                        "参数 " + p.Name + " 不在 manifest 里（函数 " + fn.Name + "）；可用: " + Names(fn));
+                }
+            }
+
+            foreach (Param d in fn.Params) {
+                JToken v = args[d.Name];
+                bool absent = v == null || v.Type == JTokenType.Null;
+                if (absent) {
+                    if (d.Required) return Detail(d.Name, "required", "参数 " + d.Name + " 必填");
+                    continue;
+                }
+                string bad = TypeProblem(d, v);
+                if (bad != null) return Detail(d.Name, "invalid", "参数 " + d.Name + ": " + bad);
+            }
+            return null;
+        }
+
+        /// <summary>Null when v is acceptable for d, else a one-line reason. Enum and Kind
+        /// membership are checked here because both sets are static; anything richer (the
+        /// describe_from whitelist) needs the model and is deferred.</summary>
+        static string TypeProblem(Param d, JToken v) {
+            switch (d.Type) {
+                case PType.Int:
+                    if (v.Type != JTokenType.Integer) return "需要整数，收到 " + v.Type;
+                    return null;
+                case PType.Bool:
+                    if (v.Type != JTokenType.Boolean) return "需要 true/false，收到 " + v.Type;
+                    return null;
+                case PType.PathList:
+                case PType.StrList:
+                    if (v.Type != JTokenType.Array) return "需要字符串数组，收到 " + v.Type;
+                    foreach (JToken e in (JArray)v)
+                        if (e.Type == JTokenType.Array || e.Type == JTokenType.Object)
+                            return "数组元素必须是字符串，收到 " + e.Type;
+                    return null;
+                case PType.Enum:
+                    if (v.Type != JTokenType.String) return "需要一个字符串，收到 " + v.Type;
+                    if (!In(d.Values, (string)v))
+                        return "取值不在允许集合内: " + (string)v + "；可用: " + Join(d.Values);
+                    return null;
+                case PType.Kind:
+                    if (v.Type != JTokenType.String) return "需要一个字符串，收到 " + v.Type;
+                    if (!In(SpecSlots.Kinds, (string)v))
+                        return "不是七种规格节点之一: " + (string)v + "；可用: " + Join(SpecSlots.Kinds);
+                    return null;
+                default:   // Str / Path / Handle / AttrName
+                    if (v.Type == JTokenType.Object || v.Type == JTokenType.Array)
+                        return "需要一个字符串，收到 " + v.Type;
+                    return null;
+            }
+        }
+
+        static bool In(string[] set, string v) {
+            if (set == null) return true;
+            foreach (string s in set) if (string.Equals(s, v, StringComparison.Ordinal)) return true;
+            return false;
+        }
+
+        static string Join(string[] a) { return a == null ? "" : string.Join("|", a); }
+
+        static string Names(SpecFn fn) {
+            var b = new System.Text.StringBuilder();
+            foreach (Param p in fn.Params) { if (b.Length > 0) b.Append(' '); b.Append(p.Name); }
+            return b.Length == 0 ? "(无)" : b.ToString();
+        }
+
+        /// <summary>error.detail for a parameter problem. `param` is the key the caller got wrong,
+        /// which is the whole point -- an error that does not name the parameter cannot be
+        /// self-corrected (SPEC §11.24 (a)).</summary>
+        static JObject Detail(string param, string reason, string message) {
+            var o = new JObject();
+            o["param"] = param;
+            o["reason"] = reason;
+            o["message"] = message;
+            return o;
+        }
+
+        // ================================================================ serialisation
+
+        /// <summary>The manifest as JSON, in the exact shape of SPEC §11.24 (c): fn / group /
+        /// desc / writes / slow / args[{n,t,req,values,from}]. `writes` is Mutating and `slow` is
+        /// Slow; the key names are the contract's, not nicer ones of my own, because this document
+        /// is what the MCP adapter will read.</summary>
+        public static string ToJson() {
+            var arr = new JArray();
+            foreach (SpecFn f in All) {
+                var o = new JObject();
+                o["fn"] = f.Name;
+                o["group"] = f.Group;
+                o["desc"] = f.Summary;
+                o["writes"] = f.Mutating;
+                o["slow"] = f.Slow;
+                o["returns"] = f.Returns;
+                o["needsHandle"] = f.NeedsHandle;
+                var args = new JArray();
+                foreach (Param p in f.Params) {
+                    var a = new JObject();
+                    a["n"] = p.Name;
+                    a["t"] = TypeName(p.Type);
+                    a["req"] = p.Required;
+                    if (p.Desc != null) a["desc"] = p.Desc;
+                    if (p.Values != null) a["values"] = new JArray(p.Values);
+                    if (p.DescribeFrom != null) a["from"] = p.DescribeFrom;
+                    args.Add(a);
+                }
+                o["args"] = args;
+                o["errors"] = new JArray(f.Errors);
+                arr.Add(o);
+            }
+            return arr.ToString(Newtonsoft.Json.Formatting.Indented);
+        }
+
+        public static string TypeName(PType t) {
+            switch (t) {
+                case PType.Int:      return "int";
+                case PType.Bool:     return "bool";
+                case PType.Handle:   return "handle";
+                case PType.Kind:     return "kind";
+                case PType.AttrName: return "attr";
+                case PType.Enum:     return "enum";
+                case PType.Path:     return "path";
+                case PType.PathList: return "path[]";
+                case PType.StrList:  return "string[]";
+                default:             return "string";
+            }
+        }
+
+        /// <summary>--help, generated from the table so it can never disagree with what the
+        /// server validates.</summary>
+        public static string Help() {
+            var b = new System.Text.StringBuilder();
+            b.Append("tzs-cli -- T100 .tzs 设计器的长驻 JSON-RPC 客户端\n\n");
+            b.Append("用法:\n");
+            b.Append("  tzs-cli open <file> [--workspace <dir>]\n");
+            b.Append("  tzs-cli call <fn> [--<参数> <值> ...]\n");
+            b.Append("  tzs-cli save --handle <h> --out <file>\n");
+            b.Append("  tzs-cli stop\n");
+            b.Append("  tzs-cli --help | --manifest\n\n");
+            b.Append("传输: 命名管道 \\\\.\\pipe\\" + Rpc.PipeName + "（由 tzs-server 常驻）；\n");
+            b.Append("      连不上时自动 spawn 一个 tzs-server 再重试一次。\n\n");
+            b.Append("函数清单（本表由 manifest 生成，与服务器校验同源）:\n");
+
+            string group = null;
+            foreach (SpecFn f in All) {
+                if (f.Group != group) { group = f.Group; b.Append("\n[").Append(group).Append("]\n"); }
+                b.Append("  ").Append(Pad(f.Name, 22)).Append(f.Summary);
+                if (f.Slow) b.Append("   [slow]");
+                if (f.Mutating) b.Append("   [写]");
+                b.Append('\n');
+                foreach (Param p in f.Params) {
+                    string t = p.Type == PType.Enum ? "enum(" + GetEnumLabel(p) + ")"
+                             : p.Type == PType.AttrName ? "attr:" + p.DescribeFrom
+                             : TypeName(p.Type);
+                    b.Append("      --").Append(Pad(p.Name, 18)).Append(Pad(t, 26));
+                    if (p.Required) b.Append("必填");
+                    if (p.Desc != null) b.Append("  ").Append(p.Desc);
+                    b.Append('\n');
+                }
+            }
+            b.Append("\nE_* 错误码: E_BAD_REQUEST / E_UNKNOWN_METHOD / E_BAD_PARAM / E_NOT_IMPLEMENTED /\n");
+            b.Append("            E_NOT_FOUND / E_KEY_IN_USE / E_DESIGNER / E_INTERNAL / E_FATAL_LOAD_TIMEOUT /\n");
+            b.Append("            E_SERVER_DIED（后两个由客户端在传输层判定）\n");
+            return b.ToString();
+        }
+
+        static string GetEnumLabel(Param p) {
+            if (p.Values == null) return "?";
+            return p.Values.Length > 6 ? p.Values.Length + " 个值" : Join(p.Values);
+        }
+
+        static string Pad(string s, int n) {
+            if (s.Length >= n) return s + " ";
+            return s + new string(' ', n - s.Length);
+        }
+    }
+}

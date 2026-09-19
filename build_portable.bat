@@ -67,6 +67,24 @@ rem Portable marker: the CLI keeps its config inside the package instead of
 rem writing to the user directory (see internal/config/paths.go, IsPortable).
 type nul > "%STAGE%\.portable"
 
+rem [3b/5] Staging the .tzs engine (C#). It is built SEPARATELY -- see engine\BUILD.md.
+rem   Exactly four files, listed by name on purpose: engine\out\ also holds a dozen probe
+rem   programs (Probe / Edit / AddField / RoundTrip / Test* / E2E) that must NOT ship, so an
+rem   xcopy of the whole directory would put them all in the portable package.
+rem   Not built here: the engine needs csc + a bash script, and rebuilding it changes its MVID,
+rem   which orphans every daemon started from the previous build (engine\BUILD.md explains).
+set TZSENGINE=engine\out
+for %%f in (tzs-server.exe tzs-cli.exe TzsCli.dll TzsCli.Designer.dll) do (
+    if not exist "%TZSENGINE%\%%f" (
+        echo MISSING %TZSENGINE%\%%f -- build the engine first, see engine\BUILD.md
+        exit /b 1
+    )
+)
+if not exist "%STAGE%\tzs" mkdir "%STAGE%\tzs"
+for %%f in (tzs-server.exe tzs-cli.exe TzsCli.dll TzsCli.Designer.dll) do (
+    copy /y "%TZSENGINE%\%%f" "%STAGE%\tzs\" >nul || (echo COPY engine %%f FAILED & exit /b 1)
+)
+
 echo [4/5] Packing zip ...
 rem Recursive zip (includes the skills/ subtree); shutil.make_archive keeps the
 rem tt-portable/ top-level directory inside the archive.

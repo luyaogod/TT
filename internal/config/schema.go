@@ -206,8 +206,25 @@ func (t *TdevSettings) WorkspaceSuffixOrDefault() string {
 	return DefaultWorkspaceSuffix
 }
 
-// ---------- 配置根 ----------
+// TzsSettings 是 .tzs 表单引擎（engine/，一个 C# 外部 exe）的运行时依赖。
+//
+// 它和 tdev 节的口径不同，值得说清楚：tdev 放的是「跨调用稳定的默认值」，flag 永远优先；
+// 这里放的是**不能由 flag 取代的机器级依赖**。设计器是第三方商业软件、**不随我们分发**，
+// 装在哪只有用户知道；workspace 更没有合理的缺省 —— 引擎内置的默认工作区是一个**真实客户
+// 目录**，落到它上面会去 Boot 别人的包，然后报一个和用户意图完全无关的错。
+type TzsSettings struct {
+	InstallDir string `json:"installDir,omitempty"` // 设计器安装目录（引擎 LoadFrom 它，约 12 MB）
+	Workspace  string `json:"workspace,omitempty"`  // 引擎 Boot 的工作区（含 mta/ 的目录）；无缺省
+	ServerExe  string `json:"serverExe,omitempty"`  // 覆盖 tzs-server.exe；缺省 <exe 目录>\tzs\tzs-server.exe
+}
 
+// EngineReady 回答"配置层是否已经完整"。深检查（文件在不在、能不能 Boot、管道名抠不抠得到）
+// 是 `tt dev tzs doctor` 的事 —— 那条「便宜状态进服务、深检查进命令」的切分与 mirror/bdldoc 一致。
+func (t *TzsSettings) EngineReady() bool {
+	return t.InstallDir != "" && t.Workspace != ""
+}
+
+// ---------- 配置根 ----------
 // Root 是 config.json 的类型化视图。
 //
 // 持久化仍以 map（见 cfgfile.go）为准 —— Root 只是读侧的一层类型化收敛，
@@ -222,6 +239,7 @@ type Root struct {
 	Bdldoc        BdldocSettings
 	Sync          SyncSettings
 	Tdev          TdevSettings
+	Tzs           TzsSettings
 }
 
 // Load 读取并解析配置，返回类型化视图。
@@ -266,6 +284,9 @@ func Load(path string) (*Root, error) {
 		return nil, err
 	}
 	if err := decodeSection(root, "tdev", &r.Tdev); err != nil {
+		return nil, err
+	}
+	if err := decodeSection(root, "tzs", &r.Tzs); err != nil {
 		return nil, err
 	}
 	return r, nil

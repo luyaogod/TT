@@ -1,0 +1,469 @@
+package tzs
+
+// server.go —— 守护进程的生命周期。
+//
+// 形状是照 internal/cli/debug/servebg.go 抄的（spawn → 等就绪 → 记状态 → stop），
+// 但**三条前提与我们相反**，所以不能复用那一份：
+//
+//	servebg 的实例用 HTTP 探活        我们探的是一条命名管道，且要问引擎才拿得到名字
+//	servebg 的状态文件全局一条         我们是按工作区多条（一个工作区一个守护进程）
+//	servebg 的失败是「没起来」         我们的失败还分「有致命帧的确定性失败」与「无帧的 EOF」
+//
+// 相同的只有「起子进程 / 判活 / 杀」这三件纯进程原语 —— 那部分已经抽在 internal/winproc，
+// 两边都用它。
+//
+// 就绪握手（契约给的三条数，全部来自实测）：
+//
+//	每 250 ms 试连一次，单次 connect 超时 300 ms；
+//	连上就发一次 list_open（needsHandle=false，Boot 完成后立刻能答），拿 ok:true 算就绪；
+//	预算 60 s（Boot 约 900 ms + 首次加载，剩下的余量是给慢磁盘的 ——
+//	真正卡死的加载由引擎内部 90 s 的看门狗负责，不是这个预算）。
+//
+// 为什么探针是 list_open 而不是别的：它 needsHandle=false，所以只依赖「Boot 做完了」，
+// 不依赖「某个包被打开了」。用 form_tree 探针会把「守护进程好了」和「这个句柄还有效」
+// 两件事绑在一起 —— 冷启动后句柄根本不存在，探针会永远不成功。
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"tt/internal/config"
+	"tt/internal/winproc"
+)
+
+// 就绪握手与轮询的常数（理由见文件注释）。
+const (
+	// ReadinessBudget 是冷启动预算。
+	ReadinessBudget = 60 * time.Second
+	// ConnectPollGap 是就绪轮询的间隔。
+	ConnectPollGap = 250 * time.Millisecond
+	// ProbeTimeout 是就绪探针（list_open）自己的读超时。
+	//
+	// 它比 DefaultTimeout 小得多是安全的：走到探针这一步说明管道**已经存在**，
+	// 而管道是 Boot 之后才创建的（Rpc.Daemon 在 Boot 之后才 new NamedPipeServerStream），
+	// 所以 Boot 已经做完了，list_open 只是遍历一张内存表。
+	ProbeTimeout = 10 * time.Second
+	// StopTimeout 是发 `stop` 之后的等待上限。
+	StopTimeout = 10 * time.Second
+)
+
+// Options 是守护进程的四个落点。
+type Options struct {
+	// Exe 是 tzs-server.exe 的路径。
+	Exe string
+	// InstallDir 是设计器安装目录，作为 TZSCLI_INSTALL 传给子进程。
+	// 留空则用引擎内置的缺省（参见 engine/src/Designer/Bootstrap.cs 的 Designer.Install）。
+	InstallDir string
+	// Workspace 是 .tzs 工作区。**绝不留空**：引擎的缺省是一个真实客户目录
+	// （Rpc.DefaultWorkspace），留空就等于拿客户的表单当草稿纸。解析顺序由命令层定：
+	// --workspace flag > TZSCLI_WS 环境变量 > config.json 的 tzs.workspace，末端**拒绝**。
+	Workspace string
+	// WorkDir 是状态文件与守护进程日志的落点，一般传 config.json 所在目录
+	// （与 .tt-serve.json 同目录）。留空则退回 config 的默认落点。
+	WorkDir string
+}
+
+// DaemonInfo 是「这个工作区现在有没有守护进程」的一份快照（给 status / doctor / stop 文案用）。
+type DaemonInfo struct {
+	Workspace string
+	Pipe      string // 现在生效的管道名（问引擎得到的）
+	Recorded  string // 状态文件里记的管道名（可能为空或已过期）
+	PID       int    // 状态文件里记的 pid（0 = 不知道）
+	Running   bool   // 管道真的应答了 list_open
+	Log       string
+	Since     string
+}
+
+//---------------------------------------------------------------------------
+// Ensure
+//---------------------------------------------------------------------------
+
+// Ensure 保证某个工作区有一个就绪的守护进程：已有就复用，没有就 spawn 并等就绪。
+// 返回本构建该工作区的管道名（调用方拿它去 Call）。
+//
+// **它不替调用方选工作区**：Workspace 解析不出来时直接拒绝（退出 2），绝不 spawn。
+func Ensure(ctx context.Context, o Options) (string, error) {
+	ws, err := o.workspace()
+	if err != nil {
+		return "", err
+	}
+	pipe, err := PipeName(ctx, o.Exe, ws)
+	if err != nil {
+		return "", err
+	}
+	dir := o.StateDir()
+	st := loadState(dir)
+	// 先记一份「我见过这个管道」——即使后面就绪失败，记录也得留着：
+	// 一个 wedged 的守护进程正是 Reap 要能看见的东西。
+	prev := st.Entry(ws)
+
+	if probeReady(ctx, pipe) {
+		e := &DaemonEntry{Pipe: pipe, Workspace: ws, Exe: o.Exe, Log: o.DaemonLogPath()}
+		if prev != nil {
+			e.PID, e.Since, e.Orphans = prev.PID, prev.Since, prev.Orphans
+		}
+		if e.Since == "" {
+			e.Since = time.Now().Format(time.RFC3339)
+		}
+		st.SetEntry(ws, e)
+		_ = SaveState(dir, st)
+		return pipe, nil
+	}
+
+	// 冷启动。子进程必须显式带 --daemon：不传且它的 stdin 被重定向时，引擎会自己
+	// 判定成 stdio 模式（tzs-server.cs 的 Console.IsInputRedirected），管道永远不会出现。
+	pid, err := winproc.SpawnDetached(o.Exe, o.spawnArgs(ws), o.DaemonLogPath(), o.extraEnv(ws)...)
+	if err != nil {
+		return "", &TransportError{Code: CodeServerDied,
+			Msg: "启动守护进程失败（" + o.Exe + "）", Err: err}
+	}
+	e := &DaemonEntry{
+		PID: pid, Pipe: pipe, Workspace: ws, Exe: o.Exe, Log: o.DaemonLogPath(),
+		Since: time.Now().Format(time.RFC3339),
+	}
+	// 旧记录的管道名与新名字不同 = 那是**上一次构建**的守护进程。它既不会被我们连上
+	// （设计如此：不允许连到跑陈旧字节的守护进程），也不会自己退出。
+	// 不在这儿杀它（可能有别的客户端正在请求它），只把 pid 留给 Reap。
+	if prev != nil && prev.PID > 0 && prev.PID != pid && prev.Pipe != pipe && winproc.Alive(prev.PID) {
+		e.Orphans = append(append([]int{}, prev.Orphans...), prev.PID)
+	} else if prev != nil {
+		e.Orphans = prev.Orphans
+	}
+	st.SetEntry(ws, e)
+	_ = SaveState(dir, st)
+
+	deadline := time.Now().Add(ReadinessBudget)
+	for time.Now().Before(deadline) {
+		if probeReady(ctx, pipe) {
+			return pipe, nil
+		}
+		if !winproc.Alive(pid) {
+			// 提前失败：进程都没了，再等满 60 s 只是把结论推迟。
+			st.DropEntry(ws)
+			_ = SaveState(dir, st)
+			return "", &TransportError{Code: CodeServerDied,
+				Msg: fmt.Sprintf("守护进程提前退出（pid %d）", pid) + "；日志末尾：\n" + logTail(o.DaemonLogPath(), 2000)}
+		}
+		if !sleepCtx(ctx, ConnectPollGap) {
+			return "", ctxFail(ctx)
+		}
+	}
+	// 超时。pid 还活着就**保留**记录（它是个 wedged 的守护进程，Reap 应该看得见）；
+	// 已经死了就删掉，免得下一条命令又对着一条死记录发呆。
+	if !winproc.Alive(pid) {
+		st.DropEntry(ws)
+		_ = SaveState(dir, st)
+	}
+	return "", &TransportError{Code: CodeServerDied,
+		Msg: fmt.Sprintf("守护进程 %s 内没有就绪（pid %d）", ReadinessBudget, pid) + "；日志末尾：\n" + logTail(o.DaemonLogPath(), 2000)}
+}
+
+// probeReady 探一次就绪：连上 + 发 list_open + 拿到 ok:true。
+//
+// 任何一步不成立都返回 false，**不返回错误** —— 它在轮询里被调用，而「还没好」
+// 与「坏了」在这里是同一件事：都在等同一个 deadline。
+func probeReady(ctx context.Context, pipe string) bool {
+	dctx, cancel := context.WithTimeout(ctx, ConnectTimeout)
+	conn, err := DefaultDialer().Dial(dctx, pipe)
+	cancel()
+	if err != nil {
+		return false
+	}
+	defer conn.Close()
+	reply, err := CallConn(ctx, conn, 1, "list_open", nil, ProbeTimeout)
+	return err == nil && reply != nil && reply.OK
+}
+
+//---------------------------------------------------------------------------
+// Stop
+//---------------------------------------------------------------------------
+
+// Stop 停掉某个工作区的守护进程。**绝不 spawn**（让「停止」去启动服务是个笑话），
+// 且幂等：本来就没有守护进程时返回 nil。
+//
+// 返回 nil 有两种含义：「停掉了」和「本来就没有」。要区分就先调 LookupDaemon
+// 取一份快照再决定文案 —— 但**不要**用返回错误来表达「本来就没有」：
+// 那会让命令层退出 5 或 1，而 stop 是幂等的退 0。
+func Stop(ctx context.Context, o Options) error {
+	ws, err := o.workspace()
+	if err != nil {
+		return err
+	}
+	dir := o.StateDir()
+	st := loadState(dir)
+
+	// 管道名优先问引擎（状态文件里的可能已经过期 —— 重编引擎会让名字变）。
+	// 问不到时退回记录里的那个：连不上就按「没有守护进程」处理，一样是幂等退 0。
+	pipe := ""
+	if rec := st.Entry(ws); rec != nil {
+		pipe = rec.Pipe
+	}
+	if p, perr := PipeName(ctx, o.Exe, ws); perr == nil {
+		pipe = p
+	} else if pipe == "" {
+		return perr
+	}
+
+	dctx, cancel := context.WithTimeout(ctx, ConnectTimeout)
+	conn, derr := DefaultDialer().Dial(dctx, pipe)
+	cancel()
+	if derr == nil {
+		func() {
+			defer conn.Close()
+			// 超时/中断都当「已经停止了」：引擎收到 stop 会写好应答再退出，
+			// 客户端没等到应答不代表它没收到。这里不把结果当判据。
+			_, _ = CallConn(ctx, conn, 1, FnStop, nil, StopTimeout)
+		}()
+	}
+	// 无论连没连上，这条记录都作废了：连不上说明进程已经没了（或换了管道名），
+	// 留着它会让下一次 Reap 对着一个死 pid 发呆。
+	st.DropEntry(ws)
+	_ = SaveState(dir, st)
+	return nil
+}
+
+//---------------------------------------------------------------------------
+// Reap
+//---------------------------------------------------------------------------
+
+// Reap 收拾**孤儿守护进程**：跑着旧构建字节、谁也连不上的那些。
+//
+// 它们是怎么来的：管道名含 TzsCli.Designer.dll 的 MVID，每次重编引擎名字就变，
+// 上一次构建起的守护进程于是永远等不到客户端（设计如此：不允许连到跑陈旧字节的
+// 守护进程），也不自己退出。
+//
+// 判据只有一条：**状态文件里记的管道名 ≠ 这个工作区现在该有的管道名**。
+// 不能用「连不上」当判据 —— 孤儿在它自己的管道名上答得好好的，连不上的是我们。
+//
+// yes=false 只报告（dry-run），yes=true 才真杀。返回涉及到的 pid 列表（排序稳定）。
+//
+// 问不到当前管道名时（引擎 exe 没了/坏了）**一个都不动**：那会儿我们没法把孤儿和
+// 现役区分开，猜错就是杀掉一个正在被别的客户端用的守护进程。
+func Reap(ctx context.Context, o Options, yes bool) ([]int, error) {
+	dir := o.StateDir()
+	st := loadState(dir)
+	var pids []int
+
+	for _, k := range st.Keys() {
+		e := st.Daemons[k]
+		if e == nil {
+			continue
+		}
+		// pid 记着、人已经没了、也没有待收的孤儿 → 这条账已经平了，删掉。
+		// 注意只删「pid 明确死了」的：pid<=0 的记录我们连它死没死都不知道
+		// （比如守护进程是别的进程起的，我们只记到了管道名），删掉就等于把一个
+		// 活着的东西忘掉 —— 而忘掉它正是下次 Reap 收不到它的原因。
+		if e.PID > 0 && !winproc.Alive(e.PID) && len(e.Orphans) == 0 {
+			delete(st.Daemons, k)
+			continue
+		}
+
+		// 「这个工作区现在该有的管道名」。问不到（exe 没了/坏了）就整条跳过：
+		// 那会儿孤儿和现役分不开，猜错的代价是杀掉一个正被别的客户端用的守护进程。
+		cur := ""
+		if e.Workspace != "" {
+			if p, err := PipeName(ctx, o.Exe, e.Workspace); err == nil {
+				cur = p
+			}
+		}
+		if cur == "" {
+			continue
+		}
+
+		// ① 记录本身指向一个旧管道名，而进程还活着 = 跑陈旧字节的孤儿。
+		if e.PID > 0 && winproc.Alive(e.PID) && e.Pipe != cur {
+			pids = append(pids, e.PID)
+			if yes {
+				_ = winproc.Kill(e.PID)
+				e.PID = 0
+				e.Pipe = ""
+			}
+		}
+
+		// ② 被后来者挤掉的那些（spawn 时挪进 Orphans 的 pid），判据同上。
+		var still []int
+		for _, p := range e.Orphans {
+			if !winproc.Alive(p) {
+				continue
+			}
+			pids = append(pids, p)
+			if yes {
+				_ = winproc.Kill(p)
+				continue
+			}
+			still = append(still, p)
+		}
+		if yes {
+			e.Orphans = nil
+			if e.PID == 0 {
+				// 自己也被收了、且没有别的线索 → 整条删掉。
+				delete(st.Daemons, k)
+			}
+		} else {
+			e.Orphans = still
+		}
+	}
+
+	if yes {
+		// dry-run 绝不落盘：Reap(ctx, o, false) 必须是纯粹的「看一眼」。
+		_ = SaveState(dir, st)
+	}
+	return pids, nil
+}
+
+//---------------------------------------------------------------------------
+// LookupDaemon
+//---------------------------------------------------------------------------
+
+// LookupDaemon 报告某个工作区当前的守护进程状态（不 spawn，也不改状态文件）。
+//
+// 它存在的理由是文案：Stop 为了幂等必须对「停掉了」和「本来就没有」都返回 nil，
+// 命令层要说出正确的那一句就得先看一眼。doctor 也用它。
+func LookupDaemon(ctx context.Context, o Options) (*DaemonInfo, error) {
+	ws, err := o.workspace()
+	if err != nil {
+		return nil, err
+	}
+	info := &DaemonInfo{Workspace: ws}
+	if rec := loadState(o.StateDir()).Entry(ws); rec != nil {
+		info.Recorded, info.PID, info.Log, info.Since = rec.Pipe, rec.PID, rec.Log, rec.Since
+	}
+	if pipe, perr := PipeName(ctx, o.Exe, ws); perr == nil {
+		info.Pipe = pipe
+	} else {
+		// 问不到就用记录里的：连得上就说明它在跑，这比报错有用。
+		info.Pipe = info.Recorded
+	}
+	if info.Pipe != "" {
+		info.Running = probeReady(ctx, info.Pipe)
+	}
+	return info, nil
+}
+
+//---------------------------------------------------------------------------
+// Options 的派生
+//---------------------------------------------------------------------------
+
+// workspace 解析出生效的工作区，解析不出来就拒绝（退出 2）。
+//
+// **绝不留缺省**：引擎的缺省工作区是一个真实客户目录（Rpc.DefaultWorkspace），
+// 留空就等于默默对着客户的表单干活。
+//
+// 退到 TZSCLI_WS 是刻意的：引擎自己也认这个变量（Rpc.PipeName 的解析顺序里有它），
+// 所以认它只会让两侧一致。命令层应当已经把 --workspace / 配置都解析好传进来，
+// 这一步是兜底，不是替代。
+func (o Options) workspace() (string, error) {
+	if ws := strings.TrimSpace(o.Workspace); ws != "" {
+		return ws, nil
+	}
+	if ws := strings.TrimSpace(os.Getenv("TZSCLI_WS")); ws != "" {
+		return ws, nil
+	}
+	return "", &UsageError{
+		Msg: "未配置工作区（拒绝启动引擎）",
+		Detail: []string{
+			"引擎的默认工作区是一个真实客户目录，工具绝不替你选",
+			"三种给法：--workspace <dir> / 环境变量 TZSCLI_WS / config.json 的 tzs.workspace",
+		},
+	}
+}
+
+// StateDir 是状态文件与日志的落点（导出给命令层：它要写 last、要渲染路径）。
+//
+// 命令层应当把解析好的配置目录经 WorkDir 传进来（只有它知道 --config）；
+// 留空时退回 config 的默认落点，再退到用户目录。
+func (o Options) StateDir() string {
+	if d := strings.TrimSpace(o.WorkDir); d != "" {
+		return d
+	}
+	if p, err := config.ResolvePath("", true); err == nil && p != "" {
+		return filepath.Dir(p)
+	}
+	if d := config.UserConfigDir(); d != "" {
+		return d
+	}
+	return "."
+}
+
+// DaemonLogPath 是守护进程日志的落点（导出给命令层渲染）。
+func (o Options) DaemonLogPath() string { return LogPath(o.StateDir()) }
+
+// spawnArgs 是拉起守护进程的参数。
+//
+// `--daemon` **必须显式给**：不传且子进程的 stdin 被重定向时（winproc 把 stdin 接成
+// 空设备，就是重定向），引擎会自己选 stdio 模式，管道永远不会出现 ——
+// 现象是每次调用都「冷启动 60 s 未就绪」，而日志里只多一行 "模式: stdio"。
+//
+// `--workspace` 也显式给：不依赖环境变量，命令行的值在引擎的参数解析里优先级更高。
+func (o Options) spawnArgs(ws string) []string {
+	return []string{"--daemon", "--workspace", ws}
+}
+
+// extraEnv 是给子进程补的环境变量。
+//
+// TZSCLI_WS 与 --workspace 一起给是冗余但故意的：它保证任何一条**再派生**的路径
+// （引擎内部 spawn、将来的子工具）也落在同一个工作区上。
+// TZSCLI_INSTALL 只在给了 InstallDir 时才覆盖，免得用空串把引擎的内置缺省打掉。
+func (o Options) extraEnv(ws string) []string {
+	env := []string{"TZSCLI_WS=" + ws}
+	if d := strings.TrimSpace(o.InstallDir); d != "" {
+		env = append(env, "TZSCLI_INSTALL="+d)
+	}
+	return env
+}
+
+//---------------------------------------------------------------------------
+// 小工具
+//---------------------------------------------------------------------------
+
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}
+
+func ctxFail(ctx context.Context) error {
+	return &TransportError{Code: CodeServerDied, Msg: "等待守护进程就绪时被取消", Err: ctx.Err()}
+}
+
+// logTail 取日志末尾（启动失败时给出线索）。
+func logTail(path string, max int) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return "(无日志文件 " + path + ")"
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return "(无法读取日志)"
+	}
+	off := int64(0)
+	if st.Size() > int64(max) {
+		off = st.Size() - int64(max)
+	}
+	buf := make([]byte, st.Size()-off)
+	if _, err := f.ReadAt(buf, off); err != nil && len(buf) > 0 {
+		return string(buf)
+	}
+	return string(buf)
+}
+
+// 断言：三种错误都能被命令层用 errors.As 取出来，并各自实现 ExitCode()。
+// 少了任何一条，命令层就得自己重写一遍退出码表 —— 那份表一定会漂移。
+var (
+	_ interface{ ExitCode() int } = (*UsageError)(nil)
+	_ interface{ ExitCode() int } = (*TransportError)(nil)
+	_ interface{ ExitCode() int } = (*WireError)(nil)
+	_ error                       = (*UsageError)(nil)
+	_ error                       = (*TransportError)(nil)
+	_ error                       = (*WireError)(nil)
+)

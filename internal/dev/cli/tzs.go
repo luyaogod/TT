@@ -1,12 +1,18 @@
-// `tt dev tzs` —— 表单包（`.tzs` / `.tzv`）的**只读**入口。
+// `tt dev tzs` —— 表单包（`.tzs` / `.tzv`）的入口。
 //
-// 与 `tt dev tzc` 的根本区别：
+// 与 `tt dev tzc` 的区别：
 //   - tzc 是**代码包**管线：渲染带围栏的 prog.full.4gl、跑三道闸门、apply 原子写回；
-//   - tzs 只有一件事：**纯解压**。不解围栏、不校验、不产生工作区、**永远不写回**。
+//   - tzs 的 `export` 只有一件事：**纯解压**，不解围栏、不校验、不产生工作区。
+//     要**读写表单**走 `tt dev tzs call`，那一条由 engine/ 里那个 C# 引擎驱动。
 //
-// 为什么表单包不给写回路径：表单（SPEC）由设计器的表单设计器维护，tdev 没有
-// 对应的模型与验收样本；硬写就是拿真实包赌。所以这里把「只读」做成命令的形状 ——
-// 没有 tzs apply 这个动词，AI 想犯错也没有入口。
+// 红线曾经是「永远不写回」，理由是：
+//
+//	表单（SPEC）由设计器的表单设计器维护，tdev 没有对应的模型与验收样本；硬写就是拿真实包赌。
+//
+// 那个前提现在不成立了 —— engine/ 就是**设计器自己的代码**（它 `Assembly.LoadFrom` 设计器的
+// 程序集，布局属性走设计器自己的 `XmlElement` 索引器，验收用设计器自己的校验器加 RoundTrip
+// 不动点）。所以红线改成「**导出只读、要写走引擎**」：`export` 的产物仍然是只读参考，
+// 不要手工改完再塞回包；改表单用 `call`，让设计器自己算。
 package cli
 
 import (
@@ -20,7 +26,7 @@ import (
 	"tt/internal/dev/pkgfile"
 )
 
-const tzsUsage = `tt dev tzs —— 表单包只读工具（只解压，不写回）
+const tzsUsage = `tt dev tzs —— 表单包工具（导出只读；读写表单走引擎）
 
 用法：
   tt dev tzs export <pkg.tzs> [-o <dir>] [--force] [--json]
@@ -28,11 +34,26 @@ const tzsUsage = `tt dev tzs —— 表单包只读工具（只解压，不写�
         # -o 省略时默认解压到 <包所在目录>/<程序名>-unzip（身份后缀 (c)/(s) 会去掉）
         # 目标已存在且非空时拒绝，加 --force 覆盖同名文件
 
+  tt dev tzs fns [<fn>] [--json]
+        # 引擎的函数表（由 --manifest 派生，不手写）。给 <fn> 看单个函数的参数
+  tt dev tzs manifest
+        # 逐字节转发引擎的函数表 JSON（AI 直接消费）
+  tt dev tzs call <fn> [--<参数> <值>…] [--workspace <dir>] [--timeout <秒>] [--json]
+        # 读写表单。这是**唯一**的表单写路径 —— 由设计器自己的代码算，不是我们拼 XML
+        #   例：call open           --path "D:\pkg\aapp320(c).tzs"
+        #       call find_component --handle h1 --query l_apcasite
+        #       call nudge          --handle h1 --paths <path> --direction right --offset 1
+        #       call validate       --handle h1
+        #       call save           --handle h1 --out "D:\pkg\_ai.tzs"
+  tt dev tzs doctor [--json]        # 环境自检（引擎产物、设计器目录、工作区、管道名）
+  tt dev tzs stop                   # 停掉本工作区的常驻引擎（不启动）
+  tt dev tzs reap [--yes]           # 清理引擎重编后停不掉的孤儿守护进程
+
   支持的输入：.tzs（表单包）、.tzv（简易表单包）。
   .tzc/.tzf/.tzx 等**代码包**请用 ` + "`tt dev tzc export`" + `（那条管线有围栏渲染与三道闸门）。
 
-红线：tzs 产物是**只读参考**。tdev 没有、也不会有表单包的写回路径；
-要改表单请在设计器里改。解压出来的文件不要用 apply 去推。
+红线：**export 的产物是只读参考** —— 它就是一包文件，没有 manifest/围栏，不要手工改完再
+塞回包。要改表单用 ` + "`tt dev tzs call`" + `：那是设计器自己的模型在算，改完设计器打得开。
 `
 
 func cmdTzs(args []string) int {
@@ -43,6 +64,18 @@ func cmdTzs(args []string) int {
 	switch args[0] {
 	case "export":
 		return cmdTzsExport(args[1:])
+	case "fns":
+		return cmdTzsFns(args[1:])
+	case "manifest":
+		return cmdTzsManifest(args[1:])
+	case "call":
+		return cmdTzsCall(args[1:])
+	case "doctor":
+		return cmdTzsDoctor(args[1:])
+	case "stop":
+		return cmdTzsStop(args[1:])
+	case "reap":
+		return cmdTzsReap(args[1:])
 	case "-h", "--help", "help":
 		fmt.Print(tzsUsage)
 		return 0

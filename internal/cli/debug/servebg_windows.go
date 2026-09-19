@@ -2,61 +2,18 @@
 
 package debug
 
-// Windows 后台常驻:以 DETACHED_PROCESS 方式脱离当前控制台启动子进程,
-// 输出重定向到日志文件;父进程退出后子进程继续运行。
+// Windows 后台常驻：实现在 internal/winproc。
+//
+// 抽出去是因为多了第二个用它的地方（tt dev tzs 托管 C# 引擎）。这三个函数是纯进程原语，
+// 和 HTTP、和 serve 的语义都无关，两处各留一份就是「清掉重复」那条纪律要清的东西。
+// spawnDetached 的 TT_SERVE_LOG 注入由 winproc 自己完成，行为与抽走前逐字一致。
 
-import (
-	"os"
-	"os/exec"
-	"syscall"
+import "tt/internal/winproc"
 
-	"golang.org/x/sys/windows"
-)
-
-// spawnDetached 启动后台子进程(不等待),返回其 pid。
 func spawnDetached(exe string, args []string, logPath string) (int, error) {
-	logf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return 0, err
-	}
-	defer logf.Close()
-
-	cmd := exec.Command(exe, args...)
-	cmd.Stdout = logf
-	cmd.Stderr = logf
-	cmd.Stdin = nil
-	cmd.Env = append(os.Environ(), "TT_SERVE_LOG="+logPath)
-	// DETACHED_PROCESS(0x8) 脱离控制台;CREATE_NEW_PROCESS_GROUP(0x200) 独立进程组
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x8 | 0x200}
-	if err := cmd.Start(); err != nil {
-		return 0, err
-	}
-	go cmd.Wait() // 回收句柄,不阻塞
-	return cmd.Process.Pid, nil
+	return winproc.SpawnDetached(exe, args, logPath)
 }
 
-// pidAlive 判断 pid 是否存活。
-func pidAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
-	if err != nil {
-		return false
-	}
-	defer windows.CloseHandle(h)
-	var code uint32
-	if err := windows.GetExitCodeProcess(h, &code); err != nil {
-		return false
-	}
-	return code == 259 // STILL_ACTIVE
-}
+func pidAlive(pid int) bool { return winproc.Alive(pid) }
 
-// killProcess 结束指定进程(后台实例)。
-func killProcess(pid int) error {
-	p, err := os.FindProcess(pid)
-	if err != nil {
-		return err
-	}
-	return p.Kill()
-}
+func killProcess(pid int) error { return winproc.Kill(pid) }

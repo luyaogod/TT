@@ -143,9 +143,12 @@ func LooksLikeOwnConfig(b []byte) bool {
 }
 
 // ownConfigKeys tt 配置的顶层键。hosts/debug/query/mirror/bdldoc/sync 是合并前
-// 两边的键，tdev/listen/schemaVersion 是合并后新增的。
+// 两边的键，tdev/tzs/listen/schemaVersion 是合并后新增的。
+//
+// 漏掉一个键不是形式问题：LooksLikeOwnConfig 靠它判断"当前目录里恰好存在的 config.json
+// 是不是我们的"，漏了就会被当成陌生文件，于是旧位置检测与迁移都当它不存在。
 var ownConfigKeys = []string{
-	"hosts", "debug", "query", "mirror", "bdldoc", "sync", "tdev", "listen", "schemaVersion",
+	"hosts", "debug", "query", "mirror", "bdldoc", "sync", "tdev", "tzs", "listen", "schemaVersion",
 }
 
 // DefaultConfigPath 未经显式指定时的默认落点：
