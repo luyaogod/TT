@@ -493,6 +493,7 @@ $env:TDEV_CORPUS="D:\t100_wrok_dir"; go test ./...
 | FGL 解析器 | BDL 61 组夹具「通过 58 / 已知偏差 3 / 不符 0」；语料 4,318 个自订点 4,317 个通过（唯一失败是 `function.memo_industry` 这种「前缀是 function 但正文只有一行注释」的退化点） | `go test ./internal/fgl -count=1` |
 | `verify` 语料 | **165 个包全部 0 error**（125 warn / 302 info） | `$env:TDEV_DEEP="1"; go test ./internal/cli -run TestCorpusExportVerify` |
 | `apply` 仿真 | **137 个包**实际写回：只动目标点，`.4gl`/`ver` 与其它点字节不变 | `$env:TDEV_DEEP="1"; go test ./internal/cli -run TestCorpusApplySimulation` |
+| `.tzs` 语料回归 | **67 个包 0 跳过 0 失败**；pin 67 条与磁盘一致；1285 帧请求、0 行异物输出 | `$env:TTZS_DEEP="1"; go test ./internal/dev/tzs/ -run TestCorpus -timeout 30m`（约 17 分钟） |
 | 对抗用例 | **31 项自检全绿**（改围栏行/改只读区/删 end 围栏/塞 `]]>`/结构行/围栏外插行/`--only` 范围外/缺条目/ver 不匹配/区段不配对/改名事务/V1–V7/newfn 模板/newfn 无 `--desc`…），且**被拒的 apply 不改包** | `.\tt.exe dev tzc selftest` |
 | 报错定位 | 只读区被改 → 打印 `prog.full.4gl:<行号>` + 该行内容（`--json` 带 `file`/`line`/`snippet`）；`status` 改动清单逐条带行号；行尾归一化不会把位置指到区段开头 | `go test ./internal/model ./internal/cli -run 'LineAt\|FirstDiffEOL\|TestApplyReportsReadonlyLine\|TestStatusReportsChangedLine\|TestVerifyReportsPosition'` |
 | 安装面 | `install skills` 复制到 `<当前目录>/skills`（冲突拒绝 / `--force` 刷新 / 源=目标拒绝）；`install path` 解析真实折行的用户 PATH、幂等、不改写 `%USERPROFILE%`（写入前 `--dry-run` 可预览） | `go test ./internal/cli -run 'TestInstall\|TestMergeUserPath\|TestParseRegQueryPath'` |
