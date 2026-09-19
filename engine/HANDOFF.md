@@ -590,7 +590,7 @@ Call(si, "InitFormValidateWorker");
 
 ## 下一步
 
-W0–W3 走完，48 个函数全部实现并经门验收（§18）。**门挖出五个缺陷，四个已处理**：
+W0–W3 走完，函数全部实现并经门验收（§18）；此后又补了 `reparent`，现共 **49 个**。**门挖出五个缺陷，四个已处理**：
 `list_tables`/`list_columns` 不可达→已修；`copy_component` 无用→已摘除；`Session/Validate/Verify` 三个死 `Descriptors` 表→已删并按论证解决了漂移；`FormWriter.Indent()` 不缩进→已修。
 剩下的一个（`set_items`）查清是**设计器自身行为**，我们忠实复现，已在返回里明确告知。
 
