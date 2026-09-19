@@ -12,6 +12,7 @@ import (
 	"tt/internal/dev/model"
 	"tt/internal/dev/pkgfile"
 	"tt/internal/dev/tapfile"
+	"tt/internal/dev/testutil"
 	"tt/internal/dev/verify"
 )
 
@@ -62,34 +63,26 @@ func silent(t *testing.T, fn func() int) int {
 	return fn()
 }
 
+// corpusRoot / corpusPackages 现在只是 testutil 之上的两个薄壳。
+//
+// 发现逻辑（根怎么定、怎么走、哪些草稿文件不算语料）搬去了 internal/dev/testutil/corpus.go，
+// 与 `.tzs` 那条管线（internal/dev/tzs/corpus_test.go）共用一份 —— 两边各写一份的后果是
+// 其中一个环境变量只在一边生效，于是同一条命令在两台机器上跑的不是同一批包。
+// 留在本文件里的是**跳过文案**：它属于这条管线的验收口径（TDEV_DEEP / README），不是发现逻辑。
+
 func corpusRoot(t *testing.T) string {
 	t.Helper()
-	if v := os.Getenv("TDEV_CORPUS"); v != "" {
-		if st, err := os.Stat(v); err == nil && st.IsDir() {
-			return v
-		}
-		return ""
+	if v := testutil.CorpusRoot(); v != "" {
+		return v
 	}
-	if st, err := os.Stat(`D:\t100_wrok_dir`); err == nil && st.IsDir() {
-		return `D:\t100_wrok_dir`
-	}
+	t.Skip("没有真实语料（设置 TDEV_CORPUS 或准备 D:\\t100_wrok_dir）")
 	return ""
 }
 
 func corpusPackages(t *testing.T) []string {
 	t.Helper()
 	root := corpusRoot(t)
-	if root == "" {
-		t.Skip("没有真实语料（设置 TDEV_CORPUS 或准备 D:\\t100_wrok_dir）")
-	}
-	var out []string
-	_ = filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || !strings.EqualFold(filepath.Ext(p), ".tzc") {
-			return nil
-		}
-		out = append(out, p)
-		return nil
-	})
+	out := testutil.CorpusFiles(root, ".tzc")
 	if len(out) == 0 {
 		t.Skipf("%s 下没有 .tzc", root)
 	}
