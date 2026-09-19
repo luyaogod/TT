@@ -216,11 +216,13 @@ tt debug mode | topent                    切换调试模式 / 企业
 ```
 tt dev tzc export <pkg.tzc> [-o <dir>] [--only <点名>...] [--json]
 tt dev tzc status | verify | apply | unlock | rename | newfn | selftest
-tt dev tzs export <pkg.tzs> [-o <dir>] [--force] [--json]
+tt dev tzs export <pkg.tzs> [-o <dir>] [--force] [--json]   # 纯解压（只读参考）
+tt dev tzs call <fn> [--<参数> <值>…]                        # 读写表单（设计器自己的引擎）
+tt dev tzs fns | manifest | doctor | stop | reap
 ```
 
 `.tzc` 是**代码包**，走 `export` 渲染围栏工作区、改完 `apply` 写回（唯一写路径）；
-`.tzs` 是**表单包**，走 `export` 纯解压、只读参考（没有 `tzs apply`）。
+`.tzs` 是**表单包**：`export` 纯解压只读；**读写表单走 `call`**，由设计器自己的引擎驱动。
 退出码：`0` 成功 / `2` 包格式或用法错 / `3` 校验失败 / `4` 拒绝写入 / `5` IO 与环境失败。
 
 ### `tt dict` — 数据字典

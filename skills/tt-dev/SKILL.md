@@ -1,6 +1,6 @@
 ---
 name: tt-dev
-description: 安全编辑 T100 设计器包：.tzc 代码包（4GL/TAP/TGL）走 export→改围栏工作区→verify→apply；.tzs 表单包只走 tzs export 纯解压只读查看。当用户要改 T100 客制程序、新增/改名/改签名自订函数、解锁框架区段、或查看 .tzc/.tzs 包里有什么时使用。
+description: 安全编辑 T100 设计器包：.tzc 代码包（4GL/TAP/TGL）走 export→改围栏工作区→verify→apply；.tzs 表单包用 tzs call 读写（由设计器自己的引擎驱动，不是拼 XML）。当用户要改 T100 客制程序、新增/改名/改签名自订函数、解锁框架区段、修改表单（改属性/加字段/加页签/调布局）、或查看 .tzc/.tzs 包里有什么时使用。
 license: 与 tt 仓库一致（见随包 README.md）
 metadata:
   tool: tdev
@@ -13,10 +13,10 @@ metadata:
 
 | | `tt dev tzc`（代码包 `.tzc`/`.tzf`/`.tzx`） | `tt dev tzs`（表单包 `.tzs`/`.tzv`） |
 |---|---|---|
-| 干什么 | 把包渲染成**带围栏的 `.4gl` 工作区**给人/AI 编辑，改完写回 | **纯解压**：把 zip 摊成一堆文件 |
+| 干什么 | 把包渲染成**带围栏的 `.4gl` 工作区**给人/AI 编辑，改完写回 | `export` 纯解压；读写表单走 `call` |
 | 产物 | 工作区：`prog.full.4gl` + `manifest.json` + `snapshot/` + `.tdev/` + `.git/` | 就是一包文件（`.tsd`/`.4fd`/`ver`…），默认目录带 `-unzip` 后缀 |
-| 能写回吗 | 能，**唯一写路径是 `apply`** | **不能，永远不能**（没有 `tzs apply` 这个动词） |
-| 用途 | 改 4GL 客制逻辑 | 只读参考：读表单结构、查字段定义、写文档 |
+| 能写回吗 | 能，**唯一写路径是 `apply`** | 能，**唯一写路径是 `call save`** —— 由设计器自己的代码算，不是我们拼 XML（`export` 的产物本身仍只读） |
+| 用途 | 改 4GL 客制逻辑 | 改表单：改属性 / 加字段 / 加页签 / 调布局 / 改多语言 |
 
 拿错入口会被挡住：`.tzc` 跑 `tzs export` → 退出码 2 并提示改用 `tzc export`。
 
@@ -31,11 +31,28 @@ tt dev tzc verify                            # 不写盘预检
 tt dev tzc apply                             # 唯一会改 .tzc 的命令（先备份到 .tdev\prev.tzc）
 ```
 
-只读查看表单包：
+## 标准流程（`.tzs` 表单包）
 
 ```powershell
-tt dev tzs export "D:\pkg\aapp320(c).tzs"    # → D:\pkg\aapp320-unzip\；然后直接读里面的文件
+tt dev tzs doctor                            # 先自检：引擎、设计器目录、工作区
+tt dev tzs fns                               # 49 个函数；fns <fn> 看单个的参数
+
+tt dev tzs call open           --path "D:\pkg\aapp320(c).tzs"
+tt dev tzs call find_component --handle h1 --query l_apcasite   # 用控件代号拿 path
+tt dev tzs call nudge          --handle h1 --paths <path> --direction right --offset 1
+tt dev tzs call validate       --handle h1                     # 设计器自己的校验器
+tt dev tzs call save           --handle h1 --out "D:\pkg\_ai.tzs"
+tt dev tzs stop
 ```
+
+纯解压（只读参考、写文档用）：
+
+```powershell
+tt dev tzs export "D:\pkg\aapp320(c).tzs"    # → D:\pkg\aapp320-unzip\
+```
+
+要配两样：设计器装在哪（`tzs.installDir` 或 `TZSCLI_INSTALL`），用哪个工作区
+（`tzs.workspace` 或 `TZSCLI_WS`）。**工作区没有缺省** —— 引擎内置的那个是真实客户目录。
 
 ## 红线（碰了就出事，没有例外）
 
@@ -47,8 +64,11 @@ tt dev tzs export "D:\pkg\aapp320(c).tzs"    # → D:\pkg\aapp320-unzip\；然�
 4. **签名行的改动要走 `rename`**（它同步围栏 `fn` + 签名行 + 描述块，并在 `.tap` 里复刻墓碑事务）；
    手工只改一处会被 gate2 的 V1–V7 拒。
 5. **`.4gl` 条目永远不被写回**（服务器 build 产物，渲染结果装不下它）。
-6. **`tzs` 产物是只读参考**：没有写回路径。不要手工改完再塞回包，也不要指望 `apply` ——
-   要改表单请在设计器的表单设计器里改。
+6. **`tzs export` 的产物是只读参考**：它就是一包文件，没有 manifest/围栏。不要手工改完再塞回包，
+   也不要拿它当 `tzc` 工作区去 `apply`。要改表单用 `tt dev tzs call` —— 那是设计器自己的模型在算，
+   改完设计器打得开；手工拼 XML 则不然（`.tsd` 由设计器从模型重算，`.4fd` 的 Record 段要重建）。
+7. **表单的请求一旦发出不要重试**：协议无幂等键，且这些函数都在改设计器内存里的模型，
+   重试是在赌「上一次写进去了没有」。引擎的守护进程死掉时重新 `open` 即可，别重放写请求。
 7. **不要手改 `.tap` / 不要直接改 zip**：`.tzc` 的唯一写路径是 `apply`（它做闸门校验 + 原子写）。
 8. **不要编辑 `.tdev/base.full.4gl`**：那是 gate1 的比对基线，改它等于伪造验证。
    要改内容就改 `prog.full.4gl`，要改意图就用 `unlock`/`rename`/`newfn`。

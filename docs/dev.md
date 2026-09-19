@@ -12,13 +12,15 @@ tt dev tzc rename [<dir>] <旧函数名> <新函数名> [--scope PUBLIC|PRIVATE]
 tt dev tzc newfn  [<dir>] --type FUNCTION|DIALOG|REPORT [--name <名>] [--scope …] [--json]
 tt dev tzc selftest [--json]
 
-tt dev tzs export <pkg.tzs> [-o <dir>] [--force] [--json]   # 表单包纯解压（只读参考，不写回）
+tt dev tzs export <pkg.tzs> [-o <dir>] [--force] [--json]   # 表单包纯解压（只读参考）
+tt dev tzs call <fn> [--<参数> <值>…]                        # 读写表单（由设计器自己的引擎算）
+tt dev tzs fns | manifest | doctor | stop | reap            # 函数表 / 环境自检 / 守护进程
 tt install skills [--to <dir>] [--force] [--json]   # 复制 exe 旁边的 skills/ 到 <当前目录>/skills
 tt install path [--dry-run] [--json]                # 把 exe 目录加进用户 PATH（HKCU，免管理员）
 ```
 
 **两条管线别用错**：`.tzc` 是**代码包**，走 `tzc export`（渲染围栏工作区，改完 `apply` 写回）；
-`.tzs` 是**表单包**，走 `tzs export`（纯解压，只读参考，tt dev 不写回表单）。
+`.tzs` 是**表单包**：`tzs export` 纯解压、只读；**要读写表单走 `tzs call`**，那是由设计器自己的代码算的。
 
 **四个生命周期动词**（export/status/verify/apply）——写包只有 `apply`；
 `unlock` 是**单向状态迁移**（框架解锁，只改 workspace）；`rename`/`newfn` 是**编辑辅助**
@@ -105,7 +107,7 @@ tt dev tzc newfn --type FUNCTION --name capt110_added
 `"SEC 模式未开启（--allow-sec）"`、`"不在本次 --only 导出范围内"`、`"框架集合锚点区段强制只读"`。
 AI 看到 `editable:false` 的同时就知道为什么，不必用试错法探测权限边界。
 
-## 表单包（`.tzs`）：只解压，不写回
+## 表单包（`.tzs`）：导出只读，读写走引擎
 
 `.tzs`（表单包）/ `.tzv`（简易表单包）走的是**完全不同的入口**：
 
@@ -124,7 +126,7 @@ tt dev tzs export "D:\pkg\aapp320(c).tzs"        # → D:\pkg\aapp320-unzip\（�
 |---|---|---|
 | 产物 | **工作区**：`prog.full.4gl`（带围栏）+ `manifest.json` + `snapshot/` + `.tdev/` + `.git/` | **就是一包文件**（`.tsd` / `.4fd` / `ver` …） |
 | 特殊处理 | 合成 + 围栏渲染 + 权限判定 | **没有**：不解围栏、不校验必需条目、不解析 `ver` |
-| 能不能改回来 | 改 `prog.full.4gl` → `verify` → `apply`（唯一写路径） | **不能**：没有 `tzs apply` 这个动词 |
+| 能不能改回来 | 改 `prog.full.4gl` → `verify` → `apply`（唯一写路径） | **不走 export**：文本改完塞回包这条路不存在，要用 `tzs call` 让设计器自己算 |
 | 用途 | 改 4GL 客制 | **只读参考**：读表单结构、查字段定义、写文档 |
 
 配套细节：
@@ -136,8 +138,44 @@ tt dev tzs export "D:\pkg\aapp320(c).tzs"        # → D:\pkg\aapp320-unzip\（�
 - 输入类型闸门：拿 `.tzc`/`.tzf`/`.tzx` 跑 `tzs export` 会被挡下并指回 `tt dev tzc export`。
 - `--json` 给 `{ok, pkg, pkg_sha256, dir, entries[], count, bytes, readonly:true}`。
 
-> **红线**：表单包 tt dev **不写回**（没有对应模型与验收样本）。解压出来的文件是**只读参考**，
-> 不要拿它当 `tzc` 工作区去 `apply`，也不要手工改完再塞回包 —— 要改表单请在设计器的表单设计器里改。
+### 读写表单：`tt dev tzs call`
+
+表单的写路径是引擎（`engine/`，一个 C# exe），它反射驱动**已安装的设计器自己的程序集**：
+布局属性走设计器自己的 `XmlElement` 索引器，`.tsd` 由设计器自己从模型重算，验收用设计器
+自己的校验器加 RoundTrip 不动点。**我们一个字节的 `.tzs` 格式都没实现。**
+
+```powershell
+tt dev tzs fns                                  # 49 个函数（由 --manifest 派生，不手写）
+tt dev tzs fns add_field                        # 单个函数的参数表
+tt dev tzs doctor                               # 引擎/设计器目录/工作区/管道名自检
+
+tt dev tzs call open           --path "D:\pkg\aapp320(c).tzs"
+tt dev tzs call find_component --handle h1 --query l_apcasite
+tt dev tzs call nudge          --handle h1 --paths <path> --direction right --offset 1
+tt dev tzs call validate       --handle h1
+tt dev tzs call save           --handle h1 --out "D:\pkg\_ai.tzs"
+tt dev tzs stop
+```
+
+需要配置两样（都是机器级依赖，没有合理缺省）：
+
+- **设计器装在哪**：`tzs.installDir`，或环境变量 `TZSCLI_INSTALL`。设计器是第三方商业软件、
+  **不随 tt 分发**，装在哪儿只有用户知道。没配就由引擎用它自己的内置缺省。
+- **用哪个工作区**：`tzs.workspace` 或 `TZSCLI_WS`。**这条没有缺省、也不回落** —— 引擎内置
+  的默认工作区是一个真实客户目录，落上去等于拿别人的表单当草稿纸。三层都空时报错退出。
+
+退出码沿用 tdev 那套：`0` 成功 / `2` 参数或环境不对（引擎的 `validation`、`not_found`）/
+`4` 设计器拒绝（`designer`）/ `1` 引擎内部错 / `5` 传输或环境失败（含「包加载不完」）。
+
+**请求一旦上线绝不重试**：协议无幂等键，而这些函数都在改设计器内存里的模型，重试是在赌
+「上一次写进去了没有」。
+
+> **红线**：`export` 的产物是**只读参考** —— 它就是一包文件，没有 manifest/围栏，不要手工
+> 改完再塞回包，也不要拿它当 `tzc` 工作区去 `apply`。要改表单用 `tt dev tzs call`：
+> 那是设计器自己的模型在算，改完设计器打得开。
+>
+> 旧版本这里写的是「tt dev 不写回（没有对应模型与验收样本）」。那句话的前提现在不成立了 ——
+> `engine/` 就是设计器自己的代码。
 
 ## 围栏协议
 
