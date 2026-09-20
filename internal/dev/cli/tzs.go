@@ -168,7 +168,7 @@ func cmdTzsExport(args []string) int {
 		line(w, "    %-28s %8d B  sha256=%s", e.Name, e.Size, short(e.Sha256))
 	}
 	line(w, "")
-	line(w, "提醒：这是**只读参考**（表单包 tdev 不写回，也没有 tzs apply）；要改表单请在设计器里改。")
+	line(w, "提醒：这是**只读参考**（没有 tzs apply）；要改表单用 `tt dev tzs call`，由设计器自己的引擎算。")
 	line(w, "下一步：直接读上面的文件即可；不要把它当成 tzc 工作区去 apply。")
 	return 0
 }

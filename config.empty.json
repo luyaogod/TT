@@ -7,5 +7,10 @@
   },
   "query": {
     "source": "auto"
+  },
+  "tzs": {
+    "installDir": "",
+    "workspace": "",
+    "serverExe": ""
   }
 }

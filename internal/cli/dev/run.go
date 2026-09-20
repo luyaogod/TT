@@ -12,15 +12,15 @@ import (
 
 // devLong 是命令组的 --help 文本。参数与退出码契约沿用 tdev 自己的说明
 // （internal/dev/cli.Usage），这里只补一句在 tt 里的调用方式。
-const devLong = `T100 设计器包工具：.tzc 安全编辑 + .tzs 只读解压
+const devLong = `T100 设计器包工具：.tzc 代码包 + .tzs 表单包
 
 在 tt 里，原来 tdev 的命令整体后移一级：
   tdev tzc export …   →  tt dev tzc export …
   tdev tzs export …   →  tt dev tzs export …
   tdev install path   →  tt dev install path（也可用统一的 tt install）
 
-退出码与参数写法完全不变（0 成功 / 2 包格式或用法错 / 3 校验失败 /
-4 拒绝写入 / 5 IO 与环境失败）。` + "\n\n" + devcli.Usage
+.tzc 的退出码与参数写法完全不变（0 成功 / 2 包格式或用法错 / 3 校验失败 /
+4 拒绝写入 / 5 IO 与环境失败）。.tzs 那条线**没有 3**，另有一个 1（引擎内部错）。` + "\n\n" + devcli.Usage
 
 // runDev 把参数原样交给 tdev 自己的解析器，并把它的退出码透传给根命令。
 //

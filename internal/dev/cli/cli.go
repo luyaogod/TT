@@ -35,7 +35,7 @@ import (
 const ToolVersion = "0.1.0"
 
 // Usage 是总帮助。
-const Usage = `tt dev —— T100 设计器包工具：.tzc 安全编辑 + .tzs 只读解压
+const Usage = `tt dev —— T100 设计器包工具：.tzc 代码包 + .tzs 表单包
 
 用法：
   tt dev tzc export <pkg.tzc> [-o <dir>] [--only <点名>...] [--json]
@@ -52,14 +52,26 @@ const Usage = `tt dev —— T100 设计器包工具：.tzc 安全编辑 + .tzs 
   tt dev tzs export <pkg.tzs> [-o <dir>] [--force] [--json]
         # 表单包**纯解压**（.tzs / .tzv）：不解围栏、不校验、不产生工作区
         # -o 省略时默认解压到 <包所在目录>/<程序名>-unzip
-        # 只读参考：tzs 没有写回路径（没有 tzs apply），要改表单请用设计器
+        # 产物是**只读参考**（没有 tzs apply）；要改表单走下面的 tzs call
+  tt dev tzs fns [<fn>] [--json]     # 引擎的函数表（49 个）；给 <fn> 看单个函数的参数
+  tt dev tzs manifest                # 函数表 JSON，原样转发
+  tt dev tzs call <fn> [--<参数> <值>…] [--workspace <dir>] [--timeout <秒>] [--json]
+        # 读写表单。这是**唯一**的表单写路径 —— 由设计器自己的引擎算，不是我们拼 XML
+        #   例：call open           --path "D:\pkg\aapp320(c).tzs"
+        #       call find_component --handle h1 --query l_apcasite
+        #       call nudge          --handle h1 --paths <path> --direction right --offset 1
+        #       call validate       --handle h1
+        #       call save           --handle h1 --out "D:\pkg\_ai.tzs"   # 写新包，不动原包
+  tt dev tzs doctor [--json]         # 环境自检（引擎 / 设计器目录 / 工作区 / 管道名）
+  tt dev tzs stop                    # 停本工作区的常驻引擎（不启动）
+  tt dev tzs reap [--yes]            # 清理引擎重编后停不掉的孤儿守护进程
 
   tt dev install skills [--to <dir>] [--force] [--json]   # 复制 exe 旁边的 skills/ 到 <当前目录>/skills
   tt dev install path [--dry-run] [--json]                # 把 exe 目录加进用户 PATH（HKCU，免管理员）
 
 两条管线别用错：
   .tzc 代码包 → tzc export（渲染围栏工作区，改完 apply 写回；唯一写路径）
-  .tzs 表单包 → tzs export（纯解压，只读参考；tdev 不写回表单）
+  .tzs 表单包 → tzs export 只解压（只读参考）；读写表单走 tzs call（设计器自己的引擎驱动）
 
 工作区动词的 <dir> 可以省略：先 cd 进工作区，命令就不用再写目录。
   cd D:\pkg\capt110-ws
