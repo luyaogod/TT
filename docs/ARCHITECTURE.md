@@ -76,7 +76,7 @@ TT/
 │  │                        覆盖三个工具的统一设置页（站点管理/数据字典/DEBUG/应用设置）
 │  └─ shared/               共享层：主题变量与机制、UI 基元、设置页布局件、cn
 │
-├─ skills/                  AI 技能：tt-debug / tt-dev / tt-dict / erp-read
+├─ skills/                  AI 技能：tt-debug / tt-dev-tzc / tt-dev-tzs / tt-dict / erp-read
 ├─ docs/                    本设计与迁移记录
 └─ testdata/                FGL 夹具（原 TDev/testdata）
 ```

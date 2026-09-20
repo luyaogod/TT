@@ -64,7 +64,7 @@ tt install skills                       # 复制到 <当前目录>/skills
 tt install skills --to .claude/skills   # 装到 Claude Code 直接读的位置
 ```
 
-`skills/` 下是四套：`tt-debug`（调试）、`tt-dev`（设计器包，`.tzc` 与 `.tzs` 都在里面）、
+`skills/` 下是五套：`tt-debug`（调试）、`tt-dev-tzc`（代码包 `.tzc`）、`tt-dev-tzs`（表单包 `.tzs`）、
 `tt-dict`（数据字典）、`erp-read`（读 ERP 代码）。一个技能一个目录、目录里是 `SKILL.md`
 （Claude 技能规范：目录名必须等于 frontmatter 里的 `name`）。装一次全部到位。
 
@@ -246,7 +246,7 @@ tt dev tzs fns [<fn>] | manifest | doctor | stop | reap
 `5` 传输或环境失败。
 
 细节（句柄语义、`validate` 的基线规则、参数语法、逐函数说明）见
-[skills/tt-dev/SKILL.md](skills/tt-dev/SKILL.md)。
+[skills/tt-dev-tzs/SKILL.md](skills/tt-dev-tzs/SKILL.md)。
 
 ### `tt dict` — 数据字典
 
@@ -334,7 +334,7 @@ TT/
 │  │                        其中的设置视图是所有命令组的统一配置页
 │  ├─ shared/               整套 SPA 共用的主题层 / UI 基元 / 设置页布局件
 │  └─ package.json          npm workspace 根
-├─ skills/                  AI 技能：tt-debug / tt-dev / tt-dict / erp-read
+├─ skills/                  AI 技能：tt-debug / tt-dev-tzc / tt-dev-tzs / tt-dict / erp-read
 ├─ docs/                    分册文档与设计说明
 └─ testdata/                FGL 夹具
 ```
@@ -387,7 +387,8 @@ cd web && npm run dev:debug   # 工作台与设置页，热更新，代理到后
 | [docs/tzc-model.md](docs/tzc-model.md) | `.tzc` 包模型与不变量 |
 | [engine/BUILD.md](engine/BUILD.md) | `.tzs` 引擎：为什么单独构建、采哪四个文件 |
 | [engine/SPEC.md](engine/SPEC.md) | `.tzs` 格式与契约的完整记录 |
-| [skills/tt-dev/SKILL.md](skills/tt-dev/SKILL.md) | 给 AI 的操作手册：`.tzc` 与 `.tzs` 怎么用、哪些坑 |
+| [skills/tt-dev-tzc/SKILL.md](skills/tt-dev-tzc/SKILL.md) | 给 AI 的操作手册：`.tzc` 代码包怎么改、哪些坑 |
+| [skills/tt-dev-tzs/SKILL.md](skills/tt-dev-tzs/SKILL.md) | 给 AI 的操作手册：`.tzs` 表单包怎么读写、哪些坑 |
 
 ## 兼容性
 
