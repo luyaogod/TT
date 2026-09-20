@@ -17,7 +17,7 @@ rem       dictionary / schema / enterprise codes); users run `tt dict db sync`
 rem       after configuring an environment.
 rem NOTE: skills/ ships as a plain directory (not embedded in the binary) so
 rem       users can edit it; `tt install skills` copies it to the target dir.
-rem       After the merge there are four skills in there, installed together.
+rem       After the merge there are five skills in there, installed together.
 setlocal
 cd /d "%~dp0"
 
