@@ -381,6 +381,72 @@ func TestMigrateInPlace_NothingToDo(t *testing.T) {
 	}
 }
 
+// 不是配置的文件不能被就地迁移改写 —— 这是个凭据泄漏的口子，不只是一处不整洁。
+//
+// migrateInPlace 的职责是"把合并前的旧结构升级到当前结构"，而"旧结构"的前提是它**得先是一份
+// 配置**。修之前，任何解不出 JSON 的文件都会一路掉进 PlanMigration 并被当成迁移目标，而来源里
+// 包含 ToolsHome 下 legacyTools 的那几份配置（**含真实 SSH / 数据库口令**）。后果很具体：
+// `TT_CONFIG=D:\tmp\scratch.json` 里有个笔误，你的口令就被复制到了那个临时文件里。
+//
+// 这个测试**必须先放一份可合并的旧配置**：没有来源时 plan.Sources 为空，谁都不会去写目标，
+// 那样测了等于没测 —— 无论修没修都会绿。
+func TestMigrateInPlace_CorruptFileIsNotATarget(t *testing.T) {
+	home := isolateEnv(t)
+
+	legacy := filepath.Join(home, "tdict", DefaultConfigName)
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	seed := `{"hosts":{"activeEnv":"e","sshs":[{"name":"e","host":"h","user":"u","password":"SECRET"}]}}`
+	if err := os.WriteFile(legacy, []byte(seed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	p := filepath.Join(dir, DefaultConfigName)
+	const broken = "这不是配置，是写坏的 JSON {\n"
+	if err := os.WriteFile(p, []byte(broken), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := migrateInPlace(p); got != p {
+		t.Fatalf("migrateInPlace 返回 %q，期望原路径", got)
+	}
+
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != broken {
+		t.Errorf("不是配置的文件被迁移改写了：\n  现在 = %q\n  应该 = %q", string(b), broken)
+	}
+	if contains(string(b), "SECRET") {
+		t.Error("旧配置里的口令被复制进了这个文件")
+	}
+}
+
+// looksLikeConfig 与 isCurrentSchema 的 false 含义不同：前者是"不是配置"，后者是
+// "是配置但结构旧"。只有后者该被迁移改写 —— 见上面那个测试。
+func TestLooksLikeConfig(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{`{"hosts":{"sshs":[]}}`, true}, // 旧结构，但是配置
+		{`{"schemaVersion":2}`, true},   // 当前结构
+		{``, false},                    // 空文件
+		{`[]`, false},                  // 是 JSON，但不是对象
+		{`"x"`, false},                 // 同上
+		{`{`, false},                   // 坏 JSON
+		{"这不是 JSON", false},           // 根本不是
+	}
+	for _, c := range cases {
+		if got := looksLikeConfig([]byte(c.in)); got != c.want {
+			t.Errorf("looksLikeConfig(%q) = %v，期望 %v", c.in, got, c.want)
+		}
+	}
+}
+
 func contains(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {

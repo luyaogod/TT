@@ -365,7 +365,7 @@ TT/
 | 前端 `web/dist` | **Node.js + npm** | 只用 npm workspaces（`web/` 是根，`web/app` 是唯一 workspace），没有 pnpm/yarn 的锁文件 |
 | 打包 | **Python 3**（可选） | `tools/zip.py` 打 zip、`tools/wix_removefolders.py` 补卸载目录。**缺了不会失败** —— 打 zip 会退回 PowerShell，卸载目录那段才需要它 |
 | `.tzs` 引擎 | **.NET Framework 4.0 的 `csc.exe`** + 一个 POSIX shell | 只在改动 `engine/` 时才要。编译器是 Windows 自带的 `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe`（**C# 5**），`build.sh` 是 bash 且用 `cygpath`，所以要 Git Bash 这类环境 |
-| `.tzs` 引擎 | **已安装的 T100 设计器**（只在你重打发行包时要） | 打包时采它的 `*.dll` 进 `tzs\designer\`，那份就是这一版发行钉住的版本。编译期只从它取 `Newtonsoft.Json.dll`。引擎跑起来**不需要**机器上装着设计器 —— 它用包里自带的那份 |
+| `.tzs` 引擎 | **已安装的 T100 设计器** | 只在你要用 `.tzs`（或重打发行包）时要。编译期从它取 `Newtonsoft.Json.dll`；打包时采它的 `*.dll` 进 `tzs\designer\`，那份就是这一版发行钉住的版本。**装发行包的人不需要装设计器** —— 包里自带 |
 | MSI | **WiX v3 工具集** | 只在打 MSI 时要，见下 |
 
 Go 的**直接**依赖只有 8 个：`coder/websocket`（调试 WebSocket）、`jackc/pgx`（Kingbase/PostgreSQL）、
@@ -376,10 +376,48 @@ Go 的**直接**依赖只有 8 个：`coder/websocket`（调试 WebSocket）、`
 
 ## 构建
 
-### 后端
+### 先看：克隆下来你能跑多少
 
-**前端必须先构建**：`main.go` 用 `//go:embed all:web/dist` 把前端产物嵌进二进制，
-`web/dist` 不存在时 `go build` 直接失败。
+绝大部分功能只要有 Go 和 Node 就能构建、也能通过全部测试。**只有 `.tzs`（表单读写）额外要装
+一样东西**：
+
+| 功能 | Go + Node 就够 | 还要 T100 设计器 |
+|---|---|---|
+| `tt debug` / `tt dict` / `tt dev tzc` | ✅ | |
+| Web 界面与统一设置页 | ✅ | |
+| `go test ./...` | ✅ | |
+| `tt dev tzs`（表单读写，含 `doctor`） | | ✅ |
+| 打发行包（便携 zip / MSI） | | ✅ |
+
+**T100 设计器是第三方商业软件，不在这个仓库里**，克隆也拿不到。这是固有的 —— 你没法驱动一个
+没装的商业软件。发行包**自带**设计器程序集（`tzs\designer\`），所以装发行包的人不需要另装设计器；
+从源码跑的人需要自己装一份，并告诉引擎它在哪（下一节）。
+
+### 一条命令都不少
+
+```bash
+git clone <repo> && cd TT
+
+cd web && npm install && npm run build && cd ..   # 前端（可先跳过，见下）
+go build -o tt.exe .                              # 后端 —— 到这里 tt debug / dict / dev tzc 就能用了
+go test ./...                                     # 21 个包；语料回归默认跳过
+```
+
+**前端可以先跳过**：`web/dist/.gitkeep` 这个占位文件让 `//go:embed all:web/dist` 在没有产物时
+也成立，所以 `go build` **不会**失败 —— 但那样出来的 tt 没有界面，`tt serve` 会返回一张写着
+「界面未构建」和构建命令的说明页（不是静默空白）。
+
+要跑 `.tzs`，再加两步：
+
+```bash
+export TZSCLI_INSTALL='D:\APPS\T100设计器_1.0.0.251_免安装'   # 改成你装设计器的地方
+cd engine && ./build.sh && cd ..                              # → engine/out/，十几个程序
+```
+
+`build.sh` 没有缺省设计器路径（写死一个只在一台机器上是对的），没设 `TZSCLI_INSTALL` 会直接
+告诉你，不会让你去猜一条 `CS0006` 里冒出来的路径。
+
+### 后端
 
 ```bash
 cd web && npm install && npm run build   # → web/dist（顺带跑 tsc --noEmit 做类型检查）
@@ -395,8 +433,8 @@ cd .. && go build -o tt.exe .            # → tt.exe
 让所有在跑的守护进程变成停不掉的孤儿（`engine/BUILD.md` 解释了这条约束）。
 
 ```bash
-cd engine && ./build.sh                      # → engine/out/，15 个单元
-TZSCLI_INSTALL='D:\APPS\某版本设计器' ./build.sh  # 换一台机器时先指设计器目录
+export TZSCLI_INSTALL='D:\APPS\T100设计器_1.0.0.251_免安装'   # 必设：见上一节
+cd engine && ./build.sh                      # → engine/out/
 ./build.sh TzsCli.Designer                   # 只编一个
 OUT=<dir> ./build.sh                         # 换落点
 ```
@@ -406,9 +444,28 @@ OUT=<dir> ./build.sh                         # 换落点
 xcopy 整个目录会把它们一起打进包里。缺任何一个都会让打包脚本报错退出。
 
 同一份 `TZSCLI_INSTALL` 在打包时还有第二个作用：`build_portable.bat` 用它找到设计器目录，
-把其中的 `*.dll` 采进 `<stage>\tzs\designer\`。**它没有缺省** —— 采的是哪一版，这一版发行就钉在
+把其中的 `*.dll` 采进 `<stage>\tzs\designer\`。它同样**没有缺省** —— 采的是哪一版，这一版发行就钉在
 哪一版，所以由人指明比从写死的路径猜更正确（也因为 `.bat` 必须保持纯 ASCII，而常见的设计器路径
 是中文的）。
+
+### 从源码跑 `.tzs`
+
+引擎编在 `engine/out/`，但 `tt` 默认去 `<tt.exe 目录>\tzs\` 找它 —— 那是**发行包**的布局，
+源码树里没有这一层。所以要么打一个包（见「便携包」），要么指一下：
+
+```bash
+tt config set tzs.workspace  "D:\你的工作区"                  # 没有缺省，必须给
+tt config set tzs.serverExe  "<仓库路径>\engine\out\tzs-server.exe"
+```
+
+`TZSCLI_INSTALL` 要一直设着（源码树里没有随包的设计器）。之后：
+
+```bash
+tt dev tzs doctor        # 应该全绿：引擎 exe / 设计器目录 / 工作区 / 管道名
+```
+
+`tzs.serverExe` 平时不该写（发行版靠 `<tt.exe 目录>\tzs\` 的固定布局），它存在的意义就是
+源码树与自定义部署这两种情况。
 
 ### 便携包
 

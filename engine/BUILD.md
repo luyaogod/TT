@@ -15,8 +15,8 @@
 **2. 设计器程序集：构建期向机器要一份，运行期自带一份。**
 
 ```
-构建期  INSTALL = TZSCLI_INSTALL 或 D:\APPS\T100设计器_1.0.0.251_免安装
-运行期  TZSCLI_INSTALL（开发覆盖）或 <引擎自己的目录>\designer（随包分发的那份）
+构建期  INSTALL = TZSCLI_INSTALL（**必设**，没有缺省）
+运行期  TZSCLI_INSTALL（开发覆盖，装发行包时不设）或 <引擎自己的目录>\designer（随包分发的那份）
 ```
 
 - **构建期**：`-r:$INSTALL\Newtonsoft.Json.dll` —— 一个编译期引用，构建机上得有；
@@ -50,16 +50,17 @@ MVID 每次重编都变，所以：
 ## 构建
 
 ```bash
-cd engine && ./build.sh          # → engine/out/，15 个单元
+export TZSCLI_INSTALL='D:\APPS\T100设计器_1.0.0.251_免安装'   # 必设：见上一节
+
+cd engine && ./build.sh          # → engine/out/
 OUT=<dir> ./build.sh             # 换落点
 ./build.sh TzsCli.Designer       # 只编一个
 ```
 
-跨机器时先设好设计器目录：
-
-```bash
-TZSCLI_INSTALL='D:\APPS\某版本设计器' ./build.sh
-```
+**`TZSCLI_INSTALL` 没有缺省**，没设或指错时脚本在编译前就停下来说清该设什么。之前的做法是
+写死一个路径：那在恰好一台机器上是对的，在别人机器上则变成一句
+`error CS0006: Metadata file '...\Newtonsoft.Json.dll' could not be found` —— 一条读者从没见过的
+路径，而且另外十二个单元照样编出来，最后只说一句 `some builds failed`。
 
 ## 进 tt 分包的是哪四个文件
 

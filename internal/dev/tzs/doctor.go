@@ -87,7 +87,12 @@ func Doctor(ctx context.Context, o Options) *DoctorReport {
 	if strings.TrimSpace(o.Exe) == "" {
 		r.add(LevelFail, "引擎 exe", "没有指定路径（--exe / 配置）")
 	} else if _, err := os.Stat(o.Exe); err != nil {
-		r.add(LevelFail, "引擎 exe", fmt.Sprintf("%s 不存在或读不到：%v", o.Exe, err))
+		// 两种处境给两种话。源码树下的人看到的路径是 <仓库>\tzs\...，那条路径本来就
+		// 不该存在 —— 把他也说成"装坏了"会让人去重装一个根本没错的东西。
+		r.add(LevelFail, "引擎 exe", fmt.Sprintf("%s 不存在或读不到（%v）\n"+
+			"        装的是发行包 → 包不完整，重装或重新打包；\n"+
+			"        从源码跑 → 引擎不在包里，先 cd engine && ./build.sh，"+
+			"再把 tzs.serverExe 指到 engine/out/tzs-server.exe（见 README「从源码跑 .tzs」）", o.Exe, err))
 	} else if m, err := FetchManifest(ctx, o.Exe); err != nil {
 		r.add(LevelFail, "引擎 exe", fmt.Sprintf("%s 答不了 --manifest：%v", o.Exe, err))
 	} else {
@@ -101,8 +106,7 @@ func Doctor(ctx context.Context, o Options) *DoctorReport {
 	}
 
 	// ② 设计器程序集：默认是**随包分发**的那份（<引擎 exe 目录>\designer），TZSCLI_INSTALL
-	// 只作开发期覆盖。这里刻意不再有"没配"这一种状态 —— 设计器目录不是配置项了，
-	// 所以要么包里有，要么这个包是坏的。
+	// 只作开发期覆盖。这里刻意不再有"没配"这一种状态 —— 设计器目录不是配置项了。
 	d := strings.TrimSpace(o.InstallDir)
 	bundled := d == ""
 	if bundled {
@@ -111,11 +115,19 @@ func Doctor(ctx context.Context, o Options) *DoctorReport {
 	if st, err := os.Stat(d); err != nil || !st.IsDir() {
 		// fail 而不是 warn：少了它 Boot 一定失败，而现象是「冷启动 60 s 未就绪」——
 		// 一条与真正原因毫无关系的消息。
-		what, how := "随包分发的设计器目录", "这个包是坏的（重装或重新打包）"
-		if !bundled {
-			what, how = "TZSCLI_INSTALL 指向的设计器目录", "改指到正确的路径，或取消这个环境变量"
+		//
+		// 消息分两种处境，因为"目录不在"有两个完全不同的原因：发行包缺件（打包坏了），
+		// 与源码树本来就没有随包的那份（引擎在 engine/out/，不是包）。只说前者会让后者
+		// 去重装一个根本没错的东西。
+		if bundled {
+			r.add(LevelFail, "设计器目录", fmt.Sprintf("%s 不是目录（%v）\n"+
+				"        装的是发行包 → 包不完整，重装或重新打包；\n"+
+				"        从源码跑 → 引擎不在包里，设 TZSCLI_INSTALL 指向已安装的设计器"+
+				"（见 README「从源码跑 .tzs」）", d, err))
+		} else {
+			r.add(LevelFail, "设计器目录",
+				fmt.Sprintf("TZSCLI_INSTALL 指向的 %s 不是目录（%v）；改指到正确的路径，或取消这个环境变量", d, err))
 		}
-		r.add(LevelFail, "设计器目录", fmt.Sprintf("%s %s 不是目录（%v）；%s", what, d, err, how))
 	} else {
 		var missing []string
 		for _, f := range []string{"SpecDesignerCommon.dll", "SpecDesigner.FormEditor.dll"} {

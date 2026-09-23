@@ -267,8 +267,17 @@ func ResolvePath(flagPath string, allowMissing bool) (string, error) {
 // 文件不存在且没有可合并的旧配置时什么都不做（首次运行由调用方的 EnsureExists
 // 落骨架）。迁移失败不报错中断 —— 按未迁移的内容继续，读得出来多少算多少。
 func migrateInPlace(p string) string {
-	if b, err := os.ReadFile(p); err == nil && isCurrentSchema(b) {
-		return p
+	if b, err := os.ReadFile(p); err == nil {
+		if isCurrentSchema(b) {
+			return p
+		}
+		// 文件在、但连 JSON 对象都不是：这不是"合并前的旧配置"，是一份坏文件或根本不是
+		// 配置的东西（手改坏的、测试脚本写的临时文件）。**不能拿它当迁移目标** ——
+		// 迁移会把统一用户目录里那份（含真实 SSH/数据库口令）整个写进来，等于随手把一个
+		// 无关路径变成凭据副本。留给读路径去报"解析不了"。
+		if !looksLikeConfig(b) {
+			return p
+		}
 	}
 	plan, err := PlanMigration(p)
 	if err != nil || plan == nil || len(plan.Sources) == 0 {
@@ -287,6 +296,15 @@ func isCurrentSchema(b []byte) bool {
 		return false // 解析不了就当需要处理，交给 PlanMigration 去报
 	}
 	return intOf(root["schemaVersion"]) >= SchemaVersion
+}
+
+// looksLikeConfig 只回答"这包内容看起来是不是一份配置"：是个 JSON 对象就算。
+//
+// 与 isCurrentSchema 分开，是因为两者的 false 含义完全不同 —— 前者是"不是配置"，
+// 后者是"是配置但结构旧"。只有后者该被就地迁移改写；前者改写就等于覆盖一个陌生文件。
+func looksLikeConfig(b []byte) bool {
+	var root map[string]any
+	return json.Unmarshal(b, &root) == nil
 }
 
 // FormatTriedPaths 把尝试过的路径渲染成 --help/报错里的清单。

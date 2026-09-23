@@ -72,10 +72,33 @@ GAC64='C:\Windows\Microsoft.NET\assembly\GAC_64'
 #
 # At RUN time nothing reads this. The engine resolves its designer from TZSCLI_INSTALL if that
 # is set, and otherwise from <its own directory>\designer -- the copy the package ships with it
-# (Bootstrap.cs; engine/BUILD.md explains why the version is pinned by the package). This
-# variable is what a cross-machine build sets, and what the probe programs under test/ fall back
-# to when they are run out of engine/out/, which is not a package and has no designer/.
-INSTALL="${TZSCLI_INSTALL:-D:\APPS\T100设计器_1.0.0.251_免安装}"
+# (Bootstrap.cs; engine/BUILD.md explains why the version is pinned by the package). Here it is
+# purely the compile-time -r: above, and the probe programs under test/ also read it at run time
+# when they are run out of engine/out/ -- which is not a package and has no designer/.
+INSTALL="${TZSCLI_INSTALL:-}"
+
+# Fail before compiling, with a sentence that names the fix. Without this the csc for
+# TzsCli.Designer.dll reports `error CS0006: Metadata file '...\Newtonsoft.Json.dll' could not be
+# found` against a path the reader has never seen -- and the other twelve units still build, so
+# the run ends with "some builds failed" and a success-looking list above it.
+#
+# There is deliberately NO default: a designer lives wherever its owner installed it, so any
+# built-in answer would be right on exactly one machine.
+if [ -z "$INSTALL" ]; then
+  echo "TZSCLI_INSTALL is not set -- the designer build needs an installed T100 designer." >&2
+  echo "  export TZSCLI_INSTALL='D:\\APPS\\T100设计器_<版本>_免安装'" >&2
+  echo "  engine/BUILD.md explains why; a checkout cannot carry the designer itself." >&2
+  exit 1
+fi
+if [ ! -d "$INSTALL" ]; then
+  echo "TZSCLI_INSTALL is not a directory: $INSTALL" >&2
+  exit 1
+fi
+if [ ! -f "$INSTALL/Newtonsoft.Json.dll" ]; then
+  echo "Not a designer directory: $INSTALL" >&2
+  echo "  expected Newtonsoft.Json.dll in it (the designer ships it; see engine/BUILD.md)." >&2
+  exit 1
+fi
 
 REFS=(
   "$GACMS\\PresentationFramework\\v4.0_4.0.0.0__31bf3856ad364e35\\PresentationFramework.dll"
