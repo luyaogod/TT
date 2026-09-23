@@ -85,6 +85,36 @@ for %%f in (tzs-server.exe tzs-cli.exe TzsCli.dll TzsCli.Designer.dll) do (
     copy /y "%TZSENGINE%\%%f" "%STAGE%\tzs\" >nul || (echo COPY engine %%f FAILED & exit /b 1)
 )
 
+rem [3c/5] Staging the designer payload the engine boots from.
+rem   The engine loads the designer's assemblies from <its own directory>\designer (see
+rem   engine\src\Designer\Bootstrap.cs), so the package carries them and a run depends on THIS
+rem   package's designer version instead of on whatever the machine happens to have installed.
+rem
+rem   Only *.dll is copied. The directory also holds T100Designer.exe (the GUI, not referenced
+rem   by the engine's assembly closure), AutoUpdater.exe + AppLimit's Sparkle updater (that one
+rem   phones a vendor update channel -- we do not ship it), AutoUpdater.exe.config and a shell
+rem   shortcut. Copying *.dll also keeps SpecDesigner*.dll and SpecDesigner.Controls.dll
+rem   together, which the language-dictionary merge requires.
+rem
+rem   The source directory has NO default here, deliberately. This file must stay ASCII-only
+rem   and the usual designer path contains Chinese, which cmd.exe would split mid-character --
+rem   that is the same reason README.md exists. Requiring TZSCLI_INSTALL is also the honest
+rem   thing: the version staged becomes the version this release is pinned to, so name it.
+if "%TZSDESIGNER%"=="" set TZSDESIGNER=%TZSCLI_INSTALL%
+if "%TZSDESIGNER%"=="" (
+    echo TZSDESIGNER / TZSCLI_INSTALL not set: name the designer directory to bundle.
+    echo   set TZSCLI_INSTALL=D:\APPS\T100Designer_1.0.0.251
+    exit /b 1
+)
+if not exist "%TZSDESIGNER%\SpecDesignerCommon.dll" (
+    echo NOT A DESIGNER DIRECTORY: %TZSDESIGNER%
+    echo   SpecDesignerCommon.dll is not in it.
+    exit /b 1
+)
+if not exist "%STAGE%\tzs\designer" mkdir "%STAGE%\tzs\designer"
+xcopy /y /q "%TZSDESIGNER%\*.dll" "%STAGE%\tzs\designer\" >nul || (echo COPY designer FAILED & exit /b 1)
+echo     designer staged from %TZSDESIGNER%
+
 echo [4/5] Packing zip ...
 rem Recursive zip (includes the skills/ subtree); shutil.make_archive keeps the
 rem tt-portable/ top-level directory inside the archive.

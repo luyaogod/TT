@@ -21,15 +21,30 @@ namespace TzsCli.Designer
     /// </summary>
     public static class Designer
     {
-        /// <summary>Where the designer itself lives. Everything is Assembly.LoadFrom()'d from
-        /// here at runtime -- nothing in this library is compiled against it.
+        /// <summary>Where the designer's assemblies live. Everything is Assembly.LoadFrom()'d
+        /// from here at runtime -- nothing in this library is compiled against it.
         ///
-        /// TZSCLI_INSTALL overrides it. That is what lets a host process (tt) carry the path in
-        /// its own configuration instead of patching this constant: the designer is third-party
-        /// commercial software, it is NOT redistributed, and it is installed wherever the user
-        /// put it. Not `const` because it is read from the environment once per process.</summary>
-        public static readonly string Install =
-            Env("TZSCLI_INSTALL") ?? @"D:\APPS\T100设计器_1.0.0.251_免安装";
+        /// Two answers, in this order:
+        ///
+        ///   1. TZSCLI_INSTALL, if set. This is the dev/build escape hatch: engine/out/ is not a
+        ///      package, so the probe programs and a locally built engine point this at whatever
+        ///      designer the machine has.
+        ///   2. `&lt;this exe's directory&gt;\designer` -- the copy that SHIPS WITH US. The package
+        ///      carries the designer's assemblies so that a run depends on the package's version
+        ///      and nothing else; before this, the answer came from the user's config and two
+        ///      machines with the same tt could run against different designers.
+        ///
+        /// There is deliberately no fallback to an installed designer: "the one next to us, or
+        /// the one you named" is the whole rule, and a missing &lt;exe&gt;\designer is a broken package
+        /// rather than a reason to guess. Not `const` because it is read from the environment once
+        /// per process.</summary>
+        public static readonly string Install = Resolve();
+
+        static string Resolve() {
+            string env = Env("TZSCLI_INSTALL");
+            if (env != null) return env;
+            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "designer");
+        }
 
         static string Env(string name) {
             string v = Environment.GetEnvironmentVariable(name);
@@ -54,7 +69,8 @@ namespace TzsCli.Designer
         /// Both are needed; that is why this walks the directory rather than loading one file.
         ///
         /// So the source tree is no longer a runtime dependency at all, and the strings come from
-        /// the designer version actually installed.</summary>
+        /// the designer version this package carries -- which is now the point: one package, one
+        /// set of UI strings. See Install for where that copy comes from.</summary>
         static void MergeLanguages(Application app) {
             string[] files;
             try { files = Directory.GetFiles(Install, "SpecDesigner*.dll"); }
@@ -115,6 +131,13 @@ namespace TzsCli.Designer
         public static void Boot(string workspace) {
             if (_booted) return;
             Workspace = workspace;
+
+            // Say it here, in one line, rather than letting LoadFrom fail on the first assembly
+            // and reporting a path nobody chose. A package missing tzs\designer\ is a packaging
+            // bug, and this is the message that names it as one.
+            if (!Directory.Exists(Install))
+                throw new Exception("设计器程序集目录不存在：" + Install
+                    + "（发行包应在 tzs\\designer\\ 下带着它；开发时用 TZSCLI_INSTALL 指向已安装的设计器）");
 
             // The designer's assemblies reference each other and Prism by name only. Without
             // this handler, the first call into SpecificationInfo fails to resolve

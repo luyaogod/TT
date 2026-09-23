@@ -124,12 +124,12 @@ func NewSkeleton() map[string]any {
 			"sshs":      []any{},
 		},
 		"query": map[string]any{"source": "auto"},
-		// 空值就是诚实的"未配置"：设计器装在哪、用哪个工作区都只有用户知道，
-		// 填一个猜的路径比留空更糟（引擎会去 Boot 别人的目录）。
+		// 空值就是诚实的"未配置"：用哪个工作区只有用户知道，填一个猜的路径比留空更糟
+		// （引擎会去 Boot 别人的目录）。设计器目录不在这里 —— 它由发行包自带，
+		// 见 engine/src/Designer/Bootstrap.cs 的 Install。
 		"tzs": map[string]any{
-			"installDir": "",
-			"workspace":  "",
-			"serverExe":  "",
+			"workspace": "",
+			"serverExe": "",
 		},
 	}
 }

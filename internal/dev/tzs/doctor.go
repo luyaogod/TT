@@ -100,12 +100,22 @@ func Doctor(ctx context.Context, o Options) *DoctorReport {
 		r.add(LevelOK, "引擎 exe", fmt.Sprintf("%s（函数表 %d 个，慢函数 %d 个）", o.Exe, len(m.Fns), slow))
 	}
 
-	// ② 设计器目录：只有我们能看见的那一半可查（引擎自己的缺省路径在它的程序集里）。
-	if d := strings.TrimSpace(o.InstallDir); d == "" {
-		r.add(LevelWarn, "设计器目录",
-			"未指定 TZSCLI_INSTALL，将由引擎用自己的内置缺省（装错版本会在守护进程日志里报版本门禁）")
-	} else if st, err := os.Stat(d); err != nil || !st.IsDir() {
-		r.add(LevelFail, "设计器目录", fmt.Sprintf("%s 不是目录：%v", d, err))
+	// ② 设计器程序集：默认是**随包分发**的那份（<引擎 exe 目录>\designer），TZSCLI_INSTALL
+	// 只作开发期覆盖。这里刻意不再有"没配"这一种状态 —— 设计器目录不是配置项了，
+	// 所以要么包里有，要么这个包是坏的。
+	d := strings.TrimSpace(o.InstallDir)
+	bundled := d == ""
+	if bundled {
+		d = filepath.Join(filepath.Dir(o.Exe), "designer")
+	}
+	if st, err := os.Stat(d); err != nil || !st.IsDir() {
+		// fail 而不是 warn：少了它 Boot 一定失败，而现象是「冷启动 60 s 未就绪」——
+		// 一条与真正原因毫无关系的消息。
+		what, how := "随包分发的设计器目录", "这个包是坏的（重装或重新打包）"
+		if !bundled {
+			what, how = "TZSCLI_INSTALL 指向的设计器目录", "改指到正确的路径，或取消这个环境变量"
+		}
+		r.add(LevelFail, "设计器目录", fmt.Sprintf("%s %s 不是目录（%v）；%s", what, d, err, how))
 	} else {
 		var missing []string
 		for _, f := range []string{"SpecDesignerCommon.dll", "SpecDesigner.FormEditor.dll"} {
@@ -114,11 +124,13 @@ func Doctor(ctx context.Context, o Options) *DoctorReport {
 			}
 		}
 		if len(missing) > 0 {
-			// fail 而不是 warn：少了这两个程序集，Boot 一定失败，而现象是
-			// 「冷启动 60 s 未就绪」—— 一条与被装错的设计器毫无关系的消息。
 			r.add(LevelFail, "设计器目录", fmt.Sprintf("%s 里缺 %s", d, strings.Join(missing, ", ")))
 		} else {
-			r.add(LevelOK, "设计器目录", d)
+			src := "随包分发"
+			if !bundled {
+				src = "TZSCLI_INSTALL 覆盖"
+			}
+			r.add(LevelOK, "设计器目录", fmt.Sprintf("%s（%s）", d, src))
 		}
 	}
 

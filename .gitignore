@@ -2,6 +2,9 @@
 /tt.exe
 /tt.exe~
 *.exe
+# 设计器程序集：第三方商业软件，只作为**打包输入**存在（build_portable.bat 从 TZSDESIGNER
+# 采进 dist/），绝不入库 —— 这个仓库是公开的，提交它们等于把它们发布出去。
+*.dll
 /dist/
 # 前端产物不入库，但那个占位文件必须入库：main.go 的 //go:embed all:web/dist
 # 在没有该目录时会直接报错（pattern all:web/dist: no matching files found），

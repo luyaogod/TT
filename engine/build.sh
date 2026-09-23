@@ -63,15 +63,18 @@ OUTW="$(cygpath -w "$OUT")"
 GACMS='C:\Windows\Microsoft.NET\assembly\GAC_MSIL'
 GAC64='C:\Windows\Microsoft.NET\assembly\GAC_64'
 
-# The designer's own install directory. TzsCli.Designer.dll needs Newtonsoft.Json at compile
-# time (SpecFn.cs parses the request payload with JObject), and this is where it lives --
-# v9.0.0.0. It is a real third-party library, not a designer assembly, so referencing it does
-# not compromise TzsCli.dll's purity; only the designer library gets this -r:.
-# The designer's install directory. Both sides need it and neither ships with us -- the designer
-# is third-party commercial software that is NOT redistributed: the build references
-# Newtonsoft.Json.dll out of it, and every program loads the designer's assemblies from it at run
-# time. One environment variable now drives both: build.sh reads TZSCLI_INSTALL here, and each
-# test/*.cs reads the same variable in its own InstallFromEnv().
+# The designer's install directory -- for BUILD TIME only.
+#
+# TzsCli.Designer.dll needs Newtonsoft.Json at compile time (SpecFn.cs parses the request
+# payload with JObject) and this is where it lives -- v9.0.0.0. That is a real third-party
+# library, not a designer assembly, so referencing it does not compromise TzsCli.dll's purity;
+# only the designer library gets this -r:.
+#
+# At RUN time nothing reads this. The engine resolves its designer from TZSCLI_INSTALL if that
+# is set, and otherwise from <its own directory>\designer -- the copy the package ships with it
+# (Bootstrap.cs; engine/BUILD.md explains why the version is pinned by the package). This
+# variable is what a cross-machine build sets, and what the probe programs under test/ fall back
+# to when they are run out of engine/out/, which is not a package and has no designer/.
 INSTALL="${TZSCLI_INSTALL:-D:\APPS\T100设计器_1.0.0.251_免安装}"
 
 REFS=(
@@ -250,6 +253,8 @@ done
 echo
 if [ "$fail" = 0 ]; then echo "all built -> $OUT"; else echo "some builds failed"; fi
 echo
-echo "runtime note: every program calls Assembly.LoadFrom() into the original install dir."
-echo "  INSTALL = $INSTALL     (TZSCLI_INSTALL overrides; each program reads the same variable)"
+echo "runtime note: the shipped engine loads its designer from <its own dir>\\designer -- the copy"
+echo "  the package carries with it. Out of engine/out/ (which is not a package) the probe"
+echo "  programs fall back to TZSCLI_INSTALL instead:"
+echo "  INSTALL = $INSTALL"
 echo "  AddField / E2E / MakeTestFile also load SpecDesigner.FormEditor.dll from there."

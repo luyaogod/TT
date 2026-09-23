@@ -15,9 +15,9 @@ using System.Xml.Linq;
 /// <summary>Fresh-process load of a produced .tzs, exactly as the designer would.</summary>
 class CheckOut
 {
-    // TZSCLI_INSTALL overrides the built-in path -- see Designer.Install. The designer is
-    // third-party software that is NOT redistributed with anything we ship, so where it lives
-    // is the user's answer, not ours. Not `const` because it comes from the environment.
+    // TZSCLI_INSTALL overrides the bundled path -- see Designer.Install. These probes build
+    // into engine/out/, which is not a package and carries no designer, so they fall back to
+    // an installed designer. Not `const` because it comes from the environment.
     static readonly string INSTALL = InstallFromEnv();
 
     static string InstallFromEnv() {

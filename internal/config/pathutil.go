@@ -79,23 +79,31 @@ func FileStatusOf(configured, defaultTarget string) FileStatus {
 
 // TzsStatus 是 .tzs 引擎那几样东西的派生状态(见 schema.go 的 TzsSettings)。
 //
-// Engine 与另外两个**故意分开**:Engine 是随包分发的那个 exe(在 tt.exe 旁边),它不在
-// 说明分包或部署坏了;Install/Workspace 在用户自己的机器上、由用户配置,它们不在是配置
-// 问题。混成一个字段会让设置页把"你自己没配"说成"程序坏了"。
+// Designer 与 Engine 都是随包分发的,**它们不在说明分包或部署坏了**;Workspace 在用户自己的
+// 机器上、由用户配置,它不在是配置问题。混成一个字段会让设置页把"你自己没配"说成"程序坏了"。
 type TzsStatus struct {
 	// Engine 引擎 exe:生效值可以是配置里覆盖的 serverExe,否则是 <tt.exe 目录>\tzs\ 下那个。
 	Engine FileStatus `json:"engine"`
-	// Install 设计器安装目录(第三方软件,不随包分发)。
-	Install DirStatus `json:"install"`
+	// Designer 随包分发的设计器程序集目录(<引擎 exe 目录>\designer),引擎默认从这儿加载。
+	Designer DirStatus `json:"designer"`
 	// Workspace 引擎 Boot 的工作区(含 mta/ 的目录)。
 	Workspace DirStatus `json:"workspace"`
 }
 
 // TzsStatusOf 汇总引擎那几样东西的状态。defaultEngineExe 由调用方算(它要知道 tt.exe 在哪)。
+//
+// Designer 的位置从**生效的**引擎 exe 推出来,而不是另配一个:引擎自己就是这么算的
+// (D.Bootstrap 的 Install = <自己的目录>\designer),两边各算一次的话,设置页会报"有"
+// 而引擎报"没有"。
 func TzsStatusOf(s TzsSettings, defaultEngineExe string) TzsStatus {
+	engine := FileStatusOf(s.ServerExe, defaultEngineExe)
+	designerDir := ""
+	if engine.Target != "" {
+		designerDir = filepath.Join(filepath.Dir(engine.Target), "designer")
+	}
 	return TzsStatus{
-		Engine:    FileStatusOf(s.ServerExe, defaultEngineExe),
-		Install:   DirStatusOf(s.InstallDir),
+		Engine:    engine,
+		Designer:  DirStatusOf(designerDir),
 		Workspace: DirStatusOf(s.Workspace),
 	}
 }

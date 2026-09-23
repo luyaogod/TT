@@ -55,8 +55,9 @@ const (
 type Options struct {
 	// Exe 是 tzs-server.exe 的路径。
 	Exe string
-	// InstallDir 是设计器安装目录，作为 TZSCLI_INSTALL 传给子进程。
-	// 留空则用引擎内置的缺省（参见 engine/src/Designer/Bootstrap.cs 的 Designer.Install）。
+	// InstallDir 是**开发期覆盖**的设计器目录，作为 TZSCLI_INSTALL 传给子进程。
+	// 留空是正常情形：引擎默认用它自己旁边的 `designer\`（随包分发的那份）。
+	// 见 engine/src/Designer/Bootstrap.cs 的 Designer.Install。
 	InstallDir string
 	// Workspace 是 .tzs 工作区。**绝不留空**：引擎的缺省是一个真实客户目录
 	// （Rpc.DefaultWorkspace），留空就等于拿客户的表单当草稿纸。解析顺序由命令层定：
@@ -407,7 +408,8 @@ func (o Options) spawnArgs(ws string) []string {
 //
 // TZSCLI_WS 与 --workspace 一起给是冗余但故意的：它保证任何一条**再派生**的路径
 // （引擎内部 spawn、将来的子工具）也落在同一个工作区上。
-// TZSCLI_INSTALL 只在给了 InstallDir 时才覆盖，免得用空串把引擎的内置缺省打掉。
+// TZSCLI_INSTALL 只在给了 InstallDir 时才覆盖：留空表示「用引擎旁边随包分发的那份」，
+// 所以要原样不传，而不是传一个空串去把它顶掉。
 func (o Options) extraEnv(ws string) []string {
 	env := []string{"TZSCLI_WS=" + ws}
 	if d := strings.TrimSpace(o.InstallDir); d != "" {

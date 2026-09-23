@@ -78,13 +78,12 @@ func tzsEngineOptions(wsFlag string) (tzs.Options, error) {
 		workDir = filepath.Dir(path) // 状态文件与守护进程日志落在 config.json 旁边
 	}
 
-	// 设计器目录与工作区同一条规矩：环境变量优先，配置兜底，都空则交给引擎自己的缺省。
-	// 这里读一次环境变量的意义是让 doctor / 报错文案说真话 —— 引擎本来就会继承这个变量，
-	// 而 `Options.InstallDir` 非空时会经 spawn 的环境覆盖它（见 tzs.Options.extraEnv）。
+	// 设计器程序集**不再由配置指定**：发行包里 `tzs\designer\` 自带一份，引擎默认就用它
+	// （见 engine/src/Designer/Bootstrap.cs 的 Install）。这样同一份 tt 在任何机器上跑的是
+	// 同一版设计器，而不是「用户那台机器上恰好装着的那版」。
+	// TZSCLI_INSTALL 保留为开发/构建期的逃生口：engine/out/ 不是包，本地引擎与探测程序
+	// 要靠它指向机器上装的那份。它只是被转发下去，不再有配置兜底。
 	installDir := os.Getenv("TZSCLI_INSTALL")
-	if installDir == "" {
-		installDir = cfg.InstallDir
-	}
 
 	return tzs.Options{
 		Exe:        exe,

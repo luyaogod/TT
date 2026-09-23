@@ -21,8 +21,8 @@ tt version
 
 TT 最初是 TDebug、TDev、TDictCli 三个工具合并的结果 —— 合并的动机、发现的分叉与取舍
 （包括旧版那条**命令注入面**为什么没有保留）记在 [docs/MIGRATION.md](docs/MIGRATION.md)。
-合并之后又长出了第四块：**`.tzs` 表单引擎**，它不在 Go 的构建链里，也**不随包分发它依赖的东西**，
-所以单独用一节说清楚。
+合并之后又长出了第四块：**`.tzs` 表单引擎**，它不在 Go 的构建链里，而且**运行期要的设计器程序集
+由发行包自带**（不靠用户机器上恰好装着的那份），所以单独用一节说清楚。
 
 有一条边界贯穿全篇，先说在前面：**tt 不实现、也不分发 T100 设计器的任何私有格式**。
 `.tzc` 靠设计器的公开发行物反推（[docs/tzc-model.md](docs/tzc-model.md)）；
@@ -35,8 +35,9 @@ TT 最初是 TDebug、TDev、TDictCli 三个工具合并的结果 —— 合并�
 把 `tt-portable.zip` 解压到任意目录，双击或命令行运行 `tt.exe` 即可。
 包内有 `.portable` 标记，配置就近留在包内（`config.json`），不写用户目录。
 
-包内还带 `tzs\`（四个文件，见下）与四套 AI 技能。**设计器不在包内** —— 它是第三方商业软件，
-要自己装，装完在配置里指一下（`tzs.installDir`）。
+包内还带 `tzs\`（引擎四个文件 + `designer\` 里的设计器程序集，见下）与五套 AI 技能。
+引擎跑起来**不需要你装设计器、也不需要配它的路径** —— 包里自带的那份就是它用的那份，
+所以同一份包在任何机器上跑的是同一版设计器。
 
 ### MSI 安装包（用户级，免管理员）
 
@@ -110,9 +111,8 @@ tt install skills --to .claude/skills   # 装到 Claude Code 直接读的位置
   "sync":   { "target": "" },
   "tdev":   { "workspaceSuffix": "-ws", "defaultOut": "" },
 
-  "tzs": {                          // .tzs 引擎的运行时依赖（见下）
-    "installDir": "D:\\APPS\\T100设计器_1.0.0.251_免安装",
-    "workspace":  "D:\\t100_wrok_dir\\某客户\\prd"
+  "tzs": {                          // .tzs 引擎（设计器程序集随包自带，不在这里配）
+    "workspace": "D:\\t100_wrok_dir\\某客户\\prd"
   }
 }
 ```
@@ -125,10 +125,12 @@ tt install skills --to .claude/skills   # 装到 Claude Code 直接读的位置
 `tdev` 与 `tzs` 的口径**故意不同**，值得分清：
 
 - `tdev` 放的是**跨调用稳定的默认值**，命令行 flag 永远优先；
-- `tzs` 放的是**不能由 flag 取代的机器级依赖**。设计器是第三方软件、不随包分发，装在哪
-  只有用户知道；`workspace` 更没有合理缺省 —— 引擎内置的默认工作区是一个**真实客户目录**，
-  落到它上面会去 Boot 别人的包，然后报一个和你意图完全无关的错。**三层都空时拒绝启动**
-  （`--workspace` → `TZSCLI_WS` → `tzs.workspace`），不回落。
+- `tzs` 只剩**工作区**这一个不能由 flag 取代的机器级依赖，而且它没有合理缺省 ——
+  引擎内置的默认工作区是一个**真实客户目录**，落到它上面会去 Boot 别人的包，然后报一个
+  和你意图完全无关的错。**三层都空时拒绝启动**（`--workspace` → `TZSCLI_WS` → `tzs.workspace`），
+  不回落。
+- **设计器不在配置里**：它的程序集随包分发，引擎默认从 `<引擎目录>\designer\` 加载。
+  所以同一份 tt 在任何机器上跑的是同一版设计器 —— 这是分发本身保证的，不需要谁去对齐配置。
 
 完整示例见 `config.example.json`。
 
@@ -267,9 +269,10 @@ tt dict bdldoc dir
 ## `.tzs` 表单引擎
 
 `tt dev tzs call` 背后是 `engine/` 里一个 **C# 引擎**（`tzs-server.exe`）。它**不实现**
-`.tzs` 格式 —— 它 `Assembly.LoadFrom` **已安装的设计器自己的程序集**，布局属性走设计器自己的
+`.tzs` 格式 —— 它 `Assembly.LoadFrom` **设计器自己的程序集**，布局属性走设计器自己的
 `XmlElement` 索引器，`.tsd` 由设计器从模型重算，验收用设计器自己的校验器加 RoundTrip 不动点。
-我们这部分总共 200 KB（`TzsCli.dll` 26 KB + `TzsCli.Designer.dll` 180 KB），设计器那部分是 10.5 MB。
+我们这部分总共 200 KB（`TzsCli.dll` 26 KB + `TzsCli.Designer.dll` 180 KB）。
+**设计器那 10.5 MB 由发行包自带**，在 `tzs\designer\` 下。
 
 `tt` 通过命名管道上的 JSON-RPC 驱动它（`internal/dev/tzs/`，`tt` 自己实现的 Go 客户端）。
 
@@ -278,9 +281,11 @@ tt dict bdldoc dir
 1. **它不属于 Go 的构建链。** 用 `csc.exe`（Framework64 v4.0.30319，**C# 5**——没有模式匹配、
    没有 `nameof`、没有字符串插值）编译，引用 GAC 里的 WPF 程序集。`build_portable.bat`
    只**采集**产物，不构建它。**只在引擎真的改了时才重编。**
-2. **设计器目录是构建期和运行期都要的依赖，而它不在我们手里。** 构建期 `-r:` 它的
+2. **设计器程序集：构建期向机器要一份，运行期自带一份。** 构建期 `-r:` 它的
    `Newtonsoft.Json.dll`；运行期 `LoadFrom` 它的 `SpecDesignerCommon.dll` / `FormEditor.dll` /
-   `UndoRedoFramework.dll`，以及分散在多个程序集里的语言字典。
+   `UndoRedoFramework.dll`，以及分散在多个程序集里的语言字典 —— **这些由包自带**。
+   引擎的解析规则只有两条：`TZSCLI_INSTALL`（开发/构建期的逃生口），否则 `<自己的目录>\designer`。
+   **没有"回落到用户装的那份"这一条**，所以少带一个文件是打包坏了，不是"去别处找找"。
 3. **重编会让所有在跑的守护进程变成孤儿。** 守护进程的管道名 = `hash(工作区)` +
    **本程序集的 MVID 前 8 位**，MVID 每次重编都变。客户端因此**永远够不到**跑着陈旧字节的
    守护进程（刻意的，否则你会和旧行为对话而看不出来）；代价是每次重编后，上一个构建起的
@@ -289,22 +294,33 @@ tt dict bdldoc dir
    把引擎构建挂在 `tt` 的每次构建上，等于每次发版都制造一批停不掉的进程 ——
    一个和 `tt` 无关的构建步骤造成用户可见的后果。
 
-### 进分包的是哪四个文件
+### 进分包的是什么
 
 ```
 tzs-server.exe        服务端（命名管道 / --stdio 两种模式）
 tzs-cli.exe           客户端（独立可用；tt 自己实现了一份 Go 客户端）
 TzsCli.dll            纯文本/zip 层，不反射
 TzsCli.Designer.dll   反射管线 + 49 个函数
+designer\             设计器的 28 个 .dll（第三方商业软件，见下）
 ```
 
 `engine/out/` 里还有十几个探测程序（`Probe` / `Edit` / `AddField` / `RoundTrip` / `Test*` / `E2E`），
-**不要 xcopy 整个目录** —— `build_portable.bat` 显式采那四个到 `<stage>\tzs\`。
+**不要 xcopy 整个目录** —— `build_portable.bat` 显式按名字采那四个到 `<stage>\tzs\`。
+
+`designer\` 只采 `*.dll`：那个目录里还有 `T100Designer.exe`（GUI，不在引擎的依赖闭包里）、
+`AutoUpdater.exe` 与 AppLimit 的 Sparkle 更新组件（会连厂商的更新通道，**不发它**）、
+`AutoUpdater.exe.config` 和一个快捷方式。
 
 ```bash
 cd engine && ./build.sh                      # → engine/out/，15 个单元
-TZSCLI_INSTALL='D:\APPS\某版本设计器' ./build.sh  # 跨机器时先指设计器目录
+TZSCLI_INSTALL='D:\APPS\某版本设计器' ./build.sh  # 换机器时先指设计器目录（只是编译期引用）
+
+TZSCLI_INSTALL='D:\APPS\某版本设计器' build_portable.bat   # 打包时采进 tzs\designer\
 ```
+
+**打包脚本的 `TZSCLI_INSTALL` 没有缺省**，这是故意的：采进去的那份就是这份发行版钉住的版本，
+所以应当由人指明，而不是从某个写死的路径猜。设计器本身**不入库**（`.gitignore` 的 `*.dll`），
+它只是打包输入。
 
 其余（`SPEC.md` 格式契约、`HANDOFF.md` 交接、`TASKS.md` 任务板）见 [engine/BUILD.md](engine/BUILD.md)。
 
@@ -349,7 +365,7 @@ TT/
 | 前端 `web/dist` | **Node.js + npm** | 只用 npm workspaces（`web/` 是根，`web/app` 是唯一 workspace），没有 pnpm/yarn 的锁文件 |
 | 打包 | **Python 3**（可选） | `tools/zip.py` 打 zip、`tools/wix_removefolders.py` 补卸载目录。**缺了不会失败** —— 打 zip 会退回 PowerShell，卸载目录那段才需要它 |
 | `.tzs` 引擎 | **.NET Framework 4.0 的 `csc.exe`** + 一个 POSIX shell | 只在改动 `engine/` 时才要。编译器是 Windows 自带的 `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe`（**C# 5**），`build.sh` 是 bash 且用 `cygpath`，所以要 Git Bash 这类环境 |
-| `.tzs` 引擎 | **已安装的 T100 设计器** | 编译期从它取 `Newtonsoft.Json.dll`，运行期 `LoadFrom` 它的程序集。第三方商业软件、**不随包分发**，装在哪由 `TZSCLI_INSTALL` 或 `config.json` 的 `tzs.installDir` 指定 |
+| `.tzs` 引擎 | **已安装的 T100 设计器**（只在你重打发行包时要） | 打包时采它的 `*.dll` 进 `tzs\designer\`，那份就是这一版发行钉住的版本。编译期只从它取 `Newtonsoft.Json.dll`。引擎跑起来**不需要**机器上装着设计器 —— 它用包里自带的那份 |
 | MSI | **WiX v3 工具集** | 只在打 MSI 时要，见下 |
 
 Go 的**直接**依赖只有 8 个：`coder/websocket`（调试 WebSocket）、`jackc/pgx`（Kingbase/PostgreSQL）、
@@ -385,9 +401,14 @@ TZSCLI_INSTALL='D:\APPS\某版本设计器' ./build.sh  # 换一台机器时先�
 OUT=<dir> ./build.sh                         # 换落点
 ```
 
-`build_portable.bat` / `build_msi.bat` **只采集产物、不构建它**，而且只按名字采那四个文件 ——
+`build_portable.bat` / `build_msi.bat` **只采集产物、不构建它**。引擎那四个文件按名字采，
 `engine/out/` 里还有十几个探测程序（`Probe` / `Edit` / `AddField` / `RoundTrip` / `Test*` / `E2E`），
 xcopy 整个目录会把它们一起打进包里。缺任何一个都会让打包脚本报错退出。
+
+同一份 `TZSCLI_INSTALL` 在打包时还有第二个作用：`build_portable.bat` 用它找到设计器目录，
+把其中的 `*.dll` 采进 `<stage>\tzs\designer\`。**它没有缺省** —— 采的是哪一版，这一版发行就钉在
+哪一版，所以由人指明比从写死的路径猜更正确（也因为 `.bat` 必须保持纯 ASCII，而常见的设计器路径
+是中文的）。
 
 ### 便携包
 

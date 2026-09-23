@@ -42,7 +42,7 @@ using TzsCli.Designer;
 /// </summary>
 class TzsCliMain
 {
-    // TZSCLI_INSTALL overrides the built-in path -- see Designer.Install and tzs-server.cs.
+    // TZSCLI_INSTALL overrides the bundled path -- see Designer.Install and tzs-server.cs.
     static readonly string INSTALL = InstallFromEnv();
 
     static string InstallFromEnv() {

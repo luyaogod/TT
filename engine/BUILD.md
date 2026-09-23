@@ -12,18 +12,27 @@
 没有 `nameof`、没有字符串插值）编译，引用 GAC 里的 WPF 程序集。把它塞进 `.bat` 等于用 cmd.exe
 重写一份已经踩平过 CS0433 的脚本，得到两份会漂移的实现。`build_portable.bat` 只**采集**产物。
 
-**2. 设计器目录是构建期和运行期都要的依赖，而它不在我们手里。**
+**2. 设计器程序集：构建期向机器要一份，运行期自带一份。**
 
 ```
-INSTALL = TZSCLI_INSTALL 或 D:\APPS\T100设计器_1.0.0.251_免安装
+构建期  INSTALL = TZSCLI_INSTALL 或 D:\APPS\T100设计器_1.0.0.251_免安装
+运行期  TZSCLI_INSTALL（开发覆盖）或 <引擎自己的目录>\designer（随包分发的那份）
 ```
 
-- **构建期**：`-r:$INSTALL\Newtonsoft.Json.dll`；
+- **构建期**：`-r:$INSTALL\Newtonsoft.Json.dll` —— 一个编译期引用，构建机上得有；
 - **运行期**：`Assembly.LoadFrom` 设计器的 `SpecDesignerCommon.dll` / `FormEditor.dll` /
-  `UndoRedoFramework.dll`，以及语言字典（见下）。
+  `UndoRedoFramework.dll`，以及语言字典（见下）。这些**由发行包自带**。
 
-设计器是第三方商业软件，**不分发**。所以这个目录由用户配置（`config.json` 的 `tzs.installDir`），
-`tt` 在 spawn 引擎时以 `TZSCLI_INSTALL` 注入。
+**为什么运行期要自带。** 同一份 tt 装在两台机器上，如果设计器目录来自各自的配置，两边跑的
+就是两版设计器 —— 同一个 `.tzs` 在两台机器上行为不同，而报错里看不出来。把版本钉进包里之后，
+"运行环境一致"是**分发这件事本身**保证的，不需要谁去对齐配置。
+
+代价也要说清楚：**设计器的版本从此由打包时采进去的那份决定**。换版本 = 重打包，
+`build_portable.bat` 的 `TZSDESIGNER`（或 `TZSCLI_INSTALL`）指到新目录，脚本只采 `*.dll`。
+
+所以 `config.json` 里**没有** `tzs.installDir` 这个键。`TZSCLI_INSTALL` 保留为开发/构建期的
+逃生口 —— `engine/out/` 不是包，本地跑的引擎和 `test/` 下的探测程序靠它指向机器上装的那份。
+设计器本身仍然不入库（`.gitignore` 的 `*.dll`），它只是**打包输入**。
 
 **3. 重编会让所有在跑的守护进程变成孤儿。** 这是最硬的一条。
 
