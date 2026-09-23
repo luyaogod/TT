@@ -341,36 +341,90 @@ TT/
 
 `★` = 为合并或为 `.tzs` 而真正重组的部分。
 
+## 依赖
+
+| 要建什么 | 需要什么 | 说明 |
+|---|---|---|
+| 后端 `tt.exe` | **Go 1.26.5+** | 版本下限就是 `go.mod` 里那条 `go` 指令。**没有 `vendor/`**，首次构建要能取到模块（`go mod download`；`build_portable.bat` 里设了 `GOPROXY=https://goproxy.cn,direct`） |
+| 前端 `web/dist` | **Node.js + npm** | 只用 npm workspaces（`web/` 是根，`web/app` 是唯一 workspace），没有 pnpm/yarn 的锁文件 |
+| 打包 | **Python 3**（可选） | `tools/zip.py` 打 zip、`tools/wix_removefolders.py` 补卸载目录。**缺了不会失败** —— 打 zip 会退回 PowerShell，卸载目录那段才需要它 |
+| `.tzs` 引擎 | **.NET Framework 4.0 的 `csc.exe`** + 一个 POSIX shell | 只在改动 `engine/` 时才要。编译器是 Windows 自带的 `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe`（**C# 5**），`build.sh` 是 bash 且用 `cygpath`，所以要 Git Bash 这类环境 |
+| `.tzs` 引擎 | **已安装的 T100 设计器** | 编译期从它取 `Newtonsoft.Json.dll`，运行期 `LoadFrom` 它的程序集。第三方商业软件、**不随包分发**，装在哪由 `TZSCLI_INSTALL` 或 `config.json` 的 `tzs.installDir` 指定 |
+| MSI | **WiX v3 工具集** | 只在打 MSI 时要，见下 |
+
+Go 的**直接**依赖只有 8 个：`coder/websocket`（调试 WebSocket）、`jackc/pgx`（Kingbase/PostgreSQL）、
+`sijms/go-ora`（Oracle）、`pkg/sftp`+`x/crypto`（SSH）、`spf13/cobra`（命令树）、`x/sys`（Windows 进程/管道）、
+`modernc.org/sqlite`（本地字典镜像，纯 Go 无 cgo）。`go.mod` 里其余都是它们的间接依赖。
+
+前端依赖见 `web/app/package.json`（React 18 + Vite 6 + Tailwind 4 + Radix + Monaco + zustand）。
+
 ## 构建
 
+### 后端
+
+**前端必须先构建**：`main.go` 用 `//go:embed all:web/dist` 把前端产物嵌进二进制，
+`web/dist` 不存在时 `go build` 直接失败。
+
 ```bash
-# 前端（必须先构建：main.go 的 //go:embed all:web/dist 依赖产物）
-cd web && npm install && npm run build
-
-# 后端
-cd .. && go build -o tt.exe .
-
-# .tzs 引擎（只在引擎改了时跑；需要设计器目录）
-cd engine && TZSCLI_INSTALL='D:\APPS\…' ./build.sh
-
-# 便携包（采集 tt.exe + skills + README + 配置样例 + tzs\ 四个文件）
-build_portable.bat        # → dist/tt-portable.zip
-
-# 用户级 MSI（需要 WiX v3 的 candle/light/heat，见下）
-build_msi.bat             # → dist/TT-<版本>-x64.msi
+cd web && npm install && npm run build   # → web/dist（顺带跑 tsc --noEmit 做类型检查）
+cd .. && go build -o tt.exe .            # → tt.exe
 ```
 
-`build_msi.bat` 依赖 WiX v3 工具集（不需要装 .NET SDK，解压即用）：把
-`candle.exe` / `light.exe` / `heat.exe` 放到 `D:\tt-build-tools\wix3`，
-或用环境变量 `WIX_BIN` 指向它们所在的目录。脚本会先跑一遍 `build_portable.bat`
-复用同一份 `tt.exe`，再采集文件、补上卸载要删的目录（`tools/wix_removefolders.py`），
-最后编译链接成 MSI（`tzs\` 由 `heat.exe` 自动采集，不用改 `tt.wxs`）。
+`build_portable.bat` 会把版本号注进去（`-ldflags "-X tt/internal/cli.Version=…"`），
+直接 `go build` 出来的是 `devel`，`tt version` 看得出来差别。
 
-开发模式：
+### `.tzs` 引擎（`engine/`）
+
+**只在引擎真的改了时才重编。** 它的产物不进 Go 的构建链，而且重编会换掉引擎程序集的 MVID，
+让所有在跑的守护进程变成停不掉的孤儿（`engine/BUILD.md` 解释了这条约束）。
 
 ```bash
-tt serve                  # 后端（默认 127.0.0.1:28670）
-cd web && npm run dev:debug   # 工作台与设置页，热更新，代理到后端
+cd engine && ./build.sh                      # → engine/out/，15 个单元
+TZSCLI_INSTALL='D:\APPS\某版本设计器' ./build.sh  # 换一台机器时先指设计器目录
+./build.sh TzsCli.Designer                   # 只编一个
+OUT=<dir> ./build.sh                         # 换落点
+```
+
+`build_portable.bat` / `build_msi.bat` **只采集产物、不构建它**，而且只按名字采那四个文件 ——
+`engine/out/` 里还有十几个探测程序（`Probe` / `Edit` / `AddField` / `RoundTrip` / `Test*` / `E2E`），
+xcopy 整个目录会把它们一起打进包里。缺任何一个都会让打包脚本报错退出。
+
+### 便携包
+
+```bash
+build_portable.bat        # → dist/tt-portable/ 与 dist/tt-portable.zip
+```
+
+它会依次跑：前端构建 → `go build`（带版本号）→ 暂存 `tt.exe` + `config.empty.json`（作为包内的
+`config.json`）+ `config.example.json` + `README.md` + `skills/` → 采引擎那四个文件到 `tzs\` →
+打 zip。注意它**刻意不打包本机的 `config.json`**（含真实口令），包里放的是空骨架。
+
+### MSI
+
+```bash
+build_msi.bat             # → dist/TT-0.1.0-x64.msi
+```
+
+依赖 WiX v3 工具集（**不需要装 .NET SDK**，解压即用）：把 `candle.exe` / `light.exe` / `heat.exe`
+放到 `D:\tt-build-tools\wix3`，或用环境变量 `WIX_BIN` 指向它们所在的目录。脚本会先跑一遍
+`build_portable.bat` 复用同一份载荷，再剥掉 `.portable` 与 `config.json`（装出来的版本配置应落在
+`%APPDATA%\T100\tt\`，不是安装目录），用 `heat.exe` 采集文件（`tzs\` 自动跟着走，不用改 `tt.wxs`），
+最后编译链接成 MSI。
+
+### 自检
+
+```bash
+go test ./...                        # Go 全量；默认跳过 .tzs 语料回归（那个要 17 分钟）
+cd web && npm run check:app          # 前端三项：fgltokens / fgloutline / store
+tt dev tzc selftest                  # .tzc 的 31 项内置对抗用例，不需要真实语料
+TTZS_DEEP=1 go test ./internal/dev/tzs/ -run TestCorpus -timeout 30m   # .tzs 语料回归
+```
+
+### 开发模式
+
+```bash
+tt serve                     # 后端（默认 127.0.0.1:28670）
+cd web && npm run dev:app    # 前端热更新，代理到后端
 ```
 
 端口被占用时后端会自动顺延，用 `TT_PROXY=http://127.0.0.1:<实际端口>` 告诉前端。
