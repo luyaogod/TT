@@ -111,7 +111,7 @@ tt install skills --to .claude/skills   # 装到 Claude Code 直接读的位置
   "sync":   { "target": "" },
   "tdev":   { "workspaceSuffix": "-ws", "defaultOut": "" },
 
-  "tzs": {                          // .tzs 引擎（设计器程序集随包自带，不在这里配）
+  "tzs": {                          // .tzs 引擎（设计器程序集随仓库/包自带，不在这里配）
     "workspace": "D:\\t100_wrok_dir\\某客户\\prd"
   }
 }
@@ -129,7 +129,8 @@ tt install skills --to .claude/skills   # 装到 Claude Code 直接读的位置
   引擎内置的默认工作区是一个**真实客户目录**，落到它上面会去 Boot 别人的包，然后报一个
   和你意图完全无关的错。**三层都空时拒绝启动**（`--workspace` → `TZSCLI_WS` → `tzs.workspace`），
   不回落。
-- **设计器不在配置里**：它的程序集随包分发，引擎默认从 `<引擎目录>\designer\` 加载。
+- **设计器不在配置里**：它的程序集随仓库与发行包自带（`engine/designer/` / `tzs\designer\`），
+  引擎默认从 `<引擎目录>\designer\` 加载。
   所以同一份 tt 在任何机器上跑的是同一版设计器 —— 这是分发本身保证的，不需要谁去对齐配置。
 
 完整示例见 `config.example.json`。
@@ -272,7 +273,7 @@ tt dict bdldoc dir
 `.tzs` 格式 —— 它 `Assembly.LoadFrom` **设计器自己的程序集**，布局属性走设计器自己的
 `XmlElement` 索引器，`.tsd` 由设计器从模型重算，验收用设计器自己的校验器加 RoundTrip 不动点。
 我们这部分总共 200 KB（`TzsCli.dll` 26 KB + `TzsCli.Designer.dll` 180 KB）。
-**设计器那 10.5 MB 由发行包自带**，在 `tzs\designer\` 下。
+**设计器那 10.5 MB 随仓库一起走**：仓库里在 `engine/designer/`，发行包里在 `tzs\designer\`。
 
 `tt` 通过命名管道上的 JSON-RPC 驱动它（`internal/dev/tzs/`，`tt` 自己实现的 Go 客户端）。
 
@@ -281,11 +282,11 @@ tt dict bdldoc dir
 1. **它不属于 Go 的构建链。** 用 `csc.exe`（Framework64 v4.0.30319，**C# 5**——没有模式匹配、
    没有 `nameof`、没有字符串插值）编译，引用 GAC 里的 WPF 程序集。`build_portable.bat`
    只**采集**产物，不构建它。**只在引擎真的改了时才重编。**
-2. **设计器程序集：构建期向机器要一份，运行期自带一份。** 构建期 `-r:` 它的
-   `Newtonsoft.Json.dll`；运行期 `LoadFrom` 它的 `SpecDesignerCommon.dll` / `FormEditor.dll` /
-   `UndoRedoFramework.dll`，以及分散在多个程序集里的语言字典 —— **这些由包自带**。
-   引擎的解析规则只有两条：`TZSCLI_INSTALL`（开发/构建期的逃生口），否则 `<自己的目录>\designer`。
-   **没有"回落到用户装的那份"这一条**，所以少带一个文件是打包坏了，不是"去别处找找"。
+2. **设计器程序集已入库，运行期不需要外部的。** 引擎 `LoadFrom` 它的 `SpecDesignerCommon.dll` /
+   `FormEditor.dll` / `UndoRedoFramework.dll`，以及分散在多个程序集里的语言字典 —— 这些就是
+   `engine/designer/` 里那 28 个 dll。引擎的解析规则只有两条：`TZSCLI_INSTALL`（**覆盖**用，
+   开发或换版本时），否则 `<自己的目录>\designer`。**没有"回落到别处装的那份"这一条**，
+   所以少带一个文件是包/仓库不完整，不是"去别处找找"。
 3. **重编会让所有在跑的守护进程变成孤儿。** 守护进程的管道名 = `hash(工作区)` +
    **本程序集的 MVID 前 8 位**，MVID 每次重编都变。客户端因此**永远够不到**跑着陈旧字节的
    守护进程（刻意的，否则你会和旧行为对话而看不出来）；代价是每次重编后，上一个构建起的
@@ -307,20 +308,18 @@ designer\             设计器的 28 个 .dll（第三方商业软件，见下�
 `engine/out/` 里还有十几个探测程序（`Probe` / `Edit` / `AddField` / `RoundTrip` / `Test*` / `E2E`），
 **不要 xcopy 整个目录** —— `build_portable.bat` 显式按名字采那四个到 `<stage>\tzs\`。
 
-`designer\` 只采 `*.dll`：那个目录里还有 `T100Designer.exe`（GUI，不在引擎的依赖闭包里）、
-`AutoUpdater.exe` 与 AppLimit 的 Sparkle 更新组件（会连厂商的更新通道，**不发它**）、
-`AutoUpdater.exe.config` 和一个快捷方式。
+`designer\` **只采 `*.dll`**，那 28 个就是引擎要的全部 —— 仓库里 `engine/designer/` 存的也正是
+这一组。GUI 的 `T100Designer.exe`、会连厂商更新通道的 `AutoUpdater.exe` 与 Sparkle 组件、它的
+`.config` 和一个快捷方式都**不在内**。所以仓库、`engine/out/designer/`、发行包 `tzs\designer\`
+三处是同一份集合。
 
 ```bash
-cd engine && ./build.sh                      # → engine/out/，15 个单元
-TZSCLI_INSTALL='D:\APPS\某版本设计器' ./build.sh  # 换机器时先指设计器目录（只是编译期引用）
-
-TZSCLI_INSTALL='D:\APPS\某版本设计器' build_portable.bat   # 打包时采进 tzs\designer\
+cd engine && ./build.sh          # → engine/out/，并把 engine/designer/ 采到 out/designer/
+build_portable.bat               # 采 tt.exe + skills + 包内配置 + 引擎四个文件 + engine\designer\
 ```
 
-**打包脚本的 `TZSCLI_INSTALL` 没有缺省**，这是故意的：采进去的那份就是这份发行版钉住的版本，
-所以应当由人指明，而不是从某个写死的路径猜。设计器本身**不入库**（`.gitignore` 的 `*.dll`），
-它只是打包输入。
+想打一个装别版设计器的包（验证用）：`TZSDESIGNER=<目录> build_portable.bat`。
+平时换版本就是换 `engine/designer/` 下的文件并提交 —— 那次提交也就是"这一版钉在哪"的记录。
 
 其余（`SPEC.md` 格式契约、`HANDOFF.md` 交接、`TASKS.md` 任务板）见 [engine/BUILD.md](engine/BUILD.md)。
 
@@ -345,6 +344,7 @@ TT/
 │  ├─ dbconfig/ erpdb/      数据库连接模型与连接器（两处合并）
 │  ├─ safesql/ sshtun/ output/ pathinstall/ atomic/ winproc/
 ├─ engine/                  ★ .tzs 表单引擎（C#，单独构建，见 engine/BUILD.md）
+│  └─ designer/             设计器的 28 个程序集（第三方商业软件，随仓库分发）
 ├─ web/
 │  ├─ app/                  调试工作台 SPA（React + Radix + zustand + Monaco）
 │  │                        其中的设置视图是所有命令组的统一配置页
@@ -365,8 +365,10 @@ TT/
 | 前端 `web/dist` | **Node.js + npm** | 只用 npm workspaces（`web/` 是根，`web/app` 是唯一 workspace），没有 pnpm/yarn 的锁文件 |
 | 打包 | **Python 3**（可选） | `tools/zip.py` 打 zip、`tools/wix_removefolders.py` 补卸载目录。**缺了不会失败** —— 打 zip 会退回 PowerShell，卸载目录那段才需要它 |
 | `.tzs` 引擎 | **.NET Framework 4.0 的 `csc.exe`** + 一个 POSIX shell | 只在改动 `engine/` 时才要。编译器是 Windows 自带的 `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe`（**C# 5**），`build.sh` 是 bash 且用 `cygpath`，所以要 Git Bash 这类环境 |
-| `.tzs` 引擎 | **已安装的 T100 设计器** | 只在你要用 `.tzs`（或重打发行包）时要。编译期从它取 `Newtonsoft.Json.dll`；打包时采它的 `*.dll` 进 `tzs\designer\`，那份就是这一版发行钉住的版本。**装发行包的人不需要装设计器** —— 包里自带 |
 | MSI | **WiX v3 工具集** | 只在打 MSI 时要，见下 |
+
+上表**没有"T100 设计器"** —— 它的 28 个程序集已经入库（`engine/designer/`），跟着 clone 一起下来，
+不需要谁去装一份。发行包也带同样一份。要换设计器版本就换那几个文件并提交，见「构建」。
 
 Go 的**直接**依赖只有 8 个：`coder/websocket`（调试 WebSocket）、`jackc/pgx`（Kingbase/PostgreSQL）、
 `sijms/go-ora`（Oracle）、`pkg/sftp`+`x/crypto`（SSH）、`spf13/cobra`（命令树）、`x/sys`（Windows 进程/管道）、
@@ -376,22 +378,18 @@ Go 的**直接**依赖只有 8 个：`coder/websocket`（调试 WebSocket）、`
 
 ## 构建
 
-### 先看：克隆下来你能跑多少
+**克隆下来什么都能构建，包括 `.tzs`** —— 设计器的 28 个程序集随仓库一起下来（`engine/designer/`）：
 
-绝大部分功能只要有 Go 和 Node 就能构建、也能通过全部测试。**只有 `.tzs`（表单读写）额外要装
-一样东西**：
+| 功能 | 需要 |
+|---|---|
+| `tt debug` / `tt dict` / `tt dev tzc` / Web 界面 | Go + Node |
+| `go test ./...` | Go |
+| `tt dev tzs`（表单读写，含 `doctor`） | 上面这些 + `cd engine && ./build.sh` |
+| 打发行包（便携 zip / MSI） | 上面这些；MSI 另要 WiX |
 
-| 功能 | Go + Node 就够 | 还要 T100 设计器 |
-|---|---|---|
-| `tt debug` / `tt dict` / `tt dev tzc` | ✅ | |
-| Web 界面与统一设置页 | ✅ | |
-| `go test ./...` | ✅ | |
-| `tt dev tzs`（表单读写，含 `doctor`） | | ✅ |
-| 打发行包（便携 zip / MSI） | | ✅ |
-
-**T100 设计器是第三方商业软件，不在这个仓库里**，克隆也拿不到。这是固有的 —— 你没法驱动一个
-没装的商业软件。发行包**自带**设计器程序集（`tzs\designer\`），所以装发行包的人不需要另装设计器；
-从源码跑的人需要自己装一份，并告诉引擎它在哪（下一节）。
+T100 设计器是第三方商业软件（厂商标识 DSC）。它的程序集**已入库**在 `engine/designer/`，
+发行包里也带一份（`tzs\designer\`）。所以无论 clone 还是装包，**都不用另装设计器、也不用配它的
+路径** —— 引擎默认从自己旁边的 `designer\` 加载（`engine/src/Designer/Bootstrap.cs`）。
 
 ### 一条命令都不少
 
@@ -399,23 +397,18 @@ Go 的**直接**依赖只有 8 个：`coder/websocket`（调试 WebSocket）、`
 git clone <repo> && cd TT
 
 cd web && npm install && npm run build && cd ..   # 前端（可先跳过，见下）
-go build -o tt.exe .                              # 后端 —— 到这里 tt debug / dict / dev tzc 就能用了
+go build -o tt.exe .                              # 后端 —— 到这里 tt debug / dict / dev tzc 就能用
 go test ./...                                     # 21 个包；语料回归默认跳过
+
+cd engine && ./build.sh && cd ..                  # .tzs 引擎（C#）→ engine/out/
 ```
 
 **前端可以先跳过**：`web/dist/.gitkeep` 这个占位文件让 `//go:embed all:web/dist` 在没有产物时
 也成立，所以 `go build` **不会**失败 —— 但那样出来的 tt 没有界面，`tt serve` 会返回一张写着
 「界面未构建」和构建命令的说明页（不是静默空白）。
 
-要跑 `.tzs`，再加两步：
-
-```bash
-export TZSCLI_INSTALL='D:\APPS\T100设计器_1.0.0.251_免安装'   # 改成你装设计器的地方
-cd engine && ./build.sh && cd ..                              # → engine/out/，十几个程序
-```
-
-`build.sh` 没有缺省设计器路径（写死一个只在一台机器上是对的），没设 `TZSCLI_INSTALL` 会直接
-告诉你，不会让你去猜一条 `CS0006` 里冒出来的路径。
+`./build.sh` 会把仓库里的 `engine/designer/` 一并采到 `engine/out/designer/` —— 那正是引擎默认
+去找的地方，所以编完就能跑，**没有任何环境变量要设**。
 
 ### 后端
 
@@ -433,36 +426,36 @@ cd .. && go build -o tt.exe .            # → tt.exe
 让所有在跑的守护进程变成停不掉的孤儿（`engine/BUILD.md` 解释了这条约束）。
 
 ```bash
-export TZSCLI_INSTALL='D:\APPS\T100设计器_1.0.0.251_免安装'   # 必设：见上一节
-cd engine && ./build.sh                      # → engine/out/
+cd engine && ./build.sh                      # → engine/out/，并把 designer/ 采进去
 ./build.sh TzsCli.Designer                   # 只编一个
 OUT=<dir> ./build.sh                         # 换落点
+TZSCLI_INSTALL=<别的设计器目录> ./build.sh    # 用别的版本覆盖仓库里那份
 ```
+
+`build.sh` 干两件事：**编译期**从设计器那份里取 `Newtonsoft.Json.dll`，然后把
+`engine/designer/` 采到 `engine/out/designer/`。于是 `engine/out/tzs-server.exe` 不需要任何环境
+变量就能找到设计器 —— 与发行包 `<引擎目录>\designer\` 是同一个布局。
 
 `build_portable.bat` / `build_msi.bat` **只采集产物、不构建它**。引擎那四个文件按名字采，
 `engine/out/` 里还有十几个探测程序（`Probe` / `Edit` / `AddField` / `RoundTrip` / `Test*` / `E2E`），
 xcopy 整个目录会把它们一起打进包里。缺任何一个都会让打包脚本报错退出。
 
-同一份 `TZSCLI_INSTALL` 在打包时还有第二个作用：`build_portable.bat` 用它找到设计器目录，
-把其中的 `*.dll` 采进 `<stage>\tzs\designer\`。它同样**没有缺省** —— 采的是哪一版，这一版发行就钉在
-哪一版，所以由人指明比从写死的路径猜更正确（也因为 `.bat` 必须保持纯 ASCII，而常见的设计器路径
-是中文的）。
+打包时设计器的来源默认也是 `engine\designer\`，所以**打发行包同样不用配任何东西**；
+`TZSDESIGNER` 可以覆盖它，用来打一个装别版设计器的包。发行版因此钉在仓库里那一版 ——
+换设计器版本 = 换 `engine/designer/` 下的文件并提交，是一次可 review 的改动。
 
 ### 从源码跑 `.tzs`
 
-引擎编在 `engine/out/`，但 `tt` 默认去 `<tt.exe 目录>\tzs\` 找它 —— 那是**发行包**的布局，
-源码树里没有这一层。所以要么打一个包（见「便携包」），要么指一下：
+编完就能用，只差把 `tt` 指到那个引擎 —— `tt` 默认去 `<tt.exe 目录>\tzs\` 找它，那是**发行包**的
+布局，源码树里没有这一层：
 
 ```bash
 tt config set tzs.workspace  "D:\你的工作区"                  # 没有缺省，必须给
 tt config set tzs.serverExe  "<仓库路径>\engine\out\tzs-server.exe"
 ```
 
-`TZSCLI_INSTALL` 要一直设着（源码树里没有随包的设计器）。之后：
-
-```bash
-tt dev tzs doctor        # 应该全绿：引擎 exe / 设计器目录 / 工作区 / 管道名
-```
+然后 `tt dev tzs doctor` 应该全绿：引擎 exe / 设计器目录 / 工作区 / 管道名。
+**不需要设 `TZSCLI_INSTALL`** —— 设计器就在 `engine/out/designer/`，引擎自己找得到。
 
 `tzs.serverExe` 平时不该写（发行版靠 `<tt.exe 目录>\tzs\` 的固定布局），它存在的意义就是
 源码树与自定义部署这两种情况。

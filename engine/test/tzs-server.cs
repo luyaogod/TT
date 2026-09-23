@@ -46,7 +46,10 @@ class TzsServerMain
 
     static string InstallFromEnv() {
         string v = Environment.GetEnvironmentVariable("TZSCLI_INSTALL");
-        return string.IsNullOrEmpty(v) ? @"D:\APPS\T100设计器_1.0.0.251_免安装" : v;
+        if (!string.IsNullOrEmpty(v)) return v;
+        // 随仓库自带的那份：build.sh 把 engine\designer\ 采到 out\designer\，
+        // 与发行包 <引擎目录>\designer\ 是同一个布局。没有硬编码缺省 —— 见 engine/BUILD.md。
+        return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "designer");
     }
 
     /// <summary>The same default the other programs in this repo use (test/Edit.cs:49,

@@ -63,40 +63,29 @@ OUTW="$(cygpath -w "$OUT")"
 GACMS='C:\Windows\Microsoft.NET\assembly\GAC_MSIL'
 GAC64='C:\Windows\Microsoft.NET\assembly\GAC_64'
 
-# The designer's install directory -- for BUILD TIME only.
+# The designer's assemblies -- the copy that lives in THIS REPO, at engine/designer/.
 #
-# TzsCli.Designer.dll needs Newtonsoft.Json at compile time (SpecFn.cs parses the request
-# payload with JObject) and this is where it lives -- v9.0.0.0. That is a real third-party
-# library, not a designer assembly, so referencing it does not compromise TzsCli.dll's purity;
-# only the designer library gets this -r:.
+# TzsCli.Designer.dll needs Newtonsoft.Json at compile time (SpecFn.cs parses the request payload
+# with JObject), and the engine Assembly.LoadFrom()s the rest at run time. The whole set is
+# committed, so a clone carries it and nobody has to point anywhere. TZSCLI_INSTALL still
+# overrides -- handy for trying a different designer version.
 #
-# At RUN time nothing reads this. The engine resolves its designer from TZSCLI_INSTALL if that
-# is set, and otherwise from <its own directory>\designer -- the copy the package ships with it
-# (Bootstrap.cs; engine/BUILD.md explains why the version is pinned by the package). Here it is
-# purely the compile-time -r: above, and the probe programs under test/ also read it at run time
-# when they are run out of engine/out/ -- which is not a package and has no designer/.
-INSTALL="${TZSCLI_INSTALL:-}"
+# After a successful build this set is copied into $OUT/designer/, which is exactly where
+# Bootstrap.Install looks when TZSCLI_INSTALL is unset: <the exe's own directory>\designer. That
+# is the layout the release package ships, so engine/out/tzs-server.exe runs straight out of a
+# checkout with no environment variable at all.
+INSTALL="${TZSCLI_INSTALL:-$HERE\\designer}"
+INSTALL_POSIX="${TZSCLI_INSTALL:-$HERE_POSIX/designer}"
 
-# Fail before compiling, with a sentence that names the fix. Without this the csc for
-# TzsCli.Designer.dll reports `error CS0006: Metadata file '...\Newtonsoft.Json.dll' could not be
-# found` against a path the reader has never seen -- and the other twelve units still build, so
-# the run ends with "some builds failed" and a success-looking list above it.
-#
-# There is deliberately NO default: a designer lives wherever its owner installed it, so any
-# built-in answer would be right on exactly one machine.
-if [ -z "$INSTALL" ]; then
-  echo "TZSCLI_INSTALL is not set -- the designer build needs an installed T100 designer." >&2
-  echo "  export TZSCLI_INSTALL='D:\\APPS\\T100设计器_<版本>_免安装'" >&2
-  echo "  engine/BUILD.md explains why; a checkout cannot carry the designer itself." >&2
+if [ ! -d "$INSTALL_POSIX" ]; then
+  echo "No designer directory at $INSTALL_POSIX" >&2
+  echo "  engine/designer/ is committed; if it is missing, this checkout is incomplete." >&2
+  echo "  Set TZSCLI_INSTALL to use an installed designer instead." >&2
   exit 1
 fi
-if [ ! -d "$INSTALL" ]; then
-  echo "TZSCLI_INSTALL is not a directory: $INSTALL" >&2
-  exit 1
-fi
-if [ ! -f "$INSTALL/Newtonsoft.Json.dll" ]; then
-  echo "Not a designer directory: $INSTALL" >&2
-  echo "  expected Newtonsoft.Json.dll in it (the designer ships it; see engine/BUILD.md)." >&2
+if [ ! -f "$INSTALL_POSIX/Newtonsoft.Json.dll" ]; then
+  echo "Not a designer directory: $INSTALL_POSIX" >&2
+  echo "  expected Newtonsoft.Json.dll in it (see engine/BUILD.md)." >&2
   exit 1
 fi
 
@@ -275,9 +264,19 @@ done
 
 echo
 if [ "$fail" = 0 ]; then echo "all built -> $OUT"; else echo "some builds failed"; fi
+
+# Stage the designer next to the engine, so out/tzs-server.exe finds it by itself.
+#
+# Only when the build succeeded: a half-built out/ with a designer in it looks more finished than
+# it is. And only the *.dll set -- the repo copy has no exes, and source and destination are the
+# same list either way, so this stays a copy rather than a policy.
+if [ "$fail" = 0 ]; then
+  mkdir -p "$OUT/designer"
+  cp -f "$INSTALL_POSIX"/*.dll "$OUT/designer/" 2>/dev/null || true
+fi
+
 echo
-echo "runtime note: the shipped engine loads its designer from <its own dir>\\designer -- the copy"
-echo "  the package carries with it. Out of engine/out/ (which is not a package) the probe"
-echo "  programs fall back to TZSCLI_INSTALL instead:"
+echo "runtime note: the engine loads its designer from <its own dir>\\designer. build.sh stages the"
+echo "  repo's copy into \$OUT/designer, so engine/out/tzs-server.exe runs from a checkout with no"
+echo "  environment variable set. TZSCLI_INSTALL overrides it (build time and run time):"
 echo "  INSTALL = $INSTALL"
-echo "  AddField / E2E / MakeTestFile also load SpecDesigner.FormEditor.dll from there."

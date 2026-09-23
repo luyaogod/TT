@@ -12,27 +12,31 @@
 没有 `nameof`、没有字符串插值）编译，引用 GAC 里的 WPF 程序集。把它塞进 `.bat` 等于用 cmd.exe
 重写一份已经踩平过 CS0433 的脚本，得到两份会漂移的实现。`build_portable.bat` 只**采集**产物。
 
-**2. 设计器程序集：构建期向机器要一份，运行期自带一份。**
+**2. 设计器程序集：入库在 `engine/designer/`，跟着仓库走。**
 
 ```
-构建期  INSTALL = TZSCLI_INSTALL（**必设**，没有缺省）
-运行期  TZSCLI_INSTALL（开发覆盖，装发行包时不设）或 <引擎自己的目录>\designer（随包分发的那份）
+构建期  INSTALL = TZSCLI_INSTALL（可选覆盖）或 <本目录>\designer（仓库里那份）
+运行期  TZSCLI_INSTALL（可选覆盖）或 <引擎自己的目录>\designer
 ```
 
-- **构建期**：`-r:$INSTALL\Newtonsoft.Json.dll` —— 一个编译期引用，构建机上得有；
+- **构建期**：`-r:$INSTALL\Newtonsoft.Json.dll` —— 一个编译期引用；
 - **运行期**：`Assembly.LoadFrom` 设计器的 `SpecDesignerCommon.dll` / `FormEditor.dll` /
-  `UndoRedoFramework.dll`，以及语言字典（见下）。这些**由发行包自带**。
+  `UndoRedoFramework.dll`，以及语言字典（见下）。
 
-**为什么运行期要自带。** 同一份 tt 装在两台机器上，如果设计器目录来自各自的配置，两边跑的
-就是两版设计器 —— 同一个 `.tzs` 在两台机器上行为不同，而报错里看不出来。把版本钉进包里之后，
-"运行环境一致"是**分发这件事本身**保证的，不需要谁去对齐配置。
+两处指向的是**同一份东西**：`engine/designer/` 里那 28 个 dll。`build.sh` 编完之后把它们采到
+`$OUT/designer/`，于是 `engine/out/tzs-server.exe` 不需要任何环境变量就能跑起来 —— 那个布局
+（`<引擎目录>\designer\`）与发行包里的完全一致。
 
-代价也要说清楚：**设计器的版本从此由打包时采进去的那份决定**。换版本 = 重打包，
-`build_portable.bat` 的 `TZSDESIGNER`（或 `TZSCLI_INSTALL`）指到新目录，脚本只采 `*.dll`。
+**为什么入库而不是让用户自己装。** 同一份 tt 在两台机器上，如果设计器目录来自各自的配置，两边
+跑的就是两版设计器 —— 同一个 `.tzs` 行为不同，而报错里看不出来。设计器跟着仓库/包走之后，
+"运行环境一致"是**分发这件事本身**保证的，不需要谁去对齐配置；从 clone 到能跑 `.tzs` 也只有
+`go build` + `./build.sh` 两步。
 
-所以 `config.json` 里**没有** `tzs.installDir` 这个键。`TZSCLI_INSTALL` 保留为开发/构建期的
-逃生口 —— `engine/out/` 不是包，本地跑的引擎和 `test/` 下的探测程序靠它指向机器上装的那份。
-设计器本身仍然不入库（`.gitignore` 的 `*.dll`），它只是**打包输入**。
+代价是版本变更会进历史：换设计器 = 换 `engine/designer/` 下的文件并提交（约 11 MB，git 压缩后
+约 4.4 MB）。好处是那次提交就是"这一版钉在哪一版"的记录，可 review。
+
+`config.json` 里因此**没有** `tzs.installDir` 这个键。`TZSCLI_INSTALL` 保留为**覆盖**手段 ——
+拿另一版设计器来验证时用，平时不用设。
 
 **3. 重编会让所有在跑的守护进程变成孤儿。** 这是最硬的一条。
 
@@ -50,28 +54,30 @@ MVID 每次重编都变，所以：
 ## 构建
 
 ```bash
-export TZSCLI_INSTALL='D:\APPS\T100设计器_1.0.0.251_免安装'   # 必设：见上一节
-
-cd engine && ./build.sh          # → engine/out/
+cd engine && ./build.sh          # → engine/out/，并把 designer/ 采到 out/designer/
 OUT=<dir> ./build.sh             # 换落点
 ./build.sh TzsCli.Designer       # 只编一个
+TZSCLI_INSTALL=<目录> ./build.sh  # 用别的设计器换掉仓库里那份（可选）
 ```
 
-**`TZSCLI_INSTALL` 没有缺省**，没设或指错时脚本在编译前就停下来说清该设什么。之前的做法是
-写死一个路径：那在恰好一台机器上是对的，在别人机器上则变成一句
-`error CS0006: Metadata file '...\Newtonsoft.Json.dll' could not be found` —— 一条读者从没见过的
-路径，而且另外十二个单元照样编出来，最后只说一句 `some builds failed`。
+设计器默认取**本目录下的 `designer\`**（仓库里那份，跟着 clone 一起下来），所以不需要配任何东西。
+`TZSCLI_INSTALL` 只是覆盖手段。
 
-## 进 tt 分包的是哪四个文件
+编完之后脚本会把 `designer\*.dll` 采到 `$OUT/designer/` —— 那正是引擎默认去找的位置，所以
+`engine/out/tzs-server.exe` 开箱即跑，不需要环境变量。
+
+## 进 tt 分包的是什么
 
 ```
 tzs-server.exe        服务端（命名管道 / --stdio 两种模式）
 tzs-cli.exe           客户端（独立可用；tt 自己实现了一份 Go 客户端）
 TzsCli.dll            纯文本/zip 层，不反射
 TzsCli.Designer.dll   反射管线 + 49 个函数
+designer\             设计器的 28 个 .dll（就是本目录下 designer\ 那一份）
 ```
 
-`build_portable.bat` 把它们采到 `<stage>\tzs\`，MSI 由 `heat.exe` 自动采集（不用改 `tt.wxs`）。
+`build_portable.bat` 把它们采到 `<stage>\tzs\`（`designer\` 来自 `engine\designer\`，`TZSDESIGNER`
+可覆盖），MSI 由 `heat.exe` 自动采集（不用改 `tt.wxs`）。
 
 **`out/` 里还有十几个探测程序**（`Probe` / `Edit` / `AddField` / `RoundTrip` / `Test*` / `E2E`），
 **不要 xcopy 整个目录**——只显式采那四个。

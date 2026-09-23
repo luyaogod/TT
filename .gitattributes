@@ -1,0 +1,4 @@
+# 设计器的程序集是二进制：别做行尾转换，也别尝试 diff/merge。
+# git 通常能自己认出二进制（文件里有 NUL 字节），这条是把它写成明示 —— 免得哪天有人
+# 开着 core.autocrlf 让它们变成"每次 clone 都改动"。
+engine/designer/*.dll binary

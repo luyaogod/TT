@@ -90,25 +90,19 @@ rem   The engine loads the designer's assemblies from <its own directory>\design
 rem   engine\src\Designer\Bootstrap.cs), so the package carries them and a run depends on THIS
 rem   package's designer version instead of on whatever the machine happens to have installed.
 rem
-rem   Only *.dll is copied. The directory also holds T100Designer.exe (the GUI, not referenced
-rem   by the engine's assembly closure), AutoUpdater.exe + AppLimit's Sparkle updater (that one
-rem   phones a vendor update channel -- we do not ship it), AutoUpdater.exe.config and a shell
-rem   shortcut. Copying *.dll also keeps SpecDesigner*.dll and SpecDesigner.Controls.dll
-rem   together, which the language-dictionary merge requires.
+rem   Only *.dll is copied -- and the repo's copy at engine\designer\ already IS exactly that set,
+rem   with the exes left out: T100Designer.exe (the GUI, not referenced by the engine's assembly
+rem   closure), AutoUpdater.exe + AppLimit's Sparkle updater (that one phones a vendor update
+rem   channel -- we do not ship it), AutoUpdater.exe.config and a shell shortcut.
 rem
-rem   The source directory has NO default here, deliberately. This file must stay ASCII-only
-rem   and the usual designer path contains Chinese, which cmd.exe would split mid-character --
-rem   that is the same reason README.md exists. Requiring TZSCLI_INSTALL is also the honest
-rem   thing: the version staged becomes the version this release is pinned to, so name it.
-if "%TZSDESIGNER%"=="" set TZSDESIGNER=%TZSCLI_INSTALL%
-if "%TZSDESIGNER%"=="" (
-    echo TZSDESIGNER / TZSCLI_INSTALL not set: name the designer directory to bundle.
-    echo   set TZSCLI_INSTALL=D:\APPS\T100Designer_1.0.0.251
-    exit /b 1
-)
+rem   The default source is that committed copy, so packaging a release needs nothing configured
+rem   and the version shipped is the version in the tree. TZSDESIGNER overrides it, for bundling
+rem   a different designer version than the one committed.
+set TZSDESIGNER_DEFAULT=engine\designer
+if "%TZSDESIGNER%"=="" set TZSDESIGNER=%TZSDESIGNER_DEFAULT%
 if not exist "%TZSDESIGNER%\SpecDesignerCommon.dll" (
     echo NOT A DESIGNER DIRECTORY: %TZSDESIGNER%
-    echo   SpecDesignerCommon.dll is not in it.
+    echo   expected SpecDesignerCommon.dll in it. See engine\BUILD.md.
     exit /b 1
 )
 if not exist "%STAGE%\tzs\designer" mkdir "%STAGE%\tzs\designer"

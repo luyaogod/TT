@@ -122,8 +122,8 @@ func Doctor(ctx context.Context, o Options) *DoctorReport {
 		if bundled {
 			r.add(LevelFail, "设计器目录", fmt.Sprintf("%s 不是目录（%v）\n"+
 				"        装的是发行包 → 包不完整，重装或重新打包；\n"+
-				"        从源码跑 → 引擎不在包里，设 TZSCLI_INSTALL 指向已安装的设计器"+
-				"（见 README「从源码跑 .tzs」）", d, err))
+				"        从源码跑 → 先 cd engine && ./build.sh，"+
+				"它会把仓库里的 engine/designer/ 采到 out/designer/（见 README「从源码跑 .tzs」）", d, err))
 		} else {
 			r.add(LevelFail, "设计器目录",
 				fmt.Sprintf("TZSCLI_INSTALL 指向的 %s 不是目录（%v）；改指到正确的路径，或取消这个环境变量", d, err))

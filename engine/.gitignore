@@ -7,6 +7,12 @@
 *.pdb
 *.obj
 
+# 例外：designer/ 是**入库**的 —— 它是引擎运行期的依赖（Assembly.LoadFrom 它），
+# 随仓库一起分发，clone 下来就能跑 .tzs。上面那几条扩展名规则是拦 csc 产物的，
+# 别把它们一起拦掉。见 engine/BUILD.md。
+!designer/
+!designer/*.dll
+
 # 关卡与批脚本的临时包。它们本来就落在工作区（D:\t100_wrok_dir），这是防御。
 _ai*.tzs
 _zz*.tzs
