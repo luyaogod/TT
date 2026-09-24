@@ -20,15 +20,16 @@ tt env / config / serve / install / version
 |---|---|---|
 | [1. 总览](#1-总览) | 三块能力的边界、目录布局、术语 | 刚接手时 |
 | [2. 统一配置](#2-统一配置) | 单一 `config.json`、位置解析、旧配置迁移、唯一写入口 | 动配置层之前 |
-| [3. 统一 Web 服务](#3-统一-web-服务) | 单进程单端口、API 前缀为什么这么分、共用的配置端点 | 动 `internal/web` 或前端之前 |
-| [4. `tt debug` 调试器](#4-tt-debug-调试器) | 命令面、会话模型、环境变量、运行时产物 | 用或改调试器时 |
-| [5. `tt dev tzc` 代码包](#5-tt-dev-tzc-代码包) | 三条公理、zip 保真、围栏协议、三道闸门、结构事务、退出码、**偏差与不变量依据** | 改 `.tzc` 管线时**必读** |
-| [6. `tt dev tzs` 表单包](#6-tt-dev-tzs-表单包) | 引擎与设计器程序集、49 个函数、句柄与基线规则 | 用或改表单读写时 |
-| [7. `tt dict` 数据字典](#7-tt-dict-数据字典) | 各查询命令的返回与读法、数据源切换、类型码 | 查 ERP 元数据时 |
-| [8. 测试与验收](#8-测试与验收) | 每层的判据、语料回归、S7 真机清单 | 交付前 |
-| [9. 构建与发布](#9-构建与发布) | 只留"为什么"，步骤见 README | 发版时 |
-| [10. 设计史与取舍](#10-设计史与取舍) | 合并动机、发现的分叉、修掉的 bug、已废弃的东西 | 想知道"为什么是这样"时 |
-| [11. 许可与出处](#11-许可与出处) | 第三方材料与来源 | 引用/分发前 |
+| [3. 环境、账号与输出](#3-环境账号与输出规范) | **SSH 登录 → 环境变量 → 企业 → 账号** 的一条链、谁管什么、查询输出的契约 | **动 `host`/`dbconfig`/`erpdb`/`entdir`/`output` 之前必读** |
+| [4. 统一 Web 服务](#4-统一-web-服务) | 单进程单端口、API 前缀为什么这么分、共用的配置端点 | 动 `internal/web` 或前端之前 |
+| [5. `tt debug` 调试器](#5-tt-debug-调试器) | 命令面、会话模型、环境变量、运行时产物 | 用或改调试器时 |
+| [6. `tt dev tzc` 代码包](#6-tt-dev-tzc-代码包) | 三条公理、zip 保真、围栏协议、三道闸门、结构事务、退出码、**偏差与不变量依据** | 改 `.tzc` 管线时**必读** |
+| [7. `tt dev tzs` 表单包](#7-tt-dev-tzs-表单包) | 引擎与设计器程序集、49 个函数、句柄与基线规则 | 用或改表单读写时 |
+| [8. `tt dict` 数据字典](#8-tt-dict-数据字典) | 各查询命令的返回与读法、数据源切换、类型码 | 查 ERP 元数据时 |
+| [9. 测试与验收](#9-测试与验收) | 每层的判据、语料回归、S7 真机清单 | 交付前 |
+| [10. 构建与发布](#10-构建与发布) | 只留"为什么"，步骤见 README | 发版时 |
+| [11. 设计史与取舍](#11-设计史与取舍) | 合并动机、发现的分叉、修掉的 bug、已废弃的东西 | 想知道"为什么是这样"时 |
+| [12. 许可与出处](#12-许可与出处) | 第三方材料与来源 | 引用/分发前 |
 
 两条贯穿全篇的红线：
 
@@ -57,12 +58,12 @@ TT/
 ├─ main.go                  //go:embed all:web/dist → cli.Execute
 ├─ README.md                使用者与构建者的入口（安装/构建/配置字段）
 ├─ docs/WIKI.md             本文
-├─ docs/T100设计器-README.md 第三方材料的恢复副本（见 §11）
+├─ docs/T100设计器-README.md 第三方材料的恢复副本（见 §12）
 ├─ engine/                  ★ .tzs 引擎（C#，单独构建）
 │  ├─ designer/             设计器的 28 个程序集（随仓库分发）
 │  └─ src/ test/            我们的两万行 C#；探测程序只供开发，不进包
 ├─ installer/tt.wxs         MSI 定义
-├─ tools/zip.py             打包 zip（递归，见 §9）
+├─ tools/zip.py             打包 zip（递归，见 §10）
 │
 ├─ internal/
 │  ├─ config/               ★ 统一配置层
@@ -76,7 +77,7 @@ TT/
 │  │  ├─ common/            各命令组共享的 CLI 上下文（叶子包）
 │  │  └─ debug/ dev/ dict/  三个命令组
 │  ├─ debug/                调试内核：fgldb 驱动、会话、REST+WS API
-│  ├─ dev/                  设计器包管线 → 见 §5.1
+│  ├─ dev/                  设计器包管线 → 见 §6.1
 │  │  └─ tzs/               .tzs 引擎的 Go 客户端（manifest/wire/client/server/state/doctor）
 │  ├─ dict/                 数据源与查询：db（本地）/ live（远程）/ dbsync / server
 │  ├─ host/                 ★ 合并后唯一的 SSH/PTY/终端/探测/镜像层
@@ -99,7 +100,7 @@ TT/
 |---|---|
 | **包 / 工作区** | 包 = `.tzc`/`.tzs` 文件；工作区 = `tzc export` 出来的可编辑目录（`-ws` 后缀） |
 | **围栏** | 写进 `prog.full.4gl` 的单行注释标记，圈出可编辑区间；**不是内容，是坐标** |
-| **Region** | 一段被围栏圈出的字节区间，带权限与类型（见 §5.6） |
+| **Region** | 一段被围栏圈出的字节区间，带权限与类型（见 §6.6） |
 | **点 / 区段** | 设计器对 `.tap` 内容的两种组织单位；自订定义点 = `function.*`/`dialog.*`/`report.*` |
 | **entry / 条目** | zip 里的一个文件（`.4gl`/`.tap`/`.tgl`/`ver`/未知） |
 | **句柄（handle）** | `.tzs` 引擎里一个已加载包的会话标识，永不复用，进程内有效 |
@@ -155,7 +156,7 @@ TT/
 - **`tdev` 节**：原 TDev 完全没有配置系统，所有参数都是每次调用的 flag。新节只放跨调用稳定的
   默认值，**flag 仍然优先**；配置读取失败绝不让命令失败。
 - **`tzs` 节只有 `workspace`**（外加可选的 `serverExe` 覆盖）。设计器程序集不在配置里 ——
-  它由仓库与发行包自带（§6.1）。
+  它由仓库与发行包自带（§7.1）。
 - **账号无"主账号"**：客户端直连取 `accounts` 列表**首项**；未收录的账号按"账号=密码"惯例兜底。
 
 ### 2.2 配置位置
@@ -170,7 +171,7 @@ TT/
    `%APPDATA%\TDebug`
 
 `T100_HOME` 整体改写统一目录（如 `T100_HOME=D:\t100`）。数据目录 = 配置所在目录，所以
-`srccache/`、`debug-bps/`、`.tt-serve.json`、`ents/`、`logs/` 都跟着落在一起。
+`ents/`、`srccache/`、`execlog/`、`debug-bps/`、`spill/`（可再生的缓存，`tt cache` 管）与 `.tt-serve.json`（运行中服务的状态文件）都跟着落在一起。
 
 > **显式指定的路径就是答案。** `--config` / `TT_CONFIG` 指向一个还不存在的文件时，**不得**
 > 悄悄改用默认落点 —— 那会让便携版把配置写进用户目录，也会让测试脚本落在别处。
@@ -206,13 +207,195 @@ TT/
 收敛（原先散落在 6 个文件里的匿名 struct 反序列化）。
 
 **未知键一律保留**：持久化以 map 为准，`Root` 只是读侧的类型化视图。这是「打开设置页点一下
-保存，手工配的东西就没了」那类 bug 的根治办法 —— 不过 `viaSsh` 还需要服务端额外兜底，见 §3.3。
+保存，手工配的东西就没了」那类 bug 的根治办法 —— 不过 `viaSsh` 还需要服务端额外兜底，见 §4.3。
 
 ---
 
-## 3. 统一 Web 服务
+## 3. 环境、账号与输出（规范）
 
-### 3.1 一个进程、一个端口、一套页面
+> 这一章是**规范**：给后续开发定"什么从哪来、谁管什么、返回长什么样"。
+> 动 `internal/host` / `internal/dbconfig` / `internal/erpdb` / `internal/entdir` /
+> `internal/output` / `internal/cli/dict` 之前**必读**。
+> 别处只讲"怎么用"，这里讲"为什么只能这样"。
+
+### 3.1 一条链：登录 → 环境变量 → 企业 → 账号 → 库
+
+```
+配置里的环境(hosts.sshs[i])
+  │  name / host / port / user / password / zone / topent / db
+  ├─① SSH 登录           密码认证,20s 超时,不校验主机密钥(内网工具,见 3.5)
+  ├─② 加载 T100 环境变量   source /u3/pub/bin/chenv <zone>
+  │                      → TOP / ERP / COM / FGLDIR / FGLRESOURCEPATH / TOPENT
+  ├─③ 企业编号 TOPENT      ← 这条链上唯一的"业务身份"
+  ├─④ 查 gzou_t           企业编号 → 账号名(gzou_t.gzou003)
+  └─⑤ 库地址              **来自配置**(hosts.sshs[i].db),不从 TOPENT 推
+```
+
+**最要紧的一句：企业编号决定的是账号(schema)，不是库。** 库一对一挂在环境上
+(`hosts.sshs[i].db`)，企业编号只决定"用这个库里的哪个账号连"。所以 `internal/entdir`
+开头那句注释是对的：**"企业 → 数据库"这个说法不准**，解析出来的永远是**账号**。
+
+`topent` 与 `db.accounts` 是**两个独立字段**，不互相推导：
+
+| 字段 | 谁写 | 作用 |
+|---|---|---|
+| `hosts.sshs[i].topent` | 设置页「站点管理 → SSH」、`tt env topent` | 默认企业编号；登录后 T100 自己也会回显一个 `$TOPENT`，两者应当一致 |
+| `hosts.sshs[i].db` | 设置页「站点管理 → 数据库」、`tt dict db discover --save` | 库地址 + 账号清单 |
+
+### 3.2 登录之后拿到什么环境变量
+
+**T100 没有 `$TOPDIR`。** 登录区域(`zone`：31 开发 / 35 测试 / 36 正式 / 39 PATCH /
+t 出货)经站点 profile 的 case 表得到 `ZONE` 目录名，`topenv` 再派生全部路径。
+所以 T100 路径**不允许静态配置** —— 登录后动态获取是唯一权威来源
+(`internal/host/tenv.go` 的 `RuntimeEnv`)，取不到就报错，不猜、不回退到某个缺省。
+
+回读的六个变量(`TEnvProbe`)：
+
+| 变量 | 含义 | 谁用 |
+|---|---|---|
+| `TOP` | `/u1/<ZONE>` | 派生下面两个 |
+| `ERP` / `COM` | `$TOP/erp`、`$TOP/com` | 源码路径、模块根 |
+| `FGLDIR` | Genero 运行时目录 | 启动 `fglrun` |
+| `FGLRESOURCEPATH` | `$ERP:$COM` | 同上 |
+| **`TOPENT`** | **当前企业编号** | **喂给 3.3 的账号解析** |
+
+⚠️ **探针必须用定界符包起来**(`TDBG-BEGIN` / `TDBG-END`)。这不是洁癖：登录脚本
+**自己也会打印** `ZONE = t35prd`、`TOPENT   = 99` 这类行。PTY 只有纯文本，没有区间就
+分不清"我们请求的回显"和"服务器自己说的话"。改探针时这两行不能删。
+
+⚠️ **zone 是拼进远端 shell 的字符串，必须过白名单**(`reZone`：
+`^[A-Za-z0-9_-]{1,16}$`)。历史教训：从前它是裸插的，实测
+`tdebug start --zone "36; id"` 能在服务器上执行任意命令。
+
+### 3.3 环境变量与数据库账号的关系
+
+账号**不是配出来的，是解析出来的**：
+
+```
+TOPENT(企业编号) --查 gzou_t--> gzou003(账号名) --> 拿这个账号去连库
+```
+
+- 表：`gzou_t`（`gzou001` = 企业编号，`gzou003` = 账号名，`gzoustus='Y'` 才算启用）
+- 结果缓存到 `<配置目录>/ents/<环境段>.json`，新鲜期 10 分钟
+- **两条访问路径共用同一个快照文件**（`internal/entdir` 是这个共享件的唯一实现）
+- 密码：在 `db.accounts` 里按账号名查（`PasswordFor`）；未收录则回退 T100 惯例
+  **账号 = 密码**
+
+**两条路径必须给出同一个账号**（2026-09 定下的规矩，此前 `tt dict` 固定取
+`accounts[0]`、`tt debug sql` 才查 `gzou_t`，于是同一张字典表可能被两个 schema 读到而
+结果里没有任何信号）：
+
+| 路径 | 谁在连 | 传输 | 用哪次连接读 gzou_t |
+|---|---|---|---|
+| **服务器侧** | T100 服务器 | SSH exec + `sqlplus`/`ksql`，SQL 走 **stdin** | 借服务器上的 sqlplus |
+| **客户端直连** | 本机 | `erpdb`（pgx / go-ora），可选 SSH 隧道 | 先用 `accounts[0]` 连一次读 |
+
+客户端直连路径的降级 —— **每一步都记进输出信封，绝不静默**：
+
+| 情形 | 行为 | 信封里怎么体现 |
+|---|---|---|
+| `topent` 没配 | 用 `accounts[0]` | `accountSource: "accounts[0]"` |
+| `topent` 不是数字（如把据点码 `DSCNJ` 填在那儿） | 同上 + note | note 写明原因 |
+| 企业不在 `gzou_t` 启用清单里 | 同上 + note | 同上 |
+| 解析出的账号不在账号清单里 | **仍用它**，密码走惯例 + note | `accountSource: "ent(gzou_t)"` + note |
+
+**为什么允许降级而不是报错**：查一条字典不该因为企业目录查不动就整个失败
+（企业目录要现查，冷启动时多一次连接，见下）。但降级**必须可见** —— 这是
+`accountSource` 与 `notes` 存在的全部理由。
+
+代价也说清楚：**快照未命中时要多连一次**（先以 `accounts[0]` 读 `gzou_t`，再以解析出的
+账号重连）；命中快照则零额外开销。
+
+### 3.4 两条路径的边界（别把对方的能力搬过去）
+
+- **服务器侧**（`internal/debug`）只服务 `tt debug sql` / `db` / `ents`：它要在**那台
+  服务器**上跑 SQL。`db.viaSsh` 对它**无意义**（它本来就连着服务器），静默忽略是对的。
+- **客户端直连**（`internal/dict/live` + `internal/erpdb`）服务所有字典查询与
+  `tt dict db ping/sync`。`viaSsh` 只在**客户端到不了库**时才配：先起 SSH 端口转发，
+  驱动改连 `127.0.0.1:<本地端口>`。
+- **不要**为了"统一"把字典查询改走 SSH：那会把一次直连查询变成"登录 + 探测工具路径 +
+  拼连接串"三次往返，还把库的可见性绑死在服务器上。
+- 反过来，**不要**给服务器侧加 `viaSsh` 支持 —— 它是给客户端用的。
+
+### 3.5 谁管什么（责任表）
+
+| 东西 | 谁管 | 存在哪 | 怎么改 |
+|---|---|---|---|
+| **SSH 连接**（host/port/user/password/zone/TOPENT） | 环境（`hosts.sshs[]`） | `config.json` | 设置页「站点管理 → SSH」、`tt env list/use/topent` |
+| **数据库连接**（type/host/port/service\|database/accounts） | 环境（`hosts.sshs[].db`） | `config.json` | 设置页「站点管理 → 数据库」、`tt dict db discover --save` |
+| **用哪个账号** | **解析出来的，不是配的** | 快照 `ents/` | 由 `topent` + `gzou_t` 决定（3.3） |
+| **查询走哪个数据源** | `query.source` / `--env` | `config.json` | 设置页「数据字典 → 查询数据源」、`--env local\|<环境名>` |
+| **本地字典副本** | `sync.target` | `config.json` | 设置页「数据字典 → 数据同步」、`tt dict db sync` |
+| **返回条数上限** | `query.limit` | `config.json` | 设置页、`--limit`（单次覆盖） |
+| **缓存**（企业快照/源码镜像/执行日志/断点/查询落盘） | 可再生，**不是数据** | `<配置目录>/<子目录>` | `tt cache`、设置页「应用设置 → 缓存」 |
+| **配置写入** | 只有 `config.Edit` 一条路 | — | 新增写路径就是 bug（见 §2.4） |
+
+几条硬规矩：
+
+1. **命令组之间互不 import。** `internal/cli/debug` 与 `internal/cli/dict` 不许互相引用；
+   共享能力一律下沉到 `internal/host` / `config` / `dbconfig` / `entdir` / `output`。
+   （合并前同一件事各写一份的后果，见 §2.1 与 §11.2。）
+2. **SSH 主机密钥当前不校验**（`InsecureIgnoreHostKey`）—— 与"手工 `ssh` 登录内网机器"
+   同一个信任级别。要改这条等于改安全模型，**须单独讨论，不要顺手改**。
+3. **口令一律不进命令行**（客户端直连路径）。服务器侧金仓是唯一例外：
+   `KINGBASE_PASSWORD` 仍会出现在远端 argv 里（`ps` 可见），`host.KbCmd` 的注释如实写了。
+4. **往配置目录写文件时，要么登记进 `internal/config/cache.go` 的 `CacheSubdirs`，
+   要么在注释里说清它为什么不是缓存。** 那个目录里住着 `config.json` —— 唯一删了不能
+   自愈的东西。
+
+### 3.6 查询输出的契约
+
+所有 DB 查询命令（`tt dict` 的 r.t/r.v/scc/desc/r.q/msg/sysp/docp/prog、`tt debug sql`）
+共用一个出口 `internal/output`；`Meta` 是"我这次落在哪"的唯一表述：
+
+```jsonc
+{
+  "ok": true,
+  "source": "live", "env": "主机正式区", "sshHost": "…", "zone": "36",
+  "topent": "99", "ent": 99, "account": "dsdemo", "accountSource": "ent(gzou_t)",
+  "target": "…:1521/t35prd", "dialect": "oracle", "route": "client-direct",
+  "readonly": true,
+  "totalRows": 28005, "returned": 20, "truncated": true,
+  "localPath": "…/spill/query-….json", "elapsedSeconds": 1.2, "notes": [],
+  "data": [ … ]
+}
+```
+
+**默认 JSON**；`--format csv` 给 `# ` 头 + 裸 CSV；`--format table` 给人看。
+四条不许破：
+
+1. **空段不打印。** 本地源拿不到 SSH，就不出现 `环境  · SSH  · 区域 ` 这种空壳行。
+2. **企业编号与账号同在一行** —— 它们是一条链，拆开会被读成两件独立的事。
+3. **截断绝不静默，结果绝不丢**：先落盘完整结果，再截；**落盘失败就不截**
+   （宁可给一坨大的，也不给一份看不出少了东西的假结果）。四处同时说：信封字段、
+   `notes`、CSV 头三行、`# 落盘` 行。
+4. **stdout 只放数据**（JSON 模式）：诊断进 `notes` 或 stderr。CSV 的 `# ` 头留在 stdout
+   是刻意例外 —— 头必须随数据走，管道里没法把 stderr 和 stdout 重新配对。
+
+错误同样是信封：`{"ok":false,"code","error","hint","exitCode"}`，`code` 是**稳定契约**
+（`USAGE` / `ENUM_INVALID` / `ENV_UNKNOWN` / `TABLE_MISSING` / `CONNECT_FAILED` /
+`QUERY_FAILED`），退出码 `0 成功`（含"查无结果"）`/ 1 用法错 / 2 数据源错 / 3 缺表`。
+逐条规矩与依据见 §8.5。
+
+### 3.7 加新东西时的检查清单
+
+- [ ] **环境从哪来？** 一律 `config.Hosts.Resolve` / `Root.ResolveForTool`；
+      **不要自己写 "name → activeEnv → 首条"**（历史上抄了五份，错误文案与边界行为
+      全不一样，见 §11.2）
+- [ ] **账号从哪来？** 一律走 `entdir` + `gzou_t`；**不要自己取 `accounts[0]`**
+- [ ] **输出怎么走？** 一律 `output.Emit`；**不要自建 JSON/CSV 发射器**（曾经有四套）
+- [ ] **写配置？** 一律 `config.Edit`
+- [ ] **往配置目录写文件？** 登记进 `CacheSubdirs`，或说清为什么不是缓存
+- [ ] **拼接服务器命令？** 值必须过白名单/引号（`reZone` / `reToolPath` / `reDBAcct` /
+      `shQuote`）；**SQL 一律走 stdin**，不拼进命令串
+- [ ] **命令行新增位置参数？** 负整数之类的值会被 flag 解析吃掉，给出可操作的提示
+      （见 `tt dict msg` 的 `SetFlagErrorFunc`）
+
+---
+
+## 4. 统一 Web 服务
+
+### 4.1 一个进程、一个端口、一套页面
 
 `tt serve` 启动，默认 `127.0.0.1:28670`（占用时自动向后探测），**默认后台常驻**（单实例），
 `--foreground` 前台、`--stop` 停止。
@@ -241,7 +424,7 @@ TT/
 `//go:embed all:web/dist` 的 FS 根是 `web/dist`，而所有消费者按"dist 根"理解路径，所以
 `main.go` 用 `fs.Sub` 剥掉一层；**"前端放在哪"只在 `common.WebSub` 里说一次**。
 
-### 3.2 服务的单实例与自寻址
+### 4.2 服务的单实例与自寻址
 
 运行状态写在与 `tt debug serve` **同一份** `.tt-serve.json` 里，其中 `apiBase` 记着调试 API
 挂在哪 —— `tt serve` 是 `/debug/api`，独立的 `tt debug serve` 是 `/api`。控制端命令
@@ -252,7 +435,7 @@ TT/
 > 这条是修出来的：前缀不同而控制端命令永远拼 `/api/…`，于是 `tt debug start/exec/status`
 > 对着 `tt serve` 全是 404。现在前缀记进状态文件，按文件寻址。
 
-### 3.3 共用的配置端点
+### 4.3 共用的配置端点
 
 `GET/PUT /api/hosts`：读回 `hosts`/`listen`/`debug`/`query`/`mirror`/`bdldoc`/`sync`/`tdev`；
 PUT 只接受要改的节（缺省 = 不动），交给 `internal/config` 的原子写路径。两个页面都写它。
@@ -269,7 +452,7 @@ PUT 只接受要改的节（缺省 = 不动），交给 `internal/config` 的原
   内存态的调试服务重新加载。否则从别处改了环境，调试侧仍按旧环境连，表现是"改了没生效"。
   重新加载失败只记日志：配置已经落盘成功，不该把成功的写报成失败，但必须让用户看见。
 
-### 3.4 设置页的四块
+### 4.4 设置页的四块
 
 | 分区 | 内容 |
 |---|---|
@@ -279,16 +462,16 @@ PUT 只接受要改的节（缺省 = 不动），交给 `internal/config` 的原
 | 应用设置 | 命令行集成（加/移除用户 PATH）、明暗色、运行信息 |
 
 前端**只有一套页面**：合并完成后曾有两套 SPA 并存互链，后来字典页被删掉、两个动作并进设置页
-（经过见 §10.6）。
+（经过见 §11.6）。
 
 ---
 
-## 4. `tt debug` 调试器
+## 5. `tt debug` 调试器
 
 通过 SSH 在 T100 服务器上驱动 `fglrun -d` 的 `(fgldb)` 文本调试协议，提供本地 Web 调试界面与
 命令行控制端，实现"人操作 GDC 界面 + AI 借助命令行检查分析"的人机协同调试。
 
-### 4.1 能力
+### 5.1 能力
 
 - **Web 界面**（`tt serve` 后浏览器打开 `/debug/`）：源码 + 断点 + 调用栈 + 变量监视
   （Monaco、悬停求值、大纲、运行到光标），接口报文日志与重放调试，服务测试，环境/数据库/参数设置。
@@ -300,7 +483,7 @@ PUT 只接受要改的节（缺省 = 不动），交给 `internal/config` 的原
   `skills/tt-debug/SKILL.md`。
 - **防呆**：停站停留超时看门狗自动放行（默认 1800s，保护生产区行锁）、断点持久化、单实例服务。
 
-### 4.2 命令一览
+### 5.2 命令一览
 
 | 命令 | 作用 |
 |---|---|
@@ -328,7 +511,7 @@ PUT 只接受要改的节（缺省 = 不动），交给 `internal/config` 的原
 （`hosts.activeEnv`）；`tt debug env <名称>` 切的是**活动调试会话**（会重连）。
 `tt debug topent <值>` 是会话级覆盖，与 `tt env topent <名称> <编号>` 设的配置默认不同。
 
-### 4.3 环境变量
+### 5.3 环境变量
 
 | 变量 | 作用 |
 |---|---|
@@ -338,7 +521,7 @@ PUT 只接受要改的节（缺省 = 不动），交给 `internal/config` 的原
 | `TDEBUG_SERVE_LOG` | 后台服务子进程写入的日志路径（由 `serve` 自动设置） |
 | `TDBG_RAW=1` | 把 fgldb 协议原始行打到服务日志（排障用） |
 
-### 4.4 运行时产物（均在 `.gitignore` 中）
+### 5.4 运行时产物（均在 `.gitignore` 中）
 
 - `.tt-serve.json` —— 后台实例状态（pid/地址/**调试 API 前缀**/日志）；控制端据此自动寻址
 - `.tt-serve.log` —— 后台服务日志
@@ -351,12 +534,12 @@ wslogs/wsdebug`。
 
 ---
 
-## 5. `tt dev tzc` 代码包
+## 6. `tt dev tzc` 代码包
 
 把「改 T100 设计器里的 4GL 客制」变成一条**可机械证明不会破坏**的管线。完整命令与参数见
 README 与 `tt dev tzc --help`；本章讲契约与依据。
 
-### 5.1 三条公理
+### 6.1 三条公理
 
 | 公理 | 含义 |
 |---|---|
@@ -381,7 +564,7 @@ verify/  split/    store/    三道闸门 / 写回拆分 / 工作区
 model/   testutil/ cli/      域类型 / 夹具 / 命令行派发
 ```
 
-### 5.2 为什么不是直接改 zip
+### 6.2 为什么不是直接改 zip
 
 - `.tzc` 是普通 zip，但里面的 `<prog>.tap` 才是**唯一被服务端消费**的设计文件；`.tgl` 是框架
   骨架、`.4gl` 是服务器 build 产物（**客户端从不读回**）。
@@ -391,7 +574,7 @@ model/   testutil/ cli/      域类型 / 夹具 / 命令行派发
 - 对策：**CDATA 感知的字节级扫描器**，只重建被改的 CDATA 内部；其余字节（属性顺序、引号风格、
   空白、未知条目、`ver`）逐字节透传。
 
-### 5.3 包容器形态：照抄设计器，不是"写个合法 zip"
+### 6.3 包容器形态：照抄设计器，不是"写个合法 zip"
 
 **合法不够，得像它。** 设计器写出来的 `.tzc` 有自己的 zip 形态，写回时必须一模一样：
 
@@ -420,7 +603,7 @@ model/   testutil/ cli/      域类型 / 夹具 / 命令行派发
 **改动的条目会被重新压缩**（Go 标准库 deflate），所以它的字节与设计器的 SharpZipLib（level 3）
 不同；其余条目连压缩数据都逐字节照抄。判据始终是**逐条目内容 sha256**。
 
-### 5.4 工作区
+### 6.4 工作区
 
 ```
 <dir>/
@@ -441,13 +624,13 @@ model/   testutil/ cli/      域类型 / 夹具 / 命令行派发
 `"不在本次 --only 导出范围内"`、`"框架集合锚点区段强制只读"`。**AI 看到 `editable:false` 的
 同时就知道为什么**，不必用试错法探测权限边界。
 
-### 5.5 两条管线别用错
+### 6.5 两条管线别用错
 
 | | `tzc export`（代码包） | `tzs export`（表单包） |
 |---|---|---|
 | 产物 | 工作区：`prog.full.4gl` + `manifest.json` + `snapshot/` + `.tdev/` + `.git/` | 就是一包文件（`.tsd`/`.4fd`/`ver`…） |
 | 特殊处理 | 合成 + 围栏渲染 + 权限判定 | **没有**：不解围栏、不校验必需条目、不解析 `ver` |
-| 能改回来吗 | 改 `prog.full.4gl` → `verify` → `apply` | **不走 export**：要用 `tzs call` 让设计器自己算（§6） |
+| 能改回来吗 | 改 `prog.full.4gl` → `verify` → `apply` | **不走 export**：要用 `tzs call` 让设计器自己算（§7） |
 | 用途 | 改 4GL 客制 | 只读参考：读表单结构、查字段定义 |
 
 拿错入口会被挡住：`.tzc` 跑 `tzs export` → 退出码 2 并提示改用 `tzc export`。
@@ -456,7 +639,7 @@ model/   testutil/ cli/      域类型 / 夹具 / 命令行派发
 解压产物还是工作区）；目标非空则拒绝（退出码 5），`--force` 只覆盖同名文件；**zip-slip 防护**
 （条目名带 `../`、盘符、绝对路径、NUL → 整体拒绝，退出码 2）。
 
-### 5.6 围栏协议
+### 6.6 围栏协议
 
 围栏是**单行注释**，不改变 4GL 语义，且与 TGL 原生的 `{<point/>}`/`{<section>}` 标记区分开：
 
@@ -495,12 +678,12 @@ END MAIN
 - `PLAIN` 点（裸名插入点）**没有函数身份**：整块即正文，除只读判定外不做结构校验 ——
   特殊的是自订定义点，不是所有 point。
 
-### 5.7 三道闸门与 apply 管线
+### 6.7 三道闸门与 apply 管线
 
 | 闸门 | 检查 | 失败 |
 |---|---|---|
 | **gate1** | 围栏行、围栏外字节、只读 Region 内容、可编辑区内的结构行 —— **逐字节相等**；删除/追加的授权 | 退出码 3；权限类 → 4 |
-| **gate2** | 不变量 I1–I15（§5.14）：区段配对 / 命名空间三层错配 / `TglTag` 折叠 / status 取值 / UTF-8 无 BOM / `]]>` / `ver` / 未知条目透传… | 退出码 3（warn 仅在 `--strict` 下失败） |
+| **gate2** | 不变量 I1–I15（§6.14）：区段配对 / 命名空间三层错配 / `TglTag` 折叠 / status 取值 / UTF-8 无 BOM / `]]>` / `ver` / 未知条目透传… | 退出码 3（warn 仅在 `--strict` 下失败） |
 | **gate3** | 对**将要产出的新包**重跑合成 = 「设计器打得开吗」的判决；**磁盘此刻仍未动** | 退出码 3 |
 
 管线顺序即契约：
@@ -528,7 +711,7 @@ END MAIN
 > `manifest.pkg.sha256`；不刷新的话第二次 apply 会被「源包自 export 之后已被改动」误拒（退出码 5）。
 > 该缺陷已修复，并由自检项「真机事故-迭代循环」钉住。
 
-### 5.8 报错怎么定位（行号 + 该行内容）
+### 6.8 报错怎么定位（行号 + 该行内容）
 
 `apply` / `verify` 拒绝时，每条发现都带**出错位置** —— 出错文件、1-based 行号、该行内容：
 
@@ -548,7 +731,7 @@ apply 被拒绝（gate1 error=1 warn=0 info=1）：
   `changed_regions`/`added_regions`/`deleted_regions`。
 - TAP 层的字节偏移会补上落在哪个 `<point>`/`<section>`。
 
-### 5.9 框架解锁（Unlocked）—— 取代 v1 的 `--allow-sec`
+### 6.9 框架解锁（Unlocked）—— 取代 v1 的 `--allow-sec`
 
 「解开框架」不是渲染效果，是**记录在 TAP 根属性上的单向状态**（`section_flag="Y"`）。解开之后，
 **规格（SPEC）的任何调整都不会再产生对应的程序代码** —— 代码与规格从此脱钩。所以它是一次显式、
@@ -583,7 +766,7 @@ topstd 模式下的 src 规则仍然生效。围栏呈现为 `[EDITABLE-SEC]`。
 - `apply` 触发区段写入时提示「下次上传会触发服务器 `adzi520` 联动」（tt dev 不代为执行）。
 - **反向迁移（重新锁上）不做**（R10）：那是服务器 `adzp064`（回标准）的职责。
 
-### 5.10 结构事务（改名 / 新函数）
+### 6.10 结构事务（改名 / 新函数）
 
 设计器把自订定义点的「身份」拆在**六处**（点名、签名行、scope、描述块、墓碑、调用点），
 任何一处单独漂移都是故障。所以不禁止改，而是把「识别意图 → 证明一致 → 复刻事务」做成一等公民：
@@ -641,7 +824,7 @@ tt dev tzc newfn  ws --type FUNCTION --name aapp131_added                # 在 A
 描述与 `desc` 字段的关系：**块可直改**（它是可编辑区，apply 后 `desc` 由块重算）；**`desc` 字段
 也可改**（视作显式意图，apply 用它重写块）；两者同时改且不一致 → 报 V6 让你只改一处。
 
-### 5.11 行尾策略（编辑器相关）
+### 6.11 行尾策略（编辑器相关）
 
 真实 `.tzc` 的 `.tap` 是**混合行尾**的（元素间 CRLF、CDATA 内 LF；capt110 实测 866 个 CRLF +
 8466 个 LF），渲染出的 `prog.full.4gl` 继承了这一点。而**编辑器会自作主张把整份文件的行尾归一**
@@ -660,7 +843,7 @@ tt dev tzc newfn  ws --type FUNCTION --name aapp131_added                # 在 A
 > "被改" → `apply` 以退出码 4 拒绝，**用户只是加了一行注释却什么都写不回去**。
 > 对抗用例已收入 `selftest`（「真机事故-编辑器把行尾归一」）。
 
-### 5.12 退出码与危险开关
+### 6.12 退出码与危险开关
 
 | 码 | 含义 |
 |---|---|
@@ -680,7 +863,7 @@ tt dev tzc newfn  ws --type FUNCTION --name aapp131_added                # 在 A
 > ⚠️ 解开框架的后果不可逆：**等于主动放弃「跟随原厂样板自动重产代码」的能力**。
 > 这个决定必须由人做，AI 不得自主触发。
 
-### 5.13 已知边界
+### 6.13 已知边界
 
 - **不写 `.4gl`**（红线 R1）。它是服务器 build 产物，与「TGL + 展开点」的渲染结果**本来就不一致**
   （实测 82/105），覆盖即丢数据。
@@ -688,11 +871,11 @@ tt dev tzc newfn  ws --type FUNCTION --name aapp131_added                # 在 A
 - **不增删 zip 条目**、不改条目名、不给 `ver` 加目录前缀。
 - 引用标准程序的包（TAP 条目基名 ≠ 根 `prog`）**拒绝写回**（I15）：设计器在这种包里会用
   `CiteTAP` 内容，我们没有样本验证。
-- **`.tzs` 的写回不走这条管线** —— 那是 §6 的引擎在做。（v1 的文档写的是"不做 `.tzs` 写回"，
+- **`.tzs` 的写回不走这条管线** —— 那是 §7 的引擎在做。（v1 的文档写的是"不做 `.tzs` 写回"，
   那句话在 `engine/` 落地之后就不成立了。）
 - `.tzg`（ReportCode）在设计器里没有必需条目检查分支，只保证字节透传。
 
-### 5.14 实现 ↔ 设计器源码 对照
+### 6.14 实现 ↔ 设计器源码 对照
 
 本节是 `tt dev tzc` 的**逐条依据表**：每一处行为都指回反编译源码的 `file:line`，或指回
 `docs/T100设计器-README.md`（第三方 README 的恢复副本，下文用 `README §x.y` 指代）。
@@ -705,12 +888,12 @@ tt dev tzc newfn  ws --type FUNCTION --name aapp131_added                # 在 A
 | TGL 标记层 | `internal/tglfile` | `TrimEnd` / `FindSections` / `FindPlaceholders` / `FindAnchor` / `ReplaceAnchor` / `PatchSection` | `CodeEditorManager.cs:1694-1715`（四个正则原文）、`:314-352`（GenerateTGL 补丁格式）、`TzpManager.cs:453-457` |
 | FGL | `internal/fgl` | `ParseOutline` / `ParseBlock` / `ParseFunction` / `EnvelopeKindFor` | README §4.7、`FglParserQuickHelper.cs:18-23`、`CodeEditorManager.cs:1230-1253` |
 | 合成层 | `internal/synth` | `Synthesize` / `ResolvePoint` / `ResolveSection` | `CodeEditorManager.cs:1070-1080`（LoadContent 六步）、`:1142-1176`（锚点展开）、`:1179-1227`（占位符替换/造空点/记 TglTag）、`:1083-1139`、`ProgramInformation.cs:655-666` |
-| 围栏层 | `internal/fence` | `Render` / `Parse` / `Pair` | 本文 §5.6 与 §5.15 的偏差表 |
+| 围栏层 | `internal/fence` | `Render` / `Parse` / `Pair` | 本文 §6.6 与 §6.15 的偏差表 |
 | 验证层 | `internal/verify` | `Gate1` / `Gate2` / `Gate3` | README §3.8（I1–I15）、§5.1（105 包实测的五个坑） |
 | 回写层 | `internal/split` | `Split` / `ApplyTglPatches` | `CodeEditorManager.cs:361-397`（SaveADPContent）、`:400-496`（TglTag 折叠）、`:408`（`section_flag="Y"`）、`AddPointModel.cs:1086-1112`（ToXML）、`ProgramInformation.cs:96-108`（order = max+1） |
-| 包容器 | `internal/pkgfile/zipraw.go` | `parseRawZip` / `rebuildZip` | **S7 真机实测**（不是源码），见 §5.3 |
+| 包容器 | `internal/pkgfile/zipraw.go` | `parseRawZip` / `rebuildZip` | **S7 真机实测**（不是源码），见 §6.3 |
 | 审计层 | `internal/store` | `Create` / `Open` / `Lock` / `GitInit` / `GitCommit` / `AtomicWrite` | 红线 R6（禁止 `File.Delete`→`File.Create`：`PackageManager.cs:569-572` 是事故模板） |
-| 报错定位 | `internal/model/lines.go` + `verify.Finding` | `LineOf` / `LineAt` / `FirstDiffEOL` / `fillPositions` | 见 §5.8 |
+| 报错定位 | `internal/model/lines.go` + `verify.Finding` | `LineOf` / `LineAt` / `FirstDiffEOL` / `fillPositions` | 见 §6.8 |
 | 新函数模板 | `internal/cli/newfn_template.go` | `newFnHeaderTemplate` | `FunctionGenerator.cs:20-67` + 真实包 `desc="\n####…"`（语料 armt100.tap） |
 
 **权限判定链**（点，`AddPointModel.IsEditable`，`AddPointModel.cs:691-747`）—— 实现全在
@@ -785,7 +968,7 @@ function.* / dialog.* / report.*               → 自订定义点（TAP 有，�
 | `gate1.fence-line` | 围栏行的**锚定部分**被改（`fn`/`scope`/`desc` 豁免，交由 V1/V5/V6） |
 | `gate1.outside-fence` | 围栏外字节（prefix/gap/suffix）拼接后不等 |
 | `gate1.readonly-region` | 只读 Region 的**自身字节**被改（按配对比较，剔除子区间） |
-| `gate1.eol-normalized` | info：受保护字节只有行尾差异（CRLF↔LF）→ 按等价处理（见 §5.11） |
+| `gate1.eol-normalized` | info：受保护字节只有行尾差异（CRLF↔LF）→ 按等价处理（见 §6.11） |
 | `gate1.region-count` | 基线总数 = 有基线配对的 Region + 被删除的 Region |
 | `gate1.delete-*` | 删除授权：只有 `new="Y"` 且可编辑的点可删 |
 | `gate1.append-*` | 追加必须在 `[APPEND]` 锚点内、类型匹配、`new="Y"`、名字不与基线重名 |
@@ -803,7 +986,7 @@ function.* / dialog.* / report.*               → 自订定义点（TAP 有，�
 | 新增点 | `cli.cmdNewfn` + `split` 的 AddPoint | `AddPointModel.cs:1008-1060` |
 | apply 基线重算 | **以写出的新包为准重新 synthesize + render**，并同步刷新 `prog.full.4gl` | 改名会切换点身份，只有从包重渲染基线才与包一致 |
 
-### 5.15 与设计指南的偏差（均已核实，逐条给出理由）
+### 6.15 与设计指南的偏差（均已核实，逐条给出理由）
 
 | # | 指南原文 | 实现 | 理由 |
 |---|---|---|---|
@@ -828,7 +1011,7 @@ function.* / dialog.* / report.*               → 自订定义点（TAP 有，�
 
 > 这几条与 D-1 同源：**把真实数据里的常态当 error，会拒掉真实包。**
 
-### 5.16 实测基线
+### 6.16 实测基线
 
 | 项 | 数据 |
 |---|---|
@@ -842,13 +1025,13 @@ function.* / dialog.* / report.*               → 自订定义点（TAP 有，�
 | 退化点（`function.*` 但正文只有注释） | 1 处：`s_axmt500(s).tzc` / `function.memo_industry` |
 
 > 语料是**活的目录**（人也在里面干活）：包数/Region/点数的绝对值随语料增删而变，
-> 换机器或语料变动后重跑 §8 的命令即可刷新；**判据（0 error、逐字节一致）不随规模变**。
+> 换机器或语料变动后重跑 §9 的命令即可刷新；**判据（0 error、逐字节一致）不随规模变**。
 
 ---
 
-## 6. `tt dev tzs` 表单包
+## 7. `tt dev tzs` 表单包
 
-### 6.1 引擎与设计器程序集
+### 7.1 引擎与设计器程序集
 
 `tt dev tzs call` 背后是 `engine/` 里一个 **C# 引擎**（`tzs-server.exe`）。它**不实现** `.tzs`
 格式 —— 它 `Assembly.LoadFrom` **设计器自己的程序集**，布局属性走设计器自己的 `XmlElement`
@@ -881,7 +1064,7 @@ function.* / dialog.* / report.*               → 自订定义点（TAP 有，�
    把引擎构建挂在 `tt` 的每次构建上，等于每次发版都制造一批停不掉的进程 —— 一个和 `tt` 无关的
    构建步骤造成用户可见的后果。
 
-### 6.2 命令面
+### 7.2 命令面
 
 | 命令 | 作用 | 要引擎吗 | 改包吗 |
 |---|---|---|---|
@@ -911,7 +1094,7 @@ function.* / dialog.* / report.*               → 自订定义点（TAP 有，�
 才得到"一个 Table 装 N 列" —— 一次一列会让大表单慢两个数量级（实测 84 列从 137 秒降到 1.17 秒，
 而且会在 Table 里给每个控件塞一个 Label，真实表单里没有那种形态）。
 
-### 6.3 句柄
+### 7.3 句柄
 
 - **每个需要句柄的函数都必须显式给 `--handle`。** 没有"自动沿用上次句柄"这回事。
 - **句柄永不复用**：`close` 掉一个包再 `open` 同一个包拿到的是**新号**。拿旧号去调 →
@@ -920,7 +1103,7 @@ function.* / dialog.* / report.*               → 自订定义点（TAP 有，�
   先 `close` 占用者（`list_open` 看是谁），或 `open --force`（只对 `Loaded` 状态的占用者有效）。
 - 句柄只活在常驻守护进程里。**进程一死全部失效** —— 守护进程挂了就重新 `open`，别重放写请求。
 
-### 6.4 `validate` 是基线相对的
+### 7.4 `validate` 是基线相对的
 
 `validate` 在**句柄上第一次被调用时，那次运行本身就是基线**（`Fns/Validate.cs:139`）。所以第一次
 调用 `newErrors`/`newWarnings` **按构造就是空** —— 它证明不了任何事。要看"我改坏了没有"，
@@ -933,7 +1116,7 @@ function.* / dialog.* / report.*               → 自订定义点（TAP 有，�
 返回体 `{baseline[], after[], newErrors[], newWarnings[], elapsedMs}`；加 `--json` 打**整帧**
 （`{id, ok, result, error, ms}`）而不是只打 `result`。
 
-### 6.5 参数语法
+### 7.5 参数语法
 
 本地只做**语法**校验，语义交给引擎：
 
@@ -953,7 +1136,7 @@ function.* / dialog.* / report.*               → 自订定义点（TAP 有，�
 两个附带事实：**参数打错的报错也要引擎在**（`call` 先拉 manifest 再校验参数）；`--timeout`
 **最小 120 秒**，低于此值会被抬到 120（下限是给加载看门狗留的）。
 
-### 6.6 退出码
+### 7.6 退出码
 
 **没有 `3`**（`3` 是 `.tzc` 那条线的"验证失败"），多一个 `1`：
 
@@ -971,9 +1154,9 @@ function.* / dialog.* / report.*               → 自订定义点（TAP 有，�
 
 ---
 
-## 7. `tt dict` 数据字典
+## 8. `tt dict` 数据字典
 
-### 7.1 能力与数据族
+### 8.1 能力与数据族
 
 各查询命令依赖不同**数据族**：表字典 / 校验带值 / 系统分类码 / 字段画面规格 / 可复用开窗 /
 系统消息 / 参数定义 / 程序与作业。`tt dict db status` 一次看清哪个族没同步、各多少行、缺哪些表
@@ -983,7 +1166,7 @@ function.* / dialog.* / report.*               → 自订定义点（TAP 有，�
 （不是部分可用 —— 所以行数列显示 `—`，那个行数没有意义）。补齐两条路：`tt dict db sync`，
 或临时用 `tt dict <命令> --env <环境名>` 免写盘直查。
 
-### 7.2 查询命令
+### 8.2 查询命令
 
 > 命名对齐 T100 原生工具/术语：`r.t`（数据表）、`r.v`（校验带值）、`r.q`（开窗）、`desc`（字段
 > 规格）、`scc`（分类码）、`prog`（程序与作业，别名 `program`/`job`）。短名 `rt`/`rv`/`rq` 与旧名
@@ -1070,7 +1253,7 @@ function.* / dialog.* / report.*               → 自订定义点（TAP 有，�
   **子程序与它的主程序是两回事**（`aapq110_01` 是"报表打印"、主程序 `aapq110` 是"明细查询"）。
 - `tt dict prog --kw 对账` 按编号或中文名称搜索；`--sub` 在子程序/元件里搜。
 
-### 7.3 数据维护与镜像
+### 8.3 数据维护与镜像
 
 **`tt dict db sync`** —— 从 ERP 把本地数据刷到最新（覆盖全部数据族）。全量约 85 万行，视网络
 2~4 分钟。采用临时库整体替换，**失败不影响原库**，完成后原库自动备份为 `<库>.bak`。
@@ -1108,7 +1291,7 @@ function.* / dialog.* / report.*               → 自订定义点（TAP 有，�
 `09_advanced-features`，SQL 在 `10_sql-support`，画面/报表在 `11_user-interface`/`12_reports`，
 fgldb 与工具在 `13_programming-tools`。
 
-### 7.4 查询数据源切换（在线 ⇄ 本地库）
+### 8.4 查询数据源切换（在线 ⇄ 本地库）
 
 `r.t/r.v/desc/scc/r.q/prog` 统一走同一查询接口（`db.Source`）：本地 SQLite 镜像与远程 ERP 库
 查的是**同一批表**，输出完全一致；命令层不感知数据源。解析优先级：
@@ -1142,7 +1325,10 @@ dict 从客户端直连。
 升级后 `tt dict` 会读到另一个 schema 的数据 —— 这正是要修的（同一张字典表被两个 schema 读到
 而结果里没有任何信号）。看 `account`/`accountSource` 两个字段即可确认本次到底落在哪。
 
-### 7.5 查询输出：一个信封，三种形态
+### 8.5 查询输出：一个信封，三种形态
+
+> **本节是细节，契约在 §3.6。** 两者的分工：§3.6 定"不许破的四条"（给改的人看），
+> 本节展开"为什么是这四套东西合过来的"（给查历史的人看）。改输出层时两处都要对得上。
 
 所有 DB 查询命令（`tt dict` 的 r.t/r.v/scc/desc/r.q/msg/sysp/docp/prog、`tt debug sql`）
 共用**同一个输出出口**（`internal/output`）与同一份环境信息块（`output.Meta`）。此前这里是
@@ -1207,7 +1393,7 @@ CSV 的 `# ` 头（DEBUG 侧先有的写法，现在两处同一个实现）：
 ⚠️ 这是**破坏性变更**：`--json` 的顶层从裸数组/裸对象变成了信封，载荷移进 `data`。
 消费方要改 `.[]` → `.data[]`。
 
-### 7.6 输出中的类型码
+### 8.6 输出中的类型码
 
 **表类型**（`r.t` 的「类型」列，每张表在系统里的角色）：
 
@@ -1224,7 +1410,7 @@ CSV 的 `# ` 头（DEBUG 侧先有的写法，现在两处同一个实现）：
 
 ---
 
-## 8. 测试与验收
+## 9. 测试与验收
 
 ```powershell
 go test ./...                        # 全量；缺语料时自动跳过（约 2–3 分钟）
@@ -1246,7 +1432,7 @@ $env:TTZS_CORPUS="D:\t100_wrok_dir"
 > 所以默认跳过（会打印跳过原因与开启方法）。测试二进制内部的 `-test.timeout` 拦不住 go 命令的
 > 杀进程，改它没有意义。
 
-### 8.1 已实测的验收数据
+### 9.1 已实测的验收数据
 
 | 层 | 结果 | 复现命令 |
 |---|---|---|
@@ -1264,7 +1450,7 @@ $env:TTZS_CORPUS="D:\t100_wrok_dir"
 
 > 前 4 行随默认 `go test ./...` 一起跑；`verify` 语料 / `apply` 仿真属于深度回归。
 
-### 8.2 真机验收清单（S7，需人工执行）
+### 9.2 真机验收清单（S7，需人工执行）
 
 自动化只到 gate3（「模拟设计器装载」）。最后一步请在装了客户端的机器上做：
 
@@ -1275,12 +1461,12 @@ $env:TTZS_CORPUS="D:\t100_wrok_dir"
 5. 建议留证：改动前后的 `.tap` 的 `<point>` CDATA 逐字节比对。
 
 > **输入必须是设计器产出的包。** 如果输入本身就是早期版本产出的（局部头 bit 3 + 数据描述符，
-> 见 §5.3），那它本来就不是设计器形态；tt dev 会把它归一化再写，但**用这种包做真机验收等于
+> 见 §6.3），那它本来就不是设计器形态；tt dev 会把它归一化再写，但**用这种包做真机验收等于
 > 同时验两件事**，容易误判。验收请从原生的 `.tzc` 出发。
 
 ---
 
-## 9. 构建与发布
+## 10. 构建与发布
 
 **操作步骤见 [README 的构建一节](../README.md#构建)**。这里只留"为什么"。
 
@@ -1288,7 +1474,7 @@ $env:TTZS_CORPUS="D:\t100_wrok_dir"
   而 `web/dist/.gitkeep` 这个占位文件让 embed 在产物缺失时也成立（否则全新克隆连 `go build`
   都过不去）。代价是那样出来的 tt 没有界面 —— `tt serve` 会返回一张写着「界面未构建」和构建
   命令的说明页，不是静默空白。
-- **`.tzs` 引擎单独构建**，因为它在 Go 的构建链之外，而且重编会让在跑的守护进程变孤儿（§6.1）。
+- **`.tzs` 引擎单独构建**，因为它在 Go 的构建链之外，而且重编会让在跑的守护进程变孤儿（§7.1）。
 - **打包脚本只采集、不构建**：`build_portable.bat` 按名字采引擎那四个文件与
   `engine\designer\`（`engine/out/` 里还有十几个探测程序，xcopy 整个目录会把它们一起打进包里）。
   MSI 复用同一份载荷，用 `heat.exe` 采集文件（新增目录自动跟着走，不用改 `tt.wxs`）。
@@ -1305,11 +1491,11 @@ $env:TTZS_CORPUS="D:\t100_wrok_dir"
 
 ---
 
-## 10. 设计史与取舍
+## 11. 设计史与取舍
 
 > 本章是"为什么现在是这个样子"的记录。上面各章写的是**现状**，这里写的是**经过**。
 
-### 10.1 合并动机：三处"请手工同步"
+### 11.1 合并动机：三处"请手工同步"
 
 三个项目互相依赖，靠注释提醒人工保持同步：
 
@@ -1322,7 +1508,7 @@ $env:TTZS_CORPUS="D:\t100_wrok_dir"
 这三处现在各只有一份实现。另外两份 `cfgfile`、两份 `dbconfig`、两份 `host`、两份 `pathinstall`、
 两份 `erpdb` 也合并了。合并**不做功能取舍，只消除重复实现**。
 
-### 10.2 合并中发现的分叉
+### 11.2 合并中发现的分叉
 
 两个 `host` 包**不是**简单的复制关系，已经实质分叉。逐文件比对后，**每个有分叉的文件都取更
 成熟、更安全的那一版**：
@@ -1366,7 +1552,7 @@ func KbCmd(ksqlPath, host, port, db, connStr string) (string, error)
 **TDictCli 那套不安全的 SQL 拼接没有保留。** `tt dict` 的调用点相应改写，这是合并里唯一需要
 改动调用方行为的地方。
 
-### 10.3 统一配置的结构变更
+### 11.3 统一配置的结构变更
 
 两份 `resolveConfigPath` / `toolsHome` / `isPortable` / `migrateLegacyConfig` / `looksLikeOwnConfig`
 / `samePath` / `defaultConfigPath` 逐行相同，只有 `toolDirName`（`tdebug`/`tdict`）与环境变量名
@@ -1386,7 +1572,7 @@ func KbCmd(ksqlPath, host, port, db, connStr string) (string, error)
 - `Save` 从「`path + ".tmp"` + rename」换成 TDev 那套更完整的原子写（同目录 `CreateTemp` +
   `Write` + `Sync` + 保留原权限位 + `Rename`）。
 
-### 10.4 命令面与兼容
+### 11.4 命令面与兼容
 
 | 合并前 | 合并后 |
 |---|---|
@@ -1405,7 +1591,7 @@ TDev 的两点被完整保留：位置无关的参数解析（`-o`/`--json` 可�
 做不到），以及明确的退出码契约。`tt dev` 用 `DisableFlagParsing` 把参数原样交给 TDev 自己的
 解析器，退出码经 `exitCode` 透传。
 
-### 10.5 合并过程中修掉的两个 bug
+### 11.5 合并过程中修掉的两个 bug
 
 两处都是"整节替换"这个动作的副作用，都由测试抓出来：
 
@@ -1414,12 +1600,12 @@ TDev 的两点被完整保留：位置无关的参数解析（`-o`/`--json` 可�
    判断"这一节没提交"。但那些字段是指针类型，nil 指针装进 `any` 后接口值非 nil，于是**本次没提交
    的节会被序列化成 `null` 再当成空对象写回去，把用户原有的 `query`/`mirror`/`debug` 全清掉**。
    现在逐个类型化判空。
-2. **`viaSsh` 被配置页静默丢弃**（见 §3.3）。
+2. **`viaSsh` 被配置页静默丢弃**（见 §4.3）。
 
 两个 bug 都有回归测试盯着：`TestHostsPut_LeavesOtherSectionsAlone` 与
 `TestHostsPut_PreservesViaSSH`。
 
-### 10.6 前端统一设置页（5 期重构）
+### 11.6 前端统一设置页（5 期重构）
 
 三工具合并完成后，前端仍是两套 SPA（`web/debug` 与 `web/dict`），各带一个设置页，两边的环境
 编辑器近乎重复。要求是**只保留一个设置页签**，组织成站点管理 / 数据字典 / DEBUG / 应用设置四块。
@@ -1427,7 +1613,7 @@ TDev 的两点被完整保留：位置无关的参数解析（`-o`/`--json` 可�
 | 期 | 做了什么 |
 |---|---|
 | 0 | 抽出共享层 `web/shared/`：主题变量与机制、UI 基元、设置页布局件 |
-| 1 | 设置页外壳 + 深链接（`/debug/#settings/<分区>`），并**修掉一处数据丢失 bug**（见 §10.5 第 1 条） |
+| 1 | 设置页外壳 + 深链接（`/debug/#settings/<分区>`），并**修掉一处数据丢失 bug**（见 §11.5 第 1 条） |
 | 2 | 设置页只跟共享层说话；服务端补上"保留表单不管理的字段"（`viaSsh`、每环境的 `launchArgs`/`watchdogSeconds`） |
 | 3 | 字典页接入共享主题层 |
 | 4 | **彻底移除字典页**：设置统一之后字典页只剩两个动作，于是那个 SPA 被删掉，动作并进设置页 |
@@ -1436,7 +1622,7 @@ TDev 的两点被完整保留：位置无关的参数解析（`-o`/`--json` 可�
 `grep` 确认 `web/app/src` 无写死色板；产物 CSS 里 `.dark` 是类驱动、`prefers-color-scheme` 归零、
 明暗两套 `--background` 都在。
 
-### 10.7 后续变更
+### 11.7 后续变更
 
 - **移除桌面版（Electron 外壳）**：`desktop/` 与 `build_desktop.bat` 整体删除；`tt serve --desktop`
   隐藏开关、`TT_READY {json}` 就绪行、`TT_DESKTOP_DATA`/`TT_DESKTOP_PORT`/`ELECTRON_MIRROR` 三个
@@ -1454,9 +1640,9 @@ TDev 的两点被完整保留：位置无关的参数解析（`-o`/`--json` 可�
   维护，tdev 没有对应的模型与验收样本"。那个前提在 `engine/` 落地后不成立 —— 引擎就是设计器
   自己的代码。红线改成"导出只读、要写走引擎"。
 - **设计器程序集入库**：原先由用户在配置里指路（`tzs.installDir`），现改为随仓库与发行包分发，
-  见 §6.1。
+  见 §7.1。
 
-### 10.8 未做 / 已知取舍
+### 11.8 未做 / 已知取舍
 
 - **`viaSsh` 无法通过配置页删除。** 为了不"保存一次就静默丢配置"，服务端保存时会把表单不管理的
   `db.viaSsh` 从旧配置补回来。要删就手改 `config.json`。
@@ -1478,15 +1664,15 @@ TDev 的两点被完整保留：位置无关的参数解析（`-o`/`--json` 可�
 
 ---
 
-## 11. 许可与出处
+## 12. 许可与出处
 
 - **本工具的实现依据是 T100 设计器**（第三方商业软件，厂商标识 **DSC**）——`.tzc` 一侧来自其
   发行物的反推，`.tzs` 一侧直接反射调用其程序集。仅供个人学习、排障与接口对接研究；
   **请勿用于重制发布或绕过授权**。
 - `docs/T100设计器-README.md` 是该设计器反编译源码树 README 的**逐行恢复副本**（第三方文本），
-  是 §5.14 各条 `file:line` 依据的来源。
+  是 §6.14 各条 `file:line` 依据的来源。
 - **设计器的 28 个程序集**（`engine/designer/`，第三方商业软件）经明确决定随本仓库分发，
-  见 §6.1。
+  见 §7.1。
 - `testdata/fgl-fixtures` 与 `internal/fgl/outline.go` 移植自同作者的 MIT 项目 **BDL**
   （`D:\我的项目\BDL`）。
 - Go 依赖见 [README 的依赖一节](../README.md#依赖)；前端依赖见 `web/app/package.json`。
