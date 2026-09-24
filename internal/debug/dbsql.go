@@ -33,9 +33,18 @@ const (
 // DBQueryResult 一次只读查询的结果。
 //
 // Ent/Account 是**必回显**的:让"上错号"当场可见,而不是让人从"查不到数据"倒推。
+//
+// Env/SSHHost/Zone/DBTarget 与 Ent/Account 一起回答"这次查询到底落在哪":
+// ENT 只决定账号(哪个 schema),环境才决定连的是哪台服务器、哪个区(31开发/35测试/36正式)
+// 的库 —— 同一个企业编号在开发区与正式区是两套完全不同的库,少回显一半就还可能
+// 把"查错了地方"读成"数据不存在"。调用方(CLI)会把它们打进结果头部。
 type DBQueryResult struct {
 	Ent           int        `json:"ent"`
 	Account       string     `json:"account"`
+	Env           string     `json:"env,omitempty"`      // 环境名(配置里的 sshs[].name)
+	SSHHost       string     `json:"sshHost,omitempty"`  // 该环境的 SSH 主机
+	Zone          string     `json:"zone,omitempty"`     // 登录区域代码
+	DBTarget      string     `json:"dbTarget,omitempty"` // 库地址 host:port/服务名
 	Dialect       string     `json:"dialect"`
 	Columns       []string   `json:"columns"`
 	Rows          [][]string `json:"rows"`
@@ -174,7 +183,15 @@ func (m *Manager) RunReadonlyQuery(conn *host.SSHConn, req ReadonlyQueryReq) (*D
 		}
 	}
 
-	res := &DBQueryResult{Ent: ent, Account: account, Dialect: d.conn.Type, ServerLimited: serverLimited, Elapsed: time.Since(start).Seconds()}
+	res := &DBQueryResult{
+		Ent: ent, Account: account,
+		// 环境信息在这里定格:后面既有 SSH 会话又有库会话,任何一处晚了都可能拿到
+		// 另一个环境的影子值 —— 头部那几个字段是给人判断"查的是哪儿"的,不能猜。
+		// SSH 主机取**实际连上的那条连接**(不是配置里的当前环境),库地址取
+		// 实际执行用的那条连接(d.conn),两者才是这次查询真正落脚的地方。
+		Env: m.cfg.EnvName(), SSHHost: conn.Cfg().Host, Zone: d.zone, DBTarget: d.conn.Address(),
+		Dialect: d.conn.Type, ServerLimited: serverLimited, Elapsed: time.Since(start).Seconds(),
+	}
 	if !serverLimited {
 		res.Notes = append(res.Notes,
 			fmt.Sprintf("未在数据库侧限流(该语句无法安全包装:以 WITH 开头,或自带行限制),行数上限由客户端截断"))

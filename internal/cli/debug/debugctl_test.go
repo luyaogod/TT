@@ -7,6 +7,8 @@ package debug
 // 组装错了会漏命令或跑错命令,判定错了会在一个没确认过的现场上继续取值。
 
 import (
+	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -261,4 +263,146 @@ func TestApplySets(t *testing.T) {
 	if _, err := applySets(`{"a":1}`, []string{"没有等号"}); err == nil {
 		t.Error("缺少等号应当报错")
 	}
+}
+
+// 只读 SQL 的输出格式。
+//
+// 钉两件在契约里写死的事:
+//  1. **头部必须回显本次查询用的环境与企业编号(ENT)** —— 读错它会把"上错号/上错环境"
+//     读成"数据不存在",那是最危险的错误结论;
+//  2. **CSV 主体必须纯净**(只有表头行 + 数据行,杂质全在 # 注释里),
+//     否则 grep -v '^#' 之后拿到的就不是一个能解析的 CSV。
+func TestWriteSQLResult(t *testing.T) {
+	base := func() sqlQueryResult {
+		return sqlQueryResult{
+			Ent: 99, Account: "dsdemo",
+			Env: "开发环境", SSHHost: "10.0.0.1", Zone: "31",
+			DBTarget: "10.0.0.2:1521/t100dev", Dialect: "oracle",
+			Columns:   []string{"BMAA001", "BMAASTUS"},
+			Rows:      [][]string{{"FCPU010100003", "Y"}, {"FCPU010100004", "N"}},
+			TotalRows: 2, ServerLimited: true, Elapsed: 1.67,
+		}
+	}
+	render := func(res sqlQueryResult) (comments []string, csvText string) {
+		t.Helper()
+		var b bytes.Buffer
+		if err := writeSQLResult(&b, res); err != nil {
+			t.Fatalf("不该报错: %v", err)
+		}
+		var body []string
+		seenBody := false
+		for _, ln := range strings.Split(strings.TrimRight(b.String(), "\n"), "\n") {
+			if strings.HasPrefix(ln, "# ") {
+				// 注释必须在头部:主体一旦开始,后面不许再冒出 # 行(那是杂质行)
+				if seenBody {
+					t.Fatalf("CSV 主体之后又出现了注释行(注释必须全部在头部):\n%s", b.String())
+				}
+				comments = append(comments, ln)
+				continue
+			}
+			seenBody = true
+			body = append(body, ln)
+		}
+		return comments, strings.Join(body, "\n")
+	}
+
+	t.Run("头部回显环境与ENT", func(t *testing.T) {
+		comments, _ := render(base())
+		all := strings.Join(comments, "\n")
+		for _, must := range []string{"开发环境", "10.0.0.1", "31", "企业(ENT) 99", "dsdemo", "oracle", "10.0.0.2:1521/t100dev"} {
+			if !strings.Contains(all, must) {
+				t.Errorf("头部缺少 %q:\n%s", must, all)
+			}
+		}
+		// ENT 与账号必须在**同一行** —— 拆开就可能只看到一半,等于没回显
+		if !strings.Contains(all, "企业(ENT) 99 → 账号 dsdemo") {
+			t.Errorf("「企业→账号」应在同一行:\n%s", all)
+		}
+	})
+
+	t.Run("CSV 主体纯净且可解析", func(t *testing.T) {
+		_, csvText := render(base())
+		recs, err := csv.NewReader(strings.NewReader(csvText)).ReadAll()
+		if err != nil {
+			t.Fatalf("主体应当是合法 CSV: %v", err)
+		}
+		if len(recs) != 3 {
+			t.Fatalf("应有 1 行表头 + 2 行数据,得到 %d 行: %v", len(recs), recs)
+		}
+		if strings.Join(recs[0], ",") != "BMAA001,BMAASTUS" {
+			t.Errorf("表头错了: %v", recs[0])
+		}
+		if recs[1][0] != "FCPU010100003" || recs[1][1] != "Y" {
+			t.Errorf("数据错了: %v", recs[1])
+		}
+	})
+
+	t.Run("值里的逗号引号换行要转义", func(t *testing.T) {
+		res := base()
+		res.Columns = []string{"a", "b"}
+		res.Rows = [][]string{{`x,y`, "has\"quote"}, {"line1\nline2", ""}}
+		_, csvText := render(res)
+		recs, err := csv.NewReader(strings.NewReader(csvText)).ReadAll()
+		if err != nil {
+			t.Fatalf("转义后仍应是合法 CSV: %v", err)
+		}
+		if recs[1][0] != "x,y" || recs[1][1] != `has"quote` {
+			t.Errorf("含逗号/引号的值被写坏了: %v", recs[1])
+		}
+		if recs[2][0] != "line1\nline2" {
+			t.Errorf("含换行的值被写坏了: %q", recs[2][0])
+		}
+	})
+
+	t.Run("0行要点名企业编号", func(t *testing.T) {
+		res := base()
+		res.Rows = nil
+		res.TotalRows = 0
+		comments, csvText := render(res)
+		if !strings.Contains(strings.Join(comments, "\n"), "企业编号") {
+			t.Errorf("0 行时必须提醒核对企业编号:\n%s", strings.Join(comments, "\n"))
+		}
+		// 表头仍在:0 行不等于没有结果集
+		if !strings.HasPrefix(csvText, "BMAA001,BMAASTUS") {
+			t.Errorf("0 行时表头仍应输出,实际 %q", csvText)
+		}
+	})
+
+	t.Run("截断要说明总数", func(t *testing.T) {
+		res := base()
+		res.Truncated = true
+		res.TotalRows = 5000
+		comments, _ := render(res)
+		all := strings.Join(comments, "\n")
+		if !strings.Contains(all, "≥5000") || !strings.Contains(all, "截断") {
+			t.Errorf("截断时要给出总数下界与原因:\n%s", all)
+		}
+	})
+
+	t.Run("无结果集不写CSV", func(t *testing.T) {
+		res := base()
+		res.Columns, res.Rows = nil, nil
+		comments, csvText := render(res)
+		if csvText != "" {
+			t.Errorf("无结果集时不该有 CSV 主体,实际 %q", csvText)
+		}
+		if !strings.Contains(strings.Join(comments, "\n"), "无结果集") {
+			t.Errorf("无结果集要给一行说明:\n%s", strings.Join(comments, "\n"))
+		}
+	})
+
+	t.Run("字段缺失时不打印空壳行", func(t *testing.T) {
+		// 老服务端(没有环境字段)只回 ent/account:头部不能变成 "环境  · SSH  · 区域 "
+		res := base()
+		res.Env, res.SSHHost, res.Zone, res.DBTarget = "", "", "", ""
+		comments, _ := render(res)
+		for _, ln := range comments {
+			if strings.Contains(ln, "环境") || strings.Contains(ln, "SSH") {
+				t.Errorf("字段为空时不该打印空壳行: %q", ln)
+			}
+		}
+		if !strings.Contains(strings.Join(comments, "\n"), "企业(ENT) 99") {
+			t.Error("企业/账号行必须始终在")
+		}
+	})
 }

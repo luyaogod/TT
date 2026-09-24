@@ -6,6 +6,7 @@ package debug
 
 import (
 	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -1043,10 +1044,133 @@ func showWSLog(rowid string, asJSON bool, reqSave string) error {
 	return nil
 }
 
+// sqlQueryResult 是 /api/dbsql 返回的只读查询结果(客户端视图)。
+//
+// 环境字段(Env/SSHHost/Zone/DBTarget)与 Ent/Account 一起构成"这次查询落在哪"的完整答案:
+// ENT 决定账号(哪个 schema),环境决定连的是哪台服务器、哪个区的库 —— 同一个企业编号
+// 在开发区与正式区是两套库,只回显其一就不足以发现"查错了地方"。
+type sqlQueryResult struct {
+	Ent           int        `json:"ent"`
+	Account       string     `json:"account"`
+	Env           string     `json:"env"`
+	SSHHost       string     `json:"sshHost"`
+	Zone          string     `json:"zone"`
+	DBTarget      string     `json:"dbTarget"`
+	Dialect       string     `json:"dialect"`
+	Columns       []string   `json:"columns"`
+	Rows          [][]string `json:"rows"`
+	TotalRows     int        `json:"totalRows"`
+	Truncated     bool       `json:"truncated"`
+	ServerLimited bool       `json:"serverLimited"`
+	Elapsed       float64    `json:"elapsedSeconds"`
+	Notes         []string   `json:"notes"`
+}
+
+// sqlHeaderLines 组装 CSV 之前的 `# ` 信息块。
+//
+// 为什么是注释行而不是"CSV 里的元数据行":输出要同时满足两件事 ——
+//  1. 环境与**本次用的企业编号(ENT)**必须出现在结果里。只读 SQL 最危险的错误结论是
+//     "查不到 = 数据不存在",而它往往只是企业编号或环境上错了(表现为 0 行);
+//  2. CSV 主体必须保持纯净:只有表头行 + 数据行,任何标准 CSV 解析器拿来就能用。
+//
+// 注释行是唯一两者兼得的写法(与 shell 的习惯一致)。标记取「# 」(井号 + 空格)而不是光一个
+// 井号:值本身以 # 开头是常事(#FF0000 这类色号),那样 grep 会把一条**数据行**当注释切掉。
+// 信息块整体在头部、不夹在数据里,所以 grep -v '^# ' 一刀切下去就是干净的 CSV。
+func sqlHeaderLines(res sqlQueryResult) []string {
+	lines := make([]string, 0, 4+len(res.Notes))
+	if s := sqlEnvLine(res); s != "" {
+		lines = append(lines, s)
+	}
+	if s := sqlWhereLine(res); s != "" {
+		lines = append(lines, s)
+	}
+	lines = append(lines, sqlCountLine(res))
+	for _, n := range res.Notes {
+		lines = append(lines, "注:"+n)
+	}
+	return lines
+}
+
+// sqlEnvLine = 环境名 + SSH 主机 + 区域。三样都是"上错地方"的判据,能拿到就都回显。
+func sqlEnvLine(res sqlQueryResult) string {
+	var parts []string
+	if res.Env != "" {
+		parts = append(parts, "环境 "+res.Env)
+	}
+	if res.SSHHost != "" {
+		parts = append(parts, "SSH "+res.SSHHost)
+	}
+	if res.Zone != "" {
+		parts = append(parts, "区域 "+res.Zone)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// sqlWhereLine = 本次查询真正用的企业(ENT)→ 账号,以及库与耗时。
+//
+// 企业编号排在这一行的最前面并且带上 `ENT` 字样:它是"查不到数据"时**第一个**要核对的值,
+// 也是命令行里 --ent 覆盖的正是它(默认取会话的 TOPENT,会话一换就变)。
+func sqlWhereLine(res sqlQueryResult) string {
+	parts := []string{fmt.Sprintf("企业(ENT) %d → 账号 %s", res.Ent, res.Account)}
+	if res.Dialect != "" {
+		parts = append(parts, "库 "+res.Dialect)
+	}
+	if res.DBTarget != "" {
+		parts = append(parts, res.DBTarget)
+	}
+	parts = append(parts, fmt.Sprintf("只读事务 · 用时 %.2fs", res.Elapsed))
+	return strings.Join(parts, " · ")
+}
+
+func sqlCountLine(res sqlQueryResult) string {
+	switch {
+	case res.Truncated:
+		// TotalRows 只是**下界**:库侧包装时故意多取了一行用来判"还有更多",
+		// 所以写成"共 N 行"会让人以为结果就这么多。
+		return fmt.Sprintf("行数 %d(已截断:库侧返回 ≥%d 行,只保留前 %d 行;要更多请加 WHERE 收窄)",
+			len(res.Rows), res.TotalRows, len(res.Rows))
+	case len(res.Rows) == 0:
+		return "行数 0(注意:上错号/上错环境也会是 0 行,先核对上面的企业编号)"
+	default:
+		return fmt.Sprintf("行数 %d", len(res.Rows))
+	}
+}
+
+// writeSQLResult 输出一次只读查询:先是 `# ` 信息块,再是纯净 CSV(表头 + 数据)。
+//
+// 空结果集时**不写 CSV 表头** —— 没有列名可写,写一行空的反而像"结果被吞了";
+// 用一行注释说明即可。
+func writeSQLResult(w io.Writer, res sqlQueryResult) error {
+	var b bytes.Buffer
+	for _, ln := range sqlHeaderLines(res) {
+		fmt.Fprintf(&b, "# %s\n", ln)
+	}
+	if len(res.Columns) == 0 {
+		b.WriteString("# (无结果集)\n")
+		_, err := w.Write(b.Bytes())
+		return err
+	}
+	cw := csv.NewWriter(&b)
+	if err := cw.Write(res.Columns); err != nil {
+		return err
+	}
+	for _, row := range res.Rows {
+		if err := cw.Write(row); err != nil {
+			return err
+		}
+	}
+	cw.Flush()
+	if err := cw.Error(); err != nil {
+		return err
+	}
+	_, err := w.Write(b.Bytes())
+	return err
+}
+
 // debugSQLCmd 只读 SQL:查业务数据("这个料号在主表里到底有没有")
 var debugSQLCmd = &cobra.Command{
 	Use:          `sql "<查询语句>"`,
-	Short:        "执行一条只读 SQL(账号由 TOPENT 决定;白名单 + 库侧只读事务双重约束)",
+	Short:        "执行一条只读 SQL(默认 CSV 输出,头部回显环境与 ENT;账号由 TOPENT 决定)",
 	SilenceUsage: true, // 报错多为运行期(白名单拒绝/库上出错),不是用法问题
 	Long: `对当前环境查一条**只读** SQL,用来回答"这条业务数据到底有没有/是什么" ——
 排查接口失败时,靠改入参反复重放去反推太慢,这里能直接看一眼。
@@ -1055,9 +1179,20 @@ var debugSQLCmd = &cobra.Command{
   tt debug sql --file q.sql              # 长语句从本地文件读
   tt debug sql "select * from t" --ent 100   # 显式指定企业(默认取会话的 TOPENT)
 
-**账号由企业编号(TOPENT)决定**,不需要你操心 —— 而且结果头部会把
-「企业 N → 账号 X」打印出来。觉得查不到数据时先看这一行:企业编号错了就会查到
-另一个 schema、拿到 0 行,那看起来和"数据不存在"一模一样。
+**输出是 CSV**(不是 JSON):头部若干行注释给出**环境信息**,其后是纯净的
+CSV 主体 —— 表头行 + 数据行。注释行一律以「# 」(井号 + 空格)开头且**全在头部**,
+所以 grep -v '^# ' 切下去就是一个标准 CSV 文件(逗号/引号/换行会被正确转义)。
+示例:
+
+  # 环境 开发环境 · SSH 10.0.0.1 · 区域 31
+  # 企业(ENT) 99 → 账号 dsdemo · 库 oracle · 10.0.0.2:1521/t100dev · 只读事务 · 用时 1.67s
+  # 行数 2
+  BMAA001,BMAASTUS
+  FCPU010100003,Y
+
+头部那行**必须看**:账号由企业编号(TOPENT)决定,企业编号错了就会查到另一个
+schema、拿到 0 行 —— 那看起来和"数据不存在"一模一样。要机器可读的完整结构
+(含 totalRows/truncated/notes 等字段)用 --json。
 
 限制(都是刻意的,不是没做):
   - 只允许**单条** SELECT / WITH;写操作、DDL、PL/SQL 块、多语句、sqlplus 命令一律拒绝;
@@ -1093,50 +1228,18 @@ var debugSQLCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		// --json 是**显式**要结构化详情(脚本/CI 路线);默认输出是 CSV,见上面的说明。
 		if IsJSON() {
 			fmt.Println(string(data))
 			return nil
 		}
 		var r struct {
-			Result struct {
-				Ent           int        `json:"ent"`
-				Account       string     `json:"account"`
-				Dialect       string     `json:"dialect"`
-				Columns       []string   `json:"columns"`
-				Rows          [][]string `json:"rows"`
-				TotalRows     int        `json:"totalRows"`
-				Truncated     bool       `json:"truncated"`
-				ServerLimited bool       `json:"serverLimited"`
-				Elapsed       float64    `json:"elapsedSeconds"`
-				Notes         []string   `json:"notes"`
-			} `json:"result"`
+			Result sqlQueryResult `json:"result"`
 		}
 		if err := json.Unmarshal(data, &r); err != nil {
 			return err
 		}
-		res := r.Result
-		// 这一行是**必须**的:查不到数据时,先要能一眼看出是不是上错了号
-		fmt.Printf("企业 %d → 账号 %s(%s,只读事务,用时 %.2fs)\n", res.Ent, res.Account, res.Dialect, res.Elapsed)
-		for _, n := range res.Notes {
-			fmt.Printf("  注:%s\n", n)
-		}
-		if len(res.Columns) == 0 {
-			fmt.Println("(无结果集)")
-			return nil
-		}
-		fmt.Println(strings.Join(res.Columns, " | "))
-		for _, row := range res.Rows {
-			fmt.Println(strings.Join(row, " | "))
-		}
-		switch {
-		case res.Truncated:
-			fmt.Printf("— 共返回 %d 行,只显示前 %d 行。要更多请加 WHERE 收窄。\n", res.TotalRows, len(res.Rows))
-		case len(res.Rows) == 0:
-			fmt.Println("— 0 行。注意:上错号也会是 0 行,先核对上面那行的企业编号。")
-		default:
-			fmt.Printf("— %d 行\n", len(res.Rows))
-		}
-		return nil
+		return writeSQLResult(os.Stdout, r.Result)
 	},
 }
 
@@ -1220,7 +1323,7 @@ func init() {
 	debugExecCmd.Flags().IntVar(&dbgExecMax, "max", 2000, "单条命令**显示**的行数上限(0=不限)。超出的部分不打印,但完整输出会落本地并给出路径")
 	debugStartCmd.Flags().IntVar(&dbgTimeout, "timeout", 120, "等待入口停站超时(秒)")
 	debugSQLCmd.Flags().StringVar(&dbgSQLFile, "file", "", "从本地文件读查询语句(长语句用)")
-	debugSQLCmd.Flags().IntVar(&dbgSQLEnt, "ent", 0, "企业编号(默认取会话的 TOPENT;结果头会回显实际用的企业与账号)")
+	debugSQLCmd.Flags().IntVar(&dbgSQLEnt, "ent", 0, "企业编号(默认取会话的 TOPENT;结果头部的 # 注释会回显实际用的环境、企业与账号)")
 	debugSQLCmd.Flags().IntVar(&dbgTimeout, "timeout", 0, "查询超时秒数(默认 30,上限 120)")
 	debugWsdebugCmd.Flags().IntVar(&dbgTimeout, "timeout", 150, "等待入口停站超时(秒)")
 	debugWsdebugCmd.Flags().StringArrayVar(&wsDebugSet, "set", nil, "改一个入参再重放:路径=值(可重复;路径形如 digi-body.std_data.parameter.x;等号后留空即清空该字段)")

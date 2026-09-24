@@ -313,7 +313,7 @@ PUT 只接受要改的节（缺省 = 不动），交给 `internal/config` 的原
 | `wait` | 等会话事件（`--for stopped,exit,dead,watchdog`、`--timeout`）：事件一到即返回，超时返回 `timedOut`（不是错误） |
 | `source` | 读服务器源码（登录区源码目录白名单只读，`--from/--to` 取行段，`--path-only` 只要行数与本地副本路径）；每次读取落一份本地副本供整读 |
 | `logs` / `locate <函数>` / `resolve <作业>` / `interrupt` | 会话事件 / 定位函数到 文件:行 / 解析作业编号 → 实体程序（不建会话）/ 中断运行中或卡住的程序 |
-| `sql "<语句>"` | 执行一条**只读** SQL（单条 SELECT/WITH；账号由 TOPENT 经 `gzou_t` 解析并在结果头回显「企业→账号」；白名单 + 库侧只读事务双重约束，最多 200 行；`hosts.sshs[].db.readonlySql=false` 可关闭） |
+| `sql "<语句>"` | 执行一条**只读** SQL（单条 SELECT/WITH；账号由 TOPENT 经 `gzou_t` 解析）。**默认输出 CSV**：头部若干行 `# ` 注释回显**环境信息**（环境名/SSH/区域、**本次用的企业(ENT)→账号**、库与耗时、行数），其后是纯净 CSV 主体（表头 + 数据），`grep -v '^# '` 即得标准 CSV；`--json` 才回结构化详情。白名单 + 库侧只读事务双重约束，最多 200 行；`hosts.sshs[].db.readonlySql=false` 可关闭 |
 | `wslogs` | 接口报文日志列表（`--job` 支持通配、`--service`/`--server`/`--origin`/`--result`/`--pid`/`--from`/`--to`/`--fail`/`--page`/`--show <rowid>`；条件口径对齐 T100 原生 awsq990） |
 | `wsdebug <rowid>` | 按日志报文参数重放调试，停在入口；`--set 路径=值` 改入参再重放（可重复）、`--request-file` 整份替换报文 |
 | `db [--ent N]` | 数据库连接探查：企业(TOPENT) → 账号映射与连接验证（`--refresh` 跳过缓存强制现查） |
@@ -321,6 +321,8 @@ PUT 只接受要改的节（缺省 = 不动），交给 `internal/config` 的原
 | `probe` | 协议驱动器自检尖刺：登录→启动→下断点→步进→求值 |
 
 全局参数 `--config` / `--json` / `-v`；控制端命令另有 `--url` 覆盖自动发现的地址。
+控制端命令默认输出**给人看的文本**；唯一例外是 `sql` —— 它的默认输出是 **CSV**
+（头部 `# ` 注释 + 纯净主体，理由见上表），`--json` 在那条命令上是"显式要结构化详情"。
 
 **「当前环境」有两套语义，都保留**：`tt env use <名称>` 改的是**配置默认**
 （`hosts.activeEnv`）；`tt debug env <名称>` 切的是**活动调试会话**（会重连）。
