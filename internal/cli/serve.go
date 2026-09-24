@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -95,6 +96,17 @@ func newServeCmd() *cobra.Command {
 			cfg, err := debug.LoadConfigAllowEmpty(path)
 			if err != nil {
 				return err
+			}
+
+			// 启动清理缓存:只删超过 CacheMaxAge 的,不动手上的东西 ——
+			// spill 里那些文件的用途正是"刚才那条查询的完整结果",启动即全清会把
+			// 上一条命令刚告诉用户的东西删掉(见 internal/config/cache.go)。
+			// 清缓存是维护动作不是启动前提,失败只报一行,不让服务起不来。
+			if removed, freed, cerr := config.CleanCache(dir, config.CacheMaxAge); cerr != nil {
+				fmt.Fprintf(os.Stderr, "缓存清理未完成: %v\n", cerr)
+			} else if removed > 0 {
+				fmt.Printf("已清理过期缓存 %d 个文件(释放 %.1f MB)\n",
+					removed, float64(freed)/(1<<20))
 			}
 			cfg.DataDir = dir
 

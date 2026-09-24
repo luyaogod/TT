@@ -161,6 +161,22 @@ export interface ConfigStatus {
   bdldoc: DirStatus
   sync: FileStatus
   install: InstallStatus
+  cache: CacheStatus
+}
+// 配置目录下的缓存:可再生的中间数据,与 config.json 同目录但性质相反
+export interface CacheDirStatus {
+  name: string
+  path: string
+  exists: boolean
+  bytes: number
+  files: number
+}
+export interface CacheStatus {
+  dir: string
+  dirs: CacheDirStatus[]
+  bytes: number
+  files: number
+  maxAgeHours: number
 }
 // 源码镜像拉取的进度(host.MirrorPullProgress),经 GET /api/mirror 轮询
 export interface MirrorEnv {
@@ -284,6 +300,10 @@ export const api = {
   // 配置派生状态:路径型取值的"在本机是否真的存在"只有服务端算得出来(要 os.Stat)。
   // 单独一个端点而不并进 /api/hosts —— 后者是每次进设置都读的热路径。
   configStatus: () => req<ConfigStatus>('/api/config/status'),
+  // 清理缓存:只删可再生的中间数据(config.json 与服务状态文件一律不动)。
+  // 连同清完的状态一起回,前端不必再打一次 configStatus 才能刷新数字。
+  cacheClear: () =>
+    req<{ removed: number; freed: number; cache: CacheStatus }>('/api/cache/clear', { method: 'POST' }),
   // 配置元信息:配置文件缺省落点、便携标记、schema 版本、支持的库类型…
   configMeta: () => req<ConfigMeta>('/api/config/meta'),
   // 命令行安装(PATH):应用级动作,统一层提供(合并前在字典子系统的私有 API 下)

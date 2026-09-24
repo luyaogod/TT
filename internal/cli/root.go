@@ -78,6 +78,7 @@ func init() {
 
 	rootCmd.AddCommand(newEnvCmd())
 	rootCmd.AddCommand(newConfigCmd())
+	rootCmd.AddCommand(newCacheCmd())
 	rootCmd.AddCommand(newServeCmd())
 	rootCmd.AddCommand(newInstallCmd())
 	rootCmd.AddCommand(newVersionCmd())

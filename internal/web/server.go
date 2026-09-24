@@ -120,6 +120,7 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/conntest", s.hConnTest)
 	m.HandleFunc("GET /api/config/meta", s.hConfigMeta)
 	m.HandleFunc("GET /api/config/status", s.hConfigStatus)
+	m.HandleFunc("POST /api/cache/clear", s.hCacheClear)
 	// 命令行安装(PATH):应用级动作,归统一层 —— 合并前它在 /dict/api/install 下,
 	// 于是共用的设置页要用它就得去调字典子系统的私有 API。
 	m.HandleFunc("GET /api/install", s.hInstallGet)

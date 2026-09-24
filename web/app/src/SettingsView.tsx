@@ -288,6 +288,8 @@ export function SettingsView() {
   const [meta, setMeta] = useState<ConfigMeta | null>(null)
   const [installBusy, setInstallBusy] = useState(false)
   const [installNote, setInstallNote] = useState('')
+  const [cacheBusy, setCacheBusy] = useState(false)
+  const [cacheNote, setCacheNote] = useState('')
   // 源码镜像 / 字典同步的运行态:它们是**动作**(长跑任务 + 进度),不再是独立页面,
   // 就住在「数据字典」分区的对应卡片里。
   const [mirror, setMirror] = useState<MirrorResp | null>(null)
@@ -547,6 +549,22 @@ export function SettingsView() {
     } catch (ex: any) {
       setInstallNote('操作失败: ' + (ex.message || String(ex)))
     } finally { setInstallBusy(false) }
+  }
+
+  // ---- 缓存清理 ----
+  // 只删可再生的中间数据(后端只认 internal/config 那份清单);config.json 不碰。
+  // 后端把清完的状态一起回,所以这里不必再打一次 configStatus。
+  const doClearCache = async () => {
+    setCacheBusy(true); setCacheNote('')
+    try {
+      const r = await api.cacheClear()
+      setStatus((prev) => (prev ? { ...prev, cache: r.cache } : prev))
+      setCacheNote(r.removed > 0
+        ? `已清理 ${r.removed} 个文件,释放 ${fmtBytes(r.freed)}`
+        : '没有可清理的文件')
+    } catch (ex: any) {
+      setCacheNote('清理失败: ' + (ex.message || String(ex)))
+    } finally { setCacheBusy(false) }
   }
 
   // 「已保存」提示短暂停留后回到空闲
@@ -1276,6 +1294,40 @@ ${sync?.target || ''}
                 <InfoRow label="支持的库类型" value={meta?.supportedTypes?.join(' / ') || '—'} />
                 <InfoRow label="默认环境" value={cfg.activeEnv || '(未设置)'} />
                 <InfoRow label="环境数" value={String(cfg.sshs?.length ?? 0)} />
+              </Card>
+
+              <Card id="card-app-cache" title="缓存">
+                <p className="text-[11px] text-muted-foreground">
+                  跑出来的可再生数据(企业快照、源码镜像、查询落盘、断点存档)。它们与 config.json
+                  同目录,但性质相反 —— 清除只动这些,配置文件一律不碰。
+                </p>
+                <InfoRow label="缓存目录" value={status?.cache?.dir || '—'} />
+                {(status?.cache?.dirs ?? []).map((d) => (
+                  <div key={d.name} className="flex items-center justify-between gap-2 text-[11px]">
+                    <span className="font-mono">{d.name}</span>
+                    <span className="text-muted-foreground">
+                      {d.exists ? `${fmtBytes(d.bytes)} · ${d.files} 个文件` : '无'}
+                    </span>
+                  </div>
+                ))}
+                <InfoRow
+                  label="共"
+                  value={`${fmtBytes(status?.cache?.bytes ?? 0)} · ${status?.cache?.files ?? 0} 个文件`}
+                />
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <Button size="sm" variant="outline" disabled={cacheBusy}
+                    onClick={() => void doClearCache()}>
+                    <Trash2 className="mr-1 h-3.5 w-3.5" />
+                    {cacheBusy ? '清理中…' : '清除缓存'}
+                  </Button>
+                  {cacheNote && <span className="text-[11px] text-muted-foreground">{cacheNote}</span>}
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  tt serve 启动时会自动清理超过{' '}
+                  {Math.max(1, Math.round((status?.cache?.maxAgeHours ?? 168) / 24))} 天的缓存
+                  —— 刻意不"启动即全清":查询落盘的那些文件正是"刚才那条查询的完整结果",
+                  启动就删会把上一条命令刚告诉你的东西删掉。
+                </p>
               </Card>
             </>
           )}

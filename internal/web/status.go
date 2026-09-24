@@ -32,6 +32,9 @@ type configStatus struct {
 	Install pathinstall.Status `json:"install"`
 	// Tzs .tzs 表单引擎的运行时依赖:引擎 exe(随包分发)、设计器目录与工作区(用户配的)。
 	Tzs config.TzsStatus `json:"tzs"`
+	// Cache 配置目录下那些**可再生**中间数据的占用(企业快照/源码镜像/查询落盘/断点存档)。
+	// 与 config.json 同目录但性质相反,所以单独一个块,并明确"它不是你的数据"。
+	Cache config.CacheStatus `json:"cache"`
 }
 
 // defaultEngineExe 引擎 exe 的缺省位置:<tt.exe 所在目录>\tzs\tzs-server.exe。
@@ -62,7 +65,39 @@ func (s *Server) hConfigStatus(w http.ResponseWriter, r *http.Request) {
 	// 引擎 exe 的状态与配置读没读到无关(它随包分发),所以放在分支外。
 	st.Tzs = config.TzsStatusOf(tzsCfg, defaultEngineExe())
 	st.Install = pathinstall.Get()
+	// 缓存就在配置目录下,配置读不到也算得出来(缓存与配置文件无关)。
+	st.Cache = config.CacheStatusOf(cacheDirOf(path))
 	writeJSON(w, http.StatusOK, st)
+}
+
+// cacheDirOf 缓存所在目录 = 配置目录(缓存是它下面那几个子目录)。
+func cacheDirOf(configPath string) string {
+	if configPath == "" {
+		return ""
+	}
+	return filepath.Dir(configPath)
+}
+
+// hCacheClear 清理缓存(设置页那个「清除缓存」按钮走的端点)。
+//
+// **只删缓存**:config.json 与运行中的服务状态文件一律不动 —— 哪些算缓存由
+// internal/config/cache.go 定义一次,这里不自己列目录,免得两处各列一份、某天漂了。
+func (s *Server) hCacheClear(w http.ResponseWriter, r *http.Request) {
+	path, err := s.configPath(true)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	dir := cacheDirOf(path)
+	removed, freed, err := config.CleanCache(dir, 0)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	// 连同清完之后的状态一起回:前端不必再打一次 status 才能刷新数字
+	writeJSON(w, http.StatusOK, map[string]any{
+		"removed": removed, "freed": freed, "cache": config.CacheStatusOf(dir),
+	})
 }
 
 // syncDefaultTarget 同步目标的缺省位置。由 Options 注入以便与字典子系统取同一个值
