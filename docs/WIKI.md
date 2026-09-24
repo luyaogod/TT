@@ -9,7 +9,7 @@ TT 是一款面向 Agent 的 CLI 开发工具，用于开发基于 Genero BDL �
 ```
 tt debug …     作业调试器：SSH 驱动 fglrun -d 的 (fgldb) 协议 + 本地 Web 工作台
 tt dev tzc …   设计器代码包（.tzc/.tzf/.tzx）：渲染带围栏的 4GL 工作区，apply 写回
-tt dev tzs …   设计器表单包（.tzs/.tzv）：50 个具名动词 + JSON 参数（field_add 任务级 + open/save/set_spec_attr…），
+tt dev tzs …   设计器表单包（.tzs/.tzv）：52 个具名动词 + JSON 参数（field_add 任务级 + open/save/set_spec_attr…），
                由设计器自己的引擎读写，不是拼 XML
 tt dict …      ERP 数据字典查询：表/字段/校验/分类码/开窗/消息/参数/程序
 tt env / config / serve / install / version
@@ -1071,7 +1071,7 @@ function.* / dialog.* / report.*               → 自订定义点（TAP 有，�
 |---|---|---|---|
 | `export <pkg> [-o <dir>] [--force]` | 纯解压（只读参考，不依赖引擎也不依赖设计器） | 否 | 否 |
 | `field_add --args '{"file":…,"table":…,"columns":[…],"out":…}'` | **任务级**：挑容器 + 建字段 + 报校验增量 + 存新包（一次请求做完，见 §7.5.4） | 是 | 只写 `out` 指定的**新**包 |
-| `<动词> --args '<JSON 对象>'` | 读写表单，**唯一写路径**（**50 个具名动词**，见下） | 是 | 只经 `save` 写到**新**包 |
+| `<动词> --args '<JSON 对象>'` | 读写表单，**唯一写路径**（**52 个具名动词**，见下） | 是 | 只经 `save` 写到**新**包 |
 | `--help` / `<动词> --help` | 动词清单（按组，引擎可达时附在帮助后）/ 单个动词的参数表 + **一条能直接粘的示例** | 是（不 Boot；拿不到就只给静态用法） | 否 |
 | `doctor` | 环境自检（引擎 exe / 设计器目录 / 工作区 / 管道名 / 守护进程） | 是 | 否 |
 | `stop` / `reap [--yes]` | 停本工作区的常驻引擎（不启动新的）/ 清理重编后停不掉的孤儿 | 否（要配工作区） | 否 |
@@ -1104,7 +1104,7 @@ function.* / dialog.* / report.*               → 自订定义点（TAP 有，�
 ### 7.3 寻址：`--form`（逻辑键），不是搬运句柄
 
 ```powershell
-tt dev tzs set_spec_attr --form aapp320 --args '{"path":"…","kind":"field","attr":"can_edit","value":"true"}' --json
+tt dev tzs set_spec_attr --form aapp320 --args '{"path":"…","kind":"field","attr":"can_edit","value":"Y"}' --json
 ```
 
 `--form` 写**程序名**（`aapp320`）或 **ProgramKey**（`aapp320|Form`），由**引擎**解析成会话
@@ -1127,7 +1127,10 @@ tt dev tzs set_spec_attr --form aapp320 --args '{"path":"…","kind":"field","at
 
 - **句柄永不复用**：`close` 掉一个包再 `open` 同一个包拿到的是**新号**。
 - **同一个程序已经开着再 `open` → `E_KEY_IN_USE`（退 4）**，报错会说清是哪个文件占着。
-  先 `close` 占用者（`list_open` 看是谁），或 `"force":true`（只对 `Loaded` 状态的占用者有效）。
+  先 `close` 占用者（`list_open` 看是谁）。**`open` 的 `force` 声明了但没实现**：manifest 里
+  有这个名字（`Manifest.cs:156`），函数体明确拒绝并给出正确做法（`Fns/Session.cs:168-172`）——
+  理由是"接管占用者"正是契约禁止的静默驱逐。删声明排在引擎批次（见 §7.5.2 的代价说明），
+  在那之前**别照参数表去用它**。
 - 句柄只活在常驻守护进程里。**进程一死全部失效** —— 守护进程挂了就重新 `open`，别重放写请求。
 
 ### 7.4 `validate` 是基线相对的
@@ -1237,6 +1240,13 @@ tt dev tzs nudge --form aapp320 --args '{"paths":["a/b","c/d"],"direction":"righ
 代价写在明处：**枚举动词多了一步**（`--help` 才看得到清单，且引擎不可达时清单是空的）。
 换来的是一条清晰的边界：`tt` 对外只有"动词"这一层，引擎的函数表（名字 + 参数 + 类型 + 取值集）
 是它自己的内部契约 —— 想直接看它，用引擎自己的开关 `tzs-server --manifest`。
+
+代价写在明处（其二）：**manifest 会声明"引擎故意不实现"的参数**。目前是 `open` 的 `force` ——
+参数表里有它（`Manifest.cs:156`），函数体则直接拒绝并给出正确做法（先 `close` 占用者；
+`Fns/Session.cs:168-172`），理由是"接管占用者"正是契约禁止的静默驱逐。所以
+`tt dev tzs open --help` 会把一个照写必失败的参数列出来（`E_NOT_IMPLEMENTED`，退 1）。
+删掉那行声明属于引擎改动（`SPEC.md:1572` 也一并改），排到引擎批次；在那之前按 SKILL §6
+的说法走：占用者只能被显式 `close`。
 
 #### 7.5.3 帮助里的示例是**生成**的
 
@@ -1865,11 +1875,13 @@ TDev 的两点被完整保留：位置无关的参数解析（`-o`/`--json` 可�
   全局 flag，所以 `--config` 会被摘出来转成 `TT_CONFIG` 再转发。三种写法都已验证可用。
 - **`internal/dev` 的 `store.ToolName` 仍写作 `"tdev tzc"`**：那是写进 `manifest.json` 的持久化
   字段，没有任何代码读它；保持稳定意味着重命名二进制不会让已有工作区的 manifest 变身份。
-- **`.tzs` 引擎的语料回归没有全函数面覆盖**：`engine/gate-w3-fns.py` 驱动全部 34 个写函数跑在
-  一个长驻进程里（只有这样才能看见 `ComponentTabIndexService` 的状态泄漏），每组带负向对照；
-  Go 侧测试驱动 8–10 个函数，是**语料的回归网，不是函数面的覆盖网**。它没有 Go 等价物，
-  所以保留在 `engine/` 里。`gate-w3.py` 的 B-neg（"不写直接存"与"被拒的写之后存"必须逐字节
-  相同）也还没有搬过来。
+- **`.tzs` 引擎的语料回归没有全函数面覆盖**：当时驱动全部写函数的是 `engine/gate-w3-fns.py`
+  （把 33 个写函数跑在一个长驻进程里，只有这样才能看见 `ComponentTabIndexService` 的状态泄漏），
+  每组带负向对照；Go 侧测试驱动 8–10 个函数，是**语料的回归网，不是函数面的覆盖网**。
+  ⚠️ **那个脚本现在跑不起来**：它 import 的 `gate-w3.py` 与 `gate-w2.py` / `batch*.sh` 一起
+  在 `cbbd866` 被删除（`gate-w3.py` 本来就在反编译树里、从未进过仓库）。所以"函数面覆盖"
+  这件事**目前是空的** —— 不是"保留在 `engine/` 里所以还在"。要补就得在 Go 侧补，
+  `gate-w3.py` 的 B-neg（"不写直接存"与"被拒的写之后存"必须逐字节相同）同样空着。
 - **在线/离线**：本项目只做离线（本地镜像、本地 SQLite）。在线那一层不在范围里。
 - **设置页没有搜索框**（用户明确说不做）；**每环境的 `launchArgs`/`watchdogSeconds` 不在界面上
   暴露**，靠服务端保留机制保证不被丢掉。

@@ -49,7 +49,7 @@ const tzsUsage = `tt dev tzs —— 表单包工具（导出只读；读写表�
         #   tt dev tzs open           --args '{"path":"D:\\pkg\\aapp320(c).tzs"}' --json
         #   tt dev tzs list_open --json                      # 无参数的动词可以省掉 --args
         #   tt dev tzs form_tree      --form aapp320 --args '{"depth":2}' --json
-        #   tt dev tzs set_spec_attr  --form aapp320 --args '{"path":"<path>","kind":"field","attr":"can_edit","value":"true"}'
+        #   tt dev tzs set_spec_attr  --form aapp320 --args '{"path":"<path>","kind":"field","attr":"can_edit","value":"Y"}'
         #   tt dev tzs validate       --form aapp320 --json
         #   tt dev tzs save           --form aapp320 --args '{"out":"D:\\pkg\\_ai.tzs"}' --json   # 写**新**包
         # --form 是"哪一张已打开的表单"：写程序名（aapp320）或 ProgramKey（aapp320|Form），

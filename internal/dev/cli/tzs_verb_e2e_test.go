@@ -97,7 +97,7 @@ func TestE2EVerbSurface(t *testing.T) {
 		}
 
 		// ⑤ `--help` 里那条示例：`--args` 那一段必须真的是合法 JSON ——
-		//    用坏例子教人是最坏的一种错，而这 50 条都是生成的，一次全检很便宜。
+		//    用坏例子教人是最坏的一种错，而所有示例都是生成的，一次全检很便宜。
 		ex := verbExample(f)
 		if f.NeedsHandle && !strings.Contains(ex, "--form") {
 			t.Errorf("%s 的示例该用 --form 寻址：%s", f.Name, ex)

@@ -228,8 +228,10 @@ tt dev tzs set_spec_attr --form aapp320 --args '{"path":"…","kind":"field","at
 ## 6. 会话与句柄（你只需要知道的最小集）
 
 - **句柄永不复用**：`close` 后再 `open` 同一个包拿到的是新号。旧号去调 → `E_NOT_FOUND`（退 2，安全失败）。
-- **同一个程序已经开着又 `open` → `E_KEY_IN_USE`（退 4）**：先 `close` 占用者（`list_open` 看是谁），
-  或对 `Loaded` 状态的占用者用 `"force":true`。**用 `field_add` + `file` 不会有这个问题**（已开着就复用）。
+- **同一个程序已经开着又 `open` → `E_KEY_IN_USE`（退 4）**：先 `close` 占用者（`list_open` 看是谁）。
+  **`open` 的 `force` 参数尚无实现** —— 它在 manifest 里声明着，用了会明确回
+  `E_NOT_IMPLEMENTED`（引擎故意不做"静默接管占用者"），别照参数表去试。
+  **用 `field_add` + `file` 不会有这个问题**（已开着就复用）。
 - 会话只活在常驻守护进程里：**进程一死全部失效**，重新 `open` 即可。
 - **请求一旦上线绝不重试**：协议没有幂等键，这些动词都在改设计器内存里的模型，重试是在赌
   「上一次写进去了没有」。

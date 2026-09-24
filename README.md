@@ -7,8 +7,8 @@ tt debug …     作业调试器：SSH 驱动 fglrun -d 的 (fgldb) 文本调试
                本地 Web 界面（源码/断点/调用栈/变量/接口日志）+ 命令行控制端
 tt dev tzc …   设计器代码包（.tzc/.tzf/.tzx）：渲染成带围栏的 4GL 工作区给人/AI 改，
                改完走三道闸门写回
-tt dev tzs …   设计器表单包（.tzs/.tzv）：export 纯解压只读；读写表单走 call，
-               由设计器自己的引擎驱动
+tt dev tzs …   设计器表单包（.tzs/.tzv）：export 纯解压只读；读写表单走**具名动词**
+               (`tt dev tzs <动词> --args '<JSON>'`)，由设计器自己的引擎算，不是拼 XML
 tt dict …      ERP 数据字典查询：r.t / r.v / desc / scc / r.q / prog，本地镜像与远程直查
 
 tt env …       环境管理（各命令组共用同一份环境清单）
@@ -97,7 +97,7 @@ tt serve                                    # 起服务，浏览器打开它打�
 tt debug start <作业> -m <模块>              # 调程序 → 细节见 skills/tt-debug
 tt dev tzc export "D:\pkg\x.tzc"            # 改 4GL 客制 → 细节见 skills/tt-dev-tzc
 tt dev tzs field add --args '{"file":"D:\\pkg\\x.tzs","table":"pmdl_t","columns":["pmdlent","pmdlsite"],"out":"D:\\pkg\\_ai.tzs"}'
-                                            # 改表单 → 细节见 skills/tt-dev-tzs（50 个具名动词 + JSON 参数）
+                                            # 改表单 → 细节见 skills/tt-dev-tzs（52 个具名动词 + JSON 参数）
 tt dict r.t --kw 应收                        # 查字典     → 细节见 skills/tt-dict
 ```
 

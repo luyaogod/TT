@@ -269,7 +269,52 @@ func TestRunTzsVerbLocalFailures(t *testing.T) {
 	}
 }
 
-// TestUsageTextHasNoStaleAdvice 是文档漂移的机械防线。
+// staleRule 是一条禁断言：命中它 = 这份文本在教一个注定失败的调用。
+type staleRule struct {
+	re  *regexp.Regexp
+	why string
+}
+
+// callGatewayRules 只在 Go 的用法常量上成立。
+//
+// 刻意**不**用到文档上：`docs/WIKI.md` §7.5.1 是故意在讲那个已删除的网关
+// （"为什么把 flag 形式整个删掉（曾经是 `call <fn> --handle h9 …`）"），
+// 拿这条去扫文档会把一段正常的史实判成漂移。
+var callGatewayRules = []staleRule{
+	{regexp.MustCompile(`call <fn>|tzs call`),
+		"call 网关已删除：动词就是函数名，参数用 JSON 给"},
+}
+
+// valueRules 对**所有**面向调用方的文本成立，文档也在内 —— 文档里的示例正是被抄走的那个。
+//
+// 用正则而不是字面子串，因为**判据不是"值写错了"，是"属性与值配错了"**：布局侧
+// `scroll` 是 BOOLEAN，`{"attr":"scroll","value":"true"}` 是**合法**的，
+// 禁掉 `"value":"true"` 会误伤它。真正错的是把 `"true"` 给了下面那三个勾选位。
+var valueRules = []staleRule{
+	// 窗口卡在两个键之间（不跨行、不跨 }），免得把一份文档里相隔很远的
+	// "can_edit" 与某个 "true" 连起来判成一处。
+	{regexp.MustCompile(`"(?:can_edit|can_query|req)"[^\n}]{0,80}"true"`),
+		"这三个是设计器面板的勾选位，只收 Y / N / 空串（写 true 引擎会拒）"},
+	{regexp.MustCompile(`"force"\s*:\s*true`),
+		"open 的 force 引擎故意没实现（只能先 close 占用者）"},
+}
+
+// checkNoStaleLines 逐行扫，命中就带行号报出来。
+//
+// 逐行（而不是整块 FindString）有两个好处：报错能指到行；报错不需要把整份文档
+// 打进测试输出 —— 一份 1900 行的 WIKI 打出来会淹掉真正的那一行。
+func checkNoStaleLines(t *testing.T, name, text string, rules []staleRule) {
+	t.Helper()
+	for i, ln := range strings.Split(text, "\n") {
+		for _, r := range rules {
+			if m := r.re.FindString(ln); m != "" {
+				t.Errorf("%s:%d 里还在教 %q（%s）\n    %s", name, i+1, m, r.why, strings.TrimSpace(ln))
+			}
+		}
+	}
+}
+
+// TestUsageTextHasNoStaleAdvice 是文档漂移的机械防线（Go 侧的用法常量）。
 //
 // 这类漂移的共同后果是**调用方照着帮助敲一条注定失败的调用**，而它不会让任何别的测试失败：
 //
@@ -277,37 +322,19 @@ func TestRunTzsVerbLocalFailures(t *testing.T) {
 //	can_edit / can_query / req 给 "true"   引擎只收 Y / N / 空串
 //	"force":true                  open 的 force 引擎故意没实现，用了必抛
 //
-// 前两条各自都真发生过，而且是**同一句话在两处**：SKILL 里的 "true" 教法在 b530001
-// 才被删掉，那句教法同时还活在本文件的 tzsUsage 里（帮助与文档各修一次，说明
-// "手写的一定漂移"）。所以这里的禁断言覆盖**所有**面向调用方的文本，而不只是含 <动词> 的那两份。
-//
-// 三条断言都用正则而不是字面子串，因为**判据不是"值写错了"，是"属性与值配错了"**：
-// 布局侧 `scroll` 是 BOOLEAN，`{"attr":"scroll","value":"true"}` 是**合法**的，
-// 禁掉 `"value":"true"` 会误伤它。真正错的是把 `"true"` 给了上面那三个勾选位。
+// 前两条各自都真发生过，而且是**同一句话在多处**：SKILL 里的 "true" 教法在 b530001
+// 才被删掉，同一句教法当时还活在本文件的 tzsUsage、`Usage` 与 WIKI §7.5 的示例里
+// （帮助与文档各修一次，说明"手写的一定漂移"）。所以禁断言覆盖所有面向调用方的文本 ——
+// 常量这一层用两套规则，文档那一层见 TestLiveDocsHaveNoStaleAdvice。
 func TestUsageTextHasNoStaleAdvice(t *testing.T) {
-	stale := []struct {
-		re  *regexp.Regexp
-		why string
-	}{
-		{regexp.MustCompile(`call <fn>|tzs call`),
-			"call 网关已删除：动词就是函数名，参数用 JSON 给"},
-		// 窗口卡在两个键之间（不允许跨行、跨 }），免得把同一份文档里相隔很远的
-		// "can_edit" 与某个 "true" 连起来判成一处。
-		{regexp.MustCompile(`"(?:can_edit|can_query|req)"[^\n}]{0,80}"true"`),
-			"这三个是设计器面板的勾选位，只收 Y / N / 空串（写 true 引擎会拒）"},
-		{regexp.MustCompile(`"force"\s*:\s*true`),
-			"open 的 force 引擎故意没实现：只能先 close 占用者"},
-	}
-	for name, text := range map[string]string{
+	consts := map[string]string{
 		"tzsUsage":     tzsUsage,
 		"Usage":        Usage,
 		"installUsage": installUsage,
-	} {
-		for _, s := range stale {
-			if m := s.re.FindString(text); m != "" {
-				t.Errorf("%s 里还在教 %q（%s）:\n%s", name, m, s.why, text)
-			}
-		}
+	}
+	for name, text := range consts {
+		checkNoStaleLines(t, name, text, callGatewayRules)
+		checkNoStaleLines(t, name, text, valueRules)
 	}
 
 	// "必须教"的那几条只对 .tzs 的用法文本成立 —— install 的用法讲的是 skills 与 PATH，
@@ -318,6 +345,49 @@ func TestUsageTextHasNoStaleAdvice(t *testing.T) {
 				t.Errorf("%s 里该出现 %s（参数只用 JSON、按程序名寻址）：\n%s", name, want, text)
 			}
 		}
+	}
+}
+
+// liveDoc 是一份**活文档**（与阶段记录相对）：里面的说法必须与今天的代码一致。
+type liveDoc struct{ name, text string }
+
+// liveDocs 读仓库里那几份活文档。**逐个列名**，不通配扫描：`dist/` 在 .gitignore 里
+// 但磁盘上有一份陈旧的 skills 副本，而 `web/node_modules` 里全是 .md ——
+// 扫到它们只会测一份没人看的拷贝。
+//
+// `engine/TASKS.md` 刻意不在里面：它是 Wave 0–3 并行实现期的**阶段记录**，
+// 写的是"当时的状态"与"当时的关卡脚本"，里面的数字是**正确的历史**，
+// 拿今天的真值去判它等于禁止一份记录保持原样。它要的是"标明自己是阶段记录"，
+// 那件事在文件顶部做，不在这里。
+func liveDocs(t *testing.T) []liveDoc {
+	t.Helper()
+	var out []liveDoc
+	for _, rel := range []string{
+		filepath.Join("..", "..", "..", "README.md"),
+		filepath.Join("..", "..", "..", "docs", "WIKI.md"),
+		filepath.Join("..", "..", "..", "skills", "tt-dev-tzs", "SKILL.md"),
+		filepath.Join("..", "..", "..", "engine", "BUILD.md"),
+	} {
+		b, err := os.ReadFile(rel)
+		if err != nil {
+			t.Errorf("读不到 %s：%v（这些属于仓库本体，不是语料那样的外部数据 —— 缺了就是仓库坏了）", rel, err)
+			continue
+		}
+		out = append(out, liveDoc{name: rel, text: string(b)})
+	}
+	return out
+}
+
+// TestLiveDocsHaveNoStaleAdvice 把同一套"教错值"的禁断言用到活文档上。
+//
+// 为什么值得单独一条：这些示例**就是被抄走的那个**。写这条测试时手工找到了三处 ——
+// `tzs.go` 的静态用法、`Usage` 常量、以及 WIKI §7.5 的示例，全都还在教
+// `can_edit` 配 `"true"`；只扫 Go 常量会漏掉第三处。
+//
+// 只扫 valueRules，不扫 callGatewayRules：WIKI 里有**故意**保留的史实（见那边的注释）。
+func TestLiveDocsHaveNoStaleAdvice(t *testing.T) {
+	for _, d := range liveDocs(t) {
+		checkNoStaleLines(t, d.name, d.text, valueRules)
 	}
 }
 
@@ -352,21 +422,8 @@ func docVerbCountClaims(t *testing.T) []verbCountClaim {
 		}
 	}
 	add("tzsUsage", tzsUsage)
-	// 文档**逐个列名**，不通配扫描：`dist/` 在 .gitignore 里但磁盘上有一份陈旧的
-	// skills 副本，而 `web/node_modules` 里全是 .md —— 扫到它们只会测一份没人看的拷贝。
-	for _, rel := range []string{
-		filepath.Join("..", "..", "..", "README.md"),
-		filepath.Join("..", "..", "..", "docs", "WIKI.md"),
-		filepath.Join("..", "..", "..", "skills", "tt-dev-tzs", "SKILL.md"),
-		filepath.Join("..", "..", "..", "engine", "BUILD.md"),
-		filepath.Join("..", "..", "..", "engine", "TASKS.md"),
-	} {
-		b, err := os.ReadFile(rel)
-		if err != nil {
-			t.Errorf("读不到 %s：%v（这些属于仓库本体，不是语料那样的外部数据 —— 缺了就是仓库坏了）", rel, err)
-			continue
-		}
-		add(rel, string(b))
+	for _, d := range liveDocs(t) {
+		add(d.name, d.text)
 	}
 	return claims
 }

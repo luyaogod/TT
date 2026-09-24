@@ -1,5 +1,11 @@
 # 任务板 — T100 `.tzs` AI 集成
 
+> **本文是阶段记录，不是现状说明书。** 它记的是 Wave 0–3（引擎的并行实现期）当时的状态、
+> 当时的关卡脚本与当时的纪律。里面出现的数字与命令**是那个时点的正确值**，此后变化不再回头改。
+>
+> 找"现在怎么跑"请看：`docs/WIKI.md` §9（测试与验收）、`README.md` 的构建一节、
+> 以及 `internal/dev/tzs/corpus_test.go` 顶部的开启方式（`.tzs` 的语料回归已经是 Go 测试）。
+
 契约见 `SPEC.md §11.24`。计划全文在 `C:\Users\18526\.claude\plans\crystalline-cuddling-kahan.md`。
 
 ## 现在的状态
@@ -13,6 +19,12 @@
 > 每个 agent 必须用自己的私有 `OUT`（`dep_w2*` 等），否则跑了一半的门会被换掉的二进制污染。
 
 ## 关卡怎么跑（三个脚本，全语料是关卡手段不是迭代手段）
+
+> **下面这段是当时的命令，现在已经跑不到了。** `gate-w3.py` / `gate-w2.py` / `batch*.sh`
+> 与它们的 `.tsv` 基线已从本仓库删除（改成了 Go 测试）；唯一留下的 `gate-w3-fns.py`
+> 也起不来 —— 它 import 的 `gate-w3.py` 从来没有进过仓库（那份在反编译树
+> `D:\我的项目\T100设计器\.tzs-cli\` 下）。**要跑关卡请照 `docs/WIKI.md` §9 或
+> `internal/dev/tzs/corpus_test.go` 顶部注释**，不要照下面敲。
 
 ```bash
 python gate-w3.py                     # 出货路径 + 全语料（现 67 个），约 8 分钟

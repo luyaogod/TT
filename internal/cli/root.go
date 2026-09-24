@@ -34,9 +34,10 @@ var rootCmd = &cobra.Command{
 
   tt debug …   作业调试器：SSH 驱动 fglrun -d 的 (fgldb) 文本调试协议，
                提供本地 Web 调试界面（源码/断点/调用栈/变量/接口日志）与命令行控制端
-  tt dev …     T100 设计器包工具：
-               .tzc 代码包 —— export 渲染带围栏的 4GL 工作区，apply 走三道闸门写回
-               .tzs 表单包 —— export 纯解压只读；读写表单走 call（设计器自己的引擎驱动）
+  tt dev tzc … T100 设计器代码包（.tzc/.tzf/.tzx）：export 渲染带围栏的 4GL 工作区，
+               apply 走三道闸门写回
+  tt dev tzs … T100 设计器表单包（.tzs/.tzv）：export 纯解压只读；读写表单走具名动词
+               （tt dev tzs <动词> --args '<JSON 对象>'），由设计器自己的引擎算，不是拼 XML
   tt dict …    ERP 数据字典查询：r.t / desc / scc / r.q / prog 等，支持本地镜像与远程直查
 
   tt env …     环境管理：列出/查看/切换 SSH 环境（三个工具共用同一份环境清单）

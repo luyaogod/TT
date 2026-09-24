@@ -60,7 +60,7 @@ const Usage = `tt dev —— T100 设计器包工具：.tzc 代码包 + .tzs 表
         # 参数**只用 JSON 给**；用 --form 指定是哪张已打开的表单（不必搬运句柄）
         # 例：tt dev tzs open          --args '{"path":"D:\\pkg\\aapp320(c).tzs"}' --json
         #     tt dev tzs nudge         --form aapp320 --args '{"paths":["<path>"],"direction":"right","offset":1}' --json
-        #     tt dev tzs set_spec_attr --form aapp320 --args '{"path":"<p>","kind":"field","attr":"can_edit","value":"true"}'
+        #     tt dev tzs set_spec_attr --form aapp320 --args '{"path":"<p>","kind":"field","attr":"can_edit","value":"Y"}'
         #     tt dev tzs list_open --json                                   # 无参数可省 --args
         # 动词全名：tt dev tzs --help     某个动词的参数与示例：tt dev tzs <动词> --help
   tt dev tzs doctor [--json]         # 环境自检（引擎 / 设计器目录 / 工作区 / 管道名）
