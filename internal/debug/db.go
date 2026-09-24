@@ -18,20 +18,13 @@ import (
 	"time"
 
 	"tt/internal/dbconfig"
+	"tt/internal/entdir"
 	"tt/internal/host"
 )
 
-// EntMapping 企业 → 账号映射
-type EntMapping struct {
-	Ent     int    `json:"ent"`
-	Account string `json:"account"` // gzou003:账号/schema 名;"-" 表示没配
-	// Placeholder = 这个企业存在,但 gzou003 为空/占位,没有可用账号。
-	//
-	// 必须单独标出来:光看 Account 是 "-" 会让人(和 agent)以为那就是账号名,
-	// 进而把"没配账号"读成"这个企业不存在" —— 两种结论差别很大。
-	// 不用 omitempty:agent 要能依赖这个键始终存在。
-	Placeholder bool `json:"placeholder"`
-}
+// EntMapping 一个企业编号 → 账号。定义在 internal/entdir:
+// tt dict 的客户端直连路径也解析同一张 gzou_t,两边的映射必须是同一个形状。
+type EntMapping = entdir.Mapping
 
 // DBProbeResult 单账号连接探查结果
 type DBProbeResult struct {

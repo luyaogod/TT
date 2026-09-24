@@ -63,6 +63,14 @@ type Connection struct {
 	// 内部直连凭据槽位（不持久化）：客户端直连前由 DialCred 填入
 	User     string `json:"-"`
 	Password string `json:"-"`
+
+	// Account 本次要用哪个账号（不持久化）。空 = 客户端直连惯例：取账号列表首项。
+	//
+	// 非空时按它取密码（PasswordFor），未收录则回退 T100 惯例 账号=密码 ——
+	// 这是"按企业编号查 gzou_t 解析出的账号"落到连接上的方式，与服务器侧
+	// （internal/debug 的 acctConnStr）同一条规则。两条路径必须对一个环境给出
+	// 同一个账号，否则同一张字典表会被两个 schema 读到而没人察觉。
+	Account string `json:"-"`
 }
 
 // ReadonlySQLEnabled 只读 SQL 是否开启（未配置 = 开启）
@@ -82,8 +90,17 @@ func (c *Connection) DialCred() (user, pass string, ok bool) {
 	return c.Accounts[0].Account, c.Accounts[0].Password, true
 }
 
-// FillDialCred 客户端直连前填充内部凭据槽（无账号返回错误）
+// FillDialCred 客户端直连前填充内部凭据槽。
+// Account 非空时用它（密码查清单，未收录回退 账号=密码）；否则取列表首项。
 func (c *Connection) FillDialCred() error {
+	if c.Account != "" {
+		pass, ok := c.PasswordFor(c.Account)
+		if !ok {
+			pass = c.Account // T100 惯例：未收录的账号，密码=账号
+		}
+		c.User, c.Password = c.Account, pass
+		return nil
+	}
 	u, p, ok := c.DialCred()
 	if !ok {
 		return fmt.Errorf("数据库连接未配置账号(accounts)")

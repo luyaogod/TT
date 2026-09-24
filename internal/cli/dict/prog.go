@@ -96,7 +96,7 @@ func runProgDetail(code string) error {
 		return printProgTables(code, true)
 	}
 
-	if IsJSON() {
+	if Format() != output.FormatTable {
 		jobs, jerr := GetDB().QueryProgJobs(code, progLang)
 		if jerr != nil && !db.IsMissingTable(jerr) {
 			return jerr
@@ -105,7 +105,7 @@ func runProgDetail(code string) error {
 		if terr != nil && !db.IsMissingTable(terr) {
 			return terr
 		}
-		return output.PrintJSON(map[string]any{"程序": info, "作业": jobs, "表格": tables})
+		return emitOne(map[string]any{"程序": info, "作业": jobs, "表格": tables})
 	}
 
 	if info.IsProg {
@@ -192,8 +192,7 @@ func runSubProgList() error {
 	list, err := GetDB().QuerySubProgList(progLang, progKW)
 	if err != nil {
 		if db.IsMissingTable(err) {
-			fmt.Println(missingHint("子程序与元件 (gzde_t/gzdel_t)"))
-			return nil
+			return missingTableErr("子程序与元件 (gzde_t/gzdel_t)")
 		}
 		return err
 	}
@@ -210,11 +209,8 @@ func runSubProgList() error {
 	for _, p := range list {
 		rows = append(rows, []string{p.Code, p.Name, p.Category, p.Module, p.Cust})
 	}
-	if IsJSON() {
-		return output.PrintJSON(list)
-	}
-	if IsCSV() {
-		return output.PrintCSVFromMaps(headers, rows)
+	if Format() != output.FormatTable {
+		return emit(list, headers, rows)
 	}
 	output.PrintTable(headers, rows)
 	fmt.Printf("\n共 %d 个", len(list))
@@ -320,11 +316,8 @@ func runProgList() error {
 	for _, p := range list {
 		rows = append(rows, []string{p.Code, p.Name, p.Category, p.Module, p.Cust, fmt.Sprintf("%d", p.JobCount)})
 	}
-	if IsJSON() {
-		return output.PrintJSON(list)
-	}
-	if IsCSV() {
-		return output.PrintCSVFromMaps(headers, rows)
+	if Format() != output.FormatTable {
+		return emit(list, headers, rows)
 	}
 	output.PrintTable(headers, rows)
 	fmt.Printf("\n共 %d 个程序", len(list))

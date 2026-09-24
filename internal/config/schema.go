@@ -84,14 +84,13 @@ type Hosts struct {
 	SSHs      []NamedSsh `json:"sshs"`
 }
 
-// ByName 按名取环境；name 为空取 activeEnv；未命中返回 nil
+// ByName 按名取环境；name 为空取 activeEnv；未命中返回 nil。
+// 选择顺序只有一份实现(见 resolve.go 的 pickName);需要"为什么选中它"或
+// "没找到时列出有哪些环境"时用 Hosts.Resolve。
 func (h *Hosts) ByName(name string) *NamedSsh {
-	target := name
+	target, _ := h.pickName(name)
 	if target == "" {
-		target = h.ActiveEnv
-	}
-	if target == "" && len(h.SSHs) > 0 {
-		target = h.SSHs[0].Name
+		return nil
 	}
 	for i := range h.SSHs {
 		if h.SSHs[i].Name == target {
@@ -308,16 +307,13 @@ func LoadHosts(path string) (*Hosts, error) {
 }
 
 // ActiveHost 返回生效环境：工具的覆盖优先，其次 hosts.activeEnv，最后首条。
+// 与 ResolveForTool 同一套规则,只是这里不要错误(取不到就是 nil)。
 func (r *Root) ActiveHost(tool string) *NamedSsh {
-	switch tool {
-	case "debug":
-		if r.Debug.ActiveEnv != "" {
-			if h := r.Hosts.ByName(r.Debug.ActiveEnv); h != nil {
-				return h
-			}
-		}
+	ref, err := r.ResolveForTool(tool, "")
+	if err != nil {
+		return nil
 	}
-	return r.Hosts.ByName("")
+	return ref.Env
 }
 
 // ---------- 读写辅助 ----------

@@ -83,19 +83,19 @@ func runParamQuery(arg string, docOnly bool) error {
 		other = "sysp"
 	}
 
+	structured := Format() != output.FormatTable
 	var pickedSys []db.ParamDefRow
 	var pickedDoc []docpObj
 	for _, code := range codes {
 		rows, err := GetDB().QueryParam(code)
 		if err != nil {
 			if db.IsMissingTable(err) {
-				fmt.Println(missingHint("参数档 (gzsz_t/gzszl_t)"))
-				return nil
+				return missingTableErr("参数档 (gzsz_t/gzszl_t)")
 			}
 			return err
 		}
 		if len(rows) == 0 {
-			if !IsJSON() {
+			if !structured {
 				fmt.Printf("未找到参数编号 '%s'。\n", code)
 			}
 			continue
@@ -108,7 +108,7 @@ func runParamQuery(arg string, docOnly bool) error {
 			}
 		}
 		if len(kept) == 0 {
-			if IsJSON() {
+			if structured {
 				continue
 			}
 			fmt.Printf("编号 '%s' 是%s参数;请用 tt dict %s 查询。\n", code, paramKind(rows[0].Group), other)
@@ -116,7 +116,7 @@ func runParamQuery(arg string, docOnly bool) error {
 		}
 		match, avail := pickLangRow(kept, paramLang, func(r db.ParamDefRow) string { return r.Lang })
 		if match == nil {
-			if IsJSON() {
+			if structured {
 				continue
 			}
 			fmt.Printf("%s\n", langMissMsg(code, paramLang, avail))
@@ -124,7 +124,7 @@ func runParamQuery(arg string, docOnly bool) error {
 		}
 		if !docOnly {
 			pickedSys = append(pickedSys, *match)
-			if !IsJSON() {
+			if !structured {
 				printParam(match, nil)
 			}
 			continue
@@ -137,18 +137,18 @@ func runParamQuery(arg string, docOnly bool) error {
 		if err != nil {
 			docs = nil
 		}
-		if IsJSON() {
+		if structured {
 			pickedDoc = append(pickedDoc, docpObj{Param: *match, Docs: docs})
 		} else {
 			printParam(match, docs)
 		}
 	}
 
-	if IsJSON() {
+	if structured {
 		if docOnly {
-			return output.PrintJSON(pickedDoc)
+			return emitOne(pickedDoc)
 		}
-		return output.PrintJSON(pickedSys)
+		return emitOne(pickedSys)
 	}
 	return nil
 }

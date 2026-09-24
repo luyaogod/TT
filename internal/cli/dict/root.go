@@ -12,12 +12,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"tt/internal/cli/common"
 	"tt/internal/config"
 	"tt/internal/dict/db"
+	"tt/internal/output"
 )
 
 // dbPath -d/--db:本地 SQLite 镜像路径(查询命令读它,db sync 写它)。
@@ -41,6 +43,9 @@ func init() {
 	}
 
 	attachDataHint() // --help 末尾附一行版本 + 本地数据覆盖状态(见 helpdata.go)
+
+	// 错误信封也要带"这次落在哪个环境/哪个账号" —— 出错时那比错误本身更难猜。
+	common.MetaProvider = srcMeta
 }
 
 // runRootPreRun 显式补跑祖先命令(tt 根)的 PersistentPreRunE。
@@ -117,8 +122,59 @@ func resolveDBPath(flagPath string) (string, error) {
 // 由 Group 的 PersistentPreRunE 打开(见 source.go)。
 func GetDB() db.Source { return dataSrc }
 
-// IsJSON 是否要求 JSON 输出(--json)。
-func IsJSON() bool { return common.JSON }
+// IsJSON 本次是否输出 JSON(默认形态)。
+func IsJSON() bool { return common.OutputFormat() == output.FormatJSON }
 
-// IsCSV 是否要求 CSV 输出(--csv)。
-func IsCSV() bool { return common.CSV }
+// IsCSV 本次是否输出 CSV。
+func IsCSV() bool { return common.OutputFormat() == output.FormatCSV }
+
+// Format 本次的输出形态(命令自己分流时用)。
+func Format() output.Format { return common.OutputFormat() }
+
+// emit 按当前形态渲染一次查询结果:JSON 给带环境信息的信封,CSV 给 `# ` 头 + 主体,
+// 人读表格由调用方在 text 分支自己打(各命令的文本输出比一张表丰富)。
+//
+// 行数由表格本身给出:字典查询是"内存里就是全部命中",没有库侧截断。
+func emit(data any, columns []string, rows [][]string) error {
+	return emitN(data, columns, rows, len(rows))
+}
+
+// emitOne 单实体详情(如一条校验定义、一张表的字段规格)。
+// 它没有"结果集行数"可言,记 1 条 —— 记 0 会让人以为什么都没查到。
+func emitOne(data any) error { return emitN(data, nil, nil, 1) }
+
+func emitN(data any, columns []string, rows [][]string, total int) error {
+	m := srcMeta()
+	m.TotalRows, m.Returned = total, total
+	return output.Emit(os.Stdout, output.Options{
+		Format: Format(), Meta: m, Data: data, Columns: columns, Rows: rows,
+	})
+}
+
+// srcMeta 把当前数据源的落脚点转成输出信封的环境信息块。
+func srcMeta() output.Meta {
+	// 字典查询全是只读的:本地 SQLite 是只读副本,远程库走只读语句 —— 如实标出来。
+	m := output.Meta{Notes: srcNotes, Source: srcKind(), Readonly: true}
+	if srcTarget != nil {
+		t := srcTarget
+		m.Env, m.SSHHost, m.Zone, m.Topent = t.Env, t.SSHHost, t.Zone, t.Topent
+		m.Ent, m.Account, m.AccountSource = t.Ent, t.Account, t.AccountSource
+		m.Target, m.Dialect, m.Route = t.Address(), t.Dialect(), t.Route
+		m.ViaTunnel, m.LocalDBPath = t.ViaTunnel, t.Path
+	}
+	if !srcStarted.IsZero() {
+		m.Elapsed = time.Since(srcStarted).Seconds()
+	}
+	return m
+}
+
+// srcKind 数据源大类:local(本地 SQLite 镜像) / live(某环境的远程库)。
+func srcKind() string {
+	if srcLocal {
+		return "local"
+	}
+	if srcTarget != nil {
+		return "live"
+	}
+	return ""
+}

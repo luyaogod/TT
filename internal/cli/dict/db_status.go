@@ -30,8 +30,8 @@ var dbStatusCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if IsJSON() {
-			return output.PrintJSON(st)
+		if Format() != output.FormatTable {
+			return emitOne(st)
 		}
 		printLocalStatus(st)
 		return nil

@@ -16,17 +16,14 @@ package debug
 // 企业编号只决定**库里的账号 / schema**(gzou_t.gzou003)。所以这里解析出来的永远是账号。
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"tt/internal/config"
+	"tt/internal/entdir"
 	"tt/internal/host"
 )
 
@@ -35,10 +32,10 @@ const (
 	//
 	// 与只读 SQL 的映射缓存(sqlEntCacheTTL)共用同一个值:两条命令必须对外表现出同一份
 	// 新鲜度,否则 agent 会拿到两条互相矛盾的时间线(一边说企业 99 在,一边说不在)。
-	EntSnapshotTTL = 10 * time.Minute
+	// 唯一实现在 internal/entdir —— tt dict 的客户端直连路径也读同一份快照。
+	EntSnapshotTTL = entdir.TTL
 
-	entsDirName    = "ents"
-	entSnapshotVer = 1
+	entSnapshotVer = entdir.Version
 )
 
 // errEmptyCatalog 查询成功、但结果里没有一个启用企业。
@@ -81,16 +78,8 @@ type EntListing struct {
 }
 
 // EntSnapshot 落盘的企业目录快照(<DataDir>/ents/<环境段>.json)。
-type EntSnapshot struct {
-	Version     int          `json:"version"`
-	Env         string       `json:"env"`
-	Fingerprint string       `json:"fingerprint"`
-	Zone        string       `json:"zone"`
-	Dialect     string       `json:"dialect"`
-	Target      string       `json:"target"`
-	Mappings    []EntMapping `json:"mappings"`
-	FetchedAt   time.Time    `json:"fetchedAt"`
-}
+// 定义在 internal/entdir:tt dict 的客户端直连路径读写同一个文件,两边必须是同一份格式。
+type EntSnapshot = entdir.Snapshot
 
 // EntCatalog 企业目录。零值不可用,用 NewEntCatalog 构造。
 type EntCatalog struct {
@@ -117,59 +106,30 @@ func NewEntCatalog(dataDir string) *EntCatalog {
 // ---- 纯函数(不碰 SSH / 磁盘,便于单测) ----
 
 // entFingerprint 环境指纹:换机器 / 换区域 / 换库 = 换了另一份 gzou_t,快照立即失效。
-//
-// zone 与 db.service 都必须在:zone 决定登录后的 T100 环境(31 开发 / 36 正式),
-// 而 service 本身就带 zone 语义(如 t35prd)。只按 host 做 key 会把开发区的企业清单
-// 当成正式区的。与 resolveDBRun 的 dbProbeCache、sqlEntCache 的 key 同源再补上库身份。
+// 算法在 internal/entdir(tt dict 用同一份,两个路径必须对同一环境算出同一个指纹)。
 func entFingerprint(cfg *Config) string {
-	db := "none"
+	ident := "none"
 	if cfg.DB != nil {
-		db = cfg.DB.Type + "|" + cfg.DB.Host + "|" + strconv.Itoa(cfg.DB.Port) + "|" + cfg.DB.Svc()
+		ident = entdir.DBIdent(cfg.DB.Type, cfg.DB.Host, cfg.DB.Port, cfg.DB.Svc())
 	}
-	return cfg.SSH.Host + "|" + cfg.SSH.User + "|" + cfg.Zone + "|" + db
+	return entdir.Fingerprint(cfg.SSH.Host, cfg.SSH.User, cfg.Zone, ident)
 }
 
-// entSnapshotPath 快照路径:<DataDir>/ents/<环境段>.json。
-// 环境段复用镜像那套命名(srccache/<环境>/…),中文环境名可用、`..` 逃不出去。
+// entSnapshotPath 快照路径:<DataDir>/ents/<环境段>.json。环境段复用镜像那套命名。
 func entSnapshotPath(dataDir string, cfg *Config) string {
-	if dataDir == "" {
-		return ""
-	}
-	seg := mirrorEnvSeg(cfg.EnvName(), cfg.SSH.Host, cfg.Zone)
-	return filepath.Join(dataDir, entsDirName, seg+".json")
+	return entdir.Path(dataDir, entdir.EnvSeg(cfg.EnvName(), cfg.SSH.Host, cfg.Zone))
 }
 
-// readEntSnapshot 读快照。不存在 / 坏掉 / 版本不符 / 指纹不符一律返回 nil(当没有)。
+// readEntSnapshot 读快照。不存在 / 坏掉 / 版本不符 / 指纹不符一律当没有(返回 nil)。
 // **不判过期** —— 过期快照在"现查失败"时是唯一的答案来源,用不用由调用方定。
 func readEntSnapshot(path, fingerprint string) *EntSnapshot {
-	if path == "" {
-		return nil
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	var s EntSnapshot
-	if err := json.Unmarshal(b, &s); err != nil {
-		return nil
-	}
-	if s.Version != entSnapshotVer || s.Fingerprint != fingerprint || len(s.Mappings) == 0 {
-		return nil
-	}
-	return &s
+	return entdir.Read(path, fingerprint)
 }
 
 // writeEntSnapshot 原子落盘。失败只返回错误,由调用方降级成一条 note ——
 // 快照写不出去不该让"查到了"这件事变成失败。
 func writeEntSnapshot(path string, s *EntSnapshot) error {
-	if path == "" {
-		return errors.New("未配置数据目录")
-	}
-	b, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return err
-	}
-	return config.AtomicWrite(path, b)
+	return entdir.Write(path, s)
 }
 
 // ---- 目录 ----
@@ -237,7 +197,7 @@ func (c *EntCatalog) resolve(conn *host.SSHConn, d *dbRun, cfg *Config, opt EntL
 
 	snap := readEntSnapshot(path, fp)
 	if snap != nil && !opt.Refresh {
-		l := snap.toListing(cfg, opt, now, "snapshot")
+		l := entSnapshotToListing(snap, cfg, opt, now, "snapshot")
 		if !l.Stale {
 			c.memPut(fp, l, now)
 			return finish(l, cfg, opt, now), nil
@@ -247,7 +207,7 @@ func (c *EntCatalog) resolve(conn *host.SSHConn, d *dbRun, cfg *Config, opt EntL
 
 	if opt.Cached {
 		if snap != nil {
-			return finish(snap.toListing(cfg, opt, now, "snapshot-stale"), cfg, opt, now), nil
+			return finish(entSnapshotToListing(snap, cfg, opt, now, "snapshot-stale"), cfg, opt, now), nil
 		}
 		return nil, fmt.Errorf("没有可用的企业目录快照(%s);先联网跑一次 tt debug ents", path)
 	}
@@ -276,7 +236,7 @@ func (c *EntCatalog) resolve(conn *host.SSHConn, d *dbRun, cfg *Config, opt EntL
 			return nil, err // 见 errEmptyCatalog:答案为空 / 明确要新的,都不回退
 		}
 		if snap != nil {
-			l := snap.toListing(cfg, opt, now, "snapshot-stale")
+			l := entSnapshotToListing(snap, cfg, opt, now, "snapshot-stale")
 			l.Stale = true
 			l.Notes = append(l.Notes, "现查失败,以下是过期快照: "+err.Error())
 			return finish(l, cfg, opt, now), nil
@@ -380,7 +340,9 @@ func resolveCur(cur *EntCurrent, ents []EntMapping) *EntCurrent {
 	return cur
 }
 
-func (s *EntSnapshot) toListing(cfg *Config, opt EntListOpt, now time.Time, source string) *EntListing {
+// entSnapshotToListing 把快照转成 listing。它是自由函数而不再是 EntSnapshot 的方法:
+// EntSnapshot 现在是 internal/entdir 的类型别名,而 Go 不允许在非本地类型上定义方法。
+func entSnapshotToListing(s *EntSnapshot, cfg *Config, opt EntListOpt, now time.Time, source string) *EntListing {
 	l := &EntListing{
 		Env: s.Env, Zone: s.Zone, Dialect: s.Dialect, Target: s.Target,
 		TopentRaw: string(cfg.Topent), Ents: s.Mappings, Source: source,

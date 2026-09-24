@@ -13,6 +13,9 @@ import (
 	"tt/internal/config"
 )
 
+// configGetRaw --raw：config get 不过滤口令（与 config show 的 --raw 同义）。
+var configGetRaw bool
+
 // newConfigCmd 是统一的配置管理命令组。
 //
 // 合并前两个工具各有自己的位置规则与迁移逻辑，注释里写着"与对方保持一致，
@@ -65,10 +68,15 @@ debug / query / mirror / bdldoc / sync / tdev 是各工具自己的设置。
 
 	cmd.AddCommand(newConfigShowCmd())
 
-	cmd.AddCommand(&cobra.Command{
+	getCmd := &cobra.Command{
 		Use:   "get <键路径>",
 		Short: "按点分路径读一个值（如 hosts.activeEnv、debug.termWidth）",
-		Args:  cobra.ExactArgs(1),
+		Long: `按点分路径读一个值。
+
+口令默认打码（路径点到 password/passwd/pwd，或值里嵌着这些键），要看原样加 --raw ——
+与 tt config show 同一套规则、同一个实现。
+配置里有明文口令，而这条命令的输出很容易被贴进日志或对话里。`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path, err := common.ResolveConfig(false)
 			if err != nil {
@@ -82,12 +90,23 @@ debug / query / mirror / bdldoc / sync / tdev 是各工具自己的设置。
 			if !ok {
 				return fmt.Errorf("配置里没有 %q", args[0])
 			}
-			if common.JSON {
-				return common.PrintJSON(v)
+			shown := v
+			if !configGetRaw {
+				// 路径直接点到口令时,值本身是个字符串,RedactValue 看不出它是秘密
+				if config.SecretPath(args[0]) {
+					shown = "***"
+				} else {
+					shown = config.RedactValue(v)
+				}
 			}
-			return printScalarOrJSON(cmd, v)
+			if common.JSON {
+				return common.PrintJSON(shown)
+			}
+			return printScalarOrJSON(cmd, shown)
 		},
-	})
+	}
+	getCmd.Flags().BoolVar(&configGetRaw, "raw", false, "原样输出（含明文口令）")
+	cmd.AddCommand(getCmd)
 
 	cmd.AddCommand(&cobra.Command{
 		Use:   "set <键路径> <值>",
@@ -296,6 +315,15 @@ func validateConfig(path string) []string {
 		problems = append(problems, fmt.Sprintf(
 			"debug.activeEnv = %q 指向不存在的环境", r.Debug.ActiveEnv))
 	}
+	// query.source 也是裸环境名(或 local / auto):环境被改名/删除后它会悬空,
+	// 直到下次查询才以"未找到环境"报错 —— 那是"配错了"被当成"查不到数据"的老毛病。
+	// 与上面两条同一个位置校验,零新增机制。
+	if s := strings.TrimSpace(r.Query.Source); s != "" && s != "local" && s != "auto" {
+		if r.Hosts.ByName(s) == nil {
+			problems = append(problems, fmt.Sprintf(
+				"query.source = %q 指向不存在的环境(应为 local、auto 或某个环境名)", s))
+		}
+	}
 	return problems
 }
 
@@ -342,42 +370,8 @@ func runConfigShow(cmd *cobra.Command, raw bool) error {
 	return nil
 }
 
-// redactSecrets 深度复制一份配置，把口令字段替换成占位符。
-//
-// 识别到的键名：password / passwd / pwd，以及 db.accounts[].password。
-// 用键名判断而不是靠结构体标签，是因为未知节的未知键也要一起打码。
-func redactSecrets(v any) any {
-	switch t := v.(type) {
-	case map[string]any:
-		out := make(map[string]any, len(t))
-		for k, val := range t {
-			if isSecretKey(k) {
-				if s, ok := val.(string); ok && s != "" {
-					out[k] = "***"
-					continue
-				}
-			}
-			out[k] = redactSecrets(val)
-		}
-		return out
-	case []any:
-		out := make([]any, len(t))
-		for i, e := range t {
-			out[i] = redactSecrets(e)
-		}
-		return out
-	default:
-		return v
-	}
-}
-
-func isSecretKey(k string) bool {
-	switch strings.ToLower(k) {
-	case "password", "passwd", "pwd":
-		return true
-	}
-	return false
-}
+// 打码规则只有一份实现(见 internal/config/redact.go):口令的几个出口都要一致。
+func redactSecrets(v any) any { return config.RedactSecrets(v) }
 
 // ---------- 点分路径读写 ----------
 

@@ -92,8 +92,7 @@ func runWinList() error {
 	rows, err := GetDB().QueryWinList(winLang, winKW)
 	if err != nil {
 		if db.IsMissingTable(err) {
-			fmt.Println(missingHint("开窗定义 (dzca_t 等表)"))
-			return nil
+			return missingTableErr("开窗定义 (dzca_t 等表)")
 		}
 		return err
 	}
@@ -103,18 +102,14 @@ func runWinList() error {
 		return nil
 	}
 
-	if IsJSON() {
-		return output.PrintJSON(items)
-	}
-
 	headers := []string{"开窗识别码", "客制", "说明", "状态", "每页笔数", "HardCode", "行业别"}
 	var tableRows [][]string
 	for _, it := range items {
 		tableRows = append(tableRows, []string{it.ID, it.Cust, it.Desc, it.Status,
 			it.PageSize, it.HardCode, it.Industry})
 	}
-	if IsCSV() {
-		return output.PrintCSVFromMaps(headers, tableRows)
+	if Format() != output.FormatTable {
+		return emit(items, headers, tableRows)
 	}
 	output.PrintTable(headers, tableRows)
 	return nil
@@ -153,7 +148,7 @@ func runWinDetail(id string) error {
 	headers, err := GetDB().QueryWinHeaders(id, winLang)
 	if err != nil {
 		if db.IsMissingTable(err) {
-			return fmt.Errorf("%s", missingHint("开窗定义 (dzca_t 等表)"))
+			return missingTableErr("开窗定义 (dzca_t 等表)")
 		}
 		return err
 	}
@@ -214,11 +209,11 @@ func runWinDetail(id string) error {
 		detail.Headers = append(detail.Headers, view)
 	}
 
-	if IsJSON() {
-		return output.PrintJSON(detail)
+	if Format() == output.FormatTable {
+		printWinDetail(&detail)
+		return nil
 	}
-	printWinDetail(&detail)
-	return nil
+	return emitOne(detail)
 }
 
 func printWinDetail(d *winDetail) {

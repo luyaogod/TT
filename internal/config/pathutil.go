@@ -15,7 +15,7 @@ import (
 // DefaultSyncFileName 字典同步产出的本地 SQLite 文件名。
 const DefaultSyncFileName = "erp_data.db"
 
-// AbsPath 相对路径转绝对;空串原样返回空串(表示"未配置")。
+// AbsPath 把配置里的路径值转成绝对路径;空串原样返回空串(表示"未配置")。
 func AbsPath(p string) string {
 	p = strings.TrimSpace(p)
 	if p == "" {
@@ -116,4 +116,17 @@ func DefaultSyncTarget() string {
 		return abs
 	}
 	return DefaultSyncFileName
+}
+
+// SyncTargetFor 数据同步(写本地 SQLite)的目标路径 = 配置里 sync.target 的绝对路径;
+// 未配置返回空串,由调用方自己决定便携版兜底位置。
+//
+// 存在的理由:同一条配置,CLI 与 web 曾经各解析各的 —— 设置页改了 sync.target 之后
+// `tt dict db sync` 仍然写旧位置,两个本地库悄悄分叉,而"tt dict db status"看到的
+// 又是另一个。目标路径只该有一个答案。
+func SyncTargetFor(root *Root) string {
+	if root == nil {
+		return ""
+	}
+	return AbsPath(root.Sync.Target)
 }

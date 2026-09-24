@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"tt/internal/entdir"
 	"tt/internal/host"
 
 	"github.com/pkg/sftp"
@@ -31,33 +32,12 @@ import (
 const srcMirrorDir = "srccache"
 
 // pathSafeSeg 把任意字符串压成单个安全的路径段。
-// 保留中文与常见符号(环境名可能是"示例测试区"),只替换分隔/通配类字符。
-func pathSafeSeg(s string) string {
-	out := strings.Map(func(r rune) rune {
-		switch r {
-		case '/', '\\', ':', '*', '?', '"', '<', '>', '|', 0:
-			return '_'
-		}
-		return r
-	}, s)
-	out = strings.TrimSpace(out)
-	// 兜底:空、当前目录、上级目录都不能作为路径段(防 `..` 逃出镜像根)
-	if out == "" || out == "." || out == ".." {
-		return "_"
-	}
-	return out
-}
+// 实现在 internal/entdir:企业目录快照的文件名用同一套清洗,两处不能各写一份。
+func pathSafeSeg(s string) string { return entdir.PathSafeSeg(s) }
 
 // mirrorEnvSeg 镜像目录里的环境段:优先环境名,退化为 主机-区域。
 func mirrorEnvSeg(envName, sshHost, zone string) string {
-	s := strings.TrimSpace(envName)
-	if s == "" {
-		s = sshHost
-		if zone != "" {
-			s += "-" + zone
-		}
-	}
-	return pathSafeSeg(s)
+	return entdir.EnvSeg(envName, sshHost, zone)
 }
 
 // srcMirrorPath 服务器绝对路径 → 本地镜像绝对路径。

@@ -6,7 +6,6 @@ package debug
 
 import (
 	"bytes"
-	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,7 +16,9 @@ import (
 	"strings"
 	"time"
 
+	"tt/internal/dbconfig"
 	"tt/internal/debug"
+	"tt/internal/output"
 
 	"github.com/spf13/cobra"
 )
@@ -1066,105 +1067,32 @@ type sqlQueryResult struct {
 	Notes         []string   `json:"notes"`
 }
 
-// sqlHeaderLines 组装 CSV 之前的 `# ` 信息块。
+// sqlMeta 把服务器返回的结果转成统一的输出环境块(internal/output.Meta)。
 //
-// 为什么是注释行而不是"CSV 里的元数据行":输出要同时满足两件事 ——
-//  1. 环境与**本次用的企业编号(ENT)**必须出现在结果里。只读 SQL 最危险的错误结论是
-//     "查不到 = 数据不存在",而它往往只是企业编号或环境上错了(表现为 0 行);
-//  2. CSV 主体必须保持纯净:只有表头行 + 数据行,任何标准 CSV 解析器拿来就能用。
-//
-// 注释行是唯一两者兼得的写法(与 shell 的习惯一致)。标记取「# 」(井号 + 空格)而不是光一个
-// 井号:值本身以 # 开头是常事(#FF0000 这类色号),那样 grep 会把一条**数据行**当注释切掉。
-// 信息块整体在头部、不夹在数据里,所以 grep -v '^# ' 一刀切下去就是干净的 CSV。
-func sqlHeaderLines(res sqlQueryResult) []string {
-	lines := make([]string, 0, 4+len(res.Notes))
-	if s := sqlEnvLine(res); s != "" {
-		lines = append(lines, s)
+// 这是本命令与 tt dict 共用的那一份"我这次落在哪"的表述 —— ENT 决定账号(哪个 schema),
+// 环境决定连的是哪台服务器、哪个区的库,少回显一半就可能把"查错了地方"读成"数据不存在"。
+func sqlMeta(res sqlQueryResult) output.Meta {
+	route := dbconfig.RouteServerOracle
+	if res.Dialect == "kingbase" {
+		route = dbconfig.RouteServerKB
 	}
-	if s := sqlWhereLine(res); s != "" {
-		lines = append(lines, s)
-	}
-	lines = append(lines, sqlCountLine(res))
-	for _, n := range res.Notes {
-		lines = append(lines, "注:"+n)
-	}
-	return lines
-}
-
-// sqlEnvLine = 环境名 + SSH 主机 + 区域。三样都是"上错地方"的判据,能拿到就都回显。
-func sqlEnvLine(res sqlQueryResult) string {
-	var parts []string
-	if res.Env != "" {
-		parts = append(parts, "环境 "+res.Env)
-	}
-	if res.SSHHost != "" {
-		parts = append(parts, "SSH "+res.SSHHost)
-	}
-	if res.Zone != "" {
-		parts = append(parts, "区域 "+res.Zone)
-	}
-	return strings.Join(parts, " · ")
-}
-
-// sqlWhereLine = 本次查询真正用的企业(ENT)→ 账号,以及库与耗时。
-//
-// 企业编号排在这一行的最前面并且带上 `ENT` 字样:它是"查不到数据"时**第一个**要核对的值,
-// 也是命令行里 --ent 覆盖的正是它(默认取会话的 TOPENT,会话一换就变)。
-func sqlWhereLine(res sqlQueryResult) string {
-	parts := []string{fmt.Sprintf("企业(ENT) %d → 账号 %s", res.Ent, res.Account)}
-	if res.Dialect != "" {
-		parts = append(parts, "库 "+res.Dialect)
-	}
-	if res.DBTarget != "" {
-		parts = append(parts, res.DBTarget)
-	}
-	parts = append(parts, fmt.Sprintf("只读事务 · 用时 %.2fs", res.Elapsed))
-	return strings.Join(parts, " · ")
-}
-
-func sqlCountLine(res sqlQueryResult) string {
-	switch {
-	case res.Truncated:
-		// TotalRows 只是**下界**:库侧包装时故意多取了一行用来判"还有更多",
-		// 所以写成"共 N 行"会让人以为结果就这么多。
-		return fmt.Sprintf("行数 %d(已截断:库侧返回 ≥%d 行,只保留前 %d 行;要更多请加 WHERE 收窄)",
-			len(res.Rows), res.TotalRows, len(res.Rows))
-	case len(res.Rows) == 0:
-		return "行数 0(注意:上错号/上错环境也会是 0 行,先核对上面的企业编号)"
-	default:
-		return fmt.Sprintf("行数 %d", len(res.Rows))
+	return output.Meta{
+		Source: "live", Env: res.Env, SSHHost: res.SSHHost, Zone: res.Zone,
+		Ent: res.Ent, Account: res.Account, AccountSource: dbconfig.AcctFromEnt,
+		Target: res.DBTarget, Dialect: res.Dialect, Route: route,
+		Readonly:  true,
+		TotalRows: res.TotalRows, Returned: len(res.Rows),
+		Truncated: res.Truncated, ServerLimited: res.ServerLimited,
+		Elapsed: res.Elapsed, Notes: res.Notes,
 	}
 }
 
-// writeSQLResult 输出一次只读查询:先是 `# ` 信息块,再是纯净 CSV(表头 + 数据)。
+// writeSQLResult 输出一次只读查询:`# ` 信息块 + 纯净 CSV(表头 + 数据)。
 //
-// 空结果集时**不写 CSV 表头** —— 没有列名可写,写一行空的反而像"结果被吞了";
-// 用一行注释说明即可。
+// 渲染本身在 internal/output,与 tt dict 同一个实现 —— 头部该有哪些字段、空段怎么跳、
+// 井号后面为什么必须有一个空格,那些规矩只该有一处定义。
 func writeSQLResult(w io.Writer, res sqlQueryResult) error {
-	var b bytes.Buffer
-	for _, ln := range sqlHeaderLines(res) {
-		fmt.Fprintf(&b, "# %s\n", ln)
-	}
-	if len(res.Columns) == 0 {
-		b.WriteString("# (无结果集)\n")
-		_, err := w.Write(b.Bytes())
-		return err
-	}
-	cw := csv.NewWriter(&b)
-	if err := cw.Write(res.Columns); err != nil {
-		return err
-	}
-	for _, row := range res.Rows {
-		if err := cw.Write(row); err != nil {
-			return err
-		}
-	}
-	cw.Flush()
-	if err := cw.Error(); err != nil {
-		return err
-	}
-	_, err := w.Write(b.Bytes())
-	return err
+	return output.WriteCSV(w, sqlMeta(res), res.Columns, res.Rows)
 }
 
 // debugSQLCmd 只读 SQL:查业务数据("这个料号在主表里到底有没有")

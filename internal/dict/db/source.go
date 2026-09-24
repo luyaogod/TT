@@ -41,8 +41,9 @@ type Source interface {
 	QueryWinHeaders(id, lang string) ([]WinHeaderRow, error)
 	QueryWinParams(id, lang string) ([]WinParamRow, error)
 	QueryWinCols(id string) ([]WinColRow, error)
-	// msg 系统消息档:gzze_t(azzi920 维护;全语言行)+ gzzal_t 作业名称
-	QueryMsg(code string) ([]MsgRow, error)
+	// msg 系统消息档:gzze_t(azzi920 维护;按编号/语句/语言多条件查)+ gzzal_t 作业名称
+	QueryMsgs(q MsgQuery) ([]MsgRow, error)
+	QueryMsgLangs(q MsgQuery) ([]string, error) // 同条件去掉语言:该编号有哪些语言行
 	// param 参数定义档:gzsz_t/gzszl_t(azzi990 系统参数、azzi991 单据别参数
 	// 共用;全语言行)+ gzsy_t 单据性质绑定
 	QueryParam(code string) ([]ParamDefRow, error)

@@ -10,6 +10,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -20,6 +21,7 @@ import (
 	"tt/internal/cli/debug"
 	"tt/internal/cli/dev"
 	"tt/internal/cli/dict"
+	"tt/internal/output"
 )
 
 // rootCmd is the base command.
@@ -60,8 +62,10 @@ var legacyAliases = map[string]string{
 func init() {
 	pf := rootCmd.PersistentFlags()
 	pf.StringVar(&common.ConfigPath, "config", "", "配置文件路径 (JSON;缺省取统一用户目录 "+common.ConfigHint()+")")
-	pf.BoolVar(&common.JSON, "json", false, "以 JSON 输出")
-	pf.BoolVar(&common.CSV, "csv", false, "以 CSV 输出")
+	pf.BoolVar(&common.JSON, "json", false, "以 JSON 输出（--format json 的语法糖，也是默认）")
+	pf.BoolVar(&common.CSV, "csv", false, "以 CSV 输出（--format csv 的语法糖）")
+	pf.StringVar(&common.Format, "format", "json",
+		"输出形态: json(默认,带环境信息的信封) | csv(带 # 环境头) | table(人读表格)")
 	pf.BoolVarP(&common.Verbose, "verbose", "v", false, "显示解析细节（如实际使用的数据源路径）")
 	pf.StringVar(&common.Env, "env", "", "指定环境名（config.json hosts.sshs 中的 name）")
 	// --conn 是合并前 tdict 的叫法，保留为别名，但不出现在 --help 里
@@ -96,11 +100,46 @@ func Execute(web fs.FS) {
 		// cobra 的 SilenceErrors 让错误只由这里打一次（各子命令只管 return err）。
 		// 少了这一行，命令失败就**一声不响**地退出 1 —— 用户看不到原因，
 		// 而这恰恰是最需要说清楚的时候（"为什么服务没起来/为什么没输出"）。
-		// 带退出码的错误（TDev 的 0/2/3/4/5 契约）按码退出。
-		fmt.Fprintf(os.Stderr, "错误: %v\n", err)
+		// 带退出码的错误（既有 TDev 的 0/2/3/4/5 契约，以及 output.Error 的
+		// 2=数据源 / 3=缺表）按码退出。
+		reportError(err)
 		if code := exitCodeOf(err); code != 0 {
 			os.Exit(code)
 		}
 		os.Exit(1)
+	}
+}
+
+// reportError 打一次错误。
+//
+// JSON 模式下错误也走 **stdout 的 JSON 信封**（与 tt dev 既有的 {"ok":false,...}
+// 同一条路子），让 agent 靠 Code 分支而不是靠正则啃中文；其余模式保持 stderr 散文，
+// 并多打一行「提示:」把修复建议单独拎出来。
+//
+// ⚠️ 这会改变"stderr 有内容 = 失败"这个既有判据：JSON 模式下失败信息在 stdout。
+func reportError(err error) {
+	format := common.OutputFormat()
+	var oe *output.Error
+	if errors.As(err, &oe) {
+		// 错误自己带了环境信息就用它的,否则补上当前数据源的 ——
+		// 连不上库时,"连的是哪个环境"比错误文本本身更难猜。
+		if oe.Meta.Env == "" && oe.Meta.Source == "" {
+			oe.Meta = common.CurrentMeta()
+		}
+	} else {
+		oe = &output.Error{Code: output.CodeUsage, Exit: exitCodeOf(err),
+			Message: err.Error(), Meta: common.CurrentMeta()}
+	}
+	if oe.Exit == 0 {
+		oe.Exit = 1
+	}
+	if format == output.FormatJSON {
+		if werr := output.WriteError(os.Stdout, oe); werr == nil {
+			return
+		}
+	}
+	fmt.Fprintf(os.Stderr, "错误: %v\n", oe)
+	if oe.Hint != "" {
+		fmt.Fprintf(os.Stderr, "提示: %s\n", oe.Hint)
 	}
 }

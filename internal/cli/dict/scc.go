@@ -84,8 +84,7 @@ func runSccList() error {
 	rows, err := GetDB().QuerySccList(sccLang, sccKW)
 	if err != nil {
 		if db.IsMissingTable(err) {
-			fmt.Println(missingHint("系统分类码 (gzca_t 等表)"))
-			return nil
+			return missingTableErr("系统分类码 (gzca_t 等表)")
 		}
 		return err
 	}
@@ -105,17 +104,13 @@ func runSccList() error {
 		})
 	}
 
-	if IsJSON() {
-		return output.PrintJSON(items)
-	}
-
 	headers := []string{"分类码", "群组", "状态", "名称", "值数"}
 	var tableRows [][]string
 	for _, it := range items {
 		tableRows = append(tableRows, []string{it.ID, it.Group, it.Status, it.Name, fmt.Sprint(it.ValCnt)})
 	}
-	if IsCSV() {
-		return output.PrintCSVFromMaps(headers, tableRows)
+	if Format() != output.FormatTable {
+		return emit(items, headers, tableRows)
 	}
 	output.PrintTable(headers, tableRows)
 	return nil
@@ -129,7 +124,7 @@ func runSccDetail(id string) error {
 	header, err := GetDB().QuerySccHeader(id, sccLang)
 	if err != nil {
 		if db.IsMissingTable(err) {
-			return fmt.Errorf("%s", missingHint("系统分类码 (gzca_t 等表)"))
+			return missingTableErr("系统分类码 (gzca_t 等表)")
 		}
 		return err
 	}
@@ -166,11 +161,11 @@ func runSccDetail(id string) error {
 		})
 	}
 
-	if IsJSON() {
-		return output.PrintJSON(detail)
+	if Format() == output.FormatTable {
+		printSccDetail(&detail)
+		return nil
 	}
-	printSccDetail(&detail)
-	return nil
+	return emitOne(detail)
 }
 
 func printSccDetail(d *sccDetail) {

@@ -86,8 +86,7 @@ func runCheckList() error {
 	rows, err := GetDB().QueryCheckList(checkLang, checkKW)
 	if err != nil {
 		if db.IsMissingTable(err) {
-			fmt.Println(missingHint("校验定义 (dzcd_t 等表)"))
-			return nil
+			return missingTableErr("校验定义 (dzcd_t 等表)")
 		}
 		return err
 	}
@@ -97,17 +96,13 @@ func runCheckList() error {
 		return nil
 	}
 
-	if IsJSON() {
-		return output.PrintJSON(items)
-	}
-
 	headers := []string{"识别码", "客制", "说明", "型态", "错误讯息", "备注"}
 	var tableRows [][]string
 	for _, it := range items {
 		tableRows = append(tableRows, []string{it.ID, it.Cust, it.Desc, it.Type, it.ErrMsg, it.Remark})
 	}
-	if IsCSV() {
-		return output.PrintCSVFromMaps(headers, tableRows)
+	if Format() != output.FormatTable {
+		return emit(items, headers, tableRows)
 	}
 	output.PrintTable(headers, tableRows)
 	return nil
@@ -148,7 +143,7 @@ func runCheckDetail(id string) error {
 	headers, err := GetDB().QueryCheckHeaders(id, checkLang)
 	if err != nil {
 		if db.IsMissingTable(err) {
-			return fmt.Errorf("%s", missingHint("校验定义 (dzcd_t 等表)"))
+			return missingTableErr("校验定义 (dzcd_t 等表)")
 		}
 		return err
 	}
@@ -199,11 +194,11 @@ func runCheckDetail(id string) error {
 		detail.Headers = append(detail.Headers, view)
 	}
 
-	if IsJSON() {
-		return output.PrintJSON(detail)
+	if Format() == output.FormatTable {
+		printCheckDetail(&detail)
+		return nil
 	}
-	printCheckDetail(&detail)
-	return nil
+	return emitOne(detail)
 }
 
 func printCheckDetail(d *checkDetail) {

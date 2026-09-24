@@ -72,7 +72,7 @@ func runSpecList(table string) error {
 	rows, err := GetDB().QuerySpecRows(table, specLang)
 	if err != nil {
 		if db.IsMissingTable(err) {
-			return fmt.Errorf("%s", missingHint("字段规格 (dzep_t)"))
+			return missingTableErr("字段规格 (dzep_t)")
 		}
 		return err
 	}
@@ -86,17 +86,12 @@ func runSpecList(table string) error {
 		return nil
 	}
 
-	if IsJSON() {
-		return output.PrintJSON(tbl)
+	var tableRows [][]string
+	for _, r := range tbl.Rows {
+		tableRows = append(tableRows, specRowCSV(r))
 	}
-
-	if IsCSV() {
-		headers := specCSVHeaders
-		var tableRows [][]string
-		for _, r := range tbl.Rows {
-			tableRows = append(tableRows, specRowCSV(r))
-		}
-		return output.PrintCSVFromMaps(headers, tableRows)
+	if Format() != output.FormatTable {
+		return emit(tbl, specCSVHeaders, tableRows)
 	}
 
 	fmt.Printf("=== %s ===\n", tbl.TableName)
@@ -106,12 +101,12 @@ func runSpecList(table string) error {
 		fmt.Println()
 	}
 	headers := []string{"序号", "字段", "字段名", "控件", "SCC码", "必填", "宽度", "格式", "默认值", "校验带值"}
-	var tableRows [][]string
+	var textRows [][]string
 	for _, r := range tbl.Rows {
-		tableRows = append(tableRows, []string{r.Seq, r.Field, r.FieldName, r.Widget,
+		textRows = append(textRows, []string{r.Seq, r.Field, r.FieldName, r.Widget,
 			r.Scc, r.Required, r.Width, r.Format, r.DefaultVal, r.ChkVal})
 	}
-	output.PrintTable(headers, tableRows)
+	output.PrintTable(headers, textRows)
 	fmt.Println(specExtNote)
 	return nil
 }
@@ -131,7 +126,7 @@ func runSpecDetail(table, field string) error {
 	rows, err := GetDB().QuerySpecRows(table, specLang)
 	if err != nil {
 		if db.IsMissingTable(err) {
-			return fmt.Errorf("%s", missingHint("字段规格 (dzep_t)"))
+			return missingTableErr("字段规格 (dzep_t)")
 		}
 		return err
 	}
@@ -164,17 +159,16 @@ func runSpecDetail(table, field string) error {
 		return err
 	}
 
-	if IsJSON() {
-		obj := struct {
-			TableName string      `json:"表名"`
-			TableDesc string      `json:"表说明"`
-			Field     specRowView `json:"字段规格"`
-		}{tbl.TableName, tbl.TableDesc, *found}
-		return output.PrintJSON(obj)
+	obj := struct {
+		TableName string      `json:"表名"`
+		TableDesc string      `json:"表说明"`
+		Field     specRowView `json:"字段规格"`
+	}{tbl.TableName, tbl.TableDesc, *found}
+	if Format() == output.FormatTable {
+		printSpecDetail(tbl, found)
+		return nil
 	}
-
-	printSpecDetail(tbl, found)
-	return nil
+	return emitOne(obj)
 }
 
 // querySpecTableMeta returns the table registry info; a missing registry is

@@ -64,12 +64,8 @@ var tableCmd = &cobra.Command{
 			dicts = append(dicts, d)
 		}
 
-		if IsJSON() {
-			return output.PrintJSON(dicts)
-		}
-
-		if IsCSV() {
-			return printTableCSV(dicts)
+		if Format() != output.FormatTable {
+			return emit(dicts, tableDetailColumns, tableDetailRows(dicts))
 		}
 
 		// --brief:只要表级信息。多表同查时默认会打每张表的全部字段(7 张表 ≈ 700 行),
@@ -97,8 +93,7 @@ func runTableList() error {
 	list, err := GetDB().QueryTableList(tableLang, tableKW)
 	if err != nil {
 		if db.IsMissingTable(err) {
-			fmt.Println(missingHint("表字典 (dzea_t/dzeb_t 等表)"))
-			return nil
+			return missingTableErr("表字典 (dzea_t/dzeb_t 等表)")
 		}
 		return err
 	}
@@ -116,11 +111,8 @@ func runTableList() error {
 	for _, t := range list {
 		rows = append(rows, []string{t.TableName, t.TableDesc, t.Module, t.TableType, fmt.Sprintf("%d", t.FieldCnt)})
 	}
-	if IsJSON() {
-		return output.PrintJSON(list)
-	}
-	if IsCSV() {
-		return output.PrintCSVFromMaps(headers, rows)
+	if Format() != output.FormatTable {
+		return emit(list, headers, rows)
 	}
 	output.PrintTable(headers, rows)
 	fmt.Printf("\n共 %d 张表", len(list))
@@ -237,8 +229,11 @@ func printTableDict(d *db.TableDict) {
 }
 
 // printTableCSV flattens the field definitions across tables into CSV rows.
-func printTableCSV(dicts []*db.TableDict) error {
-	headers := []string{"表名", "序号", "字段名", "字段说明", "数据类型", "长度", "主键", "必填", "备注"}
+// tableDetailColumns / tableDetailRows 表字典详情的列定义与摊平。
+// 列定义只有一处:CSV 表头与 JSON 的键同源于 db.TableDict 这一份 DTO。
+var tableDetailColumns = []string{"表名", "序号", "字段名", "字段说明", "数据类型", "长度", "主键", "必填", "备注"}
+
+func tableDetailRows(dicts []*db.TableDict) [][]string {
 	var rows [][]string
 	for _, d := range dicts {
 		for _, f := range d.Fields {
@@ -246,13 +241,15 @@ func printTableCSV(dicts []*db.TableDict) error {
 				f.DataType, f.Length, f.IsPK, f.Required, f.Remark})
 		}
 	}
-	return output.PrintCSVFromMaps(headers, rows)
+	return rows
 }
 
 // runTableWho 反查"哪些程序在用这些表"(gzdg_t 程序与应用表格功能分析表,由 T100 自己维护;
 // 参考作业 azzq902 程式編號對應表格查詢)。改表前的影响分析用它。
 func runTableWho(tables []string) error {
 	var jsonOut []map[string]any
+	var outRows [][]string
+	structured := Format() != output.FormatTable
 	for _, t := range tables {
 		meta, err := GetDB().QueryTableMeta(t)
 		if err != nil && !db.IsMissingTable(err) {
@@ -266,14 +263,16 @@ func runTableWho(tables []string) error {
 		progs, err := GetDB().QueryTablePrograms(t, tableLang)
 		if err != nil {
 			if db.IsMissingTable(err) {
-				fmt.Println(missingHint("程序与表格 (gzdg_t)"))
-				return nil
+				return missingTableErr("程序与表格 (gzdg_t)")
 			}
 			return err
 		}
-		if IsJSON() {
+		if structured {
 			// 机器可读:不打标题行,只收集
 			jsonOut = append(jsonOut, map[string]any{"表格编号": t, "表说明": desc, "使用程序": progs})
+			for _, p := range progs {
+				outRows = append(outRows, []string{t, desc, p.Prog, p.ProgName, p.Ops})
+			}
 			continue
 		}
 
@@ -304,8 +303,8 @@ func runTableWho(tables []string) error {
 		fmt.Println("操作: S=SELECT 查询 / I=INSERT 新增 / U=UPDATE 修改 / D=DELETE 删除")
 		fmt.Println()
 	}
-	if IsJSON() {
-		return output.PrintJSON(jsonOut)
+	if structured {
+		return emit(jsonOut, []string{"表格编号", "表说明", "程序编号", "程序名称", "操作"}, outRows)
 	}
 	return nil
 }

@@ -429,16 +429,66 @@ ORDER BY CAST(c.dzcc002 AS INTEGER)`
 
 // ---- msg:系统消息档 gzze_t(azzi920)/作业名称 gzzal_t ----
 
-// QueryMsg 返回指定消息编号的全部语言行(与本地 SQLite 语义一致)。
-func (l *Live) QueryMsg(code string) ([]db.MsgRow, error) {
-	c := lit(code)
+// inUpperLits 把一组值内联成 UPPER('a'),UPPER('b') 的 IN 列表(列侧自己包 UPPER)。
+// 与本地 db 包的 inUpper 同一个规矩,区别只是这边用内联字面量。
+func inUpperLits(vals []string) string {
+	parts := make([]string, len(vals))
+	for i, v := range vals {
+		parts[i] = "UPPER(" + lit(v) + ")"
+	}
+	return strings.Join(parts, ",")
+}
+
+// liveMsgWhere 与 db 包 msgWhere 同构(本地 SQLite 语义为蓝本),差别只有值要内联
+// (simple protocol 无绑定参数)。UPPER 两端:远程 Oracle/金仓的 LIKE 与 = 都区分
+// 大小写,本地 SQLite 的 LIKE 不区分 —— 统一 UPPER 让三个后端表现一致。
+func liveMsgWhere(q db.MsgQuery) string {
+	var conds []string
+	if len(q.Codes) > 0 {
+		ors := make([]string, 0, len(q.Codes))
+		for _, c := range q.Codes {
+			if strings.ContainsAny(c, "*%") {
+				ors = append(ors, "UPPER(COALESCE(gzze001, '')) LIKE UPPER("+lit(db.MsgLike(c))+")")
+			} else {
+				ors = append(ors, "UPPER(COALESCE(gzze001, '')) = UPPER("+lit(c)+")")
+			}
+		}
+		conds = append(conds, "("+strings.Join(ors, " OR ")+")")
+	}
+	if q.Text != "" {
+		conds = append(conds, "UPPER(COALESCE(gzze003, '')) LIKE UPPER("+lit(db.MsgLike(q.Text))+")")
+	}
+	if len(q.Types) > 0 {
+		conds = append(conds, "UPPER(gzze007) IN ("+inUpperLits(q.Types)+")")
+	}
+	if len(q.Status) > 0 {
+		conds = append(conds, "UPPER(COALESCE(gzzestus, '')) IN ("+inUpperLits(q.Status)+")")
+	}
+	if len(q.Progs) > 0 {
+		conds = append(conds, "UPPER(COALESCE(gzze005, '')) IN ("+inUpperLits(q.Progs)+")")
+	}
+	if q.Lang != "" {
+		conds = append(conds, "gzze002 = "+lit(q.Lang))
+	}
+	if len(conds) == 0 {
+		return ""
+	}
+	return " WHERE " + strings.Join(conds, " AND ")
+}
+
+// QueryMsgs 按编号/语句/类型/状态/建议作业/语言多条件查消息(与本地 SQLite 语义一致)。
+func (l *Live) QueryMsgs(q db.MsgQuery) ([]db.MsgRow, error) {
+	if !q.HasFilter() {
+		return nil, fmt.Errorf("消息查询至少需要一个条件(编号/语句/类型/状态/建议作业)")
+	}
+	where := liveMsgWhere(q)
 	sql := `SELECT gzze001, gzze002, gzze003,
        gzze004, gzze005, gzze006,
        gzze007, gzze008, gzzestus
-FROM gzze_t WHERE gzze001 = ` + c + ` ORDER BY gzze002`
+FROM gzze_t` + where + ` ORDER BY gzze001, gzze002`
 	rows, err := l.q(sql)
 	if err != nil {
-		return nil, fmt.Errorf("查询消息 %s: %w", code, err)
+		return nil, fmt.Errorf("查询消息: %w", err)
 	}
 	out := make([]db.MsgRow, 0, len(rows))
 	progs := map[string]bool{}
@@ -460,6 +510,28 @@ FROM gzze_t WHERE gzze001 = ` + c + ` ORDER BY gzze002`
 	}
 	for i := range out {
 		out[i].ProgName = names[out[i].ExecProg+"\x00"+out[i].Lang]
+	}
+	return out, nil
+}
+
+// QueryMsgLangs 同条件(去掉语言)下该编号有哪些语言行。
+func (l *Live) QueryMsgLangs(q db.MsgQuery) ([]string, error) {
+	if !q.HasFilter() {
+		return nil, fmt.Errorf("消息查询至少需要一个条件(编号/语句/类型/状态/建议作业)")
+	}
+	q.Lang = ""
+	where := liveMsgWhere(q)
+	// 别名 ORDER BY:Oracle 的 DISTINCT 只认 select 列表里的表达式(见 db/msg.go 同名方法)。
+	sql := `SELECT DISTINCT COALESCE(gzze002, '') AS lang FROM gzze_t` + where + ` ORDER BY lang`
+	rows, err := l.q(sql)
+	if err != nil {
+		return nil, fmt.Errorf("查询消息语言: %w", err)
+	}
+	var out []string
+	for _, r := range rows {
+		if v := get(r, 0); v != "" {
+			out = append(out, v)
+		}
 	}
 	return out, nil
 }

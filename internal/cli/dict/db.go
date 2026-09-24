@@ -59,27 +59,13 @@ func resolveDbConn(name string) (*dbconfig.Connection, string, error) {
 	if dbCfg == nil {
 		return nil, "", fmt.Errorf("配置未加载")
 	}
-	target := name
-	if target == "" {
-		target = dbCfg.ActiveEnv
+	ref, err := dbCfg.Resolve(name)
+	if err != nil {
+		return nil, name, err
 	}
-	if target == "" && len(dbCfg.SSHs) > 0 {
-		target = dbCfg.SSHs[0].Name
+	cc, err := dbConnOf(ref)
+	if err != nil {
+		return nil, ref.Name, err
 	}
-	if target == "" {
-		return nil, "", fmt.Errorf("尚未配置 SSH 环境(运行 tt serve 添加,或编辑 config.json hosts.sshs)")
-	}
-	for i := range dbCfg.SSHs {
-		e := &dbCfg.SSHs[i]
-		if e.Name != target {
-			continue
-		}
-		if e.DB == nil {
-			return nil, target, fmt.Errorf("环境 %q 未配置数据库(设置-环境-数据库页添加)", target)
-		}
-		cc := *e.DB
-		cc.Accounts = append([]dbconfig.DBAcct(nil), e.DB.Accounts...)
-		return &cc, target, nil
-	}
-	return nil, name, fmt.Errorf("未找到环境 %q(可用: tt env list 查看)", name)
+	return cc, ref.Name, nil
 }

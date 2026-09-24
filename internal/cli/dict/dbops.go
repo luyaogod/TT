@@ -22,9 +22,10 @@ import (
 )
 
 var (
-	discoverType string
-	discoverHost string
-	discoverSave bool
+	discoverType  string
+	discoverHost  string
+	discoverSave  bool
+	dbListSecrets bool
 )
 
 // dbListCmd 列出各环境挂载的数据库。
@@ -52,8 +53,13 @@ var dbListCmd = &cobra.Command{
 			rows = append(rows, row{Env: e.Name, Type: e.DB.Type, Address: e.DB.Address(),
 				Accounts: e.DB.Accounts, ViaSsh: via})
 		}
-		if IsJSON() {
-			return output.PrintJSON(rows)
+		if Format() != output.FormatTable {
+			if dbListSecrets {
+				return emit(rows, nil, nil)
+			}
+			// 账号清单里带明文口令,而这条命令的输出很容易被贴进日志或对话。
+			// 打码规则与 tt config show/get 同一份实现(internal/config/redact.go)。
+			return emit(config.RedactValue(rows), nil, nil)
 		}
 		if len(rows) == 0 {
 			fmt.Println("(无环境挂载数据库;请在 设置-环境-数据库 页配置)")
@@ -131,8 +137,8 @@ var dbDiscoverCmd = &cobra.Command{
 			return err
 		}
 		cand := candidateConn(out)
-		if IsJSON() {
-			return output.PrintJSON(cand)
+		if Format() != output.FormatTable {
+			return emitOne(cand)
 		}
 		fmt.Printf("自动发现(SSH %s, env=%s):\n", ssh.Host, envName)
 		fmt.Printf("  类型: %s", cand.Type)
@@ -177,25 +183,15 @@ func discoverSSHFromEnv(name string) (host.SSHConfig, string, string, error) {
 	if err != nil {
 		return host.SSHConfig{}, "", "", err
 	}
-	if name == "" {
-		name = cfg.ActiveEnv
+	ref, err := cfg.Resolve(name)
+	if err != nil {
+		return host.SSHConfig{}, "", "", err
 	}
-	if name == "" && len(cfg.SSHs) > 0 {
-		name = cfg.SSHs[0].Name
+	s := ref.Env.SSHConfig
+	if s.Port == 0 {
+		s.Port = 22
 	}
-	if name != "" {
-		for _, e := range cfg.SSHs {
-			if e.Name == name {
-				s := e.SSHConfig
-				if s.Port == 0 {
-					s.Port = 22
-				}
-				return s, e.Zone, e.Name, nil
-			}
-		}
-		return host.SSHConfig{}, "", "", fmt.Errorf("未找到环境 %q(可 tt env list 查看)", name)
-	}
-	return host.SSHConfig{}, "", "", fmt.Errorf("尚未配置 SSH 环境(运行 tt serve 添加,或编辑 config.json hosts.sshs)")
+	return s, ref.Env.Zone, ref.Name, nil
 }
 
 // candidateConn 由探测结果构造连接要素(type/host/port/service|库名);
@@ -252,4 +248,5 @@ func init() {
 	dbDiscoverCmd.Flags().StringVar(&discoverHost, "host", "", "客户端可达 DB 地址覆盖(默认取探测/ssh host)")
 	dbDiscoverCmd.Flags().BoolVar(&discoverSave, "save", false, "写入该环境的 db(config.json hosts.sshs[].db)")
 	dbCmd.AddCommand(dbListCmd, dbPingCmd, dbDiscoverCmd)
+	dbListCmd.Flags().BoolVar(&dbListSecrets, "show-secrets", false, "原样输出账号口令(默认打码)")
 }

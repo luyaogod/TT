@@ -6,12 +6,13 @@
 package common
 
 import (
-	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
+	"strings"
 
 	"tt/internal/config"
+	"tt/internal/output"
 )
 
 // 全局开关。由根命令的 persistent flags 绑定；各命令组只读。
@@ -20,8 +21,10 @@ var (
 	ConfigPath string
 	// JSON --json：机器可读输出
 	JSON bool
-	// CSV --csv：CSV 输出（字典类命令用）
+	// CSV --csv：CSV 输出（--format csv 的语法糖）
 	CSV bool
+	// Format --format：输出形态 json(默认) | csv | table。--json/--csv 是它的语法糖。
+	Format string
 	// Verbose -v：显示解析细节（如实际使用的数据源路径）
 	Verbose bool
 	// Env --env 指定的环境名；--conn 是其别名（合并前 tdict 的写法）
@@ -55,13 +58,43 @@ func WebFrontend() fs.FS {
 	return WebFS
 }
 
-// PrintJSON 以缩进 JSON 输出 v（各命令的 --json 通道统一走它，保证格式一致）。
-func PrintJSON(v any) error {
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	enc.SetEscapeHTML(false)
-	return enc.Encode(v)
+// OutputFormat 解析本次要用的输出形态。
+//
+// 默认 **json** —— 依据是表格类格式对 LLM 的理解力实测(JSON 52.3% /
+// Markdown 表格 51.9% / CSV 44.3%),而 JSON 又省掉了解析歧义。
+// --json / --csv 保留为语法糖：既有脚本与 skill 文档里的例子不改即可用。
+func OutputFormat() output.Format {
+	switch {
+	case JSON:
+		return output.FormatJSON
+	case CSV:
+		return output.FormatCSV
+	}
+	switch strings.ToLower(strings.TrimSpace(Format)) {
+	case "csv":
+		return output.FormatCSV
+	case "table", "text":
+		return output.FormatTable
+	default:
+		return output.FormatJSON
+	}
 }
+
+// MetaProvider 由命令组注入：返回当前数据源的落脚点(环境/账号/库)，
+// 供错误信封使用 —— 出错时"哪个环境连不上"比错误本身更难猜。
+var MetaProvider func() output.Meta
+
+// CurrentMeta 取当前数据源的环境信息(未注入返回零值)。
+func CurrentMeta() output.Meta {
+	if MetaProvider == nil {
+		return output.Meta{}
+	}
+	return MetaProvider()
+}
+
+// PrintJSON 以缩进 JSON 输出 v。查询命令请用 output.Emit —— 裸值没有地方放
+// "这次查的是哪个环境、哪个账号"。
+func PrintJSON(v any) error { return output.WriteJSONValue(os.Stdout, v) }
 
 // Fatal 打印错误到 stderr 并以退出码 1 结束。
 func Fatal(format string, args ...any) {

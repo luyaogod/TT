@@ -96,21 +96,19 @@ func (c *Config) ApplyDefaultEnv() {
 		c.Runtime = nil
 		return
 	}
-	if c.envName == "" {
-		c.envName = c.SSHs[0].Name
-	}
-	if c.envName == "" {
-		return
-	}
-	for i := range c.SSHs {
-		if c.SSHs[i].Name == c.envName {
-			c.applySsh(&c.SSHs[i])
+	// 环境名的选择顺序只有一份实现(config.Hosts.Resolve),这里不再自己写一遍线性查找。
+	// ActiveEnv 留空:envName 是"会话当前环境",与配置里的 hosts.activeEnv 是两回事 ——
+	// 用配置默认值兜底会把会话悄悄切走。
+	h := config.Hosts{SSHs: c.SSHs}
+	ref, err := h.Resolve(c.envName)
+	if err != nil {
+		// 当前环境已被删除:回落到首条,避免运行时字段悬空
+		if ref, err = h.Resolve(""); err != nil {
 			return
 		}
 	}
-	// 当前环境已被删除:回落到首条,避免运行时字段悬空
-	c.envName = c.SSHs[0].Name
-	c.applySsh(&c.SSHs[0])
+	c.envName = ref.Name
+	c.applySsh(ref.Env)
 }
 
 // SSHByName 按名取 SSH 连接;空名/未命中返回生效 SSH(合并后的 c.SSH)

@@ -19,22 +19,34 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"time"
 
 	"tt/internal/cli/common"
 	"tt/internal/config"
 	"tt/internal/dbconfig"
 	"tt/internal/dict/db"
 	"tt/internal/dict/live"
-	"tt/internal/host"
+	"tt/internal/output"
 )
 
 var (
 	dataSrc  db.Source
 	srcLocal bool // 当前源为本地 SQLite(错误提示文案分流)
+
+	// srcTarget 当前数据源的"落脚点"(环境/账号/库/路径)—— openQuerySource 时填好,
+	// 由查询命令打进输出信封。它是"我这次到底查的是哪儿"的唯一答案。
+	srcTarget *dbconfig.Target
+	// srcNotes 打开数据源时产生的降级提示(如企业账号解析失败改用了列表首项)。
+	srcNotes []string
+	// srcStarted 数据源打开的时刻,用来算信封里的"用时" —— 它含连接与环境解析,
+	// 不只是查询本身,那正是"这条命令为什么慢"要看的数。
+	srcStarted time.Time
 )
 
 // openQuerySource 在 Group PersistentPreRunE 打开数据源。
 func openQuerySource() error {
+	srcStarted = time.Now()
 	if common.Env != "" { // ① 命令行指定(--env/--conn):强制
 		if common.Env == "local" {
 			return openLocalSource()
@@ -85,6 +97,8 @@ func openLocalSource() error {
 	if err != nil {
 		return err
 	}
+	srcTarget = &dbconfig.Target{Env: "local", Route: dbconfig.RouteLocalSQLite, Path: resolvedPath}
+	srcNotes = nil
 	if common.Verbose {
 		fmt.Fprintf(os.Stderr, "[dict] 数据源: 本地 SQLite (%s)\n", resolvedPath)
 	}
@@ -107,37 +121,49 @@ func openRemoteSource(target string) error {
 	if err != nil {
 		return err
 	}
-	cc, err := envDBByName(cfg, target)
+	ref, err := cfg.Resolve(target)
 	if err != nil {
 		return err
 	}
+	cc, err := dbConnOf(ref)
+	if err != nil {
+		return err
+	}
+	srcTarget = dbconfig.NewTarget(cc, ref.Name, ref.Env.Host, ref.Env.User, ref.Env.Zone,
+		string(ref.Env.Topent), dbconfig.RouteClientDirect)
+	// 用哪个账号由企业编号(topent)决定:与 tt debug 同一条规则、同一份快照 —— 见 entacct.go
+	srcNotes = hookEntAccount(cc, ref, dataDirOf(path))
 	if common.Verbose {
-		fmt.Fprintf(os.Stderr, "[dict] 数据源: 远程 %s (%s %s)\n", target, cc.Type, cc.Address())
+		fmt.Fprintf(os.Stderr, "[dict] 数据源: 远程 %s (账号 %s/%s, %s %s)\n",
+			ref.Name, srcTarget.Account, srcTarget.AccountSource, cc.Type, cc.Address())
 	}
 	l, err := live.Open(context.Background(), *cc)
 	if err != nil {
-		return fmt.Errorf("打开远程数据源 %q: %w", target, err)
+		return fmt.Errorf("打开远程数据源 %q: %w", ref.Name, err)
 	}
 	dataSrc = l
 	srcLocal = false
 	return nil
 }
 
-// envDBByName 在 hosts.sshs 中按环境名取该环境 db 的深拷贝。
-func envDBByName(cfg *host.Hosts, name string) (*dbconfig.Connection, error) {
-	for i := range cfg.SSHs {
-		e := &cfg.SSHs[i]
-		if e.Name != name {
-			continue
-		}
-		if e.DB == nil {
-			return nil, fmt.Errorf("环境 %q 未配置数据库(可在 config.json hosts.sshs[].db 添加后可用 --env 直查)", name)
-		}
-		cc := *e.DB
-		cc.Accounts = append([]dbconfig.DBAcct(nil), e.DB.Accounts...)
-		return &cc, nil
+// dataDirOf 数据目录 = 配置文件所在目录(与调试侧同一条约定:ents/、srccache/ 都跟着它)。
+// 企业目录快照两处共用一个文件,靠的就是这条约定。
+func dataDirOf(configPath string) string {
+	if configPath == "" {
+		return ""
 	}
-	return nil, fmt.Errorf("未找到环境 %q(可用: tt env list 查看环境名)", name)
+	return filepath.Dir(configPath)
+}
+
+// dbConnOf 取某环境一对一挂载的库连接(深拷贝:调用方要改 User/Password 等运行期槽位,
+// 不能写回配置里的那份)。
+func dbConnOf(ref *config.EnvRef) (*dbconfig.Connection, error) {
+	if ref.Env.DB == nil {
+		return nil, fmt.Errorf("环境 %q 未配置数据库(设置-环境-数据库页添加,或编辑 config.json hosts.sshs[].db)", ref.Name)
+	}
+	cc := *ref.Env.DB
+	cc.Accounts = append([]dbconfig.DBAcct(nil), ref.Env.DB.Accounts...)
+	return &cc, nil
 }
 
 // defaultEnvName 尽力取默认环境名(读配置失败或未配置时返回空串)。只用于错误提示,不报错。
@@ -150,13 +176,23 @@ func defaultEnvName() string {
 	if err != nil {
 		return ""
 	}
-	if cfg.ActiveEnv != "" {
-		return cfg.ActiveEnv
+	ref, err := cfg.Resolve("")
+	if err != nil {
+		return ""
 	}
-	if len(cfg.SSHs) > 0 {
-		return cfg.SSHs[0].Name
-	}
-	return ""
+	return ref.Name
+}
+
+// missingTableErr 主字典表缺失。**这是错误(退出码 3),不是一句提示。**
+//
+// 从前它在十来处都是"打一句提示、然后退出 0",脚本与 agent 会把"没查过"
+// 读成"查过了,没有" —— 而这两件事的后续动作完全不同(前者去 sync,后者改条件)。
+// 缺表意味着数据源不完整,那是失败。
+//
+// 注意只用于**命令的主数据**;程序族那种"缺了还能靠另一族兜底"的降级
+// (printProgTables、程序详情的用表索引)仍然打提示、不报错。
+func missingTableErr(subject string) error {
+	return output.Errorf(output.CodeTableMissing, output.ExitMissing, "%s", missingHint(subject))
 }
 
 // missingHint 主字典表缺失(IsMissingTable)时的提示。本地源给**两条路**:全量同步,
