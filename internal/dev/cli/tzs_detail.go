@@ -53,6 +53,7 @@ var detailOrder = []struct{ key, label string }{
 	{"at", "抛出位置"},
 	{"source", "依据"},
 	{"written", "写入的值"},
+	{"conflict", "冲突的路径"},
 	{"message", "说明"},
 }
 

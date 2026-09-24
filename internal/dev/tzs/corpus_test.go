@@ -1310,3 +1310,97 @@ func reAttr(name string) *regexp.Regexp {
 	reAttrCache[name] = re
 	return re
 }
+
+//---------------------------------------------------------------------------
+// `out` 闸门（引擎侧，2026-09-24 加）
+//---------------------------------------------------------------------------
+
+// TestOutGateRefusesToDestroyTheSource 钉住写入前那两道闸门：`out` 不能指向已打开的包、
+// 不能落在工作区之外。
+//
+// 为什么值得一条真机用例：`Save.Run` 结尾就是 `File.WriteAllBytes(outPath, ...)`，在闸门
+// 存在之前，把 `out` 指到源包**会覆盖原始素材**，而阻止它的只有 SKILL 里的一条红线 ——
+// 代码零防线。`.tzc` 那条线一直有闸门 + 原子写 + prev 备份 + 源包 sha256，这边一直没有。
+//
+// 判据三问，缺一不可：
+//
+//	① 指到**源包**必须被拒，而且源包**一个字节不变** —— 这才是闸门存在的理由
+//	② 指到**工作区之外**必须被拒 —— 从前它退 0 成功，那个包之后才 open 不了
+//	③ 指到工作区内的**新**路径必须放行 —— 没有这一条，一个"见谁都拒"的实现也能让①②变绿
+//
+// `field_add` 走的是同一个出口（它也经过 SaveFn），所以这两道闸门对它是同一个实现；
+// `field_add --out <源包>` 在 2026-09-24 手工验过（回 E_BAD_PARAM / out-is-open-package）。
+func TestOutGateRefusesToDestroyTheSource(t *testing.T) {
+	env := requireCorpus(t)
+	if len(env.pkgs) == 0 {
+		t.Skip("语料里没有包")
+	}
+	src := env.pkgs[0]
+	ws := workspaceOf(src)
+
+	before, err := sha16(src)
+	if err != nil {
+		t.Fatalf("算源包 sha256 失败：%v", err)
+	}
+
+	s := startStdio(t, env.exe, ws, 3*time.Minute)
+	defer s.close()
+
+	opened, ok := ask[openReply](t, s, "outgate/open", "open", map[string]any{"path": src})
+	if !ok || opened.Handle == "" {
+		t.Fatalf("打不开语料包 %s", src)
+	}
+
+	// ① out = 源包
+	if r, err := s.call("save", map[string]any{"handle": opened.Handle, "out": src}); err != nil {
+		t.Errorf("save(out=源包)：调用本身失败：%v", err)
+	} else if r.OK {
+		t.Error("save(out=源包) 该被拒 —— 它成功了，原始素材会被覆盖")
+	} else if r.Error == nil || !strings.Contains(string(r.Error.Detail), "out-is-open-package") {
+		t.Errorf("拒绝的 detail 里该有 out-is-open-package，得：%v", r.Error)
+	}
+	if after, err := sha16(src); err != nil || after != before {
+		t.Errorf("被拒的 save 动了源包：%s → %s（err=%v）", before, after, err)
+	}
+
+	// ② out 在工作区之外
+	outside := filepath.Join(os.TempDir(), fmt.Sprintf("_outgate_%d.tzs", os.Getpid()))
+	if inWorkspace(outside, ws) {
+		t.Log("os.TempDir() 落在工作区内，用一个明显在外的路径代替")
+		outside = filepath.Join(filepath.Dir(ws), "..", "_outgate_outside_"+itoaPID()+".tzs")
+	}
+	defer os.Remove(outside)
+	if r, err := s.call("save", map[string]any{"handle": opened.Handle, "out": outside}); err != nil {
+		t.Errorf("save(工作区外)：调用本身失败：%v", err)
+	} else if r.OK {
+		t.Error("save 到工作区外该被拒（写成功了那个包之后也打不开）—— 它成功了")
+	} else if r.Error == nil || !strings.Contains(string(r.Error.Detail), "out-outside-workspace") {
+		t.Errorf("拒绝的 detail 里该有 out-outside-workspace，得：%v", r.Error)
+	}
+	if _, err := os.Stat(outside); err == nil {
+		t.Errorf("被拒的 save 还是在工作区外写出了文件：%s", outside)
+	}
+
+	// ③ out 在工作区内的新路径 —— 必须放行
+	inside := scratchPath(src, 0, "outgate", "ok")
+	defer os.Remove(inside)
+	if !saveTo(t, s, "outgate/save(工作区内)", opened.Handle, inside) {
+		t.Error("save 到工作区内的新路径该成功 —— 被拒说明闸门在误伤正常调用")
+	}
+	if _, err := os.Stat(inside); err != nil {
+		t.Errorf("放行的 save 没有落盘：%v", err)
+	}
+}
+
+// inWorkspace 是闸门那条判据的测试侧复述（目录前缀、分隔符归一、大小写不敏感）。
+func inWorkspace(p, ws string) bool {
+	norm := func(s string) string { return strings.ToLower(strings.ReplaceAll(s, "/", `\`)) }
+	d := norm(filepath.Dir(p))
+	w := norm(ws)
+	for len(w) > 1 && strings.HasSuffix(w, `\`) {
+		w = w[:len(w)-1]
+	}
+	return strings.HasPrefix(d+`\`, w+`\`)
+}
+
+func itoaPID() string { return strconv.Itoa(os.Getpid()) }

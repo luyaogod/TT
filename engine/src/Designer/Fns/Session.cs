@@ -196,6 +196,7 @@ namespace TzsCli.Designer.Fns
             string outPath = Str(args, "out");
             if (string.IsNullOrEmpty(outPath)) outPath = Str(args, "outPath");
             if (string.IsNullOrEmpty(outPath)) throw TzsError.Validation("save 需要一个 out（输出 .tzs 路径）");
+            CheckOutPath(outPath);
 
             byte[] original = File.ReadAllBytes(s.Path);
             FormWriter w4 = Layout(s);
@@ -209,6 +210,109 @@ namespace TzsCli.Designer.Fns
                 { "layoutDirty", w4.Dirty },
                 { "state",      State(s) },
             };
+        }
+
+        /// <summary>
+        /// The two gates every write passes through: `out` must not be an already-open package,
+        /// and it must be inside the workspace.
+        ///
+        /// <para>
+        /// WHY THIS HAS TO BE HERE. <c>Save.Run</c> ends in <c>File.WriteAllBytes(outPath, ...)</c>,
+        /// so pointing `out` at the package we are editing replaces the original material on
+        /// disk. Before this, the only thing saying "never do that" was a red line in
+        /// skills/tt-dev-tzs/SKILL.md -- zero code behind it. The `.tzc` pipeline has had the
+        /// opposite shape all along: three gates, an atomic write, a `prev.tzc` backup and a
+        /// source sha256 check. This is that discipline arriving on the `.tzs` side, at the one
+        /// place where losing data is possible.
+        /// </para>
+        ///
+        /// <para>
+        /// The workspace half moves an EXISTING verdict earlier rather than inventing one: the
+        /// designer already refuses a package outside the workspace at LOAD time
+        /// (<c>TzpManager.InCurrentWorkspace</c>, same string-prefix rule), but writing was never
+        /// checked -- so a write outside the workspace used to return success and the package
+        /// then could not be opened (SKILL §4.4 records that trap). We mirror the rule; we do not
+        /// call it, because it lives in the designer's assemblies and this file talks to the
+        /// designer by reflection only.
+        /// </para>
+        ///
+        /// <para>
+        /// Compared separator-insensitively (both sides run through <see cref="Normalize"/>).
+        /// That direction matters: being permissive here costs nothing -- the designer still
+        /// refuses the package later -- while being strict would reject a call that works.
+        /// </para>
+        ///
+        /// <para>
+        /// KNOWN LIMIT, left in on purpose: gate (a) compares the strings as given (separators
+        /// normalised), it does not resolve relative paths against the process CWD. A relative
+        /// `out` therefore cannot be caught pointing at an open package. That case is not worth
+        /// the resolution: the daemon's CWD is the engine's own directory, so a relative `out`
+        /// lands next to the engine, where no source package ever lives -- and the dangerous
+        /// version of this mistake (an absolute path back into the workspace) is exactly what
+        /// gate (a) does catch. Gate (b) does resolve, because there the comparison is against
+        /// the workspace directory rather than against another caller-supplied string.
+        /// </para>
+        /// </summary>
+        static void CheckOutPath(string outPath) {
+            string outFull = Normalize(outPath);
+
+            // (a) `out` == ANY open package. Not just the one being saved: `save --form A --out
+            //     <B's path>` would destroy B, and B never entered this call.
+            lock (_gate) {
+                foreach (KeyValuePair<string, DS> kv in _handles) {
+                    if (kv.Value == null || string.IsNullOrEmpty(kv.Value.Path)) continue;
+                    if (string.Equals(Normalize(kv.Value.Path), outFull, StringComparison.OrdinalIgnoreCase))
+                        throw new DetailedError("validation",
+                            "out 指向一个已打开的包（" + kv.Value.Path + "）：那会覆盖原始素材。"
+                            + "另给一个 out 路径（写新包），或先 close 它。",
+                            new JObject {
+                                { "param",    "out" },
+                                { "reason",   "out-is-open-package" },
+                                { "value",    outPath },
+                                { "conflict", kv.Value.Path },
+                            });
+                }
+            }
+
+            // (b) `out` inside the workspace. Same resolution order as Rpc.PipeName: the booted
+            //     value first (a daemon is always Booted before it serves anything), the hint
+            //     second (`--pipe-name` runs pre-Boot). Reading only WorkspaceHint here was the
+            //     first cut and it silently skipped the check, because the daemon branch of
+            //     tzs-server.cs never sets the hint -- measured, not deduced.
+            string ws = Designer.Workspace;
+            if (string.IsNullOrEmpty(ws)) ws = Rpc.WorkspaceHint;
+            if (string.IsNullOrEmpty(ws)) return;
+            string outDir;
+            try {
+                outDir = Path.GetDirectoryName(Path.GetFullPath(outPath));
+            } catch (Exception) {
+                // Unresolvable path: the write itself will fail with a clearer IO error than
+                // anything invented here.
+                return;
+            }
+            if (string.IsNullOrEmpty(outDir)) return;
+            string wsPrefix = Normalize(ws) + "\\";
+            string dirPrefix = Normalize(outDir) + "\\";
+            if (!dirPrefix.StartsWith(wsPrefix, StringComparison.OrdinalIgnoreCase))
+                throw new DetailedError("validation",
+                    "out 落在工作区之外（" + outPath + "）：现在写会退 0 成功，但那个包之后打不开"
+                    + "（设计器在**加载**时才查工作区）。把它写到工作区内，或改工作区设置。",
+                    new JObject {
+                        { "param",     "out" },
+                        { "reason",    "out-outside-workspace" },
+                        { "value",     outPath },
+                        { "workspace", ws },
+                    });
+        }
+
+        /// <summary>
+        /// Separators to `\` so that two spellings of one path compare equal. Trailing
+        /// separators are NOT trimmed: the caller compares directory prefixes with one added,
+        /// and trimming here would make `C:\ws\` and `C:\ws` collide in a way the designer's own
+        /// rule does not (internal/dev/tzs/server.go normalises the workspace on the Go side).
+        /// </summary>
+        static string Normalize(string p) {
+            return p.Replace('/', '\\');
         }
 
         /// <summary>

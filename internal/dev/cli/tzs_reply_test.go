@@ -99,6 +99,12 @@ func TestPrintWireDetail(t *testing.T) {
 			},
 		},
 		{
+			// 引擎侧 `out` 闸门的拒绝（2026-09-24 加）：detail 带 param/reason/value/conflict
+			name:   "out 闸门的拒绝",
+			detail: `{"param":"out","reason":"out-is-open-package","value":"C:/ws/a.tzs","conflict":"C:/ws/a.tzs"}`,
+			want:   []string{"参数：out", "原因：out-is-open-package", "冲突的路径：C:/ws/a.tzs"},
+		},
+		{
 			// 同样真机实测（同一个元素上写 case，它没有这个属性）：
 			// 不带 value ⟹ 属性名集。写成"合法值"会被读成"case 的合法值是 tag/posX/…"
 			name:   "属性名集拒绝",
