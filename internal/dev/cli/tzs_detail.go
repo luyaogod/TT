@@ -39,6 +39,7 @@ var detailOrder = []struct{ key, label string }{
 	{"value", "值"},
 	{"expected", "期望"},
 	{"got", "实际"},
+	{"type", "类型"},
 	{"types", "类型"},
 	{"legal", "合法值"},
 	{"hint", "提示"},
@@ -80,6 +81,15 @@ func printWireDetail(w io.Writer, e *tzs.WireError) {
 	}
 
 	seen := make(map[string]bool, len(m))
+	// `legal` 有两种含义，而判据**是结构不是语义**：同一个 detail 里带 `value` 时它是
+	// "这个值该取哪些"（值集），不带时是"这个位置接受哪些"（属性名集 / 类型集）。
+	// 真机上见过后者，标签写"合法值"会读成"case 的合法值是 tag/posX/…"，那是错的。
+	// 这条判据用到的只是"有没有那一项"，不是引擎的规则。
+	legalLabel := "合法值"
+	if _, hasValue := m["value"]; !hasValue {
+		legalLabel = "可选项"
+	}
+
 	for _, d := range detailOrder {
 		raw, ok := m[d.key]
 		if !ok {
@@ -90,7 +100,11 @@ func printWireDetail(w io.Writer, e *tzs.WireError) {
 		if d.key == "message" && unquote(raw) == e.Message {
 			continue
 		}
-		printDetailValue(w, d.label, raw)
+		label := d.label
+		if d.key == "legal" {
+			label = legalLabel
+		}
+		printDetailValue(w, label, raw)
 	}
 
 	// 表里没有的键：按名字排序、用原名当标签。**这就是"引擎加键不用改 Go"的落点。**

@@ -80,10 +80,31 @@ func TestPrintWireDetail(t *testing.T) {
 		absent []string
 	}{
 		{
-			// Fns/Attr.cs:81-84,107-112 —— 属性值不在设计器声明的集合里
-			name:   "合法值 + 近似值",
+			// Fns/Attr.cs:81-84,107-112 —— 属性值不在设计器声明的集合里。
+			// 不带 `value` ⟹ `legal` 是**属性名集**，标签用"可选项"
+			name:   "可选项 + 近似值",
 			detail: `{"path":"managedform/a/HBoxT1/x","legal":["none","lower","upper"],"hint":"upper"}`,
-			want:   []string{"位置：managedform/a/HBoxT1/x", "合法值：", "- none", "- upper", "提示：upper"},
+			want:   []string{"位置：managedform/a/HBoxT1/x", "可选项：", "- none", "- upper", "提示：upper"},
+			absent: []string{"合法值"},
+		},
+		{
+			// 真机实测的载荷（aapt300(c).tzs 的 HBoxT1 上写 hidden=MAYBE）：
+			// 带 `value` ⟹ `legal` 是**值集**，标签是"合法值"
+			name:   "值集拒绝",
+			detail: `{"path":"managedform/aapt300/HBoxT1","attr":"hidden","value":"MAYBE","legal":["false","true"],"type":"ENUM","source":"mta/mod-fd.spec","written":false}`,
+			want: []string{
+				"位置：managedform/aapt300/HBoxT1", "属性：hidden", "值：MAYBE",
+				"合法值：", "- false", "- true",
+				"类型：ENUM", "依据：mta/mod-fd.spec", "写入的值：false",
+			},
+		},
+		{
+			// 同样真机实测（同一个元素上写 case，它没有这个属性）：
+			// 不带 value ⟹ 属性名集。写成"合法值"会被读成"case 的合法值是 tag/posX/…"
+			name:   "属性名集拒绝",
+			detail: `{"path":"managedform/aapt300/HBoxT1","attr":"case","legal":["tag","posX","posY"]}`,
+			want:   []string{"属性：case", "可选项：", "- tag", "- posX"},
+			absent: []string{"合法值"},
 		},
 		{
 			// Rpc.cs:739-749 + OpenHandles Rpc.cs:468-484 —— 候选是**对象数组**，
@@ -215,7 +236,7 @@ func TestHumanReplyRendersDetailOnError(t *testing.T) {
 
 	for _, want := range []string{
 		"E_ATTR_VALUE_ILLEGAL (validation): 属性值不在合法集里",
-		"合法值：", "- upper", "提示：upper",
+		"可选项：", "- upper", "提示：upper",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("该出现 %q，实际：\n%s", want, out)
