@@ -1363,7 +1363,7 @@ properties="…"/>`）本来就是**属性名**白名单的来源——`Componen
 | 码 | 含义 |
 |---|---|
 | 0 | 帧 `ok:true` |
-| 1 | 引擎内部错（`kind=internal`，含 `E_NOT_IMPLEMENTED`）。**`E_NO_OP` 也落在这一格** —— 见下 |
+| 1 | 引擎内部错（`kind=internal`，含 `E_NOT_IMPLEMENTED`）。**少数情形**：`E_NO_OP` 被 `set_local_string` / `set_spec_description` 发成错误帧时也落这一格 —— 见下 |
 | 2 | 参数/环境不对：本地参数错、未知动词、manifest 拉不到、引擎的 `validation` 与 `not_found` |
 | 4 | **设计器拒绝**（`kind=designer`，含 `E_KEY_IN_USE`） |
 | 5 | 传输或环境失败（含加载超时、没配工作区、`--args-file` 读不到） |
@@ -1966,6 +1966,18 @@ TDev 的两点被完整保留：位置无关的参数解析（`-o`/`--json` 可�
 8. 小的两条：`add_field` 的 `column`/`columns` 写着"二选一"但两个都是选填（都不给也过本地校验）；
    `set_spec_description` 的参数声明顺序与其它动词不同（`kind` 在 `path` 之前），而**声明顺序
    就是线上键序**。
+9. **`describe_kind` 收不下 `kind:"layout"`，于是"布局属性合法集"这条路走不通。**
+   函数体**实现了**它（`Read.cs:458`：`else if (want == "layout") res["layout"] = StrArray(LayoutAttrUnion(s))`），
+   注释还写着"`kind:"layout"` is how the layout side is asked for explicitly" —— 但它在
+   **参数校验层**就被挡掉了：`Manifest.cs:197` 把 `describe_kind` 的 `kind` 声明成 `PType.Kind`，
+   而那个校验器（`Manifest.cs:536-539`）只认七种规格节点，回
+   `E_BAD_PARAM: 不是七种规格节点之一: layout`。**实测**（2026-09-24）。
+   后果：`set_layout_attr` 的 `attr` 在 manifest 里声明了 `from:"layout"`，指向一条**调不通**的
+   发现路径；调用方只能从 `get_component` 看元素**现有**的属性（等价于试错，而项目自己的
+   承诺是"不必用试错法探测边界"），或者照 `E_ATTR_NOT_WHITELIST` 的 `detail.legal` 更正。
+   修法：给这一个参数单独的声明（七种 + `layout`），别动全局的 `PType.Kind`（`set_spec_attr`
+   的 `kind` 本来就不该收 `layout`）；顺带把描述里那句"七种之一"改掉。这是本项目第三次
+   撞上"同一个知识写在两处、只改了一处"（前两次：容器名三份集合、`gate-w3-fns.py` 的 import）。
 
 不需要重建引擎的（Go 侧，可单独发）：
 

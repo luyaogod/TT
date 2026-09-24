@@ -34,6 +34,9 @@ metadata:
 **本文档的 `D:\ws` 一律指工作区**）。**这条没有缺省、也不回落** —— 引擎内置的默认工作区是一个
 **真实客户目录**，落上去等于拿别人的表单当草稿纸；三层都空时运行类动词直接拒绝启动（退 5）。
 工作区还**圈定了你能碰哪些包**：包的目录必须在它之下，`out` 也一样（§4.4）。
+
+配置**文件**的位置可以用环境变量 `TT_CONFIG=<config.json>` 指定（便携版、或"不想动默认配置"
+时用）；`tt config path` 会告诉你当前实际读的是哪一份。工作区写在那个文件的 `tzs.workspace` 里。
 设计器**不用配**（它的程序集随仓库与发行包自带）。开工前先 `tt dev tzs doctor` 自检。
 
 ## 2. 任务级动词：`field_add`
@@ -116,9 +119,16 @@ tt dev tzs stop                                          # 停本工作区的常
 `undoSteps` 是**实测的**（撤销栈前后差），不是承诺的。
 
 **读的动词各自干什么**：`form_tree` 看层级与 name-path；`get_component` 看一个节点的属性与规格；
-`describe_kind` 给**这一类节点此刻能写哪些属性**（白名单是每个包现算的，`attr` 必须照着它写，
+`describe_kind` 给**这一类规格节点此刻能写哪些属性**（白名单是每个包现算的，`attr` 必须照着它写，
 否则撞 `E_ATTR_NOT_WHITELIST`）；`list_spec_nodes` 列字段/动作等规格节点；`list_tables` /
 `list_columns` 查数据字典；`list_records` / `list_local_strings` 看记录与多语言。
+
+> ⚠️ **要改的是布局属性（`set_layout_attr` 的 `attr`）时，`describe_kind` 帮不上忙** ——
+> 它只答那七种规格节点，`kind:"layout"` 会被参数校验拒掉（引擎侧的声明问题，见
+> `docs/WIKI.md` §11.9 第 9 条）。两条实际可用的路：
+> ① `get_component` 看这个元素**现有**的属性名（`layout` 那一段就是）；
+> ② 直接写，被拒时看 `E_ATTR_NOT_WHITELIST` 的 `detail.legal` —— 它会把这个元素能用的属性名列全。
+> 而布局属性的**值**集有另一份依据：见 §7 的表（引擎按工作区的 `mta/mod-fd.spec` 拒）。
 
 **两个返回形状不一样，别按一个猜**：`get_component` 的 `spec` 是**按 kind 分层的**
 （`spec.field.attrs.can_edit`），而 `layout` 是**扁平的**（`layout.noEntry`，没有 `.attrs`）。
@@ -162,6 +172,17 @@ tt dev tzs list_open --json                            # 无参数的动词可�
 没有 `--handle h9` 这种写法：参数名与类型是**运行时**从引擎 manifest 来的，写成 flag 就得让调用方
 去学一套只存在于命令行的语法（逗号切数组、能不能重复、负号算不算值…）。JSON 里这些都不存在。
 **中文/长内容一律走 `--args-file`**：Windows 管道可能按控制台代码页重编码。
+
+> ⚠️ **路径写正斜杠，别写反斜杠。** 内联 `--args` 里的 Windows 反斜杠路径
+> （`'{"path":"D:\\pkg\\x.tzs"}'` —— 上面那些示例就是这么写的）在 bash / Git Bash 下会被
+> **吃掉一层转义**，引擎报 `invalid character 'U' in string escape code`。
+> 两条出路，都不用猜：
+>
+> ① **路径写成正斜杠**：`'{"path":"D:/pkg/x.tzs"}'` ← **推荐**。引擎接受它（包路径、`out`、
+> `file` 都是），而且不必和引号层数较劲；
+> ② 或者把整份 JSON 写进文件，走 `--args-file`。
+>
+> 这不是"小心一点就好"的坑：四个互不相干的执行者在这上面各花了额外调用，全都靠试出①才通。
 
 ### 4.3 寻址：`--form <程序名>`，不要搬运句柄
 
@@ -287,10 +308,15 @@ tt dev tzs set_spec_attr --form aapp320 --args '{"path":"…","kind":"field","at
 | 码 | 含义 |
 |---|---|
 | `0` | 帧 `ok:true` |
-| `1` | 引擎内部错（`kind=internal`，含 `E_NOT_IMPLEMENTED`）。**`E_NO_OP`（"什么都没改"）也在这里** —— 那是引擎把它发成了错误帧，不是真出错，见下 |
+| `1` | 引擎内部错（`kind=internal`，含 `E_NOT_IMPLEMENTED`）。**少数情形**：`E_NO_OP`（"什么都没改"）被 `set_local_string` / `set_spec_description` 发成了错误帧，也落这一格 —— 那不是出错，见下 |
 | `2` | 参数/环境不对：本地参数错、未知动词、manifest 拉不到、引擎的 `validation` 与 `not_found` |
 | `4` | **设计器拒绝**（`kind=designer`，含 `E_KEY_IN_USE`） |
 | `5` | 传输或环境失败（含加载超时、没配工作区、`--args-file` 读不到） |
+
+**`E_NO_OP` 分两路，别只记上面那条。** 绝大多数动词把"什么都没改"放在**成功帧**里：
+`ok:true` + `result.code="E_NO_OP"` + `noop:true`，**退出码 0**（`set_spec_attr` /
+`set_layout_attr` 等写动词，目标值已等于当前值时就是这样）。只有上面指出那两个动词把它发成
+错误帧（→ 退 1）。两路含义相同：**请求的值与当前值相同、什么都没改** —— 不是失败，也不用重试。
 
 **报错默认就会把"怎么改对"打出来**（不用加 `--json`）：`合法值`（`detail.legal`）、
 `提示`（近似值）、`候选（key 可直接拿去重试）`、以及复数写入的 `已写入`/`失败` 两栏，
