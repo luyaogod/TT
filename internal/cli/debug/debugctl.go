@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"tt/internal/cli/common"
 	"tt/internal/dbconfig"
 	"tt/internal/debug"
 	"tt/internal/output"
@@ -1098,7 +1099,7 @@ func writeSQLResult(w io.Writer, res sqlQueryResult) error {
 // debugSQLCmd 只读 SQL:查业务数据("这个料号在主表里到底有没有")
 var debugSQLCmd = &cobra.Command{
 	Use:          `sql "<查询语句>"`,
-	Short:        "执行一条只读 SQL(默认 CSV 输出,头部回显环境与 ENT;账号由 TOPENT 决定)",
+	Short:        "执行一条只读 SQL(默认 JSON 信封,含环境与 ENT;账号由 TOPENT 决定)",
 	SilenceUsage: true, // 报错多为运行期(白名单拒绝/库上出错),不是用法问题
 	Long: `对当前环境查一条**只读** SQL,用来回答"这条业务数据到底有没有/是什么" ——
 排查接口失败时,靠改入参反复重放去反推太慢,这里能直接看一眼。
@@ -1107,25 +1108,26 @@ var debugSQLCmd = &cobra.Command{
   tt debug sql --file q.sql              # 长语句从本地文件读
   tt debug sql "select * from t" --ent 100   # 显式指定企业(默认取会话的 TOPENT)
 
-**输出是 CSV**(不是 JSON):头部若干行注释给出**环境信息**,其后是纯净的
-CSV 主体 —— 表头行 + 数据行。注释行一律以「# 」(井号 + 空格)开头且**全在头部**,
+**默认输出是 JSON 信封**(与 tt dict 同一条口径):环境信息平铺在顶层,载荷在 data。
+信封里那几项**必须看** —— 账号由企业编号(TOPENT)经 gzou_t 解析而来,企业编号错了
+就会连到另一个 schema、拿到 0 行,而那看起来和"数据不存在"一模一样。
+
+  {"ok":true,"env":"开发环境","zone":"31","ent":99,"account":"dsdemo",
+   "accountSource":"ent(gzou_t)","target":"10.0.0.2:1521/t100dev",
+   "route":"server-sqlplus","readonly":true,
+   "totalRows":2,"returned":2,"truncated":false,
+   "data":{"columns":["BMAA001"],"rows":[["FCPU010100003"]]}}
+
+--format csv 给"注释头 + 纯净 CSV":注释行一律以「# 」(井号 + 空格)开头且**全在头部**,
 所以 grep -v '^# ' 切下去就是一个标准 CSV 文件(逗号/引号/换行会被正确转义)。
-示例:
-
-  # 环境 开发环境 · SSH 10.0.0.1 · 区域 31
-  # 企业(ENT) 99 → 账号 dsdemo · 库 oracle · 10.0.0.2:1521/t100dev · 只读事务 · 用时 1.67s
-  # 行数 2
-  BMAA001,BMAASTUS
-  FCPU010100003,Y
-
-头部那行**必须看**:账号由企业编号(TOPENT)决定,企业编号错了就会查到另一个
-schema、拿到 0 行 —— 那看起来和"数据不存在"一模一样。要机器可读的完整结构
-(含 totalRows/truncated/notes 等字段)用 --json。
+--format table 给人看对齐表格(前面同样带那几行环境信息)。
 
 限制(都是刻意的,不是没做):
   - 只允许**单条** SELECT / WITH;写操作、DDL、PL/SQL 块、多语句、sqlplus 命令一律拒绝;
   - 库会话是只读事务,常规写会被库自己挡回去;
-  - **最多回 200 行**。要更多请加 WHERE 收窄 —— 工具不提供整表导出。
+  - **最多回 200 行**,totalRows 是**下界**(库侧故意多取一行判"还有更多")。要更多请
+    加 WHERE 收窄 —— 工具不提供整表导出;
+  - 单字段超过 4096 字节会被截断,并在 notes 里记一条。
 
 挡不住的(别当成绝对安全):自治事务/函数副作用这类"披着 SELECT 外衣的写",
 以及"只读 ≠ 只读该企业的数据"(账号常有跨 schema 授权)。`,
@@ -1156,18 +1158,30 @@ schema、拿到 0 行 —— 那看起来和"数据不存在"一模一样。要�
 		if err != nil {
 			return err
 		}
-		// --json 是**显式**要结构化详情(脚本/CI 路线);默认输出是 CSV,见上面的说明。
-		if IsJSON() {
-			fmt.Println(string(data))
-			return nil
-		}
 		var r struct {
 			Result sqlQueryResult `json:"result"`
 		}
 		if err := json.Unmarshal(data, &r); err != nil {
 			return err
 		}
-		return writeSQLResult(os.Stdout, r.Result)
+		// 默认 JSON —— 与 tt dict 同一条口径:信封带环境信息,载荷在 data。
+		// 从前这里默认吐 CSV、--json 时把服务器响应原样打出去(套着 result 外层),
+		// 于是同一个信封在两个命令里是两种形状。CSV 现在要显式 --format csv,
+		// 人读表格是 --format table。
+		switch common.OutputFormat() {
+		case output.FormatCSV:
+			return writeSQLResult(os.Stdout, r.Result)
+		case output.FormatTable:
+			if err := output.WriteMeta(os.Stdout, sqlMeta(r.Result)); err != nil {
+				return err
+			}
+			return output.WriteTable(os.Stdout, r.Result.Columns, r.Result.Rows)
+		default:
+			return output.Emit(os.Stdout, output.Options{
+				Format: output.FormatJSON, Meta: sqlMeta(r.Result),
+				Data: map[string]any{"columns": r.Result.Columns, "rows": r.Result.Rows},
+			})
+		}
 	},
 }
 

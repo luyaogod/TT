@@ -61,6 +61,17 @@ func WriteJSON(w io.Writer, opt Options) error {
 	return enc.Encode(envelope{OK: true, Meta: opt.Meta, Data: opt.Data})
 }
 
+// WriteMeta 只写 `# ` 信息块,不写主体。
+// 人读表格模式也要在前面带上它 —— "这份数据从哪来"和格式无关。
+func WriteMeta(w io.Writer, m Meta) error {
+	for _, ln := range m.headerLines() {
+		if _, err := fmt.Fprintf(w, "# %s\n", ln); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // WriteCSV 写 `# ` 环境头 + 裸 CSV 主体。
 //
 // 井号**必须带一个空格**:值本身以 `#` 开头是常事(如颜色 #FF0000),
@@ -69,10 +80,8 @@ func WriteJSON(w io.Writer, opt Options) error {
 // 元信息留在 stdout 是刻意的例外 —— CSV 的头必须随数据一起走,管道里没法
 // 把 stderr 和 stdout 重新配对;JSON 模式则相反,stdout 只有那一份信封。
 func WriteCSV(w io.Writer, meta Meta, columns []string, rows [][]string) error {
-	for _, ln := range meta.headerLines() {
-		if _, err := fmt.Fprintf(w, "# %s\n", ln); err != nil {
-			return err
-		}
+	if err := WriteMeta(w, meta); err != nil {
+		return err
 	}
 	if len(columns) == 0 {
 		_, err := io.WriteString(w, "# (无结果集)\n")
