@@ -29,7 +29,7 @@ tt env / config / serve / install / version
 | [8. `tt dict` 数据字典](#8-tt-dict-数据字典) | 各查询命令的返回与读法、数据源切换、类型码 | 查 ERP 元数据时 |
 | [9. 测试与验收](#9-测试与验收) | 每层的判据、语料回归、S7 真机清单 | 交付前 |
 | [10. 构建与发布](#10-构建与发布) | 只留"为什么"，步骤见 README | 发版时 |
-| [11. 设计史与取舍](#11-设计史与取舍) | 合并动机、发现的分叉、修掉的 bug、已废弃的东西 | 想知道"为什么是这样"时 |
+| [11. 设计史与取舍](#11-设计史与取舍) | 合并动机、发现的分叉、修掉的 bug、已废弃的东西、**下一轮的引擎批次（已定做法）** | 想知道"为什么是这样"或"接下来做什么"时 |
 | [12. 许可与出处](#12-许可与出处) | 第三方材料与来源 | 引用/分发前 |
 
 两条贯穿全篇的红线：
@@ -1922,6 +1922,67 @@ TDev 的两点被完整保留：位置无关的参数解析（`-o`/`--json` 可�
 - **在线/离线**：本项目只做离线（本地镜像、本地 SQLite）。在线那一层不在范围里。
 - **设置页没有搜索框**（用户明确说不做）；**每环境的 `launchArgs`/`watchdogSeconds` 不在界面上
   暴露**，靠服务端保留机制保证不被丢掉。
+
+### 11.9 下一轮：`.tzs` 的引擎批次（已定做法，未执行）
+
+一页设计评审（对着 Anthropic 的 *Writing effective tools for agents* 与 AWS CLI 的 skeleton
+文档逐条比对）的结论分两半：**"已经算出来了但没送到调用方手里"**（错误里可操作的那一半
+默认看不见、`--json` 下传输失败往 stdout 打 `null`、`IsSuccessCode` 写好没人用）与
+**"文档在教已删除或不存在的调用"**。这两半已随本轮落地（见 §7.6 的规则与 §7.5.2 的代价说明）。
+
+剩下的是**必须重建一次引擎**才能做的那批（重建会换 MVID → 管道名变 → 在跑的守护进程
+变孤儿，靠 `tt dev tzs reap --yes` 收，再加一次重打包，所以攒在一起做）：
+
+1. **`save` / `field_add` 的 `out` 闸门。** 指到源包会覆盖原始素材（`Fns/Session.cs` 的
+   `Save.Run` 直接 `File.WriteAllBytes`），而这条**只写在 SKILL 的红线里**，代码零防线 ——
+   对照 `.tzc` 一边：三道闸门 + 原子写 + `prev.tzc` 备份 + 源包 sha256 校验。做法：拒绝
+   `out` == 任何已打开包的路径；拒绝 `out` 不在工作区之下（设计器自己的 `InWorkspace`
+   谓词**加载**路径已经在用，搬到写路径即可 —— 现在往区外写会退 0 成功，之后才 `open` 不了）。
+2. **`list_tables` 的 `limit` 声明进 manifest。** 实现读 `IntArg(a,"limit",200)`，而
+   `Manifest.Check` 拒未声明的键 —— 于是 200 行这个上限**对调用方是死的**（既不能调高拿第
+   201 张表，也不能调低）。`filter` 别名同理。
+3. **manifest 加 `role` 标注，不改任何参数名。** 参数名是从 C# 函数签名继承的
+   （`open.path` vs `field_add.file`、`save.out` 是 `string` 而 `field_add.out` 是 `path`、
+   `move.to` / `tab_action.action` / `nudge.direction` / `align.option` 四个名字一个意思）。
+   `role`（`package-path` / `component-path` / `direction` / `action-id`…）解决两件事：
+   ① 生成的示例按 role 选占位符 —— 现在 `placeholder` 只看参数名是不是 `file`，
+   于是 `open.path` 与 `field_add.out` 这两个**包路径**都被教成 `<name-path>`；
+   ② 跨动词的同一概念可以被机械检查（"凡 role 相同的参数，占位符规则相同"）。
+4. **`force` 从 manifest 删掉**（`Manifest.cs:156`），并改 `SPEC.md:1572`。与 `add_field.name`
+   的先例一致 —— 那条注释写着 "an advertised parameter that silently does nothing is worse
+   than an absent one"。**在那之前 `tt dev tzs open --help` 会继续列出一个照写必失败的参数。**
+5. **容器枚举收敛到函数体白名单这一个产地。** `Manifest.cs:75-78` 声明 10 个值（含
+   `HBox/VBox/Page/Folder`），函数体只收 6 个；根因是引擎里容器名本来就有三份集合
+   （`Semantic.cs:911` 十个、`Session.cs:279` 九个、Manifest 十个）。验法：E2E 对**每个
+   枚举值**逐个发一次负向对照（`gate-w3-fns.py` 已经在用这套，只是没覆盖 manifest 的 enum）。
+6. **各动词的 `Errors[]` 补全。** 52 个动词只用了 4 个模板，而 `E_HANDLE_BUSY`、
+   `E_NO_HANDLE`、`E_PATH_NOT_FOUND`、`E_NO_SPEC_NODE`、`E_BAD_REQUEST`、
+   `E_UNKNOWN_METHOD`、`E_SERVER_DIED`、`E_FATAL_LOAD_TIMEOUT` **不在任何动词的清单里** ——
+   照 `<动词> --help` 写代码的调用方会漏掉分支。
+7. **`E_NO_OP` 按 SPEC §11.24(a) 改回成功帧。** `set_local_string` / `set_spec_description`
+   的 NoOp 分支把"什么也没改"发成了错误帧（`kind=internal` → 退 1），而那份契约明确说这两条
+   是**成功帧**（该出现在 `result` 里）。`tt` 侧现在只把文案说清楚了（§7.6），改回去之后
+   `IsSuccessCode` 就退化成纯防线。
+8. 小的两条：`add_field` 的 `column`/`columns` 写着"二选一"但两个都是选填（都不给也过本地校验）；
+   `set_spec_description` 的参数声明顺序与其它动词不同（`kind` 在 `path` 之前），而**声明顺序
+   就是线上键序**。
+
+不需要重建引擎的（Go 侧，可单独发）：
+
+- `tt dev` 转发 `--format`（`--config` 有现成先例可抄）；root help 里一张**退出码总表**
+  （现在三家各一套：tzc 0/2/3/4/5、tzs 0/1/2/4/5、dict 0/1/2/3，得读三份 SKILL 才知道
+  "3 在哪条线上是什么意思"）。
+- dict 侧结果集的出路：截断时完整结果已经在盘上（`spill/`），但没有翻页入口 ——
+  `--offset`，或者更贴合既有设计：`tt dict spill show <localPath> --offset N --limit M`。
+- `.tzs` 写动词的 **dry-run**（落法：应用 → 读 diff → 批量 undo，撤销栈是现成的）与
+  **`reload`**（丢弃内存改动、从盘重读，把"只能 close + 重新 open 且丢掉 validate 基线"
+  变成一条命令）。
+- **幂等 op log**：现在只有"请求一旦上线绝不重试"这条禁令（协议无幂等键）；轻档做法是写动词
+  带一个 `op` 名、引擎记进会话的操作日志，再加一个与 `list_open` 同级的 `list_ops`，
+  让超时后"到底写进去没有"有机械答案。
+- **评测回归网**：一组任务（改一个属性并确认、按表加字段、加页签、定位一个只读区为何不能改…）
+  各自交给一个**只拿 SKILL、没有对话上下文**的干净 agent，记三个数：调用次数、返回字节数、
+  是否做对。b530001 就是这样把一个真 bug 挖出来的（那个提交的正文写着结论）。
 
 ---
 
