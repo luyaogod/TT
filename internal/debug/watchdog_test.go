@@ -8,7 +8,7 @@ import (
 
 // 停站看门狗的默认值。配置里没写这个键时取 DefaultWatchdogSeconds ——
 // 这里写死 1800 而**不引那个常量**,要钉住的正是"这个数是多少":
-// docs/debug.md 一度写 1800 而代码里是 180,引常量的话两边一起漂就没人发现了。
+// 文档一度写 1800 而代码里是 180,引常量的话两边一起漂就没人发现了。
 func TestWatchdogDefaultSeconds(t *testing.T) {
 	c := &Config{}
 	c.applySsh(&host.NamedSsh{Name: "未配看门狗的环境"})

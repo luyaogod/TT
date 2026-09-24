@@ -191,4 +191,4 @@ tt dev tzs export "D:\pkg\aapt300(c).tzs"    # → D:\pkg\aapt300-unzip\
 引擎为什么单独构建（不在 Go 构建链里、设计器目录是构建期与运行期都要的依赖、重编会让在跑的
 守护进程变孤儿）见 [engine/BUILD.md](../../engine/BUILD.md)。
 `.tzs` 格式契约见 [engine/SPEC.md](../../engine/SPEC.md)；
-命令面与验收清单见 [docs/dev.md](../../docs/dev.md)。
+命令面与验收清单见 [docs/WIKI.md](../../docs/WIKI.md#6-tt-dev-tzs-表单包)。

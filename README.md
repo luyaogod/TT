@@ -20,13 +20,13 @@ tt version
 ```
 
 TT 最初是 TDebug、TDev、TDictCli 三个工具合并的结果 —— 合并的动机、发现的分叉与取舍
-（包括旧版那条**命令注入面**为什么没有保留）记在 [docs/MIGRATION.md](docs/MIGRATION.md)。
+（包括旧版那条**命令注入面**为什么没有保留）记在 [docs/WIKI.md](docs/WIKI.md#10-设计史与取舍)。
 合并之后又长出了第四块：**`.tzs` 表单引擎**，它不在 Go 的构建链里，而且**运行期要的设计器程序集
-由发行包自带**（不靠用户机器上恰好装着的那份），所以单独用一节说清楚。
+随仓库与发行包自带**（不靠用户机器上恰好装着的那份），所以单独用一节说清楚。
 
-有一条边界贯穿全篇，先说在前面：**tt 不实现、也不分发 T100 设计器的任何私有格式**。
-`.tzc` 靠设计器的公开发行物反推（[docs/tzc-model.md](docs/tzc-model.md)）；
-`.tzs` 更彻底 —— 它**直接反射调用已安装的设计器自己的程序集**，格式那部分是设计器自己在算。
+有一条边界贯穿全篇，先说在前面：**tt 不实现 T100 设计器的任何私有格式**。
+`.tzc` 靠设计器的公开发行物反推（[docs/WIKI.md](docs/WIKI.md#5-tt-dev-tzc-代码包)）；
+`.tzs` 更彻底 —— 它**直接反射调用设计器自己的程序集**，格式那部分是设计器自己在算。
 
 ## 安装
 
@@ -226,7 +226,7 @@ tt dev tzc status | verify | apply | unlock | rename | newfn | selftest
 
 `export` 把包渲染成**带围栏的 4GL 工作区**（`prog.full.4gl` + `manifest.json` + 快照 + git），
 改完 `apply` 走 gate1/gate2/gate3 写回 —— **`apply` 是唯一的写路径**，它做闸门校验与原子写。
-围栏协议与不变量见 [docs/tzc-model.md](docs/tzc-model.md) 与 [docs/dev.md](docs/dev.md)。
+围栏协议与不变量见 [docs/WIKI.md](docs/WIKI.md#5-tt-dev-tzc-代码包)。
 
 退出码：`0` 成功 / `2` 包格式或用法错 / `3` 校验失败 / `4` 拒绝写入 / `5` IO 与环境失败。
 
@@ -504,14 +504,10 @@ cd web && npm run dev:app    # 前端热更新，代理到后端
 
 | 文档 | 内容 |
 |---|---|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 合并架构与统一配置设计 |
-| [docs/MIGRATION.md](docs/MIGRATION.md) | 迁移记录：改了什么、为什么 |
-| [docs/debug.md](docs/debug.md) | 调试器手册（原 TDebug README） |
-| [docs/dev.md](docs/dev.md) | 设计器包工具手册（原 TDev README；`.tzs` 与验收清单都在里面） |
-| [docs/dict.md](docs/dict.md) | 数据字典手册（原 TDictCli README） |
-| [docs/tzc-model.md](docs/tzc-model.md) | `.tzc` 包模型与不变量 |
+| [docs/WIKI.md](docs/WIKI.md) | **项目 wiki**：架构、统一配置、Web 服务、三个命令组的设计与契约、测试与验收、设计史。原先散在 `docs/` 下的六份文档已合并进这一份 |
 | [engine/BUILD.md](engine/BUILD.md) | `.tzs` 引擎：为什么单独构建、采哪四个文件 |
 | [engine/SPEC.md](engine/SPEC.md) | `.tzs` 格式与契约的完整记录 |
+| [docs/T100设计器-README.md](docs/T100设计器-README.md) | 第三方材料的恢复副本（设计器反编译源码树的 README）——wiki §5.14 的 `file:line` 依据来源 |
 | [skills/tt-dev-tzc/SKILL.md](skills/tt-dev-tzc/SKILL.md) | 给 AI 的操作手册：`.tzc` 代码包怎么改、哪些坑 |
 | [skills/tt-dev-tzs/SKILL.md](skills/tt-dev-tzs/SKILL.md) | 给 AI 的操作手册：`.tzs` 表单包怎么读写、哪些坑 |
 
