@@ -9,8 +9,11 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -266,25 +269,126 @@ func TestRunTzsVerbLocalFailures(t *testing.T) {
 	}
 }
 
-// TestUsageTextHasNoCallGateway 是文档漂移的机械防线。
+// TestUsageTextHasNoStaleAdvice 是文档漂移的机械防线。
 //
-// `call <fn>` 已经删了；一段还写着它的帮助文本会让调用方敲一条注定退 2 的命令，
-// 而这类漂移不会让任何别的测试失败。
-func TestUsageTextHasNoCallGateway(t *testing.T) {
-	for _, text := range []string{tzsUsage, Usage} {
-		if strings.Contains(text, "call <fn>") || strings.Contains(text, "tzs call") {
-			t.Errorf("帮助文本里还在教 call 写法：\n%s", text)
-		}
-		if !strings.Contains(text, "<动词>") {
-			t.Errorf("帮助文本里该出现 <动词> 的用法：\n%s", text)
-		}
-		if !strings.Contains(text, "--args") {
-			t.Errorf("帮助文本里该出现 --args（参数只用 JSON 给）：\n%s", text)
-		}
-		if !strings.Contains(text, "--form") {
-			t.Errorf("帮助文本里该出现 --form（按程序名寻址，免得搬运句柄）：\n%s", text)
+// 这类漂移的共同后果是**调用方照着帮助敲一条注定失败的调用**，而它不会让任何别的测试失败：
+//
+//	`call <fn>`                   网关已删除（敲它退 2）
+//	can_edit / can_query / req 给 "true"   引擎只收 Y / N / 空串
+//	"force":true                  open 的 force 引擎故意没实现，用了必抛
+//
+// 前两条各自都真发生过，而且是**同一句话在两处**：SKILL 里的 "true" 教法在 b530001
+// 才被删掉，那句教法同时还活在本文件的 tzsUsage 里（帮助与文档各修一次，说明
+// "手写的一定漂移"）。所以这里的禁断言覆盖**所有**面向调用方的文本，而不只是含 <动词> 的那两份。
+//
+// 三条断言都用正则而不是字面子串，因为**判据不是"值写错了"，是"属性与值配错了"**：
+// 布局侧 `scroll` 是 BOOLEAN，`{"attr":"scroll","value":"true"}` 是**合法**的，
+// 禁掉 `"value":"true"` 会误伤它。真正错的是把 `"true"` 给了上面那三个勾选位。
+func TestUsageTextHasNoStaleAdvice(t *testing.T) {
+	stale := []struct {
+		re  *regexp.Regexp
+		why string
+	}{
+		{regexp.MustCompile(`call <fn>|tzs call`),
+			"call 网关已删除：动词就是函数名，参数用 JSON 给"},
+		// 窗口卡在两个键之间（不允许跨行、跨 }），免得把同一份文档里相隔很远的
+		// "can_edit" 与某个 "true" 连起来判成一处。
+		{regexp.MustCompile(`"(?:can_edit|can_query|req)"[^\n}]{0,80}"true"`),
+			"这三个是设计器面板的勾选位，只收 Y / N / 空串（写 true 引擎会拒）"},
+		{regexp.MustCompile(`"force"\s*:\s*true`),
+			"open 的 force 引擎故意没实现：只能先 close 占用者"},
+	}
+	for name, text := range map[string]string{
+		"tzsUsage":     tzsUsage,
+		"Usage":        Usage,
+		"installUsage": installUsage,
+	} {
+		for _, s := range stale {
+			if m := s.re.FindString(text); m != "" {
+				t.Errorf("%s 里还在教 %q（%s）:\n%s", name, m, s.why, text)
+			}
 		}
 	}
+
+	// "必须教"的那几条只对 .tzs 的用法文本成立 —— install 的用法讲的是 skills 与 PATH，
+	// 那里不该出现 <动词>。
+	for name, text := range map[string]string{"tzsUsage": tzsUsage, "Usage": Usage} {
+		for _, want := range []string{"<动词>", "--args", "--form"} {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s 里该出现 %s（参数只用 JSON、按程序名寻址）：\n%s", name, want, text)
+			}
+		}
+	}
+}
+
+// verbCountClaim 是一处"这份文本说动词有多少个"的声明。
+type verbCountClaim struct {
+	where string // 文件:行（或常量名）
+	n     int
+	line  string
+}
+
+// docVerbCountClaims 收集所有用「N 个动词 / N 个具名动词」这个说法做出的声明。
+//
+// 只认这一种说法是刻意的：这条防线要的是"**凡是用这个说法写的，它必须是真的**"，
+// 而不是去猜任意一句话在说什么（"33 个写函数"、"31 项自检"、"4 个内建命令"都不是动词数）。
+func docVerbCountClaims(t *testing.T) []verbCountClaim {
+	t.Helper()
+	re := regexp.MustCompile(`(\d+)\s*个(?:具名)?动词`)
+	var claims []verbCountClaim
+	add := func(where, text string) {
+		for i, ln := range strings.Split(text, "\n") {
+			for _, mm := range re.FindAllStringSubmatch(ln, -1) {
+				n, err := strconv.Atoi(mm[1])
+				if err != nil {
+					continue
+				}
+				claims = append(claims, verbCountClaim{
+					where: fmt.Sprintf("%s:%d", where, i+1),
+					n:     n,
+					line:  strings.TrimSpace(ln),
+				})
+			}
+		}
+	}
+	add("tzsUsage", tzsUsage)
+	// 文档**逐个列名**，不通配扫描：`dist/` 在 .gitignore 里但磁盘上有一份陈旧的
+	// skills 副本，而 `web/node_modules` 里全是 .md —— 扫到它们只会测一份没人看的拷贝。
+	for _, rel := range []string{
+		filepath.Join("..", "..", "..", "README.md"),
+		filepath.Join("..", "..", "..", "docs", "WIKI.md"),
+		filepath.Join("..", "..", "..", "skills", "tt-dev-tzs", "SKILL.md"),
+		filepath.Join("..", "..", "..", "engine", "BUILD.md"),
+		filepath.Join("..", "..", "..", "engine", "TASKS.md"),
+	} {
+		b, err := os.ReadFile(rel)
+		if err != nil {
+			t.Errorf("读不到 %s：%v（这些属于仓库本体，不是语料那样的外部数据 —— 缺了就是仓库坏了）", rel, err)
+			continue
+		}
+		add(rel, string(b))
+	}
+	return claims
+}
+
+// TestDocVerbCountsAgree 不需要引擎：散文里所有动词数声明**彼此**必须一致。
+//
+// 为什么这条留在不碰引擎的那一层：引擎不在手边时它照样跑，而 49/50/52 那种漂移
+// 恰恰是"改文档的人只看了一份文档"造成的。与真 manifest 对不对得上，由
+// tzs_verb_e2e_test.go 的 TestE2EDocsVerbCountMatchesManifest 保证（TTZS_E2E=1）。
+func TestDocVerbCountsAgree(t *testing.T) {
+	claims := docVerbCountClaims(t)
+	if len(claims) == 0 {
+		t.Skip("文档里没有「N 个动词」的声明 —— 这条断言没有对象了（改写了措辞就把它一起改）")
+	}
+	want := claims[0]
+	for _, c := range claims[1:] {
+		if c.n != want.n {
+			t.Errorf("动词数对不上：%s 说 %d，%s 说 %d\n    %s\n    %s",
+				want.where, want.n, c.where, c.n, want.line, c.line)
+		}
+	}
+	t.Logf("散文里的动词数一致：%d 个（共 %d 处声明）", want.n, len(claims))
 }
 
 // TestVerbExample 钉住"示例优先"的那条示例：从 manifest 生成，能直接粘。

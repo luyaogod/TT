@@ -171,3 +171,27 @@ func countParams(m *tzs.Manifest) int {
 	}
 	return n
 }
+
+// TestE2EDocsVerbCountMatchesManifest 把"动词数"这个数字钉在 manifest 上。
+//
+// 为什么值得一条 E2E：同一个数字曾经在四处各不相同（49 / 50 / 52 同时存在），
+// 而 `Index()` 打的那份**永远是对的**（它是 `len(m.Fns)`）—— 漂的只有手写的散文。
+// 这就是"能问的就不抄"在文档上的形态：既然跑的时候引擎就在手边，数字就该被问一次。
+//
+// 声明怎么收集、为什么只认「N 个动词」这一种说法，见 tzs_verb_test.go 的
+// docVerbCountClaims；"彼此一致"那一半由那边的 TestDocVerbCountsAgree 在不碰引擎的
+// 情况下守着，这条只补最后一问：那个数字**真的是引擎的数吗**。
+func TestE2EDocsVerbCountMatchesManifest(t *testing.T) {
+	m := requireRealManifest(t)
+	want := len(m.Fns)
+
+	claims := docVerbCountClaims(t)
+	for _, c := range claims {
+		if c.n != want {
+			t.Errorf("%s 写着 %d 个动词，manifest 里是 %d 个：\n    %s", c.where, c.n, want, c.line)
+		}
+	}
+	// 一处都没找到不判失败：把数字整句删掉是允许的改法之一。但要让人在输出里看得见
+	// 这条断言到底查了几处 —— 否则它会悄悄退化成空转。
+	t.Logf("动词数 %d：查了 %d 处「N 个动词」的声明", want, len(claims))
+}
