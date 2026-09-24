@@ -30,123 +30,106 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"tt/internal/config"
 	"tt/internal/dev/tzs"
 )
 
-// tzsEngineOptions 解析出一次引擎调用需要的四样东西。
-//
-// 工作区的解析顺序：--workspace flag > TZSCLI_WS 环境变量 > config.json 的 tzs.workspace。
-// **末端拒绝**：三层都没有时退出 2 并说清该配哪个键，绝不 spawn —— 引擎的缺省是一个真实
-// 客户目录，落上去等于拿别人的表单当草稿纸。
-func tzsEngineOptions(wsFlag string) (tzs.Options, error) {
-	var cfg config.TzsSettings
+// tzsSettings 读配置里的 tzs 节（读不到就是零值：配置缺失绝不让命令失败）。
+func tzsSettings() config.TzsSettings {
 	if path, err := config.ResolvePath("", true); err == nil && path != "" {
 		if root, err := config.Load(path); err == nil {
-			cfg = root.Tzs
+			return root.Tzs
 		}
 	}
+	return config.TzsSettings{}
+}
 
-	exe := cfg.ServerExe
-	if exe == "" {
-		self, err := os.Executable()
-		if err != nil {
-			return tzs.Options{}, fmt.Errorf("定位不到 tt.exe 自身：%w", err)
-		}
-		// 与 skills/ 同一种分发形态：exe 同目录的子目录，不进二进制。
-		exe = filepath.Join(filepath.Dir(self), "tzs", "tzs-server.exe")
+// tzsEngineExe 解析引擎 exe 的路径。**不碰工作区。**
+//
+// 与 tzsEngineOptions 分开是必要的：问函数表（`--manifest`）只依赖 exe。
+// 把工作区也捆进来，会让两件事在"还没配工作区"的新机器上变成退 5 ——
+// "动词名打错"（本该退 2）和"`<动词> --help`"（本该退 0，它就是说明书本身）。
+func tzsEngineExe() (string, error) {
+	if exe := tzsSettings().ServerExe; exe != "" {
+		return exe, nil
 	}
+	self, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("定位不到 tt.exe 自身：%w", err)
+	}
+	// 与 skills/ 同一种分发形态：exe 同目录的子目录，不进二进制。
+	return filepath.Join(filepath.Dir(self), "tzs", "tzs-server.exe"), nil
+}
 
+// tzsExecOptions 解析出一次引擎调用需要的四样东西；**缺工作区不报错**（留给调用方决定）。
+//
+// 分成"宽松 / 严格"两版是有意的：
+//   - 问函数表（fns / manifest / `<动词> --help`）只需要 exe —— 它们是**动词索引与说明书**，
+//     在还没配工作区的新机器上必须能用，否则说明书锁在门里面；
+//   - doctor 的职责就是回答"还差什么"，它自己先因为缺工作区退 5 的话，就永远走不到
+//     它那条「工作区：未配置」的自检项（README 承诺的正是那一句）；
+//   - 运行类动词走 tzsEngineOptions（严格版）：没有工作区就不该开工（见下）。
+func tzsExecOptions(wsFlag string) (tzs.Options, error) {
+	exe, err := tzsEngineExe()
+	if err != nil {
+		return tzs.Options{}, err
+	}
 	ws := wsFlag
 	if ws == "" {
 		ws = os.Getenv("TZSCLI_WS")
 	}
 	if ws == "" {
-		ws = cfg.Workspace
+		ws = tzsSettings().Workspace
 	}
-	if ws == "" {
-		return tzs.Options{}, fmt.Errorf(
-			"未配置工作区：--workspace、TZSCLI_WS 与配置里的 tzs.workspace 都是空的。\n" +
-				"  引擎的缺省工作区是一个真实客户目录，所以这里拒绝启动而不是回落。\n" +
-				"  配置：tt config set tzs.workspace \"D:\\\\你的工作区\"")
-	}
-
 	workDir := ""
 	if path, err := config.ResolvePath("", true); err == nil && path != "" {
 		workDir = filepath.Dir(path) // 状态文件与守护进程日志落在 config.json 旁边
 	}
-
-	// 设计器程序集**不再由配置指定**：发行包里 `tzs\designer\` 自带一份，引擎默认就用它
-	// （见 engine/src/Designer/Bootstrap.cs 的 Install）。这样同一份 tt 在任何机器上跑的是
-	// 同一版设计器，而不是「用户那台机器上恰好装着的那版」。
-	// TZSCLI_INSTALL 保留为开发/构建期的逃生口：engine/out/ 不是包，本地引擎与探测程序
-	// 要靠它指向机器上装的那份。它只是被转发下去，不再有配置兜底。
-	installDir := os.Getenv("TZSCLI_INSTALL")
-
 	return tzs.Options{
 		Exe:        exe,
-		InstallDir: installDir,
+		InstallDir: os.Getenv("TZSCLI_INSTALL"),
 		Workspace:  ws,
 		WorkDir:    workDir,
 	}, nil
 }
 
-// ---------- manifest / fns：两个只读的"问引擎"动词 ----------
-
-func cmdTzsManifest(args []string) int {
-	fs := flag.NewFlagSet("tzs manifest", flag.ContinueOnError)
-	if err := parseArgs(fs, args); err != nil {
-		return 2
-	}
-	o, err := tzsEngineOptions("")
+// tzsEngineOptions 是**运行类**动词用的严格版。
+//
+// 工作区的解析顺序：--workspace flag > TZSCLI_WS 环境变量 > config.json 的 tzs.workspace。
+// **末端拒绝**：三层都没有时报错（调用方退 5）并说清该配哪个键，绝不 spawn —— 引擎的缺省
+// 是一个真实客户目录，落上去等于拿别人的表单当草稿纸。
+func tzsEngineOptions(wsFlag string) (tzs.Options, error) {
+	o, err := tzsExecOptions(wsFlag)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 5
+		return tzs.Options{}, err
 	}
-	m, err := tzs.FetchManifest(tzsCtx(), o.Exe)
-	if err != nil {
-		return fail(err, false)
+	if o.Workspace == "" {
+		return tzs.Options{}, fmt.Errorf(
+			"未配置工作区：--workspace、TZSCLI_WS 与配置里的 tzs.workspace 都是空的。\n" +
+				"  引擎的缺省工作区是一个真实客户目录，所以这里拒绝启动而不是回落。\n" +
+				"  配置：tt config set tzs.workspace \"D:\\\\你的工作区\"")
 	}
-	// 逐字节转发引擎的输出：这是 AI 直接消费的东西，Go 侧改写它就是在制造第二份函数表。
-	raw, err := json.MarshalIndent(m.Fns, "", "  ")
-	if err != nil {
-		return fail(err, false)
-	}
-	os.Stdout.Write(append(raw, '\n'))
-	return 0
+	return o, nil
 }
 
-func cmdTzsFns(args []string) int {
-	fs := flag.NewFlagSet("tzs fns", flag.ContinueOnError)
-	if err := parseArgs(fs, args); err != nil {
-		return 2
-	}
-	o, err := tzsEngineOptions("")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 5
-	}
-	m, err := tzs.FetchManifest(tzsCtx(), o.Exe)
-	if err != nil {
-		return fail(err, false)
-	}
-	if fs.NArg() == 0 {
-		m.Help(os.Stdout) // 全表，按组渲染
-		return 0
-	}
-	fn := m.ByName(fs.Arg(0))
-	if fn == nil {
-		fmt.Fprintf(os.Stderr, "没有这个函数：%s\n\n可用的：%s\n", fs.Arg(0), strings.Join(m.Names(), " "))
-		return 2
-	}
-	printFn(os.Stdout, fn)
-	return 0
-}
+// ---------- 动词索引：唯一的枚举入口 ----------
+//
+// fns / manifest 两个命令已经删掉：对外只留"动词"这一层，而**函数表**（名字 + 参数 + 类型 +
+// 必填 + 取值集）是引擎自己的内部契约，不该整个摊给调用方。于是枚举只剩两条路：
+//
+//	tt dev tzs --help            静态用法 + （引擎可达时）按组列出动词名
+//	tt dev tzs <敲错的名字>      同上一份索引，走 stderr
+//
+// 参数的契约按需给：`tt dev tzs <动词> --help`。
 
-// printFn 渲染单个函数的参数表。参数本身用 JSON 打 —— 它的字段（t/req/values/from）
-// 就是 manifest 的原样，手写一遍等于抄第二份，抄了就会漂移。
+// printFn 渲染单个动词的参数表（`tt dev tzs <动词> --help`）。
+//
+// 顺序照 clig.dev 的建议：**示例优先**，然后参数，最后错误码 —— 人们读示例比读文档多。
+// 参数本身用 JSON 打 —— 它的字段（n/t/req/values/from）就是 manifest 的原样，
+// 手写一遍等于抄第二份，抄了就会漂移。
 func printFn(w io.Writer, fn *tzs.SpecFn) {
 	fmt.Fprintf(w, "%s — %s\n", fn.Name, fn.Desc)
 	marks := []string{}
@@ -160,6 +143,13 @@ func printFn(w io.Writer, fn *tzs.SpecFn) {
 		marks = append(marks, "需要句柄")
 	}
 	fmt.Fprintf(w, "  组 %s   返回 %s   %s\n", fn.Group, fn.Returns, strings.Join(marks, " "))
+
+	fmt.Fprintln(w, "  例：")
+	fmt.Fprintf(w, "    %s\n", verbExample(fn))
+	if h := filterHint(fn); h != "" {
+		fmt.Fprintf(w, "  提示：%s\n", h)
+	}
+
 	if len(fn.Args) > 0 {
 		fmt.Fprintln(w, "  参数：")
 		for _, p := range fn.Args {
@@ -172,19 +162,117 @@ func printFn(w io.Writer, fn *tzs.SpecFn) {
 	}
 }
 
-// ---------- call：把命令行翻成一次 JSON-RPC ----------
-
-// takeEngineFlags 摘出 call 自己的三个开关，剩下的原样交给 tzs.SplitArgs。
+// verbExample 造一条**能直接粘**的例子：从 manifest 的参数表生成，不手写（手写必漂移）。
 //
-// 不能用标准库 flag 解析整个 argv：函数参数的名字是**运行时**从 manifest 来的（`--paths`、
-// `--can_edit`…），flag 包遇到不认识的名字会直接报错。
-func takeEngineFlags(argv []string) (rest []string, ws string, timeout time.Duration, asJSON bool, err error) {
-	take := func(i *int) (string, bool) {
+// 只列**必填**参数，加两个例外：① `handle` 不列（需要句柄的动词改用 `--form <程序名>` ——
+// 那才是调用方想说的东西）；② `file` 列出来，即使它是选填 —— 任务级动词（工作流）正是靠
+// `file` 或 `handle` 二选一寻址的，示例里缺了它这条命令就粘不了。
+func verbExample(spec *tzs.SpecFn) string {
+	var parts []string
+	for _, p := range spec.Args {
+		if p.Name == "handle" {
+			continue
+		}
+		if !p.Required && p.Name != "file" {
+			continue
+		}
+		parts = append(parts, tzs.JSONString(p.Name)+":"+placeholder(p))
+	}
+	cmd := "tt dev tzs " + spec.Name
+	if spec.NeedsHandle {
+		cmd += " --form aapp320"
+	}
+	if len(parts) > 0 {
+		cmd += " --args '{" + strings.Join(parts, ",") + "}'"
+	}
+	return cmd + " --json"
+}
+
+// placeholder 给一个参数造一个类型正确的占位值（只用于帮助里的示例）。
+//
+// 用 `<...>` 而不是编造一个具体值：编造的值会被人当成"就该这么写"，而它可能只是某一
+// 张表单的巧合。kind / attr 尤其如此 —— 它们的合法集是运行时从活模型里算的。
+func placeholder(p *tzs.Param) string {
+	switch p.Type {
+	case tzs.TypeInt:
+		return "0"
+	case tzs.TypeBool:
+		return "true"
+	case tzs.TypeEnum:
+		if len(p.Values) > 0 {
+			return tzs.JSONString(p.Values[0])
+		}
+		return tzs.JSONString("<值>")
+	case tzs.TypePathList, tzs.TypeStrList:
+		return "[]"
+	case tzs.TypePath:
+		// `file` 是**包路径**，不是表单内部的 name-path：两者都是 t=path，
+		// 占位符说错了会让人照着写一个 name-path 进去。
+		if p.Name == "file" {
+			return tzs.JSONString("<包路径>")
+		}
+		return tzs.JSONString("<name-path>")
+	case tzs.TypeKind:
+		return tzs.JSONString("<kind>")
+	case tzs.TypeAttr:
+		return tzs.JSONString("<属性名>")
+	}
+	return tzs.JSONString("<值>")
+}
+
+// ---------- 具名动词：把命令行翻成一次 JSON-RPC ----------
+//
+// 50 个动词（open/save/close/field_add/…）**不是 50 段代码**，而是同一段代码跑 50 次：动词表来自
+// 引擎的 manifest，参数定型来自同一份 manifest。所以引擎加/改一个函数，这里一行都不用动
+// —— 这正是 internal/dev/tzs/manifest.go 那句「本地绝不抄第二份参数表」的兑现方式。
+
+// builtinVerbs 是 tzs 自己的动词（不来自 manifest）。分派时它们**优先**。
+//
+// 注意里面**没有** fns / manifest：那两个命令已删除（见上面的「动词索引」）。
+// 这份清单的另一处用途是 warnBuiltinCollisions —— 引擎若有同名函数，那个函数就不可达，
+// 必须看得见。
+var builtinVerbs = []string{"export", "doctor", "stop", "reap"}
+
+// verbTransportFlags 是一条动词命令的**传输级**开关（不是动词参数）。
+//
+// 动词参数只有一种写法：`--args '<JSON 对象>'` / `--args-file <文件>`（见 tzs_engine.go
+// 的说明与 internal/dev/tzs/argmap.go 的文件头）。所以这份清单很短，而且是封闭的：
+// 任何别的 `--xxx` 都会被当场拒掉，而不是被当成某个动词参数悄悄收下。
+var verbTransportFlags = []string{
+	"--form", "--args", "--args-file", "--workspace", "--rpc-timeout", "--json", "-h", "--help",
+}
+
+// verbFlags 是一条动词命令解析出来的东西。
+type verbFlags struct {
+	verb        string   // 动词名
+	extra       []string // 动词名之后多出来的位置参数（一律报错）
+	workspace   string
+	timeout     time.Duration
+	asJSON      bool
+	form        string // --form <程序名|ProgramKey>：按逻辑键寻址（见 BuildArgsForForm）
+	args        string // --args 的原文
+	argsSet     bool
+	argsFile    string
+	argsFileSet bool
+	help        bool
+}
+
+// takeVerbFlags 解析一条动词命令。
+//
+// 不能用标准库 flag 解析整个 argv：**动词名本身**才是第一个参数，而它得先被取出来
+// 才知道该问哪张参数表（那是运行时从引擎 manifest 拿的）。
+//
+// 这里的严格是有意的：位置参数与未知开关一律报错。动词参数既然只有 JSON 一种写法，
+// 那么 `--handle h9` 这种写法就一定是调用方记错了 —— 当场说清楚，比把它当未知参数
+// 发给引擎、或者更糟地悄悄忽略掉，都要好。
+func takeVerbFlags(argv []string) (verbFlags, error) {
+	var f verbFlags
+	takeVal := func(i *int) (string, bool) {
 		a := argv[*i]
 		if eq := strings.IndexByte(a, '='); eq >= 0 {
 			return a[eq+1:], true
 		}
-		if *i+1 < len(argv) && !strings.HasPrefix(argv[*i+1], "--") {
+		if *i+1 < len(argv) {
 			*i++
 			return argv[*i], true
 		}
@@ -193,80 +281,259 @@ func takeEngineFlags(argv []string) (rest []string, ws string, timeout time.Dura
 	for i := 0; i < len(argv); i++ {
 		a := argv[i]
 		switch {
+		case a == "-h" || a == "--help":
+			f.help = true
 		case a == "--json":
-			asJSON = true
+			f.asJSON = true
 		case a == "--workspace" || strings.HasPrefix(a, "--workspace="):
-			v, ok := take(&i)
+			v, ok := takeVal(&i)
 			if !ok {
-				return nil, "", 0, false, fmt.Errorf("--workspace 需要参数")
+				return f, fmt.Errorf("--workspace 需要参数")
 			}
-			ws = v
-		case a == "--timeout" || strings.HasPrefix(a, "--timeout="):
-			v, ok := take(&i)
+			f.workspace = v
+		case a == "--rpc-timeout" || strings.HasPrefix(a, "--rpc-timeout="):
+			v, ok := takeVal(&i)
 			if !ok {
-				return nil, "", 0, false, fmt.Errorf("--timeout 需要参数")
+				return f, fmt.Errorf("--rpc-timeout 需要参数")
 			}
 			n, e := strconv.Atoi(v)
 			if e != nil || n <= 0 {
-				return nil, "", 0, false, fmt.Errorf("--timeout 需要一个正整数秒数，收到 %q", v)
+				return f, fmt.Errorf("--rpc-timeout 需要一个正整数秒数，收到 %q", v)
 			}
-			timeout = time.Duration(n) * time.Second
+			f.timeout = time.Duration(n) * time.Second
+		case a == "--form" || strings.HasPrefix(a, "--form="):
+			v, ok := takeVal(&i)
+			if !ok {
+				return f, fmt.Errorf("--form 需要参数（程序名，如 aapp320；或 ProgramKey，如 aapp320|Form）")
+			}
+			f.form = v
+		case a == "--args" || strings.HasPrefix(a, "--args="):
+			v, ok := takeVal(&i)
+			if !ok {
+				return f, fmt.Errorf("--args 需要参数（一个 JSON 对象）")
+			}
+			f.args, f.argsSet = v, true
+		case a == "--args-file" || strings.HasPrefix(a, "--args-file="):
+			v, ok := takeVal(&i)
+			if !ok {
+				return f, fmt.Errorf("--args-file 需要参数（路径，`-` 表示标准输入）")
+			}
+			f.argsFile, f.argsFileSet = v, true
+		case strings.HasPrefix(a, "--"):
+			return f, fmt.Errorf("未知开关 %s：动词参数只用 JSON 给\n  可用开关：%s\n  %s",
+				a, strings.Join(verbTransportFlags, " "), verbUsageLine())
 		default:
-			rest = append(rest, a)
+			if f.verb == "" {
+				f.verb = a
+				continue
+			}
+			// 动词名之后还有裸词：先留着，分派时可能拿它拼**两级动词名**（`field add`）。
+			f.extra = append(f.extra, a)
 		}
 	}
-	return rest, ws, timeout, asJSON, nil
+	return f, nil
 }
 
-func cmdTzsCall(args []string) int {
-	rest, wsFlag, timeout, asJSON, err := takeEngineFlags(args)
+// verbUsageLine 是动词命令的用法一行（错误文案与帮助共用，避免两处措辞漂移）。
+func verbUsageLine() string {
+	return "tt dev tzs <动词> --args '{\"<参数>\": <值>}' [--args-file <文件>] [--json]"
+}
+
+// splitTwoWordVerb 尝试把「名词 动词」拼成引擎的动词名：`field add` → `field_add`。
+//
+// 为什么值得支持两级：clig.dev 推荐 `noun verb` 的两级子命令（`docker container create`），
+// 因为动词一多，"名词+动词"比平铺一堆动宾混排更好猜。而这里是**纯机械拼接**：
+// 不做映射表 —— 有表就有第二份动词名清单，引擎一改就漂移。命中不了就当没这回事。
+//
+// 返回命中的动词与"用掉了 rest 里的几个词"（0 = 没命中）。
+func splitTwoWordVerb(m *tzs.Manifest, first string, rest []string) (*tzs.SpecFn, int) {
+	if len(rest) == 0 {
+		return nil, 0
+	}
+	if f := lookupVerb(m, first+"_"+rest[0]); f != nil {
+		return f, 1
+	}
+	return nil, 0
+}
+
+// lookupVerb 按名字找动词：精确匹配优先，其次把 `-` 换成 `_` 再找一次。
+//
+// 允许连字符形式，是因为 shell 里手写 `form-tree` 太自然了，为一次拼写差异浪费一轮往返
+// 没有意义。报错文案里给的永远是 manifest 的原名（见调用处）。
+func lookupVerb(m *tzs.Manifest, name string) *tzs.SpecFn {
+	if f := m.ByName(name); f != nil {
+		return f
+	}
+	if strings.Contains(name, "-") {
+		return m.ByName(strings.ReplaceAll(name, "-", "_"))
+	}
+	return nil
+}
+
+// warnBuiltinCollisions 在引擎的函数名与内建动词撞名时提醒一句。
+//
+// 撞名的后果是内建赢、那个函数从此不可达 —— 这件事必须**看得见**，不能静默。
+func warnBuiltinCollisions(m *tzs.Manifest) {
+	for _, b := range builtinVerbs {
+		if m.ByName(b) != nil {
+			fmt.Fprintf(os.Stderr,
+				"警告：引擎的函数名 %q 与内建动词同名，内建优先，该函数无法用动词调用\n", b)
+		}
+	}
+}
+
+// localUsage 是本地参数型失败的出口：一律 stderr + 退出码 2。
+//
+// 不走 fail()：那会在 --json 时把一份**不是引擎帧**的信封写到 stdout，
+// 而 stdout 上的每一行都该是引擎的帧（调用方按行读，混进别的东西就是错位）。
+func localUsage(err error) int {
+	fmt.Fprintln(os.Stderr, err)
+	return exitCodeOf(err)
+}
+
+// readArgsBody 取出 --args / --args-file 里的 JSON 原文（都没给 = 空对象，`)` = 标准输入）。
+// 读不动是 IO 失败（退 5），不是用法错：写法没错，是那份文件/标准输入拿不到。
+func readArgsBody(f verbFlags) ([]byte, int) {
+	var b []byte
+	var err error
+	switch {
+	case f.argsSet:
+		b = []byte(f.args)
+	case f.argsFile == "-":
+		b, err = io.ReadAll(os.Stdin)
+	case f.argsFileSet:
+		b, err = os.ReadFile(f.argsFile)
+	default:
+		// 一个参数都没有的动词（list_open 之类）不必写 `--args '{}'`。
+		b = []byte("{}")
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "读不到 --args-file %s：%v\n", f.argsFile, err)
+		return nil, 5
+	}
+	return b, 0
+}
+
+// oldCallExample 给旧写法一条能直接粘的例子（把 `call <函数> --…` 里的函数名提到前面）。
+func oldCallExample(rest []string) string {
+	if len(rest) == 0 {
+		return `open --args '{"path":"D:\\pkg\\a.tzs"}' --json`
+	}
+	return strings.Join(rest, " ")
+}
+
+// runTzsVerb 跑一条具名动词命令：`tt dev tzs <动词> [--<参数> <值>…] [--args <JSON>] [--json]`。
+//
+// 它是**唯一**的表单读写入口，而且不认识任何具体动词 —— 名字、参数、必填、取值范围
+// 全部来自 manifest。想确认"零 per-function 代码"：这个函数里没有一个动词的字面量。
+func runTzsVerb(args []string) int {
+	if len(args) == 0 {
+		fmt.Fprint(os.Stderr, tzsUsage)
+		return 2
+	}
+	f, err := takeVerbFlags(args)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
-	if len(rest) == 0 {
-		fmt.Fprintln(os.Stderr, "用法：tt dev tzs call <fn> [--<参数> <值>…] [--workspace <dir>] [--timeout <秒>] [--json]")
-		fmt.Fprintln(os.Stderr, "  函数与参数见：tt dev tzs fns")
+	if f.verb == "" {
+		fmt.Fprintln(os.Stderr, "用法："+verbUsageLine())
+		fmt.Fprintln(os.Stderr, "  动词名见 `tt dev tzs --help`；某个动词的参数与 JSON 写法：tt dev tzs <动词> --help")
 		return 2
 	}
-	fnName, fnArgs := rest[0], rest[1:]
+	verbName := f.verb
 
-	o, err := tzsEngineOptions(wsFlag)
+	// `call <函数>` 是上一版的写法。专设一条迁移指引：只说「未知子命令 call」，
+	// 会让照旧文档敲命令的人去猜是不是自己拼错了。
+	if verbName == "call" {
+		fmt.Fprintln(os.Stderr, "`tt dev tzs call <函数>` 已删除：动词就是函数名，参数用 JSON 给")
+		fmt.Fprintf(os.Stderr, "  例：tt dev tzs %s\n", oldCallExample(f.extra))
+		fmt.Fprintln(os.Stderr, "  动词名见：tt dev tzs --help")
+		return 2
+	}
+
+	// 先只解析 exe：问函数表不需要工作区，所以"动词名打错"（退 2）与
+	// "`<动词> --help`"（退 0）在还没配工作区的新机器上也能给出正确答案。
+	exe, err := tzsEngineExe()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 5
 	}
-
-	m, err := tzs.FetchManifest(tzsCtx(), o.Exe)
+	m, err := tzs.FetchManifest(tzsCtx(), exe)
 	if err != nil {
-		return fail(err, asJSON)
+		return fail(err, f.asJSON)
 	}
-	parsed, err := tzs.SplitArgs(fnArgs)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+	warnBuiltinCollisions(m)
+
+	spec := lookupVerb(m, verbName)
+	// 两级写法：`field add` 等价于动词 `field_add`（纯拼接，见 splitTwoWordVerb）。
+	if spec == nil {
+		if two, used := splitTwoWordVerb(m, verbName, f.extra); two != nil {
+			spec, verbName = two, two.Name
+			f.extra = f.extra[used:]
+		}
+	}
+	if spec == nil {
+		// 打错名字是**发现动词**的主要路径（fns 已删），所以这里给全表而不是裁短的清单。
+		fmt.Fprintf(os.Stderr, "未知动词 %q\n\n", strings.Join(append([]string{verbName}, f.extra...), " "))
+		m.Index(os.Stderr)
 		return 2
 	}
-	// 本地校验只做 manifest 明文声明的事（必填 / 类型 / 静态取值 / 未知参数）。多做的每一分
-	// 都会变成「本地拒绝了一个引擎本会接受的调用」——from:* 的参数（attr、kind）与自由字符串
-	// （add_action 的 type）本来就是运行时的，本地一个字符都不碰。
-	raw, err := tzs.BuildArgs(m, fnName, parsed)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+	if len(f.extra) > 0 {
+		// 动词名之后还剩下的裸词：那不是参数（参数一律走 --args）。
+		fmt.Fprintf(os.Stderr, "多了位置参数 %s：动词后面只跟开关，参数全部写进 --args 的 JSON 里\n  %s\n",
+			strings.Join(f.extra, " "), verbUsageLine())
 		return 2
 	}
+	if f.help {
+		printFn(os.Stdout, spec)
+		return 0
+	}
 
+	// 参数只有一种来源：--args 或 --args-file（二选一；都没有 = 空对象）。
+	if f.argsSet && f.argsFileSet {
+		fmt.Fprintln(os.Stderr, "--args 与 --args-file 只能给一个")
+		return 2
+	}
+	body, code := readArgsBody(f)
+	if code != 0 {
+		return code
+	}
+	// --form 落在引擎的 handle 字段上（两种寻址只能给一个；给不需要句柄的动词传 form 会报错）。
+	raw, err := tzs.BuildArgsForForm(m, spec.Name, body, f.form)
+	if err != nil {
+		return localUsage(err)
+	}
+
+	// 参数都定型了，现在才需要工作区：**运行**要它，校验不要。
+	o, err := tzsEngineOptions(f.workspace)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 5
+	}
 	pipe, err := tzs.Ensure(tzsCtx(), o)
 	if err != nil {
-		return fail(err, asJSON)
+		return fail(err, f.asJSON)
 	}
 
 	d := tzs.DefaultDialer()
-	reply, err := tzs.Call(tzsCtx(), d, pipe, 1, fnName, raw, tzs.NormalizeTimeout(timeout))
-	code := tzs.ExitCode(reply, err)
+	// 慢调用要有动静：clig.dev 的规矩是「长操作先给一行输出，别让它看起来像卡死」。
+	// 阈值 400ms —— 毫秒级的动词保持安静，只有真的慢（open 加载包、validate 跑校验器）
+	// 才吱一声。走 stderr，不污染数据流。
+	stopProgress := progressAfter(os.Stderr, 400*time.Millisecond, verbProgressText(spec.Name, f.form))
+	reply, err := tzs.Call(tzsCtx(), d, pipe, 1, spec.Name, raw, tzs.NormalizeTimeout(f.timeout))
+	stopProgress()
+	code = tzs.ExitCode(reply, err)
+	if code == 0 && reply != nil {
+		maybeNudgeFilter(os.Stderr, spec, raw, reply.Result)
+	}
 
-	// open 成功后记住句柄，让随后的 call 可以省掉 --handle（**本地方便，不改协议**：
-	// 句柄始终是引擎的东西，进程一死全部失效，所以它只当提示用，不当缓存）。
-	if code == 0 && fnName == "open" && reply != nil {
+	// open 成功后把「最近一次 open」记进状态文件（.tt-tzs.json 的 last）。
+	//
+	// 它**只是一份指引**，命令层并不读它来寻址：要指定哪张表单用 `--form <程序名>`
+	// （引擎按程序名/ProgramKey 解析，见 tzs.BuildArgsForForm）。句柄只活在守护进程里、
+	// 永不复用，进程一死全部失效，拿它去填等于把"可能已经没了"当成已知事实。
+	if code == 0 && spec.Name == "open" && reply != nil {
 		if h := replyString(reply, "handle"); h != "" {
 			if p := replyString(reply, "path"); p != "" {
 				_ = tzs.Remember(o, h, p)
@@ -274,11 +541,158 @@ func cmdTzsCall(args []string) int {
 		}
 	}
 
-	if asJSON {
+	if f.asJSON {
 		printRawReply(reply, err)
 		return code
 	}
-	return printHumanReply(fnName, reply, err, code)
+	return printHumanReply(spec.Name, reply, err, code)
+}
+
+// narrowingParams 是"能把返回收窄"的参数名，按推荐顺序排。
+//
+// 这份清单**不是**动词表：它只是一组参数名，用来看某个动词有没有省 context 的手段。
+// 加新名字的成本是零，而它换来的是"提示自动跟着 manifest 走"——引擎给哪个动词加了
+// query，那个动词的提示就自动出现，不需要在 Go 侧登记。
+var narrowingParams = []string{"query", "limit", "table", "kind", "path", "column"}
+
+// firstNarrowingParam 返回该动词声明的第一个收窄参数名（没有则空）。
+func firstNarrowingParam(fn *tzs.SpecFn) string {
+	for _, n := range narrowingParams {
+		if fn.Param(n) != nil {
+			return n
+		}
+	}
+	return ""
+}
+
+// filterHint 给"会回一大块"的动词一句**先过滤**的提示。
+//
+// 实测（真实语料）：`list_columns --table pmdl_t` 不给 query 回 109 列的完整元数据
+// **44,655 字节**，给了 `query:"pmdl00"` 只剩 3,833 字节 —— 一次调用就差 40 KB 的 context。
+// 这不是接口缺东西，是**没人告诉调用方要先过滤**。所以提示从 manifest 生成，见
+// narrowingParams 的注释。
+//
+// **会改模型的动词不谈收窄**：它们的参数是输入（`field_add` 的 table 是"加哪张表的列"），
+// 不是"少回一点"的过滤器。不加这条判据就会给 field_add 印一句毫无意义的"先收窄：table…"。
+func filterHint(fn *tzs.SpecFn) string {
+	if fn.Writes {
+		return ""
+	}
+	p := firstNarrowingParam(fn)
+	if p == "" {
+		return ""
+	}
+	if p == "query" {
+		return "先过滤：--args 里给 query（子串匹配）能显著减少返回；" +
+			"实测 list_columns 不给过滤回 109 列 ≈ 44 KB，给了只剩几 KB"
+	}
+	return "先收窄：" + p + " 能减少返回；不给会回全量（清单类动词可能几十 KB）"
+}
+
+// maybeNudgeFilter 在这次"回了一大块、而且本来能收窄"时提醒一句（走 stderr）。
+//
+// 为什么在**事后**提醒：context 已经花掉了，但提示能把**下一次**调用引向省流量的写法
+// （Anthropic 的 tool 指南里专门讲了这条：错误与截断提示可以用来引导调用方）。
+// 走 stderr 而不是塞进结果，是为了不污染数据流。
+func maybeNudgeFilter(w io.Writer, spec *tzs.SpecFn, args json.RawMessage, result json.RawMessage) {
+	if spec.Writes {
+		return // 改模型的动词：参数是输入，不是过滤器（同 filterHint 的判据）
+	}
+	if len(result) < 8192 && resultCount(result) < 20 {
+		return // 小返回不提，免得变成噪音
+	}
+	p := firstNarrowingParam(spec)
+	if p == "" {
+		return
+	}
+	if argGiven(args, p) {
+		return // 已经收窄过了，不念
+	}
+	n := resultCount(result)
+	if n > 0 {
+		fmt.Fprintf(w, "… 提示：本次 %s 回了 %d 条（≈%d KB）；给 --args 里的 %s 收窄能省很多 context\n",
+			spec.Name, n, len(result)/1024, p)
+		return
+	}
+	fmt.Fprintf(w, "… 提示：本次 %s 回了 ≈%d KB；给 --args 里的 %s 收窄能省很多 context\n",
+		spec.Name, len(result)/1024, p)
+}
+
+// resultCount 从返回体里取列表条数（引擎的清单类返回用 count 或 returned）。
+//
+// 只认这两个键，不做通用遍历：这两个名字是引擎自己在多处用的约定
+// （list_tables/list_columns/list_spec_nodes 用 count，查询输出信封用 returned）。
+func resultCount(result json.RawMessage) int {
+	var probe struct {
+		Count    *int `json:"count"`
+		Returned *int `json:"returned"`
+	}
+	if err := json.Unmarshal(result, &probe); err != nil {
+		return 0
+	}
+	if probe.Count != nil {
+		return *probe.Count
+	}
+	if probe.Returned != nil {
+		return *probe.Returned
+	}
+	return 0
+}
+
+// argGiven 报告调用方是否给了某个参数（给了空串或 null 不算"收窄过"）。
+func argGiven(args json.RawMessage, name string) bool {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(args, &m); err != nil {
+		return false
+	}
+	v, ok := m[name]
+	if !ok {
+		return false
+	}
+	s := strings.TrimSpace(string(v))
+	return s != "" && s != "null" && s != `""` && s != "[]"
+}
+
+// verbProgressText 是慢调用那一行的措辞。
+func verbProgressText(verb, form string) string {
+	if form != "" {
+		return "正在执行 " + verb + "（" + form + "）"
+	}
+	return "正在执行 " + verb
+}
+
+// progressAfter 在 d 之后往 w 打一行"还在跑"，返回一个**必须调用**的收尾函数。
+//
+// 为什么不是"开始/完成"两条：毫秒级的动词每次都打两行会变成噪音，而要求只是
+// "别让它看起来像卡死"。所以只在真的慢时吱一声。
+//
+// 收尾之后绝不再打印：定时器与 stop 同时就绪时，select 的选择是随机的，
+// 所以用一个互斥量把"已经收尾"钉住 —— 否则会给一条已经打完结果的命令补一行"还在跑"。
+func progressAfter(w io.Writer, d time.Duration, what string) func() {
+	var mu sync.Mutex
+	stopped := false
+	done := make(chan struct{})
+	go func() {
+		t := time.NewTimer(d)
+		defer t.Stop()
+		select {
+		case <-t.C:
+			mu.Lock()
+			defer mu.Unlock()
+			if stopped {
+				return
+			}
+			fmt.Fprintf(w, "… %s；还在等引擎，慢是正常的\n", what)
+		case <-done:
+			return
+		}
+	}()
+	return func() {
+		mu.Lock()
+		stopped = true
+		mu.Unlock()
+		close(done)
+	}
 }
 
 // ---------- stop / reap / doctor ----------
@@ -331,7 +745,9 @@ func cmdTzsDoctor(args []string) int {
 	if err := parseArgs(fs, args); err != nil {
 		return 2
 	}
-	o, err := tzsEngineOptions("")
+	// 宽松版：缺工作区时 doctor **自己**要在报告里说出来（那是它的职责），
+	// 在这里先退 5 就永远走不到那条自检项。
+	o, err := tzsExecOptions("")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 5

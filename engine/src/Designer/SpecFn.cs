@@ -54,7 +54,10 @@ namespace TzsCli.Designer {
         /// loop. validate is 1.6 s on a 114-element form and 10.4 s on a 670-element one.</summary>
         public bool Slow;
         public string[] Errors;  // the E_* codes this fn can return; drives help AND tests
-        public string Returns;   // closed vocabulary: void|handle|el|tree|list<el>|delta|kindmap
+        /// <summary>Closed vocabulary: void|handle|el|tree|list&lt;el&gt;|delta|kindmap, plus
+        /// `report` for the task-level verbs (工作流) whose answer is a small composed object
+        /// ("what was added / what it broke / where it was saved") rather than one domain value.</summary>
+        public string Returns;
     }
 
     /// <summary>Small builders so the manifest table reads as a table rather than as object

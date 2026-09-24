@@ -1,129 +1,227 @@
 ---
 name: tt-dev-tzs
-description: 读写 T100 设计器**表单包**（.tzs/.tzv）：由设计器自己的引擎驱动（49 个函数，命名管道 JSON-RPC），不是拼 XML。流程 open → 读/改 → validate → save --out 写新包。当用户要改表单（改属性、加字段、加页签、调布局、换容器、多语言/选项/串查、Tab 顺序）、从数据字典按表加字段、或查看表单结构与字段时使用。**代码包（.tzc/.tzf/.tzx）不归这里，用 tt-dev-tzc。**
+description: 读写 T100 设计器**表单包**（.tzs/.tzv）：由设计器自己的引擎驱动（50 个具名动词，命名管道 JSON-RPC），参数一律用 JSON 给，不是拼 XML。按数据表加字段用任务级动词 field_add（一条命令做完挑容器+建字段+校验+另存）；改属性/布局/页签等用细粒度动词（open → 读 → 改 → validate → save）。要改表单、按表加字段、查表单结构或字段时用。**前提：先配工作区，且包与 out 都必须用绝对路径落在工作区目录之下。代码包（.tzc/.tzf/.tzx）不归这里，用 tt-dev-tzc。**
 license: 与 tt 仓库一致（见随包 README.md）
 metadata:
   tool: tdev
-  command: tt dev tzs / tt install
+  command: tt dev tzs <动词> / tt install
 ---
 
 # tt dev tzs：T100 设计器表单包的读写
 
-**这是表单包（`.tzs`/`.tzv`）的技能。** 代码包（`.tzc`/`.tzf`/`.tzx`）是**另一条互不相通的管线**，
-用 `tt-dev-tzc`：
+表单包（`.tzs`/`.tzv`）的读写**由设计器自己的代码算**：引擎反射加载随包分发的设计器程序集，
+`.tsd` 由设计器从模型重算。我们一个字节的 `.tzs` 格式都没实现 —— 所以**手工拼 XML 这条路不存在**。
 
-| | `tt dev tzs`（表单包，本技能） | `tt dev tzc`（代码包，见 tt-dev-tzc） |
+代码包（`.tzc`/`.tzf`/`.tzx`）是**另一条互不相通的管线**，用 `tt-dev-tzc`：
+
+| | `tt dev tzs`（本技能） | `tt dev tzc` |
 |---|---|---|
-| 干什么 | 由设计器自己的引擎读写**表单模型** | 把包渲染成带围栏的 `.4gl` 工作区给人改 |
-| 唯一写路径 | `call save --out`（写**新**包，不动原包） | `apply`（闸门校验 + 原子写回原包） |
+| 干什么 | 由设计器引擎读写**表单模型** | 把包渲染成带围栏的 `.4gl` 工作区给人改 |
+| 怎么调 | `tt dev tzs <动词> --args '<JSON>'` | `tt dev tzc export/apply …` |
+| 唯一写路径 | `field_add … out` 或 `save`（都写**新**包） | `apply`（闸门校验 + 原子写回原包） |
 
-拿错入口会被挡住：`.tzs` 跑 `tzc export` → 退出码 2 并提示改用 `tzs export`。
+拿错入口会被挡住：`.tzs` 跑 `tzc export` → 退 2 并提示改用 `tt dev tzs export`。
 
-表单的读写**由设计器自己的代码算**：`engine/` 里那个 C# 引擎反射驱动**已安装的设计器自己的程序集**
-（布局属性走设计器自己的 `XmlElement` 索引器，`.tsd` 由设计器从模型重算）。我们一个字节的 `.tzs`
-格式都没实现 —— 所以**手工拼 XML 这条路是不存在的**，改表单只有 `call` 一条路。
+## 1. 三条路怎么选
 
-## 一次改动的完整形状
-
-```powershell
-tt dev tzs doctor                            # 先自检：引擎 exe、设计器目录、工作区、管道名
-tt dev tzs fns                               # 49 个函数（按组列）；`fns <fn>` 看单个函数的参数
-
-# open → 读 → 改 → validate → save → close
-tt dev tzs call open           --path "D:\pkg\aapt300(c).tzs"   # → {"handle":"h9", "state":"Loaded", …}
-tt dev tzs call form_tree      --handle h9 --depth 3            # 结构树，每节点带 name-path
-tt dev tzs call find_component --handle h9 --query worksheet    # 控件代号 → name-path
-tt dev tzs call get_component  --handle h9 --path managedform/aapt300/HBoxT1/worksheet
-tt dev tzs call describe_kind  --handle h9 --kind field         # 这类节点**运行时**能写哪些属性
-tt dev tzs call set_spec_attr  --handle h9 --path <path> --kind field --attr can_edit --value true
-tt dev tzs call validate       --handle h9                      # 慢（实测 3–7 秒）；报**增量**
-tt dev tzs call save           --handle h9 --out "D:\pkg\_ai.tzs" # 写到**新**包；原包一个字节不动
-tt dev tzs call close          --handle h9
-tt dev tzs stop                                                 # 停本工作区的常驻引擎
-```
-
-**不要跳过读那几步**：`describe_kind` 给出的白名单是**运行时**从这个包算出来的
-（同一类节点在不同包里属性集不同），照着它写 `set_spec_attr` 才不会撞 `E_ATTR_NOT_WHITELIST`。
-
-纯解压（只读参考、写文档用；**不依赖引擎也不依赖设计器**）：
-
-```powershell
-tt dev tzs export "D:\pkg\aapt300(c).tzs"    # → D:\pkg\aapt300-unzip\
-```
-
-要配两样（机器级依赖，没有合理缺省）：
-
-- **设计器**：不用配。它的程序集随仓库与发行包自带（`engine/designer/` 与 `tzs\designer\` 是同一组），
-  引擎默认从自己旁边的 `designer\` 加载 —— 所以同一份 tt 在任何机器上跑的是**同一版设计器**，
-  不存在"你装的那版"和"我装的那版"。`TZSCLI_INSTALL` 只是覆盖手段（拿别版验证时才用）。
-- **用哪个工作区**：`tzs.workspace` 或 `TZSCLI_WS`。**这条没有缺省、也不回落** —— 引擎内置的
-  默认工作区是一个**真实客户目录**，落上去等于拿别人的表单当草稿纸。三层都空时拒绝启动（退 5）。
-
-## 句柄（handle）：最容易踩的一组
-
-- **每个需要句柄的函数都必须显式给 `--handle`**。没有「自动沿用上次句柄」这回事：
-  状态文件（`%APPDATA%\T100\tt\.tt-tzs.json`）里虽然记了一份最近 `open` 的结果，
-  但命令层不读它，省掉 `--handle` 只会得到退 2「缺必填参数 handle」。
-- **句柄永不复用**：`close` 掉一个包再 `open` 同一个包拿到的是**新号**（不是原来那个）。
-  拿旧号去调 → `E_NOT_FOUND`「句柄不存在或已关闭」（退 2）。这是安全失败，不是 bug。
-- **同一个程序已经开着再 `open` → `E_KEY_IN_USE`（退 4）**，报错会说清是哪个文件占着。
-  先 `close` 占用者（`list_open` 看是谁），或 `open --force`（只对 `Loaded` 状态的占用者有效，
-  `Mutable` 的会被拒）。
-- 句柄只活在常驻守护进程里。**进程一死全部失效** —— 守护进程挂了就重新 `open`，别重放写请求。
-
-## `validate` 是**基线相对**的，首调必然「零增量」
-
-这是读输出时最容易误判的一处：`validate` 在**句柄上第一次被调用时，那次运行本身就是基线**
-（`Fns/Validate.cs:139`）。所以第一次调用 `newErrors`/`newWarnings` **按构造就是空** ——
-它证明不了任何事。要看「我改坏了没有」，必须在**同一个句柄**上先 `validate` 一次建立基线。
-
-实测：`aapt300(c).tzs`（未做任何改动）首调 `baseline = 13 条 WARNING`，`after = 13`，
-`newErrors = 0`、`newWarnings = 0`。**语料里本来就不干净** —— 所以判据永远是
-「改动后的增量」，而不是「有没有 WARNING」。
-
-返回体：`{baseline[], after[], newErrors[], newWarnings[], elapsedMs}`。
-加 `--json` 会把**整帧**（`{id, ok, result, error, ms}`）原样打出，而不是只打 `result`。
-
-## 参数语法（本地只做**语法**校验，语义交给引擎）
-
-| 写法 | 含义 |
+| 你要做的事 | 用哪个 |
 |---|---|
-| `--handle h9` / `--handle=h9` | 两种都行；`=` 后允许空串（`--desc=` 是「清空」） |
-| `--paths a,b,c` | 列表按逗号切 |
-| `--paths a --paths b` | 列表**可重复**，多次出现会合并（`a,b,c`） |
-| `--force` | 裸开关 = `true`（`--excluded` / `--cited` 同理） |
-| 裸词 `foo` | **报错**。位置参数一律不接受（这一条与 `tzs-cli` 有意不同） |
-| `--offset 2` | 按 manifest 定型成数字 2 |
-| 标量给两次 | 报错（只有 `path[]`/`string[]` 可重复） |
+| **按某张表的列加字段**（最高频） | **`field add`** —— 挑容器 + 建字段 + 报校验增量 + 存新包，一条命令（§2） |
+| 改属性 / 挪布局 / 换容器 / 页签 / 多语言 / Tab 顺序 | **细粒度动词链**（§3）—— 先看清结构，再改一处 |
+| 只看结构、字段、开着的表单 | `form_tree` / `find_component` / `get_component` / `list_spec_nodes` / `list_columns` / `list_open` |
 
-**本地绝不拦的**（拦了就是「本地拒绝了一个引擎本会接受的调用」）：`attr` 白名单、
-`kind` 的取值、`add_action` 的 `type` —— 这些合法集要从**活着的模型**或**该表单自己的**
-`s_detail<n>` 记录里取，静态判不了。所以 `--attr bogus_attr` 会照发，由引擎用它自己的白名单拒绝。
+**跑之前要配一样东西**：工作区（`tt config set tzs.workspace "D:\ws"` 或环境变量 `TZSCLI_WS`；
+**本文档的 `D:\ws` 一律指工作区**）。**这条没有缺省、也不回落** —— 引擎内置的默认工作区是一个
+**真实客户目录**，落上去等于拿别人的表单当草稿纸；三层都空时运行类动词直接拒绝启动（退 5）。
+工作区还**圈定了你能碰哪些包**：包的目录必须在它之下，`out` 也一样（§4.4）。
+设计器**不用配**（它的程序集随仓库与发行包自带）。开工前先 `tt dev tzs doctor` 自检。
 
-两个附带事实：**参数打错的报错也要引擎在**（`call` 先拉 manifest 再校验参数，manifest 拉不到按
-用法错退 2）；`--timeout` **最小 120 秒**，低于此值会被抬到 120（下限是给加载看门狗留的）。
+## 2. 任务级动词：`field_add`
 
-## 其它必知
+一次做完：**挑容器 → 按列建字段 → 报校验增量 →（给了 `out` 就）存新包**。
 
-- **`--depth 1` 意思是「只有这个节点本身」**，不是「往下看一层」。要子节点至少 `--depth 2`。
-- **`save --out` 写到新包，不动原包**。不要 `--out` 指向源包 —— 那是唯一会毁掉原始素材的写法。
-- **请求一旦上线绝不重试**：协议无幂等键，而这些函数都在改设计器内存里的模型，重试是在赌
-  「上一次写进去了没有」。守护进程死了就重新 `open`。
-- `stop` **绝不 spawn**（让 stop 去起一个服务器是件可笑的事）；`reap` 收的是**引擎重编后**
-  停不掉的孤儿守护进程（管道名含 MVID，重编就换名，旧进程的 pid 只能靠状态文件的 `orphans` 找到）。
-   `reap` 不加 `--yes` 只列不杀。
+```powershell
+# ① 最省事：只给 file（没开着就顺手开，已开着就复用 —— 不会撞 E_KEY_IN_USE）
+tt dev tzs field add --args '{"file":"D:\\ws\\apmt500_wf(c).tzs","table":"pmdl_t","columns":["pmdlent","pmdlsite"],"out":"D:\\ws\\_ai.tzs"}' --json
 
-## 红线（碰了就出事，没有例外）
+# ② 表单已经开着：用程序名寻址，不必抄句柄
+tt dev tzs field_add --args '{"handle":"apmt500_wf","table":"pmdl_t","columns":["pmdlent"]}' --json
 
-1. **`export` 的产物是只读参考**：它就是一包文件，没有 manifest/围栏。不要手工改完再塞回包，
-   也不要拿它当 `tzc` 工作区去 `apply`。要改表单用 `tt dev tzs call` —— 那是设计器自己的模型在算，
-   改完设计器打得开；手工拼 XML 则不然（`.tsd` 由设计器从模型重算，`.4fd` 的 Record 段要重建）。
-2. **请求一旦发出不要重试**（同「其它必知」第二条）。
-3. **`save --out` 永远指向新包**，绝不指向源包；`export` 只读源包。实验一律用副本或临时目录。
-4. **不要在没有工作区的地方跑** —— 引擎的缺省工作区是真实客户目录，命令会拒绝启动而不是回落；
-   不要试图绕过那个拒绝。
+# ③ 容器不想让它挑：显式给 into（name-path 用 form_tree 看）
+tt dev tzs field_add --args '{"file":"D:\\ws\\x.tzs","table":"pmdl_t","columns":["pmdlent"],"into":"managedform/x/HBoxT1/worksheet"}' --json
+```
 
-## 退出码
+| 参数 | 必填 | 说明 |
+|---|---|---|
+| `handle` | 否 | 已在开的表单：句柄 `h1`、程序名 `aapp320`、或 ProgramKey `aapp320\|Form` |
+| `file` | 否 | `.tzs` 路径；**与 `handle` 二选一** |
+| `table` | **是** | 表名，如 `pmdl_t` |
+| `columns` | **是** | 列名数组；一次构造 N 列（列名用 `list_columns` 取，**记得先过滤**，§4.7） |
+| `into` | 否 | 父容器的 name-path；省略时自动挑（见下） |
+| `container` | 否 | 容器模式，默认 `None`（`None` = 每个字段配一个 Label 控件；`Table` = 一个 Table 装 N 列） |
+| `out` | 否 | 给了就把结果存成这个**新**包（绝不写源包）；**必须也落在同一工作区内**（§4.4） |
+
+> ⚠️ `container` 的**枚举在 `--help` 里比函数体接受的宽**：`HBox` / `VBox` / `Page` / `Folder`
+> 目前会被拒（`E_BAD_PARAM`「未知容器模式 HBox；合法值: None, Grid, Group, ScrollGrid, Table, Tree」）。
+> 用 `None` 或 `Table` 最稳。（引擎里两份清单该对齐，属已知待办。）
+
+**容器怎么自动挑**（`into` 可覆盖）：① 叫 `worksheet` 的容器（设计器模板里放字段的那块）→
+② 名字含 `layout` 的容器 → ③ 根 `<Form>` 下唯一的容器 → ④ 都不成立就**报错要你显式指定**
+（宁可不做，也不把字段塞进一个猜出来的盒子里）。
+
+**它返回什么**（刻意瘦，约 1.4 KB）：`form` / `key` / `handle` / `opened`（这次是不是它开的）/
+`container` / `added`（加了哪些节点）/ `validate`（`newErrorCount`/`newWarningCount` + 明细）/
+`baselineCached` / `saved`（`out`、字节数）。**不回表单全量，也不回校验的 baseline/after 全表** ——
+要看全量就单独调 `validate`。
+
+**边界**：它只做"按表的列加字段"。改属性、挪布局、页签、多语言仍是细粒度动词 —— 走 §3。
+
+## 3. 细粒度：一次调用改一处
+
+```powershell
+tt dev tzs doctor                                        # 先自检：引擎/设计器目录/工作区/管道名
+tt dev tzs <动词> --help                                 # 参数表 + 一条能直接粘的示例
+
+# open → 读 → 改 → validate → save → close（全程 --form 寻址，不搬运句柄）
+tt dev tzs open           --args '{"path":"D:\\ws\\aapt300(c).tzs"}' --json   # → {"program":"aapt300",…}
+tt dev tzs form_tree      --form aapt300 --args '{"depth":3}' --json            # 结构树，每节点带 name-path
+tt dev tzs find_component --form aapt300 --args '{"query":"worksheet"}' --json  # 控件代号 → name-path
+tt dev tzs get_component  --form aapt300 --args '{"path":"managedform/aapt300/HBoxT1/worksheet"}' --json
+tt dev tzs describe_kind  --form aapt300 --args '{"kind":"field"}' --json       # 这类节点**运行时**能写哪些属性
+tt dev tzs set_spec_attr  --form aapt300 --args '{"path":"<path>","kind":"field","attr":"can_edit","value":"true"}' --json
+tt dev tzs validate       --form aapt300 --json                                 # 慢（实测 3–5 秒）；报**增量**
+tt dev tzs save           --form aapt300 --args '{"out":"D:\\ws\\_ai.tzs"}' --json  # 写**新**包；原包一字节不动
+tt dev tzs close          --form aapt300 --json
+tt dev tzs stop                                          # 停本工作区的常驻引擎
+```
+
+**读的动词各自干什么**：`form_tree` 看层级与 name-path；`get_component` 看一个节点的属性与规格；
+`describe_kind` 给**这一类节点此刻能写哪些属性**（白名单是每个包现算的，`attr` 必须照着它写，
+否则撞 `E_ATTR_NOT_WHITELIST`）；`list_spec_nodes` 列字段/动作等规格节点；`list_tables` /
+`list_columns` 查数据字典；`list_records` / `list_local_strings` 看记录与多语言。
+
+**几处容易记混的**：`move` **只改 Z 序**（同一父容器内前后挪），换父容器要用 `reparent`
+（设计器的拖拽命令，仅限同表单）；`add_field` 是加字段、`wrap` 是拿选中元素**包一层新容器**；
+`add_field` 的 `columns` 一次构造多列，一次一列会让大表单慢两个数量级（实测 84 列从 137 秒降到
+1.17 秒）。
+
+## 4. 调用形状（所有动词通用）
+
+### 4.1 动词名怎么找
+
+```powershell
+tt dev tzs --help            # 静态用法 + 按组列出动词名（引擎可达时；[工作流] 排在最前）
+tt dev tzs <动词> --help     # 该动词的示例 + 参数 + 错误码
+tt dev tzs nudgee            # 敲错：退 2，并把完整动词清单打到 stderr
+```
+
+两级写法与连字符都认：`field add` = `field_add`、`form-tree` = `form_tree`。**没有"打印整张函数表"
+的命令** —— 参数表是每个动词自己的契约，一次全摊开只会淹没人。
+
+### 4.2 参数只有一种给法：JSON
+
+```powershell
+tt dev tzs <动词> --args '{"<参数>": <值>}' [--json]   # 数组就是数组、布尔就是布尔、数字不带引号
+tt dev tzs <动词> --args-file <UTF-8 文件>              # 长内容/中文；值写 - 表示读标准输入
+tt dev tzs list_open --json                            # 无参数的动词可以省掉 --args
+```
+
+没有 `--handle h9` 这种写法：参数名与类型是**运行时**从引擎 manifest 来的，写成 flag 就得让调用方
+去学一套只存在于命令行的语法（逗号切数组、能不能重复、负号算不算值…）。JSON 里这些都不存在。
+**中文/长内容一律走 `--args-file`**：Windows 管道可能按控制台代码页重编码。
+
+### 4.3 寻址：`--form <程序名>`，不要搬运句柄
+
+```powershell
+tt dev tzs set_spec_attr --form aapp320 --args '{"path":"…","kind":"field","attr":"can_edit","value":"true"}' --json
+```
+
+`--form` 写**程序名**（`aapp320`）或 **ProgramKey**（`aapp320|Form`），引擎自己解析成会话 ——
+`open` 的返回里虽然有 `handle:"h1"`，但你可以全程忽略它。想看现在开着哪些：`list_open --json`。
+
+- `--form` 与 args 里的 `handle` **只能给一个**（不做优先级猜测）；
+- `--form` 只对**需要句柄**的动词有意义，给 `list_open` 这类会报「不接受 form」；
+- 名字不存在 → 退 2，错误里列出当前开着的候选（含可用的 `key`）并说明三种写法；
+- 程序名不唯一 → 报 `bad_param` 让你改用 ProgramKey，**不猜**。
+
+### 4.4 路径与工作区：包必须**在工作区目录之下**
+
+工作区不是包的属性，是**目录**的属性。设计器只做一次字符串前缀比较（`TzpManager.InCurrentWorkspace`
+→ `ConnectionSetting.InWorkspace`）：
+
+> 取**包所在的目录**，两边补上尾 `\`，看它是否以 `<工作区>\` 开头（大小写不敏感）。是就放行，否则抛
+> `NotInCurrentWorkspaceException`。
+
+由此而来的四条，都实测过：
+
+| | |
+|---|---|
+| 包内容与此无关 | `.tzs` 里**没有任何**工作区/路径信息（5 个条目，只有一个 4 字节的 `ver` 装着发行版本号）。同一份包，放对目录就开，放错就拒。 |
+| 子目录可以 | `<工作区>\任意\子\目录\x.tzs` 也过 —— 前缀语义如此。（兄弟目录不行：`…\prd2\` 不以 `…\prd\` 开头。） |
+| **`out` 必须也在工作区内** | 闸只装在**加载**路径，写盘不查。`save`/`field_add` 往区外写会**成功返回**（退 0），那个包之后 `open` 才被拒。 |
+| **路径必须绝对** | 相对路径由**守护进程**的 cwd 解释（它继承自第一次调用它的那个 `tt` 进程），不是你的 cwd；裸文件名更必拒（`Path.GetDirectoryName("x.tzs")` 是空串）。 |
+
+守护进程 `Boot` 一次就绑死一个工作区、不可重指，所以 **`field_add` 的 `file` 与 `out` 必须同属一个工作区**。
+"改 A 模块的表单、存到 B 模块"在无头这条路里做不到 —— 那需要两个进程。
+
+### 4.5 传输开关（不是动词参数）
+
+`--form` / `--args` / `--args-file` / `--workspace` / `--rpc-timeout <秒>` / `--json` / `-h`。
+
+### 4.6 慢动词会有动静
+
+超过约 0.4 秒先在 **stderr** 打一行 `… 正在执行 validate；还在等引擎，慢是正常的`。
+那是提示不是错误；**数据仍只在 stdout**。
+
+### 4.7 先过滤：清单类动词不给过滤会回一大块
+
+**最容易白花 context 的一处**（实测）：`list_columns --table pmdl_t` 不给 `query` 会回 109 列的
+完整元数据 **44,655 字节**；`"query":"pmdl00"` → **3,833 字节**；`"query":"site"` → **517 字节**。
+动词自己的 `--help` 里有这句提示；调用后如果回了一大块又本来能收窄，stderr 还会提一句。
+**会改模型的动词不谈"收窄"** —— 它们的参数是输入，不是过滤器。
+
+## 5. `validate` 与"增量"
+
+`validate` 在**一个会话上第一次被调用时，那次运行本身就是基线**（`Fns/Validate.cs:139`），
+所以首调 `newErrors`/`newWarnings` **按构造就是空**，它证明不了任何事。
+
+实测 `aapt300(c).tzs`（**未做任何改动**）：首调 `baseline = 13 条 WARNING`、`after = 13`、
+`newErrors = 0`、`newWarnings = 0`（耗时 5,029 ms）；第二次调用 3,379 ms 起才是"相对基线的增量"。
+**语料本来就不干净** —— 判据永远是「改动后的增量」，不是「有没有 WARNING」。
+
+返回体 `{baseline[], after[], newErrors[], newWarnings[], elapsedMs}`；`field_add` 会把这一坨
+**瘦身**成计数 + 增量（见 §2）。`--json` 打的是**整帧** `{id, ok, result, error, ms}`，不是只打 `result`。
+
+## 6. 会话与句柄（你只需要知道的最小集）
+
+- **句柄永不复用**：`close` 后再 `open` 同一个包拿到的是新号。旧号去调 → `E_NOT_FOUND`（退 2，安全失败）。
+- **同一个程序已经开着又 `open` → `E_KEY_IN_USE`（退 4）**：先 `close` 占用者（`list_open` 看是谁），
+  或对 `Loaded` 状态的占用者用 `"force":true`。**用 `field_add` + `file` 不会有这个问题**（已开着就复用）。
+- 会话只活在常驻守护进程里：**进程一死全部失效**，重新 `open` 即可。
+- **请求一旦上线绝不重试**：协议没有幂等键，这些动词都在改设计器内存里的模型，重试是在赌
+  「上一次写进去了没有」。
+- `stop` 停本工作区的常驻引擎（**绝不 spawn**）；`reap [--yes]` 收引擎**重编后**停不掉的孤儿
+  守护进程（管道名含 MVID，重编即换名）。`reap` 不加 `--yes` 只列不杀。
+
+## 7. 本地校验口径（语法在本地，语义交给引擎）
+
+| 情况 | 行为 |
+|---|---|
+| 未知动词 / 未知参数 / 缺必填 | 退 2 并点名（未知参数**一次报全部**） |
+| int 收到 `"2"` 或 `1.5`、bool 收到 `"yes"`、枚举越界、数组元素非字符串 | 退 2，点名参数与合法值 |
+| 参数写 `null` | 视同**没给**（缺必填照报） |
+| 参数写成 flag（`--handle h9`） | 退 2「未知开关」 |
+| 寻址写进 JSON（`"form":"aapp320"`） | 退 2「参数 form 不在 manifest 里」+ 提醒用 `--form` |
+| `--form` 与 `handle` 同时给 / 给不需要句柄的动词 | 退 2（不猜优先级 / 不接受 form） |
+| **`kind` / `attr` 的取值、`add_action` 的 `type`** | **本地放行**，由引擎用它自己的白名单/该表单的 `s_detail<n>` 拒绝（退 2，`detail.legal` 给合法集） |
+
+最后一行是**故意的**：那三处的合法集要从**活着的模型**或**该表单自己的**记录里取，静态判不了。
+在本地拦下来只会让一个引擎本会接受的调用永远到不了引擎，而且拦得静悄悄（写错了不会有测试失败）。
+
+参数打错的报错**也要引擎在**（命令先拉 manifest 再校验参数）。`--rpc-timeout` **最小 120 秒**
+（下限是给加载看门狗留的）；引擎自己的加载看门狗是另一个参数：`open --args '{"path":"…","timeout":30}'`。
+
+## 8. 退出码
 
 **没有 `3`**（`3` 是 `.tzc` 那条线的「验证失败」），多一个 `1`：
 
@@ -131,26 +229,26 @@ tt dev tzs export "D:\pkg\aapt300(c).tzs"    # → D:\pkg\aapt300-unzip\
 |---|---|
 | `0` | 帧 `ok:true` |
 | `1` | 引擎内部错（`kind=internal`，含 `E_NOT_IMPLEMENTED`） |
-| `2` | 参数/环境不对：本地参数错、未知函数、manifest 拉不到、引擎的 `validation` 与 `not_found` |
+| `2` | 参数/环境不对：本地参数错、未知动词、manifest 拉不到、引擎的 `validation` 与 `not_found` |
 | `4` | **设计器拒绝**（`kind=designer`，含 `E_KEY_IN_USE`） |
-| `5` | 传输或环境失败（含加载超时、没配工作区） |
+| `5` | 传输或环境失败（含加载超时、没配工作区、`--args-file` 读不到） |
 
-## 动词速查
+## 9. 只读解压：`export`
 
-| 命令 | 作用 | 要引擎吗 | 改包吗 |
-|---|---|---|---|
-| `export <pkg> [-o <dir>] [--force]` | 纯解压（只读参考） | 否 | 否 |
-| `fns [<fn>] [--json]` | 函数表 / 单个函数的参数 | 是（拉 manifest） | 否 |
-| `manifest` | 函数表 JSON，原样转发 | 是 | 否 |
-| `call <fn> --<参数> …` | 读写表单，**唯一写路径** | 是 | 只经 `save --out` 写到**新**包 |
-| `doctor [--json]` | 环境自检（引擎/设计器目录/工作区/管道名/守护进程） | 是 | 否 |
-| `stop` | 停本工作区的常驻引擎（不启动新的） | 否（要配工作区） | 否 |
-| `reap [--yes]` | 清理引擎重编后停不掉的孤儿守护进程 | 否（要配工作区） | 否 |
+```powershell
+tt dev tzs export "D:\\ws\\aapt300(c).tzs"    # 纯解压到 <包目录>\aapt300-unzip（只读参考）
+```
 
-改表单的函数按组分（`tt dev tzs fns` 看全表，会改模型的标 `[写]`，慢的标 `[slow]`）：
+`export` **不依赖引擎也不依赖设计器**；`-o <dir>` 换落点，目标非空时拒绝（`--force` 覆盖同名文件）。
+产物就是**一包文件**（不是 `tzc` 那种带围栏的工作区、不能 apply）；要改表单走动词，不要手工改完塞回去。
 
-| 组 | 函数 |
+## 10. 动词全表（50 个）
+
+`tt dev tzs --help` 会列出它们（`[工作流]` 在最前；会改模型的标 `[写]`，慢的标 `[slow]`）：
+
+| 组 | 动词 |
 |---|---|
+| 工作流 | `field_add` |
 | 会话 | `open` `save` `close` `verify` `list_open` |
 | 读 | `form_tree` `find_component` `get_component` `list_spec_nodes` `describe_kind` `list_tables` `list_columns` `list_records` `list_local_strings` |
 | 属性 | `set_spec_attr` `set_layout_attr` `set_tree_source` `rename_component` |
@@ -161,34 +259,46 @@ tt dev tzs export "D:\pkg\aapt300(c).tzs"    # → D:\pkg\aapt300-unzip\
 | Tab 顺序 | `set_tab_order` `tab_action` |
 | 校验/工具 | `validate` `base_data` `set_excluded` `set_code_template` |
 
-几处容易记混的：**`move` 只改 Z 序**（同一个父容器内前后挪），**换父容器用 `reparent`**
-（设计器的拖拽 `DragComponentsUndoRedoCommand`，仅限同表单）。**`add_field` 加字段，
-`wrap` 是拿选中元素包一层新容器**（不是加字段）。`add_field --columns a,b,c` 一次构造多列，
-`--container Table` 才得到「一个 Table 装 N 列」；一次一列会让大表单慢两个数量级
-（实测 84 列从 137 秒降到 1.17 秒）。
+## 11. 常见错误（自查表）
 
-## 常见简单错误（自查表）
+**任务级**
+- ❌ 加字段还自己一步步串（挑列 → 开包 → 探容器 → 两遍 validate → save）→ 直接用 `field add`；
+  手工链只在要精细控制时才走（§3）。
+- ❌ `field_add` 没给 `table` 或 `columns` → 退 2 点名缺哪个。
+- ❌ 让它猜容器，它报"挑不出容器" → 那是**故意的**；给 `into`（`form_tree` 看 name-path）。
+- ❌ 给 `field_add` 的 `container` 写 `HBox`/`VBox`/`Page`/`Folder` → 函数体不收（见 §2 的警示）。
 
-- ❌ 调 `call` 时省掉 `--handle` → 退 2「缺必填参数 handle」。**没有自动沿用上次句柄**这件事。
-- ❌ 上一个包 `close` 之后仍拿旧句柄调 → 退 2「句柄不存在或已关闭」。**句柄永不复用**，
-  重新 `open` 拿新号。
-- ❌ 同一个程序已经开着又 `open` → 退 4 `E_KEY_IN_USE`。先 `close` 占用者（`list_open` 看是谁），
-  或对 `Loaded` 的占用者用 `open --force`。
-- ❌ 看到第一次 `validate` 报 `newErrors: []` 就以为改对了 → 首调**就是建立基线的那次**，
-  零增量是构造性的。要比对增量必须在同一句柄上先建立基线。
-- ❌ 拿 `baseline` 里的 WARNING 数当「改坏了」 → 语料**本来就不干净**（aapt300 未改动即有 13 条）。
-- ❌ `form_tree --depth 1` 想看子节点 → 那是「只有这个节点本身」，至少 `--depth 2`。
+**参数**
+- ❌ 布尔写字符串、数字写字符串、数组写逗号串 → 退 2（`"excluded":"yes"` / `"offset":"2"` / `"paths":"a,b"`）。
+- ❌ 参数写成 flag（`--handle h9`）或用位置参数（裸词）→ 退 2。参数一律进 `--args` 的 JSON。
+- ❌ 中文/长内容直接写在命令行里被重编码 → 用 `--args-file` 写 UTF-8 文件。
+- ❌ 给 `path` / `file` / `out` 写相对路径 → 由**守护进程**的 cwd 解释（不是你的 cwd），裸文件名必拒；一律写绝对路径（§4.4）。
+- ❌ `list_columns` / `list_local_strings` 不给过滤直接打 → 可能回几十 KB（先看 `--help` 的"先过滤"提示）。
+
+**寻址与会话**
+- ❌ 需要句柄的动词既没给 `--form` 也没在 JSON 里给 `handle` → 退 2「缺必填参数 handle」。
+  **正解是 `--form <程序名>`**，不必抄句柄。
+- ❌ `--form` 与 `handle` 同时给 / 给 `list_open` 传 `--form` / 把 `form` 写进 JSON → 各退 2（文案会指路）。
+- ❌ 用已经失效的程序名（`close` 过、或守护进程重启过）→ 退 2 并列出当前候选；重新 `open`。
+- ❌ 同一个程序已经开着又 `open` → 退 4 `E_KEY_IN_USE`（或改用 `field_add` + `file`，它会复用）。
+
+**读与校验**
+- ❌ 第一次 `validate` 报 `newErrors: []` 就以为改对了 → 首调**就是建基线的那次**，零增量是构造性的。
+- ❌ 拿 `baseline` 的 WARNING 数当"改坏了" → 语料**本来就不干净**（aapt300 未改动即有 13 条）。
+- ❌ `form_tree` 用 `--depth 1` 想看子节点 → 那是"只有这个节点本身"，至少 `2`。
 - ❌ 不看 `describe_kind` 就写 `set_spec_attr` → 撞 `E_ATTR_NOT_WHITELIST`；白名单是每个包现算的。
-- ❌ `--paths a b c` 希望是三个 → 列表要么 `--paths a,b,c`，要么 `--paths a --paths b --paths c`。
-- ❌ 写参数时用位置参数（裸词）→ 一律报错，参数都是 `--名 值`。
-- ❌ `--offset 2 --offset 3` 这种标量给两次 → 报错（只有 `path[]`/`string[]` 可重复）。
-- ❌ 以为参数打错会立刻在本地报 → `call` **先拉 manifest 再校验参数**，引擎 exe 不在就要退 5。
-- ❌ `--timeout 30` 想快点失败 → 会被抬到 120 秒（下限是给加载看门狗留的）。
-- ❌ `save --out` 指向源包 → 唯一会毁掉原始素材的写法。永远写**新**包。
 
-## 背景与细节
+**红线**
+- ❌ 把 `save`/`field_add` 的 `out` 指向**源包** → 唯一会毁掉原始素材的写法。永远写**新**包。
+- ❌ 把 `out` 写到工作区**外** → 写的时候退 0 一切正常，那个包**之后** `open` 才被设计器拒（§4.4）。
+- ❌ 把 `export` 的产物当工作区去 `apply` / 手工改完塞回包 → 它只是只读参考。
+- ❌ 在没有工作区的地方跑运行类动词 → 引擎缺省工作区是真实客户目录，拒绝启动是保护你的（别绕过）。
+- ❌ 请求超时后重发 → 不重试；重新 `open` 或直接看结果。
+- ❌ 看到 stderr 的 `… 正在执行 validate；还在等引擎，慢是正常的` 就以为出错 → 那是提示行。
 
-引擎为什么单独构建（不在 Go 构建链里、设计器目录是构建期与运行期都要的依赖、重编会让在跑的
-守护进程变孤儿）见 [engine/BUILD.md](../../engine/BUILD.md)。
-`.tzs` 格式契约见 [engine/SPEC.md](../../engine/SPEC.md)；
-命令面与验收清单见 [docs/WIKI.md](../../docs/WIKI.md#7-tt-dev-tzs-表单包)。
+## 12. 背景与细节
+
+- 引擎为什么单独构建（不在 Go 构建链里、设计器目录是构建期与运行期都要的依赖、重编会让在跑的
+  守护进程变孤儿）：[engine/BUILD.md](../../engine/BUILD.md)
+- `.tzs` 格式与引擎契约：[engine/SPEC.md](../../engine/SPEC.md)
+- 命令面、验收清单、设计依据：[docs/WIKI.md](../../docs/WIKI.md#7-tt-dev-tzs-表单包)

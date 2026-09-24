@@ -82,9 +82,19 @@ namespace TzsCli.Designer.Fns
             lock (_gate) _baseline.Remove(handle);
         }
 
+        /// <summary>Is there already a cached baseline for this handle?
+        ///
+        /// A composed verb that mutates and then reports a delta has to know this BEFORE it
+        /// mutates: with no baseline, its first validate would run *after* the change and define
+        /// the baseline as the broken state -- "new errors: none" by construction (§7.4).
+        /// So it either seeds one first (one extra validate) or says so honestly.</summary>
+        internal static bool HasBaseline(string handle) {
+            lock (_gate) return _baseline.ContainsKey(handle);
+        }
+
         // ------------------------------------------------------------------ validate
 
-        static object Run(DS s0, JObject args) {
+        internal static object Run(DS s0, JObject args) {
             DS s = TzsCli.Designer.Fns.Session.Resolve(s0, args);
             object si = s.Si;
             if (si == null) throw new TzsError("internal", "句柄没有 SpecificationInfo: " + s.Handle);

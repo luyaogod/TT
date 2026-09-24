@@ -392,10 +392,83 @@ namespace TzsCli.Designer
             return null;
         }
 
+        /// <summary>
+        /// Looks up an open session by a MEANINGFUL name instead of by the opaque handle:
+        /// either the program name ("aapp320") or the ProgramKey string ("aapp320|Form").
+        ///
+        /// Why this exists: handles are minted as "h1", "h2", ... and are never reused
+        /// (SPEC §11.24 (g)), so a caller that wants to "edit aapp320's form" has to carry an
+        /// opaque, perishable id through every single call. Both names a caller would rather use
+        /// are already here -- `open` returns them, `list_open` reports them -- so accepting them
+        /// costs nothing and removes a whole class of "which handle was it again?".
+        ///
+        /// This is an ADDITIVE relaxation of §11.24 (b): the wire shape does not change, `handle`
+        /// is still a string, and an exact handle match still wins (handles are always "h"+N, so
+        /// a program name can never be mistaken for one).
+        ///
+        /// Returns EVERY match, never the first: one program can be open once per type (a Form
+        /// and a Report share the program name), and silently picking one would be a wrong answer
+        /// that looks like a right one. The caller turns 0/1/N into the right message.
+        /// </summary>
+        public static List<Session> FindByKey(string programOrKey) {
+            var hits = new List<Session>();
+            if (string.IsNullOrEmpty(programOrKey)) return hits;
+            IDictionary open = Reflect.Prop2(typeof(Session), "_open") as IDictionary;
+            if (open == null) return hits;
+            foreach (DictionaryEntry de in open) {
+                Session s = de.Value as Session;
+                if (s == null || s.Closed) continue;
+                // The registry's key IS the ProgramKey string (Session.SlotKey), so matching it
+                // needs no second derivation of the format -- which is the whole point of reading
+                // the live dictionary instead of recomputing a key.
+                string slot = de.Key as string;
+                if (string.Equals(s.Program, programOrKey, StringComparison.Ordinal)
+                    || (slot != null && string.Equals(slot, programOrKey, StringComparison.Ordinal)))
+                    hits.Add(s);
+            }
+            return hits;
+        }
+
+        /// <summary>
+        /// Looks up an open session by the .tzs path it was opened from.
+        ///
+        /// Exists so a composed verb can mean "open it if it is not already open" without walking
+        /// into E_KEY_IN_USE: if this file is already serving a handle, reuse that handle rather
+        /// than ask for a second load of the same key. That trap is real and easy to hit by hand
+        /// (a previous command left the form open, so the next `open` fails) -- measured while
+        /// writing the task-verb baseline.
+        ///
+        /// Comparison is full-path-normalised and case-insensitive: the caller's spelling of the
+        /// path is not necessarily the one the engine stored.
+        /// </summary>
+        public static Session FindByPath(string path) {
+            if (string.IsNullOrEmpty(path)) return null;
+            string want = NormPath(path);
+            IDictionary open = Reflect.Prop2(typeof(Session), "_open") as IDictionary;
+            if (open == null) return null;
+            foreach (DictionaryEntry de in open) {
+                Session s = de.Value as Session;
+                if (s == null || s.Closed) continue;
+                if (NormPath(s.Path) == want) return s;
+            }
+            return null;
+        }
+
+        static string NormPath(string p) {
+            if (string.IsNullOrEmpty(p)) return "";
+            string q;
+            try { q = Path.GetFullPath(p); } catch { q = p; }
+            return q.TrimEnd('\\', '/').ToLowerInvariant();
+        }
+
         /// <summary>Every open handle, for the "you gave me a handle that does not exist" detail.
         /// SPEC §11.24 (a) asks for an approximate candidate list; the live handle list is the
         /// only useful one, and §11.24 (g) makes it worth printing in full because two files can
-        /// share a ProgramKey and only list_open would show it.</summary>
+        /// share a ProgramKey and only list_open would show it.
+        ///
+        /// `key` is included so the detail itself teaches the alternative addressing: a caller
+        /// that gets this list can immediately retry with `handle: "aapp320|Form"` instead of
+        /// having to work out that form from `program` + a package type.</summary>
         public static JArray OpenHandles() {
             var arr = new JArray();
             IDictionary open = Reflect.Prop2(typeof(Session), "_open") as IDictionary;
@@ -406,6 +479,7 @@ namespace TzsCli.Designer
                 var o = new JObject();
                 o["handle"] = s.Handle;
                 o["program"] = s.Program;
+                if (de.Key != null) o["key"] = de.Key.ToString();
                 o["path"] = s.Path;
                 o["mutable"] = s.Mutable;
                 arr.Add(o);
@@ -648,12 +722,27 @@ namespace TzsCli.Designer
                         Det("handle", "invalid", "handle 必须是字符串"));
                 string hs = (string)h;
                 Session s = FindByHandle(hs);
-                if (s == null) {
-                    var d = Det("handle", "not_found", "句柄不存在或已关闭: " + hs);
-                    d["candidates"] = OpenHandles();
-                    throw new DetailedError("not_found", "句柄不存在或已关闭: " + hs, d);
+                if (s != null) return s;
+
+                // Not a handle -- so it may be a MEANINGFUL key: the program name, or the
+                // ProgramKey string ("aapp320|Form"). Accepting both is what lets a caller say
+                // "the form of aapp320" instead of carrying an opaque perishable id around.
+                List<Session> byKey = FindByKey(hs);
+                if (byKey.Count == 1) return byKey[0];
+                if (byKey.Count > 1) {
+                    // The message a caller reads FIRST must carry the fix, not just the fact.
+                    string ambMsg = "程序名 " + hs + " 对应 " + byKey.Count
+                        + " 个开着的会话：请用 ProgramKey 形式指定（例如 " + hs + "|Form，见 candidates 里的 key）";
+                    var amb = Det("handle", "ambiguous", ambMsg);
+                    amb["candidates"] = OpenHandles();
+                    throw new DetailedError("bad_param", ambMsg, amb);
                 }
-                return s;
+
+                string msg = "句柄不存在或已关闭: " + hs
+                    + "（handle 也可以写程序名或 ProgramKey，例如 aapp320 或 aapp320|Form）";
+                var d = Det("handle", "not_found", msg);
+                d["candidates"] = OpenHandles();
+                throw new DetailedError("not_found", msg, d);
             }
 
             static JObject Det(string param, string reason, string message) {

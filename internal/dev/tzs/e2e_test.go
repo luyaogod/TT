@@ -17,6 +17,8 @@ package tzs
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -57,7 +59,7 @@ func TestE2EManifest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("--manifest 失败: %v", err)
 	}
-	// 契约说 ~49 个函数。给个下界即可（引擎会先声明全部、再慢慢补实现）。
+	// 契约说 ~50 个函数。给个下界即可（引擎会先声明全部、再慢慢补实现）。
 	if len(m.Fns) < 40 {
 		t.Errorf("函数表只有 %d 个，看着不像完整表", len(m.Fns))
 	}
@@ -86,7 +88,8 @@ func TestE2EManifest(t *testing.T) {
 		t.Errorf("add_action.type 该是普通 string（无 from）：%+v", ty)
 	}
 	if m.ByName("list_open").NeedsHandle {
-		t.Errorf("list_open 必须 needsHandle=false —— 就绪握手就靠它")
+		t.Errorf("list_open 必须 needsHandle=false（它是最常用来探活的一次性只读动词；" +
+			"注意就绪握手本身已经不再调它了，见 server.go 的 probeReady）")
 	}
 
 	name, err := PipeName(ctx, exe, ws)
@@ -135,8 +138,9 @@ func TestE2EEnsureCallStop(t *testing.T) {
 		t.Errorf("Ensure 返回的管道名与快照不一致：%q vs %q", pipe, info.Pipe)
 	}
 
-	// 就绪握手已经证明 list_open 能答；这里再走一遍完整的 Call 路径（带参数定型）。
-	args, err := BuildArgs(mustManifestFromEngine(t, exe), "list_open", nil)
+	// 就绪握手只证明"管道连得上"（不再发任何帧）；这里走一遍完整的 Call 路径（带参数定型）。
+	// 用 list_open 当那次调用：只读、不需要打开任何包，所以不会改动工作区里的东西。
+	args, err := BuildArgsFromJSON(mustManifestFromEngine(t, exe), "list_open", nil)
 	if err != nil {
 		t.Fatalf("list_open 的 args 该是空的：%v", err)
 	}
@@ -169,6 +173,240 @@ func TestE2EEnsureCallStop(t *testing.T) {
 	}
 	if info, _ := LookupDaemon(ctx, o); info != nil && info.Running {
 		t.Errorf("stop 之后不该还有应答的守护进程：%+v", info)
+	}
+}
+
+// TestE2ELogicalKey 走一遍**逻辑键寻址**：open 一个真包，然后用程序名（而不是句柄）寻址。
+//
+// 这条要真包，所以额外要求 TTZS_PKG（一个真 .tzs 的**绝对路径**，必须在本工作区内 ——
+// 引擎的 TzpManager 会拒绝工作区之外的文件）。没给就跳过。
+//
+// 它证明的是 Go 与引擎对 `--form` 的理解一致：Go 把程序名写进 handle 字段，
+// 引擎按程序名/ProgramKey 解析（Rpc.FindByKey）。只测 Go 那一半证明不了这件事。
+func TestE2ELogicalKey(t *testing.T) {
+	exe, ws, install := requireE2E(t)
+	pkg := os.Getenv("TTZS_PKG")
+	if strings.TrimSpace(pkg) == "" {
+		t.Skip("没给 TTZS_PKG（一个本工作区内的真 .tzs 路径）：逻辑键寻址要用真包验")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	o := Options{Exe: exe, Workspace: ws, InstallDir: install}
+
+	m := mustManifestFromEngine(t, exe)
+	pipe, err := Ensure(ctx, o)
+	if err != nil {
+		t.Fatalf("Ensure 失败: %v", err)
+	}
+
+	// open（句柄只用来在最后 close，全程不用它寻址）
+	openArgs, err := BuildArgsFromJSON(m, "open", json.RawMessage(`{"path":`+JSONString(pkg)+`}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	opened, err := Call(ctx, DefaultDialer(), pipe, 1, "open", openArgs, DefaultTimeout)
+	if err != nil {
+		t.Fatalf("open 失败: %v", err)
+	}
+	if !opened.OK {
+		t.Fatalf("open 该成功：%+v", opened.Error)
+	}
+	var openRes struct {
+		Handle  string `json:"handle"`
+		Program string `json:"program"`
+		Key     string `json:"key"`
+	}
+	if err := json.Unmarshal(opened.Result, &openRes); err != nil {
+		t.Fatalf("open 的 result 解不动：%v", err)
+	}
+	if openRes.Program == "" || openRes.Key == "" {
+		t.Fatalf("open 该回 program 与 key（逻辑键就是它们）：%s", opened.Result)
+	}
+	defer func() {
+		closeArgs, _ := BuildArgsFromJSON(m, "close", json.RawMessage(`{"handle":`+JSONString(openRes.Handle)+`}`))
+		_, _ = Call(ctx, DefaultDialer(), pipe, 9, "close", closeArgs, DefaultTimeout)
+	}()
+
+	for _, addr := range []string{openRes.Program, openRes.Key} {
+		// 用**逻辑键**寻址：Go 侧把它写进 handle 字段（--form 走的就是这条路）。
+		args, err := BuildArgsForForm(m, "form_tree", json.RawMessage(`{"depth":1}`), addr)
+		if err != nil {
+			t.Fatalf("按 %q 定型失败：%v", addr, err)
+		}
+		if !strings.Contains(string(args), `"handle":`+JSONString(addr)) {
+			t.Fatalf("逻辑键没被写进 handle：%s", args)
+		}
+		r, err := Call(ctx, DefaultDialer(), pipe, 2, "form_tree", args, DefaultTimeout)
+		if err != nil {
+			t.Fatalf("按 %q 调用失败：%v", addr, err)
+		}
+		if !r.OK {
+			t.Errorf("按逻辑键 %q 该能寻址，却失败：%+v", addr, r.Error)
+		}
+	}
+
+	// 不存在的名字要给出**可自纠**的错误：点名两种写法，并列出当前开着的候选。
+	badArgs, _ := BuildArgsForForm(m, "form_tree", json.RawMessage(`{"depth":1}`), "绝不存在_zzz")
+	r, err := Call(ctx, DefaultDialer(), pipe, 3, "form_tree", badArgs, DefaultTimeout)
+	if err != nil {
+		t.Fatalf("调用失败：%v", err)
+	}
+	if r.OK {
+		t.Fatal("不存在的逻辑键不该成功")
+	}
+	if got := ExitCode(r, nil); got != ExitUsage {
+		t.Errorf("kind=not_found 该退 2，得 %d", got)
+	}
+	// 错误必须**教怎么改**：两种寻址写法 + 当前开着的候选（上一轮在 Rpc.Resolve 里加的）。
+	if !strings.Contains(r.Error.Message, "程序名") || !strings.Contains(r.Error.Message, "ProgramKey") {
+		t.Errorf("错误文案该点出两种寻址写法：%s", r.Error.Message)
+	}
+	var det struct {
+		Candidates []map[string]any `json:"candidates"`
+	}
+	if len(r.Error.Detail) > 0 {
+		if err := json.Unmarshal(r.Error.Detail, &det); err != nil {
+			t.Errorf("error.detail 解不动：%v", err)
+		}
+		if len(det.Candidates) == 0 {
+			t.Errorf("detail.candidates 该列出开着的会话：%s", r.Error.Detail)
+		} else if _, ok := det.Candidates[0]["key"]; !ok {
+			t.Errorf("候选里该带 key（那正是可用的逻辑键）：%v", det.Candidates[0])
+		}
+	} else {
+		t.Error("该带 error.detail")
+	}
+}
+
+// TestE2EFieldAdd 走一遍**任务级动词**：只给 file（不给 handle、不先 open），让它自己开包、
+// 自己挑容器、自己报校验增量，并可存新包。要真包（TTZS_PKG）。
+//
+// 它证明的是"一次请求做完一条链"真的成立，而不只是把 9 次调用换个写法：
+//
+//	· opened 第一次 true、第二次 false —— 复用会话语，不再撞 E_KEY_IN_USE；
+//	· container 是自动挑的（真实包上应落到 worksheet 或 *layout*）；
+//	· 校验是真增量，不是"首调按构造为空"的假象；
+//	· out 存出来的是**新**包，源包一个字节没动；
+//	· 返回体够小（它是省 context 的手段，不是副产品）。
+func TestE2EFieldAdd(t *testing.T) {
+	exe, ws, install := requireE2E(t)
+	pkg := os.Getenv("TTZS_PKG")
+	if strings.TrimSpace(pkg) == "" {
+		t.Skip("没给 TTZS_PKG（本工作区内的真 .tzs 路径）：任务级动词要用真包验")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	o := Options{Exe: exe, Workspace: ws, InstallDir: install}
+	m := mustManifestFromEngine(t, exe)
+
+	spec := m.ByName("field_add")
+	if spec == nil {
+		t.Fatal("真 manifest 里该有 field_add")
+	}
+	if spec.NeedsHandle {
+		t.Error("field_add 必须 needsHandle=false —— 它自己解析 file/handle")
+	}
+
+	before, err := os.ReadFile(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shaBefore := sha256.Sum256(before)
+
+	outPkg := filepath.Join(t.TempDir(), "field_add_out.tzs")
+	call := func(id int, args string) *Reply {
+		t.Helper()
+		raw, err := BuildArgsFromJSON(m, "field_add", json.RawMessage(args))
+		if err != nil {
+			t.Fatalf("定型失败（%s）：%v", args, err)
+		}
+		pipe, err := Ensure(ctx, o)
+		if err != nil {
+			t.Fatalf("Ensure 失败: %v", err)
+		}
+		r, err := Call(ctx, DefaultDialer(), pipe, id, "field_add", raw, DefaultTimeout)
+		if err != nil {
+			t.Fatalf("调用失败: %v", err)
+		}
+		return r
+	}
+
+	// ① 只给 file：它应该自己开，并自动挑容器。
+	r1 := call(1, `{"file":`+JSONString(pkg)+`,"table":"pmdl_t",`+
+		`"columns":["pmdlent","pmdlsite"],"out":`+JSONString(outPkg)+`}`)
+	if !r1.OK {
+		t.Fatalf("field_add 该成功：%+v", r1.Error)
+	}
+	var rep struct {
+		Form      string `json:"form"`
+		Opened    bool   `json:"opened"`
+		Container string `json:"container"`
+		Validate  struct {
+			NewErrorCount   int `json:"newErrorCount"`
+			NewWarningCount int `json:"newWarningCount"`
+		} `json:"validate"`
+		BaselineCached bool `json:"baselineCached"`
+		Saved          *struct {
+			Out      string `json:"out"`
+			BytesOut int64  `json:"bytesOut"`
+		} `json:"saved"`
+	}
+	if err := json.Unmarshal(r1.Result, &rep); err != nil {
+		t.Fatalf("返回体解不动：%v\n%s", err, r1.Result)
+	}
+	if rep.Form == "" || rep.Container == "" {
+		t.Errorf("该回 form 与 container：%s", r1.Result)
+	}
+	if !rep.Opened {
+		t.Error("只给了 file 而包没开着，opened 该是 true（它自己开的）")
+	}
+	if rep.BaselineCached {
+		t.Error("第一次调用没有缓存基线，baselineCached 该是 false")
+	}
+	if rep.Saved == nil || rep.Saved.Out == "" || rep.Saved.BytesOut <= 0 {
+		t.Errorf("给了 out 就该存出新包：%s", r1.Result)
+	}
+	if len(r1.Result) > 4096 {
+		t.Errorf("返回体 %d 字节，太大了 —— 任务动词不该回表单全量与校验全表", len(r1.Result))
+	}
+
+	// ② 同一个 file 再调一次：复用会话（E_KEY_IN_USE 陷阱不该再出现），基线已缓存。
+	r2 := call(2, `{"file":`+JSONString(pkg)+`,"table":"pmdl_t","columns":["pmdlunit"]}`)
+	if !r2.OK {
+		t.Fatalf("第二次该成功（复用会话）：%+v", r2.Error)
+	}
+	var rep2 struct {
+		Opened         bool `json:"opened"`
+		BaselineCached bool `json:"baselineCached"`
+	}
+	if err := json.Unmarshal(r2.Result, &rep2); err != nil {
+		t.Fatal(err)
+	}
+	if rep2.Opened {
+		t.Error("第二次不该重新 open（同一个文件已经开着，应当复用）")
+	}
+	if !rep2.BaselineCached {
+		t.Error("第二次该用上已有的基线（省掉一次全表校验）")
+	}
+
+	// ③ 源包一个字节没动。
+	after, err := os.ReadFile(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sha256.Sum256(after) != shaBefore {
+		t.Error("源包被改了 —— save 只该写新包")
+	}
+
+	// ④ 新包真的存在且非空。
+	if fi, err := os.Stat(outPkg); err != nil || fi.Size() == 0 {
+		t.Fatalf("新包没写出来或为空: %v", err)
+	}
+
+	// 收尾：关掉它自己开的那个会话。
+	if pipe, err := Ensure(ctx, o); err == nil {
+		closeRaw, _ := BuildArgsFromJSON(m, "close", json.RawMessage(`{"handle":`+JSONString(rep.Form)+`}`))
+		_, _ = Call(ctx, DefaultDialer(), pipe, 9, "close", closeRaw, DefaultTimeout)
 	}
 }
 

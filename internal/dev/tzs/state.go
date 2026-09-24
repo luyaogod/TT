@@ -58,12 +58,12 @@ type DaemonEntry struct {
 	Orphans []int `json:"orphans,omitempty"`
 }
 
-// LastEntry 是最近一次 open 的指引（`tt dev tzs call` 省略 --handle 时用）。
+// LastEntry 是最近一次 open 的指引（`open` 成功时写下来）。
 //
-// **它是建议，不是真相**：句柄只活在守护进程里（引擎内自增、永不复用），
-// 进程一死全部失效。所以拿它填 --handle 之后，引擎会用 E_NO_HANDLE（kind=not_found，
-// 退 2）明确告诉你那个句柄没了 —— 这个失败是安全且自解释的，
-// 但绝不能在本地「确认它还有效」，那需要 Boot，正是我们要避免的事。
+// **命令层不读它来补 handle**：每个需要句柄的动词都必须显式给 handle（见
+// skills/tt-dev-tzs）。留它是为了"上一次开的是哪个包"这件事有个落点，
+// 句柄本身只活在守护进程里（引擎内自增、永不复用），进程一死全部失效 ——
+// 拿它去填等于把"可能已经没了"当成已知事实。
 type LastEntry struct {
 	Workspace string `json:"workspace,omitempty"`
 	Handle    string `json:"handle,omitempty"`

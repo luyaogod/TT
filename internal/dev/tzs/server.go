@@ -15,13 +15,12 @@ package tzs
 // 就绪握手（契约给的三条数，全部来自实测）：
 //
 //	每 250 ms 试连一次，单次 connect 超时 300 ms；
-//	连上就发一次 list_open（needsHandle=false，Boot 完成后立刻能答），拿 ok:true 算就绪；
+//	**连得上就算就绪**（不发任何帧 —— 理由见 probeReady）；
 //	预算 60 s（Boot 约 900 ms + 首次加载，剩下的余量是给慢磁盘的 ——
 //	真正卡死的加载由引擎内部 90 s 的看门狗负责，不是这个预算）。
 //
-// 为什么探针是 list_open 而不是别的：它 needsHandle=false，所以只依赖「Boot 做完了」，
-// 不依赖「某个包被打开了」。用 form_tree 探针会把「守护进程好了」和「这个句柄还有效」
-// 两件事绑在一起 —— 冷启动后句柄根本不存在，探针会永远不成功。
+// 探针不碰任何引擎函数：管道是 Boot 之后才创建的、实例只有一个，所以"连上"本身就证明了
+// "Boot 做完且服务端正等在这里"。这条边界很重要 —— Go 侧不该在传输层写死一个业务函数名。
 
 import (
 	"context"
@@ -41,12 +40,6 @@ const (
 	ReadinessBudget = 60 * time.Second
 	// ConnectPollGap 是就绪轮询的间隔。
 	ConnectPollGap = 250 * time.Millisecond
-	// ProbeTimeout 是就绪探针（list_open）自己的读超时。
-	//
-	// 它比 DefaultTimeout 小得多是安全的：走到探针这一步说明管道**已经存在**，
-	// 而管道是 Boot 之后才创建的（Rpc.Daemon 在 Boot 之后才 new NamedPipeServerStream），
-	// 所以 Boot 已经做完了，list_open 只是遍历一张内存表。
-	ProbeTimeout = 10 * time.Second
 	// StopTimeout 是发 `stop` 之后的等待上限。
 	StopTimeout = 10 * time.Second
 )
@@ -74,7 +67,7 @@ type DaemonInfo struct {
 	Pipe      string // 现在生效的管道名（问引擎得到的）
 	Recorded  string // 状态文件里记的管道名（可能为空或已过期）
 	PID       int    // 状态文件里记的 pid（0 = 不知道）
-	Running   bool   // 管道真的应答了 list_open
+	Running   bool   // 管道真的连得上（= 守护进程在跑；见 probeReady）
 	Log       string
 	Since     string
 }
@@ -163,20 +156,25 @@ func Ensure(ctx context.Context, o Options) (string, error) {
 		Msg: fmt.Sprintf("守护进程 %s 内没有就绪（pid %d）", ReadinessBudget, pid) + "；日志末尾：\n" + logTail(o.DaemonLogPath(), 2000)}
 }
 
-// probeReady 探一次就绪：连上 + 发 list_open + 拿到 ok:true。
+// probeReady 探一次就绪：**连得上就算就绪**。
 //
-// 任何一步不成立都返回 false，**不返回错误** —— 它在轮询里被调用，而「还没好」
-// 与「坏了」在这里是同一件事：都在等同一个 deadline。
+// 为什么不发一帧：管道实例只有一个（引擎 `maxNumberOfServerInstances=1`），而服务端的循环是
+// `WaitForConnection → Serve → Disconnect`；我们连得上，就说明服务端此刻正等在这个实例上
+// （即 Boot 已经做完 —— `tzs-server` 是**先 `Designer.Boot` 再 `Rpc.Daemon`**，
+// 管道在 Boot 之后才创建，见 engine/test/tzs-server.cs）。
+//
+// 以前这里发 `list_open` 探活：为了问一句"你醒着吗"，去调一个**业务函数**（列打开的句柄）。
+// 那让 Go 侧把一个引擎函数名写死在传输层里 —— 业务面与传输面混在一起，引擎改名就得改这里。
+// 连上即就绪没有这个问题，而且更便宜。
 func probeReady(ctx context.Context, pipe string) bool {
 	dctx, cancel := context.WithTimeout(ctx, ConnectTimeout)
+	defer cancel()
 	conn, err := DefaultDialer().Dial(dctx, pipe)
-	cancel()
 	if err != nil {
 		return false
 	}
-	defer conn.Close()
-	reply, err := CallConn(ctx, conn, 1, "list_open", nil, ProbeTimeout)
-	return err == nil && reply != nil && reply.OK
+	_ = conn.Close()
+	return true
 }
 
 //---------------------------------------------------------------------------

@@ -16,7 +16,7 @@ metadata:
 |---|---|---|
 | 干什么 | 把包渲染成**带围栏的 `.4gl` 工作区**给人/AI 编辑 | 由设计器自己的引擎读写表单模型 |
 | 产物 | 工作区：`prog.full.4gl` + `manifest.json` + `snapshot/` + `.tdev/` + `.git/` | 就是一包文件（`.tsd`/`.4fd`/`ver`…） |
-| 唯一写路径 | `apply`（闸门校验 + 原子写） | `call save --out`（写**新**包） |
+| 唯一写路径 | `apply`（闸门校验 + 原子写） | `save`（写**新**包：`tt dev tzs save --args '{"handle":…,"out":…}'`） |
 
 拿错入口会被挡住：`.tzc` 跑 `tzs export` → 退出码 2 并提示改用 `tzc export`。
 

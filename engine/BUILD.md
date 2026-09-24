@@ -70,17 +70,26 @@ TZSCLI_INSTALL=<目录> ./build.sh  # 用别的设计器换掉仓库里那份（
 
 ```
 tzs-server.exe        服务端（命名管道 / --stdio 两种模式）
-tzs-cli.exe           客户端（独立可用；tt 自己实现了一份 Go 客户端）
 TzsCli.dll            纯文本/zip 层，不反射
-TzsCli.Designer.dll   反射管线 + 49 个函数
+TzsCli.Designer.dll   反射管线 + 50 个函数
 designer\             设计器的 28 个 .dll（就是本目录下 designer\ 那一份）
 ```
 
-`build_portable.bat` 把它们采到 `<stage>\tzs\`（`designer\` 来自 `engine\designer\`，`TZSDESIGNER`
+**`tzs-cli.exe` 不进包。** 它是引擎自己的 C# 客户端（`test/tzs-cli.cs`），而 tt 已经有一份
+Go 客户端（`internal/dev/tzs/`）并且是**唯一**的对外入口。留两个客户端就是给同一个引擎配两套
+命令面与两套退出码（`tzs-cli` 是 `0/1/2/3/4`：3 = 传输失败；tt 是 `0/1/2/4/5`，没有 3），
+而"同一件事两个答案"是文档与排查都治不好的病。
+
+它仍然**照编**（`build.sh` 的 `LINK_SRC` 里有 `[tzs-cli]=ref`）。它是引擎开发期的一次性客户端
+——当年的分段验收就是"六个请求经**真正的 `tzs-cli`** 跑通"（SPEC §11.20、`HANDOFF.md §18`），
+那些批脚本（`batch*.sh` / `slice.sh`）在反编译设计器那棵树里，**不在本仓库**。tt 从不调用它
+（Go 侧只跟 `tzs-server` 打交道）。所以是**不进包，不是删源**。
+
+`build_portable.bat` 把上面这些采到 `<stage>\tzs\`（`designer\` 来自 `engine\designer\`，`TZSDESIGNER`
 可覆盖），MSI 由 `heat.exe` 自动采集（不用改 `tt.wxs`）。
 
 **`out/` 里还有十几个探测程序**（`Probe` / `Edit` / `AddField` / `RoundTrip` / `Test*` / `E2E`），
-**不要 xcopy 整个目录**——只显式采那四个。
+**不要 xcopy 整个目录**——只显式采那三个。
 
 ## 语言字典：曾经依赖反编译源码树，现在不依赖了
 

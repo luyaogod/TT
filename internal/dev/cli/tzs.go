@@ -3,7 +3,8 @@
 // 与 `tt dev tzc` 的区别：
 //   - tzc 是**代码包**管线：渲染带围栏的 prog.full.4gl、跑三道闸门、apply 原子写回；
 //   - tzs 的 `export` 只有一件事：**纯解压**，不解围栏、不校验、不产生工作区。
-//     要**读写表单**走 `tt dev tzs call`，那一条由 engine/ 里那个 C# 引擎驱动。
+//     要**读写表单**走 `tt dev tzs <动词>`（open / set_spec_attr / save / …），
+//     那一条由 engine/ 里那个 C# 引擎驱动，动词表来自引擎自己的函数表。
 //
 // 红线曾经是「永远不写回」，理由是：
 //
@@ -12,21 +13,23 @@
 // 那个前提现在不成立了 —— engine/ 就是**设计器自己的代码**（它 `Assembly.LoadFrom` 设计器的
 // 程序集，布局属性走设计器自己的 `XmlElement` 索引器，验收用设计器自己的校验器加 RoundTrip
 // 不动点）。所以红线改成「**导出只读、要写走引擎**」：`export` 的产物仍然是只读参考，
-// 不要手工改完再塞回包；改表单用 `call`，让设计器自己算。
+// 不要手工改完再塞回包；改表单走具名动词，让设计器自己算。
 package cli
 
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"tt/internal/dev/model"
 	"tt/internal/dev/pkgfile"
+	"tt/internal/dev/tzs"
 )
 
-const tzsUsage = `tt dev tzs —— 表单包工具（导出只读；读写表单走引擎）
+const tzsUsage = `tt dev tzs —— 表单包工具（导出只读；读写表单由一个常驻引擎跑）
 
 用法：
   tt dev tzs export <pkg.tzs> [-o <dir>] [--force] [--json]
@@ -34,17 +37,25 @@ const tzsUsage = `tt dev tzs —— 表单包工具（导出只读；读写表�
         # -o 省略时默认解压到 <包所在目录>/<程序名>-unzip（身份后缀 (c)/(s) 会去掉）
         # 目标已存在且非空时拒绝，加 --force 覆盖同名文件
 
-  tt dev tzs fns [<fn>] [--json]
-        # 引擎的函数表（由 --manifest 派生，不手写）。给 <fn> 看单个函数的参数
-  tt dev tzs manifest
-        # 逐字节转发引擎的函数表 JSON（AI 直接消费）
-  tt dev tzs call <fn> [--<参数> <值>…] [--workspace <dir>] [--timeout <秒>] [--json]
-        # 读写表单。这是**唯一**的表单写路径 —— 由设计器自己的代码算，不是我们拼 XML
-        #   例：call open           --path "D:\pkg\aapp320(c).tzs"
-        #       call find_component --handle h1 --query l_apcasite
-        #       call nudge          --handle h1 --paths <path> --direction right --offset 1
-        #       call validate       --handle h1
-        #       call save           --handle h1 --out "D:\pkg\_ai.tzs"
+  tt dev tzs <动词> [--form <程序名>] --args '<JSON 对象>' [--args-file <UTF-8 文件>] [--workspace <dir>] [--rpc-timeout <秒>] [--json]
+        # 读写表单：**唯一**写路径，由设计器自己的引擎算，不是我们拼 XML
+        # 50 个动词全部由引擎的函数表生成，所以这里没有"函数名"这一层要填：
+        #   open form_tree find_component get_component list_spec_nodes describe_kind
+        #   set_spec_attr add_widget add_field field_add nudge validate save close …
+        #   动词全名：tt dev tzs --help（引擎可达时附在帮助后面）
+        #   某个动词的参数与示例：tt dev tzs <动词> --help
+        # 参数**只用 JSON 给** —— 数组就是数组、布尔就是布尔，不必学命令行的引号与切分：
+        #   tt dev tzs open           --args '{"path":"D:\\pkg\\aapp320(c).tzs"}' --json
+        #   tt dev tzs list_open --json                      # 无参数的动词可以省掉 --args
+        #   tt dev tzs form_tree      --form aapp320 --args '{"depth":2}' --json
+        #   tt dev tzs set_spec_attr  --form aapp320 --args '{"path":"<path>","kind":"field","attr":"can_edit","value":"true"}'
+        #   tt dev tzs validate       --form aapp320 --json
+        #   tt dev tzs save           --form aapp320 --args '{"out":"D:\\pkg\\_ai.tzs"}' --json   # 写**新**包
+        # --form 是"哪一张已打开的表单"：写程序名（aapp320）或 ProgramKey（aapp320|Form），
+        #   由引擎解析 —— 所以**不必搬运句柄**（它每次 open 都换号、永不复用）。
+        # 中文/长内容请用 --args-file（UTF-8 文件；值是单个 - 表示读标准输入）
+        # 传输开关（不是动词参数）：--form / --workspace / --rpc-timeout / --json / -h
+
   tt dev tzs doctor [--json]        # 环境自检（引擎产物、设计器目录、工作区、管道名）
   tt dev tzs stop                   # 停掉本工作区的常驻引擎（不启动）
   tt dev tzs reap [--yes]           # 清理引擎重编后停不掉的孤儿守护进程
@@ -52,8 +63,12 @@ const tzsUsage = `tt dev tzs —— 表单包工具（导出只读；读写表�
   支持的输入：.tzs（表单包）、.tzv（简易表单包）。
   .tzc/.tzf/.tzx 等**代码包**请用 ` + "`tt dev tzc export`" + `（那条管线有围栏渲染与三道闸门）。
 
+保留名（不是动词参数）：--form / --args / --args-file / --workspace / --rpc-timeout / --json / -h。
+动词名可以用连字符写（form-tree = form_tree）；**参数一律写进 --args 的 JSON 里**，
+--handle h9 这种写法会当场报错（handle 不是开关，它是 JSON 里的一个键）。
+
 红线：**export 的产物是只读参考** —— 它就是一包文件，没有 manifest/围栏，不要手工改完再
-塞回包。要改表单用 ` + "`tt dev tzs call`" + `：那是设计器自己的模型在算，改完设计器打得开。
+塞回包。要改表单走 ` + "`tt dev tzs <动词>`" + `：那是设计器自己的模型在算，改完设计器打得开。
 `
 
 func cmdTzs(args []string) int {
@@ -64,12 +79,6 @@ func cmdTzs(args []string) int {
 	switch args[0] {
 	case "export":
 		return cmdTzsExport(args[1:])
-	case "fns":
-		return cmdTzsFns(args[1:])
-	case "manifest":
-		return cmdTzsManifest(args[1:])
-	case "call":
-		return cmdTzsCall(args[1:])
 	case "doctor":
 		return cmdTzsDoctor(args[1:])
 	case "stop":
@@ -77,12 +86,34 @@ func cmdTzs(args []string) int {
 	case "reap":
 		return cmdTzsReap(args[1:])
 	case "-h", "--help", "help":
+		// 静态用法总是打得出（没有引擎、没有工作区也行），动词索引是**尽力而为**：
+		// 拉不到就只留一句指引。--help 绝不能因为环境不全而失败。
 		fmt.Print(tzsUsage)
+		printVerbIndexIfReachable(os.Stdout)
 		return 0
 	default:
-		fmt.Fprintf(os.Stderr, "未知子命令 %q\n\n%s", args[0], tzsUsage)
-		return 2
+		// 其余第一个词一律当**具名动词**（open / save / set_spec_attr / …）：
+		// 名字与参数来自引擎 manifest，这里不做任何硬编码（见 tzs_engine.go 的说明）。
+		return runTzsVerb(args)
 	}
+}
+
+// printVerbIndexIfReachable 在引擎可达时把动词索引（按组列名字）附在帮助后面。
+//
+// 为什么允许"可有可无"：`--help` 是**还没有环境时唯一能用的一条命令**。要求引擎可达
+// 就等于把说明书锁在门里面（而那条门锁正是 `tt dev tzs doctor` 要告诉你怎么开的）。
+func printVerbIndexIfReachable(w io.Writer) {
+	exe, err := tzsEngineExe()
+	if err != nil {
+		return
+	}
+	m, err := tzs.FetchManifest(tzsCtx(), exe)
+	if err != nil {
+		fmt.Fprintln(w, "\n（这次没能列出动词名：引擎不可达。tt dev tzs doctor 看差什么）")
+		return
+	}
+	fmt.Fprintln(w)
+	m.Index(w)
 }
 
 // defaultUnzipDir 是 -o 省略时的默认解压目录：<包所在目录>/<程序名>-unzip。
@@ -168,7 +199,7 @@ func cmdTzsExport(args []string) int {
 		line(w, "    %-28s %8d B  sha256=%s", e.Name, e.Size, short(e.Sha256))
 	}
 	line(w, "")
-	line(w, "提醒：这是**只读参考**（没有 tzs apply）；要改表单用 `tt dev tzs call`，由设计器自己的引擎算。")
+	line(w, "提醒：这是**只读参考**（没有 tzs apply）；要改表单用 `tt dev tzs <动词>`（open/add_field/save…），由设计器自己的引擎算。")
 	line(w, "下一步：直接读上面的文件即可；不要把它当成 tzc 工作区去 apply。")
 	return 0
 }

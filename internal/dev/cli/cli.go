@@ -52,16 +52,17 @@ const Usage = `tt dev —— T100 设计器包工具：.tzc 代码包 + .tzs 表
   tt dev tzs export <pkg.tzs> [-o <dir>] [--force] [--json]
         # 表单包**纯解压**（.tzs / .tzv）：不解围栏、不校验、不产生工作区
         # -o 省略时默认解压到 <包所在目录>/<程序名>-unzip
-        # 产物是**只读参考**（没有 tzs apply）；要改表单走下面的 tzs call
-  tt dev tzs fns [<fn>] [--json]     # 引擎的函数表（49 个）；给 <fn> 看单个函数的参数
-  tt dev tzs manifest                # 函数表 JSON，原样转发
-  tt dev tzs call <fn> [--<参数> <值>…] [--workspace <dir>] [--timeout <秒>] [--json]
-        # 读写表单。这是**唯一**的表单写路径 —— 由设计器自己的引擎算，不是我们拼 XML
-        #   例：call open           --path "D:\pkg\aapp320(c).tzs"
-        #       call find_component --handle h1 --query l_apcasite
-        #       call nudge          --handle h1 --paths <path> --direction right --offset 1
-        #       call validate       --handle h1
-        #       call save           --handle h1 --out "D:\pkg\_ai.tzs"   # 写新包，不动原包
+        # 产物是**只读参考**（没有 tzs apply）；要改表单走下面的 tzs 动词
+  tt dev tzs <动词> --args '<JSON 对象>' [--form <程序名>] [--args-file <文件>] [--workspace <dir>] [--rpc-timeout <秒>] [--json]
+        # 读写表单，**唯一**写路径 —— 由设计器自己的引擎算，不是我们拼 XML
+        # 50 个动词由引擎的函数表生成（open / form_tree / set_spec_attr / field_add /
+        # nudge / validate / save / close …），所以没有"函数名"这一层要填
+        # 参数**只用 JSON 给**；用 --form 指定是哪张已打开的表单（不必搬运句柄）
+        # 例：tt dev tzs open          --args '{"path":"D:\\pkg\\aapp320(c).tzs"}' --json
+        #     tt dev tzs nudge         --form aapp320 --args '{"paths":["<path>"],"direction":"right","offset":1}' --json
+        #     tt dev tzs set_spec_attr --form aapp320 --args '{"path":"<p>","kind":"field","attr":"can_edit","value":"true"}'
+        #     tt dev tzs list_open --json                                   # 无参数可省 --args
+        # 动词全名：tt dev tzs --help     某个动词的参数与示例：tt dev tzs <动词> --help
   tt dev tzs doctor [--json]         # 环境自检（引擎 / 设计器目录 / 工作区 / 管道名）
   tt dev tzs stop                    # 停本工作区的常驻引擎（不启动）
   tt dev tzs reap [--yes]            # 清理引擎重编后停不掉的孤儿守护进程
@@ -71,7 +72,7 @@ const Usage = `tt dev —— T100 设计器包工具：.tzc 代码包 + .tzs 表
 
 两条管线别用错：
   .tzc 代码包 → tzc export（渲染围栏工作区，改完 apply 写回；唯一写路径）
-  .tzs 表单包 → tzs export 只解压（只读参考）；读写表单走 tzs call（设计器自己的引擎驱动）
+  .tzs 表单包 → tzs export 只解压（只读参考）；读写表单走 tzs 动词（设计器自己的引擎驱动）
 
 工作区动词的 <dir> 可以省略：先 cd 进工作区，命令就不用再写目录。
   cd D:\pkg\capt110-ws

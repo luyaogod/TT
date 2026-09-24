@@ -61,6 +61,7 @@ namespace TzsCli.Designer.Fns
             into["save"]      = SaveFn;
             into["close"]     = CloseFn;
             into["list_open"] = ListOpen;
+            into["field_add"] = FieldAdd;
         }
 
         // ------------------------------------------------------------------ the mutation gate
@@ -267,6 +268,154 @@ namespace TzsCli.Designer.Fns
             var list = new List<object>();
             foreach (DS s in snapshot) list.Add(Info(s));
             return list;
+        }
+
+        // ------------------------------------------------------------------ field_add（任务级动词）
+
+        /// <summary>.4fd 里"能当容器"的标签集 —— 与 Manifest.CONTAINERS 同源，去掉其中的 "None"
+        /// （它不是标签）。**不复用** Struct.CONTAINER_TYPES：那一份只列 add_field 接受的*容器模式*，
+        /// 比标签集窄（没有 HBox/VBox/Folder/Page），两回事。</summary>
+        static readonly string[] CONTAINER_TAGS =
+            { "Grid", "Group", "ScrollGrid", "Table", "Tree", "Page", "HBox", "VBox", "Folder" };
+
+        /// <summary>
+        /// `field_add` —— 任务级动词：一次请求做完「按列建字段 → 报校验增量 →（可选）存新包」。
+        ///
+        /// 为什么要有它（实测语料 apmt500_wf(c).tzs，加 3 列）：同一条链手工做是 **9 次调用**
+        /// （list_columns / open / list_spec_nodes / form_tree / validate / add_field / validate /
+        /// save / close），输出 62,873 字节，其中两次 validate 占掉 85% 的时间；而调用方真正想说的
+        /// 只有一句"把这几列加到这张表单上"。这里把**动作之间的那段**搬进引擎：
+        ///
+        ///   · 容器自己挑（worksheet → *layout* → 根下唯一容器，见 PickContainer），也可 into 指定；
+        ///   · file 已经开着就**复用**，不再撞 E_KEY_IN_USE（手工链最容易踩的一脚，实测踩过）；
+        ///   · 校验基线在改动**之前**建立，所以 newErrors/newWarnings 是真增量（§7.4）。
+        ///
+        /// 它不重复实现任何东西：建字段走 Struct.AddFieldFn（设计器自己的 UICreator 一次构造 N 列），
+        /// 校验走 Validate.Run，存包走本模块的 SaveFn。返回体刻意**瘦**：不回表单全量、不回校验的
+        /// baseline/after 全表，只回答"加了什么、有没有新增问题、存哪了"。
+        /// </summary>
+        public static object FieldAdd(DS s0, JObject a) {
+            string file = Str(a, "file");
+            string handle = Str(a, "handle");
+            DS s = s0;
+            bool opened = false;
+
+            if (s == null) {
+                if (!string.IsNullOrEmpty(file)) {
+                    s = Rpc.FindByPath(file);          // 已经开着同一个文件 → 复用，不撞 E_KEY_IN_USE
+                    if (s == null) {
+                        var o = new JObject();
+                        o["path"] = file;
+                        Open(null, o);                 // 走模块自己的 Open：登记进 _handles，也进核心 _open
+                        s = Rpc.FindByPath(file);
+                        opened = true;
+                    }
+                } else if (!string.IsNullOrEmpty(handle)) {
+                    s = Rpc.FindByHandle(handle);
+                    if (s == null) {
+                        // 逻辑键（程序名 / ProgramKey）也认，与其它动词一致（Rpc.FindByKey）。
+                        List<DS> byKey = Rpc.FindByKey(handle);
+                        if (byKey.Count == 1) s = byKey[0];
+                        else if (byKey.Count > 1)
+                            throw TzsError.Validation(
+                                "程序名 " + handle + " 对应多个开着的会话：请用 ProgramKey 形式指定");
+                    }
+                } else {
+                    throw TzsError.Validation(
+                        "field_add 需要 file（.tzs 路径，没开就顺手开）或 handle（已在开的表单）之一");
+                }
+                if (s == null) throw TzsError.NotFound("会话", file ?? handle);
+            }
+
+            string container = Str(a, "into");
+            if (string.IsNullOrEmpty(container)) container = PickContainer(s);
+
+            // 基线必须在**改动之前**建立：否则第一次 validate 会把"改完的样子"当成基线，
+            // 增量按构造恒为空（Validate.Run 的注释与 §7.4）。已经有了就直接用，省一次校验。
+            bool hadBaseline = Validate.HasBaseline(s.Handle);
+            if (!hadBaseline) Validate.Run(s, new JObject());
+
+            var addArgs = new JObject();
+            addArgs["path"] = container;
+            addArgs["table"] = Str(a, "table");
+            addArgs["columns"] = a["columns"];
+            string cmode = Str(a, "container");
+            if (!string.IsNullOrEmpty(cmode)) addArgs["container"] = cmode;
+            object added = Struct.AddFieldFn(s, addArgs);
+
+            JObject v = Lean(Validate.Run(s, new JObject()));
+
+            object saved = null;
+            string outPath = Str(a, "out");
+            if (!string.IsNullOrEmpty(outPath)) {
+                var saveArgs = new JObject();
+                saveArgs["out"] = outPath;
+                saved = SaveFn(s, saveArgs);
+            }
+
+            var rep = new Dictionary<string, object> {
+                { "form",      s.Program },
+                { "key",       KeyString(s.Key) },
+                { "handle",    s.Handle },
+                { "opened",    opened },
+                { "container", container },
+                { "added",     added },
+                { "validate",  v },
+                { "baselineCached", hadBaseline },
+            };
+            if (saved != null) rep["saved"] = saved;
+            return rep;
+        }
+
+        /// <summary>挑默认父容器。规则只认设计器模板的命名习惯，**不靠猜**：
+        ///   ① 叫 worksheet 的容器 —— 设计器模板里放字段的那块（实测 6 个真实包里 5 个有）；
+        ///   ② 名字含 layout 的容器（mainlayout 是外层布局框；capp002 这类没有 worksheet 的有它）；
+        ///   ③ 根（&lt;Form&gt;）下**唯一**的容器 —— 没有歧义才用；
+        ///   ④ 都不成立就报错要求显式 into：宁可不做，也不把字段塞进一个猜出来的盒子里。
+        /// </summary>
+        static string PickContainer(DS s) {
+            byte[] zip = Read.Zip(s);
+            string fdText = Reflect.EntryText(zip, Read.Entry(zip, ".4fd"));
+            ElementIndex idx = ElementIndex.Build(fdText);
+
+            string byLayout = null, onlyAtRoot = null;
+            int rootContainers = 0;
+            foreach (ElementSpan el in idx.All) {
+                if (el.Parent == null) continue;                    // 跳过 .4fd 的文档根
+                if (Array.IndexOf(CONTAINER_TAGS, el.Tag) < 0) continue;
+                if (string.Equals(el.Name, "worksheet", StringComparison.Ordinal)) return el.Path;
+                if (byLayout == null && el.Name != null
+                    && el.Name.IndexOf("layout", StringComparison.OrdinalIgnoreCase) >= 0) byLayout = el.Path;
+                if (el.Depth == 2) { rootContainers++; onlyAtRoot = el.Path; }  // 根 <Form> 的直接子容器
+            }
+            if (byLayout != null) return byLayout;
+            if (rootContainers == 1) return onlyAtRoot;
+            throw TzsError.Validation(
+                "挑不出要加进哪个容器（没有 worksheet、也没有唯一的 layout）：用 into 显式指定父容器的 name-path；"
+                + "可先 `form_tree` 看一眼结构");
+        }
+
+        /// <summary>把 validate 的返回体瘦成"增量 + 计数"。
+        ///
+        /// 任务动词不该把 baseline/after 两张全表塞进调用方的 context（真实表单各 ≈2 KB，
+        /// 整表更大）—— 要看全量就单独调一次 validate。这里只回答"这次改动新增了什么"。
+        /// </summary>
+        static JObject Lean(object validateResult) {
+            var d = validateResult as IDictionary<string, object>;
+            var o = new JObject();
+            if (d == null) { o["raw"] = JToken.FromObject(validateResult); return o; }
+            foreach (string k in new[] { "newErrors", "newWarnings", "elapsedMs" })
+                if (d.ContainsKey(k)) o[k] = JToken.FromObject(d[k]);
+            o["newErrorCount"] = Count(d, "newErrors");
+            o["newWarningCount"] = Count(d, "newWarnings");
+            return o;
+        }
+
+        static int Count(IDictionary<string, object> d, string key) {
+            object v;
+            if (!d.TryGetValue(key, out v) || v == null) return 0;
+            var list = v as System.Collections.IList;
+            return list == null ? 0 : list.Count;
         }
 
         // ------------------------------------------------------------------ helpers

@@ -8,274 +8,174 @@ import (
 )
 
 //---------------------------------------------------------------------------
-// SplitArgs：纯语法
-//---------------------------------------------------------------------------
-
-// TestSplitArgs 钉住 `--k v` 的拆分规则。
+// BuildArgsFromJSON：唯一的参数入口
 //
-// 最关键的一条是「负号不是 flag」：`-1` 不以 `--` 开头，所以它是**值**。
-// 少了这一条，`--value -1` 会把 -1 拆成一个独立的位置参数（或未知参数），
-// 于是一个合法的负值永远传不进去 —— 而报出来的错是「未知参数 -1」，
-// 看起来像用户打错了。
-func TestSplitArgs(t *testing.T) {
-	cases := []struct {
-		name string
-		in   []string
-		want []Arg
-	}{
-		{"k v", []string{"--value", "-1"}, []Arg{{"value", "-1"}}},
-		{"k=v", []string{"--value=-1"}, []Arg{{"value", "-1"}}},
-		{"空值", []string{"--desc="}, []Arg{{"desc", ""}}},
-		{"k=v 里有 =", []string{"--desc=a=b"}, []Arg{{"desc", "a=b"}}},
-		{"裸布尔", []string{"--force"}, []Arg{{"force", "true"}}},
-		{"裸布尔后面跟 flag", []string{"--force", "--json"}, []Arg{{"force", "true"}, {"json", "true"}}},
-		{"显式 false", []string{"--force", "false"}, []Arg{{"force", "false"}}},
-		{"可重复", []string{"--paths", "a", "--paths", "b"}, []Arg{{"paths", "a"}, {"paths", "b"}}},
-		{"以 -- 开头的值要用 =", []string{"--path=--weird"}, []Arg{{"path", "--weird"}}},
-		{"空列表", nil, nil},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got, err := SplitArgs(c.in)
-			if err != nil {
-				t.Fatalf("不该报错：%v", err)
-			}
-			if len(got) != len(c.want) {
-				t.Fatalf("拆出 %d 个，想要 %d 个：%+v", len(got), len(c.want), got)
-			}
-			for i := range got {
-				if got[i] != c.want[i] {
-					t.Errorf("第 %d 个：得 %+v，想要 %+v", i, got[i], c.want[i])
-				}
-			}
-		})
-	}
-}
-
-// TestSplitArgsRejects 位置参数与 `--` 必须**当场报错**（退出 2）。
-//
-// 这是与引擎自带 tzs-cli 的一处有意差异：那边把不带 `--` 的词「忽略并继续」。
-// 无声忽略正是引擎 Manifest.Check 双向卡 arity 要治的病（`--attrr` 打错了和一次
-// 合法调用在结果上无法区分，直到有人去读文件）。
-func TestSplitArgsRejects(t *testing.T) {
-	for _, in := range [][]string{{"foo"}, {"--paths", "a", "foo"}, {"--"}, {"--paths", "--"}} {
-		_, err := SplitArgs(in)
-		if err == nil {
-			t.Errorf("输入 %v 该被拒", in)
-			continue
-		}
-		var ue *UsageError
-		if !errors.As(err, &ue) {
-			t.Errorf("输入 %v 该是用法错，得 %T", in, err)
-		}
-	}
-}
-
-//---------------------------------------------------------------------------
-// BuildArgs：定型 + 本地校验
-//---------------------------------------------------------------------------
-
-// TestBuildArgsTable 是 argmap 的主表。
-//
-// 表里既有「必须本地拦住」的（枚举越界、类型不对、缺必填、未知参数、标量重复），
-// 也有「**绝不能**本地拦住」的三条反向断言（kind / attr / string）——
-// 后三条更重要：越界拦截是**无声**发生的，写错了不会有任何测试失败，
+// 命令面不接受 `--<参数> <值>`（见 argmap.go 的文件头），所以这里就是**全部**的
+// 参数判据。表里既有"必须本地拦住"的，也有"**绝不能**本地拦住"的反向断言 ——
+// 后者更重要：越界拦截是**无声**发生的，写错了不会有任何测试失败，
 // 只会让某些合法调用永远到不了引擎。
-func TestBuildArgsTable(t *testing.T) {
+//---------------------------------------------------------------------------
+
+func TestBuildArgsFromJSONTable(t *testing.T) {
 	cases := []struct {
 		name    string
 		fn      string
-		argv    []string
-		want    string // 成功时期望的 args JSON（空 = 应当失败）
-		wantErr string // 失败时文案里必须出现的子串
+		in      string
+		want    string
+		wantErr string
 	}{
-		// ---- int / bool / 数组的定型 ----
+		// ---- 定型 ----
 		{
-			"int 变数字", "nudge",
-			[]string{"--handle", "h1", "--paths", "a", "--direction", "up", "--offset", "2"},
-			`{"handle":"h1","paths":["a"],"direction":"up","offset":2}`, "",
+			"数组 + 枚举 + 数字", "nudge",
+			`{"handle":"h1","paths":["a","b"],"direction":"up","offset":2}`,
+			`{"handle":"h1","paths":["a","b"],"direction":"up","offset":2}`, "",
 		},
 		{
-			"选填省略", "nudge",
-			[]string{"--handle", "h1", "--paths", "a", "--direction", "up"},
-			`{"handle":"h1","paths":["a"],"direction":"up"}`, "",
-		},
-		{
-			"逗号拆数组", "nudge",
-			[]string{"--handle", "h1", "--paths", "a,b", "--direction", "down"},
-			`{"handle":"h1","paths":["a","b"],"direction":"down"}`, "",
-		},
-		{
-			"数组项去空白", "nudge",
-			[]string{"--handle", "h1", "--paths", " a , b ", "--direction", "up"},
-			`{"handle":"h1","paths":["a","b"],"direction":"up"}`, "",
-		},
-		{
-			"可重复的数组", "nudge",
-			[]string{"--handle", "h1", "--paths", "a", "--paths", "b", "--direction", "up"},
-			`{"handle":"h1","paths":["a","b"],"direction":"up"}`, "",
-		},
-		{
-			"= 写法 + 负整数", "nudge",
-			[]string{"--handle=h1", "--paths=a", "--direction=up", "--offset=-3"},
+			"负数", "nudge",
+			`{"handle":"h1","paths":["a"],"direction":"up","offset":-3}`,
 			`{"handle":"h1","paths":["a"],"direction":"up","offset":-3}`, "",
 		},
 		{
-			"裸布尔", "set_excluded",
-			[]string{"--handle", "h1", "--path", "p", "--excluded"},
+			"选填缺席", "nudge",
+			`{"handle":"h1","paths":["a"],"direction":"up"}`,
+			`{"handle":"h1","paths":["a"],"direction":"up"}`, "",
+		},
+		{
+			"选填给 null = 缺席", "nudge",
+			`{"handle":"h1","paths":["a"],"direction":"up","offset":null}`,
+			`{"handle":"h1","paths":["a"],"direction":"up"}`, "",
+		},
+		{
+			"空对象", "list_open", `{}`, `{}`, "",
+		},
+		{
+			"没有参数时也 build 出空对象", "list_open", ``, `{}`, "",
+		},
+		{
+			"null 等于空对象", "list_open", `null`, `{}`, "",
+		},
+		{
+			"键序 = manifest 声明序（JSON 里反着给也一样）", "nudge",
+			`{"offset":1,"direction":"up","paths":["a"],"handle":"h1"}`,
+			`{"handle":"h1","paths":["a"],"direction":"up","offset":1}`, "",
+		},
+		{
+			"空数组", "nudge",
+			`{"handle":"h1","paths":[],"direction":"up"}`,
+			`{"handle":"h1","paths":[],"direction":"up"}`, "",
+		},
+		{
+			"字符串里的转义被规范化", "save",
+			`{"handle":"h1","out":"D:\\x\\y.tzs"}`,
+			`{"handle":"h1","out":"D:\\x\\y.tzs"}`, "",
+		},
+		{
+			"string 里的逗号不切", "add_action",
+			`{"handle":"h1","path":"p","type":"di3,db4"}`,
+			`{"handle":"h1","path":"p","type":"di3,db4"}`, "",
+		},
+		{
+			"string[] 保 |", "set_items",
+			`{"handle":"h1","path":"p","items":["lbl_a|A|d1","lbl_b|B|d2"]}`,
+			`{"handle":"h1","path":"p","items":["lbl_a|A|d1","lbl_b|B|d2"]}`, "",
+		},
+		{
+			"布尔 true", "set_excluded",
+			`{"handle":"h1","path":"p","excluded":true}`,
 			`{"handle":"h1","path":"p","excluded":true}`, "",
 		},
 		{
 			"布尔 false", "set_excluded",
-			[]string{"--handle", "h1", "--path", "p", "--excluded", "false"},
+			`{"handle":"h1","path":"p","excluded":false}`,
 			`{"handle":"h1","path":"p","excluded":false}`, "",
 		},
 		{
-			"布尔 0", "set_excluded",
-			[]string{"--handle", "h1", "--path", "p", "--excluded", "0"},
-			`{"handle":"h1","path":"p","excluded":false}`, "",
+			"值是空串", "set_spec_attr",
+			`{"handle":"h1","path":"p","kind":"field","attr":"a","value":""}`,
+			`{"handle":"h1","path":"p","kind":"field","attr":"a","value":""}`, "",
 		},
 		{
-			"布尔大写", "set_excluded",
-			[]string{"--handle", "h1", "--path", "p", "--excluded", "YES"},
-			`{"handle":"h1","path":"p","excluded":true}`, "",
-		},
-		{
-			"无参函数", "list_open", nil,
-			`{}`, "",
-		},
-		{
-			"path 里的反斜杠", "save",
-			[]string{"--handle", "h1", "--out", `D:\x\y.tzs`},
-			`{"handle":"h1","out":"D:\\x\\y.tzs"}`, "",
-		},
-		{
-			"数组给空串", "nudge",
-			[]string{"--handle", "h1", "--paths", "", "--direction", "up"},
-			`{"handle":"h1","paths":[],"direction":"up"}`, "",
+			"值是负数字符串", "set_spec_attr",
+			`{"handle":"h1","path":"p","kind":"field","attr":"a","value":"-1"}`,
+			`{"handle":"h1","path":"p","kind":"field","attr":"a","value":"-1"}`, "",
 		},
 
-		// ---- 反向断言：本地**绝不**拦（越界拦截是无声发生的） ----
+		// ---- 反向断言：本地**绝不**拦 ----
 		{
 			// from:"spec:<kind>" 的合法集要现场从模型里取，静态列不出来。
-			// 本地拦它 = 让描述器白名单永远到不了引擎。
 			"attr(from:*) 放行", "set_spec_attr",
-			[]string{"--handle", "h1", "--path", "p", "--kind", "field", "--attr", "bogus_attr", "--value", "v"},
+			`{"handle":"h1","path":"p","kind":"field","attr":"bogus_attr","value":"v"}`,
 			`{"handle":"h1","path":"p","kind":"field","attr":"bogus_attr","value":"v"}`, "",
 		},
 		{
 			// kind 的合法集（七种）**不在 manifest 里** —— Go 侧抄一份就是第二份真源。
-			// 引擎会回 E_BAD_PARAM（kind=validation，退 2），和本地拦下来一模一样。
 			"kind 放行", "set_spec_attr",
-			[]string{"--handle", "h1", "--path", "p", "--kind", "alien", "--attr", "a", "--value", "v"},
+			`{"handle":"h1","path":"p","kind":"alien","attr":"a","value":"v"}`,
 			`{"handle":"h1","path":"p","kind":"alien","attr":"a","value":"v"}`, "",
 		},
 		{
-			// add_action 的「型态」是一张**每表单自己的**词表（该表单的 s_detail<n>），
-			// 在 manifest 里它就是一个普通 string。在本地拦它会让「加一个 db* 型态」
-			// 永远到不了引擎。
+			// add_action 的「型态」是一张**每表单自己的**词表（该表单的 s_detail<n>）。
 			"per-form 词表放行", "add_action",
-			[]string{"--handle", "h1", "--path", "p", "--type", "Bogus"},
+			`{"handle":"h1","path":"p","type":"Bogus"}`,
 			`{"handle":"h1","path":"p","type":"Bogus"}`, "",
 		},
 		{
-			// string 参数不按逗号切（只有 path[]/string[] 才切）。
-			"string 里的逗号不切", "add_action",
-			[]string{"--handle", "h1", "--path", "p", "--type", "di3,db4"},
-			`{"handle":"h1","path":"p","type":"di3,db4"}`, "",
-		},
-		{
-			// 契约点名的：负号不是 flag，`--value -1` 得到字符串 "-1"。
-			"value -1 是字符串", "set_spec_attr",
-			[]string{"--handle", "h1", "--path", "p", "--kind", "field", "--attr", "a", "--value", "-1"},
-			`{"handle":"h1","path":"p","kind":"field","attr":"a","value":"-1"}`, "",
-		},
-		{
-			"= 给空串", "set_spec_attr",
-			[]string{"--handle", "h1", "--path", "p", "--kind", "field", "--attr", "a", "--value="},
-			`{"handle":"h1","path":"p","kind":"field","attr":"a","value":""}`, "",
-		},
-
-		// ---- string[]：切逗号但保 | ----
-		{
-			"string[] 切逗号", "set_items",
-			[]string{"--handle", "h1", "--path", "p", "--items", "lbl_a|A|d1,lbl_b|B|d2"},
-			`{"handle":"h1","path":"p","items":["lbl_a|A|d1","lbl_b|B|d2"]}`, "",
-		},
-		{
-			"string[] 可重复", "set_items",
-			[]string{"--handle", "h1", "--path", "p", "--items", "x", "--items", "y"},
-			`{"handle":"h1","path":"p","items":["x","y"]}`, "",
+			// 引擎的 Manifest.Check 对 string 参数的数字/布尔是放行的，
+			// 本地凭空加一条引擎没有的规则，就会让合法调用到不了引擎。
+			"string 参数收到数字原样透传", "set_spec_attr",
+			`{"handle":"h1","path":"p","kind":"field","attr":"a","value":-1}`,
+			`{"handle":"h1","path":"p","kind":"field","attr":"a","value":-1}`, "",
 		},
 
 		// ---- 本地必须拦 ----
-		{
-			"枚举越界", "nudge",
-			[]string{"--handle", "h1", "--paths", "a", "--direction", "Bogus"},
-			"", "direction",
-		},
-		{
-			"枚举越界要列合法值", "nudge",
-			[]string{"--handle", "h1", "--paths", "a", "--direction", "Bogus"},
-			"", "up|down|left|right",
-		},
-		{
-			"缺必填", "nudge",
-			[]string{"--handle", "h1", "--paths", "a"},
-			"", "缺必填参数 direction",
-		},
-		{
-			"缺必填 handle", "nudge",
-			[]string{"--paths", "a", "--direction", "up"},
-			"", "缺必填参数 handle",
-		},
-		{
-			"未知参数", "nudge",
-			[]string{"--handle", "h1", "--paths", "a", "--direction", "up", "--bogus", "1"},
-			"", "bogus",
-		},
-		{
-			"整数解析失败", "nudge",
-			[]string{"--handle", "h1", "--paths", "a", "--direction", "up", "--offset", "2x"},
-			"", "offset",
-		},
-		{
-			"布尔值不认识", "set_excluded",
-			[]string{"--handle", "h1", "--path", "p", "--excluded", "maybe"},
-			"", "excluded",
-		},
-		{
-			"标量给两次", "nudge",
-			[]string{"--handle", "h1", "--paths", "a", "--direction", "up", "--offset", "2", "--offset", "3"},
-			"", "给了一次以上",
-		},
-		{
-			"无参函数收到参数", "list_open",
-			[]string{"--handle", "h1"},
-			"", "handle",
-		},
-		{
-			"stop 不在 manifest 里", "stop",
-			[]string{},
-			"", "传输级命令",
-		},
-		{
-			"未知函数", "nope",
-			[]string{},
-			"", "未知函数 nope",
-		},
+		{"未知函数", "nope", `{}`, "", "未知函数 nope"},
+		{"未知函数要把可用清单带出来", "nope", `{}`, "", "nudge"},
+		{"未知参数（报全部且排序）", "nudge",
+			`{"handle":"h1","paths":["a"],"direction":"up","zBogus":1,"aBogus":2}`,
+			"", "aBogus, zBogus"},
+		{"缺必填", "nudge", `{"handle":"h1","paths":["a"]}`, "", "缺必填参数 direction"},
+		{"缺必填 handle", "nudge", `{"paths":["a"],"direction":"up"}`, "", "缺必填参数 handle"},
+		{"int 收到字符串", "nudge",
+			`{"handle":"h1","paths":["a"],"direction":"up","offset":"2"}`,
+			"", "需要整数"},
+		{"int 收到小数", "nudge",
+			`{"handle":"h1","paths":["a"],"direction":"up","offset":1.5}`,
+			"", "需要整数"},
+		{"bool 收到字符串", "set_excluded",
+			`{"handle":"h1","path":"p","excluded":"yes"}`,
+			"", "需要 true/false"},
+		{"枚举越界（列合法值）", "nudge",
+			`{"handle":"h1","paths":["a"],"direction":"sideways"}`,
+			"", "up|down|left|right"},
+		{"数组元素不是字符串", "nudge",
+			`{"handle":"h1","paths":["a",2],"direction":"up"}`,
+			"", "数组元素必须是字符串"},
+		{"数组位置给了标量", "nudge",
+			`{"handle":"h1","paths":"a","direction":"up"}`,
+			"", "需要字符串数组"},
+		{"字符串参数收到对象", "set_spec_attr",
+			`{"handle":"h1","path":"p","kind":"field","attr":"a","value":{"x":1}}`,
+			"", "需要一个字符串"},
+		{"字符串参数收到数组", "set_spec_attr",
+			`{"handle":"h1","path":"p","kind":"field","attr":"a","value":["x"]}`,
+			"", "需要一个字符串"},
+		{"args 是数组不是对象", "nudge", `["a"]`, "", "必须是 JSON 对象"},
+		{"args 是标量", "nudge", `2`, "", "必须是 JSON 对象"},
+		{"args 不是 JSON", "nudge", `{`, "", "不是合法的 JSON 对象"},
+		{"stop 不在 manifest 里", "stop", `{}`, "", "传输级命令"},
 	}
-
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			m := mustManifest(t)
-			got, err := BuildArgs(m, c.fn, argsOf(c.argv))
+			got, err := BuildArgsFromJSON(mustManifest(t), c.fn, json.RawMessage(c.in))
 			if c.wantErr == "" {
 				if err != nil {
 					t.Fatalf("不该报错：%v", err)
 				}
 				if string(got) != c.want {
 					t.Fatalf("定型结果不对\n  得 %s\n想 %s", got, c.want)
+				}
+				if !json.Valid(got) {
+					t.Fatalf("产出的不是合法 JSON：%s", got)
 				}
 				return
 			}
@@ -296,41 +196,49 @@ func TestBuildArgsTable(t *testing.T) {
 	}
 }
 
-// argsOf 把 argv 过一遍 SplitArgs（测试里就写命令行原样，不手搓 Arg）。
-func argsOf(argv []string) []Arg {
-	a, err := SplitArgs(argv)
+// TestBuildArgsFromJSONOrderIsManifestOrder：输出顺序固定 = manifest 声明顺序。
+//
+// 固定顺序是为了可复现：同一份输入永远产出同一串字节，日志、--json、测试断言
+// 才能逐字节比对（JSON 里键的书写顺序不该影响帧）。
+func TestBuildArgsFromJSONOrderIsManifestOrder(t *testing.T) {
+	m := mustManifest(t)
+	a, err := BuildArgsFromJSON(m, "nudge",
+		json.RawMessage(`{"offset":1,"direction":"up","paths":["a"],"handle":"h1"}`))
 	if err != nil {
-		panic(err)
+		t.Fatal(err)
 	}
-	return a
+	want := `{"handle":"h1","paths":["a"],"direction":"up","offset":1}`
+	if string(a) != want {
+		t.Errorf("参数顺序没按 manifest：\n  得 %s\n想 %s", a, want)
+	}
 }
 
-// TestBuildArgsReverseRequestCarried 是反向断言的**第二半**：
+// TestBuildArgsFromJSONReverseRequestCarried 是反向断言的**第二半**：
 // 本地放行不算数，还得真的进了请求帧。
 //
 // 只说「本地没拦」是不够的 —— 一个把值悄悄丢掉的实现也能过那一半。
-func TestBuildArgsReverseRequestCarried(t *testing.T) {
+func TestBuildArgsFromJSONReverseRequestCarried(t *testing.T) {
 	m := mustManifest(t)
 	cases := []struct {
 		fn    string
-		argv  []string
+		in    string
 		inReq string // 请求帧里必须原样出现的值
 	}{
 		{"set_spec_attr",
-			[]string{"--handle", "h1", "--path", "p", "--kind", "field", "--attr", "bogus_attr", "--value", "v"},
+			`{"handle":"h1","path":"p","kind":"field","attr":"bogus_attr","value":"v"}`,
 			`"attr":"bogus_attr"`},
 		{"set_spec_attr",
-			[]string{"--handle", "h1", "--path", "p", "--kind", "alien", "--attr", "a", "--value", "v"},
+			`{"handle":"h1","path":"p","kind":"alien","attr":"a","value":"v"}`,
 			`"kind":"alien"`},
 		{"add_action",
-			[]string{"--handle", "h1", "--path", "p", "--type", "Bogus"},
+			`{"handle":"h1","path":"p","type":"Bogus"}`,
 			`"type":"Bogus"`},
 		{"nudge",
-			[]string{"--handle", "h1", "--paths", "a", "--direction", "up", "--offset", "-7"},
+			`{"handle":"h1","paths":["a"],"direction":"up","offset":-7}`,
 			`"offset":-7`},
 	}
 	for _, c := range cases {
-		args, err := BuildArgs(m, c.fn, argsOf(c.argv))
+		args, err := BuildArgsFromJSON(m, c.fn, json.RawMessage(c.in))
 		if err != nil {
 			t.Fatalf("%s：本地不该拦：%v", c.fn, err)
 		}
@@ -344,23 +252,115 @@ func TestBuildArgsReverseRequestCarried(t *testing.T) {
 	}
 }
 
-// TestBuildArgsOrderIsManifestOrder：输出顺序固定 = manifest 声明顺序。
+// TestBuildArgsForForm 钉住逻辑键寻址：form 落在 handle 字段上，两种寻址只能给一个。
 //
-// 固定顺序是为了可复现：同一份输入永远产出同一串字节，日志、--json、测试断言
-// 才能逐字节比对（命令行给参数的顺序不该影响帧）。
-func TestBuildArgsOrderIsManifestOrder(t *testing.T) {
-	m := mustManifest(t)
-	a, err := BuildArgs(m, "nudge", argsOf([]string{
-		"--offset", "1", "--direction", "up", "--paths", "a", "--handle", "h1",
-	}))
+// 这是 "让调用方说'改 aapp320 的表单'" 而不是"搬一串易失的 h1" 的入口（见 Rpc.FindByKey）。
+func TestBuildArgsForForm(t *testing.T) {
+	cases := []struct {
+		name    string
+		fn      string
+		in      string
+		form    string
+		want    string
+		wantErr string
+	}{
+		{
+			"form 顶替 handle（顺序仍按 manifest）", "save",
+			`{"out":"D:\\x.tzs"}`, "aapp320",
+			`{"handle":"aapp320","out":"D:\\x.tzs"}`, "",
+		},
+		{
+			"ProgramKey 形式照发", "nudge",
+			`{"paths":["a"],"direction":"up"}`, "aapp320|Form",
+			`{"handle":"aapp320|Form","paths":["a"],"direction":"up"}`, "",
+		},
+		{
+			"form 与 args.handle 同时给 = 错", "save",
+			`{"handle":"h1","out":"x"}`, "aapp320",
+			"", "只能给一个",
+		},
+		{
+			"不需要句柄的动词给 form = 错", "list_open",
+			`{}`, "aapp320",
+			"", "不接受 form",
+		},
+		{
+			"没给 form 时行为不变（handle 必填照报）", "save",
+			`{"out":"x"}`, "",
+			"", "缺必填参数 handle",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := BuildArgsForForm(mustManifest(t), c.fn, json.RawMessage(c.in), c.form)
+			if c.wantErr == "" {
+				if err != nil {
+					t.Fatalf("不该报错：%v", err)
+				}
+				if string(got) != c.want {
+					t.Fatalf("定型结果不对\n  得 %s\n想 %s", got, c.want)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("该报错（含 %q），却得到 %s", c.wantErr, got)
+			}
+			if !strings.Contains(err.Error(), c.wantErr) {
+				t.Errorf("文案里缺 %q：%v", c.wantErr, err)
+			}
+		})
+	}
+}
+
+// TestUnknownParamTeachesForm：把 form 写进 args 是最容易犯的一种写法错误
+// （`form` 确实比 `handle` 更像人话），所以那条报错必须**指出正确的写法**，
+// 而不只是说"不在 manifest 里" —— 后者会让人以为此路不通。
+func TestUnknownParamTeachesForm(t *testing.T) {
+	var ue *UsageError
+	_, err := BuildArgsFromJSON(mustManifest(t), "nudge",
+		json.RawMessage(`{"form":"aapp320","paths":["a"],"direction":"up"}`))
+	if !errors.As(err, &ue) {
+		t.Fatalf("该是用法错，得 %T：%v", err, err)
+	}
+	if !strings.Contains(err.Error(), "参数 form 不在 manifest 里") {
+		t.Errorf("该先点出未知参数：%v", err)
+	}
+	if !strings.Contains(strings.Join(ue.Detail, " "), "--form") {
+		t.Errorf("明细里该教正确的写法（--form <程序名>）：%v", ue.Detail)
+	}
+}
+
+// TestJSONStringEscapesLikeTheWire：帮助里演示的写法与真正上线的写法必须同一个转义器。
+func TestJSONStringEscapesLikeTheWire(t *testing.T) {
+	cases := []string{`plain`, `<name-path>`, `a"b`, `a\b`, `中文`, "</section>"}
+	for _, s := range cases {
+		got := JSONString(s)
+		if !strings.HasPrefix(got, `"`) || !strings.HasSuffix(got, `"`) {
+			t.Fatalf("%q 没被编成 JSON 字符串：%s", s, got)
+		}
+		var back string
+		if err := json.Unmarshal([]byte(got), &back); err != nil {
+			t.Fatalf("%q 编出来的不是合法 JSON（%s）：%v", s, got, err)
+		}
+		if back != s {
+			t.Errorf("往返丢了内容：%q → %s → %q", s, got, back)
+		}
+		// 关掉 HTML 转义（与 MarshalRequest 同一条）：`</section>` 在日志里要能照着读。
+		if strings.Contains(got, `\u003c`) {
+			t.Errorf("%q 被 HTML 转义了：%s", s, got)
+		}
+	}
+}
+
+// 这不是洁癖：记事本和 PowerShell 的 `Set-Content -Encoding utf8` 都会写 BOM，
+// 而引擎那侧的帧读取同样剥它（见 wire.go 的入方向容错）。
+func TestBuildArgsFromJSONToleratesBOM(t *testing.T) {
+	in := append([]byte{0xEF, 0xBB, 0xBF}, []byte("  {\"handle\":\"h1\",\"out\":\"x\"}\n")...)
+	got, err := BuildArgsFromJSON(mustManifest(t), "save", in)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"handle":"h1","paths":["a"],"direction":"up","offset":1}`
-	if string(a) != want {
-		t.Errorf("参数顺序没按 manifest：\n  得 %s\n想 %s", a, want)
-	}
-	if !json.Valid(a) {
-		t.Errorf("产出的不是合法 JSON：%s", a)
+	if string(got) != `{"handle":"h1","out":"x"}` {
+		t.Errorf("带 BOM 的输入没解析对：%s", got)
 	}
 }

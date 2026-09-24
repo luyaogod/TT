@@ -68,20 +68,25 @@ rem writing to the user directory (see internal/config/paths.go, IsPortable).
 type nul > "%STAGE%\.portable"
 
 rem [3b/5] Staging the .tzs engine (C#). It is built SEPARATELY -- see engine\BUILD.md.
-rem   Exactly four files, listed by name on purpose: engine\out\ also holds a dozen probe
+rem   Exactly three files, listed by name on purpose: engine\out\ also holds a dozen probe
 rem   programs (Probe / Edit / AddField / RoundTrip / Test* / E2E) that must NOT ship, so an
 rem   xcopy of the whole directory would put them all in the portable package.
+rem   tzs-cli.exe (the engine's own C# client) is DELIBERATELY NOT shipped: tt has its own Go
+rem   client (internal/dev/tzs) which is the only supported entry point. Shipping a second
+rem   client would mean two command surfaces and two exit-code tables (tzs-cli is 0/1/2/3/4,
+rem   tt is 0/1/2/4/5) for the same engine. It still builds in the repo
+rem   (engine\test\tzs-cli.cs) because the engine's own acceptance harness drives it.
 rem   Not built here: the engine needs csc + a bash script, and rebuilding it changes its MVID,
 rem   which orphans every daemon started from the previous build (engine\BUILD.md explains).
 set TZSENGINE=engine\out
-for %%f in (tzs-server.exe tzs-cli.exe TzsCli.dll TzsCli.Designer.dll) do (
+for %%f in (tzs-server.exe TzsCli.dll TzsCli.Designer.dll) do (
     if not exist "%TZSENGINE%\%%f" (
         echo MISSING %TZSENGINE%\%%f -- build the engine first, see engine\BUILD.md
         exit /b 1
     )
 )
 if not exist "%STAGE%\tzs" mkdir "%STAGE%\tzs"
-for %%f in (tzs-server.exe tzs-cli.exe TzsCli.dll TzsCli.Designer.dll) do (
+for %%f in (tzs-server.exe TzsCli.dll TzsCli.Designer.dll) do (
     copy /y "%TZSENGINE%\%%f" "%STAGE%\tzs\" >nul || (echo COPY engine %%f FAILED & exit /b 1)
 )
 

@@ -26,7 +26,7 @@ import (
 // FnStop 是传输级命令的名字。它**不在 manifest 里**（引擎的 Rpc.Handle 在查表之前
 // 就把它截走了）：`stop` 问的是守护进程本身，不是设计器。
 //
-// 所以 BuildArgs("stop") 必然报「未知函数」—— 那是正确行为，命令层必须自己特判它。
+// 所以 BuildArgsFromJSON("stop") 必然报「未知函数」—— 那是正确行为，命令层必须自己特判它。
 const FnStop = "stop"
 
 // Param 类型名。取值集合来自引擎的 Manifest.TypeName（唯一产地）。
@@ -117,7 +117,7 @@ type Manifest struct {
 // ParseManifest 解析 `--manifest` 的输出。
 //
 // 校验只覆盖「这份 manifest 自己自洽吗」，不覆盖「引擎实现了哪些函数」：
-// 引擎会先声明全部 ~49 个函数，**再**逐个补实现，没实现的回 E_NOT_IMPLEMENTED
+// 引擎会先声明全部 ~50 个函数，**再**逐个补实现，没实现的回 E_NOT_IMPLEMENTED
 // （kind=internal，退 1）。那是诚实答案，我们不该在这里把它过滤掉 ——
 // 过滤会让「这个函数以后会有」变成「没有这个函数」，两者对调用方的含义完全不同。
 func ParseManifest(b []byte) (*Manifest, error) {
@@ -195,16 +195,20 @@ func (m *Manifest) Groups() []string {
 	return out
 }
 
-// Help 渲染函数表（`tt dev tzs help` / `--list-fns` 用）。
+// Index 渲染**动词索引**：分组 + 名字，仅此而已。
+//
+// 为什么不把参数一起打出来：每个动词的参数是它自己的契约，`tt dev tzs <动词> --help`
+// 按需给一个。把 50 个动词的全部参数一次摊开（真表约 36 KB）既淹没人，也等于把引擎的
+// **函数表**整个交到调用方手里 —— 对外只该有"动词"这一层。
 //
 // 从 manifest 生成而不是手写：手写的那份一定会漂移，而漂移的表现是
-// 「help 里明明写着 --attribute，打上去却是未知参数」。
-func (m *Manifest) Help(w io.Writer) {
+// 「索引里明明有这个名字，敲上去却是未知动词」。
+func (m *Manifest) Index(w io.Writer) {
 	if m == nil {
-		fmt.Fprintln(w, "（没有函数表）")
+		fmt.Fprintln(w, "（没有动词表）")
 		return
 	}
-	fmt.Fprintf(w, "%d 个函数（慢的标 [slow]，会改模型的标 [写]）：\n", len(m.Fns))
+	fmt.Fprintf(w, "%d 个动词（会改模型的标 [写]，慢的标 [slow]；参数：tt dev tzs <动词> --help）：\n", len(m.Fns))
 	for _, g := range m.Groups() {
 		fmt.Fprintf(w, "\n[%s]\n", g)
 		for _, f := range m.Fns {
@@ -218,24 +222,10 @@ func (m *Manifest) Help(w io.Writer) {
 			if f.Writes {
 				marks += " [写]"
 			}
-			fmt.Fprintf(w, "  %-22s %s%s\n", f.Name, f.Desc, marks)
-			for _, p := range f.Args {
-				t := p.Type
-				switch {
-				case p.Type == TypeEnum && len(p.Values) > 0:
-					t = "enum(" + strings.Join(p.Values, "|") + ")"
-				case p.From != "":
-					t = TypeAttr + ":" + p.From
-				}
-				req := "  "
-				if p.Required {
-					req = "必填"
-				}
-				fmt.Fprintf(w, "      --%-18s %-26s %s  %s\n", p.Name, t, req, p.Desc)
-			}
+			fmt.Fprintf(w, "  %s%s\n", f.Name, marks)
 		}
 	}
-	fmt.Fprintf(w, "\n报错定位用 error.detail 里的字段；%s 是传输级命令，不在本表里。\n", FnStop)
+	fmt.Fprintf(w, "\n%s 是传输级命令，不在本表里。\n", FnStop)
 }
 
 //---------------------------------------------------------------------------

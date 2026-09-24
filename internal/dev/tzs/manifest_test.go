@@ -1,6 +1,7 @@
 package tzs
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -8,7 +9,7 @@ import (
 
 // fixtureManifest 是**手写的小夹具**，不是真 manifest 的拷贝。
 //
-// 为什么不拷真的：真 manifest 有 36 KB、49 个函数，它一改（引擎加个参数）测试就得跟着改，
+// 为什么不拷真的：真 manifest 有 36 KB、50 个函数，它一改（引擎加个参数）测试就得跟着改，
 // 而测试想钉住的是**解析规则**（req/values/from/分组/慢函数），不是引擎此刻有几个函数。
 // 拷贝还会给人一个假印象：「这份测试证明了我们的工具和引擎对得上」—— 它证明不了，
 // 那是 TTZS_E2E=1 的活。
@@ -164,39 +165,29 @@ func TestManifestGroups(t *testing.T) {
 	}
 }
 
-// TestManifestHelp 钉住 help 的可用性：参数名、类型、必填、[slow]/[写] 都得在。
+// TestManifestIndex 钉住动词索引的**边界**：列分组与名字，**不列参数**。
 //
-// 从 manifest 生成而不是手写，就是为了让 help 不可能与引擎校验的口径不一致。
-func TestManifestHelp(t *testing.T) {
+// 后半条是这次改动的要点：索引不该把函数表整个摊给调用方（参数是每个动词自己的契约，
+// `tt dev tzs <动词> --help` 按需给一个）。所以这里既断言"该有的都在"，也断言"参数不在"。
+func TestManifestIndex(t *testing.T) {
 	var b strings.Builder
-	mustManifest(t).Help(&b)
+	mustManifest(t).Index(&b)
 	out := b.String()
 
 	for _, want := range []string{
 		"[会话]", "[结构]", "[校验/工具]",
 		"list_open", "nudge", "validate",
-		"path[]",
-		"必填",
-		"enum(up|down|left|right)",
-		"attr:spec:<kind>",
 		"[slow]", "[写]",
 		FnStop, // 提示 stop 不在表里
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("help 里缺 %q：\n%s", want, out)
+			t.Errorf("索引里缺 %q：\n%s", want, out)
 		}
 	}
-	// 参数行要能一眼看出「这个参数是什么类型、必不必填」。
-	// 不比对整行的空白（那是排版，改一个宽度就会让测试变脆），只要求同一行里有这三样。
-	var pathsLine string
-	for _, ln := range strings.Split(out, "\n") {
-		if strings.Contains(ln, "--paths") {
-			pathsLine = ln
-		}
-	}
-	for _, want := range []string{"path[]", "必填"} {
-		if !strings.Contains(pathsLine, want) {
-			t.Errorf("--paths 那一行缺 %q：%q", want, pathsLine)
+	// 参数契约一概不出现：类型、必填、枚举值、from:* —— 那是 <动词> --help 的事。
+	for _, forbidden := range []string{"path[]", "必填", "--paths", "enum(", "attr:spec:"} {
+		if strings.Contains(out, forbidden) {
+			t.Errorf("索引里不该出现参数契约 %q：\n%s", forbidden, out)
 		}
 	}
 }
@@ -259,10 +250,8 @@ func TestKnownTypeMatchesEngine(t *testing.T) {
 	m := mustManifest(t)
 	f := m.ByName("nudge")
 	f.Args[3].Type = "futuretype"
-	if _, err := BuildArgs(m, "nudge", []Arg{
-		{Name: "handle", Value: "h1"}, {Name: "paths", Value: "a"},
-		{Name: "direction", Value: "up"}, {Name: "offset", Value: "3"},
-	}); err != nil {
+	if _, err := BuildArgsFromJSON(m, "nudge", json.RawMessage(
+		`{"handle":"h1","paths":["a"],"direction":"up","offset":3}`)); err != nil {
 		t.Errorf("未知类型该按字符串放过，得 %v", err)
 	}
 }

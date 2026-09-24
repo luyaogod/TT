@@ -1576,6 +1576,14 @@ open(path2) 而 key(path2) 已有活句柄 → E_KEY_IN_USE
 - 读操作在 `Loaded`/`Mutable` 都合法且不改变状态；`save` 不改状态、在 `Loaded` 就可用
   （那正是不动点性质）。
 
+**加性扩展（2026-09，`Rpc.FindByKey`）：`args.handle` 也接受"有意义的键"。** 除 `h<N>` 之外，
+可以写**程序名**（`aapp320`）或 **ProgramKey**（`aapp320|Form`）；`Rpc.Resolve` 先按句柄精确匹配
+（句柄恒为 `h`+数字，不可能与程序名混淆），未命中再按这两者查 `_open`；查不到时错误里列出候选
+（含 `key`）并说明三种写法。理由：句柄是易失的随机号，让调用方在每条命令之间搬运它，等于逼它用
+随机号说"我要改 aapp320 的表单"。线上形状一个字没变（仍是字符串、仍叫 `handle`），
+`Manifest.Check` 不动 —— 这是**允许更多写法**，不是收紧契约。
+匹配到多个（同名程序的不同类型同时开着）时返回 `bad_param` + `detail.candidates`，**不猜**。
+
 **新 P0 问题（Wave 0 必答）**：`close` 之后能否重新 `open` 同一个 key？
 `CheckUndoRedoManager`（SettingManager.cs:79）只是 `undoRedoManagerMap.ContainsKey(key)` 的裸查表，
 所以**理论上**摘掉就能重新加载——但从未验证过，且 `EventAggregatorManager` 的 per-key 实例

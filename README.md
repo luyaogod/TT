@@ -35,7 +35,7 @@ TT 是一款**面向 Agent 的 CLI 开发工具**，用于开发基于 Genero BD
 | 装 tt / 构建 tt / 知道配置放在哪 | **本文件** |
 | 搞清设计、契约、不变量，以及"为什么是这样" | [docs/WIKI.md](docs/WIKI.md)（11 章，带章节索引） |
 | 用某个命令 —— 怎么改 `.tzc`、怎么读写 `.tzs`、怎么查字典、怎么调程序 | [skills/](skills/) 下对应的 `SKILL.md` |
-| 精确的参数、flag、退出码 | `tt <命令> --help`，或 `tt dev tzs fns` 看函数表 |
+| 精确的参数、flag、退出码 | `tt <命令> --help`，或 `tt dev tzs <动词> --help` 看单个动词的参数 |
 | 改 `.tzs` 引擎（C#） | [engine/BUILD.md](engine/BUILD.md) 与 [engine/SPEC.md](engine/SPEC.md) |
 | 查 `.tzc` 那些 `file:line` 依据指向的第三方材料 | [docs/T100设计器-README.md](docs/T100设计器-README.md)（设计器反编译源码树的 README 副本） |
 
@@ -52,7 +52,7 @@ TT 是一款**面向 Agent 的 CLI 开发工具**，用于开发基于 Genero BD
 把 `tt-portable.zip` 解压到任意目录，双击或命令行运行 `tt.exe` 即可。
 包内有 `.portable` 标记，配置就近留在包内（`config.json`），不写用户目录。
 
-包内还带 `tzs\`（引擎四个文件 + `designer\` 里的设计器程序集）与五套 AI 技能。
+包内还带 `tzs\`（引擎三个文件 + `designer\` 里的设计器程序集）与五套 AI 技能。
 引擎跑起来**不需要你装设计器、也不需要配它的路径** —— 包里自带的那份就是它用的那份，
 所以同一份包在任何机器上跑的是同一版设计器。
 
@@ -96,7 +96,8 @@ tt serve                                    # 起服务，浏览器打开它打�
 
 tt debug start <作业> -m <模块>              # 调程序 → 细节见 skills/tt-debug
 tt dev tzc export "D:\pkg\x.tzc"            # 改 4GL 客制 → 细节见 skills/tt-dev-tzc
-tt dev tzs call open --path "D:\pkg\y.tzs"  # 改表单     → 细节见 skills/tt-dev-tzs
+tt dev tzs field add --args '{"file":"D:\\pkg\\x.tzs","table":"pmdl_t","columns":["pmdlent","pmdlsite"],"out":"D:\\pkg\\_ai.tzs"}'
+                                            # 改表单 → 细节见 skills/tt-dev-tzs（50 个具名动词 + JSON 参数）
 tt dict r.t --kw 应收                        # 查字典     → 细节见 skills/tt-dict
 ```
 
@@ -188,9 +189,11 @@ TZSCLI_INSTALL=<别的设计器目录> ./build.sh    # 用别的版本覆盖仓�
 `engine/designer/` 采到 `engine/out/designer/`。于是 `engine/out/tzs-server.exe` 不需要任何环境
 变量就能找到设计器 —— 与发行包 `<引擎目录>\designer\` 是同一个布局。
 
-`build_portable.bat` / `build_msi.bat` **只采集产物、不构建它**。引擎那四个文件按名字采，
+`build_portable.bat` / `build_msi.bat` **只采集产物、不构建它**。引擎那三个文件按名字采，
 `engine/out/` 里还有十几个探测程序（`Probe` / `Edit` / `AddField` / `RoundTrip` / `Test*` / `E2E`），
 xcopy 整个目录会把它们一起打进包里。缺任何一个都会让打包脚本报错退出。
+引擎自带的 C# 客户端 `tzs-cli.exe` 不采 —— 对外只有 `tt` 一个入口（理由见
+[engine/BUILD.md](engine/BUILD.md)）。
 
 打包时设计器的来源默认也是 `engine\designer\`，所以**打发行包同样不用配任何东西**；
 `TZSDESIGNER` 可以覆盖它，用来打一个装别版设计器的包。发行版因此钉在仓库里那一版 ——
@@ -219,7 +222,7 @@ build_portable.bat        # → dist/tt-portable/ 与 dist/tt-portable.zip
 ```
 
 它会依次跑：前端构建 → `go build`（带版本号）→ 暂存 `tt.exe` + `config.empty.json`（作为包内的
-`config.json`）+ `config.example.json` + `README.md` + `skills/` → 采引擎那四个文件到 `tzs\` →
+`config.json`）+ `config.example.json` + `README.md` + `skills/` → 采引擎那三个文件到 `tzs\` →
 打 zip。注意它**刻意不打包本机的 `config.json`**（含真实口令），包里放的是空骨架。
 
 ### MSI

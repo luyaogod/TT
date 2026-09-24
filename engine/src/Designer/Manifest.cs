@@ -26,6 +26,7 @@ namespace TzsCli.Designer
     public static class Manifest
     {
         // ---------------------------------------------------------------- groups
+        const string G_WORKFLOW = "工作流";
         const string G_SESSION = "会话";
         const string G_READ    = "读";
         const string G_ATTR    = "属性";
@@ -84,6 +85,17 @@ namespace TzsCli.Designer
             return new Param { Name = n, Type = t, Required = false, Desc = desc };
         }
 
+        /// <summary>A **task-level** verb: it resolves its own session (handle / program name /
+        /// ProgramKey / file), so the transport must not demand a handle before the body can even
+        /// see `file`. Same shape as F otherwise -- `mutating` still has to be told the truth,
+        /// because that is what the CLI shows as [写].</summary>
+        static SpecFn W(string name, string group, string summary, bool mutating, string returns,
+                        string[] errors, params Param[] ps) {
+            SpecFn f = F(name, group, summary, mutating, returns, errors, ps);
+            f.NeedsHandle = false;
+            return f;
+        }
+
         /// <summary>An optional enum still has to carry its Values: an Enum Param with a null
         /// Values array would accept any string, which is the silent-typo hole this table
         /// exists to close.</summary>
@@ -91,9 +103,28 @@ namespace TzsCli.Designer
             return new Param { Name = n, Type = PType.Enum, Required = false, Values = values, Desc = desc };
         }
 
-        /// <summary>All 49 declared functions, in §11.22's order. The order is the order --help
-        /// prints them in, which is why it is the spec's order and not alphabetical.</summary>
+        /// <summary>Every declared function, in §11.22's order plus the 工作流 group in front.
+        /// The order is the order --help prints them in, which is why it is the spec's order and
+        /// not alphabetical.</summary>
         public static readonly SpecFn[] All = {
+
+            // ------------------------------------------------------------ 工作流 (1)
+            // Task-level verbs: one request does what used to be a chain of calls. They resolve
+            // their OWN session (handle / program / ProgramKey / file), which is why NeedsHandle
+            // is false -- the dispatcher must not demand a handle before the body can look at
+            // `file`. Declared FIRST on purpose: help and the CLI index print in manifest order,
+            // and the recommended entry point should be the first thing a caller sees
+            // (clig.dev: "display the most common commands at the start of the help text").
+            W("field_add", G_WORKFLOW,
+              "按数据表的列一次性加字段（挑容器 → 建字段 → 报校验增量 → 可存新包，一次请求做完）",
+              true, "report", E_STD,
+                Opt(PType.Handle, "handle", "已在开的表单：句柄 h1 或程序名 aapp320 或 ProgramKey aapp320|Form"),
+                Opt(PType.Path, "file", ".tzs 路径：没开就顺手开，已开着就复用（与 handle 二选一）"),
+                P.Str("table", true, "表名，如 pmdl_t"),
+                P.StrList("columns", true, "列名数组；一次构造 N 列（列名可用 list_columns 取）"),
+                Opt(PType.Path, "into", "父容器的 name-path；省略时自动挑（优先 worksheet）"),
+                OptEnum("container", CONTAINERS, "容器模式，默认 None"),
+                Opt(PType.Path, "out", "给了就把结果存成这个**新**包（绝不写源包）")),
 
             // ------------------------------------------------------------ 会话 (5)
             N("open", G_SESSION, "加载包 + 注册会话，返回句柄", "handle", E_SESS,
