@@ -702,7 +702,10 @@ func progressAfter(w io.Writer, d time.Duration, what string) func() {
 func cmdTzsStop(args []string) int {
 	fs := flag.NewFlagSet("tzs stop", flag.ContinueOnError)
 	ws := fs.String("workspace", "", "工作区（默认取 TZSCLI_WS / 配置）")
-	_ = fs.Bool("all", false, "停掉状态文件里记录的全部守护进程")
+	// 这里曾声明过一个 `all`（"停掉状态文件里记录的全部守护进程"），但它只是
+	// `_ = fs.Bool(...)` —— 解析了、丢掉了，是个**许诺了却不做**的开关，而且没有任何
+	// 文档提过它（所以删掉不带走谁的既有用法）。项目自己的标准：advertised-but-inert
+	// 比不存在更坏（见 Manifest.cs 里 add_field.name 那条注释）。
 	_ = fs.Bool("yes", false, "兼容保留")
 	if err := parseArgs(fs, args, "workspace"); err != nil {
 		return 2

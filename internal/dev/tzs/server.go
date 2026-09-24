@@ -356,10 +356,10 @@ func LookupDaemon(ctx context.Context, o Options) (*DaemonInfo, error) {
 // 所以认它只会让两侧一致。命令层应当已经把 --workspace / 配置都解析好传进来，
 // 这一步是兜底，不是替代。
 func (o Options) workspace() (string, error) {
-	if ws := strings.TrimSpace(o.Workspace); ws != "" {
+	if ws := normalizeWS(o.Workspace); ws != "" {
 		return ws, nil
 	}
-	if ws := strings.TrimSpace(os.Getenv("TZSCLI_WS")); ws != "" {
+	if ws := normalizeWS(os.Getenv("TZSCLI_WS")); ws != "" {
 		return ws, nil
 	}
 	return "", &UsageError{
@@ -369,6 +369,34 @@ func (o Options) workspace() (string, error) {
 			"三种给法：--workspace <dir> / 环境变量 TZSCLI_WS / config.json 的 tzs.workspace",
 		},
 	}
+}
+
+// normalizeWS 把工作区路径里的 `/` 换成 `\`。
+//
+// 为什么这一个替换是必要的：这个字符串同时喂给两处，而**用 `/` 写的那一种，
+// 两处都过不去**（实测，不是推理）——
+//
+//  1. **设计器**的 `TzpManager.InCurrentWorkspace` 是纯**字符串前缀比较**（取包所在的
+//     目录、两边各补一个尾 `\`）。工作区写成 `C:/ws` 时，每一次 `open` 都被拒
+//     （`NotInCurrentWorkspaceException: … 不在工作目录之下`），而 `doctor` 对同一个值
+//     说「工作区 ok」（它只 `stat` 目录）—— 症状与原因离得很远。
+//  2. **管道名** = hash(工作区字符串) 前 8 位。同一个目录两种拼法 = **两个守护进程身份**，
+//     于是"只把配置里的斜杠方向改一下"就孤儿化一个正在跑的 daemon：实测状态文件里是
+//     `tzs-cli-3637cf53-…`，改斜杠后 doctor 算出 `tzs-cli-29fc047f-…`，`stop` 与 `reap`
+//     都够不到它，最后只能手工 taskkill。
+//
+// 两个身份的合并之所以只会更好：`/` 那一种**根本装不进任何包**，所以它不是"另一种用法"，
+// 是一个坏掉的值。
+//
+// **不做的事**（有意的，别顺手加）：不 `filepath.Clean`、不去尾分隔符、不改大小写。
+// `TestWorkspaceFromEnvAndTrim` 的注释立过这条规矩：尾斜杠会改变 hash，那是另一个身份。
+// 只有尾分隔符的那一种形态我**没有实测过**，而这个仓库的规矩是实测过的才改
+// （尾斜杠会不会同样被设计器拒，是 §11.9 里一条待验的开放问题）。
+// 大小写不必管：引擎 hash 之前先 `ToLowerInvariant()`，而前缀比较也是大小写不敏感的。
+//
+// Windows 的文件名里不允许出现 `/`，所以这个替换不会误伤；UNC（`\\server\share`）也不受影响。
+func normalizeWS(p string) string {
+	return strings.ReplaceAll(strings.TrimSpace(p), "/", `\`)
 }
 
 // StateDir 是状态文件与日志的落点（导出给命令层：它要写 last、要渲染路径）。

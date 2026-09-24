@@ -62,6 +62,43 @@ func TestWorkspaceFromEnvAndTrim(t *testing.T) {
 	}
 }
 
+// TestWorkspaceSeparatorsAreUnified 钉住 `/` → `\` 这一条替换。
+//
+// 为什么值得一条测试：`/` 那一种**装不进任何包** —— 实测每一次 `open` 都被设计器拒
+// （`NotInCurrentWorkspaceException`），而 `doctor` 对同一个值说「工作区 ok」；
+// 同一个字符串还 hash 出**另一个管道名**，于是改一下配置里的斜杠方向就能孤儿化一个
+// 正在跑的守护进程（`stop` 与 `reap` 都够不到，只能手工 taskkill）。
+//
+// 同时钉住**不做**的事：尾分隔符不动、不去尾、不 `filepath.Clean` ——
+// 上一条测试的注释立过这条规矩（尾斜杠改变 hash，是另一个身份），而只有正斜杠这一种
+// 形态我实测过。空白的处理也与从前一致。
+func TestWorkspaceSeparatorsAreUnified(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{`C:\ws`, `C:\ws`},                   // 反斜杠原样
+		{`C:/ws`, `C:\ws`},                   // 正斜杠统一成反斜杠
+		{`C:/ws/`, `C:\ws\`},                 // 只换分隔符，**尾斜杠不动**
+		{`  C:/ws  `, `C:\ws`},               // 两端空白仍然去掉
+		{`\\server\share`, `\\server\share`}, // UNC 不受影响
+	}
+	for _, c := range cases {
+		ws, err := Options{Workspace: c.in}.workspace()
+		if err != nil {
+			t.Fatalf("%q 该能解析：%v", c.in, err)
+		}
+		if ws != c.want {
+			t.Errorf("%q → %q，想要 %q", c.in, ws, c.want)
+		}
+	}
+
+	// 同一个目录的两种斜杠必须给**同一个**工作区 —— 这条等式才是这个函数的全部意义
+	// （管道名是它的哈希，两个字符串就是两个身份）。
+	a, _ := Options{Workspace: `C:\ws\x`}.workspace()
+	b, _ := Options{Workspace: `C:/ws/x`}.workspace()
+	if a != b {
+		t.Errorf("同一个目录两种拼法该给同一个工作区，得 %q vs %q", a, b)
+	}
+}
+
 // TestEnsureRefusesBeforeTouchingEngine：Ensure 在没有工作区时**连 exe 都不该碰**。
 //
 // exe 故意给一个不存在的路径：如果它被用到，错误会变成「问不到管道名」，
