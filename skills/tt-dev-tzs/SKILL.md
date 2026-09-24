@@ -287,10 +287,15 @@ tt dev tzs set_spec_attr --form aapp320 --args '{"path":"…","kind":"field","at
 | 码 | 含义 |
 |---|---|
 | `0` | 帧 `ok:true` |
-| `1` | 引擎内部错（`kind=internal`，含 `E_NOT_IMPLEMENTED`） |
+| `1` | 引擎内部错（`kind=internal`，含 `E_NOT_IMPLEMENTED`）。**`E_NO_OP`（"什么都没改"）也在这里** —— 那是引擎把它发成了错误帧，不是真出错，见下 |
 | `2` | 参数/环境不对：本地参数错、未知动词、manifest 拉不到、引擎的 `validation` 与 `not_found` |
 | `4` | **设计器拒绝**（`kind=designer`，含 `E_KEY_IN_USE`） |
 | `5` | 传输或环境失败（含加载超时、没配工作区、`--args-file` 读不到） |
+
+**报错默认就会把"怎么改对"打出来**（不用加 `--json`）：`合法值`（`detail.legal`）、
+`提示`（近似值）、`候选（key 可直接拿去重试）`、以及复数写入的 `已写入`/`失败` 两栏，
+都跟在错误那一行下面。看到这些就别自己猜 —— 它们就是从**活着的模型**里取出来的那个集合。
+`--json` 拿到的仍是整帧。
 
 ## 9. 只读解压：`export`
 

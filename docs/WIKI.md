@@ -1363,10 +1363,23 @@ properties="…"/>`）本来就是**属性名**白名单的来源——`Componen
 | 码 | 含义 |
 |---|---|
 | 0 | 帧 `ok:true` |
-| 1 | 引擎内部错（`kind=internal`，含 `E_NOT_IMPLEMENTED`） |
+| 1 | 引擎内部错（`kind=internal`，含 `E_NOT_IMPLEMENTED`）。**`E_NO_OP` 也落在这一格** —— 见下 |
 | 2 | 参数/环境不对：本地参数错、未知动词、manifest 拉不到、引擎的 `validation` 与 `not_found` |
 | 4 | **设计器拒绝**（`kind=designer`，含 `E_KEY_IN_USE`） |
 | 5 | 传输或环境失败（含加载超时、没配工作区、`--args-file` 读不到） |
+
+**`E_NO_OP` 退 1 是契约表的结果，不是"出错了"。** 正常情况下它是**成功帧**（`ok:true` +
+`result.code=E_NO_OP`，表示"请求的值与当前值相同"，见 SPEC §11.24(a)）。但
+`set_local_string` / `set_spec_description` 的 NoOp 分支把它发成了**错误帧**，`kind` 落到
+`internal`，于是退出码是 1。这是**引擎侧偏离自己契约**的一处（那两条本该是成功帧），
+排到引擎批次；在那之前 `tt` 侧的做法是**只把文案说清楚**（"什么也没改"），
+判据一个字没动 —— 见 `internal/dev/tzs/client.go:66-75` 与那里的 `IsSuccessCode`。
+
+**默认输出（不加 `--json`）也渲染 `detail`。** 引擎那些为"让调用方自己纠正"而做的
+`detail.legal`（合法值集）/ `detail.hint`（近似值）/ `detail.candidates`（候选，含可直接
+重试的 `key`）/ `E_ATTR_PARTIAL` 的 `applied`+`failed` 两栏，都跟在错误那一行下面打出来；
+`--json` 拿到的仍然是**整帧**（不做裁剪）。渲染器只按 JSON 的类型分派、不认键名以外的
+schema，所以引擎加一个新键不需要改 `tt`（`internal/dev/cli/tzs_detail.go`）。
 
 **红线**：`export` 的产物是**只读参考**，不要手工改完再塞回包，也不要拿它当 `tzc` 工作区去
 `apply`；`save` 的 `out` **永远指向新包**，绝不指向源包；**请求一旦上线绝不重试**（协议无幂等键，
