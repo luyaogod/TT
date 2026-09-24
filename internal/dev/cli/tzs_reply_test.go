@@ -21,29 +21,45 @@ import (
 	"tt/internal/dev/tzs"
 )
 
-// capture 把 stdout/stderr 换成同一根管道，返回 fn 期间的输出。
+// capture 把 stdout/stderr 换成同一根管道，返回 fn 期间的输出（两股合在一起）。
 //
 // 与 corpus_test.go 的 `silent`（丢到 DevNull）是两件事：这里要**看见**输出。
 // 读端必须放在 goroutine 里 —— 管道缓冲区满了之后写端会阻塞，同 goroutine 读就是死锁。
 func capture(t *testing.T, fn func()) string {
 	t.Helper()
-	r, w, err := os.Pipe()
+	out, errOut := captureBoth(t, fn)
+	return out + errOut
+}
+
+// captureBoth 分别捕获 stdout 与 stderr。
+//
+// 要断言"这句话进的是哪一股流"时必须分开：合在一起就分不出"stdout 干净"与"两股都在说话"，
+// 而 `--json` 的契约恰恰是"stdout 恰好一帧"——那是以 stdout 单独为对象的断言。
+func captureBoth(t *testing.T, fn func()) (stdout, stderr string) {
+	t.Helper()
+	ro, wo, err := os.Pipe()
 	if err != nil {
-		t.Fatalf("建管道失败：%v", err)
+		t.Fatalf("建 stdout 管道失败：%v", err)
+	}
+	re, we, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("建 stderr 管道失败：%v", err)
 	}
 	oldOut, oldErr := os.Stdout, os.Stderr
-	os.Stdout, os.Stderr = w, w
-	got := make(chan string, 1)
-	go func() {
-		b, _ := io.ReadAll(r)
-		got <- string(b)
-	}()
+	os.Stdout, os.Stderr = wo, we
+	gotOut, gotErr := make(chan string, 1), make(chan string, 1)
+	go func() { b, _ := io.ReadAll(ro); gotOut <- string(b) }()
+	go func() { b, _ := io.ReadAll(re); gotErr <- string(b) }()
+
 	fn()
+
 	os.Stdout, os.Stderr = oldOut, oldErr
-	w.Close()
-	out := <-got
-	r.Close()
-	return out
+	wo.Close()
+	we.Close()
+	stdout, stderr = <-gotOut, <-gotErr
+	ro.Close()
+	re.Close()
+	return stdout, stderr
 }
 
 func frameError(code, kind, msg string, detail string) *tzs.Reply {

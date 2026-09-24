@@ -388,15 +388,6 @@ func warnBuiltinCollisions(m *tzs.Manifest) {
 	}
 }
 
-// localUsage 是本地参数型失败的出口：一律 stderr + 退出码 2。
-//
-// 不走 fail()：那会在 --json 时把一份**不是引擎帧**的信封写到 stdout，
-// 而 stdout 上的每一行都该是引擎的帧（调用方按行读，混进别的东西就是错位）。
-func localUsage(err error) int {
-	fmt.Fprintln(os.Stderr, err)
-	return exitCodeOf(err)
-}
-
 // readArgsBody 取出 --args / --args-file 里的 JSON 原文（都没给 = 空对象，`)` = 标准输入）。
 // 读不动是 IO 失败（退 5），不是用法错：写法没错，是那份文件/标准输入拿不到。
 func readArgsBody(f verbFlags) ([]byte, int) {
@@ -467,7 +458,7 @@ func runTzsVerb(args []string) int {
 	}
 	m, err := tzs.FetchManifest(tzsCtx(), exe)
 	if err != nil {
-		return fail(err, f.asJSON)
+		return emitFailure(err, f.asJSON)
 	}
 	warnBuiltinCollisions(m)
 
@@ -508,7 +499,7 @@ func runTzsVerb(args []string) int {
 	// --form 落在引擎的 handle 字段上（两种寻址只能给一个；给不需要句柄的动词传 form 会报错）。
 	raw, err := tzs.BuildArgsForForm(m, spec.Name, body, f.form)
 	if err != nil {
-		return localUsage(err)
+		return emitFailure(err, f.asJSON)
 	}
 
 	// 参数都定型了，现在才需要工作区：**运行**要它，校验不要。
@@ -519,7 +510,7 @@ func runTzsVerb(args []string) int {
 	}
 	pipe, err := tzs.Ensure(tzsCtx(), o)
 	if err != nil {
-		return fail(err, f.asJSON)
+		return emitFailure(err, f.asJSON)
 	}
 
 	d := tzs.DefaultDialer()
@@ -548,7 +539,12 @@ func runTzsVerb(args []string) int {
 	}
 
 	if f.asJSON {
-		printRawReply(reply, err)
+		if err != nil {
+			// 传输失败：请求**可能已经上线**（所以绝不重试），只是应答没回来。
+			// 这一帧是客户端合成的 —— 消费方不必分辨是谁发的，形状是一个。
+			return emitFailure(err, true)
+		}
+		printRawReply(reply)
 		return code
 	}
 	return printHumanReply(spec.Name, reply, err, code)
@@ -792,12 +788,43 @@ func replyString(r *tzs.Reply, key string) string {
 	return s
 }
 
-func printRawReply(r *tzs.Reply, err error) {
+// printRawReply 把一帧原样写到 stdout。
+//
+// **它只收真帧**：从前这里还收一个 err，传输失败时 `json.Marshal(nil)` 会往 stdout
+// 打一个字面量 `null` —— 看着像 JSON、其实什么都没说。那种失败现在走 emitFailure。
+func printRawReply(r *tzs.Reply) {
 	b, _ := json.Marshal(r)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
-	}
 	os.Stdout.Write(append(b, '\n'))
+}
+
+// emitFailure 是**没能成为帧的失败**的统一出口，并返回该给的退出码。
+//
+// 定下的规则：`tt dev tzs <动词> --json` 在"这次调用有了结论"时，stdout **恰好一帧** ——
+// 引擎发的和客户端合成的**是同一个形状**（`tzs.Reply`，同一个 json.Marshal），
+// 所以消费方不需要分辨这一帧是谁发的。
+//
+// 三处**刻意**的例外（不写出来这条规则就是假的）：
+//
+//  1. 用法屏 —— 没有动词、动词名打错（打的是动词索引）、`<动词> --help`。那些是**说明书**，
+//     形态由说明书决定，不是调用结论。
+//  2. 调用还没成立时的本地参数错（`--args` 与 `--args-file` 同时给、多了位置参数…）——
+//     进 stderr。**这条改了口径**：从前 `localUsage` 对"本地参数错"一律不写 stdout，
+//     理由是"stdout 上的每一行都该是引擎的帧"；那条理由在客户端开始合成帧之后不成立了，
+//     现在它与别的失败同路。
+//  3. 引擎 exe / 工作区这类**环境**失败（`readArgsBody`、`tzsEngineOptions` 那几处）——
+//     同样进 stderr，它们连"要跑哪个动词"都还没算出来。
+//
+// 非 --json 时文案与从前一致（人话进 stderr）。
+func emitFailure(err error, asJSON bool) int {
+	code := exitCodeOf(err)
+	if asJSON {
+		emitJSON(os.Stdout, tzs.SyntheticFailure(err))
+		// 一行一帧：帧与帧之间靠换行分界（与 printRawReply 一致）。
+		fmt.Fprintln(os.Stdout)
+		return code
+	}
+	fmt.Fprintf(os.Stderr, "错误（退出码 %d）：%v\n", code, err)
+	return code
 }
 
 // printHumanReply 把一帧渲染成人看的样子，并返回该给的退出码。

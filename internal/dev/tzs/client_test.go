@@ -129,6 +129,72 @@ func TestExitCodeTransportAndUsage(t *testing.T) {
 	}
 }
 
+// TestSyntheticFailure 钉住"合成的帧"与错误本身的**退出码一致**。
+//
+// 这条等式是硬约束，理由是消费方只会读其中一个：脚本读退出码、agent 读帧，
+// 两处不一致就是同一个失败有两种说法。按退出码挑 (code, kind) 让等式**构造上成立**，
+// 这条测试负责证明它确实成立 —— 逐个错误类型验，不是抽查。
+func TestSyntheticFailure(t *testing.T) {
+	if SyntheticFailure(nil) != nil {
+		t.Error("没有错误时不该合成出帧")
+	}
+
+	cases := []struct {
+		name string
+		err  error
+		code string
+		kind string
+	}{
+		{"传输失败", &TransportError{Code: CodeServerDied, Msg: "守护进程没有应答就退出了"}, CodeServerDied, KindInternal},
+		{"用法错（含 detail 时也要能合成）", &UsageError{Msg: "未知函数 foo", Detail: []string{"是不是想写 bar"}}, CodeBadRequest, KindValidation},
+		{"未分类的错", errors.New("随便一个错"), CodeInternal, KindInternal},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := SyntheticFailure(c.err)
+			if f == nil || f.Error == nil {
+				t.Fatal("该合成出一个带 error 的帧")
+			}
+			if f.OK {
+				t.Error("合成的帧必须是 ok:false")
+			}
+			if f.Error.Code != c.code || f.Error.Kind != c.kind {
+				t.Errorf("想要 (%s, %s)，得 (%s, %s)", c.code, c.kind, f.Error.Code, f.Error.Kind)
+			}
+			if f.Error.Message == "" {
+				t.Error("帧里要有 message —— 人读的就是它")
+			}
+			if f.ID != nil {
+				t.Errorf("id 该留 null（帧级错误不回显 id），得 %s", f.ID)
+			}
+
+			// ① 帧算出来的退出码 == 错误自己的退出码
+			fromFrame := ExitCode(f, nil)
+			fromErr := ExitFrameErr
+			var ec interface{ ExitCode() int }
+			if errors.As(c.err, &ec) {
+				fromErr = ec.ExitCode()
+			}
+			if fromFrame != fromErr {
+				t.Errorf("帧说退出码 %d、错误自己是 %d —— 同一个失败两种说法", fromFrame, fromErr)
+			}
+
+			// ② 我们自己合成的帧，自己的解析器必须认得
+			b, err := json.Marshal(f)
+			if err != nil {
+				t.Fatalf("合成帧序列化失败：%v", err)
+			}
+			r, err := ParseReply(b)
+			if err != nil {
+				t.Fatalf("自己合成的帧自己的解析器不认得（%s）：%v", b, err)
+			}
+			if r.OK || r.Error == nil || r.Error.Code != c.code {
+				t.Errorf("往返之后帧变了：%s", b)
+			}
+		})
+	}
+}
+
 // TestFailureKindHelpers 报告「哪两种 kind 是调用方能自纠的」。
 // 用错这一条的表现是：一个自己打错的参数名被报成「内部错误，请报 bug」。
 func TestFailureKindHelpers(t *testing.T) {

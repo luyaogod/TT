@@ -68,3 +68,14 @@ func (e exitCode) Error() string { return fmt.Sprintf("退出码 %d", int(e)) }
 
 // ExitCode 实现根命令期望的退出码接口。
 func (e exitCode) ExitCode() int { return int(e) }
+
+// AlreadyReported 告诉根命令「这次失败我已经打出去了」，让它别再抄一份。
+//
+// 为什么：`tt dev` 是一套完整的 CLI —— 自己的 Usage、自己的退出码、自己把失败打成
+// stdout 的信封（或 .tzs 那条线的帧）。失败路径返回前**都**打过一份（`fail()` 或各自的
+// 文案），根命令的 reportError 再打一次的后果是 **stdout 上出现两个 JSON 对象**：
+// `jq .error.code` 会打出两行，其中一行还是 null。
+//
+// 记号由命令组自己声明，根命令只问"你报过了吗"（见 internal/cli/root.go 的
+// alreadyReported），所以两边不必共享一个类型。
+func (e exitCode) AlreadyReported() bool { return true }

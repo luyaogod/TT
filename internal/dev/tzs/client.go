@@ -63,6 +63,19 @@ const (
 	CodeFatalLoadTimeout = "E_FATAL_LOAD_TIMEOUT"
 )
 
+// 另外三个引擎会用的码，在本包里只作为**合成帧**的取值出现
+// （帧的 code 由 syntheticFor 按错误自己的退出码挑，见 SyntheticFailure）。
+//
+// 取这几个而不是新编名字：它们是 Rpc.Map（引擎侧唯一产地）里同一种失败会用的同一批码 ——
+// "行不是合法 JSON 对象"（E_BAD_REQUEST）、"设计器自己拒绝"（E_DESIGNER）、
+// "未预期异常"（E_INTERNAL）。自造一批只在客户端存在的名字，等于让 `code` 这个稳定契约
+// 从此有两套词汇。
+const (
+	CodeBadRequest = "E_BAD_REQUEST"
+	CodeDesigner   = "E_DESIGNER"
+	CodeInternal   = "E_INTERNAL"
+)
+
 // E_NO_OP / E_ATTR_CLAMPED 是**成功码**：正常情况下它们出现在 `result.code` 里
 // （ok:true），表示「你要的状态已经是这样了」/「写进去了但被栅格吸附过」。
 //
@@ -242,8 +255,51 @@ func ExitCode(reply *Reply, err error) int {
 	return reply.Error.ExitCode()
 }
 
-// NormalizeTimeout 把 `--timeout` 收到的值规范化：0/负数 → 默认 300 s；
-// 正数但小于 120 s → 抬到 120 s（理由见 MinTimeout）。
+// SyntheticFailure 把一次"没能成为帧"的失败**合成成一帧**，形状与引擎帧完全一致。
+//
+// 为什么需要它：`--json` 的消费方读的是帧（`{id,ok,result,error,ms}`），而这条链上有几处
+// 失败根本到不了引擎 —— 连不上、本地参数错、manifest 拉不到。从前它们各写各的：
+// 两处写的是 `fail()` 那份**另一个形状**的信封（`{ok,exit_code,error}`，那是 tzc 那条线的），
+// 一处什么都不写，而传输失败那处往 stdout 打了个字面量 `null`（`json.Marshal(nil)`）。
+// 现在一律走这里。
+//
+// **不在 Go 侧另写一个 struct**：形状就是 `Reply` 本身，逐字段对齐是抄第二份、会漂。
+// `id` 留 null 而不是 0 —— 帧级错误本来就不回显 id（引擎的 WriteFatal 也是这样）。
+func SyntheticFailure(err error) *Reply {
+	if err == nil {
+		return nil
+	}
+	code, kind := syntheticFor(err)
+	return &Reply{OK: false, Error: &WireError{Code: code, Kind: kind, Message: err.Error()}}
+}
+
+// syntheticFor 按 err **自己的退出码**挑一对 (code, kind)。
+//
+// 硬约束：`frameExitCode(code, kind)` 必须等于 `err.ExitCode()`。不然同一个失败会有两种
+// 说法（"帧说 5、进程退 2"），而消费方只读其中一个。按退出码而不是按错误类型挑，
+// 这条约束就是**构造上成立**的，不靠人记得对齐 —— TestSyntheticFailure 会对四种错误
+// 逐个验这条等式。
+func syntheticFor(err error) (code, kind string) {
+	var ec interface{ ExitCode() int }
+	if !errors.As(err, &ec) {
+		return CodeInternal, KindInternal // 未分类：按"不是你的错"兜底（退 1）
+	}
+	switch ec.ExitCode() {
+	case ExitUsage:
+		return CodeBadRequest, KindValidation // 退 2：参数/环境不对，可以自纠
+	case ExitDesigner:
+		return CodeDesigner, KindDesigner // 退 4：表单自己的规则说不
+	case ExitTransport:
+		// 退 5。E_SERVER_DIED 就是本包给"一切传输失败"的码（见上面的常量注释），
+		// 包括守护进程没应答就退出。
+		return CodeServerDied, KindInternal
+	default:
+		// ExitFrameErr（退 1）以及任何没见过的码：内部错。
+		return CodeInternal, KindInternal
+	}
+}
+
+// NormalizeTimeout 把 `--timeout` 收到的值规范化：0/负数 → 默认 300 s；// 正数但小于 120 s → 抬到 120 s（理由见 MinTimeout）。
 //
 // 命令层应当在**解析完 flag 之后**、调用 Call 之前过一遍它。
 func NormalizeTimeout(d time.Duration) time.Duration {

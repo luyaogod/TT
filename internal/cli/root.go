@@ -104,13 +104,30 @@ func Execute(web fs.FS) {
 		// 而这恰恰是最需要说清楚的时候（"为什么服务没起来/为什么没输出"）。
 		// 带退出码的错误（既有 TDev 的 0/2/3/4/5 契约，以及 output.Error 的
 		// 2=数据源 / 3=缺表）按码退出。
-		reportError(err)
+		//
+		// **例外**：自己已经把失败打出去了的命令组（见 alreadyReported）跳过这一步 ——
+		// 它们各有自己完整的输出契约，再抄一份会让 stdout 上出现两个 JSON 对象。
+		var reported alreadyReported
+		if !errors.As(err, &reported) || !reported.AlreadyReported() {
+			reportError(err)
+		}
 		if code := exitCodeOf(err); code != 0 {
 			os.Exit(code)
 		}
 		os.Exit(1)
 	}
 }
+
+// alreadyReported 由"自己已经把失败打出去了"的命令组实现 —— 根命令据此跳过 reportError。
+//
+// 为什么需要它：`tt dev` 是完整的一套 CLI（自己的 Usage、自己的退出码、自己把失败打成
+// stdout 的信封或帧），而 reportError 在 JSON 模式下也往 stdout 写信封。两份叠在一起的
+// 后果是 **stdout 上恰好两个 JSON 对象**：`jq .error.code` 打出两行，其中一行是 null，
+// 而"`--json` 下 stdout 恰好一个对象"正是 .tzs 那条线刚立下的规则。
+//
+// 用结构化接口而不是共享一个类型：记号由命令组自己声明（`exitCode.AlreadyReported`），
+// 根命令只问"你报过了吗" —— 不必为了一个记号把 internal/cli/dev 的类型导出。
+type alreadyReported interface{ AlreadyReported() bool }
 
 // reportError 打一次错误。
 //
@@ -119,6 +136,10 @@ func Execute(web fs.FS) {
 // 并多打一行「提示:」把修复建议单独拎出来。
 //
 // ⚠️ 这会改变"stderr 有内容 = 失败"这个既有判据：JSON 模式下失败信息在 stdout。
+//
+// **`tt dev` 不经过这里**：它自己是一套完整的 CLI（自己的 Usage、自己的退出码、
+// 自己把失败打成 stdout 的信封或帧），所以它返回的错误实现了 alreadyReported ——
+// 否则同一个失败会在 stdout 上出现两份信封，而 `jq .error.code` 会打出两行（一行是 null）。
 func reportError(err error) {
 	format := common.OutputFormat()
 	var oe *output.Error
