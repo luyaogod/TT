@@ -173,6 +173,30 @@ func (d *DebugSettings) BPsPersisted(dataDir string) bool {
 // 静默回落会让用户以为查到的是实时数据，实际是几天前的镜像。
 type QuerySettings struct {
 	Source string `json:"source,omitempty"`
+
+	// Limit 查询结果默认**返回**多少条(0 = 不限;未配置 = DefaultQueryLimit)。
+	//
+	// 它不是"显示上限"而是**返回上限**,文本/CSV/JSON 一视同仁 —— 否则换个输出格式
+	// 就换了契约,而一次宽查询足以把 agent 的上下文打爆(实测 `tt dict msg --type 1
+	// --status Y` 是 9.3 MB / 28005 条)。命令行的 --limit 覆盖本次调用。
+	//
+	// 截断时结果不会丢:完整的那份落盘,信封里给 totalRows 与 localPath。
+	Limit int `json:"limit,omitempty"`
+}
+
+// DefaultQueryLimit 未配置 query.limit 时的返回条数上限。
+// 取 20 与既有几处 --limit 的默认值一致(消息列表 / 程序作业数 / 用表反查)。
+const DefaultQueryLimit = 20
+
+// EffectiveLimit 生效的返回条数上限;0 = 不限。
+func (q QuerySettings) EffectiveLimit() int {
+	if q.Limit > 0 {
+		return q.Limit
+	}
+	if q.Limit < 0 {
+		return 0 // 显式配成负数 = 不限(与 --limit 0 同义)
+	}
+	return DefaultQueryLimit
 }
 
 // MirrorSettings 源码镜像落点（绝对路径）。

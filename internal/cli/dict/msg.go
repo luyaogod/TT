@@ -33,7 +33,6 @@ var (
 	msgType   string
 	msgStatus string
 	msgProg   string
-	msgLimit  int
 	msgFull   bool
 )
 
@@ -198,8 +197,8 @@ func printMsg(m *db.MsgRow) {
 // 65 条),一条一块详情没法看;列表给编号,要细节再用编号精确查一次。
 func printMsgList(rows []db.MsgRow) {
 	shown := rows
-	if msgLimit > 0 && len(shown) > msgLimit {
-		shown = shown[:msgLimit]
+	if limitOf() > 0 && len(shown) > limitOf() {
+		shown = shown[:limitOf()]
 	}
 	table := make([][]string, 0, len(shown))
 	for _, m := range shown {
@@ -335,7 +334,6 @@ func init() {
 	msgCmd.Flags().StringVar(&msgType, "type", "", "信息类型 (gzze007; 0=警告 1=错误 2=资讯;可逗号分隔多个)")
 	msgCmd.Flags().StringVar(&msgStatus, "status", "", "状态 (gzzestus; Y=启用 N=停用;可逗号分隔多个)")
 	msgCmd.Flags().StringVar(&msgProg, "prog", "", "建议运行作业 (gzze005);查哪些消息建议跑这个作业;可逗号分隔多个")
-	msgCmd.Flags().IntVar(&msgLimit, "limit", 20, "多条命中时列表最多显示几行 (0 = 全部)")
 	msgCmd.Flags().BoolVar(&msgFull, "full", false, "多条命中时也逐条打详情(默认只列表)")
 	// 负整数编号(SQLCODE,如 -263)会被 flag 解析吃掉,报 "unknown shorthand flag: '2' in -263",
 	// 看不出该怎么办。这里翻成可操作的提示(唯一需要 -- 分隔的参数位置)。

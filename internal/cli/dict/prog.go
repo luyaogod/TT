@@ -11,10 +11,9 @@ import (
 )
 
 var (
-	progKW    string
-	progLang  string
-	progLimit int
-	progSub   bool
+	progKW   string
+	progLang string
+	progSub  bool
 )
 
 var progCmd = &cobra.Command{
@@ -141,8 +140,8 @@ func runProgDetail(code string) error {
 	}
 	headers := []string{"作业编号", "作业名称", "归属模块", "应用参数组", "参数组说明", "默认单据性质"}
 	shown := jobs
-	if progLimit > 0 && len(jobs) > progLimit {
-		shown = jobs[:progLimit]
+	if limitOf() > 0 && len(jobs) > limitOf() {
+		shown = jobs[:limitOf()]
 	}
 	var rows [][]string
 	for _, j := range shown {
@@ -244,8 +243,8 @@ func printProgTables(code string, fromNotFound bool) error {
 	}
 	fmt.Printf("\n使用的表格 (%d):\n", len(tables))
 	shown := tables
-	if progLimit > 0 && len(tables) > progLimit {
-		shown = tables[:progLimit]
+	if limitOf() > 0 && len(tables) > limitOf() {
+		shown = tables[:limitOf()]
 	}
 	var rows [][]string
 	for _, t := range shown {
@@ -410,7 +409,6 @@ func isDigits(s string) bool {
 func init() {
 	progCmd.Flags().StringVar(&progKW, "kw", "", "按程序编号/中文名称搜索 (无编号时的列表模式)")
 	progCmd.Flags().StringVar(&progLang, "lang", "zh_CN", "程序名称语言别 (gzzal002, 默认 zh_CN)")
-	progCmd.Flags().IntVar(&progLimit, "limit", 20, "作业最多显示几行 (0 = 全部;大程序可被数百个作业使用)")
 	progCmd.Flags().BoolVar(&progSub, "sub", false, "无编号时:列出/搜索子程序与元件(gzde_t)而不是主程序")
 	Group.AddCommand(progCmd)
 }

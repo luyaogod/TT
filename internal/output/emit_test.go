@@ -132,7 +132,8 @@ func TestEmitMetaSkipsEmptySegments(t *testing.T) {
 	}
 }
 
-// TestEmitCountLine 行数行的三种情形:0 行要点名"上错号也是 0 行",截断要给总数。
+// TestEmitCountLine 行数行的四种情形:0 行要点名"上错号也是 0 行";
+// 截断要给总数,且**区分**库侧限流的"≥下界"与本地按条数截断的"共 N 条"。
 func TestEmitCountLine(t *testing.T) {
 	cases := []struct {
 		name string
@@ -141,7 +142,11 @@ func TestEmitCountLine(t *testing.T) {
 	}{
 		{"零行", Meta{TotalRows: 0}, "先核对上面的企业编号"},
 		{"正常", Meta{TotalRows: 7}, "行数 7"},
-		{"截断", Meta{TotalRows: 5000, Returned: 200, Truncated: true}, "≥5000"},
+		// 库侧包装多取一行判"还有更多",所以 totalRows 只是下界
+		{"库侧截断", Meta{TotalRows: 5000, Returned: 200, Truncated: true, ServerLimited: true}, "≥5000"},
+		// 本地按返回条数截断:总数是准的,且必须说清只回了多少
+		{"本地截断", Meta{TotalRows: 28005, Returned: 20, Truncated: true}, "共 28005 条,只回了前 20 条"},
+		{"本地截断带落盘", Meta{TotalRows: 28005, Returned: 20, Truncated: true, LocalPath: `D:\x.json`}, "完整结果见落盘文件"},
 	}
 	for _, c := range cases {
 		if got := c.m.countLine(); !strings.Contains(got, c.want) {

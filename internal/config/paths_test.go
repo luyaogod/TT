@@ -434,11 +434,11 @@ func TestLooksLikeConfig(t *testing.T) {
 	}{
 		{`{"hosts":{"sshs":[]}}`, true}, // 旧结构，但是配置
 		{`{"schemaVersion":2}`, true},   // 当前结构
-		{``, false},                    // 空文件
-		{`[]`, false},                  // 是 JSON，但不是对象
-		{`"x"`, false},                 // 同上
-		{`{`, false},                   // 坏 JSON
-		{"这不是 JSON", false},           // 根本不是
+		{``, false},                     // 空文件
+		{`[]`, false},                   // 是 JSON，但不是对象
+		{`"x"`, false},                  // 同上
+		{`{`, false},                    // 坏 JSON
+		{"这不是 JSON", false},             // 根本不是
 	}
 	for _, c := range cases {
 		if got := looksLikeConfig([]byte(c.in)); got != c.want {

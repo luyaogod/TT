@@ -93,13 +93,24 @@ func (m Meta) headerLines() []string {
 }
 
 // countLine 行数行。0 行时必须点名"上错号也会是 0 行" —— 那是本工具最容易误读的一种结果。
+//
+// 截断时把"总共多少、回了多少、完整在哪"一次说清:截断是刻意的保护,但**绝不能静默** ——
+// 调用方拿着残缺结果当成全部去下结论,比给一坨大的坏得多。
 func (m Meta) countLine() string {
 	switch {
 	case m.Truncated:
-		// TotalRows 只是**下界**:库侧包装时故意多取一行用来判"还有更多",
-		// 写成"共 N 行"会让人以为结果就这么多。
-		return fmt.Sprintf("行数 %d(已截断:库侧返回 ≥%d 行,只保留前 %d 行;要更多请加条件收窄)",
-			m.Returned, m.TotalRows, m.Returned)
+		// ServerLimited 时 TotalRows 只是**下界**(库侧包装时故意多取一行判"还有更多"),
+		// 写成"共 N 条"会让人以为结果就这么多;加"库侧返回 ≥"把它说实。
+		count := "共 "
+		if m.ServerLimited {
+			count = "库侧返回 ≥"
+		}
+		where := ""
+		if m.LocalPath != "" {
+			where = ",完整结果见落盘文件"
+		}
+		return fmt.Sprintf("行数 %d(已截断:%s%d 条,只回了前 %d 条%s;要直接看全量加 --limit 0)",
+			m.Returned, count, m.TotalRows, m.Returned, where)
 	case m.TotalRows == 0:
 		return "行数 0(注意:上错号/上错环境也会是 0 行,先核对上面的企业编号)"
 	default:

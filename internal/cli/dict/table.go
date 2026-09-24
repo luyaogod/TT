@@ -15,7 +15,6 @@ var (
 	tableLang  string
 	tableBrief bool
 	tableWho   bool
-	tableLimit int
 )
 
 var tableCmd = &cobra.Command{
@@ -65,7 +64,7 @@ var tableCmd = &cobra.Command{
 		}
 
 		if Format() != output.FormatTable {
-			return emit(dicts, tableDetailColumns, tableDetailRows(dicts))
+			return emitDetail(dicts, tableDetailColumns, tableDetailRows(dicts))
 		}
 
 		// --brief:只要表级信息。多表同查时默认会打每张表的全部字段(7 张表 ≈ 700 行),
@@ -288,8 +287,8 @@ func runTableWho(tables []string) error {
 		}
 		fmt.Printf("使用它的程序 (%d):\n", len(progs))
 		shown := progs
-		if tableLimit > 0 && len(progs) > tableLimit {
-			shown = progs[:tableLimit]
+		if limitOf() > 0 && len(progs) > limitOf() {
+			shown = progs[:limitOf()]
 		}
 		var rows [][]string
 		for _, p := range shown {
@@ -328,7 +327,6 @@ func init() {
 	tableCmd.Flags().StringVar(&tableLang, "lang", "zh_CN", "表说明语言别 (dzeal002, 默认 zh_CN)")
 	tableCmd.Flags().BoolVar(&tableBrief, "brief", false, "只给表级信息(表名/说明/模块/类型/字段数),不打字段明细")
 	tableCmd.Flags().BoolVar(&tableWho, "who", false, "反查哪些程序在用这些表(含操作类别 S/I/U/D)")
-	tableCmd.Flags().IntVar(&tableLimit, "limit", 20, "--who 最多显示几个程序 (0 = 全部)")
 	Group.AddCommand(tableCmd)
 }
 

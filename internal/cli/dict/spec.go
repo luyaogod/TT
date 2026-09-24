@@ -91,7 +91,7 @@ func runSpecList(table string) error {
 		tableRows = append(tableRows, specRowCSV(r))
 	}
 	if Format() != output.FormatTable {
-		return emit(tbl, specCSVHeaders, tableRows)
+		return emitDetail(tbl, specCSVHeaders, tableRows)
 	}
 
 	fmt.Printf("=== %s ===\n", tbl.TableName)

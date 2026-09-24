@@ -9,9 +9,13 @@ package dict
 // 那一整块已删除。
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strconv"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -25,10 +29,18 @@ import (
 // dbPath -d/--db:本地 SQLite 镜像路径(查询命令读它,db sync 写它)。
 var dbPath string
 
+// srcConfigPath 本次用的配置文件路径(PreRunE 里解析一次):它所在的目录既是
+// 企业目录快照的落点,也是截断时结果落盘的落点。
+var srcConfigPath string
+
 func init() {
 	// 字典独有的 persistent flag:--db 只对 tt dict 有意义
 	Group.PersistentFlags().StringVarP(&dbPath, "db", "d", "erp_data.db",
 		"本地 SQLite 数据库路径(本地查询数据源;也可用 TDICT_DB)")
+	// --limit 挂在命令组上而不是各命令上:返回条数上限是**全局策略**,不是某个命令的
+	// 显示选项 —— 从前只有 msg/prog/r.t 各自定义了一个,其余命令等于没有防线。
+	Group.PersistentFlags().IntVar(&queryLimit, "limit", -1,
+		"结果最多返回多少条 (0 = 不限;-1 = 跟随配置;缺省取 config.json query.limit,再缺省 20)")
 
 	// 打开/关闭查询数据源:本地 SQLite(--db/TDICT_DB)或远程库(--env/query.source)。
 	// 不依赖本地字典库的子命令(env/mirror/db/install/serve/bdldoc)各自覆盖本钩子。
@@ -36,6 +48,7 @@ func init() {
 		if err := runRootPreRun(args); err != nil {
 			return err
 		}
+		loadQueryPolicy()
 		return openQuerySource()
 	}
 	Group.PersistentPostRun = func(cmd *cobra.Command, args []string) {
@@ -131,24 +144,156 @@ func IsCSV() bool { return common.OutputFormat() == output.FormatCSV }
 // Format 本次的输出形态(命令自己分流时用)。
 func Format() output.Format { return common.OutputFormat() }
 
-// emit 按当前形态渲染一次查询结果:JSON 给带环境信息的信封,CSV 给 `# ` 头 + 主体,
+// emit 渲染一次**结果集**查询:JSON 给带环境信息的信封,CSV 给 `# ` 头 + 主体,
 // 人读表格由调用方在 text 分支自己打(各命令的文本输出比一张表丰富)。
 //
-// 行数由表格本身给出:字典查询是"内存里就是全部命中",没有库侧截断。
+// 返回条数受**全局上限**约束(命令行 --limit > config.json query.limit > 内置缺省),
+// 三种形态一视同仁 —— 换个输出格式就换契约的话,一次宽查询足以打爆 agent 的上下文
+// (实测 `tt dict msg --type 1 --status Y` 是 9.3 MB / 28005 条)。
+// 截断时完整的那份落盘,信封里给 totalRows 与 localPath:截断是为了保护上下文,
+// 不是为了丢数据。
 func emit(data any, columns []string, rows [][]string) error {
-	return emitN(data, columns, rows, len(rows))
+	return emitCapped(true, data, columns, rows)
 }
 
-// emitOne 单实体详情(如一条校验定义、一张表的字段规格)。
-// 它没有"结果集行数"可言,记 1 条 —— 记 0 会让人以为什么都没查到。
-func emitOne(data any) error { return emitN(data, nil, nil, 1) }
+// emitDetail 单实体 + 它的明细行(如"一张表的全部字段规格")。
+//
+// **不按行数截断**:那是一张表的字段清单,不是结果集的一页 —— 按 20 行切下去
+// 会把字段切掉一半,而调用方要的就是"这张表完整长什么样"。
+// 条数照报,`--limit` 对它无效。
+func emitDetail(data any, columns []string, rows [][]string) error {
+	return emitCapped(false, data, columns, rows)
+}
 
-func emitN(data any, columns []string, rows [][]string, total int) error {
+// emitOne 单实体(如一条校验定义)。它没有"结果集行数"可言,记 1 条 ——
+// 记 0 会让人以为什么都没查到。
+func emitOne(data any) error {
+	m := srcMeta()
+	m.TotalRows, m.Returned = 1, 1
+	return emitWith(m, data, nil, nil)
+}
+
+func emitCapped(capping bool, data any, columns []string, rows [][]string) error {
+	total := len(rows)
+	if rows == nil {
+		total = payloadLen(data)
+	}
 	m := srcMeta()
 	m.TotalRows, m.Returned = total, total
+
+	if limit := limitOf(); capping && limit > 0 && total > limit {
+		// **先落盘,再截。** 顺序反了就把丢掉的那部分也一起丢了。
+		//
+		// 落盘失败就**不截断** —— 静默截断比给一坨大的更坏:调用方会拿着残缺的结果
+		// 当成全部去下结论,而这正是"不要误导 agent"要防的事。宁可让它大,不可让它假。
+		path, err := spillResult(data)
+		if err != nil {
+			m.Notes = append(m.Notes, "结果超过返回上限("+strconv.Itoa(limit)+" 条),"+
+				"但完整结果落盘失败,因此**未截断**、原样返回: "+err.Error())
+			return emitWith(m, data, columns, rows)
+		}
+		data = truncatePayload(data, limit)
+		if len(rows) > limit {
+			rows = rows[:limit]
+		}
+		m.Returned, m.Truncated, m.LocalPath = limit, true, path
+		// 三处说同一件事(notes / truncated+计数 / localPath),因为它最容易被读漏:
+		// 只看 notes 的、只看计数的、只看 data 的,都得撞上"这不是全部"。
+		m.Notes = append(m.Notes, fmt.Sprintf(
+			"结果已截断:只回了 %d / %d 条。完整结果在 %s(要直接看全量加 --limit 0)", limit, total, path))
+	}
+	return emitWith(m, data, columns, rows)
+}
+
+func emitWith(m output.Meta, data any, columns []string, rows [][]string) error {
 	return output.Emit(os.Stdout, output.Options{
 		Format: Format(), Meta: m, Data: data, Columns: columns, Rows: rows,
 	})
+}
+
+// ---- 返回条数上限 ----
+
+// queryLimit --limit:本次查询最多返回多少条。
+// 默认 -1 = 跟随 config.json 的 query.limit(它再缺省 DefaultQueryLimit);0 = 不限。
+var queryLimit int
+
+// srcQueryLimit 来自 config.json 的 query.limit(在 PreRunE 里读一次)。
+var srcQueryLimit = config.DefaultQueryLimit
+
+// limitOf 本次生效的返回条数上限;0 = 不限。
+func limitOf() int {
+	if queryLimit >= 0 {
+		return queryLimit
+	}
+	return srcQueryLimit
+}
+
+// payloadLen 载荷的元素个数:slice/array 看长度,其它(单实体)算 1,nil 算 0。
+func payloadLen(v any) int {
+	if v == nil {
+		return 0
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Slice, reflect.Array:
+		return rv.Len()
+	}
+	return 1
+}
+
+// truncatePayload 载荷是 slice 时保留前 n 个元素;其它形态原样返回(单实体没什么可截的)。
+func truncatePayload(v any, n int) any {
+	if v == nil || n <= 0 {
+		return v
+	}
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.Slice || rv.Len() <= n {
+		return v
+	}
+	return rv.Slice(0, n).Interface()
+}
+
+// spillResult 把完整结果落一份到 <配置目录>/spill/,返回路径。
+//
+// 它**必须在截断之前**成功 —— 落不了盘就不截断(见 emitCapped)。想看全量就去 grep
+// 这个文件,而不必把 9 MB 灌回上下文,也不必重跑一次查询。
+func spillResult(data any) (string, error) {
+	dir := dataDirOf(srcConfigPath)
+	if dir == "" {
+		return "", errors.New("定位不到配置目录")
+	}
+	if data == nil {
+		return "", errors.New("没有可落盘的数据")
+	}
+	sub := filepath.Join(dir, spillDirName)
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		return "", err
+	}
+	b, err := json.Marshal(data)
+	if err != nil {
+		return "", err
+	}
+	p := filepath.Join(sub, "query-"+time.Now().Format("20060102-150405")+".json")
+	if err := os.WriteFile(p, b, 0o644); err != nil {
+		return "", err
+	}
+	return p, nil
+}
+
+const spillDirName = "spill"
+
+// loadQueryPolicy 读一次全局查询策略。读不到配置不算错 —— 用内置缺省,查询照跑。
+func loadQueryPolicy() {
+	path, err := common.ResolveConfig(true)
+	if err != nil {
+		return
+	}
+	srcConfigPath = path
+	root, err := config.Load(path)
+	if err != nil {
+		return
+	}
+	srcQueryLimit = root.Query.EffectiveLimit()
 }
 
 // srcMeta 把当前数据源的落脚点转成输出信封的环境信息块。
