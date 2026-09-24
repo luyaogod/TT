@@ -88,13 +88,19 @@ tt dev tzs form_tree      --form aapt300 --args '{"depth":3}' --json            
 tt dev tzs find_component --form aapt300 --args '{"query":"worksheet"}' --json  # 控件代号 → name-path
 tt dev tzs get_component  --form aapt300 --args '{"path":"managedform/aapt300/HBoxT1/worksheet"}' --json
 tt dev tzs describe_kind  --form aapt300 --args '{"kind":"field"}' --json       # 这类节点**运行时**能写哪些属性
-tt dev tzs set_spec_attr  --form aapt300 --args '{"path":"<path>","kind":"field","attr":"can_edit","value":"true"}' --json
-tt dev tzs set_spec_attrs --form aapt300 --args '{"path":"<path>","kind":"field","attrs":{"can_edit":"true","can_query":"N"}}' --json
+tt dev tzs set_spec_attr  --form aapt300 --args '{"path":"<path>","kind":"field","attr":"can_edit","value":"N"}' --json
+tt dev tzs set_spec_attrs --form aapt300 --args '{"path":"<path>","kind":"field","attrs":{"can_edit":"Y","can_query":"N"}}' --json
 tt dev tzs validate       --form aapt300 --json                                 # 慢（实测 3–5 秒）；报**增量**
 tt dev tzs save           --form aapt300 --args '{"out":"D:\\ws\\_ai.tzs"}' --json  # 写**新**包；原包一字节不动
 tt dev tzs close          --form aapt300 --json
-tt dev tzs stop                                          # 停本工作区的常驻引擎
+tt dev tzs stop                                          # 停本工作区的常驻引擎（内建命令，不是引擎动词）
 ```
+
+> ⚠️ **上面这个顺序里那次 `validate` 证明不了任何事。** 一个会话上的**第一次** validate
+> **就是建基线的那次**（§5），而这里它排在改动**之后** —— 所以 `newErrors` 按构造就是空。
+> 想看真增量要**改之前**先 validate 一次（多花 3–8 秒）：
+> `open → 读 → validate(建基线) → 改 → validate(真增量) → save`。
+> 真正的"改对了"由**回读**证明，不是由 validate 证明。
 
 **要改多个属性就用复数形式**（`set_spec_attrs` / `set_layout_attrs`）：一次请求、一次寻址、**先全量校验再全量写**
 —— 名字或值有一个不合法，一个都不会写。它省掉的是 N 遍那条 100 多字符的 name-path。
@@ -113,6 +119,19 @@ tt dev tzs stop                                          # 停本工作区的常
 `describe_kind` 给**这一类节点此刻能写哪些属性**（白名单是每个包现算的，`attr` 必须照着它写，
 否则撞 `E_ATTR_NOT_WHITELIST`）；`list_spec_nodes` 列字段/动作等规格节点；`list_tables` /
 `list_columns` 查数据字典；`list_records` / `list_local_strings` 看记录与多语言。
+
+**两个返回形状不一样，别按一个猜**：`get_component` 的 `spec` 是**按 kind 分层的**
+（`spec.field.attrs.can_edit`），而 `layout` 是**扁平的**（`layout.noEntry`，没有 `.attrs`）。
+
+**规格动词怎么寻址**（这一条不写下来会白撞一次）：
+
+- `set_spec_attr` / `set_spec_attrs` 要的 `path` **是那个布局元素的 name-path**，再用 `kind` 指出
+  它身上挂的哪个规格节点。规格节点活在 `.tsd` 里，本身**没有** name-path。
+- `list_spec_nodes` 回的是 `{kind, name, status}`，**不含 path** —— 它不是寻址工具，
+  是"这张表单有哪些规格节点"的清单。要 path 用 `find_component`。
+- **path 的根不等于 `--form` 的程序名**：`--form apmt500_wf` 但 path 是
+  `managedform/`**`apmt500`**`/HBoxT1/…`。拿程序名去拼 path 会 `E_NOT_FOUND`。照 `find_component`
+  回的那条原样用。
 
 **几处容易记混的**：`move` **只改 Z 序**（同一父容器内前后挪），换父容器要用 `reparent`
 （设计器的拖拽命令，仅限同表单）；`add_field` 是加字段、`wrap` 是拿选中元素**包一层新容器**；
@@ -147,7 +166,7 @@ tt dev tzs list_open --json                            # 无参数的动词可�
 ### 4.3 寻址：`--form <程序名>`，不要搬运句柄
 
 ```powershell
-tt dev tzs set_spec_attr --form aapp320 --args '{"path":"…","kind":"field","attr":"can_edit","value":"true"}' --json
+tt dev tzs set_spec_attr --form aapp320 --args '{"path":"…","kind":"field","attr":"can_edit","value":"N"}' --json
 ```
 
 `--form` 写**程序名**（`aapp320`）或 **ProgramKey**（`aapp320|Form`），引擎自己解析成会话 ——
@@ -230,9 +249,21 @@ tt dev tzs set_spec_attr --form aapp320 --args '{"path":"…","kind":"field","at
 | `--form` 与 `handle` 同时给 / 给不需要句柄的动词 | 退 2（不猜优先级 / 不接受 form） |
 | **`kind` / `attr` 的取值、`add_action` 的 `type`** | **本地放行**，由引擎用它自己的白名单/该表单的 `s_detail<n>` 拒绝（退 2，`detail.legal` 给合法集） |
 | **布局属性的「值」** | **引擎按工作区的 `mta/mod-fd.spec` 拒**（退 2，`detail.legal` 给值集、`detail.hint` 给近似值） |
+| **`req` / `can_edit` / `can_query` 的值** | **引擎只收 `Y` / `N` / 空串**（退 2，`detail.legal`）。这三个是设计器面板上的勾选位，**不要写 `"true"`** |
 
-最后两行是**故意的**：那几处的合法集要从**活着的模型**、**该表单自己的**记录、或**工作区的规范文件**里取，
+最后三行是**故意的**：那几处的合法集要从**活着的模型**、**该表单自己的**记录、或**工作区的规范文件**里取，
 静态判不了。在本地拦下来只会让一个引擎本会接受的调用永远到不了引擎，而且拦得静悄悄（写错了不会有测试失败）。
+
+**`req` / `can_edit` / `can_query` 只写 `Y` / `N`（或空串）。** 这三个值得单独说，因为写错**不报错**：
+
+- 面板的复选框走 `CheckedValueConverter`，它的 `ConvertBack` 只写 `"Y"` 或 `"N"`。
+- 但它的 `Convert`（值→勾选态）认 `"Y"` **和 `"TRUE"`**（大小写不敏感）—— 所以 `can_edit="true"`
+  在面板上**显示为勾着**。
+- 而 `SpecNodeTransform.TransformCanEdit` 是**精确比较**：
+  `formElement.SetAttribute("noEntry", ("Y" == specFieldNode.CanEdit) ? "false" : "true")`。
+  于是 `can_edit="true"` → `noEntry="true"` → **面板说能编辑，运行时说不能编辑**。
+
+语料（65 个包的 `.tsd`）里这三个属性只出现过 `Y` / `N` / 空串，从没有别的写法。**写别的值引擎现在会拒。**
 
 **值校验只覆盖布局侧**（`set_layout_attr` / `set_layout_attrs`），依据是 `<工作区>/mta/mod-fd.spec` 的
 `<PropertyInfo type=… editorInfo="contains:a|b|c">`。三条边界要知道：
@@ -284,6 +315,10 @@ tt dev tzs export "D:\\ws\\aapt300(c).tzs"    # 纯解压到 <包目录>\aapt300
 | 多语言/选项/串查 | `set_local_string` `set_items` `set_progrel_programs` `set_table_association` `set_spec_description` `set_cited` |
 | Tab 顺序 | `set_tab_order` `tab_action` |
 | 校验/工具 | `validate` `base_data` `set_excluded` `set_code_template` |
+
+**这 52 个来自引擎的函数表。另有 4 个是 `tt` 自己的内建命令，不在表里、也不接受 `--help`：**
+`export`（§9，本地解压，不用引擎）、`doctor`（自检）、`stop`、`reap`。`tt dev tzs stop --help`
+会退 2 —— 它走的是另一条路径。
 
 ## 11. 常见错误（自查表）
 

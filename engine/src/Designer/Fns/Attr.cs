@@ -94,6 +94,31 @@ namespace TzsCli.Designer
             return new DetailedError("E_ATTR_NOT_WHITELIST", msg, d);
         }
 
+        /// <summary>The spec side's value guard: the same shape as GuardValue, against a domain
+        /// that comes from the designer's own checkbox plumbing rather than from mod-fd.spec (see
+        /// SpecValues.CheckSpec). Called before any write, by both the singular and the plural
+        /// writer -- in the plural one it must run in the VALIDATE-ALL pass, not inside the write
+        /// loop, or a bad third value would land after the first two had been written.</summary>
+        static void GuardSpecValue(string attr, string value, string path, string kind) {
+            SpecValues.Verdict v = SpecValues.CheckSpec(attr, value);
+            if (v.Ok) return;
+
+            var d = new JObject();
+            d["path"] = path;
+            d["kind"] = kind;
+            d["attr"] = attr;
+            d["value"] = value;
+            d["legal"] = Read.StrArray(new List<string>(v.Legal));
+            if (v.Suggest != null) d["hint"] = v.Suggest;
+            d["type"] = v.Type;
+            d["source"] = "设计器自己的勾选位（CheckedValueConverter / SpecNodeTransform）";
+            d["written"] = false;
+
+            string msg = v.Message + "；合法值: " + string.Join(", ", v.Legal);
+            if (v.Suggest != null) msg += "（是不是想说 " + v.Suggest + "？）";
+            throw new DetailedError("E_ATTR_VALUE_ILLEGAL", msg, d);
+        }
+
         /// <summary>
         /// Refuses a value the designer's own specification does not allow, BEFORE anything is
         /// written.
@@ -308,6 +333,7 @@ namespace TzsCli.Designer
             SpecNode(s, path, kind, out el, out node, out legal);
             if (legal.IndexOf(attr) < 0)
                 throw NotWhitelisted(kind + " 节点", attr, legal, path, kind);
+            GuardSpecValue(attr, value, path, kind);
 
             // NO GuardValue here, deliberately -- do not "fix" this by adding one.
             //
@@ -353,9 +379,11 @@ namespace TzsCli.Designer
             object el, node;
             List<string> legal;
             SpecNode(s, path, kind, out el, out node, out legal);
-            foreach (JProperty p in attrs.Properties())
+            foreach (JProperty p in attrs.Properties()) {
                 if (legal.IndexOf(p.Name) < 0)
                     throw NotWhitelisted(kind + " 节点", p.Name, legal, path, kind);
+                GuardSpecValue(p.Name, StringValue(p), path, kind);
+            }
 
             var results = new JArray();
             var changes = new JObject();

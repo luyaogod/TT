@@ -55,10 +55,10 @@ namespace TzsCli.Designer
         // vocabulary the distinction needs.
         static readonly string[] E_SPEC = {
             "E_NOT_FOUND", "E_BAD_PARAM", "E_DESIGNER",
-            "E_ATTR_NOT_WHITELIST", "E_NO_OP", "E_INTERNAL" };
+            "E_ATTR_NOT_WHITELIST", "E_ATTR_VALUE_ILLEGAL", "E_ATTR_PARTIAL", "E_NO_OP", "E_INTERNAL" };
         static readonly string[] E_LAYOUT = {
             "E_NOT_FOUND", "E_BAD_PARAM", "E_DESIGNER",
-            "E_ATTR_NOT_WHITELIST", "E_ATTR_VALUE_ILLEGAL", "E_ATTR_CLAMPED", "E_NO_OP", "E_INTERNAL" };
+            "E_ATTR_NOT_WHITELIST", "E_ATTR_VALUE_ILLEGAL", "E_ATTR_PARTIAL", "E_ATTR_CLAMPED", "E_NO_OP", "E_INTERNAL" };
 
         /// <summary>The 控件箱 (WidgetBox.xaml, 31 items) minus the container/semantic families,
         /// which get their own enums. It is an enum rather than a free string because

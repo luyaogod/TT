@@ -144,6 +144,58 @@ namespace TzsCli.Designer {
             return v;
         }
 
+        // ------------------------------------------------------------------ the spec side's Y/N
+
+        /// <summary>
+        /// The three spec-node attributes the designer's own checkboxes write, and the only values
+        /// they may take.
+        ///
+        /// This is NOT read from mod-fd.spec -- that file is the *Form Designer*'s and describes
+        /// .4fd elements (see the class comment for why the layout rule must not be reused here).
+        /// The domain is declared just as firmly, by three sources that agree:
+        ///
+        ///   * SpecPropertyEditor.xaml binds exactly four CheckBoxes through CheckedValueConverter
+        ///     (Req :398, CanEdit :611, CanQuery :636, Gencode :1409), and that converter's
+        ///     ConvertBack writes only "Y" or "N".
+        ///   * The transforms compare against "Y" EXACTLY -- SpecNodeTransform.TransformCanEdit is
+        ///         formElement.SetAttribute("noEntry", ("Y" == specFieldNode.CanEdit) ? "false" : "true");
+        ///     So `can_edit="true"` reads back as CHECKED in the panel (the converter's Convert
+        ///     accepts "TRUE" case-insensitively) while the transform computes the OPPOSITE
+        ///     side-effect: the panel says editable and the runtime says not. That is a silent
+        ///     corruption with no error anywhere, and it is what the SKILL's own example used to
+        ///     teach -- which is the only reason this table exists.
+        ///   * The corpus (65 packages, .tsd): can_edit Y4553/N1929/""74, can_query Y5263/N1219/""74,
+        ///     req N5070/Y1284/""202. Nothing outside {Y, N, ""} has ever been written.
+        ///
+        /// Hand-written, therefore a drift risk, and accepted on purpose: the alternative is an
+        /// error nobody reports. Each of the three checks above is re-runnable when the designer
+        /// moves. `gen_code` (the fourth CheckBox, on the `act` node) is deliberately left out --
+        /// the corpus scan covered &lt;field&gt; elements, so its domain is not measured here.
+        /// </summary>
+        static readonly Dictionary<string, string[]> SpecYN = new Dictionary<string, string[]>(StringComparer.Ordinal) {
+            { "req",       new string[] { "Y", "N" } },
+            { "can_edit",  new string[] { "Y", "N" } },
+            { "can_query", new string[] { "Y", "N" } },
+        };
+
+        /// <summary>The spec-side half of Check(): a value the designer's own checkbox could not
+        /// have produced is refused, because the transforms compare against "Y" literally. No
+        /// workspace is needed -- the table is above.</summary>
+        public static Verdict CheckSpec(string attr, string value) {
+            var v = new Verdict();
+            string[] legal;
+            if (attr == null || !SpecYN.TryGetValue(attr, out legal)) return v;
+            v.Type = "YESNO";
+            if (value == null || value.Length == 0) return v;   // empty = unset, as everywhere else
+            for (int i = 0; i < legal.Length; i++) if (legal[i] == value) return v;
+            v.Ok = false;
+            v.Legal = legal;
+            v.Suggest = Nearest(value, legal);
+            v.Message = "属性 \"" + attr + "\" 是设计器的勾选位，只接受 Y / N（空串＝没设）；"
+                      + "写别的值面板与运行时会对不上";
+            return v;
+        }
+
         // ------------------------------------------------------------------ nearest-name / nearest-value
 
         /// <summary>
