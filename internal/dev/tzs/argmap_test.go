@@ -48,6 +48,27 @@ func TestBuildArgsFromJSONTable(t *testing.T) {
 		{
 			"空对象", "list_open", `{}`, `{}`, "",
 		},
+		// ---- attrs：一次改多个属性的那个对象 ----
+		{
+			"attrs：值都是字符串，键排一次序（重发的字节才稳定）", "set_spec_attrs",
+			`{"handle":"h1","path":"p","kind":"field","attrs":{"can_query":"N","can_edit":"true"}}`,
+			`{"handle":"h1","path":"p","kind":"field","attrs":{"can_edit":"true","can_query":"N"}}`, "",
+		},
+		{
+			"attrs：值不是字符串 → 点名那个键", "set_spec_attrs",
+			`{"handle":"h1","path":"p","kind":"field","attrs":{"gridWidth":20}}`,
+			"", "gridWidth",
+		},
+		{
+			"attrs：空对象 → 指路用单数形式", "set_spec_attrs",
+			`{"handle":"h1","path":"p","kind":"field","attrs":{}}`,
+			"", "空对象",
+		},
+		{
+			"attrs：写成数组 → 说清要对象", "set_spec_attrs",
+			`{"handle":"h1","path":"p","kind":"field","attrs":["a"]}`,
+			"", "需要 JSON 对象",
+		},
 		{
 			"没有参数时也 build 出空对象", "list_open", ``, `{}`, "",
 		},

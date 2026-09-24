@@ -1264,7 +1264,7 @@ new AddComponetsUndoRedoCommand(list, parent, index).Execute();
 |---|---|---|
 | 会话 (5) | `open` `save` `close` `verify` `list_open` | `SettingManager.OpenSpecFiles` / `SaveSetting` |
 | 读 (9) | `form_tree` `find_component` `get_component` `list_spec_nodes` `describe_kind` `list_tables` `list_columns` `list_records` `list_local_strings` | `FormNode` / `*ForView` / `Other*` / `TableColumnHelper` / `GetRecords` |
-| 属性 (4) | `set_spec_attr` `set_layout_attr`（含批量）`set_tree_source` `rename_component` | `SpecAttribute` / `MultiFormAttributes` / `SpecTreeAttribute` / `Rename` |
+| 属性 (6) | `set_spec_attr` `set_spec_attrs` `set_layout_attr`（含批量 `paths`）`set_layout_attrs` `set_tree_source` `rename_component` | `SpecAttribute` / `MultiFormAttributes` / `SpecTreeAttribute` / `Rename` |
 | 结构 (12) | `add_widget` `add_field` `insert_at` `delete` `move` `nudge` `align` `fit_size` `wrap` `break_layout` `convert_widget` `convert_container` | 对应 12 个命令类 |
 | ~~复制 (1)~~ | **已摘除**：`copy_component` 不复制（它是 cut+paste，同容器下就是重排），而且 `TargetContainer` 取的是**源容器自己**的相对路径，所以换容器不可达、跨表单必被拒。命令类在设计器里存在，但**不暴露**——完整理由见 `HANDOFF.md §18` |`Cut`/`Paste`/`DesignerClipboardData`（不暴露） |
 | 页签 (2) | `add_page` `delete_page` | `AddComponets` + `Page` / `DeleteComponents` |
@@ -1433,7 +1433,9 @@ SpecDesignerCommon/ViewModel/XmlElement.cs:2522
 | `E_HANDLE_BUSY` | validation | 句柄状态不对 |
 | `E_PATH_NOT_FOUND` | not_found | name-path 解析不到 |
 | `E_NO_SPEC_NODE` | not_found | 该元素没有这种规格节点；换一个 kind |
-| `E_ATTR_NOT_WHITELIST` | validation | 索引器拒绝——元素身上没有这个属性；`detail.legal` 列出合法集 |
+| `E_ATTR_NOT_WHITELIST` | validation | 索引器拒绝——元素身上没有这个属性；`detail.legal` 列出合法集，`detail.hint` 给最接近的名字 |
+| `E_ATTR_VALUE_ILLEGAL` | validation | 属性名合法但**值**不在设计器声明的集合里（`<工作区>/mta/mod-fd.spec` 的 `contains:` / `type`）；`detail.legal` 给值集、`detail.hint` 给最接近的值、`detail.source` 说明依据、`detail.written:false` 表示一个字节都没写。**只查布局侧**，原因见 7.5.5 的表 |
+| `E_ATTR_PARTIAL` | designer | 复数写入（`set_spec_attrs` / `set_layout_attrs`）写了一半：名字与值都已在写之前全量校验过，所以失败来自模型；`detail.applied` / `detail.failed` 两栏说明哪几个落了、哪几个没有，**模型不是原样了**，重发只该发 `failed` 里那几个 |
 | `E_KEY_IN_USE` | designer | 同一个 `ProgramKey` 已被占用；先 close |
 | `E_DESIGNER` | designer | 设计器自己的规则拒绝（repeat 门禁、重名、被引用不可改） |
 | `E_FATAL_LOAD_TIMEOUT` | designer | 加载超时；**进程随即退出**，见 (h) |

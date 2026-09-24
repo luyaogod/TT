@@ -23,7 +23,8 @@ namespace TzsCli.Designer {
         Kind,        // one of the seven spec node kinds
         AttrName,    // describe_from decides the legal set at runtime
         Enum,        // Values decides it statically
-        StrList, PathList
+        StrList, PathList,
+        Attrs        // a JSON object of attribute name -> string value (the plural writers)
     }
 
     public sealed class Param {
@@ -86,6 +87,11 @@ namespace TzsCli.Designer {
         /// `items` carried `path[]` for a list of "name|text|description" strings).</summary>
         public static Param StrList(string n, bool req = false, string desc = null)
             { return new Param { Name = n, Type = PType.StrList, Required = req, Desc = desc }; }
+        /// <summary>Several attributes of one node, as `{"attr":"value", ...}`. An object rather
+        /// than a list of {attr,value} pairs because the attribute names ARE unique within the map
+        /// -- the JSON object is the shape that says so.</summary>
+        public static Param Attrs(string n, string desc = null)
+            { return new Param { Name = n, Type = PType.Attrs, Required = true, Desc = desc }; }
     }
 
     /// <summary>The seven spec-node slots a FormSpecModel actually holds.

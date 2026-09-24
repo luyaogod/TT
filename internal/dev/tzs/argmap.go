@@ -5,7 +5,7 @@ package tzs
 // 命令面只接受**一种**参数写法：`--args '<JSON 对象>'` / `--args-file <文件>`。
 // 没有 `--<参数> <值>` 那种写法，这是刻意的：
 //
-//   - 动词参数的名字与类型是**运行时**从引擎 manifest 来的（144 个参数、10 种类型）。
+//   - 动词参数的名字与类型是**运行时**从引擎 manifest 来的（151 个参数、11 种类型）。
 //     照它为每个动词手写一遍 flag，就是 50 × N 处会跟引擎漂移的代码；动态解析则把
 //     `--paths a b c`、裸词、重复标量、负号、引号这些**语法问题**变成调用方要学的东西。
 //   - 一份 JSON 把这一类问题一次消掉：数组就是数组、布尔就是布尔、字符串不用转义，
@@ -201,6 +201,7 @@ func emitArgs(keys []string, vals map[string]json.RawMessage) json.RawMessage {
 //	bool 只认字面量 true/false
 //	enum 认字符串且在静态合法集内（Values 为空则不校验，与引擎一致）
 //	数组 必须是字符串数组（元素是对象/数字都拒）
+//	attrs 必须是对象且值是字符串（键排一次序，重发出去的字节稳定）
 //	其余（string / path / handle / kind / attr / 未知类型）按字符串对待：
 //	     对象与数组拒（引擎也拒），字符串重新转义成规范形式，其余标量原样透传
 //
@@ -234,6 +235,51 @@ func paramJSONValue(fn string, p *Param, v json.RawMessage) (string, error) {
 			b.WriteString(JSONString(s))
 		}
 		b.WriteByte(']')
+		return b.String(), nil
+
+	case TypeAttrs:
+		// 一个 JSON 对象，值必须是字符串。形状逐条对齐引擎的 Manifest.Check；**不**判
+		// 「哪些属性名合法、哪些值合法」—— 前者要看活模型、后者要看工作区的 mod-fd.spec，
+		// 本地两样都没有（与 kind/attr 同一条分工，见 §11.24(c)）。
+		var obj map[string]json.RawMessage
+		if len(t) == 0 || t[0] != '{' || json.Unmarshal(t, &obj) != nil {
+			return "", &UsageError{
+				Msg: "参数 " + p.Name + " 需要 JSON 对象（属性名 → 字符串值），收到 " + jsonKindName(t),
+				Detail: []string{"函数 " + fn,
+					"写法：\"" + p.Name + "\": {\"can_query\": \"N\", \"req\": \"Y\"}"},
+			}
+		}
+		if len(obj) == 0 {
+			return "", &UsageError{
+				Msg:    "参数 " + p.Name + " 是空对象",
+				Detail: []string{"函数 " + fn, "只改一个属性用单数形式的动词"},
+			}
+		}
+		keys := make([]string, 0, len(obj))
+		for k := range obj {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys) // 稳定输出：同一次调用重发出去的字节一致，diff 与测试才有意义
+		var b bytes.Buffer
+		b.WriteByte('{')
+		for i, k := range keys {
+			raw := bytes.TrimSpace(obj[k])
+			s, ok := jsonString(raw)
+			if !ok {
+				return "", &UsageError{
+					Msg: "参数 " + p.Name + " 里 " + k + " 的值需要字符串，收到 " + jsonKindName(raw),
+					Detail: []string{"函数 " + fn,
+						"属性值在 .4fd/.tsd 里都是文本：写 \"20\" 而不是 20"},
+				}
+			}
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			b.WriteString(JSONString(k))
+			b.WriteByte(':')
+			b.WriteString(JSONString(s))
+		}
+		b.WriteByte('}')
 		return b.String(), nil
 
 	case TypeInt:

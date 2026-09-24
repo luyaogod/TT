@@ -25,7 +25,7 @@ tt env / config / serve / install / version
 | [4. 统一 Web 服务](#4-统一-web-服务) | 单进程单端口、API 前缀为什么这么分、共用的配置端点 | 动 `internal/web` 或前端之前 |
 | [5. `tt debug` 调试器](#5-tt-debug-调试器) | 命令面、会话模型、环境变量、运行时产物 | 用或改调试器时 |
 | [6. `tt dev tzc` 代码包](#6-tt-dev-tzc-代码包) | 三条公理、zip 保真、围栏协议、三道闸门、结构事务、退出码、**偏差与不变量依据** | 改 `.tzc` 管线时**必读** |
-| [7. `tt dev tzs` 表单包](#7-tt-dev-tzs-表单包) | 引擎与设计器程序集、50 个动词（含任务级 `field_add`）、寻址与基线规则 | 用或改表单读写时 |
+| [7. `tt dev tzs` 表单包](#7-tt-dev-tzs-表单包) | 引擎与设计器程序集、52 个动词（含任务级 `field_add`）、寻址与基线规则 | 用或改表单读写时 |
 | [8. `tt dict` 数据字典](#8-tt-dict-数据字典) | 各查询命令的返回与读法、数据源切换、类型码 | 查 ERP 元数据时 |
 | [9. 测试与验收](#9-测试与验收) | 每层的判据、语料回归、S7 真机清单 | 交付前 |
 | [10. 构建与发布](#10-构建与发布) | 只留"为什么"，步骤见 README | 发版时 |
@@ -1087,7 +1087,7 @@ function.* / dialog.* / report.*               → 自订定义点（TAP 有，�
 | 工作流 | `field_add` |
 | 会话 | `open` `save` `close` `verify` `list_open` |
 | 读 | `form_tree` `find_component` `get_component` `list_spec_nodes` `describe_kind` `list_tables` `list_columns` `list_records` `list_local_strings` |
-| 属性 | `set_spec_attr` `set_layout_attr` `set_tree_source` `rename_component` |
+| 属性 | `set_spec_attr` `set_spec_attrs` `set_layout_attr` `set_layout_attrs` `set_tree_source` `rename_component` |
 | 结构 | `add_widget` `add_field` `insert_at` `delete` `move` `reparent` `nudge` `align` `fit_size` `wrap` `break_layout` `convert_widget` `convert_container` |
 | 页签 | `add_page` `delete_page` |
 | 语义/Action | `insert_semantic` `add_action` `delete_action` `set_action_types` |
@@ -1203,7 +1203,7 @@ tt dev tzs nudge --form aapp320 --args '{"paths":["a/b","c/d"],"direction":"righ
 
 #### 7.5.1 为什么是具名动词，而不是 `call <fn>`
 
-50 个动词由引擎的函数表在运行时生成：`tt dev tzs <动词>` 里，动词名 = manifest 的 `fn`，
+52 个动词由引擎的函数表在运行时生成：`tt dev tzs <动词>` 里，动词名 = manifest 的 `fn`，
 参数 = manifest 的 `args`。命令层**一个动词的字面量都没有**（`runTzsVerb` 只吃 manifest 条目），
 所以引擎加/改函数时，`tt` 侧一行都不用改 —— 这是 §7.1「格式那部分由设计器自己在算」在
 命令行上的同一条思路：**能问的就不抄**。
@@ -1226,7 +1226,7 @@ tt dev tzs nudge --form aapp320 --args '{"paths":["a/b","c/d"],"direction":"righ
 
 | 项 | 从前 | 现在 | 依据 |
 |---|---|---|---|
-| 枚举动词 | `tt dev tzs fns` 打全表（名字 + 全部参数 + 类型 + 必填 + 取值集） | `tt dev tzs --help` 打**索引**（分组 + 名字）；敲错名字打同一份清单 | 参数是每个动词自己的契约，按需问 `<动词> --help`；一次摊开 50 个动词的参数只会淹没人 |
+| 枚举动词 | `tt dev tzs fns` 打全表（名字 + 全部参数 + 类型 + 必填 + 取值集） | `tt dev tzs --help` 打**索引**（分组 + 名字）；敲错名字打同一份清单 | 参数是每个动词自己的契约，按需问 `<动词> --help`；一次摊开 52 个动词的参数只会淹没人 |
 | 就绪握手 | 连上管道后**发一帧 `list_open`**（还是个业务函数：列打开的句柄） | **连上即就绪**，一帧都不发 | 管道实例只有一个，而 `tzs-server` 先 `Boot` 再建管道（`test/tzs-server.cs`）；"连上"本身就证明 Boot 做完且服务端正等在这个实例上 |
 | Go 侧出现的引擎函数名 | `list_open`（握手）+ `stop`（停机）+ 用户点的动词 | 只剩用户点的那个动词 + `stop` | `stop` 是**传输级**命令（不在 manifest 里，引擎在查表前就把它截走），不算业务函数名 |
 
@@ -1283,6 +1283,68 @@ CLI 写胖了，而是把**调用方本来就要手工做的那段**搬进引擎
 **边界**（写清楚，免得被当成万能）：它只做"按表的列加字段"。别的组合（改属性、挪布局、加页签、
 多语言）目前仍是细粒度动词；要不要再加任务级动词，判据是**同样的三问**：够高频吗？手工链够长吗？
 组合逻辑必须在一个请求里完成吗（原子性 / 一次 undo）？
+
+#### 7.5.5 属性值也要校验，而且依据是工作区里的规范文件
+
+写属性原来是**只查名字、不查值**的，后果不是"报错"而是"报成功"：
+
+```
+set_layout_attr  case   = "GARBAGE"   ->  {"ok":true,"applied":true,"written":"GARBAGE"}
+set_layout_attr  scroll = "MAYBE"     ->  {"ok":true,"applied":true,"written":"MAYBE"}
+```
+
+`case` 声明的取值是 `none|lower|upper`；`scroll` 是 BOOLEAN。两个都写进了 `.4fd`，而且调用方
+**没有任何办法知道**。这是本项目最坏的一类错——一个能自纠的拒绝，永远优于一个静默的成功。
+
+依据不是我们编的，是**设计器自己的表单规范** `<工作区>/mta/mod-fd.spec`：
+
+```xml
+<PropertyInfo name="case"     type="ENUM"    editorInfo="alwaysUpdate:true;contains:none|lower|upper"/>
+<PropertyInfo name="gridWidth" type="INTEGER" editorInfo="alwaysUpdate:true;range:0|4000;isDynamic:true"/>
+```
+
+260 条属性里 118 条 ENUM、104 条带 `contains:`。同一条规范的另一半（`<NodeInfo mimeType="modFD/Edit"
+properties="…"/>`）本来就是**属性名**白名单的来源——`ComponentFactory.IsIncludeProperties` 读的就是它。
+这次只是把值那一半也读上。`SpecValues` 是纯 XML 解析，不反射、不依赖设计器。
+
+四条边界，每条都有实测依据：
+
+| 决定 | 依据 |
+|---|---|
+| **空值永远放行** | 65 个包的语料里，`hidden=""` 出现 2649 次、`sizePolicy=""` 一次；全量扫描显示**每一个非空值**都落在自己的声明集内，**空值是唯一在集合外的**。空 = 没设/继承基础数据 |
+| **BOOLEAN / INTEGER 也按 `type` 校验** | 同一轮扫描：没有任何 BOOLEAN 属性带 true/false 之外的值，没有任何 INTEGER 属性不能解析。所以这不是我们发明的规则，是 `type` 本来就写着 |
+| **`range:` 不查** | 下限已由设计器夹住并回 `E_ATTR_CLAMPED`（实测 `gridWidth=-3` → `clamped:true, written:"1"`）；上限是模型限制还是 UI 输入框限制**没有依据**——语料里最宽的是 2390，落在 4000 以内，证不了任何事 |
+| **spec 侧不查** | `mod-fd.spec` 是**表单设计器**的规范，写的是 `.4fd` 元素属性。`.tsd` 规格属性是另一套：`widget` 声明集里没有 `Label`，而语料的 `.tsd` 里 `widget="Label"` 有 **94** 次（form-only 字段不需要数据控件）。照搬会误拒 94 个合法值 |
+
+错误码是 `E_ATTR_VALUE_ILLEGAL`（`kind=validation`，退 2），`detail` 给 `legal`（值集）、`type`、
+`source`（哪份文件说的）与 `written:false`；近似值另有 `hint`（编辑距离，阈值紧：4 字符以内 1 个编辑，
+以上 2 个——`case` 与 `name` 的距离正好是 2，给一个错候选比不给更贵）。属性名拼错同样给 `hint`
+（`notnull` → `notNull`、`canquery` → `can_query`）。
+
+#### 7.5.6 复数形式的属性写入：先全量校验，再全量写
+
+单数形式一次一个属性，而调用方真实的句子是"把 req、can_edit、can_query 一起设上"。分成 N 次调用
+要付三样东西：N 次往返、**同一条 100 多字符的 name-path 由调用方打 N 遍**（输出 token，比输入贵）、
+以及设计器里 N 步撤销。
+
+`set_spec_attrs` / `set_layout_attrs` 把 `attrs` 收成一个 JSON 对象（键是属性名、值是字符串——
+属性在文件里都是文本）。**先按名字全量校验、再按值全量校验、然后才开始写**：任何一个不合法，
+一个都不写，所以"改对了重发"是安全的。
+
+**不假装原子。** 写完一层校验之后，写入过程中仍可能撞上设计器内部的规则（`SpecFieldNode` 的
+`field is required`、名称格式等），而设计器的命令是**立即改内存、没有回滚**的。那种情况下返回的是一个
+错误（`E_ATTR_PARTIAL`），`detail` 里同时给 `applied` 和 `failed` 两栏，并说明模型已经不是原样了、
+只需要重发 `failed` 里那几个——而不是回一个 `ok` 让调用方以为全成了。
+
+**一步撤销只做到了一半，而且是实测的。** `StartGroup`/`EndGroup` 需要拿一个命令当组的 main，
+设计器的 `GeneralComplexCommand` 没有可用的无参构造（`new GeneralComplexCommand()` 留 `_commands = null`，
+第一次 `Append` 就 NullReferenceException——设计器自己四处调用全都传了命令）。所以：
+
+- `set_spec_attrs` 自己造 `SpecAttributeUndoRedoCommand`，拿第一个当 main → **1 步**；
+- `set_layout_attrs` 造不出命令——布局写入必须走 `XmlElement` 索引器（§11.24(d) 1），而索引器
+  内部自己造并压栈，我们拿不到那个对象 → **N 步**。
+
+返回体的 `undoSteps` 是**撤销栈前后差的实测值**，不是承诺值。全 noop 时它诚实地是 0。
 
 ### 7.6 退出码
 

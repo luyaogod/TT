@@ -55,7 +55,7 @@ const Usage = `tt dev —— T100 设计器包工具：.tzc 代码包 + .tzs 表
         # 产物是**只读参考**（没有 tzs apply）；要改表单走下面的 tzs 动词
   tt dev tzs <动词> --args '<JSON 对象>' [--form <程序名>] [--args-file <文件>] [--workspace <dir>] [--rpc-timeout <秒>] [--json]
         # 读写表单，**唯一**写路径 —— 由设计器自己的引擎算，不是我们拼 XML
-        # 50 个动词由引擎的函数表生成（open / form_tree / set_spec_attr / field_add /
+        # 52 个动词由引擎的函数表生成（open / form_tree / set_spec_attr / set_spec_attrs /
         # nudge / validate / save / close …），所以没有"函数名"这一层要填
         # 参数**只用 JSON 给**；用 --form 指定是哪张已打开的表单（不必搬运句柄）
         # 例：tt dev tzs open          --args '{"path":"D:\\pkg\\aapp320(c).tzs"}' --json

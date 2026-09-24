@@ -38,6 +38,13 @@ const fixtureManifest = `[
            {"n":"attr","t":"attr","req":true,"from":"spec:<kind>"},
            {"n":"value","t":"string","req":true,"desc":"新值"}],
    "errors":["E_BAD_PARAM"]},
+  {"fn":"set_spec_attrs","group":"属性","desc":"一次改一个节点的多个规格属性","writes":true,"slow":false,
+   "returns":"delta","needsHandle":true,
+   "args":[{"n":"handle","t":"handle","req":true},
+           {"n":"path","t":"path","req":true,"desc":"name-path"},
+           {"n":"kind","t":"kind","req":true},
+           {"n":"attrs","t":"attrs","req":true,"desc":"{\"属性名\":\"值\", …}"}],
+   "errors":["E_BAD_PARAM"]},
   {"fn":"add_action","group":"语义/Action","desc":"新增 Action","writes":true,"slow":false,
    "returns":"el","needsHandle":true,
    "args":[{"n":"handle","t":"handle","req":true},
@@ -77,8 +84,8 @@ func mustManifest(t *testing.T) *Manifest {
 func TestParseManifestShapes(t *testing.T) {
 	m := mustManifest(t)
 
-	if len(m.Fns) != 8 {
-		t.Fatalf("该有 8 个函数，得 %d", len(m.Fns))
+	if len(m.Fns) != 9 {
+		t.Fatalf("该有 9 个函数，得 %d", len(m.Fns))
 	}
 	// 顺序即 manifest 顺序（--help 的分节顺序就是它，不是字母序）。
 	if m.Fns[0].Name != "list_open" || m.Fns[len(m.Fns)-1].Name != "validate" {
@@ -228,13 +235,13 @@ func TestParseManifestRejects(t *testing.T) {
 	}
 }
 
-// TestKnownTypeMatchesEngine：参数类型名的集合就是引擎 Manifest.TypeName 的十个分支。
+// TestKnownTypeMatchesEngine：参数类型名的集合就是引擎 Manifest.TypeName 的十一个分支。
 //
 // 契约给的清单里**漏了 handle**，而它在真 manifest 里出现 44 次 ——
 // 这一条不是多余的：漏了它，每个需要句柄的函数都会因为「未知类型」被本地判死。
 func TestKnownTypeMatchesEngine(t *testing.T) {
-	// 这十个就是 engine/src/Designer/Manifest.cs 的 TypeName 全部返回值。
-	all := []string{"int", "bool", "handle", "kind", "attr", "enum", "path", "path[]", "string[]", "string"}
+	// 这十一个就是 engine/src/Designer/Manifest.cs 的 TypeName 全部返回值。
+	all := []string{"int", "bool", "handle", "kind", "attr", "enum", "path", "path[]", "string[]", "attrs", "string"}
 	for _, ty := range all {
 		if !KnownType(ty) {
 			t.Errorf("引擎会产出 t=%q，KnownType 却说不知道", ty)

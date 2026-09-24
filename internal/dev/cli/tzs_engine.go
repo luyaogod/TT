@@ -164,16 +164,18 @@ func printFn(w io.Writer, fn *tzs.SpecFn) {
 
 // verbExample 造一条**能直接粘**的例子：从 manifest 的参数表生成，不手写（手写必漂移）。
 //
-// 只列**必填**参数，加两个例外：① `handle` 不列（需要句柄的动词改用 `--form <程序名>` ——
+// 只列**必填**参数，加三个例外：① `handle` 不列（需要句柄的动词改用 `--form <程序名>` ——
 // 那才是调用方想说的东西）；② `file` 列出来，即使它是选填 —— 任务级动词（工作流）正是靠
-// `file` 或 `handle` 二选一寻址的，示例里缺了它这条命令就粘不了。
+// `file` 或 `handle` 二选一寻址的，示例里缺了它这条命令就粘不了；③ `path` 同理，它是
+// "path 或 paths 二选一"的一半，两个都是选填，只按必填生成会让示例缺了定位，
+// 粘上去只会得到一句"需要 path 或 paths"。
 func verbExample(spec *tzs.SpecFn) string {
 	var parts []string
 	for _, p := range spec.Args {
 		if p.Name == "handle" {
 			continue
 		}
-		if !p.Required && p.Name != "file" {
+		if !p.Required && p.Name != "file" && p.Name != "path" {
 			continue
 		}
 		parts = append(parts, tzs.JSONString(p.Name)+":"+placeholder(p))
@@ -205,6 +207,10 @@ func placeholder(p *tzs.Param) string {
 		return tzs.JSONString("<值>")
 	case tzs.TypePathList, tzs.TypeStrList:
 		return "[]"
+	case tzs.TypeAttrs:
+		// 一个具体的属性名，不是 `<...>`：这一半是"一次改多个"的语法示范，空对象只会教人
+		// 写出必被拒的调用（引擎对空对象明确报错）。
+		return `{"<属性名>":"<值>"}`
 	case tzs.TypePath:
 		// `file` 是**包路径**，不是表单内部的 name-path：两者都是 t=path，
 		// 占位符说错了会让人照着写一个 name-path 进去。
@@ -222,7 +228,7 @@ func placeholder(p *tzs.Param) string {
 
 // ---------- 具名动词：把命令行翻成一次 JSON-RPC ----------
 //
-// 50 个动词（open/save/close/field_add/…）**不是 50 段代码**，而是同一段代码跑 50 次：动词表来自
+// 52 个动词（open/save/close/field_add/…）**不是 52 段代码**，而是同一段代码跑 52 次：动词表来自
 // 引擎的 manifest，参数定型来自同一份 manifest。所以引擎加/改一个函数，这里一行都不用动
 // —— 这正是 internal/dev/tzs/manifest.go 那句「本地绝不抄第二份参数表」的兑现方式。
 

@@ -1,6 +1,6 @@
 ---
 name: tt-dev-tzs
-description: 读写 T100 设计器**表单包**（.tzs/.tzv）：由设计器自己的引擎驱动（50 个具名动词，命名管道 JSON-RPC），参数一律用 JSON 给，不是拼 XML。按数据表加字段用任务级动词 field_add（一条命令做完挑容器+建字段+校验+另存）；改属性/布局/页签等用细粒度动词（open → 读 → 改 → validate → save）。要改表单、按表加字段、查表单结构或字段时用。**前提：先配工作区，且包与 out 都必须用绝对路径落在工作区目录之下。代码包（.tzc/.tzf/.tzx）不归这里，用 tt-dev-tzc。**
+description: 读写 T100 设计器**表单包**（.tzs/.tzv）：由设计器自己的引擎驱动（52 个具名动词，命名管道 JSON-RPC），参数一律用 JSON 给，不是拼 XML。按数据表加字段用任务级动词 field_add（一条命令做完挑容器+建字段+校验+另存）；改属性用 set_spec_attr / set_layout_attr，改多个用它们的复数形式（一次请求、先全量校验再全量写）；布局/页签等用细粒度动词（open → 读 → 改 → validate → save）。要改表单、按表加字段、查表单结构或字段时用。**前提：先配工作区，且包与 out 都必须用绝对路径落在工作区目录之下。代码包（.tzc/.tzf/.tzx）不归这里，用 tt-dev-tzc。**
 license: 与 tt 仓库一致（见随包 README.md）
 metadata:
   tool: tdev
@@ -89,11 +89,25 @@ tt dev tzs find_component --form aapt300 --args '{"query":"worksheet"}' --json  
 tt dev tzs get_component  --form aapt300 --args '{"path":"managedform/aapt300/HBoxT1/worksheet"}' --json
 tt dev tzs describe_kind  --form aapt300 --args '{"kind":"field"}' --json       # 这类节点**运行时**能写哪些属性
 tt dev tzs set_spec_attr  --form aapt300 --args '{"path":"<path>","kind":"field","attr":"can_edit","value":"true"}' --json
+tt dev tzs set_spec_attrs --form aapt300 --args '{"path":"<path>","kind":"field","attrs":{"can_edit":"true","can_query":"N"}}' --json
 tt dev tzs validate       --form aapt300 --json                                 # 慢（实测 3–5 秒）；报**增量**
 tt dev tzs save           --form aapt300 --args '{"out":"D:\\ws\\_ai.tzs"}' --json  # 写**新**包；原包一字节不动
 tt dev tzs close          --form aapt300 --json
 tt dev tzs stop                                          # 停本工作区的常驻引擎
 ```
+
+**要改多个属性就用复数形式**（`set_spec_attrs` / `set_layout_attrs`）：一次请求、一次寻址、**先全量校验再全量写**
+—— 名字或值有一个不合法，一个都不会写。它省掉的是 N 遍那条 100 多字符的 name-path。
+
+| | 单属性 | 多属性 |
+|---|---|---|
+| 规格（`.tsd`） | `set_spec_attr` + `attr`/`value` | `set_spec_attrs` + `attrs:{…}` |
+| 布局（`.4fd`） | `set_layout_attr`（也能同属性刷多节点，用 `paths`） | `set_layout_attrs` + `attrs:{…}` |
+
+`attrs` 的值**必须是字符串**（属性在文件里都是文本）：`{"gridWidth":"20"}`，不是 `{"gridWidth":20}`。
+复数形式合成**一步撤销**只对 `set_spec_attrs` 成立；`set_layout_attrs` 是 N 步 —— 布局写入必须走
+`XmlElement` 索引器（§11.24(d) 1），而它自己造命令，我们拿不到那个命令来做分组。返回体的
+`undoSteps` 是**实测的**（撤销栈前后差），不是承诺的。
 
 **读的动词各自干什么**：`form_tree` 看层级与 name-path；`get_component` 看一个节点的属性与规格；
 `describe_kind` 给**这一类节点此刻能写哪些属性**（白名单是每个包现算的，`attr` 必须照着它写，
@@ -209,14 +223,26 @@ tt dev tzs set_spec_attr --form aapp320 --args '{"path":"…","kind":"field","at
 |---|---|
 | 未知动词 / 未知参数 / 缺必填 | 退 2 并点名（未知参数**一次报全部**） |
 | int 收到 `"2"` 或 `1.5`、bool 收到 `"yes"`、枚举越界、数组元素非字符串 | 退 2，点名参数与合法值 |
+| `attrs` 收到非对象 / 值不是字符串 / 空对象 | 退 2，点名是哪个键 |
 | 参数写 `null` | 视同**没给**（缺必填照报） |
 | 参数写成 flag（`--handle h9`） | 退 2「未知开关」 |
 | 寻址写进 JSON（`"form":"aapp320"`） | 退 2「参数 form 不在 manifest 里」+ 提醒用 `--form` |
 | `--form` 与 `handle` 同时给 / 给不需要句柄的动词 | 退 2（不猜优先级 / 不接受 form） |
 | **`kind` / `attr` 的取值、`add_action` 的 `type`** | **本地放行**，由引擎用它自己的白名单/该表单的 `s_detail<n>` 拒绝（退 2，`detail.legal` 给合法集） |
+| **布局属性的「值」** | **引擎按工作区的 `mta/mod-fd.spec` 拒**（退 2，`detail.legal` 给值集、`detail.hint` 给近似值） |
 
-最后一行是**故意的**：那三处的合法集要从**活着的模型**或**该表单自己的**记录里取，静态判不了。
-在本地拦下来只会让一个引擎本会接受的调用永远到不了引擎，而且拦得静悄悄（写错了不会有测试失败）。
+最后两行是**故意的**：那几处的合法集要从**活着的模型**、**该表单自己的**记录、或**工作区的规范文件**里取，
+静态判不了。在本地拦下来只会让一个引擎本会接受的调用永远到不了引擎，而且拦得静悄悄（写错了不会有测试失败）。
+
+**值校验只覆盖布局侧**（`set_layout_attr` / `set_layout_attrs`），依据是 `<工作区>/mta/mod-fd.spec` 的
+`<PropertyInfo type=… editorInfo="contains:a|b|c">`。三条边界要知道：
+
+- **空值永远放行** —— 语料里 `hidden=""` 出现 2649 次，它不在自己的声明集里，但表示"没设/继承基础数据"。
+- **spec 侧不查**（`set_spec_attr` / `set_spec_attrs`）：`mod-fd.spec` 是**表单设计器**的规范，写的是
+  `.4fd` 元素属性；`.tsd` 规格属性是另一套，值集也不同 —— `widget="Label"` 在语料里出现 94 次，
+  而声明集里没有 `Label`。
+- **`range:` 不查**（`gridWidth` 是 `range:0|4000`）：下限已经由设计器夹住并回 `E_ATTR_CLAMPED`，
+  上限是模型限制还是 UI 输入框限制没有依据。
 
 参数打错的报错**也要引擎在**（命令先拉 manifest 再校验参数）。`--rpc-timeout` **最小 120 秒**
 （下限是给加载看门狗留的）；引擎自己的加载看门狗是另一个参数：`open --args '{"path":"…","timeout":30}'`。
@@ -242,7 +268,7 @@ tt dev tzs export "D:\\ws\\aapt300(c).tzs"    # 纯解压到 <包目录>\aapt300
 `export` **不依赖引擎也不依赖设计器**；`-o <dir>` 换落点，目标非空时拒绝（`--force` 覆盖同名文件）。
 产物就是**一包文件**（不是 `tzc` 那种带围栏的工作区、不能 apply）；要改表单走动词，不要手工改完塞回去。
 
-## 10. 动词全表（50 个）
+## 10. 动词全表（52 个）
 
 `tt dev tzs --help` 会列出它们（`[工作流]` 在最前；会改模型的标 `[写]`，慢的标 `[slow]`）：
 
@@ -251,7 +277,7 @@ tt dev tzs export "D:\\ws\\aapt300(c).tzs"    # 纯解压到 <包目录>\aapt300
 | 工作流 | `field_add` |
 | 会话 | `open` `save` `close` `verify` `list_open` |
 | 读 | `form_tree` `find_component` `get_component` `list_spec_nodes` `describe_kind` `list_tables` `list_columns` `list_records` `list_local_strings` |
-| 属性 | `set_spec_attr` `set_layout_attr` `set_tree_source` `rename_component` |
+| 属性 | `set_spec_attr` `set_spec_attrs` `set_layout_attr` `set_layout_attrs` `set_tree_source` `rename_component` |
 | 结构 | `add_widget` `add_field` `insert_at` `delete` `move` `reparent` `nudge` `align` `fit_size` `wrap` `break_layout` `convert_widget` `convert_container` |
 | 页签 | `add_page` `delete_page` |
 | 语义/Action | `insert_semantic` `add_action` `delete_action` `set_action_types` |
@@ -274,6 +300,16 @@ tt dev tzs export "D:\\ws\\aapt300(c).tzs"    # 纯解压到 <包目录>\aapt300
 - ❌ 中文/长内容直接写在命令行里被重编码 → 用 `--args-file` 写 UTF-8 文件。
 - ❌ 给 `path` / `file` / `out` 写相对路径 → 由**守护进程**的 cwd 解释（不是你的 cwd），裸文件名必拒；一律写绝对路径（§4.4）。
 - ❌ `list_columns` / `list_local_strings` 不给过滤直接打 → 可能回几十 KB（先看 `--help` 的"先过滤"提示）。
+- ❌ `attrs` 写成数组、写空对象、或值不带引号（`{"gridWidth":20}`）→ 退 2，点名是哪个键；值一律是字符串。
+
+**改属性**
+- ❌ 一次只改一个属性、还一条条发 → 用复数形式（`set_spec_attrs` / `set_layout_attrs`），省掉 N 遍 name-path。
+- ❌ **猜布局属性的值** → 引擎按工作区的 `mta/mod-fd.spec` 拒（退 2，`detail.legal` 给值集、`detail.hint` 给近似值）。
+  实测过的坑：`case="UPPER"`（合法的是 `upper`）、`scroll="MAYBE"`（BOOLEAN 只收 true/false）。
+- ❌ 把布局属性和规格属性混在一个动词里 → 两个面板、两个文件、两个动词，混用会被白名单拒
+  （`case` 是布局、`can_query` 是规格）。
+- ❌ 复数形式改一半失败还当成功 → `detail` 里有 `applied` / `failed` 两栏，`E_ATTR_PARTIAL` 说明
+  模型已经不是原样了；只重发 `failed` 里那几个。
 
 **寻址与会话**
 - ❌ 需要句柄的动词既没给 `--form` 也没在 JSON 里给 `handle` → 退 2「缺必填参数 handle」。

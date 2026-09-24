@@ -525,6 +525,11 @@ namespace TzsCli.Designer
                 // whole point is that those two are different.
                 case "E_DESIGNER":      wire = code; kind = "designer";   return;
                 case "E_ATTR_NOT_WHITELIST": wire = code; kind = "validation"; return;  // detail.legal
+                case "E_ATTR_VALUE_ILLEGAL": wire = code; kind = "validation"; return;  // detail.legal + hint
+                // The plural writers landed part of the request. `designer` rather than
+                // `validation`: the names and values were checked before anything was written, so a
+                // failure here is the model refusing mid-batch (see Attr.Partial).
+                case "E_ATTR_PARTIAL":      wire = code; kind = "designer";   return;  // detail.applied + failed
                 case "E_BAD_PARAM":     wire = code; kind = "validation"; return;
                 case "E_HANDLE_BUSY":   wire = code; kind = "validation"; return;
                 case "E_NO_HANDLE":     wire = code; kind = "not_found";  return;       // reopen it

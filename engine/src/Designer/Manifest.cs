@@ -43,6 +43,23 @@ namespace TzsCli.Designer
         static readonly string[] E_STD = { "E_NOT_FOUND", "E_BAD_PARAM", "E_DESIGNER", "E_INTERNAL" };
         static readonly string[] E_SESS = { "E_NOT_FOUND", "E_BAD_PARAM", "E_DESIGNER", "E_KEY_IN_USE", "E_INTERNAL" };
 
+        // The two attribute writers answer with more than E_STD says, and the difference is the
+        // point of both: a caller that cannot see E_ATTR_NOT_WHITELIST in the help will not know
+        // that a refused name comes back with detail.legal, and one that cannot see
+        // E_ATTR_VALUE_ILLEGAL will not know a *value* is checked at all -- which is the failure
+        // this pair exists to end (case="GARBAGE" used to come back ok:true).
+        //
+        // E_ATTR_CLAMPED and E_NO_OP are listed even though they arrive as SUCCESSES in `result`
+        // (SPEC §11.24 (a)), not as errors: they are the two outcomes a caller must be able to tell
+        // apart from `applied`, so leaving them out of the advertised set would hide exactly the
+        // vocabulary the distinction needs.
+        static readonly string[] E_SPEC = {
+            "E_NOT_FOUND", "E_BAD_PARAM", "E_DESIGNER",
+            "E_ATTR_NOT_WHITELIST", "E_NO_OP", "E_INTERNAL" };
+        static readonly string[] E_LAYOUT = {
+            "E_NOT_FOUND", "E_BAD_PARAM", "E_DESIGNER",
+            "E_ATTR_NOT_WHITELIST", "E_ATTR_VALUE_ILLEGAL", "E_ATTR_CLAMPED", "E_NO_OP", "E_INTERNAL" };
+
         /// <summary>The 控件箱 (WidgetBox.xaml, 31 items) minus the container/semantic families,
         /// which get their own enums. It is an enum rather than a free string because
         /// ComponentFactory.ModFdInfo.IsIncludeAttribute NREs natively on a type outside the
@@ -190,19 +207,34 @@ namespace TzsCli.Designer
                 P.Handle(),
                 Opt(PType.Path, "path", "限定某条子树")),
 
-            // ------------------------------------------------------------ 属性 (4)
-            F("set_spec_attr", G_ATTR, "改字段规格属性（白名单来自 describe_kind）", true, "delta", E_STD,
+            // ------------------------------------------------------------ 属性 (6)
+            F("set_spec_attr", G_ATTR, "改字段规格属性（白名单来自 describe_kind）", true, "delta", E_SPEC,
                 P.Handle(),
                 new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
                 P.Kind(),
                 P.Attr("attr", "spec:<kind>"),
                 P.Str("value", true, "新值")),
-            F("set_layout_attr", G_ATTR, "改布局属性（走 XmlElement 索引器，铁律 §11.24(d)）", true, "delta", E_STD,
+            F("set_spec_attrs", G_ATTR, "一次改一个节点的多个规格属性（先全量校验，再全量写）", true, "delta", E_SPEC,
                 P.Handle(),
                 new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
+                P.Kind(),
+                P.Attrs("attrs", "{\"属性名\":\"值\", …}；一次请求改多个，合成一步撤销")),
+            F("set_layout_attr", G_ATTR, "改布局属性（走 XmlElement 索引器，铁律 §11.24(d)）", true, "delta", E_LAYOUT,
+                P.Handle(),
+                // NOT required, and that is the fix rather than the bug: this verb takes path OR
+                // paths, and the descriptor cannot express an either/or. Declaring path required
+                // made the batch form unreachable -- the caller's own client refused
+                // `{"paths":[...],"attr":...,"value":...}` with "缺必填参数 path" before the request
+                // ever reached the engine, so `paths` had never worked through tt at all. With
+                // neither given the engine still refuses, in a sentence that names both.
+                new Param { Name = "path", Type = PType.Path, Required = false, Desc = "name-path（与 paths 二选一）" },
                 P.Attr("attr", "layout"),
                 P.Str("value", true, "新值"),
                 Opt(PType.PathList, "paths", "批量：对这些 path 一起改，忽略 path")),
+            F("set_layout_attrs", G_ATTR, "一次改一个元素的多个布局属性（先全量校验，再全量写）", true, "delta", E_LAYOUT,
+                P.Handle(),
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
+                P.Attrs("attrs", "{\"属性名\":\"值\", …}；一次请求改多个，合成一步撤销")),
             F("set_tree_source", G_ATTR, "Tree 数据来源的某一格", true, "delta", E_STD,
                 P.Handle(),
                 new Param { Name = "path", Type = PType.Path, Required = true, Desc = "Tree 的 name-path" },
@@ -483,6 +515,19 @@ namespace TzsCli.Designer
                         if (e.Type == JTokenType.Array || e.Type == JTokenType.Object)
                             return "数组元素必须是字符串，收到 " + e.Type;
                     return null;
+                case PType.Attrs:
+                    // Shape only. WHICH attributes are legal, and which VALUES, are properties of the
+                    // node and of the workspace specification -- this method has no session, so it
+                    // cannot know either (the same division §11.24 (c) draws for describe_from).
+                    if (v.Type != JTokenType.Object) return "需要 JSON 对象（属性名 → 字符串值），收到 " + v.Type;
+                    var map = (JObject)v;
+                    if (map.Count == 0) return "是空对象；只改一个属性用单数形式的动词";
+                    foreach (JProperty p in map.Properties())
+                        if (p.Value == null || p.Value.Type != JTokenType.String)
+                            return "属性 " + p.Name + " 的值需要字符串，收到 "
+                                 + (p.Value == null ? "null" : p.Value.Type.ToString())
+                                 + "（属性值在 .4fd/.tsd 里都是文本）";
+                    return null;
                 case PType.Enum:
                     if (v.Type != JTokenType.String) return "需要一个字符串，收到 " + v.Type;
                     if (!In(d.Values, (string)v))
@@ -571,6 +616,7 @@ namespace TzsCli.Designer
                 case PType.Path:     return "path";
                 case PType.PathList: return "path[]";
                 case PType.StrList:  return "string[]";
+                case PType.Attrs:    return "attrs";
                 default:             return "string";
             }
         }

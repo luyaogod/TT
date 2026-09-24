@@ -44,6 +44,9 @@ const (
 	TypeHandle   = "handle"
 	TypePathList = "path[]"
 	TypeStrList  = "string[]"
+	// 「一次改多个属性」的参数：`{"属性名":"值", …}`。和 path[]/string[] 一样是**容器**，
+	// 所以本地必须认形状（对象、值是字符串）—— 把它当字符串处理会让一个合法调用被本地判死。
+	TypeAttrs = "attrs"
 )
 
 // KnownType 报告 t 是不是引擎会产出的类型名。
@@ -54,7 +57,7 @@ const (
 // 合法的新参数判成「未知类型」。
 func KnownType(t string) bool {
 	switch t {
-	case TypeString, TypePath, TypeInt, TypeBool, TypeKind, TypeAttr, TypeEnum, TypeHandle, TypePathList, TypeStrList:
+	case TypeString, TypePath, TypeInt, TypeBool, TypeKind, TypeAttr, TypeEnum, TypeHandle, TypePathList, TypeStrList, TypeAttrs:
 		return true
 	}
 	return false
