@@ -1,13 +1,10 @@
 # TT 项目 wiki
 
-> 这份文档合并了原先散在 `docs/` 下的六份设计与手册：`ARCHITECTURE.md`、`MIGRATION.md`、
-> `dev.md`（设计器包）、`debug.md`（调试器）、`dict.md`（数据字典）、`tzc-model.md`（模型对照）。
-> 安装、构建、配置字段的**操作步骤**不在这里重复 —— 那些在 [README.md](../README.md)。
-> 这里放的是**设计、契约、依据**：为什么这么写、哪里不能碰、判决标准是什么。
+> 装 tt、构建 tt 的步骤在 [README.md](../README.md)；每个命令组**怎么用**在
+> [skills/](../skills/) 下对应的 `SKILL.md`。这里放的是**设计、契约、依据**：
+> 为什么这么写、哪里不能碰、判决标准是什么 —— 以及配置字段的完整说明。
 
-TT 是 `TDebug`、`TDev`、`TDictCli` 三个工具合并后的统一项目：一个仓库、一个二进制 `tt`、
-一份配置、一个本地 Web 服务。合并之后又长出了第四块 —— `.tzs` 表单引擎（`engine/`，
-一个 C# 程序，反射驱动设计器自己的程序集）。
+TT 是一款面向 Agent 的 CLI 开发工具，用于开发基于 Genero BDL 技术栈的大型 ERP 系统——鼎捷数智旗下的 T100。
 
 ```
 tt debug …     作业调试器：SSH 驱动 fglrun -d 的 (fgldb) 协议 + 本地 Web 工作台

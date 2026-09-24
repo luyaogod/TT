@@ -8,25 +8,42 @@ tt debug …     作业调试器：SSH 驱动 fglrun -d 的 (fgldb) 文本调试
 tt dev tzc …   设计器代码包（.tzc/.tzf/.tzx）：渲染成带围栏的 4GL 工作区给人/AI 改，
                改完走三道闸门写回
 tt dev tzs …   设计器表单包（.tzs/.tzv）：export 纯解压只读；读写表单走 call，
-               由设计器自己的引擎驱动（见「.tzs 表单引擎」一节）
+               由设计器自己的引擎驱动
 tt dict …      ERP 数据字典查询：r.t / r.v / desc / scc / r.q / prog，本地镜像与远程直查
 
 tt env …       环境管理（各命令组共用同一份环境清单）
 tt config …    配置管理：位置 / 查看 / 读写 / 迁移 / 校验
 tt serve       启动本地 Web 服务（工作台 + 统一设置页；默认后台常驻，打印地址后返回）
-tt serve --foreground / --stop    前台运行看实时日志 / 停止后台实例
 tt install     安装 AI skills 到当前目录，或把 tt 加进用户 PATH
 tt version
 ```
 
-TT 最初是 TDebug、TDev、TDictCli 三个工具合并的结果 —— 合并的动机、发现的分叉与取舍
-（包括旧版那条**命令注入面**为什么没有保留）记在 [docs/WIKI.md](docs/WIKI.md#10-设计史与取舍)。
-合并之后又长出了第四块：**`.tzs` 表单引擎**，它不在 Go 的构建链里，而且**运行期要的设计器程序集
-随仓库与发行包自带**（不靠用户机器上恰好装着的那份），所以单独用一节说清楚。
+TT 是一款**面向 Agent 的 CLI 开发工具**，用于开发基于 Genero BDL 技术栈的大型 ERP 系统
+—— 鼎捷数智旗下的 T100。它由 TDebug、TDev、TDictCli 三个工具合并而来，之后又长出了第四块：
+**`.tzs` 表单引擎**（`engine/`，一个 C# 程序，反射驱动设计器自己的程序集）。
 
-有一条边界贯穿全篇，先说在前面：**tt 不实现 T100 设计器的任何私有格式**。
-`.tzc` 靠设计器的公开发行物反推（[docs/WIKI.md](docs/WIKI.md#5-tt-dev-tzc-代码包)）；
-`.tzs` 更彻底 —— 它**直接反射调用设计器自己的程序集**，格式那部分是设计器自己在算。
+有一条边界贯穿全篇：**tt 不实现 T100 设计器的任何私有格式**。`.tzc` 靠设计器的公开发行物反推；
+`.tzs` 更彻底 —— 它直接反射调用设计器自己的程序集，格式那部分是设计器自己在算。
+设计器的 28 个程序集**随本仓库与发行包分发**，所以运行 tt 不需要另外安装设计器。
+
+## 这份 README 管什么
+
+**本文件只管两件事：把 tt 装起来、把它构建出来。** 别的内容各有归属：
+
+| 想做什么 | 去哪 |
+|---|---|
+| 装 tt / 构建 tt / 知道配置放在哪 | **本文件** |
+| 搞清设计、契约、不变量，以及"为什么是这样" | [docs/WIKI.md](docs/WIKI.md)（11 章，带章节索引） |
+| 用某个命令 —— 怎么改 `.tzc`、怎么读写 `.tzs`、怎么查字典、怎么调程序 | [skills/](skills/) 下对应的 `SKILL.md` |
+| 精确的参数、flag、退出码 | `tt <命令> --help`，或 `tt dev tzs fns` 看函数表 |
+| 改 `.tzs` 引擎（C#） | [engine/BUILD.md](engine/BUILD.md) 与 [engine/SPEC.md](engine/SPEC.md) |
+| 查 `.tzc` 那些 `file:line` 依据指向的第三方材料 | [docs/T100设计器-README.md](docs/T100设计器-README.md)（设计器反编译源码树的 README 副本） |
+
+三份材料各管一段，互不重复：**README 管装和构建，WIKI 管为什么，skills 管怎么用。**
+
+> 合并前的命令名仍是别名（`tt tdebug …` = `tt debug …`，`tt tdev …` = `tt dev …`，
+> `tt tdict …` = `tt dict …`），`TDEBUG_CONFIG` / `TDICT_CONFIG` 仍被识别，`--conn` 仍是
+> `--env` 的别名 —— 既有脚本不改即可运行。
 
 ## 安装
 
@@ -35,7 +52,7 @@ TT 最初是 TDebug、TDev、TDictCli 三个工具合并的结果 —— 合并�
 把 `tt-portable.zip` 解压到任意目录，双击或命令行运行 `tt.exe` 即可。
 包内有 `.portable` 标记，配置就近留在包内（`config.json`），不写用户目录。
 
-包内还带 `tzs\`（引擎四个文件 + `designer\` 里的设计器程序集，见下）与五套 AI 技能。
+包内还带 `tzs\`（引擎四个文件 + `designer\` 里的设计器程序集）与五套 AI 技能。
 引擎跑起来**不需要你装设计器、也不需要配它的路径** —— 包里自带的那份就是它用的那份，
 所以同一份包在任何机器上跑的是同一版设计器。
 
@@ -58,7 +75,7 @@ tt install path             # 把 tt.exe 所在目录加进用户 PATH（HKCU，
 tt install path --dry-run   # 只预览将要写入的内容
 ```
 
-### AI 技能
+### AI 技能（也就是使用手册）
 
 ```
 tt install skills                       # 复制到 <当前目录>/skills
@@ -69,293 +86,35 @@ tt install skills --to .claude/skills   # 装到 Claude Code 直接读的位置
 `tt-dict`（数据字典）、`erp-read`（读 ERP 代码）。一个技能一个目录、目录里是 `SKILL.md`
 （Claude 技能规范：目录名必须等于 frontmatter 里的 `name`）。装一次全部到位。
 
-## 配置
+**这五份也是给人看的操作手册** —— 每个命令组怎么用、哪些坑，都在里面，别处不再重复。
 
-**只有一个配置文件**：`%APPDATA%\T100\tt\config.json`，所有命令组共用。
+## 快速上手
 
-位置解析顺序（第一个存在的胜出）：
+```bash
+tt serve                                    # 起服务，浏览器打开它打印的地址
+# 在「设置 → 站点管理」里加一台环境（SSH + 数据库），之后：
+
+tt debug start <作业> -m <模块>              # 调程序 → 细节见 skills/tt-debug
+tt dev tzc export "D:\pkg\x.tzc"            # 改 4GL 客制 → 细节见 skills/tt-dev-tzc
+tt dev tzs call open --path "D:\pkg\y.tzs"  # 改表单     → 细节见 skills/tt-dev-tzs
+tt dict r.t --kw 应收                        # 查字典     → 细节见 skills/tt-dict
+```
+
+`.tzs` 还要配一样：`tt config set tzs.workspace "D:\你的工作区"`（**这条没有缺省**，
+引擎内置的默认工作区是一个真实客户目录）。`tt dev tzs doctor` 会告诉你还差什么。
+
+## 配置在哪
+
+**只有一个配置文件**，所有命令组共用，位置按优先级（第一个存在的胜出）：
 
 1. `TT_CONFIG` 环境变量（旧名 `TDEBUG_CONFIG` / `TDICT_CONFIG` 仍可用）
 2. `--config <路径>`
 3. `<exe 目录>\.portable` 存在 → 便携包，配置留在包内
-4. `%APPDATA%\T100\tt\config.json`
-5. 旧位置兜底（首次运行自动合并迁移到 4）
+4. `%APPDATA%\T100\tt\config.json` —— 默认
+5. 旧位置兜底（首次运行自动合并迁移）
 
-`T100_HOME` 环境变量整体改写统一目录（如 `T100_HOME=D:\t100`）。
-数据目录 = 配置所在目录，所以 `srccache/`、`debug-bps/`、`logs/`、`.tt-tzs.json` 都跟着落在一起。
-
-### 结构
-
-```jsonc
-{
-  "schemaVersion": 2,
-  "listen": "127.0.0.1:28670",     // 本地 Web 服务；端口占用时自动顺延
-
-  "hosts": {                        // ★ 共用环境清单：所有命令组都读这一份
-    "activeEnv": "开发环境",
-    "sshs": [{
-      "name": "开发环境", "host": "10.0.0.1", "port": 22,
-      "user": "tiptop", "password": "…", "zone": "31", "topent": "10001",
-      "db": { "type": "oracle", "host": "10.0.0.2", "port": 1521,
-              "service": "t100dev", "readonlySql": true,
-              "accounts": [{ "account": "ds", "password": "…" }] }
-    }]
-  },
-
-  "debug": { "activeEnv": "", "launchArgs": "…", "watchdogSeconds": 1800,
-             "fglserver": "", "termWidth": 200, "termHeight": 50,
-             "printElements": 1000, "persistBreakpoints": true },
-  "query":  { "source": "auto" },   // auto（缺省=在线优先）| local | <环境名>
-  "mirror": { "dir": "" },
-  "bdldoc": { "dir": "" },
-  "sync":   { "target": "" },
-  "tdev":   { "workspaceSuffix": "-ws", "defaultOut": "" },
-
-  "tzs": {                          // .tzs 引擎（设计器程序集随仓库/包自带，不在这里配）
-    "workspace": "D:\\t100_wrok_dir\\某客户\\prd"
-  }
-}
-```
-
-**这就是"统一配置管理"的核心**：原来 TDebug 把环境放在 `debug.sshs`、TDictCli 放在
-`hosts.sshs`（两份 schema 完全一样，只是节名不同），现在只留 `hosts.sshs` 一处。
-`debug` 节降级为纯工具设置。`tdev` / `tzs` 是新增节 —— 原 TDev 完全没有配置系统，
-所有参数都是每次调用的 flag。
-
-`tdev` 与 `tzs` 的口径**故意不同**，值得分清：
-
-- `tdev` 放的是**跨调用稳定的默认值**，命令行 flag 永远优先；
-- `tzs` 只剩**工作区**这一个不能由 flag 取代的机器级依赖，而且它没有合理缺省 ——
-  引擎内置的默认工作区是一个**真实客户目录**，落到它上面会去 Boot 别人的包，然后报一个
-  和你意图完全无关的错。**三层都空时拒绝启动**（`--workspace` → `TZSCLI_WS` → `tzs.workspace`），
-  不回落。
-- **设计器不在配置里**：它的程序集随仓库与发行包自带（`engine/designer/` / `tzs\designer\`），
-  引擎默认从 `<引擎目录>\designer\` 加载。
-  所以同一份 tt 在任何机器上跑的是同一版设计器 —— 这是分发本身保证的，不需要谁去对齐配置。
-
-完整示例见 `config.example.json`。
-
-### 旧配置迁移
-
-首次运行会**自动**把合并前的两份配置合并成一份，规则：
-
-- 环境清单取**并集**，同名环境以 TDictCli 那份为准（它是字典查询的现役配置）；
-- TDebug 的 `debug` 节被**拆开**：`sshs` 提升为 `hosts.sshs`，其余键留在 `debug`；
-- `query` / `mirror` / `bdldoc` / `sync` 原样带过来；
-- **原文件不删除**，各留一份 `.pre-merge.bak`。
-
-> 注意 TDictCli 原有的一条迁移规则是「`debug` 整节重命名为 `hosts`」。那条规则在合并后会
-> 把 TDebug 的 `launchArgs` / `watchdogSeconds` / `termWidth` 等设置一并吞进 `hosts`，
-> 必须换成本次的拆解规则 —— 这是合并里最容易出错的一处，`internal/config/migrate.go`
-> 的注释和测试都盯着它。
-
-预览迁移结果：
-
-```bash
-tt config migrate --dry-run
-```
-
-### 配置页
-
-```
-tt serve
-```
-
-**默认后台常驻**（单实例）：打印实际地址后立即返回，终端可以接着敲别的命令；
-`tt debug start/exec/status` 等控制命令会自动找到它。已在运行时打印它的地址后返回。
-
-```
-tt serve --foreground    # 前台运行，日志直出终端（Ctrl+C 停止）
-tt serve --stop          # 停止后台实例
-```
-
-一个进程、一个端口、一套页面：
-
-- `/debug/` — 调试工作台
-- `/debug/#settings` — 统一设置页：站点管理 / 数据字典 / DEBUG / 应用设置
-- `/api/*` — 统一接口：环境与数据库配置（`/api/hosts`）、配置派生状态、
-  PATH 安装，以及字典类动作（源码镜像拉取、字典同步、BDL 文档）
-
-**所有配置都在设置页里**：环境与数据库、查询数据源、镜像目录、同步目标、
-BDL 文档目录、调试参数、`.tzs` 引擎依赖、明暗色。环境清单只有一份数据源
-（config.json 的 hosts 节），调试、字典查询与源码镜像读的是同一份。
-
-### 命令行也能改配置
-
-```bash
-tt env list                       # 列出全部环境（* 标记默认环境）
-tt env show 开发环境               # 看某个环境的连接详情（口令打码）
-tt env use 正式环境                # 切换默认环境
-tt env topent 开发环境 10001       # 设置默认企业编号
-
-tt config path                    # 配置在哪
-tt config show                    # 看配置（口令打码；--raw 看原样）
-tt config validate                # 校验：节是否齐全、环境是否完整
-tt config get hosts.activeEnv     # 按点分路径读
-tt config set debug.termWidth 240 # 按点分路径写（值按 JSON 解析）
-tt config migrate [--dry-run]     # 合并旧配置
-```
-
-写操作走与配置页完全相同的原子写路径（同目录临时文件 + fsync + 重命名），
-失败不留半截文件，也不会覆盖自己那一节之外的任何键。
-
-## 命令面
-
-### `tt debug` — 作业调试器
-
-```
-tt debug serve [--stop|--foreground]     启动/停止调试服务
-tt debug probe                           探测：SSH / 区域 / 数据库
-tt debug ents [--ent N]                  企业目录：有哪些企业(ENT)、各用哪个账号（带快照，离线可答）
-tt debug db [--ent N]                    数据库连接体检：真连一次库验证账号可用
-
-tt debug start <作业> [-m <模块>] [-z <区域>]   拉起调试会话
-tt debug exec "<命令>"                    下断点/继续/求值（fgldb 原生命令）
-tt debug status | quit | wait | why       会话管理
-tt debug source | logs | locate | resolve | interrupt
-tt debug wslogs | wsdebug | sql | wstest  接口日志与报文回放
-tt debug mode | topent                    切换调试模式 / 企业
-```
-
-### `tt dev tzc` — 设计器代码包
-
-```
-tt dev tzc export <pkg.tzc> [-o <dir>] [--only <点名>...] [--json]
-tt dev tzc status | verify | apply | unlock | rename | newfn | selftest
-```
-
-`export` 把包渲染成**带围栏的 4GL 工作区**（`prog.full.4gl` + `manifest.json` + 快照 + git），
-改完 `apply` 走 gate1/gate2/gate3 写回 —— **`apply` 是唯一的写路径**，它做闸门校验与原子写。
-围栏协议与不变量见 [docs/WIKI.md](docs/WIKI.md#5-tt-dev-tzc-代码包)。
-
-退出码：`0` 成功 / `2` 包格式或用法错 / `3` 校验失败 / `4` 拒绝写入 / `5` IO 与环境失败。
-
-### `tt dev tzs` — 设计器表单包
-
-```
-tt dev tzs export <pkg.tzs> [-o <dir>] [--force] [--json]   # 纯解压（只读参考）
-tt dev tzs call <fn> [--<参数> <值>…]                        # 读写表单（设计器自己的引擎）
-tt dev tzs fns [<fn>] | manifest | doctor | stop | reap
-```
-
-- **`export` 是纯解压**：把 zip 逐条目摊到目录里（默认 `<包目录>/<程序名>-unzip`），
-  不解围栏、不校验、不产生工作区。产物是**只读参考**，不要改完再塞回包。
-  它**不依赖引擎，也不依赖设计器** —— 没装设计器也能用。
-- **读写表单走 `call`**，49 个函数（`fns` 看全表）。这是设计器自己的模型在算，
-  改完设计器打得开；手工拼 XML 则不然。
-
-退出码与 `tzc` 那套**不一样**：没有 `3`，多一个 `1`。
-`0` 成功 / `1` 引擎内部错 / `2` 参数或环境不对 / `4` 设计器拒绝（含 `E_KEY_IN_USE`）/
-`5` 传输或环境失败。
-
-细节（句柄语义、`validate` 的基线规则、参数语法、逐函数说明）见
-[skills/tt-dev-tzs/SKILL.md](skills/tt-dev-tzs/SKILL.md)。
-
-### `tt dict` — 数据字典
-
-```
-tt dict r.t [表名] | r.v [识别码] | desc <表> [字段] | scc [分类码] | r.q [开窗码]
-tt dict msg | sysp | docp | prog
-tt dict env
-tt dict db status | sync | list | ping | discover
-tt dict mirror dir|pull|path
-tt dict bdldoc dir
-```
-
-数据源缺省是**在线优先**：用默认环境（`hosts.activeEnv`）的远程库直查；
-一个环境都没配时才用本地 SQLite 镜像（`erp_data.db`，由 `tt dict db sync` 同步）。
-用 `--env <环境名|local>` 或 `config.json` 的 `query.source` 固定数据源。
-连不上不会静默回落本地 —— 否则你会以为查到的是实时数据，实际是几天前的镜像。
-
-## `.tzs` 表单引擎
-
-`tt dev tzs call` 背后是 `engine/` 里一个 **C# 引擎**（`tzs-server.exe`）。它**不实现**
-`.tzs` 格式 —— 它 `Assembly.LoadFrom` **设计器自己的程序集**，布局属性走设计器自己的
-`XmlElement` 索引器，`.tsd` 由设计器从模型重算，验收用设计器自己的校验器加 RoundTrip 不动点。
-我们这部分总共 200 KB（`TzsCli.dll` 26 KB + `TzsCli.Designer.dll` 180 KB）。
-**设计器那 10.5 MB 随仓库一起走**：仓库里在 `engine/designer/`，发行包里在 `tzs\designer\`。
-
-`tt` 通过命名管道上的 JSON-RPC 驱动它（`internal/dev/tzs/`，`tt` 自己实现的 Go 客户端）。
-
-### 为什么单独构建
-
-1. **它不属于 Go 的构建链。** 用 `csc.exe`（Framework64 v4.0.30319，**C# 5**——没有模式匹配、
-   没有 `nameof`、没有字符串插值）编译，引用 GAC 里的 WPF 程序集。`build_portable.bat`
-   只**采集**产物，不构建它。**只在引擎真的改了时才重编。**
-2. **设计器程序集已入库，运行期不需要外部的。** 引擎 `LoadFrom` 它的 `SpecDesignerCommon.dll` /
-   `FormEditor.dll` / `UndoRedoFramework.dll`，以及分散在多个程序集里的语言字典 —— 这些就是
-   `engine/designer/` 里那 28 个 dll。引擎的解析规则只有两条：`TZSCLI_INSTALL`（**覆盖**用，
-   开发或换版本时），否则 `<自己的目录>\designer`。**没有"回落到别处装的那份"这一条**，
-   所以少带一个文件是包/仓库不完整，不是"去别处找找"。
-3. **重编会让所有在跑的守护进程变成孤儿。** 守护进程的管道名 = `hash(工作区)` +
-   **本程序集的 MVID 前 8 位**，MVID 每次重编都变。客户端因此**永远够不到**跑着陈旧字节的
-   守护进程（刻意的，否则你会和旧行为对话而看不出来）；代价是每次重编后，上一个构建起的
-   守护进程**再也停不掉**（新名字没人监听，旧名字没人知道）。清理由 `tt dev tzs reap` 兜底。
-
-   把引擎构建挂在 `tt` 的每次构建上，等于每次发版都制造一批停不掉的进程 ——
-   一个和 `tt` 无关的构建步骤造成用户可见的后果。
-
-### 进分包的是什么
-
-```
-tzs-server.exe        服务端（命名管道 / --stdio 两种模式）
-tzs-cli.exe           客户端（独立可用；tt 自己实现了一份 Go 客户端）
-TzsCli.dll            纯文本/zip 层，不反射
-TzsCli.Designer.dll   反射管线 + 49 个函数
-designer\             设计器的 28 个 .dll（第三方商业软件，见下）
-```
-
-`engine/out/` 里还有十几个探测程序（`Probe` / `Edit` / `AddField` / `RoundTrip` / `Test*` / `E2E`），
-**不要 xcopy 整个目录** —— `build_portable.bat` 显式按名字采那四个到 `<stage>\tzs\`。
-
-`designer\` **只采 `*.dll`**，那 28 个就是引擎要的全部 —— 仓库里 `engine/designer/` 存的也正是
-这一组。GUI 的 `T100Designer.exe`、会连厂商更新通道的 `AutoUpdater.exe` 与 Sparkle 组件、它的
-`.config` 和一个快捷方式都**不在内**。所以仓库、`engine/out/designer/`、发行包 `tzs\designer\`
-三处是同一份集合。
-
-```bash
-cd engine && ./build.sh          # → engine/out/，并把 engine/designer/ 采到 out/designer/
-build_portable.bat               # 采 tt.exe + skills + 包内配置 + 引擎四个文件 + engine\designer\
-```
-
-想打一个装别版设计器的包（验证用）：`TZSDESIGNER=<目录> build_portable.bat`。
-平时换版本就是换 `engine/designer/` 下的文件并提交 —— 那次提交也就是"这一版钉在哪"的记录。
-
-其余（`SPEC.md` 格式契约、`HANDOFF.md` 交接、`TASKS.md` 任务板）见 [engine/BUILD.md](engine/BUILD.md)。
-
-## 项目结构
-
-```
-TT/
-├─ main.go                  //go:embed all:web/dist → cli.Execute
-├─ internal/
-│  ├─ config/               ★ 统一配置层：位置解析 / 读写 / schema / 迁移
-│  ├─ cli/                  cobra 根命令
-│  │  ├─ env.go config.go serve.go install.go version.go
-│  │  ├─ common/            各命令组共享的 CLI 上下文（叶子包）
-│  │  ├─ debug/ dev/ dict/  命令组
-│  ├─ debug/                调试内核：fgldb 驱动、会话、REST+WS
-│  ├─ dev/
-│  │  ├─ tzc 管线           pkgfile/tapfile/tglfile/fgl/synth/fence/verify/split/store/model
-│  │  └─ tzs/               ★ .tzs 引擎的 Go 客户端：manifest/wire/client/server/state/doctor
-│  ├─ dict/                 数据源与查询：db（本地）/ live（远程）/ dbsync / server
-│  ├─ web/                  统一 HTTP 服务与共享 /api/*
-│  ├─ host/                 ★ 合并后唯一的 SSH/PTY/终端/探测/镜像层
-│  ├─ dbconfig/ erpdb/      数据库连接模型与连接器（两处合并）
-│  ├─ safesql/ sshtun/ output/ pathinstall/ atomic/ winproc/
-├─ engine/                  ★ .tzs 表单引擎（C#，单独构建，见 engine/BUILD.md）
-│  └─ designer/             设计器的 28 个程序集（第三方商业软件，随仓库分发）
-├─ web/
-│  ├─ app/                  调试工作台 SPA（React + Radix + zustand + Monaco）
-│  │                        其中的设置视图是所有命令组的统一配置页
-│  ├─ shared/               整套 SPA 共用的主题层 / UI 基元 / 设置页布局件
-│  └─ package.json          npm workspace 根
-├─ skills/                  AI 技能：tt-debug / tt-dev-tzc / tt-dev-tzs / tt-dict / erp-read
-├─ docs/                    分册文档与设计说明
-└─ testdata/                FGL 夹具
-```
-
-`★` = 为合并或为 `.tzs` 而真正重组的部分。
+`T100_HOME` 整体改写统一目录（如 `T100_HOME=D:\t100`）。**字段的完整说明、迁移规则、
+以及"哪些能写在界面上"见 [docs/WIKI.md](docs/WIKI.md#2-统一配置)。**
 
 ## 依赖
 
@@ -409,13 +168,6 @@ cd engine && ./build.sh && cd ..                  # .tzs 引擎（C#）→ engin
 
 `./build.sh` 会把仓库里的 `engine/designer/` 一并采到 `engine/out/designer/` —— 那正是引擎默认
 去找的地方，所以编完就能跑，**没有任何环境变量要设**。
-
-### 后端
-
-```bash
-cd web && npm install && npm run build   # → web/dist（顺带跑 tsc --noEmit 做类型检查）
-cd .. && go build -o tt.exe .            # → tt.exe
-```
 
 `build_portable.bat` 会把版本号注进去（`-ldflags "-X tt/internal/cli.Version=…"`），
 直接 `go build` 出来的是 `devel`，`tt version` 看得出来差别。
@@ -499,26 +251,3 @@ cd web && npm run dev:app    # 前端热更新，代理到后端
 ```
 
 端口被占用时后端会自动顺延，用 `TT_PROXY=http://127.0.0.1:<实际端口>` 告诉前端。
-
-## 文档
-
-| 文档 | 内容 |
-|---|---|
-| [docs/WIKI.md](docs/WIKI.md) | **项目 wiki**：架构、统一配置、Web 服务、三个命令组的设计与契约、测试与验收、设计史。原先散在 `docs/` 下的六份文档已合并进这一份 |
-| [engine/BUILD.md](engine/BUILD.md) | `.tzs` 引擎：为什么单独构建、采哪四个文件 |
-| [engine/SPEC.md](engine/SPEC.md) | `.tzs` 格式与契约的完整记录 |
-| [docs/T100设计器-README.md](docs/T100设计器-README.md) | 第三方材料的恢复副本（设计器反编译源码树的 README）——wiki §5.14 的 `file:line` 依据来源 |
-| [skills/tt-dev-tzc/SKILL.md](skills/tt-dev-tzc/SKILL.md) | 给 AI 的操作手册：`.tzc` 代码包怎么改、哪些坑 |
-| [skills/tt-dev-tzs/SKILL.md](skills/tt-dev-tzs/SKILL.md) | 给 AI 的操作手册：`.tzs` 表单包怎么读写、哪些坑 |
-
-## 兼容性
-
-合并前的命令名仍可直接当子命令组用，既有脚本与 AI skill 不改即可运行：
-
-```
-tt tdebug …  =  tt debug …
-tt tdev …    =  tt dev …
-tt tdict …   =  tt dict …
-```
-
-环境变量同理：`TDEBUG_CONFIG` / `TDICT_CONFIG` 仍被识别，`--conn` 仍是 `--env` 的别名。
