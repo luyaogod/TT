@@ -1430,7 +1430,7 @@ SpecDesignerCommon/ViewModel/XmlElement.cs:2522
 | `E_UNKNOWN_METHOD` | validation | 不在 manifest 里 |
 | `E_BAD_PARAM` | validation | 参数缺/类型错/枚举越界；`detail.param` 点名 |
 | `E_NO_HANDLE` | not_found | 句柄不存在或已关闭 |
-| `E_HANDLE_BUSY` | validation | 句柄状态不对 |
+| ~~`E_HANDLE_BUSY`~~ | ~~validation~~ | **已删除（2026-09-25）**：表里写着、实现里从没有任何地方抛它（引擎唯一的句柄状态判定是 Closed，那是 `E_NO_HANDLE`）。一个抛不出来的码是 advertised-but-inert，留着只会让调用方永远为一个不存在的结果写分支。 |
 | `E_PATH_NOT_FOUND` | not_found | name-path 解析不到 |
 | `E_NO_SPEC_NODE` | not_found | 该元素没有这种规格节点；换一个 kind |
 | `E_ATTR_NOT_WHITELIST` | validation | 索引器拒绝——元素身上没有这个属性；`detail.legal` 列出合法集，`detail.hint` 给最接近的名字 |

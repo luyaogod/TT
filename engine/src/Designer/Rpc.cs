@@ -531,7 +531,10 @@ namespace TzsCli.Designer
                 // failure here is the model refusing mid-batch (see Attr.Partial).
                 case "E_ATTR_PARTIAL":      wire = code; kind = "designer";   return;  // detail.applied + failed
                 case "E_BAD_PARAM":     wire = code; kind = "validation"; return;
-                case "E_HANDLE_BUSY":   wire = code; kind = "validation"; return;
+                // E_HANDLE_BUSY used to be listed here ("句柄状态不对"). Nothing ever threw it:
+                // the only state test in the engine is Closed, and that is E_NO_HANDLE above. A
+                // code that no Fn can produce is advertised-but-inert, so it is gone from here and
+                // from SPEC §11.24 (a) rather than left for a caller to branch on forever.
                 case "E_NO_HANDLE":     wire = code; kind = "not_found";  return;       // reopen it
                 case "E_PATH_NOT_FOUND": wire = code; kind = "not_found"; return;
                 case "E_NO_SPEC_NODE":  wire = code; kind = "not_found";  return;       // try another kind
@@ -747,7 +750,10 @@ namespace TzsCli.Designer
                     + "（handle 也可以写程序名或 ProgramKey，例如 aapp320 或 aapp320|Form）";
                 var d = Det("handle", "not_found", msg);
                 d["candidates"] = OpenHandles();
-                throw new DetailedError("not_found", msg, d);
+                // E_NO_HANDLE rather than the generic E_NOT_FOUND: §11.24 (a) lists it for exactly
+                // this ("句柄不存在或已关闭"), kind is still not_found, and the caller's next move
+                // ("open it again") is then a branch rather than a guess.
+                throw new DetailedError("E_NO_HANDLE", msg, d);
             }
 
             static JObject Det(string param, string reason, string message) {

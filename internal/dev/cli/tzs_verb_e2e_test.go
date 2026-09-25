@@ -114,6 +114,20 @@ func TestE2EVerbSurface(t *testing.T) {
 			}
 		}
 
+		// ⑥ 示例里的占位符必须与参数的**角色**一致。包路径教成 `<name-path>` 是这条测试
+		//    存在的理由：`open.path` 与 `field_add.out` 从前都被教错，而它们都是包路径
+		//    （2026-09-24 的设计评审发现，修法是引擎声明里的 `role`）。
+		if args := exampleArgsOf(t, ex); args != nil {
+			for _, p := range f.Args {
+				if p.Role != tzs.RolePackagePath {
+					continue
+				}
+				if v, ok := args[p.Name].(string); ok && v == "<name-path>" {
+					t.Errorf("%s：参数 %s 的角色是包路径，示例却教成 <name-path>：%s", f.Name, p.Name, ex)
+				}
+			}
+		}
+
 		// 动词的参数表要能渲染（`<动词> --help` 走的就是 printFn）。
 		if f.Name == "list_open" {
 			printFn(io.Discard, f)

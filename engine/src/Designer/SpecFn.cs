@@ -30,6 +30,9 @@ namespace TzsCli.Designer {
 
     public sealed class Param {
         public string Name;
+        /// <summary>What the parameter MEANS, independent of what it is called (see Role).
+        /// Null for the many parameters whose meaning is not ambiguous.</summary>
+        public string Role;
         public PType Type;
         public bool Required;
         public string Default;
@@ -64,6 +67,34 @@ namespace TzsCli.Designer {
 
     /// <summary>Small builders so the manifest table reads as a table rather than as object
     /// initialisers. Kept here, with the types, so every Fns module writes them the same way.</summary>
+    /// <summary>What a parameter means, for the pairs where the name alone does not say.
+    ///
+    /// The names are not going to change -- they are the C# function signatures' own, and §11.9's
+    /// decision was to annotate rather than rename. But two problems come from those names, and both
+    /// are mechanical once the meaning is written down:
+    ///
+    ///   * the generated example picks a placeholder from the name (the Go client's `placeholder`
+    ///     keyed off the parameter being literally called `file`), so `open.path` and
+    ///     `field_add.out` -- both PACKAGE paths -- were taught as `<name-path>`;
+    ///   * whether a verb can answer E_PATH_NOT_FOUND depends on whether it takes a name-path or a
+    ///     package path, and PType.Path does not distinguish them (`open.path` is a .tzs file).
+    ///
+    /// So: a role is declared where the meaning is not obvious from the type, and those two
+    /// consumers read it instead of guessing.
+    /// </summary>
+    public static class Role {
+        /// <summary>A .tzs file on disk.</summary>
+        public const string PackagePath   = "package-path";
+        /// <summary>A name-path inside the loaded form ("managedform/a/HBoxT1/...").</summary>
+        public const string ComponentPath = "component-path";
+        /// <summary>Which way a structural verb moves or switches (first/prev/next/last, up/down…).</summary>
+        public const string Direction     = "direction";
+        /// <summary>An action's identifier, as the form's own vocabulary spells it.</summary>
+        public const string ActionId      = "action-id";
+        /// <summary>The new name in a rename.</summary>
+        public const string NewName       = "new-name";
+    }
+
     public static class P {
         public static Param Str(string n, bool req = true, string desc = null)
             { return new Param { Name = n, Type = PType.Str, Required = req, Desc = desc }; }
@@ -72,7 +103,12 @@ namespace TzsCli.Designer {
         public static Param Bool(string n, bool req = false, string desc = null)
             { return new Param { Name = n, Type = PType.Bool, Required = req, Desc = desc }; }
         public static Param Path(string n, bool req = true, string desc = null)
-            { return new Param { Name = n, Type = PType.Path, Required = req, Desc = desc }; }
+            // A `path` parameter IS a name-path unless something says otherwise: the package paths
+            // (`open.path`, `field_add.file`/`out`, `save.out`) are the exceptions and are tagged
+            // where they are declared. Defaulting here rather than tagging ~25 sites is what keeps
+            // "the role is declared where the meaning is not obvious" from becoming "declared
+            // everywhere", which nobody would maintain.
+            { return new Param { Name = n, Type = PType.Path, Required = req, Desc = desc, Role = Role.ComponentPath }; }
         public static Param Handle(string n = "handle")
             { return new Param { Name = n, Type = PType.Handle, Required = true }; }
         public static Param Kind(string n = "kind")
@@ -97,7 +133,7 @@ namespace TzsCli.Designer {
         public static Param Enum(string n, string[] values, bool req = true)
             { return new Param { Name = n, Type = PType.Enum, Required = req, Values = values }; }
         public static Param List(string n, bool req = true)
-            { return new Param { Name = n, Type = PType.PathList, Required = req }; }
+            { return new Param { Name = n, Type = PType.PathList, Required = req, Role = Role.ComponentPath }; }
         /// <summary>A list of plain strings -- NOT paths. `List` above is PathList, and using it
         /// for a value list publishes the wrong type to every reader of --manifest (set_items'
         /// `items` carried `path[]` for a list of "name|text|description" strings).</summary>
@@ -108,6 +144,10 @@ namespace TzsCli.Designer {
         /// -- the JSON object is the shape that says so.</summary>
         public static Param Attrs(string n, string desc = null)
             { return new Param { Name = n, Type = PType.Attrs, Required = true, Desc = desc }; }
+        /// <summary>Tag a parameter with what it means (see Role). A wrapper rather than an extra
+        /// argument on every helper above: most parameters need no role, and the role is metadata
+        /// about the parameter rather than part of the helper's own vocabulary.</summary>
+        public static Param As(Param p, string role) { p.Role = role; return p; }
     }
 
     /// <summary>The seven spec-node slots a FormSpecModel actually holds.

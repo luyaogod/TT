@@ -868,9 +868,16 @@ namespace TzsCli.Designer
             object el = Attr.El(s, path);
             object fsm = Attr.Fsm(s, el);
             object node = FirstSlot(fsm);
-            if (node == null)
-                throw Refused("no_spec_node",
-                    "元素 \"" + Read.Str(Session.Raw(el, "name")) + "\" 没有任何规格节点", Detail("path", path));
+            if (node == null) {
+                // E_NO_SPEC_NODE, not the `designer` kind Refused() would give: §11.24 (a) classifies
+                // this one as not_found ("该元素没有这种规格节点；换一个 kind"), because the caller's
+                // fix is to ask for a different kind. `designer` means "do not retry, tell the user",
+                // which is the opposite advice.
+                var d = Detail("path", path);
+                d["reason"] = "no_spec_node";
+                throw new DetailedError("E_NO_SPEC_NODE",
+                    "元素 \"" + Read.Str(Session.Raw(el, "name")) + "\" 没有任何规格节点", d);
+            }
 
             if (Reflect.Prop(node, "CitedSpec") == null)
                 throw Refused("no_cited_spec",

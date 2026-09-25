@@ -64,9 +64,11 @@ tt dev tzs field_add --args '{"file":"D:\\ws\\x.tzs","table":"pmdl_t","columns":
 | `container` | 否 | 容器模式，默认 `None`（`None` = 每个字段配一个 Label 控件；`Table` = 一个 Table 装 N 列） |
 | `out` | 否 | 给了就把结果存成这个**新**包（绝不写源包）；**必须也落在同一工作区内**（§4.4） |
 
-> ⚠️ `container` 的**枚举在 `--help` 里比函数体接受的宽**：`HBox` / `VBox` / `Page` / `Folder`
-> 目前会被拒（`E_BAD_PARAM`「未知容器模式 HBox；合法值: None, Grid, Group, ScrollGrid, Table, Tree」）。
-> 用 `None` 或 `Table` 最稳。（引擎里两份清单该对齐，属已知待办。）
+> `container` 的枚举**就是函数体校验的那一份**（2026-09-25 起，同一个数组）：
+> `None` / `Grid` / `Group` / `ScrollGrid` / `Table` / `Tree` —— 照着 `--help` 写一定过得去。
+> `HBox`/`VBox`/`Page`/`Folder` 从来不是**创建目标**（它们在设计器里只作为命令存在），
+> 从前 `--help` 把它们列出来、函数体再拒 —— 那是声明那一侧的错，现在两边是同一份。
+> `convert_container` 的 `type` 是另一件事：只收 `Grid` / `Group`（设计器的转换命令只能在这两者之间转）。
 
 **容器怎么自动挑**（`into` 可覆盖）：① 叫 `worksheet` 的容器（设计器模板里放字段的那块）→
 ② 名字含 `layout` 的容器 → ③ 根 `<Form>` 下唯一的容器 → ④ 都不成立就**报错要你显式指定**

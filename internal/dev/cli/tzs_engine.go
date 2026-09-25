@@ -195,6 +195,17 @@ func verbExample(spec *tzs.SpecFn) string {
 // 用 `<...>` 而不是编造一个具体值：编造的值会被人当成"就该这么写"，而它可能只是某一
 // 张表单的巧合。kind / attr 尤其如此 —— 它们的合法集是运行时从活模型里算的。
 func placeholder(p *tzs.Param) string {
+	// **角色优先于类型**：占位符由"这个参数是什么意思"决定，而不是由它声明成 `path` 还是
+	// `string` 决定 —— `field_add.file` 是 path、`save.out` 是 string，两者都是包路径；
+	// 而表单内的 name-path 不论哪种类型都该渲染成 `<name-path>`。判据从前是"参数名是不是
+	// `file`"，于是 `open.path`（包路径）被教成 `<name-path>`、`save.out` 干脆教成 `<值>`
+	// （2026-09-24 的设计评审发现；现在是引擎声明里的 `role`）。
+	switch p.Role {
+	case tzs.RolePackagePath:
+		return tzs.JSONString("<包路径>")
+	case tzs.RoleComponentPath:
+		return tzs.JSONString("<name-path>")
+	}
 	switch p.Type {
 	case tzs.TypeInt:
 		return "0"
@@ -212,11 +223,7 @@ func placeholder(p *tzs.Param) string {
 		// 写出必被拒的调用（引擎对空对象明确报错）。
 		return `{"<属性名>":"<值>"}`
 	case tzs.TypePath:
-		// `file` 是**包路径**，不是表单内部的 name-path：两者都是 t=path，
-		// 占位符说错了会让人照着写一个 name-path 进去。
-		if p.Name == "file" {
-			return tzs.JSONString("<包路径>")
-		}
+		// 剩下的 path 都是表单内的 name-path（包路径那几种在上面按 role 摘走了）。
 		return tzs.JSONString("<name-path>")
 	case tzs.TypeKind, tzs.TypeKindOrLayout:
 		return tzs.JSONString("<kind>")
@@ -821,9 +828,16 @@ func printRawReply(r *tzs.Reply) {
 func emitFailure(err error, asJSON bool) int {
 	code := exitCodeOf(err)
 	if asJSON {
-		emitJSON(os.Stdout, tzs.SyntheticFailure(err))
-		// 一行一帧：帧与帧之间靠换行分界（与 printRawReply 一致）。
-		fmt.Fprintln(os.Stdout)
+		// **紧凑、一行**，与引擎帧一样。从前这里走 emitJSON（它会美化缩进），于是同一个
+		// `--json` 出口有两种形状：引擎发的帧是一行，客户端合成的帧是多行 —— 按行读的消费方
+		// （`| head -1`、逐行解析）在合成的帧上会踩空，而它分不出两者有什么不同。
+		// （2026-09-25 实测发现：契约说"一行一个响应"，合成帧也该守。）
+		b, merr := json.Marshal(tzs.SyntheticFailure(err))
+		if merr != nil {
+			fmt.Fprintf(os.Stderr, "合成帧失败：%v\n", merr)
+			return code
+		}
+		os.Stdout.Write(append(b, '\n'))
 		return code
 	}
 	fmt.Fprintf(os.Stderr, "错误（退出码 %d）：%v\n", code, err)

@@ -187,7 +187,7 @@ namespace TzsCli.Designer
             string startPath = rootName + "/" + Reflect.S(Reflect.Prop(formNode, "Name"));
             if (pathFilter != null) {
                 start = s.FindByPath(pathFilter);
-                if (start == null) throw TzsError.NotFound("路径", pathFilter);
+                if (start == null) throw TzsError.PathNotFound(pathFilter);
                 startPath = pathFilter;
             }
 
@@ -328,13 +328,13 @@ namespace TzsCli.Designer
             string elPath = null;
             if (!string.IsNullOrEmpty(path)) {
                 el = s.FindByPath(path);
-                if (el == null) throw TzsError.NotFound("路径", path);
+                if (el == null) throw TzsError.PathNotFound(path);
                 elPath = path;
             } else {
                 string[] hit = Resolve(s, formNode, rootName, query);
                 el = s.FindByPath(hit[0]);
                 elPath = hit[0];
-                if (el == null) throw TzsError.NotFound("路径", hit[0]);
+                if (el == null) throw TzsError.PathNotFound(hit[0]);
             }
 
             string name = (string)Session.Raw(el, "name");
@@ -868,7 +868,7 @@ namespace TzsCli.Designer
             HashSet<string> wanted = null;
             if (path != null) {
                 object el = s.FindByPath(path);
-                if (el == null) throw TzsError.NotFound("路径", path);
+                if (el == null) throw TzsError.PathNotFound(path);
                 wanted = new HashSet<string>();
                 CollectLocalNames(el, wanted);
             }

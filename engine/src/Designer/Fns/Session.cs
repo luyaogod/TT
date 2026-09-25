@@ -96,7 +96,7 @@ namespace TzsCli.Designer.Fns
         /// </summary>
         public static void Touch(DS s) {
             if (s == null) throw TzsError.Validation("缺少 handle");
-            if (s.Closed) throw TzsError.NotFound("句柄（已关闭）", s.Handle);
+            if (s.Closed) throw TzsError.NoHandle("句柄（已关闭）", s.Handle);
             s.RegisterUndoRedo();
         }
 
@@ -109,8 +109,8 @@ namespace TzsCli.Designer.Fns
             if (string.IsNullOrEmpty(handle)) throw TzsError.Validation("缺少 handle");
             DS s;
             lock (_gate) { _handles.TryGetValue(handle, out s); }
-            if (s == null) throw TzsError.NotFound("句柄", handle);
-            if (s.Closed) throw TzsError.NotFound("句柄（已关闭）", handle);
+            if (s == null) throw TzsError.NoHandle("句柄", handle);
+            if (s.Closed) throw TzsError.NoHandle("句柄（已关闭）", handle);
             return s;
         }
 
@@ -528,7 +528,7 @@ namespace TzsCli.Designer.Fns
         internal static DS Resolve(DS s, JObject args) {
             DS got = s;
             if (got == null) got = Get(Str(args, "handle"));
-            if (got.Closed) throw TzsError.NotFound("句柄（已关闭）", got.Handle);
+            if (got.Closed) throw TzsError.NoHandle("句柄（已关闭）", got.Handle);
             return got;
         }
 

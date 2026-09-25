@@ -428,7 +428,7 @@ namespace TzsCli.Designer.Fns
             bool want = TzsCli.Designer.Fns.Session.Bool(args, "excluded", true);
 
             object el = s.FindByPath(path);
-            if (el == null) throw TzsError.NotFound("路径", path);
+            if (el == null) throw TzsError.PathNotFound(path);
             string name = Reflect.S(Reflect.Prop(el, "Name"));
             if (string.IsNullOrEmpty(name))
                 throw new TzsError("designer", "该元素没有控件代号，不能排除: " + path);

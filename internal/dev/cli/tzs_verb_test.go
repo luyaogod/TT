@@ -523,6 +523,50 @@ func TestPlaceholder(t *testing.T) {
 	}
 }
 
+// TestPlaceholderFollowsRole 钉住"**同一个角色，占位符规则相同**"。
+//
+// 这条规则是 §11.9 第 3 条要的机械检查：参数名是从 C# 函数签名继承来的、不打算改，所以
+// "同一个概念在不同动词里叫什么"这件事必须由**角色**承载。判据不看名字、也不看类型 ——
+// 包路径既可能是 `path`（`field_add.file`）也可能是 `string`（`save.out`）。
+func TestPlaceholderFollowsRole(t *testing.T) {
+	for _, c := range []struct{ role, want string }{
+		{tzs.RolePackagePath, `"<包路径>"`},
+		{tzs.RoleComponentPath, `"<name-path>"`},
+	} {
+		for _, p := range []tzs.Param{
+			{Name: "path", Type: tzs.TypePath, Role: c.role},
+			{Name: "file", Type: tzs.TypePath, Role: c.role},
+			{Name: "out", Type: tzs.TypeString, Role: c.role}, // 同一个角色也可以是 string 型
+			{Name: "被改名的那个", Type: tzs.TypePath, Role: c.role},
+		} {
+			pp := p
+			if got := placeholder(&pp); got != c.want {
+				t.Errorf("role=%s name=%s type=%s → %s，想 %s（同一个角色必须同一个占位符）",
+					c.role, p.Name, p.Type, got, c.want)
+			}
+		}
+	}
+}
+
+// exampleArgsOf 取示例里 `--args '{...}'` 的那一段并解成对象；没有 args 段时返回 nil。
+func exampleArgsOf(t *testing.T, example string) map[string]any {
+	t.Helper()
+	i := strings.Index(example, "--args '")
+	if i < 0 {
+		return nil
+	}
+	rest := example[i+len("--args '"):]
+	j := strings.Index(rest, "'")
+	if j < 0 {
+		return nil
+	}
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(rest[:j]), &obj); err != nil {
+		return nil
+	}
+	return obj
+}
+
 // assertExampleArgsIsJSON 取出示例里 `--args '...'` 的那一段，断言它是合法 JSON 对象。
 func assertExampleArgsIsJSON(t *testing.T, example string) {
 	t.Helper()

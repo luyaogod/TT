@@ -66,6 +66,24 @@ func KnownType(t string) bool {
 	return false
 }
 
+// 参数的角色（= 引擎 `Param.Role`，见 engine/src/Designer/SpecFn.cs 的 Role）。
+//
+// 为什么需要它：参数名来自 C# 函数签名，同一个概念在不同动词里叫不同名字
+// （`open.path` vs `field_add.file`），同一个名字在不同动词里意思也不同（`path` 在 `open` 上
+// 是**包路径**，在别处是表单内的 name-path）。角色的用途是**机械**的，不是文档：
+//
+//	① 生成的示例按角色挑占位符 —— 从前只看参数名是不是 `file`，于是 `open.path` 与
+//	   `field_add.out` 这两个**包路径**都被教成 `<name-path>`；
+//	② 一个动词会不会回 `E_PATH_NOT_FOUND` 取决于它收的是不是 name-path（引擎侧
+//	   `AdvertisedErrors` 按 role 推导）。
+const (
+	RolePackagePath   = "package-path"
+	RoleComponentPath = "component-path"
+	RoleDirection     = "direction"
+	RoleActionID      = "action-id"
+	RoleNewName       = "new-name"
+)
+
 // Param 是 manifest 里的一项参数（引擎的 Param / SPEC §11.24(c) 的 args[] 元素）。
 type Param struct {
 	Name     string   `json:"n"`
@@ -73,6 +91,8 @@ type Param struct {
 	Required bool     `json:"req"`
 	Desc     string   `json:"desc,omitempty"`
 	Values   []string `json:"values,omitempty"` // 仅 enum：静态合法集
+	// Role 是"这个参数是什么意思"，只在名字看不出来时声明（见上面那组常量）。
+	Role string `json:"role,omitempty"`
 	// From 仅 attr：合法集要现场从模型里取（engine 的 DescribeFrom）。
 	// 它的取值是 "spec:<kind>" / "layout" 这种模板串，**不是**一份可列举的清单 ——
 	// 所以本地无从校验，只能让它上线（见 argmap 的本地校验清单）。

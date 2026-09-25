@@ -574,7 +574,17 @@ namespace TzsCli.Designer
 
         // ================================================================ add_field
 
-        static readonly string[] CONTAINER_TYPES =
+        /// <summary>The containers <c>UICreator.Create</c> can build INTO -- its six dispatch
+        /// branches (SPEC §11.10). This is the whitelist this file refuses against, and it is also
+        /// what the manifest publishes for `container`.
+        ///
+        /// ONE PRODUCER, and it did not use to be: the manifest had its own ten-entry list (six
+        /// creation targets plus the three that exist only as commands: HBox/VBox are
+        /// AddToContainerUndoRedoCommand targets §11.17, Page is a Folder's only legal child, and
+        /// Folder itself), so `--help` advertised four values that the body then refused with
+        /// "未知容器模式". A caller reading the parameter table had no way to know.
+        /// (Measured 2026-09-25; §11.9 item 5.)</summary>
+        internal static readonly string[] CONTAINER_TYPES =
             { "None", "Grid", "Group", "ScrollGrid", "Table", "Tree" };
 
         /// <summary>
@@ -1520,7 +1530,7 @@ namespace TzsCli.Designer
         /// (FormCommands.ConvertToContainerCommand) AND CanExecuteConvertToContainer requires the
         /// element to already BE a Grid or a Group -- you convert one container type into the
         /// other, you do not turn a widget into a container this way.</summary>
-        static readonly string[] CONVERT_CONTAINER_TARGETS = { "Grid", "Group" };
+        internal static readonly string[] CONVERT_CONTAINER_TARGETS = { "Grid", "Group" };
 
         public static object ConvertContainer(Session s, JObject a) {
             string path = Read.Need(a, "path");

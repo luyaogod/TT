@@ -120,7 +120,7 @@ namespace TzsCli.Designer
         /// kept local so this file does not depend on another agent's private helpers.</summary>
         static object El(Session s, string path) {
             object el = s.FindByPath(path);
-            if (el == null) throw TzsError.NotFound("路径", path);
+            if (el == null) throw TzsError.PathNotFound(path);
             return el;
         }
 

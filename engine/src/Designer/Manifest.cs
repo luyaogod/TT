@@ -41,7 +41,14 @@ namespace TzsCli.Designer
         /// <summary>The codes a declared function may put on the wire. Kept as arrays so the
         /// help and the (future) MCP tool schema cannot drift from what the Fns throw.</summary>
         static readonly string[] E_STD = { "E_NOT_FOUND", "E_BAD_PARAM", "E_DESIGNER", "E_INTERNAL" };
-        static readonly string[] E_SESS = { "E_NOT_FOUND", "E_BAD_PARAM", "E_DESIGNER", "E_KEY_IN_USE", "E_INTERNAL" };
+        // `open` is the only verb that loads a package, so it is the only one the engine's own
+        // watchdog can kill mid-call (E_FATAL_LOAD_TIMEOUT, written by the watchdog thread just
+        // before exit(3)). Kept as its own array rather than added to a shared one because no other
+        // verb can produce it -- and the E_SESS array that used to hold E_KEY_IN_USE for `open` is
+        // gone with it (open was its only user).
+        static readonly string[] E_OPEN = {
+            "E_NOT_FOUND", "E_BAD_PARAM", "E_DESIGNER", "E_KEY_IN_USE",
+            "E_FATAL_LOAD_TIMEOUT", "E_INTERNAL" };
 
         // The two attribute writers answer with more than E_STD says, and the difference is the
         // point of both: a caller that cannot see E_ATTR_NOT_WHITELIST in the help will not know
@@ -55,10 +62,43 @@ namespace TzsCli.Designer
         // vocabulary the distinction needs.
         static readonly string[] E_SPEC = {
             "E_NOT_FOUND", "E_BAD_PARAM", "E_DESIGNER",
-            "E_ATTR_NOT_WHITELIST", "E_ATTR_VALUE_ILLEGAL", "E_ATTR_PARTIAL", "E_NO_OP", "E_INTERNAL" };
+            "E_ATTR_NOT_WHITELIST", "E_ATTR_VALUE_ILLEGAL", "E_ATTR_PARTIAL",
+            "E_NO_SPEC_NODE",   // 元素没有这个 kind 的规格节点：换一个 kind 就行（Attr.SpecNode）
+            "E_NO_OP", "E_INTERNAL" };
         static readonly string[] E_LAYOUT = {
             "E_NOT_FOUND", "E_BAD_PARAM", "E_DESIGNER",
             "E_ATTR_NOT_WHITELIST", "E_ATTR_VALUE_ILLEGAL", "E_ATTR_PARTIAL", "E_ATTR_CLAMPED", "E_NO_OP", "E_INTERNAL" };
+
+        /// <summary>The codes one function can put on the wire: its declared array, plus the ones its
+        /// own parameters imply.
+        ///
+        /// WHY DERIVED. The arrays above say what each *family* of verbs was expected to throw, and
+        /// they had forgotten the code every handle-taking verb really can throw and the one every
+        /// name-path-taking verb can. Measured 2026-09-25 (§11.9 item 6): eight codes appeared in no
+        /// verb's list at all -- E_NO_HANDLE, E_HANDLE_BUSY, E_PATH_NOT_FOUND, E_NO_SPEC_NODE,
+        /// E_BAD_REQUEST, E_UNKNOWN_METHOD, E_SERVER_DIED, E_FATAL_LOAD_TIMEOUT -- so a caller
+        /// writing its branches from `--help` was missing them. Whether a verb takes a handle or a
+        /// path is already in its declaration, so the advertisement is computed rather than
+        /// remembered. Of those eight: E_HANDLE_BUSY turned out to be unreachable and is gone from
+        /// Rpc.Map; E_FATAL_LOAD_TIMEOUT is declared on `open`, the only verb that loads;
+        /// E_NO_SPEC_NODE is in E_SPEC, the only family that resolves a spec node.
+        ///
+        /// NOT advertised, deliberately: E_BAD_REQUEST and E_UNKNOWN_METHOD (refused before a verb
+        /// is dispatched) and E_SERVER_DIED (synthesised by the CLI). Those are facts about the
+        /// call, not about the verb's body.</summary>
+        static JArray AdvertisedErrors(SpecFn f) {
+            var codes = new List<string>(f.Errors);
+            bool handle = false, path = false;
+            foreach (Param p in f.Params) {
+                if (p.Type == PType.Handle) handle = true;
+                // A name-path, not a package path: only the former can come back E_PATH_NOT_FOUND
+                // (`open.path` is a .tzs file, and a missing one is a load failure, not this).
+                if (p.Role == Role.ComponentPath) path = true;
+            }
+            if (handle && !codes.Contains("E_NO_HANDLE")) codes.Add("E_NO_HANDLE");
+            if (path && !codes.Contains("E_PATH_NOT_FOUND")) codes.Add("E_PATH_NOT_FOUND");
+            return new JArray(codes);
+        }
 
         /// <summary>The 控件箱 (WidgetBox.xaml, 31 items) minus the container/semantic families,
         /// which get their own enums. It is an enum rather than a free string because
@@ -71,12 +111,13 @@ namespace TzsCli.Designer
             "Slider", "SpinEdit", "TextEdit", "TimeEdit", "WebComponent"
         };
 
-        /// <summary>UICreator.Create's six dispatch branches (SPEC §11.10) plus the three that
-        /// exist only as commands: HBox/VBox are AddToContainerUndoRedoCommand targets (§11.17),
-        /// Page is a Folder's only legal child.</summary>
-        static readonly string[] CONTAINERS = {
-            "None", "Grid", "Group", "ScrollGrid", "Table", "Tree", "Page", "HBox", "VBox", "Folder"
-        };
+        // The container vocabulary is NOT declared here any more. It used to be (a ten-entry array
+        // that every `container`/`type` parameter published), and it was wrong for every verb that
+        // used it: the creation verbs accept only Struct's six, `convert_container` accepts two.
+        // Each parameter now publishes the array its own body validates against, so the declared set
+        // and the enforced set are the same object -- see Fns/Struct.cs for the vocabulary itself
+        // (including which container names exist only as commands). The type is `Struct` and it lives
+        // in this namespace, not in `.Fns`: its own header explains why.
 
         // ---------------------------------------------------------------- table builders
         /// <summary>A handle-taking function. NeedsHandle=true is the default in SpecFn, and it
@@ -136,16 +177,16 @@ namespace TzsCli.Designer
               "按数据表的列一次性加字段（挑容器 → 建字段 → 报校验增量 → 可存新包，一次请求做完）",
               true, "report", E_STD,
                 Opt(PType.Handle, "handle", "已在开的表单：句柄 h1 或程序名 aapp320 或 ProgramKey aapp320|Form"),
-                Opt(PType.Path, "file", ".tzs 路径：没开就顺手开，已开着就复用（与 handle 二选一）"),
+                P.As(Opt(PType.Path, "file", ".tzs 路径：没开就顺手开，已开着就复用（与 handle 二选一）"), Role.PackagePath),
                 P.Str("table", true, "表名，如 pmdl_t"),
                 P.StrList("columns", true, "列名数组；一次构造 N 列（列名可用 list_columns 取）"),
                 Opt(PType.Path, "into", "父容器的 name-path；省略时自动挑（优先 worksheet）"),
-                OptEnum("container", CONTAINERS, "容器模式，默认 None"),
-                Opt(PType.Path, "out", "给了就把结果存成这个**新**包（绝不写源包）")),
+                OptEnum("container", Struct.CONTAINER_TYPES, "容器模式，默认 None"),
+                P.As(Opt(PType.Path, "out", "给了就把结果存成这个**新**包（绝不写源包）"), Role.PackagePath)),
 
             // ------------------------------------------------------------ 会话 (5)
-            N("open", G_SESSION, "加载包 + 注册会话，返回句柄", "handle", E_SESS,
-                new Param { Name = "path", Type = PType.Path, Required = true, Desc = ".tzs 路径" },
+            N("open", G_SESSION, "加载包 + 注册会话，返回句柄", "handle", E_OPEN,
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = ".tzs 路径", Role = Role.PackagePath },
                 // `timeout` was read by Session.Open (Fns/Session.cs:220) but declared nowhere, and
                 // Manifest.Check refuses an argument that is not in Params -- so the parameter was
                 // unreachable from the wire. It lived only in Fns/Session.cs's `Descriptors`, a
@@ -164,7 +205,7 @@ namespace TzsCli.Designer
                 // and §6 saying it is unimplemented, and reported the contradiction.
             F("save", G_SESSION, "把句柄的模型写回新包（不改会话状态）", false, "void", E_STD,
                 P.Handle(),
-                P.Str("out", true, "输出 .tzs 路径")),
+                P.As(P.Str("out", true, "输出 .tzs 路径"), Role.PackagePath)),
             // Mutating=false, and the argument for it was sitting in Fns/Session.cs's dead
             // `Descriptors` copy of this table, which said `true` -- the two disagreed and nothing
             // read either. Resolved in favour of the argument: `close` releases a handle, it does
@@ -188,7 +229,7 @@ namespace TzsCli.Designer
                 P.Str("query", true, "控件代号或其前缀")),
             F("get_component", G_READ, "一个元素的布局属性 + 它持有的规格节点属性", false, "el", E_STD,
                 P.Handle(),
-                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path", Role = Role.ComponentPath },
                 Opt(PType.Kind, "kind", "限定只回哪一类规格节点")),
             F("list_spec_nodes", G_READ, "整张表单的规格节点清单（按 kind 过滤）", false, "list<el>", E_STD,
                 P.Handle(),
@@ -222,13 +263,13 @@ namespace TzsCli.Designer
             // ------------------------------------------------------------ 属性 (6)
             F("set_spec_attr", G_ATTR, "改字段规格属性（白名单来自 describe_kind）", true, "delta", E_SPEC,
                 P.Handle(),
-                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path", Role = Role.ComponentPath },
                 P.Kind(),
                 P.Attr("attr", "spec:<kind>"),
                 P.Str("value", true, "新值")),
             F("set_spec_attrs", G_ATTR, "一次改一个节点的多个规格属性（先全量校验，再全量写）", true, "delta", E_SPEC,
                 P.Handle(),
-                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path", Role = Role.ComponentPath },
                 P.Kind(),
                 P.Attrs("attrs", "{\"属性名\":\"值\", …}；一次请求改多个，合成一步撤销")),
             F("set_layout_attr", G_ATTR, "改布局属性（走 XmlElement 索引器，铁律 §11.24(d)）", true, "delta", E_LAYOUT,
@@ -239,24 +280,24 @@ namespace TzsCli.Designer
                 // `{"paths":[...],"attr":...,"value":...}` with "缺必填参数 path" before the request
                 // ever reached the engine, so `paths` had never worked through tt at all. With
                 // neither given the engine still refuses, in a sentence that names both.
-                new Param { Name = "path", Type = PType.Path, Required = false, Desc = "name-path（与 paths 二选一）" },
+                new Param { Name = "path", Type = PType.Path, Required = false, Desc = "name-path（与 paths 二选一）", Role = Role.ComponentPath },
                 P.Attr("attr", "layout"),
                 P.Str("value", true, "新值"),
                 Opt(PType.PathList, "paths", "批量：对这些 path 一起改，忽略 path")),
             F("set_layout_attrs", G_ATTR, "一次改一个元素的多个布局属性（先全量校验，再全量写）", true, "delta", E_LAYOUT,
                 P.Handle(),
-                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path", Role = Role.ComponentPath },
                 P.Attrs("attrs", "{\"属性名\":\"值\", …}；一次请求改多个，合成一步撤销")),
             F("set_tree_source", G_ATTR, "Tree 数据来源的某一格", true, "delta", E_STD,
                 P.Handle(),
-                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "Tree 的 name-path" },
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "Tree 的 name-path", Role = Role.ComponentPath },
                 P.Str("element", true, "子元素名"),
                 P.Str("property", true, "属性名"),
                 P.Str("value", true, "新值")),
             F("rename_component", G_ATTR, "改控件代号（设计器强制全表单唯一）", true, "delta", E_STD,
                 P.Handle(),
-                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
-                P.Str("name", true, "新代号")),
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path", Role = Role.ComponentPath },
+                P.As(P.Str("name", true, "新代号"), Role.NewName)),
 
             // ------------------------------------------------------------ 结构 (12)
             // with_label defaults TRUE, which is a behaviour change and the faithful one: the
@@ -265,7 +306,7 @@ namespace TzsCli.Designer
             // built by hand. Pass with_label=false for the old single-element behaviour.
             F("add_widget", G_STRUCT, "往容器里加一个控件（走 AddComponetsUndoRedoCommand）", true, "el", E_STD,
                 P.Handle(),
-                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "父容器的 name-path" },
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "父容器的 name-path", Role = Role.ComponentPath },
                 P.Enum("type", WIDGETS),
                 Opt(PType.Str, "name", "控件代号，默认走 ComponentFactory.GetNewName"),
                 Opt(PType.Bool, "with_label", "给需要标签的 8 种控件配一个 Label 并双向绑定+AddSpecBinding"
@@ -285,12 +326,12 @@ namespace TzsCli.Designer
             // that form has; CreateTableContainer returns the Table alone.
             F("add_field", G_STRUCT, "从数据字典加字段（控件类型由列元数据决定）", true, "el", E_STD,
                 P.Handle(),
-                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "父容器的 name-path" },
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "父容器的 name-path", Role = Role.ComponentPath },
                 P.Str("table", true, "表名"),
                 P.Str("column", false, "单列名；与 columns 二选一（两个都不给会被拒）"),
                 P.StrList("columns", false, "一次加多列；与 column 二选一（两个都不给会被拒）。N 列走同一次构造调用，"
                     + "所以 container=Table 得到的是「一个 Table 装 N 列」而不是每列一个容器"),
-                OptEnum("container", CONTAINERS, "容器模式，默认 None（就地放一对标签+控件）"),
+                OptEnum("container", Struct.CONTAINER_TYPES, "容器模式，默认 None（就地放一对标签+控件）"),
                 // `name` used to be declared here and was never read by AddFieldFn -- an
                 // advertised parameter that silently does nothing is worse than an absent one.
                 // It is not simply implemented either: a column-backed field's name IS its
@@ -298,19 +339,19 @@ namespace TzsCli.Designer
                 Opt(PType.Str, "widget", "覆盖列元数据给的控件类型")),
             F("insert_at", G_STRUCT, "在指定序号插入控件（往前/往后新增栏位）", true, "el", E_STD,
                 P.Handle(),
-                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "父容器的 name-path" },
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "父容器的 name-path", Role = Role.ComponentPath },
                 P.Enum("type", WIDGETS),
                 Opt(PType.Int, "index", "插入位置，默认追加"),
                 Opt(PType.Bool, "with_label", "同 add_widget：给需要标签的 8 种控件配一个 Label。"
                     + "默认 true = 设计器控件箱的行为")),
             F("delete", G_STRUCT, "删元素：布局真删、规格留墓碑（status=d）", true, "delta", E_STD,
                 P.Handle(),
-                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path", Role = Role.ComponentPath },
                 Opt(PType.PathList, "paths", "批量：删这些 path，忽略 path")),
             F("move", G_STRUCT, "改 Z 序（最前/前一个/下一个/最后）", true, "delta", E_STD,
                 P.Handle(),
                 P.List("paths", true),
-                P.Enum("to", new[] { "first", "prev", "next", "last" })),
+                P.As(P.Enum("to", new[] { "first", "prev", "next", "last" }), Role.Direction)),
             // move's Z-order sibling: `move` stays inside one parent, this one changes the parent.
             // DragComponentsUndoRedoCommand is the designer's drag-drop command and the only
             // reparent primitive there is -- AddToContainer makes a NEW box, and cut+paste is
@@ -324,12 +365,12 @@ namespace TzsCli.Designer
             F("nudge", G_STRUCT, "按方向平移（MoveComponentsUndoRedoCommand）", true, "delta", E_STD,
                 P.Handle(),
                 P.List("paths", true),
-                P.Enum("direction", new[] { "up", "down", "left", "right" }),
+                P.As(P.Enum("direction", new[] { "up", "down", "left", "right" }), Role.Direction),
                 Opt(PType.Int, "offset", "格数，默认 1")),
             F("align", G_STRUCT, "对齐（STRETCH/LEFT/RIGHT/TOP/BOTTOM）", true, "delta", E_STD,
                 P.Handle(),
                 P.List("paths", true),
-                P.Enum("option", new[] { "stretch", "left", "right", "top", "bottom" })),
+                P.As(P.Enum("option", new[] { "stretch", "left", "right", "top", "bottom" }), Role.Direction)),
             F("fit_size", G_STRUCT, "尺寸自适应", true, "delta", E_STD,
                 P.Handle(),
                 P.List("paths", true)),
@@ -339,34 +380,34 @@ namespace TzsCli.Designer
                 P.Enum("type", new[] { "hbox", "vbox", "grid", "group" })),
             F("break_layout", G_STRUCT, "拆箱（wrap 的对称操作）", true, "delta", E_STD,
                 P.Handle(),
-                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "盒子元素的 name-path" }),
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "盒子元素的 name-path", Role = Role.ComponentPath }),
             F("convert_widget", G_STRUCT, "转换控件类型（14 种）", true, "delta", E_STD,
                 P.Handle(),
-                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path", Role = Role.ComponentPath },
                 P.Enum("type", WIDGETS)),
             F("convert_container", G_STRUCT, "转换容器类型", true, "delta", E_STD,
                 P.Handle(),
-                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
-                P.Enum("type", CONTAINERS)),
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path", Role = Role.ComponentPath },
+                P.Enum("type", Struct.CONVERT_CONTAINER_TARGETS)),
 
             // ------------------------------------------------------------ 页签 (2)
             F("add_page", G_PAGE, "新增页签（Folder 下的 Page）", true, "el", E_STD,
                 P.Handle(),
-                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "Folder 的 name-path" },
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "Folder 的 name-path", Role = Role.ComponentPath },
                 Opt(PType.Str, "name", "页签名")),
             F("delete_page", G_PAGE, "删除页签（含其子节点）", true, "delta", E_STD,
                 P.Handle(),
-                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "Page 的 name-path" }),
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "Page 的 name-path", Role = Role.ComponentPath }),
 
             // ------------------------------------------------------------ 语义 / Action (4)
             F("insert_semantic", G_SEM, "插入语义节点（REFERENCE/MULTILANG/PROGREL）", true, "el", E_STD,
                 P.Handle(),
-                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "父容器的 name-path" },
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "父容器的 name-path", Role = Role.ComponentPath },
                 P.Enum("use", new[] { "reference", "multilang", "progrel" })),
             F("add_action", G_SEM, "新增 Action（<act>，id=控件代号）", true, "el", E_STD,
                 P.Handle(),
                 new Param { Name = "path", Type = PType.Path, Required = true,
-                            Desc = "父容器的 name-path；空串 = 独立动作（无按钮）" },
+                            Desc = "父容器的 name-path；空串 = 独立动作（无按钮）", Role = Role.ComponentPath },
                 // NOT a static enum. The vocabulary is the FORM's own: all / mi / di<n> / db<n>,
                 // where n comes from that form's s_detail<n> records -- aapp320 has 12 tokens,
                 // another form has 3. A fixed list cannot express that, and pinning one to
@@ -375,13 +416,13 @@ namespace TzsCli.Designer
                 // validates against the form and returns the real set as `vocabulary`; detail.legal
                 // carries it on rejection. W3-C found this.
                 P.Str("type", false, "型态，逗号分隔；合法集是该表单自己的（见返回体的 vocabulary）"),
-                Opt(PType.Str, "name", "action id")),
+                P.As(Opt(PType.Str, "name", "action id"), Role.ActionId)),
             F("delete_action", G_SEM, "删除 Action", true, "delta", E_STD,
                 P.Handle(),
-                P.Str("id", true, "action id")),
+                P.As(P.Str("id", true, "action id"), Role.ActionId)),
             F("set_action_types", G_SEM, "改 Action 的类型组合", true, "delta", E_STD,
                 P.Handle(),
-                P.Str("id", true, "action id"),
+                P.As(P.Str("id", true, "action id"), Role.ActionId),
                 // Same reason as add_action's `type`: the legal set is per-form, so it cannot be
                 // an enum here. "none" requests the empty set, which rule 3 folds back to all.
                 P.Str("types", true, "型态，逗号分隔；合法集见返回体的 vocabulary，\"none\" 表示空集")),
@@ -389,21 +430,21 @@ namespace TzsCli.Designer
             // ------------------------------------------------------------ 多语言 / 选项 / 串查 (6)
             F("set_local_string", G_MULTI, "写一条本地化串（sfield）", true, "delta", E_STD,
                 P.Handle(),
-                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path", Role = Role.ComponentPath },
                 P.Str("name", true, "串名，如 lbl_pmdlud001"),
                 P.Str("text", true, "内容")),
             F("set_items", G_MULTI, "ComboBox/RadioGroup 的选项值（<Item>）", true, "delta", E_STD,
                 P.Handle(),
-                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path", Role = Role.ComponentPath },
                 P.StrList("items", true, "\"name|text|description\" 字符串数组（不是路径）")),
             F("set_progrel_programs", G_MULTI, "串查程序的增删", true, "delta", E_STD,
                 P.Handle(),
-                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path", Role = Role.ComponentPath },
                 P.Str("program", true, "程序名"),
                 Opt(PType.Bool, "isDelete", "true = 删掉这条串查")),
             F("set_table_association", G_MULTI, "改表关联（<table> 段）", true, "delta", E_STD,
                 P.Handle(),
-                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path", Role = Role.ComponentPath },
                 P.Str("table", true, "表名"),
                 Opt(PType.Str, "column", "列名")),
             F("set_spec_description", G_MULTI, "写 SD 规格描述（CDATA）", true, "delta", E_STD,
@@ -413,12 +454,12 @@ namespace TzsCli.Designer
                 // argmap builds the frame in manifest order), and one verb emitting its keys in a
                 // different order from its three siblings is the kind of difference a reader has to
                 // stop and explain.
-                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path", Role = Role.ComponentPath },
                 P.Kind(),
                 P.Str("content", true, "新内容")),
             F("set_cited", G_MULTI, "引用 / 取消引用标准（SpecCitedUndoRedoCommand）", true, "delta", E_STD,
                 P.Handle(),
-                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path", Role = Role.ComponentPath },
                 P.Bool("cited", true, "true = 引用")),
 
             // ------------------------------------------------------------ Tab 顺序 (2)
@@ -428,7 +469,7 @@ namespace TzsCli.Designer
             F("tab_action", G_TAB, "Tab 顺序动作六合一", true, "delta", E_STD,
                 P.Handle(),
                 P.List("paths", true),
-                P.Enum("action", new[] { "first", "prev", "next", "last", "clear", "auto" })),
+                P.As(P.Enum("action", new[] { "first", "prev", "next", "last", "clear", "auto" }), Role.Direction)),
 
             // ------------------------------------------------------------ 校验 / 工具 (4)
             Slow(F("validate", G_TOOL, "跑设计器自己的校验器，报 delta（慢，勿循环）", false, "delta", E_STD,
@@ -439,7 +480,7 @@ namespace TzsCli.Designer
                 Opt(PType.Str, "column", "列名")),
             F("set_excluded", G_TOOL, "排除 / 取消排除控件", true, "delta", E_STD,
                 P.Handle(),
-                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path", Role = Role.ComponentPath },
                 P.Bool("excluded", true, "true = 排除")),
             // The enum is the UNION across workspaces; the function body narrows it against the
             // workspace's own mta/code_template.xml and reports detail.legal from the file. R was
@@ -448,7 +489,7 @@ namespace TzsCli.Designer
             // W3-B found it. Keep this list a superset of what any workspace ships.
             F("set_code_template", G_TOOL, "改 code_template（F/P/Q/R/W）", true, "delta", E_STD,
                 P.Handle(),
-                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path（只校验，作用域是整张表单）" },
+                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path（只校验，作用域是整张表单）", Role = Role.ComponentPath },
                 P.Enum("template", new[] { "F", "P", "Q", "R", "W" })),
         };
 
@@ -627,10 +668,11 @@ namespace TzsCli.Designer
                     if (p.Desc != null) a["desc"] = p.Desc;
                     if (p.Values != null) a["values"] = new JArray(p.Values);
                     if (p.DescribeFrom != null) a["from"] = p.DescribeFrom;
+                    if (p.Role != null) a["role"] = p.Role;
                     args.Add(a);
                 }
                 o["args"] = args;
-                o["errors"] = new JArray(f.Errors);
+                o["errors"] = AdvertisedErrors(f);
                 arr.Add(o);
             }
             return arr.ToString(Newtonsoft.Json.Formatting.Indented);

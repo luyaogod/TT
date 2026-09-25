@@ -263,7 +263,7 @@ namespace TzsCli.Designer
         /// <summary>Look up a form element, or the caller's error. Used by all four.</summary>
         internal static object El(Session s, string path) {
             object el = s.FindByPath(path);
-            if (el == null) throw TzsError.NotFound("路径", path);
+            if (el == null) throw TzsError.PathNotFound(path);
             return el;
         }
 
@@ -500,9 +500,20 @@ namespace TzsCli.Designer
             el = El(s, path);
             object fsm = Fsm(s, el);
             node = Reflect.Prop(fsm, SpecSlots.ByKind[kind]);
-            if (node == null)
-                throw Refused("元素 \"" + Read.Str(Session.Raw(el, "name")) + "\" 没有 " + kind + " 节点；"
-                    + "先用 get_component 看它有哪些 kind，或用 describe_kind 看该 kind 的合法属性", null);
+            if (node == null) {
+                // E_NO_SPEC_NODE, not the `designer` kind Refused() would give. The message below was
+                // already telling the caller how to self-correct ("先用 get_component … 或用
+                // describe_kind …") while the code classified it as "do not retry, tell the user" --
+                // one statement contradicting itself. §11.24 (a) lists E_NO_SPEC_NODE as not_found
+                // for exactly this case.
+                var d = new JObject();
+                d["path"] = path;
+                d["kind"] = kind;
+                d["reason"] = "no_spec_node";
+                throw new DetailedError("E_NO_SPEC_NODE",
+                    "元素 \"" + Read.Str(Session.Raw(el, "name")) + "\" 没有 " + kind + " 节点；"
+                    + "先用 get_component 看它有哪些 kind，或用 describe_kind 看该 kind 的合法属性", d);
+            }
 
             legal = Read.AttrNames(Reflect.Prop(node, "Source") as XElement);
             return node;

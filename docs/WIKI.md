@@ -1386,6 +1386,11 @@ schema，所以引擎加一个新键不需要改 `tt`（`internal/dev/cli/tzs_de
 合成的帧里 `id` 是 `null`（帧级错误不回显 id）。硬约束是**帧算出来的退出码等于进程的退出码**，
 由 `TestSyntheticFailure` 逐个错误类型验。
 
+**而且两种帧的**行格式**也必须一样：紧凑、一行。** 2026-09-25 修掉的一处不一致是：引擎帧走
+`printRawReply`（紧凑一行），而合成帧走 `emitJSON`（美化缩进的多行）—— 同一个 `--json` 出口
+两种形状，按行读的消费方（`| head -1`、逐行解析）在合成帧上会踩空，而它分不出两者有什么不同。
+契约说"一行一个响应"，合成帧也该守。
+
 三类**本地失败**刻意不走这条规则，只写 stderr（stdout 为空）：
 
 | 例外 | 为什么 |
@@ -1747,6 +1752,21 @@ $env:TTZS_CORPUS="D:\t100_wrok_dir"
   改动**的句柄做的是重打包：条目内容等价、zip 容器字节不同。这正是"为什么 `out` 不该指向源包"
   的活教材 —— 也是这条闸门从今天起存在的原因。
 
+**同一天的第二起，同类、但没造成损失：行尾。** 这个仓库的行尾是**混合**的 —— C# 源与部分引擎
+文档是 CRLF，Go 源与 `docs/` 是 LF。而"机械编辑"会把整份文件翻掉：当天上午是我用 Python 的
+文本模式写 `WIKI.md`（LF → CRLF，`cb538b0` 多出 4068 行假 diff，由 `3c8a143` 改回）；
+下午是 `sed -i` 改三处抛出点（`Attr.cs` / `Read.cs` / `Manifest.cs`，CRLF → LF，各自多出
+900–1900 行假 diff）。两次都是**提交前**发现的，判据同一条：
+
+```bash
+git diff --stat              # 行数对不上改动规模，就是行尾被翻了
+git diff --ignore-cr-at-eol --stat   # 这一份才是真实改动
+```
+
+改完这类文件（`sed -i`、Python 写文件、任何批量替换）**要核一遍**：HEAD 的 `file -b` 与工作树
+的 `file -b` 必须一致。`Edit` 工具会保留原行尾，`sed -i` 与 Python 文本模式不会。
+（根治要给仓库加 `.gitattributes` 并统一全仓行尾 —— 那是一次全仓 diff，属于仓库主人的决定。）
+
 ## 10. 构建与发布
 
 **操作步骤见 [README 的构建一节](../README.md#构建)**。这里只留"为什么"。
@@ -1956,7 +1976,8 @@ TDev 的两点被完整保留：位置无关的参数解析（`-o`/`--json` 可�
 
 剩下的是**必须重建一次引擎**才能做的那批（重建会换 MVID → 管道名变 → 在跑的守护进程
 变孤儿，靠 `tt dev tzs reap --yes` 收，再加一次重打包，所以攒在一起做）。
-**第 1 条 2026-09-24 已发；第 2 / 4 / 8 / 9 条 2026-09-25 随第二次重建一起发；其余四条（3 / 5 / 6 / 7）等下一次。**
+**第 1 条 2026-09-24 已发；第 2 / 3 / 4 / 5 / 6 / 8 / 9 条 2026-09-25 已发（各自独立的一次重建、
+独立提交）。只剩第 7 条（`E_NO_OP` 改回成功帧）与第 10 条（`list_local_strings` 的过滤器）。**
 
 1. ✅ **`save` / `field_add` 的 `out` 闸门（已做，2026-09-24，`Fns/Session.cs` 的 `CheckOutPath`）。**
    指到源包会覆盖原始素材（`Save.Run` 结尾就是 `File.WriteAllBytes`），而这条此前**只写在
@@ -1979,25 +2000,45 @@ TDev 的两点被完整保留：位置无关的参数解析（`-o`/`--json` 可�
    现在 `--args '{"limit":500}'` 拿得到 500 行。
    附注：`filter` 那几处读**不是死路**（`Read.cs:664` 的注释写着它是给**进程内库调用方**的别名，
    线上名是 `query`），所以留着没动 —— 我先前把"线上不可达"当成了"没有用"。
-3. **manifest 加 `role` 标注，不改任何参数名。** 参数名是从 C# 函数签名继承的
-   （`open.path` vs `field_add.file`、`save.out` 是 `string` 而 `field_add.out` 是 `path`、
-   `move.to` / `tab_action.action` / `nudge.direction` / `align.option` 四个名字一个意思）。
-   `role`（`package-path` / `component-path` / `direction` / `action-id`…）解决两件事：
-   ① 生成的示例按 role 选占位符 —— 现在 `placeholder` 只看参数名是不是 `file`，
-   于是 `open.path` 与 `field_add.out` 这两个**包路径**都被教成 `<name-path>`；
-   ② 跨动词的同一概念可以被机械检查（"凡 role 相同的参数，占位符规则相同"）。
+3. ✅ **manifest 加 `role` 标注（已做，2026-09-25），一个参数名都没改。** 角色现在写在
+   引擎的 `SpecFn.cs`（`Role.PackagePath` / `ComponentPath` / `Direction` / `ActionId` / `NewName`），
+   由 `P.As(...)` 就地标注；`P.Path`/`P.List` **默认**是 `component-path`（那正是它们的含义，
+   26 处手写的路径参数也一并标上），包路径那几个（`open.path`、`field_add.file`/`out`、`save.out`）
+   例外地标成 `package-path`。两个消费者读它，都不再靠猜：
+   ① Go 侧 `placeholder` 按角色挑占位符 —— 实测三个包路径的示例现在都教 `<包路径>`
+   （从前 `open.path`/`field_add.out` 教成 `<name-path>`，`save.out` 干脆教 `<值>`）；
+   ② 引擎的 `AdvertisedErrors` 按角色推导 `E_PATH_NOT_FOUND`（见第 6 条）。
+   另有 `TestPlaceholderFollowsRole` 钉住"同一个角色，占位符规则相同"。
 4. ✅ **`force` 已从 manifest 与 SPEC 删掉（2026-09-25）。** 理由与 `add_field.name` 那条同源：
    advertised-but-inert 比不存在更坏。传它现在得到的是准确的话 —— `E_BAD_REQUEST`
    「参数 force 不在 manifest 里（函数 open）（该函数的参数：path timeout）」，而不是从前的
    「force 尚未实现」（那还让人觉得"以后会有"）。**引擎侧那个拒绝留着当兜底**。
-5. **容器枚举收敛到函数体白名单这一个产地。** `Manifest.cs:75-78` 声明 10 个值（含
-   `HBox/VBox/Page/Folder`），函数体只收 6 个；根因是引擎里容器名本来就有三份集合
-   （`Semantic.cs:911` 十个、`Session.cs:279` 九个、Manifest 十个）。验法：E2E 对**每个
-   枚举值**逐个发一次负向对照（`gate-w3-fns.py` 已经在用这套，只是没覆盖 manifest 的 enum）。
-6. **各动词的 `Errors[]` 补全。** 52 个动词只用了 4 个模板，而 `E_HANDLE_BUSY`、
-   `E_NO_HANDLE`、`E_PATH_NOT_FOUND`、`E_NO_SPEC_NODE`、`E_BAD_REQUEST`、
-   `E_UNKNOWN_METHOD`、`E_SERVER_DIED`、`E_FATAL_LOAD_TIMEOUT` **不在任何动词的清单里** ——
-   照 `<动词> --help` 写代码的调用方会漏掉分支。
+5. ✅ **容器枚举收敛到一个产地（已做，2026-09-25）。** 声明与函数体现在是**同一个数组**：
+   创建类动词（`add_field`/`field_add` 的 `container`）用 `Struct.CONTAINER_TYPES`（6 个），
+   `convert_container` 的 `type` 用 `Struct.CONVERT_CONTAINER_TARGETS`。
+   原来那三份集合**不是**都在犯错 —— `Semantic.Containers`（10 个，谁能当父容器）与
+   `FormDesignSetting.containers` 回答的是另一个问题，它自己的注释也写明了；错的是 manifest
+   里那份十项的 `CONTAINERS`，而它被三个参数拿去当枚举用 ✗。最刺眼的是 `convert_container`：
+   **声明 10 个、函数体只收 2 个**（Grid/Group，设计器的转换命令只能在两者间转），
+   于是"照 `--help` 写"与"函数体接受"差了五倍。
+6. ✅ **`Errors[]` 补齐（已做，2026-09-25）—— 但正解不是"往列表里加八串字符串"。**
+   把八个缺席的码逐个查了来源，它们分三类：
+   - **能推导的**：`E_NO_HANDLE`（每个收 handle 的动词）、`E_PATH_NOT_FOUND`（每个收 **name-path**
+     的动词 —— 判据是**角色**不是类型，见第 3 条）。这两个不进手工数组，由 `AdvertisedErrors`
+     按声明算：收不收 handle / name-path 是声明里已有的事实，**算出来的不可能忘**。
+     `open` 因此**没有** `E_PATH_NOT_FOUND`（它的 `path` 是包路径；不存在的包走的是另一条路）。
+     这四个数组里现在只剩"这一族额外会抛什么"，不再兼任"每个动词都会抛什么"。
+   - **没接线的**：`E_PATH_NOT_FOUND` / `E_NO_SPEC_NODE` / `E_NO_HANDLE` 三个码写在 `Rpc.Map`
+     的分类表里、写在 SPEC 的码表里，**却没有任何地方抛它们** —— 真实情形一律走 `E_NOT_FOUND`。
+     最刺眼的是 `Attr.SpecNode`：那句"先用 get_component…或用 describe_kind…"的消息自己在教
+     调用方自纠，却挂着 `designer`（"别重试、转述给用户"）的分类 —— 一句话里自相矛盾。
+     现在三个码都真的发得出来（2026-09-25 实测各见了一次），`E_NO_SPEC_NODE` 也加进 `E_SPEC`
+     （唯一解析规格节点的那一族）。
+   - **本来就不该广告的**：`E_BAD_REQUEST` / `E_UNKNOWN_METHOD`（动词被派发**之前**就拒了）、
+     `E_SERVER_DIED`（CLI 自己合成的）—— 那是"这次调用"的事实，不是某个动词的词汇。
+   `E_FATAL_LOAD_TIMEOUT` 单列给 `open`（只有它加载包、只有它会被引擎自己的看门狗打断）。
+   另外 `E_HANDLE_BUSY` **删掉了**：它没有任何抛出点，引擎里唯一的句柄状态判定是 Closed，
+   而那是 `E_NO_HANDLE`。表里写着、永远抛不出来，与上面同一类毛病。
 7. **`E_NO_OP` 按 SPEC §11.24(a) 改回成功帧。** `set_local_string` / `set_spec_description`
    的 NoOp 分支把"什么也没改"发成了错误帧（`kind=internal` → 退 1），而那份契约明确说这两条
    是**成功帧**（该出现在 `result` 里）。`tt` 侧现在只把文案说清楚了（§7.6），改回去之后

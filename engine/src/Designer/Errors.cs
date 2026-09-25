@@ -29,6 +29,26 @@ namespace TzsCli.Designer {
             return new TzsError("validation", message);
         }
 
+        /// <summary>The handle is gone: never existed, or closed. Wire code E_NO_HANDLE, kind
+        /// not_found (Rpc.Map has the case) -- the caller's fix is "open it again", so this must
+        /// NOT be the "don't retry" kind it used to be reported as.
+        ///
+        /// <paramref name="what"/> stays a parameter so the two situations keep reading differently
+        /// ("句柄" vs "句柄（已关闭）") while sharing one code.</summary>
+        public static TzsError NoHandle(string what, string handle) {
+            return new TzsError("E_NO_HANDLE", what + " 不存在: " + handle);
+        }
+
+        /// <summary>A name-path that resolves to nothing. Wire code E_PATH_NOT_FOUND, kind
+        /// not_found: the caller fixes the path and retries, which is why it is not E_DESIGNER.
+        ///
+        /// Six call sites used to say `NotFound("路径", path)`, i.e. E_NOT_FOUND -- correct in
+        /// kind, but it left the caller to guess whether the thing that was not found was the path,
+        /// the table or the handle. §11.24 (a) lists E_PATH_NOT_FOUND for exactly this.</summary>
+        public static TzsError PathNotFound(string path) {
+            return new TzsError("E_PATH_NOT_FOUND", "路径 不存在: " + path);
+        }
+
         /// <summary>The designer's own rules refused it (repeat gating, duplicate name, cited).
         /// The caller must not retry; this is a fact about the form, not about the request.</summary>
         public static TzsError Designer(string message) {
