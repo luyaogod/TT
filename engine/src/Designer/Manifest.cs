@@ -171,6 +171,27 @@ namespace TzsCli.Designer
             return new Param { Name = n, Type = t, Required = false, Desc = desc };
         }
 
+        /// <summary>The `path` + `paths` pair, as the six verbs that go through `Struct.PathsArg`
+        /// declare it: either form accepted, **one of them required**, and that "one of them" is
+        /// checked in the body because a manifest `Required` flag is per-parameter and cannot express
+        /// 二选一 (the same reasoning as add_field's column/columns, §11.9 item 8).
+        ///
+        /// Both are declared for all six. Before 2026-09-25 five of them declared only `paths`, and
+        /// required -- so `PathsArg`'s own message ("需要 path 或 paths") named a form the CLI refused
+        /// before the request was sent, and `delete` (the one that did declare `path`) forced a dummy
+        /// `path` on anyone who only wanted the batch form. Same class as item 10's
+        /// `list_local_strings` filter: a capability the body has and the wire cannot deliver.</summary>
+        static Param AnyPath() {
+            return new Param { Name = "path", Type = PType.Path, Required = false,
+                Desc = "name-path（与 paths 至少给一个）", Role = Role.ComponentPath };
+        }
+
+        static Param AnyPaths() {
+            return new Param { Name = "paths", Type = PType.PathList, Required = false,
+                Desc = "批量的 name-path（与 path 至少给一个；给了它就忽略 path）",
+                Role = Role.ComponentPath };
+        }
+
         /// <summary>A **task-level** verb: it resolves its own session (handle / program name /
         /// ProgramKey / file), so the transport must not demand a handle before the body can even
         /// see `file`. Same shape as F otherwise -- `mutating` still has to be told the truth,
@@ -242,9 +263,14 @@ namespace TzsCli.Designer
             // and that is exactly the fixed-point property the RoundTrip oracle tests).
             F("close", G_SESSION, "释放句柄（发布 TzpFileClose + 摘 EAM；句柄串永不复用）", false, "void", E_STD,
                 P.Handle()),
+            // No `path` here. It was declared ("只校验这条子树") on validate and verify and implemented
+            // as a refusal (Validate.RejectPath): the designer's validators take one whole XElement
+            // and have no subtree entry point, so the parameter could never do anything but come back
+            // E_NOT_IMPLEMENTED -- whose kind is `internal`, i.e. "report a bug, do not retry", for a
+            // parameter the help was offering. Same call as `force` (item 4): advertised-but-inert is
+            // worse than absent. The refusal stays in the body as the backstop for library callers.
             F("verify", G_SESSION, "对句柄的模型跑设计器自己的校验器，报 delta", false, "delta", E_STD,
-                P.Handle(),
-                Opt(PType.Path, "path", "只校验这条子树")),
+                P.Handle()),
             N("list_open", G_SESSION, "列出打开的句柄；回吐 ProgramKey 让碰撞可见", "list<el>", E_STD),
 
             // ------------------------------------------------------------ 读 (9)
@@ -257,10 +283,23 @@ namespace TzsCli.Designer
                 P.Str("query", true, "控件代号或其前缀")),
             F("get_component", G_READ, "一个元素的布局属性 + 它持有的规格节点属性", false, "el", E_STD,
                 P.Handle(),
-                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path", Role = Role.ComponentPath },
+                // `path` is deliberately NOT required: the body takes `path` **or** `query` -- its own
+                // message says "get_component 需要 path 或 query 之一", and `query` resolves a 控件代号
+                // through the same resolver find_component uses. Declaring `path` required made the query
+                // branch unreachable twice over (the CLI refuses a call with no `path` before the request
+                // is ever sent), so the only way to use it was the two-call find_component -> get_component
+                // dance. Same defect as set_spec_description's `kind` (SPEC §11.9 item 11), found by the
+                // sweep that closed item 10.
+                new Param { Name = "path", Type = PType.Path, Required = false, Desc = "name-path", Role = Role.ComponentPath },
+                Opt(PType.Str, "query", "控件代号（与 path 二选一）"),
                 Opt(PType.Kind, "kind", "限定只回哪一类规格节点")),
             F("list_spec_nodes", G_READ, "整张表单的规格节点清单（按 kind 过滤）", false, "list<el>", E_STD,
                 P.Handle(),
+                // The body read `name` and the manifest declared nothing, so "narrow the list before you
+                // dump it" (SKILL §4.7) was unactionable here -- and this is the verb whose answer is
+                // biggest: aapt300 has 269 field nodes alone. Same pair as list_tables/list_columns:
+                // `query` on the wire, the old name kept as an alias for library callers.
+                Opt(PType.Str, "query", "节点名子串"),
                 Opt(PType.Kind, "kind", "只列这一类")),
             // Needs a handle, unlike its neighbours here. The attribute set is per-FILE, not
             // per-kind: an aapp320 field carries 23 attributes, a cs_excel one carries 20,
@@ -286,6 +325,13 @@ namespace TzsCli.Designer
                 P.Handle()),
             F("list_local_strings", G_READ, "本地化串（sfield）清单", false, "list<el>", E_STD,
                 P.Handle(),
+                // `query` is what the body reads first (Read.cs), with `filter` kept as an alias for
+                // direct library callers -- the same pair as list_tables / list_columns. It used to be
+                // read as `filter` ONLY and declared nowhere, so "narrow the list before you dump it"
+                // -- the rule SKILL §4.7 states for every list verb -- was unreachable from the wire on
+                // the one verb whose answer is biggest on a large form (aapt300: ten strings for the
+                // worksheet subtree alone, each with its text).
+                Opt(PType.Str, "query", "串名子串"),
                 Opt(PType.Path, "path", "限定某条子树")),
 
             // ------------------------------------------------------------ 属性 (6)
@@ -374,11 +420,12 @@ namespace TzsCli.Designer
                     + "默认 true = 设计器控件箱的行为")),
             F("delete", G_STRUCT, "删元素：布局真删、规格留墓碑（status=d）", true, "delta", E_STD,
                 P.Handle(),
-                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path", Role = Role.ComponentPath },
-                Opt(PType.PathList, "paths", "批量：删这些 path，忽略 path")),
+                AnyPath(),
+                AnyPaths()),
             F("move", G_STRUCT, "改 Z 序（最前/前一个/下一个/最后）", true, "delta", E_STD,
                 P.Handle(),
-                P.List("paths", true),
+                AnyPath(),
+                AnyPaths(),
                 P.As(P.Enum("to", new[] { "first", "prev", "next", "last" }), Role.Direction)),
             // move's Z-order sibling: `move` stays inside one parent, this one changes the parent.
             // DragComponentsUndoRedoCommand is the designer's drag-drop command and the only
@@ -392,19 +439,23 @@ namespace TzsCli.Designer
                             Desc = "目标容器的 name-path" }),
             F("nudge", G_STRUCT, "按方向平移（MoveComponentsUndoRedoCommand）", true, "delta", E_STD,
                 P.Handle(),
-                P.List("paths", true),
+                AnyPath(),
+                AnyPaths(),
                 P.As(P.Enum("direction", new[] { "up", "down", "left", "right" }), Role.Direction),
                 Opt(PType.Int, "offset", "格数，默认 1")),
             F("align", G_STRUCT, "对齐（STRETCH/LEFT/RIGHT/TOP/BOTTOM）", true, "delta", E_STD,
                 P.Handle(),
-                P.List("paths", true),
+                AnyPath(),
+                AnyPaths(),
                 P.As(P.Enum("option", new[] { "stretch", "left", "right", "top", "bottom" }), Role.Direction)),
             F("fit_size", G_STRUCT, "尺寸自适应", true, "delta", E_STD,
                 P.Handle(),
-                P.List("paths", true)),
+                AnyPath(),
+                AnyPaths()),
             F("wrap", G_STRUCT, "把选中元素整体包进一个新容器（不是加字段）", true, "el", E_STD,
                 P.Handle(),
-                P.List("paths", true),
+                AnyPath(),
+                AnyPaths(),
                 P.Enum("type", new[] { "hbox", "vbox", "grid", "group" })),
             F("break_layout", G_STRUCT, "拆箱（wrap 的对称操作）", true, "delta", E_STD,
                 P.Handle(),
@@ -517,8 +568,7 @@ namespace TzsCli.Designer
 
             // ------------------------------------------------------------ 校验 / 工具 (4)
             Slow(F("validate", G_TOOL, "跑设计器自己的校验器，报 delta（慢，勿循环）", false, "delta", E_STD,
-                P.Handle(),
-                Opt(PType.Path, "path", "只校验这条子树"))),
+                P.Handle())),
             N("base_data", G_TOOL, "基础资料（MasterDetailView）", "list<el>", E_STD,
                 Opt(PType.Str, "table", "表名"),
                 Opt(PType.Str, "column", "列名")),

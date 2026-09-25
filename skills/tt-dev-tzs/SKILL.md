@@ -121,8 +121,10 @@ tt dev tzs stop                                          # 停本工作区的常
 `XmlElement` 索引器（§11.24(d) 1），而它自己造命令，我们拿不到那个命令来做分组。返回体的
 `undoSteps` 是**实测的**（撤销栈前后差），不是承诺的。
 
-**读的动词各自干什么**：`form_tree` 看层级与 name-path；`get_component` 看一个节点的属性与规格；
-`describe_kind` 给**这一类规格节点此刻能写哪些属性**（白名单是每个包现算的，`attr` 必须照着它写，
+**读的动词各自干什么**：`form_tree` 看层级与 name-path；`get_component` 看一个节点的属性与规格
+（用 name-path 寻址，**也可以直接给控件代号 `query`** —— 那时它自己解析成路径，省掉
+`find_component → get_component` 两次调用；两个都不给会退 2 说明这一点）；`describe_kind` 给
+**这一类规格节点此刻能写哪些属性**（白名单是每个包现算的，`attr` 必须照着它写，
 否则撞 `E_ATTR_NOT_WHITELIST`）；`list_spec_nodes` 列字段/动作等规格节点；`list_tables` /
 `list_columns` 查数据字典；`list_records` / `list_local_strings` 看记录与多语言。
 
@@ -152,7 +154,8 @@ tt dev tzs stop                                          # 停本工作区的常
 **几处容易记混的**：`move` **只改 Z 序**（同一父容器内前后挪），换父容器要用 `reparent`
 （设计器的拖拽命令，仅限同表单）；`add_field` 是加字段、`wrap` 是拿选中元素**包一层新容器**；
 `add_field` 的 `columns` 一次构造多列，一次一列会让大表单慢两个数量级（实测 84 列从 137 秒降到
-1.17 秒）。
+1.17 秒）。`delete` / `move` / `nudge` / `align` / `fit_size` / `wrap` 六个的寻址是
+**`path` 与 `paths` 二选一**（都可选、至少给一个，函数体判；两者都给时以 `paths` 为准）。
 
 ## 4. 调用形状（所有动词通用）
 
@@ -237,6 +240,13 @@ tt dev tzs set_spec_attr --form aapp320 --args '{"path":"…","kind":"field","at
 
 **最容易白花 context 的一处**（实测）：`list_columns --table pmdl_t` 不给 `query` 会回 109 列的
 完整元数据 **44,655 字节**；`"query":"pmdl00"` → **3,833 字节**；`"query":"site"` → **517 字节**。
+
+另外两个大头（2026-09-25 实测，`aapt300(c)`）：`list_spec_nodes` 不过滤回 **701 个节点 /
+29,918 字节**，`"query":"app"` → **11 个 / 555 字节**（差 54 倍）；`list_local_strings` 337 条 /
+13,807 字节，`"query":"lbl_apca"` → 84 条 / 3,312 字节，再叠 `"path":"<子树>"` → **6 条 / 398 字节**
+（两个参数是**与**关系）。这几个 `query` 是 2026-09-25 才接上线的：引擎比这份 SKILL 旧时
+会报「参数 query 不在 manifest 里」—— 那就是这个（见 §11.9 第 13 条）。
+
 动词自己的 `--help` 里有这句提示；调用后如果回了一大块又本来能收窄，stderr 还会提一句。
 **会改模型的动词不谈"收窄"** —— 它们的参数是输入，不是过滤器。
 
@@ -395,7 +405,8 @@ tt dev tzs export "D:\\ws\\aapt300(c).tzs"    # 纯解压到 <包目录>\aapt300
 - ❌ 参数写成 flag（`--handle h9`）或用位置参数（裸词）→ 退 2。参数一律进 `--args` 的 JSON。
 - ❌ 中文/长内容直接写在命令行里被重编码 → 用 `--args-file` 写 UTF-8 文件。
 - ❌ 给 `path` / `file` / `out` 写相对路径 → 由**守护进程**的 cwd 解释（不是你的 cwd），裸文件名必拒；一律写绝对路径（§4.4）。
-- ❌ `list_columns` / `list_local_strings` 不给过滤直接打 → 可能回几十 KB（先看 `--help` 的"先过滤"提示）。
+- ❌ `list_columns` / `list_spec_nodes` / `list_local_strings` 不给过滤直接打 → 可能回几十 KB
+  （先看 `--help` 的"先过滤"提示；`list_spec_nodes` 不过滤实测 29,918 字节）。
 - ❌ `attrs` 写成数组、写空对象、或值不带引号（`{"gridWidth":20}`）→ 退 2，点名是哪个键；值一律是字符串。
 
 **改属性**

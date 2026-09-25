@@ -176,12 +176,19 @@ namespace TzsCli.Designer.Fns
         }
 
         /// <summary>
-        /// Manifest.cs declares an optional `path` on validate AND on verify ("只校验这条子树").
+        /// Manifest.cs used to declare an optional `path` on validate AND on verify ("只校验这条子树").
         /// Neither implements it: the designer's validators are handed one whole XElement
         /// (FormElement / TSDElement) and have no subtree entry point, and the fixed-point
         /// comparison is inherently whole-document. Failing loudly is the point -- a caller that
         /// asked for a subtree and silently received the whole form gets a superset it cannot
         /// distinguish from the answer it asked for.
+        ///
+        /// The declaration is GONE (2026-09-25, SPEC §11.9 item 13): the parameter could never do
+        /// anything but come back E_NOT_IMPLEMENTED, whose kind is `internal` -- "report a bug, do
+        /// not retry" -- for something the help was offering, and the CLI's "narrow it with `path`"
+        /// hint led straight into it. Same call as `force` (item 4). This refusal stays as the
+        /// backstop: a direct library caller or an older CLI still gets the honest reason instead of
+        /// a silently whole-document answer.
         /// </summary>
         internal static void RejectPath(JObject args) {
             string p = TzsCli.Designer.Fns.Session.Str(args, "path");

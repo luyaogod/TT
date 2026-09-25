@@ -591,7 +591,12 @@ namespace TzsCli.Designer
         /// </summary>
         public static object ListSpecNodes(Session s, JObject a) {
             string only = Arg(a, "kind");
-            string filter = Arg(a, "name");
+            // `query` is the name the manifest uses; `name` is the alias the body used first (and the
+            // one a direct library caller may still pass). Declaring it took until 2026-09-25 --
+            // before that the filter was unreachable from the wire, on the verb with the largest
+            // answer in the set (SPEC §11.9 item 10).
+            string filter = Arg(a, "query");
+            if (filter == null) filter = Arg(a, "name");
             if (only != null && Array.IndexOf(SpecSlots.Kinds, only) < 0)
                 throw TzsError.Validation("未知 kind：" + only + "；合法值: " + string.Join(",", SpecSlots.Kinds));
 
@@ -856,7 +861,12 @@ namespace TzsCli.Designer
         /// "deleted" are different facts and only one of them is visible from the layout.
         /// </summary>
         public static object ListLocalStrings(Session s, JObject a) {
-            string filter = Arg(a, "filter");
+            // `query` is the name the manifest uses; `filter` is accepted as an alias so a
+            // direct library caller can use either. Same pair as ListTables / ListColumns below --
+            // this one read ONLY `filter` until 2026-09-25, and since `filter` was declared nowhere
+            // the filter was unreachable from the wire (SPEC §11.9 item 10).
+            string filter = Arg(a, "query");
+            if (filter == null) filter = Arg(a, "filter");
             string path = Arg(a, "path");
 
             // `path` narrows the answer to the strings one subtree actually refers to. The
