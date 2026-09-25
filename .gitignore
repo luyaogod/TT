@@ -47,3 +47,7 @@ Thumbs.db
 
 # 前端 check runner 的 esbuild 中间产物
 /web/app/scripts/.tmp-*.mjs
+
+# Python 的字节码缓存（tools/ 下有脚本，跑一下就冒出来）
+__pycache__/
+*.pyc
