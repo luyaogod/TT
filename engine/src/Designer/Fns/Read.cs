@@ -456,7 +456,39 @@ namespace TzsCli.Designer
                 // question. `kind:"layout"` is how the layout side is asked for explicitly.
                 foreach (string kind in SpecSlots.Kinds) res[kind] = StrArray(KindAttrs(s, kind));
             } else if (want == "layout") {
-                res["layout"] = StrArray(LayoutAttrUnion(s));
+                // One record per attribute rather than a bare name list: the facts the caller needs
+                // to write a value it has never written before are exactly the ones this class of
+                // answer was missing (2026-09-25 eval, F13). The two failures it measured were
+                // `hidden` (ENUM false|true) chosen over `invisible` (BOOLEAN, whose 4.2 name is
+                // isPassword) and the value's spelling -- and a wrong guess in either does not
+                // error, it does the other thing.
+                //
+                // Both halves come from tables that already existed: the name union from the loaded
+                // form, the shape from the same mta/mod-fd.spec table SpecValues uses to REJECT a
+                // bad value. Reading it forwards is the difference between "the engine knows but
+                // does not say" and what the eval had to guess at.
+                string ws = Workspace(s);
+                var attrs = new JArray();
+                foreach (string name in LayoutAttrUnion(s)) {
+                    var o = new JObject();
+                    o["name"] = name;
+                    SpecValues.Declared d = SpecValues.Describe(ws, name);
+                    if (d != null) {
+                        if (d.Type != null) o["type"] = d.Type;
+                        if (d.Values != null) o["values"] = StrArray(d.Values);
+                        if (d.Initial != null) o["initial"] = d.Initial;
+                    }
+                    attrs.Add(o);
+                }
+                res["count"] = attrs.Count;
+                res["layout"] = attrs;
+                // Two things a reader could otherwise get wrong: `values` is the engine's accepted
+                // set (absent = nothing declares one), and this list is the union over the whole
+                // form -- any ONE element allows a subset of it.
+                res["note"] = "values = 引擎会接受的值集（没这个键 = 工作区的 mta/mod-fd.spec 没声明取值集）；"
+                            + "这是一张表单的并集，某个元素具体能用哪些比它窄 —— 写错时 E_ATTR_NOT_WHITELIST / "
+                            + "E_ATTR_VALUE_ILLEGAL 的 detail.legal 给的是该元素那一份";
+                if (ws != null) res["source"] = Path.Combine(Path.Combine(ws, "mta"), "mod-fd.spec");
             } else {
                 if (Array.IndexOf(SpecSlots.Kinds, want) < 0)
                     throw TzsError.Validation("未知 kind：" + want + "；合法值: "

@@ -67,10 +67,50 @@ namespace TzsCli.Designer {
     /// </summary>
     public static class SpecValues {
 
-        /// <summary>One declared property. Only the two things we act on are kept.</summary>
+        /// <summary>One declared property. Only the things we act on are kept.</summary>
         public sealed class Prop {
             public string Type;         // BOOLEAN / ENUM / INTEGER / TEXT / FDSTYLE / ...
             public string[] Contains;   // editorInfo "contains:a|b|c"; null when not declared
+            public string Initial;      // initialValue; null when not declared
+        }
+
+        /// <summary>The pair a BOOLEAN attribute accepts. Declared once, because two callers who
+        /// must agree use it: Check's rejection message (v.Legal) and the discovery surface
+        /// (Describe) that tells a caller the set *before* it writes.</summary>
+        public static readonly string[] BooleanValues = { "true", "false" };
+
+        /// <summary>The declared shape of one layout attribute -- what `describe_kind` reports so a
+        /// caller can write a value it has never written before without guessing.
+        ///
+        /// WHY IT EXISTS (SPEC §11.9 item 15; found by the 2026-09-25 eval, F13). `describe_kind
+        /// --kind layout` used to return a bare list of names, so "隐藏该用 hidden 还是 invisible"
+        /// and "这个属性收什么值" had no answer anywhere: the eval's executor guessed `hidden` and
+        /// guessed that a BOOLEAN takes lowercase `true`, and a wrong guess here does not error --
+        /// it does the other thing (that is the whole reason this class exists). The declared
+        /// values were already parsed for the *rejection* path; this is the same table read
+        /// forwards.
+        ///
+        /// `Values` is what Check will ACCEPT, not merely what the file lists: for a BOOLEAN that
+        /// is the true/false pair even though mod-fd.spec declares no `contains:` for it. A null
+        /// Values means the file declares no value set (TEXT / FDSTYLE / ...: free-form as far as
+        /// anything says).</summary>
+        public sealed class Declared {
+            public string Type;
+            public string[] Values;
+            public string Initial;
+        }
+
+        public static Declared Describe(string workspace, string attr) {
+            if (string.IsNullOrEmpty(attr)) return null;
+            Dictionary<string, Prop> map = Load(workspace);
+            if (map == null) return null;
+            Prop p;
+            if (!map.TryGetValue(attr, out p)) return null;   // not declared here -> say nothing
+            return new Declared {
+                Type = p.Type,
+                Values = p.Type == "BOOLEAN" ? BooleanValues : p.Contains,
+                Initial = p.Initial,
+            };
         }
 
         /// <summary>The answer for one (attribute, value) pair.</summary>
@@ -119,7 +159,7 @@ namespace TzsCli.Designer {
             // both costs nothing real -- measured before it was written, not after.
             if (p.Type == "BOOLEAN" && value != "true" && value != "false") {
                 v.Ok = false;
-                v.Legal = new string[] { "true", "false" };
+                v.Legal = BooleanValues;
                 v.Suggest = Nearest(value, v.Legal);
                 v.Message = "属性 \"" + attr + "\" 是 BOOLEAN，只接受 true / false";
                 return v;
@@ -284,6 +324,9 @@ namespace TzsCli.Designer {
 
                 XAttribute ty = e.Attribute("type");
                 if (ty != null && p.Type == null) p.Type = ty.Value;
+
+                XAttribute iv = e.Attribute("initialValue");
+                if (iv != null && p.Initial == null) p.Initial = iv.Value;
 
                 XAttribute ei = e.Attribute("editorInfo");
                 if (ei == null) continue;

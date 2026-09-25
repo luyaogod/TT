@@ -223,7 +223,7 @@ namespace TzsCli.Designer.Fns
                 { "layoutDirty", w4.Dirty },
                 { "state",      State(s) },
                 { "note",       "新包沿用源包的 ProgramKey（回读它要先 close 本句柄）；"
-                                + "sha256 是刚写进 out 的那份字节的摘要，与 `sha256sum <out>` 比对即可证明落盘" },
+                                + "sha256 是刚写进 out 的那份字节的摘要，与 sha256sum <out> 比对即可证明落盘" },
             };
         }
 

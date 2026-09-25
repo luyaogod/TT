@@ -47,6 +47,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -1442,3 +1443,198 @@ func inWorkspace(p, ws string) bool {
 }
 
 func itoaPID() string { return strconv.Itoa(os.Getpid()) }
+
+//---------------------------------------------------------------------------
+// 布局属性的取值规则：报给人看的那一半，与拒人时给的那一半
+//---------------------------------------------------------------------------
+
+// describeLayoutReply 是 `describe_kind --kind layout` 的形状（只列我们读的字段）。
+type describeLayoutReply struct {
+	Count  int `json:"count"`
+	Layout []struct {
+		Name    string   `json:"name"`
+		Type    string   `json:"type"`
+		Values  []string `json:"values"`
+		Initial string   `json:"initial"`
+	} `json:"layout"`
+}
+
+// TestCorpusLayoutValueRuleAgreesWithItsDiscovery —— 取值规则的两半必须是**同一份**。
+//
+// 同一个知识有两个出口：`describe_kind --kind layout` 在**写之前**把它报出来，
+// `set_layout_attr` 在**写错之后**把它放进 `detail.legal`。两半都来自工作区的
+// `mta/mod-fd.spec`（SpecValues 一张表、两个方向），所以它们对不上就说明有人只改了一边。
+// 而 2026-09-25 之前的状态正是"只有后半个出口"：调用方写之前问不到，只能猜 ——
+// 评测 F13 里，执行者猜了 `hidden`（对的）而不敢碰 `invisible`（BOOLEAN，4.2 名 isPassword），
+// 值也只能从别处外推。这条把"两个出口一致"钉成机械判据。
+//
+// 每个**工作区**验一次就够（规则是按 `mta/mod-fd.spec` 定的，同一工作区里的包共用它），
+// 而且只写**非法**值（必被拒 ⇒ 模型不动），所以它不改变任何包的产出，也不进 RoundTrip 那条链。
+func TestCorpusLayoutValueRuleAgreesWithItsDiscovery(t *testing.T) {
+	env := requireCorpus(t)
+	seen := map[string]bool{}
+	checked := 0
+	for _, src := range env.pkgs {
+		ws := workspaceOf(src)
+		if ws == "" || seen[ws] {
+			continue
+		}
+		seen[ws] = true
+		if checkLayoutValueRule(t, env, src, ws) {
+			checked++
+		}
+	}
+	if checked == 0 {
+		t.Skip("没有一个工作区能验（都缺 mta/mod-fd.spec，或包打不开）")
+	}
+	t.Logf("验过 %d 个工作区（语料里共 %d 个）", checked, len(seen))
+}
+
+// checkLayoutValueRule 在一个工作区上验一次，返回是否真的验到了。
+func checkLayoutValueRule(t *testing.T, env *corpusEnv, src, ws string) bool {
+	t.Helper()
+	s := startStdio(t, env.exe, ws, 3*time.Minute)
+	defer s.close()
+
+	opened, ok := ask[openReply](t, s, "layoutrule/open", "open", map[string]any{"path": src})
+	if !ok || opened.Handle == "" {
+		t.Logf("跳过 %s：打不开", filepath.Base(src))
+		return false
+	}
+
+	// ① 写之前先问：名字 + 类型 + 取值集
+	rep, err := s.call("describe_kind", map[string]any{"handle": opened.Handle, "kind": "layout"})
+	if err != nil || rep == nil || !rep.OK {
+		t.Errorf("describe_kind --kind layout 该成功：err=%v reply=%+v", err, rep)
+		return false
+	}
+	var dl describeLayoutReply
+	if err := json.Unmarshal(rep.Result, &dl); err != nil {
+		t.Errorf("describe_kind 的返回解不开：%v（%s）", err, string(rep.Result)[:200])
+		return false
+	}
+	if dl.Count != len(dl.Layout) {
+		t.Errorf("count=%d 与记录数 %d 对不上", dl.Count, len(dl.Layout))
+	}
+	if len(dl.Layout) == 0 {
+		t.Errorf("布局属性一条都没有？%s", filepath.Base(src))
+		return false
+	}
+	declared, typed := map[string][]string{}, 0
+	for _, a := range dl.Layout {
+		if a.Name == "" {
+			t.Errorf("有一条记录没有 name：%+v", a)
+		}
+		if a.Type != "" {
+			typed++
+		}
+		if len(a.Values) > 0 {
+			declared[a.Name] = a.Values
+		}
+	}
+	if typed == 0 {
+		t.Logf("跳过 %s：这个工作区有 mta/ 但 mod-fd.spec 什么都没声明（SpecValues 对缺文件的容错）",
+			filepath.Base(src))
+		return false
+	}
+
+	// ② 找一个**真的长在元素身上**、且**有声明取值集**的属性。值规则排在白名单之后，属性不在
+	//    元素上会先撞 E_ATTR_NOT_WHITELIST，那就没验到这一条 —— 所以要跑到一个真有它的元素上。
+	//    表单根节点通常只带 gridWidth 这种（INTEGER，没有取值集），所以要往后走几个：实测
+	//    aapt300 的根 Form 一个都没有，第二个元素 HBoxT1 就带 hidden（集合 false|true）。
+	root := formTree(t, s, "layoutrule", opened.Handle)
+	if root == nil {
+		return false
+	}
+	for _, elPath := range firstTreePaths(root, 6) {
+		gc, err := s.call("get_component", map[string]any{"handle": opened.Handle, "path": elPath})
+		if err != nil || gc == nil || !gc.OK {
+			t.Errorf("get_component(%s) 失败：err=%v reply=%+v", elPath, err, gc)
+			return false
+		}
+		var comp struct {
+			Layout map[string]string `json:"layout"`
+		}
+		if err := json.Unmarshal(gc.Result, &comp); err != nil {
+			t.Errorf("get_component 的返回解不开：%v", err)
+			return false
+		}
+
+		// 不写死"试哪几个属性名"：把这个元素**真实带着**的每个属性挨个对一遍 describe_kind，
+		// 取第一个两边都认的。硬编码 hidden/case/… 会漏掉别的表单上不同的那一批。
+		names := make([]string, 0, len(comp.Layout))
+		for k := range comp.Layout {
+			names = append(names, k)
+		}
+		sort.Strings(names) // 定序，失败信息可复现
+		for _, name := range names {
+			vals := declared[name]
+			if len(vals) == 0 {
+				continue
+			}
+
+			// ③ 写一个**不在集合里**的值 → 必须被拒，且 detail.legal 逐字等于 ① 报的那一份
+			r, err := s.call("set_layout_attr", map[string]any{
+				"handle": opened.Handle, "path": elPath, "attr": name, "value": "TT_NOPE",
+			})
+			if err != nil {
+				t.Errorf("set_layout_attr(%s=TT_NOPE) 调用本身失败：%v", name, err)
+				return false
+			}
+			if r.OK {
+				t.Errorf("%s=%q 该被拒（合法集 %v）—— 它成功了，静默写脏值", name, "TT_NOPE", vals)
+				return false
+			}
+			if r.Error == nil || r.Error.Code != "E_ATTR_VALUE_ILLEGAL" {
+				t.Errorf("%s=TT_NOPE 该回 E_ATTR_VALUE_ILLEGAL，得 %+v", name, r.Error)
+				return false
+			}
+			var detail struct {
+				Legal []string `json:"legal"`
+				Type  string   `json:"type"`
+			}
+			if err := json.Unmarshal(r.Error.Detail, &detail); err != nil {
+				t.Errorf("拒绝的 detail 解不开：%v（%s）", err, string(r.Error.Detail))
+				return false
+			}
+			if !sameStrings(detail.Legal, vals) {
+				t.Errorf("%s：describe_kind 报的取值集是 %v，拒绝时 detail.legal 给的是 %v —— 两个出口不是同一份",
+					name, vals, detail.Legal)
+				return false
+			}
+			return true
+		}
+	}
+	t.Logf("跳过 %s：前 6 个元素上都没找到带声明取值集的属性", filepath.Base(src))
+	return false
+}
+
+// firstTreePaths 按文档序取前 n 个有 path 的节点（宽度优先，父先于子）。
+func firstTreePaths(root *treeNode, n int) []string {
+	var out []string
+	queue := []*treeNode{root}
+	for len(queue) > 0 && len(out) < n {
+		node := queue[0]
+		queue = queue[1:]
+		if node == nil {
+			continue
+		}
+		if node.Path != "" {
+			out = append(out, node.Path)
+		}
+		queue = append(queue, node.Children...)
+	}
+	return out
+}
+
+func sameStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

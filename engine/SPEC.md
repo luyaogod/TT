@@ -1501,6 +1501,17 @@ close → 释放
 （`field` 23 / `hfield` 12 / `pfield` 7 / `rfield` 12 / `tree` 5 / `act` 8 个，每种都完整物化、一个不漏）。
 这同时解决了"AI 该填什么"和"拒绝非法值"。
 
+**布局侧那一半是同一张表的另一个方向**（2026-09-25，§11.9 第 15 条）。`describe_kind --kind layout`
+回的**不是**一串名字，而是每条 `{name, type, values[], initial}` —— 名字来自这张表单上出现过的
+属性并集，后三项来自工作区 `mta/mod-fd.spec` 的 `<PropertyInfo>`，与 `set_layout_attr` 拒绝坏值时
+写进 `detail.legal` 的**是同一张表**（`SpecValues`：一个 `Check` 拒人，一个 `Describe` 报人；
+BOOLEAN 的 `true|false` 是一处声明的常量，两边共用）。`values` 缺省表示"没有任何地方声明取值集"
+（TEXT / FDSTYLE 之类自由格式，以及 `gridWidth` 这种只有 range 的）。
+为什么要有这个出口：在那之前只有"拒绝"那一半 —— 调用方写之前问不到，只能猜，而猜错**不报错**，
+只是做了另一件事（`hidden` 与 `invisible` 就是一例：前者 ENUM `false|true`，后者是 BOOLEAN，
+4.2 名 `isPassword`）。两半一致由语料回归的
+`TestCorpusLayoutValueRuleAgreesWithItsDiscovery` 在每个真实工作区上钉住。
+
 `slow:true` 标记耗时函数（`validate`：114 元素 1.6 s、670 元素 **10.4 s**），提醒不要每步都调。
 
 `errors[]` **是算出来的，不是手写名单**：除了每个动词自己声明的那几个，`AdvertisedErrors` 还会按

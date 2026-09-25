@@ -308,7 +308,7 @@ validate，得到"13 → 13，增量 0"，**零信息量还花了 8.4 秒**；E3
 | F10 "回读"没定义 | SKILL §3 的调用链改成 `… → save → close → open(新包) → 回读`，并写明 `get_component`/`verify` 读的是内存模型、拿它们回读是自证循环 |
 | F11 新包同名导致回读撞 key | SKILL §2 加一段（`close --form <程序名>` → `open <新包>`）、§3 的链里列为"三处容易走错"之一、§6 补一句串起 `field_add --out` |
 | F12 程序名 → 包文件 | SKILL §1 加一段：包在工作区里、`(c)`/`(s)` 的含义与默认、**没有列包动词**（要自己 `ls`） |
-| F13 属性语义地图 | SKILL §7 加两张小表：`can_edit` vs `noEntry`（并给出语料里矛盾的那个实例）、`hidden` vs `invisible`（依据 `mod-fd.spec` 与它的 4.2 名 `isPassword`） |
+| F13 属性语义地图 | SKILL §7 加两张小表：`can_edit` vs `noEntry`（并给出语料里矛盾的那个实例）、`hidden` vs `invisible`（依据 `mod-fd.spec` 与它的 4.2 名 `isPassword`）。**2026-09-25 又往前一步**：`describe_kind --kind layout` 现在每条带 `type`/`values`/`initial`（§11.9 第 15 条）—— 文档里那两张表从此是"万一绕过了那个出口"的兜底，而不是唯一的信息来源 |
 | F14 validate 的定位 | SKILL §2 加一段（`baselineCached:false` 时那个 0 什么都没证明）、§3 的链把基线 validate 标成 ①、结尾的 ⚠️ 改成"纯布局改动可以不跑 validate，回读就是证明" |
 | F15 提示挂在必填参数上 | **Go 侧**：`firstNarrowingParam` 现在要求"非写动词 + 参数可选 + 返回是清单"三条同时成立（三条都是 manifest 里现成的事实）。新增单测三例（各隔离一条规则）+ E2E 一条（拿真 manifest 通判，并点名 `open`/`find_component`/`get_component` 三个）。**先让它们红过**：退回旧逻辑时六处报错 |
 | F16 的四条 | SKILL §6：`list_open` 不再是必须步骤、被拒的 `open` 也吃句柄号（附实测序列）；§4.2 后加一句 `--help` 里的 `handle` 是线上名、命令行用 `--form`；§2 写清 `added` 的嵌套形状与 `promoted`/`bound`；§9 说明新包通常比源包小、那不是丢数据 |
@@ -328,7 +328,11 @@ validate，得到"13 → 13，增量 0"，**零信息量还花了 8.4 秒**；E3
 - **"回读新包要先 close"这条流程本身**（F11）在工具面上仍然是个陷阱：文档讲清了，但调用方
   仍会踩 —— 除非引擎允许两个同名 program 的会话共存（那是契约级改动），或者 `save` 的返回
   里直接告诉调用方"新包的 key 与源包相同，回读前先 close"。
-- **`describe_kind --kind layout` 只给名字**（F13 的一半）：给类型与取值集要引擎侧补信息。
+- **`describe_kind --kind layout` 只给名字**（F13 的一半）—— **已修**（§11.9 第 15 条）：现在每条
+  `{name, type, values, initial}`，`values` 与"拒你时给的 `detail.legal`"是同一张表，并由
+  `TestCorpusLayoutValueRuleAgreesWithItsDiscovery` 在每个真实工作区上钉住两半一致。
+  **spec 侧那七种 kind 仍是名字数组** —— 它们的取值集不在 `mod-fd.spec` 里（除 `req`/`can_edit`/
+  `can_query` 三个勾选位是设计器的 C# 定的），要补得先有第二个声明来源，所以没顺手做。
 - **`(c)`/`(s)` 的消歧**（F12）：文档给了约定，但工作区里到底有哪些包还是只能 `ls`。
 
 

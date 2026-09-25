@@ -140,7 +140,7 @@ tt dev tzs form_tree      --form aapt300 --args '{"depth":3}' --json            
 tt dev tzs find_component --form aapt300 --args '{"query":"worksheet"}' --json  # 控件代号 → name-path
 tt dev tzs get_component  --form aapt300 --args '{"path":"managedform/aapt300/HBoxT1/worksheet"}' --json
 tt dev tzs describe_kind  --form aapt300 --args '{"kind":"field"}' --json       # 这类节点**运行时**能写哪些属性
-tt dev tzs describe_kind  --form aapt300 --args '{"kind":"layout"}' --json      # 布局侧：这张表单上所有布局属性名
+tt dev tzs describe_kind  --form aapt300 --args '{"kind":"layout"}' --json      # 布局侧：名字 + 类型 + 取值集（约 9 KB）
 tt dev tzs validate       --form aapt300 --json                                 # ① 建基线（慢，实测 3–5 秒）
 tt dev tzs set_spec_attr  --form aapt300 --args '{"path":"<path>","kind":"field","attr":"can_edit","value":"N"}' --json
 tt dev tzs set_spec_attrs --form aapt300 --args '{"path":"<path>","kind":"field","attrs":{"can_edit":"Y","can_query":"N"}}' --json
@@ -183,11 +183,22 @@ tt dev tzs stop                                          # 停本工作区的常
 否则撞 `E_ATTR_NOT_WHITELIST`）；`list_spec_nodes` 列字段/动作等规格节点；`list_tables` /
 `list_columns` 查数据字典；`list_records` / `list_local_strings` 看记录与多语言。
 
-> ⚠️ **要改的是布局属性（`set_layout_attr` 的 `attr`）时，先问一次 `describe_kind --args '{"kind":"layout"}'`** ——
-> 它给的是**这张表单上所有布局属性名**的并集（各表单不同：`aapt300` 那份实测 132 个），是 `attr` 的词汇来源；
-> 某个元素**具体能用哪些**比它窄，写错时 `E_ATTR_NOT_WHITELIST` 的 `detail.legal` 会把该元素可用的名字列全。
-> （2026-09-24 之前这条路是断的：函数体实现了 `layout` 分支，参数校验却收不下 —— 见 §11.9 第 9 条。）
-> 布局属性的**值**集是另一回事：见 §7 的表（引擎按工作区的 `mta/mod-fd.spec` 拒）。
+> ⚠️ **要改布局属性（`set_layout_attr` 的 `attr`）时，先问一次 `describe_kind --args '{"kind":"layout"}'`**
+> —— 它给的是这张表单上布局属性的**并集**，每条是 `{name, type, values, initial}`：
+>
+> ```json
+> {"name":"hidden","type":"ENUM","values":["false","true"],"initial":"false"}
+> {"name":"invisible","type":"BOOLEAN","values":["true","false"],"initial":"false"}
+> {"name":"gridWidth","type":"INTEGER"}
+> ```
+>
+> `values` 就是**引擎会接受的那一份**（与 `set_layout_attr` 拒绝你时给的 `detail.legal` 是同一张表，
+> 语料回归在每个真实工作区上验它俩一致）；**没有 `values` 键 = 没有任何地方声明取值集**
+> （`TEXT`/`FDSTYLE` 之类自由格式，以及 `gridWidth` 这种只有范围的）。所以"这个属性收什么值"
+> **不必靠试**：先看这里。实测 `aapt300` 那份并集 132 条、约 9 KB —— 大，但一次调用换掉一串试错。
+> 某个元素**具体能用哪些**比这份并集窄，写错时 `E_ATTR_NOT_WHITELIST` 的 `detail.legal` 会给该元素那一份。
+> （2026-09-24 之前这条路是断的：函数体实现了 `layout` 分支，参数校验却收不下 —— 见 §11.9 第 9 条；
+> 2026-09-25 之前它只给名字，不给类型与取值集 —— 见第 15 条。）
 
 **两个返回形状不一样，别按一个猜**：`get_component` 的 `spec` 是**按 kind 分层的**
 （`spec.field.attrs.can_edit`），而 `layout` 是**扁平的**（`layout.noEntry`，没有 `.attrs`）。
@@ -384,13 +395,16 @@ tt dev tzs set_spec_attr --form aapp320 --args '{"path":"…","kind":"field","at
 面板勾选只驱动后者，所以"把可编辑关掉"要看你想要的是**面板显示**还是**运行时行为** ——
 要两边都关就得改两次。
 
-**「隐藏」用布局属性 `hidden`，别用 `invisible`。** `hidden` 是 `ENUM`（`mod-fd.spec` 里
-`contains:false|true`，`isDynamic:true`），写 `"true"` / `"false"`，语料里 `hidden="true"` 是多数的
-隐藏写法（空串 = 没设）。`invisible` 是 `BOOLEAN` 且**另一回事** —— 它在 `mod-fd.spec` 里的
-4.2 名是 `isPassword`（掩码），拿它当"藏起来"会得到一个不报错但语义不对的结果。
+**「隐藏」用布局属性 `hidden`，别用 `invisible`。** 这两个现在**问得出来**（§3 那条：
+`describe_kind --kind layout` 会告诉你 `hidden` 是 `ENUM false|true`、`invisible` 是 `BOOLEAN`），
+但类型相同也可能语义不同 —— `hidden` 是隐藏，而 `invisible` 在 `mod-fd.spec` 里的 4.2 名是
+`isPassword`（掩码）：拿它当"藏起来"会得到一个不报错但语义不对的结果。
+语料里 `hidden="true"` 是多数的隐藏写法（空串 = 没设）。
 
 **值校验只覆盖布局侧**（`set_layout_attr` / `set_layout_attrs`），依据是 `<工作区>/mta/mod-fd.spec` 的
-`<PropertyInfo type=… editorInfo="contains:a|b|c">`。三条边界要知道：
+`<PropertyInfo type=… editorInfo="contains:a|b|c">`。**同一张表现在也读得到前面**：
+`describe_kind --kind layout` 每条都带 `type` / `values` / `initial`（§3），所以下面这些边界
+是"万一你绕过了那个出口"的兜底，不是唯一的信息来源。三条边界要知道：
 
 - **空值永远放行** —— 语料里 `hidden=""` 出现 2649 次，它不在自己的声明集里，但表示"没设/继承基础数据"。
 - **spec 侧不查**（`set_spec_attr` / `set_spec_attrs`）：`mod-fd.spec` 是**表单设计器**的规范，写的是
@@ -502,8 +516,9 @@ tt dev tzs export "D:/ws/aapt300(c).tzs"    # 纯解压到 <包目录>\aapt300-u
 
 **改属性**
 - ❌ 一次只改一个属性、还一条条发 → 用复数形式（`set_spec_attrs` / `set_layout_attrs`），省掉 N 遍 name-path。
-- ❌ **猜布局属性的值** → 引擎按工作区的 `mta/mod-fd.spec` 拒（退 2，`detail.legal` 给值集、`detail.hint` 给近似值）。
-  实测过的坑：`case="UPPER"`（合法的是 `upper`）、`scroll="MAYBE"`（BOOLEAN 只收 true/false）。
+- ❌ **猜布局属性的值** → 先 `describe_kind --kind layout` 看 `values`（§3）；真写错了引擎会拒
+  （退 2，`detail.legal` 给值集、`detail.hint` 给近似值）。实测过的坑：`case="UPPER"`（合法的是
+  `upper`）、`scroll="MAYBE"`（BOOLEAN 只收 true/false）—— 这两个现在问一次就知道，不必撞。
 - ❌ 把布局属性和规格属性混在一个动词里 → 两个面板、两个文件、两个动词，混用会被白名单拒
   （`case` 是布局、`can_query` 是规格）。
 - ❌ 复数形式改一半失败还当成功 → `detail` 里有 `applied` / `failed` 两栏，`E_ATTR_PARTIAL` 说明

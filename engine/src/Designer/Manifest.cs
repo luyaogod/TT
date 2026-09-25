@@ -311,7 +311,7 @@ namespace TzsCli.Designer
             F("describe_kind", G_READ, "某类规格节点运行时可写的属性白名单（§11.24(c) from:describe_kind）",
               false, "kindmap", E_STD,
                 P.Handle(),
-                P.KindOrLayout("kind", "七种之一，或 layout（布局属性名集）；省略则返回全部七种")),
+                P.KindOrLayout("kind", "七种之一，或 layout（布局属性：名字 + 类型 + 取值集）；省略则返回全部七种")),
             N("list_tables", G_READ, "工作区数据字典里的表", "list<el>", E_STD,
                 Opt(PType.Str, "query", "名称子串"),
                 // `limit` was read by the implementation (IntArg(a,"limit",200)) but declared

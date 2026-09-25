@@ -1316,6 +1316,12 @@ set_layout_attr  scroll = "MAYBE"     ->  {"ok":true,"applied":true,"written":"M
 properties="…"/>`）本来就是**属性名**白名单的来源——`ComponentFactory.IsIncludeProperties` 读的就是它。
 这次只是把值那一半也读上。`SpecValues` 是纯 XML 解析，不反射、不依赖设计器。
 
+**同一张表现在也往前读**（2026-09-25，§11.9 第 15 条）：`describe_kind --kind layout` 每条返回
+`{name, type, values, initial}`，`values` **就是**下面这套规则会接受的集合 —— 于是"这个属性收什么值"
+在**写之前**就问得到，不必先撞一次拒绝（在那之前知识只有一个出口：拒绝你的那一帧）。
+两半一致由语料回归在每个真实工作区上钉住：写一个集合外的值，断言 `detail.legal` 逐字等于
+`describe_kind` 报的那一份（`TestCorpusLayoutValueRuleAgreesWithItsDiscovery`）。
+
 四条边界，每条都有实测依据：
 
 | 决定 | 依据 |
@@ -1981,8 +1987,8 @@ TDev 的两点被完整保留：位置无关的参数解析（`-o`/`--json` 可�
 变孤儿，靠 `tt dev tzs reap --yes` 收，再加一次重打包，所以攒在一起做）。
 **第 1 条 2026-09-24 已发；第 2 至第 13 条 2026-09-25 已发（各自独立的一次重建、独立提交）。
 第 7 条落地时牵出第 11、12 条；第 10 条落地时牵出第 13 条 —— 那一条是一次普查，把"声明与实现
-各说各话"当**一类**量了一遍，又修掉四处同类。第 14 条（`save` 回写入字节的 `sha256`）是第二轮
-评测逼出来的，同日发。这一批至此全部完成。**
+各说各话"当**一类**量了一遍，又修掉四处同类。第 14 条（`save` 回写入字节的 `sha256`）与
+第 15 条（`describe_kind` 报类型与取值集）是第二轮评测逼出来的，同日发。这一批至此全部完成。**
 
 1. ✅ **`save` / `field_add` 的 `out` 闸门（已做，2026-09-24，`Fns/Session.cs` 的 `CheckOutPath`）。**
    指到源包会覆盖原始素材（`Save.Run` 结尾就是 `File.WriteAllBytes`），而这条此前**只写在
@@ -2088,6 +2094,7 @@ TDev 的两点被完整保留：位置无关的参数解析（`-o`/`--json` 可�
    的 `kind` 本来就不该收 `layout`），`describe_kind` 改用它声明；`spec:` 前缀那种老写法一并保留
    （校验器与函数体都认）。实测 `kind:"layout"` 现在返回**那张表单上所有布局属性名的并集**
    （`aapt300` 上是 132 个，各表单不同），`set_layout_attr` 的 `from:"layout"` 终于指向一条走得通的路。
+   （那一次只修了"路通不通"；**每一**条只有名字、没有类型与取值集，是第 15 条补的 —— 见下。）
 
 10. ✅ **`list_local_strings` 的过滤器（已做，2026-09-25）—— 而它牵出的是一整类，见第 13 条。**
     它声明的是 `P.Handle()` + `Opt(PType.Path, "path")`，实现读的却是 `Read.Arg(a, "filter")`
@@ -2189,6 +2196,25 @@ TDev 的两点被完整保留：位置无关的参数解析（`-o`/`--json` 可�
     ⚠️ **没解掉的那半**：新包沿用源包的 program 名，所以想 `open` 它读内容，`close` 省不掉 ——
     那要允许两个同名 program 的会话共存，属 §11.24(g) 的契约级改动。
 
+15. ✅ **`describe_kind --kind layout` 从"一串名字"变成"名字 + 类型 + 取值集 + 初值"（已做，2026-09-25）—— 第二轮评测 F13 的另一半。**
+    在那之前同一个知识只有一个出口：`set_layout_attr` 拒你的时候把合法值塞进 `detail.legal`。
+    **写之前问不到，只能猜** —— 而评测里那次猜的代价是真实存在的：执行者猜了 `hidden`（对的，
+    但它自己不确定），不敢碰 `invisible`（`mod-fd.spec` 里是 `BOOLEAN`，4.2 名 `isPassword`），
+    值也是从别处外推的（"BOOLEAN 只收 true/false"）。这类猜错**不报错**，只是做了另一件事。
+    现在每条记录是 `{name, type, values, initial}`：名字仍来自这张表单上出现过的属性并集，
+    后三项来自工作区 `mta/mod-fd.spec` 的 `<PropertyInfo>` —— 与那次拒绝**是同一张表**
+    （`SpecValues`：一个 `Check` 拒人，一个 `Describe` 报人；BOOLEAN 的 `true|false` 提成一个
+    常量，两边共用）。`values` 缺省 = 没有任何地方声明取值集（`TEXT`/`FDSTYLE` 自由格式，
+    `gridWidth` 只有范围）；`initial` 是设计器的初值。
+    实测（aapt300）：132 条 / 9,034 字节；`hidden`→ENUM false|true、`invisible`→BOOLEAN true|false、
+    `case`→none|lower|upper、`scroll`→BOOLEAN、`gridWidth`→INTEGER（无 `values`，与"range 不查"
+    那条决定一致）。七种 kind 那一支**没动**（仍是名字数组）。
+    防线：语料回归的 `TestCorpusLayoutValueRuleAgreesWithItsDiscovery` —— 每个**真实工作区**挑一个
+    真有声明取值集的属性，写一个集合外的值，断言拒绝时的 `detail.legal` **逐字等于** `describe_kind`
+    报的那一份。两半来自同一张表，所以它们对不上就说明有人只改了一边；这条**见过它红**
+    （临时让报出来的集合少一个值 → `lstrtext：报的是 [true]，拒绝时给的是 [true false]`）。
+    只写非法值（必被拒 ⇒ 模型不动），所以它不改变任何包的产出。
+
 不需要重建引擎的（Go 侧，可单独发）：
 
 - ✅ **已发（2026-09-25）：抓函数表没有期限，于是"唯一能用的一条命令"会挂死。** 实测（一次真事故）：
@@ -2229,12 +2255,10 @@ TDev 的两点被完整保留：位置无关的参数解析（`-o`/`--json` 可�
   各自交给一个**只拿 SKILL、没有对话上下文**的干净 agent，记三个数：调用次数、返回字节数、
   是否做对。b530001 就是这样把一个真 bug 挖出来的（那个提交的正文写着结论）。
   **两轮都跑完了**（2026-09-24 基线 / 2026-09-25 引擎批次之后），全部记录在
-  `docs/eval-baseline.md`。第二轮沿这条线挖出两件事：一件已经做掉了（"证明落盘"的代价 ——
-  见第 14 条：`save` 现在回 `sha256`，那一步从三次引擎调用变成一条 `sha256sum`），另一件还欠着：
-  - **`describe_kind --kind layout` 只给一串属性名**：没有类型、没有取值集、没有语义，
-    于是"隐藏该用 `hidden` 还是 `invisible`"这种问题只能猜（第二轮实测：`hidden` 是
-    `ENUM contains:false|true`，`invisible` 是 `BOOLEAN` 且 4.2 名是 `isPassword` ——
-    这些都在工作区的 `mta/mod-fd.spec` 里，引擎知道却没说）。
+  `docs/eval-baseline.md`。第二轮沿这条线挖出的两件事**都已做掉**：
+  "证明落盘"的代价（第 14 条：`save` 现在回 `sha256`，那一步从三次引擎调用变成一条 `sha256sum`）
+  与"`describe_kind` 只给名字"（第 15 条：现在带 `type`/`values`/`initial`，取值集与拒你时给的
+  `detail.legal` 是同一张表）。第三轮该测的是这两处**有没有真的少花调用**。
 
 ---
 
