@@ -638,6 +638,29 @@ func TestFilterHintAndNudge(t *testing.T) {
 	if got := nudge(write, `{"table":"pmdl_t"}`, big); got != "" {
 		t.Errorf("改模型的动词不该提醒：%q", got)
 	}
+
+	// ④ 必填参数不是过滤器。`open` 的 path 必填、不给根本开不了表 —— 而它从前会印出
+	// "先收窄：path 能减少返回"（2026-09-25 的评测里被执行者点名）。
+	openLike := &tzs.SpecFn{Name: "open", Writes: false, Returns: "handle",
+		Args: []*tzs.Param{{Name: "path", Type: tzs.TypePath, Required: true},
+			{Name: "timeout", Type: tzs.TypeInt, Required: false}}}
+	if h := filterHint(openLike); h != "" {
+		t.Errorf("必填的 path 不该被说成收窄手段：%q", h)
+	}
+	// ⑤ 必填 query 同理 —— 这条单独测，因为它的 Returns 是清单（规则③放行），
+	// 挡住它的只能是规则②。
+	findLike := &tzs.SpecFn{Name: "find_component", Writes: false, Returns: "list<el>",
+		Args: []*tzs.Param{{Name: "query", Type: tzs.TypeString, Required: true}}}
+	if h := filterHint(findLike); h != "" {
+		t.Errorf("必填的 query 不该被说成收窄手段：%q", h)
+	}
+	// ⑥ 返回单个元素的动词没有"全量"可收窄 —— 这条也单独测（参数可选、非写动词，
+	// 挡住它的只能是规则③）。
+	oneLike := &tzs.SpecFn{Name: "get_component", Writes: false, Returns: "el",
+		Args: []*tzs.Param{{Name: "query", Type: tzs.TypeString, Required: false}}}
+	if h := filterHint(oneLike); h != "" {
+		t.Errorf("返回单个 el 的动词不该有收窄提示：%q", h)
+	}
 }
 
 // nudge 跑一次 maybeNudgeFilter，把要打印的东西收回来。

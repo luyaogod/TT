@@ -565,9 +565,23 @@ func runTzsVerb(args []string) int {
 var narrowingParams = []string{"query", "limit", "table", "kind", "path", "column"}
 
 // firstNarrowingParam 返回该动词声明的第一个收窄参数名（没有则空）。
+//
+// 三个条件**都从 manifest 现成的事实判**，一条都不能少 —— 每一条都是被量出来的
+// （2026-09-25 的评测，四个只拿 SKILL 的执行者）：
+//
+//  1. `!Writes`：会改模型的动词，参数是**输入**不是过滤器。少了这条，`field_add --help`
+//     会印一句毫无意义的"先收窄：table…"。
+//  2. `!Required`：**必填的东西不可能用来"少回一点"**。少了这条，`open --help` 挂着
+//     "先收窄：path 能减少返回" —— 而 open 的 path 必填，不给根本开不了表（评测里被点名）。
+//  3. `Returns` 以 `list` 开头：只有会回**一大块**的读动词才有"全量"可收窄。少了这条，
+//     `find_component`（返回 list 但 `query` 必填 → 由 2 拦下）与 `get_component`
+//     （返回单个 el）都会挂上一句不合身的提示。
 func firstNarrowingParam(fn *tzs.SpecFn) string {
+	if fn.Writes || !strings.HasPrefix(fn.Returns, "list") {
+		return ""
+	}
 	for _, n := range narrowingParams {
-		if fn.Param(n) != nil {
+		if p := fn.Param(n); p != nil && !p.Required {
 			return n
 		}
 	}

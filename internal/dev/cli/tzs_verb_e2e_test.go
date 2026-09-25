@@ -368,6 +368,52 @@ var noopVerbs = []string{
 	"set_spec_description", "set_tree_source",
 }
 
+// TestE2ENarrowingHintFollowsTheManifest —— "先收窄/先过滤"提示只能挂在**可选 + 返回清单**的参数上。
+//
+// 为什么值得一条：这类提示是 `--help` 里唯一一句"教你怎么少花 context"的话，所以它一旦
+// 挂错地方，代价是**照它做反而更糟**。2026-09-25 的评测实测到三处挂错：`open --help` 印
+// "先收窄：path 能减少返回"（path 必填，不给开不了表）、`find_component`（query 必填）、
+// `get_component`（返回单个 el，没有"全量"可收窄）。三条判据都是 manifest 里现成的事实。
+func TestE2ENarrowingHintFollowsTheManifest(t *testing.T) {
+	m := requireRealManifest(t)
+	hinted := 0
+	for _, f := range m.Fns {
+		h := filterHint(f)
+		if h == "" {
+			continue
+		}
+		hinted++
+		n := firstNarrowingParam(f)
+		p := f.Param(n)
+		if p == nil {
+			t.Errorf("%s：提示点名 %q，manifest 里没有这个参数", f.Name, n)
+			continue
+		}
+		if p.Required {
+			t.Errorf("%s：提示点名了必填参数 %q（必填的是输入，不是过滤器）：%s", f.Name, n, h)
+		}
+		if !strings.HasPrefix(f.Returns, "list") {
+			t.Errorf("%s：返回 %q 不是清单，没有全量可收窄：%s", f.Name, f.Returns, h)
+		}
+	}
+	// 三个被实测点过名的，必须一直没有提示 —— 这条比上面的通判更硬：它们换不回旋余地。
+	for _, name := range []string{"open", "find_component", "get_component"} {
+		f := m.ByName(name)
+		if f == nil {
+			t.Errorf("manifest 里没有 %s？", name)
+			continue
+		}
+		if h := filterHint(f); h != "" {
+			t.Errorf("%s 曾被实测挂过一句不成立的收窄提示，现在又有了：%s", name, h)
+		}
+	}
+	// 一处都没提示不判失败（把提示整段删掉也是允许的改法），但要让人在输出里看得见它没退化成空转。
+	t.Logf("真 manifest：%d 个动词里 %d 个有收窄提示", len(m.Fns), hinted)
+	if hinted == 0 {
+		t.Errorf("一个收窄提示都没有 —— 这条断言成了空转（list_columns / list_tables 该有的）")
+	}
+}
+
 // TestE2EDocsVerbCountMatchesManifest 把"动词数"这个数字钉在 manifest 上。
 //
 // 为什么值得一条 E2E：同一个数字曾经在四处各不相同（49 / 50 / 52 同时存在），
