@@ -219,6 +219,22 @@ namespace TzsCli.Designer
             return ((IDictionary)Reflect.Prop(Designer.SettingManager, "undoRedoManagerMap"))[s.Key];
         }
 
+        /// <summary>The manager IF THIS HANDLE ALREADY HAS ONE, without registering one.
+        ///
+        /// Urm above is the write path and its RegisterUndoRedo is load-bearing there. This is for
+        /// the one caller that only wants to LOOK at the stack -- `reload` reports how many steps it
+        /// is about to throw away -- and for that, registering would be a side effect of asking a
+        /// question: it flips the handle Loaded -> Mutable irreversibly (§11.24 (b)), so `reload`
+        /// would report "1 步可丢" for a handle nothing had ever written to.
+        ///
+        /// (dry-run used to read it too, back when its rollback was going to be "batch undo". That
+        /// basis was measured wrong -- see DryRun.cs -- so this has exactly one caller now.)</summary>
+        internal static object UrmIfAny(Session s) {
+            if (s == null || s.Key == null) return null;
+            var map = (IDictionary)Reflect.Prop(Designer.SettingManager, "undoRedoManagerMap");
+            return map.Contains(s.Key) ? map[s.Key] : null;
+        }
+
         /// <summary>Runs a designer command. AddThenExecute is what Edit.cs uses (its `set`), and
         /// it matters: the command's own Execute() resolves its manager through
         /// SettingManager.GetUndoRedoManager(key), which throws "No UndoRedoManager" unless the
@@ -678,7 +694,10 @@ namespace TzsCli.Designer
             return UndoCount(g.Urm) - g.UndoBefore;
         }
 
-        static int UndoCount(object urm) {
+        /// <summary>Undo-stack height of a manager as fetched from the map. `internal` because
+        /// `reload` reports how many steps it is about to throw away, and that number has to come
+        /// from the same manager that will be dropped.</summary>
+        internal static int UndoCount(object urm) {
             if (urm == null) return 0;
             object v = Reflect.Prop(urm, "UndoCount");
             return v is int ? (int)v : 0;

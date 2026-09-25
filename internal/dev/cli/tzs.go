@@ -38,7 +38,7 @@ const tzsUsage = `tt dev tzs —— 表单包工具（导出只读；读写表�
 
   tt dev tzs <动词> [--form <程序名>] --args '<JSON 对象>' [--args-file <UTF-8 文件>] [--workspace <dir>] [--rpc-timeout <秒>] [--json]
         # 读写表单：**唯一**写路径，由设计器自己的引擎算，不是我们拼 XML
-        # 53 个动词全部由引擎的函数表生成，所以这里没有"函数名"这一层要填：
+        # 55 个动词全部由引擎的函数表生成，所以这里没有"函数名"这一层要填：
         #   open form_tree find_component get_component list_spec_nodes describe_kind
         #   set_spec_attr set_spec_attrs set_layout_attr set_layout_attrs add_widget add_field
         #   field_add nudge validate save close …

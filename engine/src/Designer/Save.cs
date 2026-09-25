@@ -24,7 +24,10 @@ namespace TzsCli.Designer
     /// </summary>
     public static class Save
     {
-        public static byte[] Run(byte[] original, string outPath, FormWriter w4, Session s) {
+        /// <summary>`write` 是 `dry-run` 的刹车：为假时**照样**把包拼出来并回给调用方（"要写的是什么"
+        /// 正是 dry-run 该回答的），只是不落盘。它必须是一个显式参数而不是 Save 自己去读 DryRun.Active
+        /// —— 落盘是这个函数唯一的不可逆动作，这件事应当写在调用点上。</summary>
+        public static byte[] Run(byte[] original, string outPath, FormWriter w4, Session s, bool write) {
             string fdEntry  = Reflect.EntryName(original, ".4fd");
             string tsdEntry = Reflect.EntryName(original, ".tsd");
             string bdxEntry = Reflect.EntryName(original, ".bdx");
@@ -48,7 +51,7 @@ namespace TzsCli.Designer
             // original entry (if any) is then left untouched rather than blanked.
             if (bdxEntry != null && !string.IsNullOrEmpty(bdxNew)) repl[bdxEntry] = Encoding.UTF8.GetBytes(bdxNew);
             byte[] result = TzsRepacker.Repack(original, repl);
-            File.WriteAllBytes(outPath, result);
+            if (write) File.WriteAllBytes(outPath, result);
             return result;
         }
 

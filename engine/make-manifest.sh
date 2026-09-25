@@ -7,6 +7,15 @@
 # no refactor could be proven against it. The three write-side drivers already excluded their
 # own scratch (_dw/_ed/_del/_ac); the read side did not.
 #
+# Two prefixes were added 2026-09-26, and neither is a driver's scratch:
+#   _tdev*    the corpus test's own output (internal/dev/tzs/scratchPath), deleted after each
+#             use but left behind when a run is killed;
+#   _tt_dry*  the ENGINE's dry-run rollback snapshot (DryRun.cs), which is written beside the
+#             source package because TzpManager only loads from inside the workspace. It is
+#             normally deleted too -- but a daemon that dies mid-rollback leaves one, and a
+#             scratch package that lands in the pinned set is exactly the unreproducible
+#             baseline this script exists to prevent.
+#
 #   ./make-manifest.sh [root]      default root: /d/t100_wrok_dir
 #
 # The manifest is a record, not (yet) the discovery mechanism -- the four drivers still glob,
@@ -28,6 +37,7 @@ HERE_POSIX="$(cd "$(dirname "$0")" && pwd)"
   echo
   find "$ROOT" -iname '*.tzs' \
        ! -name '_ai*' ! -name '_dw*' ! -name '_ed*' ! -name '_del*' ! -name '_ac*' \
+       ! -name '_tdev*' ! -name '_tt_dry*' \
        -print0 \
     | sort -z \
     | while IFS= read -r -d '' f; do

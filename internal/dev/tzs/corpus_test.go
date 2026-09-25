@@ -72,7 +72,12 @@ const (
 // scratchPrefixes 是不算语料的文件名前缀：四个 batch 脚本与 gate-w3.py 各自排除集的**并集**
 // （它们的注释解释了为什么必须取并集），外加 _tdev —— 本测试自己的临时产出。
 // _tdev 必须在里面，否则一次跑崩留下的临时包会被下一轮当成语料。
-var scratchPrefixes = []string{"_ai", "_dw", "_ed", "_del", "_ac", "_tdev"}
+//
+// _tt_dry 与它们不同类：它是**引擎**自己产的临时包（dry-run 的回滚快照，见 DryRun.cs，
+// 名字是 _tt_dry_<pid>_<n>.tzs，正常路径上写完就删）。放进这张表是因为"正常路径"之外还有
+// 一条：守护进程在回滚中间死掉，包就留在源包旁边了 —— 而它落在**工作区里**，下一次语料遍历
+// 会把它当成一份语料（实测留下过一个）。engine/make-manifest.sh 的排除集里也有它。
+var scratchPrefixes = []string{"_ai", "_dw", "_ed", "_del", "_ac", "_tdev", "_tt_dry"}
 
 // validateSample 是「每轴一个」的 validate 样本，逐字照搬 gate-w3.py 的 DEEP_SAMPLE。
 //

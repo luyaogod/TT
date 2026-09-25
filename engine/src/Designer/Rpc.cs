@@ -686,17 +686,54 @@ namespace TzsCli.Designer
                 // carried and the caller can match it.
                 _inflight = this;
                 _inflightId = id;
-                object result;
+
+                // Two switches that cut across every write verb, both closed here rather than in
+                // each body (Manifest.Traced puts them on the wire; SpecFn.Traced is the flag that
+                // says which verbs those are). Both need the same thing: the outcome of a body
+                // that really ran.
+                //
+                //   dry_run -- run it, keep the answer, put the model back (DryRun).
+                //   op      -- the caller's name for this attempt, logged BEFORE the body so that
+                //              a request that takes the daemon down still leaves "it started" behind
+                //              (OpLog).
+                //
+                // Keyed off spec.Traced and NOT off "args has an `op`": `list_ops` takes an `op`
+                // too, as a filter, and reading it as a name made the query log itself as an
+                // operation (measured 2026-09-26 -- the first cut of this code did exactly that).
+                bool traced = spec != null && spec.Traced;
+                bool dry = traced && DryRun.Requested(args);
+                string opName = traced ? Scalar(args["op"]) : null;
+                if (opName != null && opName.Length == 0) opName = null;
+                OpLog.Entry opEntry = opName == null ? null : OpLog.Begin(opName, fn,
+                    s == null ? null : s.Handle, s == null ? null : s.Program, dry);
+
+                object result = null;
+                string errWire = null, errKind = null, errMsg = null;
+                JObject errDetail = null;
+                DryRun.Scope dryScope = null;
                 try {
+                    // The arming is INSIDE the same catch as the body on purpose: taking the
+                    // dry-run snapshot writes a file, so it can fail for environmental reasons
+                    // (read-only directory, full disk), and an exception thrown here used to
+                    // escape the dispatcher entirely and take the daemon down with it -- a preview
+                    // flag that can kill the server. Measured 2026-09-26. With nothing armed,
+                    // DryRun.Exit below returns null and there is nothing to roll back, which is
+                    // correct: the body never ran.
+                    if (dry) {
+                        DryRun.Enter();
+                        // Only a mutating verb has anything to roll back. `save --dry-run` is the
+                        // other half: it never dirties the model, and its one side effect (the
+                        // file) is suppressed inside Save.Run. A verb that resolves its own session
+                        // arms itself from inside the body -- DryRun.Arm's contract.
+                        if (spec.Mutating) DryRun.Arm(s);
+                    }
                     result = f(s, args);
                 } catch (DetailedError de) {
-                    string w, k; Map(de.Code, out w, out k);
-                    WriteError(id, w, k, de.Message, de.Detail, sw.Elapsed.TotalMilliseconds);
-                    return;
+                    Map(de.Code, out errWire, out errKind);
+                    errMsg = de.Message; errDetail = de.Detail;
                 } catch (TzsError te) {
-                    string w, k; Map(te.Code, out w, out k);
-                    WriteError(id, w, k, te.Message, null, sw.Elapsed.TotalMilliseconds);
-                    return;
+                    Map(te.Code, out errWire, out errKind);
+                    errMsg = te.Message;
                 } catch (Exception ex) {
                     // Unwrap first. Every designer call goes through reflection, and both
                     // Activator.CreateInstance and MethodInfo.Invoke wrap the real failure in
@@ -712,12 +749,34 @@ namespace TzsCli.Designer
                     var detail = new JObject();
                     detail["exception"] = inner.GetType().FullName;
                     detail["at"] = inner.TargetSite == null ? null : inner.TargetSite.Name;
-                    WriteError(id, "E_INTERNAL", "internal", chain, detail, sw.Elapsed.TotalMilliseconds);
-                    return;
+                    errWire = "E_INTERNAL"; errKind = "internal"; errMsg = chain; errDetail = detail;
                 } finally {
                     _inflight = null;
+                    // The rollback belongs in the finally, and that is not tidiness: a body that
+                    // threw half-way (E_ATTR_PARTIAL is the one that says so out loud) has already
+                    // written part of the model, and a dry run that leaves THAT behind is worse
+                    // than no dry run at all -- it is the write the caller asked not to make.
+                    if (dry) dryScope = DryRun.Exit();
+                    if (dryScope != null) dryScope.Rollback();
                 }
 
+                if (errWire != null) {
+                    // The verb's own refusal, reported as itself -- with one addition: under a dry
+                    // run the caller has to be able to see that nothing stuck. `reverted` is exactly
+                    // the proof, and for a partial write it is the difference between "the model is
+                    // half-changed" and "the model is as you left it".
+                    if (dry) {
+                        if (errDetail == null) errDetail = new JObject();
+                        errDetail["dryRun"] = true;
+                        if (dryScope != null) errDetail["reverted"] = DryRun.Reverted(dryScope);
+                    }
+                    OpLog.End(opEntry, "error", errWire, errMsg, sw.Elapsed.TotalMilliseconds, null);
+                    WriteError(id, errWire, errKind, errMsg, errDetail, sw.Elapsed.TotalMilliseconds);
+                    return;
+                }
+
+                if (dry) result = DryRun.Envelope(result, fn, s == null ? null : s.Handle, dryScope);
+                OpLog.End(opEntry, "ok", null, null, sw.Elapsed.TotalMilliseconds, result);
                 WriteOk(id, result, sw.Elapsed.TotalMilliseconds);
             }
 

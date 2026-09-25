@@ -1,6 +1,6 @@
 ---
 name: tt-dev-tzs
-description: 读写 T100 设计器**表单包**（.tzs/.tzv）：由设计器自己的引擎驱动（53 个具名动词，命名管道 JSON-RPC），参数一律用 JSON 给，不是拼 XML。按数据表加字段用任务级动词 field_add（一条命令做完挑容器+建字段+校验+另存）；改属性用 set_spec_attr / set_layout_attr，改多个用它们的复数形式（一次请求、先全量校验再全量写）；布局/页签等用细粒度动词（open → 读 → 改 → validate → save）。要改表单、按表加字段、查表单结构或字段时用。**前提：先配工作区，且包与 out 都必须用绝对路径落在工作区目录之下。代码包（.tzc/.tzf/.tzx）不归这里，用 tt-dev-tzc。**
+description: 读写 T100 设计器**表单包**（.tzs/.tzv）：由设计器自己的引擎驱动（55 个具名动词，命名管道 JSON-RPC），参数一律用 JSON 给，不是拼 XML。按数据表加字段用任务级动词 field_add（一条命令做完挑容器+建字段+校验+另存）；改属性用 set_spec_attr / set_layout_attr，改多个用它们的复数形式（一次请求、先全量校验再全量写）；布局/页签等用细粒度动词（open → 读 → 改 → validate → save）。要改表单、按表加字段、查表单结构或字段时用。**前提：先配工作区，且包与 out 都必须用绝对路径落在工作区目录之下。代码包（.tzc/.tzf/.tzx）不归这里，用 tt-dev-tzc。**
 license: 与 tt 仓库一致（见随包 README.md）
 metadata:
   tool: tdev
@@ -181,6 +181,9 @@ tt dev tzs <动词> --help                                 # 参数表 + 一条*
 # 落盘证明有两种问法，按你要问什么选（§2 有表）：
 #   · "文件里就是引擎刚写的那份字节" → save 返回的 `sha256` 与 `sha256sum <out>` 比一次（不碰引擎）
 #   · "盘上那个包的内容" → close → open(新包) → 读（三次调用，且必须先 close）
+# 先看一眼再动手（可选）：写动词都收 dry_run，见 §6 —— 真跑一遍、答案在 preview 里、模型放回去
+# 反悔：reload 丢内存改动、从盘重读（保 validate 基线），见 §6
+# 超时了不确定写没写进去：给写起个 op 名，事后 list_ops 问它，见 §6
 # 三处容易走错的：
 #   · validate 想报增量，第一次必须排在**改之前**（§5：一个会话上的首调就是建基线那次）
 #   · `save` 出的新包 program 名与源包**相同**（返回里的 `key` 就写着它），要 open 它必须先
@@ -447,8 +450,38 @@ tt dev tzs set_spec_attr --form aapp320 --args '{"path":"…","kind":"field","at
   **用 `field_add` + `file` 不会有这个问题**（已开着就复用）——
   但 `field_add --out` 存完新包之后，**回读新包**要先 `close`（那新包沿用了同一个程序名，见 §2）。
 - 会话只活在常驻守护进程里：**进程一死全部失效**，重新 `open` 即可。
-- **请求一旦上线绝不重试**：协议没有幂等键，这些动词都在改设计器内存里的模型，重试是在赌
-  「上一次写进去了没有」。
+- **请求一旦上线绝不重试 —— 但超时之后可以问。** 协议没有幂等键，这些动词都在改设计器内存里的
+  模型，重试是在赌「上一次写进去了没有」。所以：给每次写起个名字（`op`），超时之后用 `list_ops`
+  问那个名字，答案只有三种：**没有记录** = 请求从未到达（重发安全）；**`pending`** = 看见了、
+  还在做（别盲目重发）；**`ok` / `error`** = 已经结束（重发安全，而且结果摘要就写在里面）。
+  ```bash
+  tt dev tzs set_spec_attr --form aapp320 --args '{"path":"…","kind":"field","attr":"can_edit","value":"N","op":"task7-a"}'
+  tt dev tzs list_ops --args '{"op":"task7-a"}' --json      # 超时之后问这一句
+  ```
+  ⚠️ 日志**只在守护进程内存里**（它只回答"这个进程看见过什么"）：进程换了就是一份新日志，
+  返回里的 `daemonStartedAt` 就是给你判断这件事的。"没有记录"要配上"守护进程没换过"才叫结论。
+  不带 `op` 的写不进日志 —— 那就回到"绝不重试"。
+- **`reload`：丢掉内存改动、从盘重读，句柄不变。** 这是 `close` + `open` 的替代品，比那条老路
+  多两样东西：① **保住 validate 基线**（文件字节与打开时相同时；不同时如实说
+  `baseline:"dropped"`）；② **告诉你盘上那个包在你打开之后被换过**（`fileChanged:true` ——
+  那之前你手里的基线增量与 diff 都在拿两个不同的文档比）。
+  ```bash
+  tt dev tzs reload --form aapp320 --json
+  ```
+- **写动词可以干跑：`dry_run: true`。** 它**真跑一遍**这个动词，把答案原样放进 `preview`
+  （所以 `preview.noop` / `preview.applied` 就是"真做的话会是哪种结果"），然后把模型放回调用前。
+  想知道"这一改会新增什么校验问题""这个容器挑得对不对"而不想先改再后悔时用它。
+  ```bash
+  tt dev tzs add_field --form aapp320 --args '{"path":"…","table":"pmda_t","columns":["pmda001"],"dry_run":true}'
+  ```
+  ⚠️ 代价写在返回里（`reverted`）：回滚是**重建会话**（把模型渲染成一份临时包 → 跑一遍 →
+  从那份临时包重读回来；撤销栈回不去这次写，实测见 §11.9 第 18 条），所以**句柄串不变，
+  但 `loadMs` 重置、`state` 回到 `Loaded`**。盘上什么都不写。
+  `reverted.complete:false` = **回滚没走完**（这时 `reverted.error` 有原因，`reverted.scratch`
+  是你调用前那一刻的包，`open` 它就是回到调用前）；`reverted.recovered:true` = 这份临时包
+  丢过一次、用留底字节重写过 —— 模型照样回来了，只是这台机器上发生过一次怪事。
+  `save --dry-run` 是另一条路（它不改模型，只是不落盘）：照样拼包、照回 `sha256`，`out` 不出现。
+  实测开销：一次干跑 ≈ 一次 `open`（render 2–11 ms + load 70–350 ms）。
 - `stop` 停本工作区的常驻引擎（**绝不 spawn**）；`reap [--yes]` 收引擎**重编后**停不掉的孤儿
   守护进程（管道名含 MVID，重编即换名）。`reap` 不加 `--yes` 只列不杀。
 
@@ -597,14 +630,14 @@ tt dev tzs export "D:/ws/aapt300(c).tzs" -o D:/out --force    # 目标非空时�
 > 包不是原样拷贝的容器。**要证明落盘就比 `sha256`**（返回里那个与 `sha256sum <out>`），
 > 不必靠字节数推断。
 
-## 10. 动词全表（53 个）
+## 10. 动词全表（55 个）
 
 `tt dev tzs --help` 会列出它们（`[工作流]` 在最前；会改模型的标 `[写]`，慢的标 `[slow]`）：
 
 | 组 | 动词 |
 |---|---|
 | 工作流 | `field_add` |
-| 会话 | `open` `save` `close` `verify` `list_open` |
+| 会话 | `open` `save` `close` `reload` `verify` `list_open` `list_ops` |
 | 读 | `form_tree` `find_component` `get_component` `list_spec_nodes` `describe_kind` `list_packages` `list_tables` `list_columns` `list_records` `list_local_strings` |
 | 属性 | `set_spec_attr` `set_spec_attrs` `set_layout_attr` `set_layout_attrs` `set_tree_source` `rename_component` |
 | 结构 | `add_widget` `add_field` `insert_at` `delete` `move` `reparent` `nudge` `align` `fit_size` `wrap` `break_layout` `convert_widget` `convert_container` |
@@ -616,8 +649,12 @@ tt dev tzs export "D:/ws/aapt300(c).tzs" -o D:/out --force    # 目标非空时�
 
 > `open` **没有 `force` 参数**（2026-09-25 删掉的，原因见 §6）；`export` 的 `-o` / `--force`
 > 见 §9 —— 它是内建命令，`--help` 走不通，只能照文档写。
+>
+> **写动词（标 `[写]` 的 36 个）与 `save` 另有两个横切参数**：`dry_run` 与 `op`，见 §6。
+> 其余动词没有它们 —— 读动词挂 `dry_run` 是空话，所以没有。
+> `list_ops` 自己也有一个 `op`，但那是**过滤器**（"我要问哪个名字"），同词不同位。
 
-**这 53 个来自引擎的函数表。另有 4 个是 `tt` 自己的内建命令，不在表里、也不接受 `--help`：**
+**这 55 个来自引擎的函数表。另有 4 个是 `tt` 自己的内建命令，不在表里、也不接受 `--help`：**
 `export`（§9，本地解压，不用引擎）、`doctor`（自检）、`stop`、`reap`。`tt dev tzs stop --help`
 会退 2 —— 它走的是另一条路径。
 

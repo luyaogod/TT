@@ -58,6 +58,17 @@ namespace TzsCli.Designer {
         /// <summary>Marked on functions that take seconds, so a caller does not put them in a
         /// loop. validate is 1.6 s on a 114-element form and 10.4 s on a 670-element one.</summary>
         public bool Slow;
+        /// <summary>True means this verb answers the two cross-cutting switches, `dry_run` and
+        /// `op` (Manifest.Traced): an attempt of it is worth naming and worth rehearsing. It is
+        /// `Mutating` for every verb but `save` -- which writes a file without dirtying the model,
+        /// and is exactly where "did it land" matters most.
+        ///
+        /// A FIELD rather than "the verb has a parameter called `op`": the parameter name is not
+        /// unique on the surface (`list_ops` takes an `op` FILTER), and Rpc deciding by name got
+        /// it wrong the first time -- the query logged itself as an operation. Declaring the
+        /// property once, next to the parameters it describes, is what makes the two agree
+        /// (SPEC §11.9 的 dry-run 与幂等 op log).</summary>
+        public bool Traced;
         public string[] Errors;  // the E_* codes this fn can return; drives help AND tests
         /// <summary>Closed vocabulary: void|handle|el|tree|list&lt;el&gt;|delta|kindmap, plus
         /// `report` for the task-level verbs (工作流) whose answer is a small composed object

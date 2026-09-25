@@ -149,13 +149,53 @@ namespace TzsCli.Designer
 
         // ---------------------------------------------------------------- table builders
         /// <summary>A handle-taking function. NeedsHandle=true is the default in SpecFn, and it
-        /// is also what makes the transport resolve args.handle before the body runs.</summary>
+        /// is also what makes the transport resolve args.handle before the body runs.
+        ///
+        /// `mutating` does a second job here as well as marking the verb [写] in the help: it is
+        /// what puts `dry_run` and `op` on the wire (see <see cref="Traced"/>). That is deliberate
+        /// -- "this verb can change the model" is exactly the set of verbs where "try it without
+        /// doing it" and "name this attempt" mean anything, and deriving the two from the flag is
+        /// what keeps 36 declarations from drifting out of it. The one verb that leaves a trace
+        /// WITHOUT being mutating (`save`, it writes a file and dirties nothing) declares them
+        /// itself, right where its other exception is explained.</summary>
         static SpecFn F(string name, string group, string summary, bool mutating, string returns,
                         string[] errors, params Param[] ps) {
-            return new SpecFn {
+            var f = new SpecFn {
                 Name = name, Group = group, Summary = summary, Params = ps,
                 NeedsHandle = true, Mutating = mutating, Slow = false, Returns = returns, Errors = errors
             };
+            if (mutating) { f.Traced = true; f.Params = TracedParams(f.Params); }
+            return f;
+        }
+
+        /// <summary>Marks a verb that is NOT mutating as traced anyway, and declares its two
+        /// switches at the call site. One verb needs this -- `save` -- and it is the one whose
+        /// written bytes are the whole point, so it is the verb `op` is least optional for.</summary>
+        static SpecFn Traced(SpecFn f) { f.Traced = true; return f; }
+
+        /// <summary>The two switches every write verb answers: `dry_run` and `op`.
+        ///
+        /// Appended AFTER the verb's own parameters, which is where a cross-cutting switch belongs
+        /// on the wire: the manifest's parameter order IS the frame's key order (internal/dev/tzs's
+        /// argmap), so the verb's own arguments stay in the position every reader already expects
+        /// and the two flags sit at the end.
+        ///
+        /// Both are optional and neither changes the verb's own semantics, which is why they can be
+        /// derived instead of declared: nothing about a specific verb decides whether they apply.
+        /// They are, however, *published* like any other parameter -- --help, --manifest and the Go
+        /// client all read them off this array, and a capability that works but is advertised
+        /// nowhere is the defect §11.9 item 10 was about (list_local_strings' unreachable filter).</summary>
+        static Param[] TracedParams(Param[] own) {
+            var ps = new List<Param>(own);
+            ps.Add(new Param {
+                Name = "dry_run", Type = PType.Bool, Required = false,
+                Desc = "只算不做：真跑一遍这个动词，答案原样放进 preview，然后把模型回滚（盘上不写）",
+            });
+            ps.Add(new Param {
+                Name = "op", Type = PType.Str, Required = false,
+                Desc = "这次写的名字（你自己起）；超时后用 list_ops 问它，就知道到底写进去没有",
+            });
+            return ps.ToArray();
         }
 
         /// <summary>Same, but with no session: these answer from the workspace or from the
@@ -233,7 +273,7 @@ namespace TzsCli.Designer
                 OptEnum("container", Struct.CONTAINER_TYPES, "容器模式，默认 None"),
                 P.As(Opt(PType.Path, "out", "给了就把结果存成这个**新**包（绝不写源包）"), Role.PackagePath)),
 
-            // ------------------------------------------------------------ 会话 (5)
+            // ------------------------------------------------------------ 会话 (7)
             N("open", G_SESSION, "加载包 + 注册会话，返回句柄", "handle", E_OPEN,
                 new Param { Name = "path", Type = PType.Path, Required = true, Desc = ".tzs 路径", Role = Role.PackagePath },
                 // `timeout` was read by Session.Open (Fns/Session.cs:220) but declared nowhere, and
@@ -252,10 +292,18 @@ namespace TzsCli.Designer
                 // SPEC.md §11.24 (g) says what the caller must do instead: close, then open.
                 // A clean executor in the 2026-09-24 baseline read `open --help`, saw `force` listed
                 // and §6 saying it is unimplemented, and reported the contradiction.
-            F("save", G_SESSION, "把句柄的模型写回新包（不改会话状态）；回 bytesIn/bytesOut 与写入字节的 sha256",
+            Traced(F("save", G_SESSION, "把句柄的模型写回新包（不改会话状态）；回 bytesIn/bytesOut 与写入字节的 sha256",
                 false, "void", E_STD,
                 P.Handle(),
-                P.As(P.Str("out", true, "输出 .tzs 路径"), Role.PackagePath)),
+                P.As(P.Str("out", true, "输出 .tzs 路径"), Role.PackagePath),
+                // The two switches are declared here BY HAND because `save` is not Mutating and yet
+                // is the verb they matter most for: it is the only one whose whole point is a file
+                // on disk, so "did it land" (op) and "what would it write" (dry_run) are questions
+                // about it, not about the model. Everything else gets them from F()'s Traced().
+                new Param { Name = "dry_run", Type = PType.Bool, Required = false,
+                    Desc = "只算不写：照样拼包并回 sha256，但不落盘（out 上不会出现文件）" },
+                new Param { Name = "op", Type = PType.Str, Required = false,
+                    Desc = "这次写的名字（你自己起）；超时后用 list_ops 问它，就知道到底写进去没有" })),
             // Mutating=false, and the argument for it was sitting in Fns/Session.cs's dead
             // `Descriptors` copy of this table, which said `true` -- the two disagreed and nothing
             // read either. Resolved in favour of the argument: `close` releases a handle, it does
@@ -264,6 +312,20 @@ namespace TzsCli.Designer
             // and that is exactly the fixed-point property the RoundTrip oracle tests).
             F("close", G_SESSION, "释放句柄（发布 TzpFileClose + 摘 EAM；句柄串永不复用）", false, "void", E_STD,
                 P.Handle()),
+            // `reload` is the "close + open" pair as one command, and it lives HERE rather than as
+            // advice in the help because the pair has a cost a caller cannot see: close drops the
+            // validate baseline (Fns/Session.cs), so the reload-then-measure-the-delta workflow
+            // loses its reference point. reload keeps it when the file is byte-identical, and says
+            // which of the three cases it hit.
+            //
+            // Not Mutating, and not merely by analogy: it takes a dirty model and makes it clean,
+            // so it is the opposite of a write. The transport therefore does not offer dry_run on
+            // it (a dry run of "throw away my changes" has no meaning).
+            F("reload", G_SESSION, "丢弃内存改动、从盘重读同一个包（句柄不变；文件没变就保留 validate 基线）",
+                false, "handle", E_STD,
+                P.Handle(),
+                new Param { Name = "timeout", Type = PType.Int, Required = false,
+                            Desc = "重读的看门狗秒数；默认 $TZSCLI_RELOAD_TIMEOUT 或 90" }),
             // No `path` here. It was declared ("只校验这条子树") on validate and verify and implemented
             // as a refusal (Validate.RejectPath): the designer's validators take one whole XElement
             // and have no subtree entry point, so the parameter could never do anything but come back
@@ -273,6 +335,16 @@ namespace TzsCli.Designer
             F("verify", G_SESSION, "对句柄的模型跑设计器自己的校验器，报 delta", false, "delta", E_STD,
                 P.Handle()),
             N("list_open", G_SESSION, "列出打开的句柄；回吐 ProgramKey 让碰撞可见", "list<el>", E_STD),
+            // The other end of the same conversation: list_open says what is open NOW, this says
+            // what has just HAPPENED. It exists for one moment -- after a timeout, when the caller
+            // must decide whether retrying is safe -- and the answer is three-valued on purpose:
+            // an entry (ok/error) means retry is safe, a `pending` entry means do not, and NO entry
+            // means the request never arrived, which is also safe to retry. That trichotomy is the
+            // whole feature (docs/WIKI.md 的幂等 op log); the log itself is per-process, and the
+            // answer says so with daemonStartedAt.
+            N("list_ops", G_SESSION, "写请求的操作日志：超时后问「那次写到底进去没有」", "list<el>", E_STD,
+                Opt(PType.Str, "op", "只列这个名字的写请求（精确匹配；不给就是最近的全部）"),
+                Opt(PType.Int, "limit", "最多回多少条，默认 20（新的在前）")),
 
             // ------------------------------------------------------------ 读 (9)
             F("form_tree", G_READ, "表单结构树（画面结构页签），每节点带 name-path", false, "tree", E_STD,

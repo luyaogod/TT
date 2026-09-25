@@ -8,14 +8,15 @@ using DS = TzsCli.Designer.Session;
 namespace TzsCli.Designer.Fns
 {
     /// <summary>
-    /// The session group: `open` / `save` / `close` / `list_open` (SPEC §11.24 (b), (g), (g-1)).
+    /// The session group: `open` / `save` / `close` / `reload` / `list_open` / `list_ops`
+    /// (SPEC §11.24 (b), (g), (g-1); the last two are items 19 and 20 of §11.9).
     ///
     /// WHAT THIS FILE ALSO OWNS, AND WHY IT IS NOT IN Session.cs
     ///
     /// <para>
-    /// Two pieces of per-handle state have no home: SpecDesignerCommon's <c>Session</c>
-    /// (src/Designer/Session.cs, frozen by W1-B) has no field for either, and it is not this
-    /// agent's file. Both live here instead, keyed by handle -- never by ProgramKey, because
+    /// Three pieces of per-handle state have no home: SpecDesignerCommon's <c>Session</c>
+    /// (src/Designer/Session.cs, frozen by W1-B) has no field for any of them, and it is not this
+    /// agent's file. All live here instead, keyed by handle -- never by ProgramKey, because
     /// four files in the corpus share one ProgramKey (SPEC §11.24 (g)).
     /// </para>
     ///
@@ -31,13 +32,18 @@ namespace TzsCli.Designer.Fns
     /// <item><b>The register-live-writers step, i.e. the Loaded/Mutable split.</b> See
     /// <see cref="Touch"/> below; the reasoning is spelled out there because the contract calls
     /// the placement question out explicitly.</item>
+    ///
+    /// <item><b>The digest of the bytes each handle was loaded from</b> (<c>_loadedHash</c>). Only
+    /// <c>reload</c> reads it, and it is what turns "re-read the file" from a guess about the
+    /// validate baseline into a measurement -- see its own comment, and <see cref="Reload"/>.</item>
     /// </list>
     ///
     /// <para>Everything else is a thin transliteration of the frozen contract: <c>open</c> is
     /// <c>Session.Open</c> (which already owns the duplicate-key refusal and the failed-load
     /// rollback -- re-implementing either here would be a second, drifting copy),
-    /// <c>save</c> is <c>Save.Run</c>, <c>close</c> is <c>Session.Close</c>, and
-    /// <c>list_open</c> is the registry rendered back out.</para>
+    /// <c>save</c> is <c>Save.Run</c>, <c>close</c> is <c>Session.Close</c>,
+    /// <c>list_open</c> is the registry rendered back out, <c>reload</c> is close+open with the
+    /// handle string kept, and <c>list_ops</c> hands out what OpLog recorded.</para>
     /// </summary>
     public static class Session
     {
@@ -54,13 +60,27 @@ namespace TzsCli.Designer.Fns
         /// <summary>Per-handle .4fd writers, created lazily by <see cref="Layout"/>.</summary>
         static readonly Dictionary<string, FormWriter> _layout = new Dictionary<string, FormWriter>(StringComparer.Ordinal);
 
+        /// <summary>Digest of the bytes each handle was LOADED from. `reload` is the only reader, and
+        /// it needs exactly this: it re-reads the same path, so the validate baseline (which is the
+        /// verdict on the file as opened) stays valid iff the file is still those bytes. Without the
+        /// digest the only honest answer would be "drop the baseline every time" -- throwing away a
+        /// validate run the caller already paid for, and hiding the one thing worth knowing, that
+        /// someone rewrote the file under an open handle.
+        ///
+        /// One extra read of the package at open. Measured against what open costs (1.5 s+ for the
+        /// designer's load), a few hundred KB off the page cache is not a rounding error to worry
+        /// about; getting it wrong is.</summary>
+        static readonly Dictionary<string, string> _loadedHash = new Dictionary<string, string>(StringComparer.Ordinal);
+
         static readonly object _gate = new object();
 
         public static void Register(IDictionary<string, Fn> into) {
             into["open"]      = Open;
             into["save"]      = SaveFn;
             into["close"]     = CloseFn;
+            into["reload"]    = Reload;
             into["list_open"] = ListOpen;
+            into["list_ops"]  = ListOps;
             into["field_add"] = FieldAdd;
         }
 
@@ -74,9 +94,12 @@ namespace TzsCli.Designer.Fns
         /// Measured against the two other files that were written in parallel (neither of which
         /// this agent touched):
         ///
-        /// * <b>Rpc.cs does NOT do it.</b> Its dispatch has no branch on <c>SpecFn.Mutating</c>;
-        ///   it resolves the handle and calls the body. So the one-line dispatcher placement the
-        ///   flag exists for (`if (fn.Mutating) Touch(s);`) is available and unused.
+        /// * <b>Rpc.cs does NOT do it.</b> Its dispatch has no branch on <c>SpecFn.Mutating</c> for
+        ///   this purpose; it resolves the handle and calls the body. So the one-line dispatcher
+        ///   placement the flag exists for (`if (fn.Mutating) Touch(s);`) is available and unused.
+        ///   (It does branch on `Mutating` since 2026-09-26, but for `dry_run`'s arming, which is
+        ///   deliberately NOT this: DryRun.Arm reads the undo stack without registering a manager,
+        ///   precisely so that a preview does not dirty a handle -- see Attr.UrmIfAny.)
         /// * <b>Fns/Attr.cs does it itself.</b> Its <c>Urm(Session)</c> helper calls
         ///   <c>s.RegisterUndoRedo()</c> and then fetches the manager out of undoRedoManagerMap,
         ///   and every write path in that file goes through <c>Urm</c>.
@@ -141,6 +164,47 @@ namespace TzsCli.Designer.Fns
             }
         }
 
+        /// <summary>The writer if one has already been built, else null -- and **without** building
+        /// one. Two callers need exactly that: `dry-run` marks the text before a write (building a
+        /// writer just to mark it would cost a file read plus a parse on every mutating call, and
+        /// would make "did this call create the writer?" unanswerable), and `reload` throws the
+        /// handle's writer away.
+        ///
+        /// A writer that does not exist yet is not a missing mark: the mark is "it did not exist",
+        /// and dropping a writer created by the call restores exactly that (see DryRun.Scope).</summary>
+        internal static FormWriter PeekLayout(DS s) {
+            if (s == null) return null;
+            lock (_gate) {
+                FormWriter w;
+                return _layout.TryGetValue(s.Handle, out w) ? w : null;
+            }
+        }
+
+        /// <summary>Forget the handle's writer, so the next use reads the package's bytes again.
+        /// Safe because a writer is a pure function of those bytes on creation (nothing else is
+        /// carried in it -- see FormWriter.Mark), and nothing outside this file holds a reference
+        /// across calls.</summary>
+        internal static void DropLayout(DS s) {
+            if (s == null) return;
+            lock (_gate) _layout.Remove(s.Handle);
+        }
+
+        /// <summary>Install a writer built from GIVEN text, for a session that was rebuilt from a
+        /// snapshot rather than from its own file.
+        ///
+        /// A dry run's rollback reopens the handle on the scratch package (see DryRun.Scope). If the
+        /// writer were then left to be rebuilt from the handle's Path -- the SOURCE file -- a caller
+        /// who had pending layout edits would silently lose them from the text side: the model came
+        /// back from the snapshot (which contains them) while the .4fd text came from the file
+        /// (which does not). Measured 2026-09-26: without this, a plain `save` after a dry run
+        /// differed from the same save before it by exactly the layout attribute the dry run had
+        /// written (`noEntry="false"` -> `"true"`) -- the dry run's own edit, surviving in the
+        /// cached writer while the model had been rolled back.</summary>
+        internal static void InstallLayout(DS s, string fdText) {
+            if (s == null || fdText == null) return;
+            lock (_gate) _layout[s.Handle] = FormWriter.Load(fdText);
+        }
+
         // ------------------------------------------------------------------ fns
 
         /// <summary>
@@ -173,7 +237,14 @@ namespace TzsCli.Designer.Fns
             int timeout = Int(args, "timeout", 0);
             if (timeout <= 0) timeout = DS.TimeoutFromEnv();
             DS s = DS.Open(path, timeout);
-            lock (_gate) _handles[s.Handle] = s;
+            lock (_gate) {
+                _handles[s.Handle] = s;
+                // Loaded-from bytes, for `reload`'s baseline decision. A read failure here must not
+                // fail the open -- the handle works either way, and reload then simply cannot prove
+                // the file is unchanged and says so (it keeps the baseline only on a match).
+                try { _loadedHash[s.Handle] = TzsCli.Designer.Save.Sha256Hex(File.ReadAllBytes(s.Path)); }
+                catch (Exception) { _loadedHash.Remove(s.Handle); }
+            }
             return Info(s);
         }
 
@@ -204,7 +275,9 @@ namespace TzsCli.Designer.Fns
 
             byte[] original = File.ReadAllBytes(s.Path);
             FormWriter w4 = Layout(s);
-            byte[] result = TzsCli.Designer.Save.Run(original, outPath, w4, s);
+            // dry-run 的刹车在这里落下：包照样拼、摘要照样算，只是不落盘（Save.Run 的注释）。
+            bool write = !DryRun.Active;
+            byte[] result = TzsCli.Designer.Save.Run(original, outPath, w4, s, write);
             return new Dictionary<string, object> {
                 { "handle",     s.Handle },
                 { "path",       s.Path },
@@ -222,8 +295,15 @@ namespace TzsCli.Designer.Fns
                 { "key",        KeyString(s.Key) },
                 { "layoutDirty", w4.Dirty },
                 { "state",      State(s) },
-                { "note",       "新包沿用源包的 ProgramKey（回读它要先 close 本句柄）；"
-                                + "sha256 是刚写进 out 的那份字节的摘要，与 sha256sum <out> 比对即可证明落盘" },
+                // False only under dry-run, and it has to be visible: sha256 below then describes
+                // bytes that exist nowhere, and a caller that read `sha256` without `written`
+                // would go looking for the file and find the OLD one (or none).
+                { "written",    write },
+                { "note",       write
+                    ? "新包沿用源包的 ProgramKey（回读它要先 close 本句柄）；"
+                      + "sha256 是刚写进 out 的那份字节的摘要，与 sha256sum <out> 比对即可证明落盘"
+                    : "dry-run：out 没有被写；sha256 是**本该**写进去的那份字节的摘要，"
+                      + "与源包或上一次的产出比对即可回答「这次会不会变」" },
             };
         }
 
@@ -359,8 +439,9 @@ namespace TzsCli.Designer.Fns
             lock (_gate) {
                 foreach (var kv in _handles)
                     if (kv.Value == s || (kv.Value.Key != null && kv.Value.Key.Equals(s.Key))) dead.Add(kv.Key);
-                foreach (string h in dead) { _handles.Remove(h); _layout.Remove(h); }
+                foreach (string h in dead) { _handles.Remove(h); _layout.Remove(h); _loadedHash.Remove(h); }
                 _layout.Remove(s.Handle);
+                _loadedHash.Remove(s.Handle);
             }
             // The cached validate baseline is the pristine state of a *file*. A reopened key is a
             // genuinely new load (§11.24 (g-1) item 3), so the cache must not survive it.
@@ -380,6 +461,7 @@ namespace TzsCli.Designer.Fns
         /// </summary>
         static object ListOpen(DS ignored, JObject args) {
             List<DS> snapshot;
+
             lock (_gate) {
                 snapshot = new List<DS>(_handles.Values);
             }
@@ -387,6 +469,152 @@ namespace TzsCli.Designer.Fns
             var list = new List<object>();
             foreach (DS s in snapshot) list.Add(Info(s));
             return list;
+        }
+
+        /// <summary>Put a freshly opened session under an EXISTING handle string, and burn the one
+        /// the open just minted.
+        ///
+        /// Two callers, one property each: `reload` keeps <c>h1</c> across a re-read, and a
+        /// dry-run's rollback (DryRun.Scope) keeps it across its rebuild. Both need the same three
+        /// lines, and doing it twice by hand is how one of them ends up reusing a handle number
+        /// (the burned one is never handed out again, so `_nextHandle` stays monotonic and the
+        /// "handle strings are never reused" rule of §11.24 (g) holds).
+        ///
+        /// Does NOT touch `_layout` / `_loadedHash` / the validate baseline: what those should do
+        /// differs between the two callers (reload drops the writer and re-decides the baseline
+        /// from the file's digest; a dry run keeps both), so the caller does it.</summary>
+        internal static void ReKey(string minted, DS fresh) {
+            lock (_gate) {
+                _handles.Remove(minted);
+                _handles[fresh.Handle] = fresh;
+            }
+        }
+
+        /// <summary>
+        /// `list_ops` —— 写请求的操作日志（SPEC §11.9 item 20）。
+        ///
+        /// 与 `list_open` 同组同级：一个列出**现在开着什么**，一个列出**刚才发生过什么**。它们是同一次
+        /// 对话的两端 —— 超时之后调用方要问的正是后者。三态见 <see cref="OpLog"/>：pending / ok / error，
+        /// 而"没有这一条"本身就是第三个答案（请求从未到达）。
+        ///
+        /// 按 `op`（调用方自己起的名字，精确匹配）与 `limit` 过滤。**不**按 handle 过滤：`handle` 是
+        /// 这条命令面上的**寻址键**（`--form` 就是落在它上面的），把它同时当成一个普通过滤器，会让
+        /// `--form aapp320` 这种写法看起来能用却永远匹配不上（日志里存的是 "h1"）。要看是哪张表单，
+        /// 每条记录自带 `program`。
+        /// </summary>
+        static object ListOps(DS ignored, JObject args) {
+            return OpLog.List(Str(args, "op"), Int(args, "limit", 20));
+        }
+
+        // ------------------------------------------------------------------ reload
+
+        /// <summary>
+        /// `reload` —— 丢弃内存里的改动，从盘上重读**同一个包**，句柄不变。
+        ///
+        /// 从前这件事只有一条路：`close` + `open`。那条路的代价写在 §11.24 (g-1) item 3 里 ——
+        /// close 会 `Validate.Forget`，于是重新打开之后 validate 基线没了，"这一轮改下来新增了什么"
+        /// 这个问题得从头再问一遍（一次 validate 在 670 元素的表单上是 10.4 s）。而 reload 的语义是
+        /// **同一个文件、同一份字节**的重读，基线在文件没变时依然成立 —— 所以它保基线，并且把
+        /// "文件变没变"这件事**量出来**（打开时记的摘要 vs 现在的摘要），不是假设。
+        ///
+        /// 为什么"文件被谁改过"值得单独报：句柄是按**打开那一刻**的字节建的模型。外部工具（另一个
+        /// tt、设计器本身、一次 save 到同一个路径）在两次调用之间改了这个文件时，调用方手里的一切
+        /// （基线的增量、diff 的对照）都在拿两个不同的文档作比较 —— 而这从前是**完全看不见**的。
+        ///
+        /// NOT Mutating: 它不脏化模型，它**清洁**模型（状态回到 Loaded），与 save / close 同一档。
+        ///
+        /// 三步，且第二步之后句柄有风险：① 先把要丢的东西量出来、把盘上的字节读了（读失败就地拒绝，
+        /// 句柄原样）；② close + open；③ 把新会话挂回**旧的句柄串**上。②③ 之间失败（盘上那个包被
+        /// 换成了坏字节），句柄就真的没了 —— 那时如实说句柄已关，并给原样的失败原因，不假装它还开着。
+        /// </summary>
+        static object Reload(DS s0, JObject args) {
+            DS s = Resolve(s0, args);
+            string path = s.Path, handle = s.Handle;
+
+            // ① 量出要丢的东西。撤销栈高度用 UrmIfAny 取 —— 不能走 Urm：那会把一个从没写过的句柄
+            //    推成 Mutable（§11.24 (b)，不可逆），而"看一眼还剩几步撤销"不该有副作用。
+            object urm = Attr.UrmIfAny(s);
+            int pending = urm == null ? 0 : Attr.UndoCount(urm);
+            FormWriter w = PeekLayout(s);
+            bool layoutDirty = w != null && w.Dirty;
+            bool hadBaseline = Validate.HasBaseline(handle);
+
+            byte[] disk;
+            try { disk = File.ReadAllBytes(path); }
+            catch (Exception ex) {
+                throw new DetailedError("not_found",
+                    "重读失败，句柄原样（什么都没动）: " + path + " — " + DryRun.Msg(ex),
+                    new JObject { { "path", path }, { "handle", handle }, { "reason", "unreadable" } });
+            }
+            string hash = TzsCli.Designer.Save.Sha256Hex(disk);
+            string was;
+            bool known = _loadedHash.TryGetValue(handle, out was);
+            bool same = known && was == hash;
+
+            int timeout = Int(args, "timeout", 0);
+            if (timeout <= 0) timeout = DS.TimeoutFromEnv();
+
+            s.Close();
+            DS fresh;
+            try {
+                fresh = DS.Open(path, timeout);
+            } catch (Exception ex) {
+                lock (_gate) { _handles.Remove(handle); _layout.Remove(handle); _loadedHash.Remove(handle); }
+                Validate.Forget(handle);
+                throw new DetailedError("E_NO_HANDLE",
+                    "重读失败，句柄 " + handle + " 已经关闭（模型数据已随旧会话释放，重新 open 即可）: " + DryRun.Msg(ex),
+                    new JObject { { "handle", handle }, { "closed", true }, { "path", path } });
+            }
+
+            // ③ 新会话挂回旧句柄串。新铸的那个号**作废不用**（句柄串永不复用，§11.24 (g)），
+            //    所以 `_nextHandle` 仍然单调，调用方手里的 h1 也仍然是同一个 h1。
+            string minted = fresh.Handle;
+            fresh.Handle = handle;
+            ReKey(minted, fresh);
+            // 三态由两个事实决定：有没有基线、字节是不是原来那份。
+            // `Validate.Forget` 刻意放在锁外面：它是另一个模块的锁，握着这把去拿那把没有好处。
+            string baseline;
+            bool dropBaseline = false;
+            lock (_gate) {
+                _layout.Remove(handle);                 // 旧 writer 带着旧改动，必须走
+                if (!hadBaseline) baseline = "none";
+                else if (same) baseline = "kept";
+                else { baseline = "dropped"; dropBaseline = true; }
+                if (!same) _loadedHash[handle] = hash;  // 下次 reload 比的是这一份
+            }
+            if (dropBaseline) Validate.Forget(handle);
+
+            var discarded = new JObject();
+            discarded["undoCommands"] = pending;
+            discarded["layoutDirty"] = layoutDirty;
+
+            var o = new JObject();
+            o["handle"] = handle;
+            o["path"] = path;
+            o["program"] = fresh.Program;
+            o["key"] = KeyString(fresh.Key);
+            o["state"] = State(fresh);
+            o["mutated"] = fresh.Mutable;
+            o["loadMs"] = Math.Round(fresh.LoadMs, 1);
+            o["discarded"] = discarded;
+            // 三态，不是布尔：null 是"无法证明"（打开那次算摘要失败），它有自己的一句实话。
+            o["fileChanged"] = known ? (JToken)new JValue(!same) : (JToken)JValue.CreateNull();
+            o["baseline"] = baseline;
+            o["note"] = ReloadNote(pending, layoutDirty, known, same, baseline);
+            return o;
+        }
+
+        static string ReloadNote(int pending, bool layoutDirty, bool known, bool same, string baseline) {
+            string s = "已从盘上重读（句柄不变）；内存里的改动丢掉了：撤销栈 " + pending + " 步"
+                     + (layoutDirty ? "、布局有改动" : "、布局无改动");
+            if (known && !same)
+                s += "。⚠ 盘上这个包在打开之后被改过（摘要与打开时不同）—— 你之前的判断是基于旧字节的";
+            if (!known)
+                s += "。读不出打开时的摘要，无法证明盘上字节没变（基线按保守做法丢弃）";
+            if (baseline == "kept") s += "。validate 基线保留：文件字节与打开时逐字节相同";
+            else if (baseline == "dropped") s += "。validate 基线已丢弃：它测的是另一份字节";
+            else if (baseline == "none") s += "。这个句柄还没跑过 validate，没有基线可谈";
+            return s + "。";
         }
 
         // ------------------------------------------------------------------ field_add（任务级动词）
@@ -445,6 +673,12 @@ namespace TzsCli.Designer.Fns
                 }
                 if (s == null) throw TzsError.NotFound("会话", file ?? handle);
             }
+
+            // The dispatcher could not arm the dry run for us: this verb resolves its own session,
+            // so at dispatch time there was no handle to mark. Whoever has the session arms it
+            // (DryRun.Arm), and this is the moment we have one -- before PickContainer and before
+            // AddFieldFn, i.e. before anything is written.
+            DryRun.Arm(s);
 
             string container = Str(a, "into");
             if (string.IsNullOrEmpty(container)) container = PickContainer(s);
