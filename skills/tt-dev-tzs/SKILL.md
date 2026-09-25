@@ -36,6 +36,10 @@ metadata:
 **真实客户目录**，落上去等于拿别人的表单当草稿纸；三层都空时运行类动词直接拒绝启动（退 5）。
 工作区还**圈定了你能碰哪些包**：包的目录必须在它之下，`out` 也一样（§4.4）。
 
+**"工作区在哪"从哪问**（`out` 必须是绝对路径，所以这条迟早要用）：`tt dev tzs doctor` 的输出里
+就有当前工作区的**绝对路径**那一行；`list_packages` 的返回里也有一个 `workspace` 字段。
+（两处都实测过。文档从前只说"工作区配在 config 里"，没说在命令行里怎么看它。）
+
 **包就在工作区里，而"程序名"不是文件名**：`aapt300` 的包叫 `aapt300(c).tzs`
 （`(c)` = 客户版、`(s)` = 标准版，一般读写用 `(c)`）。**要问"哪个文件是 aapt300"就用
 `list_packages`**（不需要句柄，与 `list_tables` 同族）：
@@ -49,6 +53,11 @@ tt dev tzs list_packages --args '{"query":"aapt300"}' --json
 `query` 是**文件名子串**，`limit` 默认 200。里面的 `program` 是**从文件名推的**
 （`<程序名>(c).tzs` 那条约定），拿来挑文件用；**权威答案永远是 `open`**（它回的 `program`
 是设计器自己算的）。手上有程序名时，照约定直接拼 `<工作区>/<程序名>(c).tzs` 也一样快。
+
+> ⚠️ **你 `save` 出来的包会被标错 `program`**（实测）：`out` 叫 `_ai_e2.tzs` 时，
+> `list_packages` 推出来的 `program` 就是 `"_ai_e2"`，而那包里真正的程序是 `aapt300`
+> （`save` 出的新包**沿用源包**的 program，§2）。这不是 bug —— 它只按文件名推 ——
+> 但意味着**别拿 `list_packages` 去找自己刚存的中间包**；按文件名找它就行。
 
 > ⚠️ **别裸 `ls <工作区>`。** 一个真实工作区里几十上百个文件（`.tzs`/`.tzc`/`.bak` 混着），
 > 实测一次回 **29.9 KB** —— 那是纯噪音，而 §4.7 那条"先过滤"的规矩正是对同一件事立的
@@ -105,9 +114,12 @@ tt dev tzs field_add --args '{"file":"D:/ws/x.tzs","table":"pmdl_t","columns":["
 **它返回什么**（刻意瘦，约 1.4 KB）：`form` / `key` / `handle` / `opened`（这次是不是它开的）/
 `container` / `added`（**对象**：`{tag,name,path,container,table,columns,specNodeType,promoted,bound,added[]}`）/
 `validate`（`newErrorCount`/`newWarningCount` + 明细）/
-`baselineCached` / `saved`（`out`、`bytesIn`/`bytesOut`、`sha256`、`key` —— 与 `save` 的返回同一个
-形状，见下）。**不回表单全量，也不回校验的 baseline/after 全表** ——
-要看全量就单独调 `validate`。
+`baselineCached` / `saved`（与 `save` 的返回同一个形状，见下）。**不回表单全量，也不回校验的
+baseline/after 全表** —— 要看全量就单独调 `validate`。
+
+> ⚠️ **`saved` 里有两条路径，别拿错**：`saved.path` 是**源包**（它是那次 `save` 的输入），
+> `saved.out` 才是**这次写出来的新包**。要比 sha256、要 `open` 回读，用的都是 `saved.out`
+> —— 拿 `path` 去比会变成"拿源包跟自己比"，看起来还挺像对了。
 
 > ⚠️ **`added` 里有两个 `container`，含义不同**（实测）：
 > 顶层的 `added.container` 是**容器模式字符串**（`"None"`/`"Table"`…，与那个**参数** `container` 同义），
@@ -120,10 +132,12 @@ tt dev tzs field_add --args '{"file":"D:/ws/x.tzs","table":"pmdl_t","columns":["
 > 外层那个 `columns` 是**你请求的那份列清单**，里层每个节点上的 `column` 才是**它自己绑到哪一列**。
 > （要更全的绑定信息 —— 比如 `fieldType` —— 仍然回读：`find_component` 会给。）
 
-> ⚠️ **`field_add` 的 `validate.newErrorCount: 0` 只有在 `baselineCached:true` 时才算数。**
-> 它头一次碰这个会话时，那次校验**就是建基线的那次**（§5），增量按构造是空 —— 那时候
-> `baselineCached` 是 `false`，那个 0 什么都没证明。判断"改对了"用回读（见下），
-> 不是用这个计数。
+> **`field_add` 的 `validate` 增量是有效的**（与手工链不同）：它内部**先建基线、再加字段、再跑一次**
+> （`Fns/Session.cs`：`Validate.Run` 在 `AddFieldFn` 之前），所以 `newErrorCount`/`newWarningCount`
+> 回的就是**这次加字段引入的**新问题。`baselineCached` 只告诉你"会话里本来就有基线吗"：
+> `true` = 基线是**你的**（或上一轮留下的），`false` = 基线是它刚建的 —— 两种情况下增量都算数。
+> （2026-09-25 更正：上一版文档写的是"`false` 时那个 0 什么都没证明"，那是把 `field_add` 与手工链
+> 搞混了 —— 手工链的**首调**才是"建基线那次"。判"改对了"仍然用回读，但**别忽略这个计数**。）
 
 **"落了盘没有"和"盘上内容对不对"是两个问题，各有便宜的问法。**
 
@@ -160,7 +174,7 @@ tt dev tzs field_add --args '{"file":"D:/ws/x.tzs","table":"pmdl_t","columns":["
 
 ```powershell
 tt dev tzs doctor                                        # 先自检：引擎/设计器目录/工作区/管道名
-tt dev tzs <动词> --help                                 # 参数表 + 一条能直接粘的示例
+tt dev tzs <动词> --help                                 # 参数表 + 一条**带占位符的**示例（<包路径>/<path> 要你自己换）
 
 # 正解顺序（全程 --form 寻址，不搬运句柄）：
 #   open → 读 → validate(建基线) → 改 → validate(增量) → save → 落盘证明
@@ -176,10 +190,11 @@ tt dev tzs <动词> --help                                 # 参数表 + 一条�
 tt dev tzs open           --args '{"path":"D:/ws/aapt300(c).tzs"}' --json   # → {"program":"aapt300",…}
 tt dev tzs form_tree      --form aapt300 --args '{"depth":3}' --json            # 结构树，每节点带 name-path
 tt dev tzs find_component --form aapt300 --args '{"query":"worksheet"}' --json  # 控件代号 → name-path
-tt dev tzs get_component  --form aapt300 --args '{"path":"managedform/aapt300/HBoxT1/worksheet"}' --json
+tt dev tzs get_component  --form aapt300 --args '{"query":"worksheet"}' --json   # 代号直取，省掉一次 find_component
+#   （重名时它退 2 并列出候选让你改用 path —— 不会替你挑；找不到退 2 E_NOT_FOUND）
 tt dev tzs describe_kind  --form aapt300 --args '{"kind":"field"}' --json       # 这类节点**运行时**能写哪些属性
 tt dev tzs describe_kind  --form aapt300 --args '{"kind":"layout"}' --json      # 布局侧：名字 + 类型 + 取值集（约 9 KB）
-tt dev tzs validate       --form aapt300 --json                                 # ① 建基线（慢，实测 3–5 秒）
+tt dev tzs validate       --form aapt300 --json                                 # ① 建基线（大包慢：aapt300 实测 3–5 秒；aapp320 那种 0.6 秒）
 tt dev tzs set_spec_attr  --form aapt300 --args '{"path":"<path>","kind":"field","attr":"can_edit","value":"N"}' --json
 tt dev tzs set_spec_attrs --form aapt300 --args '{"path":"<path>","kind":"field","attrs":{"can_edit":"Y","can_query":"N"}}' --json
 # 布局侧少一个 kind（规格节点才分 kind，布局元素不分 —— §7 有对照表）：
@@ -197,6 +212,10 @@ tt dev tzs open           --args '{"path":"D:/ws/_ai.tzs"}' --json              
 tt dev tzs get_component  --form aapt300 --args '{"path":"<path>"}' --json       # 回读它内容
 tt dev tzs stop                                          # 停本工作区的常驻引擎（内建命令，不是引擎动词）
 ```
+
+> **规格写入（`set_spec_attr` 那类）不算"纯布局改动"**：设计器的 transform 会把它映射到布局
+> 属性（`can_edit` → `noEntry`），所以它**有**布局侧副作用 —— 按上面的正解顺序建基线再改，
+> 别省那次 validate。（实测过一次：`set_spec_attr` 的返回里 `layoutDelta` 带着它牵动的布局变化。）
 
 > ⚠️ **validate 的增量只对"改动之后的那次"成立**，而一个会话上第一次调用永远是建基线那次（§5）。
 > 所以上面那个 ① 不能省：省掉它，改动后那次就是首调，`newErrors` 按构造是空 —— 那不是"没改坏"，
@@ -247,12 +266,20 @@ tt dev tzs stop                                          # 停本工作区的常
 **两个返回形状不一样，别按一个猜**：`get_component` 的 `spec` 是**按 kind 分层的**
 （`spec.field.attrs.can_edit`），而 `layout` 是**扁平的**（`layout.noEntry`，没有 `.attrs`）。
 
-**两个写动词的返回**（实测，SKILL 这里从前一个字段都没写）：
+**两个写动词的返回：形状按分支不同**（实测两个分支都跑过 —— 上一版这里列的是两个分支的并集，
+还漏了 `applied`，照它解析会在写入成功时去找 `noop`）：
 
 ```jsonc
+// 真的写了（成功帧，退出码 0）
 set_spec_attr   // {"path","kind","attr","old","value","specStatus","layoutDelta"}
-set_layout_attr // {"path","attr","old","value","written","changed","noop","code","note","layoutDelta"}
+set_layout_attr // {"path","attr","old","value","written","applied":true,"changed":true,"layoutDelta"}
+// 值本来就一样（也是成功帧，退出码 0）
+set_spec_attr   // 同上去掉 specStatus 之外，另加 "noop":true,"code":"E_NO_OP","note"
+set_layout_attr // 同上，但 "changed":false 且**没有** applied，另有 "noop":true,"code":"E_NO_OP","note"
 ```
+
+**判"这次写落地了没有"看 `applied`**（写入分支才有）；**判"是不是走了 no-op"看 `noop`**。
+两者互斥，各带一个 —— 与 §8 那张三结局表同源。
 
 两处容易读错的：
 
@@ -369,8 +396,8 @@ tt dev tzs set_spec_attr --form aapp320 --args '{"path":"…","kind":"field","at
 
 ### 4.6 慢动词会有动静
 
-超过约 0.4 秒先在 **stderr** 打一行 `… 正在执行 <动词>；还在等引擎，慢是正常的` ——
-那句里的动词名是**当前动词**（跑 `field_add` 就是"正在执行 field_add"），不是写死 `validate`。
+超过约 0.4 秒先在 **stderr** 打一行 `… 正在执行 <动词>（<程序名>）；还在等引擎，慢是正常的` ——
+动词名与程序名都是**插值**的（实测：`… 正在执行 validate（aapt300）；…`），不是写死 `validate`。
 那是提示不是错误；**数据仍只在 stdout**。
 
 ### 4.7 先过滤：清单类动词不给过滤会回一大块
@@ -408,11 +435,11 @@ tt dev tzs set_spec_attr --form aapp320 --args '{"path":"…","kind":"field","at
 - **句柄永不复用**：`close` 后再 `open` 同一个包拿到的是新号。旧号去调 → `E_NOT_FOUND`（退 2，安全失败）。
   **被拒的调用也吃号**（实测：`open`→`h2`，再 `open` 被 `E_KEY_IN_USE` 拒，第三次 `open`→`h4` ——
   中间那个号给了被拒的那次）。所以**别拿句柄号去数会话数**。
-- **同一个程序已经开着又 `open` → `E_KEY_IN_USE`（退 4）**：先 `close` 占用者。
-  ⚠️ **但先问一句"我要的到底是什么"**：被拒本身就说明**它已经开着** —— 如果你的目标就是
-  "让这张表单开着"，那么**什么都不用做**（`close` → `open` 是白关一次再开）。只有当你需要
-  **一个新的会话**时才走那两步：源包在盘上变了、你要读的是**另一个**包（新包与源包同
-  program 名，见 §2）、或者你要一个干净的句柄去读回。
+  （想自己复核：记下 `open` 回的号 → 故意撞一次 → 再 `open` 另一个包，看新号比"上一个 + 1"多跳一格。）
+- **同一个程序已经开着又 `open` → `E_KEY_IN_USE`（退 4）**。**先问一句"我要的到底是什么"**：
+  被拒本身就说明**它已经开着** —— 目标就是"让这张表单开着"的话，**什么都不用做**。
+  `close` → `open` 只在你要一个**新会话**时才有意义：源包在盘上变了、你要读的是**另一个**包
+  （新包与源包同 program 名，见 §2）、或者你要一个干净的句柄去读回。
   调用方**不需要**先 `list_open` 找它是谁 —— 那个错误帧里已经写着占用者的**完整路径**和处方
   （「先 close 它，或换一个文件」），`list_open` 只在你想看全部会话时才有必要。
   （`open` 曾有一个 `force` 参数，**已于 2026-09-25 从参数表删除** —— 它从未实现，而"接管占用者"
@@ -454,7 +481,12 @@ tt dev tzs set_spec_attr --form aapp320 --args '{"path":"…","kind":"field","at
 
 语料（65 个包的 `.tsd`）里这三个属性只出现过 `Y` / `N` / 空串，从没有别的写法。**写别的值引擎现在会拒。**
 
-**「是否可编辑」有两个面，改之前先想清要改哪个**（用户嘴里那句话是含糊的）：
+**「是否可编辑」有两个面，改之前先想清要改哪个**（用户嘴里那句话是含糊的）。
+
+> **判决规则**（用户只说了"是否可编辑"、没说是哪个面时）：**按字面最贴的那个 —— 面板勾选位
+> `can_edit` 为准**（它就是设计器面板上那个框），改它；**只有当你要声称"运行时也关掉"时才连带
+> `noEntry`**。而**改之前先读一眼两边现在各是什么**，已经是"否"的那一面不要写（写了就是一次
+> `E_NO_OP` 成功帧，白花一次调用）。下面 `net108` 就是这种情形。
 
 | 说法 | 落在哪 | 谁读它 |
 |---|---|---|
@@ -464,6 +496,10 @@ tt dev tzs set_spec_attr --form aapp320 --args '{"path":"…","kind":"field","at
 两者**会不一致**，而且这不是理论问题：语料里就有（`aapt300` 的 `net108`：`can_edit="Y"` 而
 `noEntry="true"`）。它们是**两个属性、两套动词**（`set_spec_attr` 改前者、`set_layout_attr` 改后者），
 面板勾选只驱动后者，所以"把可编辑关掉"要看你想要的是**面板显示**还是**运行时行为**。
+
+**这种不一致不是特例**：`field_add` **新建**的字段默认就会这样 —— 实测新字段的
+`can_edit:"N"` 而布局 `noEntry:"false"`（面板说"不可编辑"、运行时说"可编辑"）。所以"加一个
+可编辑字段"要做两件事：加字段 + 把规格那一侧改对（§3）。
 
 **做法：先用 `get_component` 读一眼两边现在各是什么，再只改需要改的那一边。**
 拿 `net108` 说：它的 `noEntry` **本来就已经是 `"true"`**（运行时已经只读），所以"要两边都关"
@@ -529,6 +565,10 @@ manifest 拉不到、守护进程起不来也各**合成**一帧，形状一样�
 例外是**本地失败** —— 它们只写 stderr、stdout 为空：用法屏（没有动词 / 动词名打错）、
 参数形状错（`--args` 与 `--args-file` 同时给、多了位置参数）、
 环境没就绪（引擎 exe 找不到、工作区没配、`--args-file` 读不到）。
+
+⚠️ **"未知参数"不在这一列**（如给 `open` 传 `force`）：它要**先拉 manifest 才知道名字不对**，
+所以走的是"给一帧"那条路 —— 实测 stdout 上有一整帧（`code:E_BAD_REQUEST`、退 2），stderr 空。
+判据仍然成立："有帧"不等于"发出去过"（那是 §7 表里"参数打错的报错也要引擎在"的同一件事）。
 
 ⚠️ **`<动词> --help` 不在这一列**：它是**成功**（退 0），参数表打在 **stdout** 上
 （实测 `open --help`：退 0 / stdout 449 字节 / stderr 空）。它和上面那几种"本地失败"不像，
@@ -632,7 +672,7 @@ tt dev tzs export "D:/ws/aapt300(c).tzs" -o D:/out --force    # 目标非空时�
 - ❌ 把 `export` 的产物当工作区去 `apply` / 手工改完塞回包 → 它只是只读参考。
 - ❌ 在没有工作区的地方跑运行类动词 → 引擎缺省工作区是真实客户目录，拒绝启动是保护你的（别绕过）。
 - ❌ 请求超时后重发 → 不重试；重新 `open` 或直接看结果。
-- ❌ 看到 stderr 的 `… 正在执行 <动词>；还在等引擎，慢是正常的` 就以为出错 → 那是提示行
+- ❌ 看到 stderr 的 `… 正在执行 <动词>（<程序名>）；还在等引擎，慢是正常的` 就以为出错 → 那是提示行
   （不是错误：数据仍只在 stdout，退出码也没变）。
 
 ## 12. 背景与细节
