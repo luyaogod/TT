@@ -33,6 +33,18 @@ package tzs
 //  3. **validate 要分层。** 它 1.3 s（114 元素）到 10.4 s（670 元素）一次，而每个包要调
 //     **两次**（第一次就是 baseline，见 validate 的注释）。67 包 × 2 × 10 s ≈ 22 分钟光是
 //     校验，所以默认只跑「每轴一个」的样本，全量留给 TTZS_VALIDATE=all。
+//
+// 两条**跑的时候**才知道的纪律（2026-09-26 加的，两条都踩过）：
+//
+//  4. **整轮在跑的时候不要重建引擎。** `engine/build.sh` 会覆盖 `out/*.exe`，而这一套
+//     每一包都要 spawn `RoundTrip.exe`（`runRoundTrip`）—— 撞上重写的那一瞬间，得到的是
+//     `fork/exec … RoundTrip.exe: The system cannot find the file specified`，表现为
+//     两三条**假红**，而报告上看不出是并发构建造成的。
+//  5. **用一份工作区副本跑**（`TTZS_CORPUS` 指到 `%TEMP%\ttws` 那样的拷贝）。缺省根是
+//     `D:\t100_wrok_dir`，那是**真实客户目录**：这一套会在源包旁边写 `_tdev_*` 临时包
+//     （跑完就删，但跑在客户目录上）。副本还顺带证明另一件事 —— 真语料一个字节都没被动过
+//     （`TestCorpusPin` 对副本会报"数量对不上"，它是对着 pin 里那 67 条真路径算的；单跑
+//     它、不设 `TTZS_CORPUS`，就能看到真语料的现状）。
 
 import (
 	"archive/zip"
