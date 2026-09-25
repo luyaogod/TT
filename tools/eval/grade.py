@@ -102,11 +102,39 @@ def error_of(frame):
     return (frame or {}).get("error") or {}
 
 
+def reset_sessions(d, tid):
+    """把这个工作区里开着的会话全关掉（理由见 grade_task 里那段注释）。"""
+    frame = call(d, "list_open")
+    rows = result_of(frame)
+    if not isinstance(rows, list):
+        return
+    closed = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        # `--form` 认程序名或 ProgramKey（"aapt300|Form"）—— 两者都给得出去。
+        who = row.get("key") or row.get("program")
+        if not who:
+            continue
+        if (call(d, "close", None, form=who) or {}).get("ok"):
+            closed.append(who)
+    if closed:
+        print("   （清掉执行者留下的会话：%s）" % ", ".join(closed))
+
+
 def grade_task(run, tid, spec, device, checks):
     d = os.path.join(run, tid)
     ws = os.path.join(d, "ws")
     print("\n== %s ==" % tid)
     print("   判据：%s" % spec["why"])
+
+    # 先把这个工作区里**残留的会话**关掉，再回读。
+    #
+    # 为什么（2026-09-25 第三轮实测）：执行者做完任务后常常留着会话开着（回读新包之后没 close），
+    # 而 `open` 的 key 是 `程序名|Form`、**不含路径** —— 于是判据想打开它产出的那个包时会撞
+    # `E_KEY_IN_USE`，看起来像"产物打不开"。判据要读的是**文件**，会话是执行者留下的现场，
+    # 该先清掉再读。关会话不写任何文件，所以不影响任何一条判据。
+    reset_sessions(d, tid)
 
     # ---- 装置完整性
     now = inventory(ws)

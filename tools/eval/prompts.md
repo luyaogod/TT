@@ -19,13 +19,17 @@ SKILL、同一份 tt.exe 对应。
 
 环境（都给你绝对路径，照抄就行）：
 
-    可执行文件：`<装置根>\<TASK>\tt.exe`
-    环境变量：  `TT_CONFIG=<装置根>\<TASK>\config.json`
+    可执行文件：`<装置根>/<TASK>/tt.exe`
+    环境变量：  `TT_CONFIG=<装置根>/<TASK>/config.json`
     工作区：    已经写在那份 config.json 里了，**不要**再传 `--workspace`
 
 调用形状：
 
-    TT_CONFIG=<装置根>\<TASK>\config.json <装置根>\<TASK>\tt.exe dev tzs <动词> --args '<JSON>' --json
+    TT_CONFIG=<装置根>/<TASK>/config.json <装置根>/<TASK>/tt.exe dev tzs <动词> --args '<JSON>' --json
+
+**路径一律写正斜杠**（上面这几行就是）：反斜杠在 Git Bash 下会被吃掉一层，而症状是"配置根本没
+被读到 → 工作区未配置"，看起来像环境坏了。2026-09-25 的第三轮里两个执行者都指出**提示词自己
+给的是反斜杠前缀** —— 是 SKILL 那条警告救了他们。那是这个文件的错，已改正。
 
 （先 `export TT_CONFIG=…` 一次也行，那样后面只写 exe 的全路径。PATH 上没有 `tt`。）
 
