@@ -255,8 +255,11 @@ func TestHumanReplyRendersDetailOnError(t *testing.T) {
 
 // TestHumanReplyNoOpSaysSo —— W3：E_NO_OP 是"什么也没改"，文案要说人话。
 //
-// **退出码不动**：契约表把它的 kind 归成 internal → 1，这是刻意的（见 client.go:66-75）。
-// 真正该改的是引擎（SPEC §11.24(a) 把这两条定义成成功帧），那属于引擎批次。
+// **退出码不动**：契约表把它的 kind 归成 internal → 1（见 client.go 的 CodeNoOp 注释）。
+// 这条现在守的是**兜底**：2026-09-25 起引擎没有路径再把成功码发成错误帧了 —— 最后一处
+// （set_local_string / set_spec_description 的 NoOp 分支）已按 SPEC §11.24(a) 改成成功帧，
+// 走下面 TestHumanReplySuccessPathUnchanged 那条路。留着是因为旧引擎仍可能在跑
+// （守护进程按 MVID 命名）。
 func TestHumanReplyNoOpSaysSo(t *testing.T) {
 	// ① 契约层面：帧 → 退出码仍然是 1（这条判据没被文案改动带偏）
 	noop := frameError("E_NO_OP", "internal", "set_local_string: 内容已经是目标值", "")

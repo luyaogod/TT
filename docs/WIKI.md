@@ -1362,17 +1362,20 @@ properties="…"/>`）本来就是**属性名**白名单的来源——`Componen
 | 码 | 含义 |
 |---|---|
 | 0 | 帧 `ok:true` |
-| 1 | 引擎内部错（`kind=internal`，含 `E_NOT_IMPLEMENTED`）。**少数情形**：`E_NO_OP` 被 `set_local_string` / `set_spec_description` 发成错误帧时也落这一格 —— 见下 |
+| 1 | 引擎内部错（`kind=internal`，含 `E_NOT_IMPLEMENTED`）。**`E_NO_OP` 不属于这一格** —— 它是成功码，见下 |
 | 2 | 参数/环境不对：本地参数错、未知动词、manifest 拉不到、引擎的 `validation` 与 `not_found` |
 | 4 | **设计器拒绝**（`kind=designer`，含 `E_KEY_IN_USE`） |
 | 5 | 传输或环境失败（含加载超时、没配工作区、`--args-file` 读不到） |
 
-**`E_NO_OP` 退 1 是契约表的结果，不是"出错了"。** 正常情况下它是**成功帧**（`ok:true` +
-`result.code=E_NO_OP`，表示"请求的值与当前值相同"，见 SPEC §11.24(a)）。但
-`set_local_string` / `set_spec_description` 的 NoOp 分支把它发成了**错误帧**，`kind` 落到
-`internal`，于是退出码是 1。这是**引擎侧偏离自己契约**的一处（那两条本该是成功帧），
-排到引擎批次；在那之前 `tt` 侧的做法是**只把文案说清楚**（"什么也没改"），
-判据一个字没动 —— 见 `internal/dev/tzs/client.go:66-75` 与那里的 `IsSuccessCode`。
+**`E_NO_OP` 是成功码，永远不该退 1。** 它出现在**成功帧**里（`ok:true` +
+`result.code=E_NO_OP` + `noop:true` + `changed:false`，表示"请求的值与当前值相同"，
+见 SPEC §11.24(a)）。2026-09-25 之前有**一处**偏离：`set_local_string` /
+`set_spec_description` 的 NoOp 分支抛 `DetailedError`，`kind` 落到 `internal`，于是退 1；
+`set_code_template` 更轻——它本来就回成功帧，却没有 `noop:true` / `code` 这两个标记，
+调用方只转发标记的话看不出"已经是这个值"。三处都已改齐（引擎批次第 7 条），
+`tt` 侧只留一层**兜底**：真收到 `ok:false` + 成功码的帧（只可能来自旧引擎——守护进程按
+MVID 命名，重编前后各有一批在跑），文案说"什么也没改"，**退出码仍按契约表退 1**
+—— 判据一个字没动，见 `internal/dev/tzs/client.go` 的 `CodeNoOp` 与 `IsSuccessCode`。
 
 **默认输出（不加 `--json`）也渲染 `detail`。** 引擎那些为"让调用方自己纠正"而做的
 `detail.legal`（合法值集）/ `detail.hint`（近似值）/ `detail.candidates`（候选，含可直接
@@ -1976,8 +1979,9 @@ TDev 的两点被完整保留：位置无关的参数解析（`-o`/`--json` 可�
 
 剩下的是**必须重建一次引擎**才能做的那批（重建会换 MVID → 管道名变 → 在跑的守护进程
 变孤儿，靠 `tt dev tzs reap --yes` 收，再加一次重打包，所以攒在一起做）。
-**第 1 条 2026-09-24 已发；第 2 / 3 / 4 / 5 / 6 / 8 / 9 条 2026-09-25 已发（各自独立的一次重建、
-独立提交）。只剩第 7 条（`E_NO_OP` 改回成功帧）与第 10 条（`list_local_strings` 的过滤器）。**
+**第 1 条 2026-09-24 已发；第 2 / 3 / 4 / 5 / 6 / 7 / 8 / 9 条 2026-09-25 已发（各自独立的一次重建、
+独立提交）。只剩第 10 条（`list_local_strings` 的过滤器）—— 那一条要定"这个动词该不该有过滤器"，
+是它自己的契约问题，不该顺手做。第 7 条落地时又查出第 11、12 条（见下），都已修。**
 
 1. ✅ **`save` / `field_add` 的 `out` 闸门（已做，2026-09-24，`Fns/Session.cs` 的 `CheckOutPath`）。**
    指到源包会覆盖原始素材（`Save.Run` 结尾就是 `File.WriteAllBytes`），而这条此前**只写在
@@ -2032,17 +2036,30 @@ TDev 的两点被完整保留：位置无关的参数解析（`-o`/`--json` 可�
      的分类表里、写在 SPEC 的码表里，**却没有任何地方抛它们** —— 真实情形一律走 `E_NOT_FOUND`。
      最刺眼的是 `Attr.SpecNode`：那句"先用 get_component…或用 describe_kind…"的消息自己在教
      调用方自纠，却挂着 `designer`（"别重试、转述给用户"）的分类 —— 一句话里自相矛盾。
-     现在三个码都真的发得出来（2026-09-25 实测各见了一次），`E_NO_SPEC_NODE` 也加进 `E_SPEC`
-     （唯一解析规格节点的那一族）。
+     现在三个码都真的发得出来（2026-09-25 实测各见了一次）。`E_NO_SPEC_NODE` 的广告先是写进
+     `E_SPEC` 的，第 12 条把它改成**推导**（写动词 + 收 kind）；那次改写顺手暴露了这条一开始
+     就没写全：另一个也解析规格节点的动词（`set_spec_description`）不在 `E_SPEC` 那一族里，
+     见第 11 条。
    - **本来就不该广告的**：`E_BAD_REQUEST` / `E_UNKNOWN_METHOD`（动词被派发**之前**就拒了）、
      `E_SERVER_DIED`（CLI 自己合成的）—— 那是"这次调用"的事实，不是某个动词的词汇。
    `E_FATAL_LOAD_TIMEOUT` 单列给 `open`（只有它加载包、只有它会被引擎自己的看门狗打断）。
    另外 `E_HANDLE_BUSY` **删掉了**：它没有任何抛出点，引擎里唯一的句柄状态判定是 Closed，
    而那是 `E_NO_HANDLE`。表里写着、永远抛不出来，与上面同一类毛病。
-7. **`E_NO_OP` 按 SPEC §11.24(a) 改回成功帧。** `set_local_string` / `set_spec_description`
-   的 NoOp 分支把"什么也没改"发成了错误帧（`kind=internal` → 退 1），而那份契约明确说这两条
-   是**成功帧**（该出现在 `result` 里）。`tt` 侧现在只把文案说清楚了（§7.6），改回去之后
-   `IsSuccessCode` 就退化成纯防线。
+7. ✅ **`E_NO_OP` 改回成功帧（已做，2026-09-25）—— 一共三处，不是两处。** 契约（SPEC §11.24(a)）
+   说 no-op 是**结局**：`ok:true` + `result.code="E_NO_OP"` + `noop:true` + `changed:false`。
+   偏离的是：
+   - `set_local_string` / `set_spec_description`（`Fns/Semantic.cs` 的 `NoOp()`）**抛**
+     `DetailedError("E_NO_OP")`，`Rpc.Map` 的 default 分支给未知 E_* 码的 kind 是 `internal`
+     —— 而 `internal` 的契约含义是"未预期异常、上报、别重试"，正好是反的。现在两处都返回成功帧，
+     载荷与真写入**同形**（`after` 是从模型读回来的，所以"已经是这个值"是事实不是假设）。
+   - `set_code_template`（`Fns/PageTab.cs`）**本来就**返回成功，却没有 `noop:true` / `code` 两个
+     标记（注释还写着"E_NO_OP 正在按 SPEC 改成成功语义"）—— 调用方只转发标记的话，它和
+     "这个文件懒得描述的一次写入"长得一模一样。现在两个标记都补上了。
+   `tt` 侧**一个字都没改判据**：`IsSuccessCode` 与 `printHumanReply` 那段人话文案留着当**兜底**
+   （旧引擎还在跑 —— 守护进程按 MVID 命名，重编前后各有一批），退出码表也没动。
+   实测：两个动词各"写一次再写同样的值"，第二问都是 `ok:true` + `code=E_NO_OP` + `exit 0` +
+   stdout 恰好一行；`set_code_template` 改 P 再改 F 两问都是真写入（`changed:true`），
+   第三问同值才是 no-op。
 8. ✅ **一条改了，一条核查后决定不改（2026-09-25）。**
    - `set_spec_description` 的参数顺序已对齐（`path` 在 `kind` 之前，与 `set_spec_attr` /
      `set_spec_attrs` 一致）—— 声明顺序就是线上键序，一个动词与它三个兄弟的键序不同，
@@ -2080,6 +2097,39 @@ TDev 的两点被完整保留：位置无关的参数解析（`-o`/`--json` 可�
     或把实现里的读法改成 `Arg(a,"query")`；**两条要一起改，别只改一处**。
     **2026-09-25 发现，未做** —— 那属于这个动词自己的契约问题（它到底该不该有过滤器），
     不该由顺手一起做。
+
+11. ✅ **`set_spec_description` 的四个程序级别名从线上够不到（已修，2026-09-25）—— 验证第 7 条时撞出来的。**
+    函数的文档与实现都写着"`path` 是 `all` / `mi_all` / `db_all` / `di_all` 时 `kind` 被忽略"，
+    函数体也为那四个别名单开了一条分支、失败提示里还写着"或 `path=\"all\"…`" —— 但 manifest 用
+    `P.Kind()` 把 `kind` 声明成**必填**，于是最自然的那次调用 `{"path":"all","content":"…"}`
+    **在本地就被拒了**（`E_BAD_REQUEST`，请求从未上线）：那四个程序级规格节点只活在文档里。
+    改法：这一个参数不再用 `P.Kind()`，改成显式 `req:false` + 一句"path 是那四个时忽略"
+    （`P.Kind()` 的默认值不动 —— 另外三个写动词的 `kind` 本来就必须给）。实测 `path:"all"`
+    现在写得进去（`oldLength 468 → newLength 27`，CDATA 真的换了），元素路径不给 `kind` 由函数体拒、
+    提示点名那两种写法。
+    **同一次验证还查出同一族的一处**：`Semantic.SetSpecDescription` 的"这个元素没有 X 节点"
+    仍走 `Refused("no_spec_node")`（`E_DESIGNER`，退 4），而第 6 条刚把 `Attr.SpecNode` 与
+    `Semantic.SetCited` 的同一情形改成 `E_NO_SPEC_NODE`（`not_found`，退 2）。同一个文件里两处
+    相同情形报两种码，正是第 6 条要消灭的那件事 —— 已改齐。实测：`worksheet` + `kind:"field"`
+    从 `E_DESIGNER`/退 4 变成 `E_NO_SPEC_NODE`/退 2，detail 带 `path`/`kind`/`reason`。
+    （第 6 条那批是怎么漏掉这里的：它是按"动词表里没出现过的码"普查的，而这一处**出现过**那个名字
+    —— 只不过拼在 `detail.reason` 里，没当 `code` 用。"同一个知识写在两处"第六次咬人。）
+
+12. ✅ **八个能答 no-op 的动词从没广告过 `E_NO_OP`（已修，2026-09-25）。** 十二个动词真的会回
+    `noop:true` + `code:"E_NO_OP"`，而 `errors[]` 里写着它的只有四个属性写动词（`E_SPEC` /
+    `E_LAYOUT` 那两族）。另外八个（`set_tree_source` / `rename_component` / `add_action` /
+    `delete_action` / `set_action_types` / `set_local_string` / `set_spec_description` /
+    `set_code_template`）—— 照 `--help` 写分支的调用方**根本不知道有这个码**，而漏掉它的分支
+    正是把"什么也没改"当成失败的那一种。改法：`E_NOOP = Plus(E_STD, "E_NO_OP")`，那八个改用它；
+    `E_SPEC` / `E_LAYOUT` 也改成 `Plus(E_NOOP, …)`，于是"能答 no-op 就必须广告它"成了**构造**，
+    而不是需要记得的事。（`E_SPEC` 里手写的 `E_NO_SPEC_NODE` 一并删了 —— 它现在由
+    `AdvertisedErrors` 按"写动词 + 收 kind"推导，与第 6 条的判据同源。）
+    防线两条：`TestE2EManifestAdvertisesImpliedCodes`（`TTZS_E2E=1`，拿真 manifest 复核四条
+    不变量，其中三条与引擎的推导**互为独立实现**，引擎自己算错这里会红）与
+    `TestImpliedCodeProblemsFiresOnDoctoredManifests`（手造 manifest，把五种毛病各来一次，
+    断言点到那个动词、那个码）。后者的存在理由就是这个仓库的老规矩：**没见过它红的断言不算防线**
+    —— 只跑真引擎的那一版在修好的当天永远是绿的。第四条的名单（`noopVerbs` 里十二个动词，各注了
+    在哪个文件读到的）算不出来，只能人读；加一个能答 no-op 的写动词时来加一行，否则测试会红。
 
 不需要重建引擎的（Go 侧，可单独发）：
 

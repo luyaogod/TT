@@ -89,10 +89,11 @@ func TestExitCodeTable(t *testing.T) {
 		{"kind=designer 的 E_KEY_IN_USE", `{"id":1,"ok":false,"error":{"code":"E_KEY_IN_USE","kind":"designer","message":"x"}}`, 4},
 		{"kind=internal", `{"id":1,"ok":false,"error":{"code":"E_INTERNAL","kind":"internal","message":"x"}}`, 1},
 		{"E_NOT_IMPLEMENTED", `{"id":1,"ok":false,"error":{"code":"E_NOT_IMPLEMENTED","kind":"internal","message":"x"}}`, 1},
-		// set_local_string / set_spec_description 的 NoOp 分支：E_NO_OP 走 kind=internal。
-		// 契约表说的是 1，而**它不是「报 bug」**（见 IsSuccessCode）。
-		{"E_NO_OP（错误帧）", `{"id":1,"ok":false,"error":{"code":"E_NO_OP","kind":"internal","message":"已经是这个内容"}}`, 1},
-		{"E_ATTR_CLAMPED（错误帧）", `{"id":1,"ok":false,"error":{"code":"E_ATTR_CLAMPED","kind":"internal","message":"被吸附"}}`, 1},
+		// E_NO_OP 曾经由 set_local_string / set_spec_description 的 NoOp 分支发出（kind=internal）。
+		// 2026-09-25 起引擎不再有那条路径，但表的这一行不动：这种帧真出现时该退 1，
+		// 而**它不是「报 bug」**（见 IsSuccessCode）。
+		{"E_NO_OP（错误帧，兜底）", `{"id":1,"ok":false,"error":{"code":"E_NO_OP","kind":"internal","message":"已经是这个内容"}}`, 1},
+		{"E_ATTR_CLAMPED（错误帧，兜底）", `{"id":1,"ok":false,"error":{"code":"E_ATTR_CLAMPED","kind":"internal","message":"被吸附"}}`, 1},
 		// code 在 kind 之前判的两行。
 		{"E_FATAL_LOAD_TIMEOUT（kind 是 designer）", `{"id":7,"ok":false,"error":{"code":"E_FATAL_LOAD_TIMEOUT","kind":"designer","message":"超时"}}`, 5},
 		{"帧里出现 E_SERVER_DIED", `{"id":1,"ok":false,"error":{"code":"E_SERVER_DIED","kind":"internal","message":"x"}}`, 5},
@@ -210,6 +211,7 @@ func TestFailureKindHelpers(t *testing.T) {
 		t.Errorf("kind=%s 该退 1", KindInternal)
 	}
 	// E_NO_OP / E_ATTR_CLAMPED 在 ok:false 的帧里是「什么也没改」，不是「坏了」。
+	// 引擎已经不发这种帧了（2026-09-25），这条断言守的是那句文案的判据本身。
 	for _, code := range []string{CodeNoOp, CodeAttrClamped} {
 		e := &WireError{Code: code, Kind: KindInternal, Message: "x"}
 		if !e.IsSuccessCode() {

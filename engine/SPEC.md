@@ -1494,6 +1494,14 @@ close → 释放
 
 `slow:true` 标记耗时函数（`validate`：114 元素 1.6 s、670 元素 **10.4 s**），提醒不要每步都调。
 
+`errors[]` **是算出来的，不是手写名单**：除了每个动词自己声明的那几个，`AdvertisedErrors` 还会按
+它的参数与性质补上蕴含的码 —— 收 `handle` 补 `E_NO_HANDLE`、收 name-path（`role:"component-path"`）
+补 `E_PATH_NOT_FOUND`、**写动词**收 `kind` 补 `E_NO_SPEC_NODE`。理由：这三条本来就已经写在声明里，
+算出来的忘不掉；手写名单忘过 —— 2026-09-25 实测：十二个能答"什么都没改"的动词里，八个的
+`errors[]` 从没出现过 `E_NO_OP`，另一个能答 `E_NO_SPEC_NODE` 的动词也不在表里，于是**照 `--help`
+写分支的调用方漏掉那些码**。两个成功码（`E_NO_OP` 与 `E_ATTR_CLAMPED`）同样要出现在 `errors[]` 里：
+它们虽然走 `result` 而不是 `error`，却是调用方必须能与 `applied` 区分开的那个结局（见 (a) 的表）。
+
 #### (d) 写入的两条铁律
 
 1. **布局属性一律走 `XmlElement` 索引器**（`el[attr] = value`），**绝不**直接

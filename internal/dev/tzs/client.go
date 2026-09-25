@@ -76,16 +76,32 @@ const (
 	CodeInternal   = "E_INTERNAL"
 )
 
-// E_NO_OP / E_ATTR_CLAMPED 是**成功码**：正常情况下它们出现在 `result.code` 里
-// （ok:true），表示「你要的状态已经是这样了」/「写进去了但被栅格吸附过」。
+// 三个"自纠"码：它们的意思是「换一个输入就能过」，而且**由声明推导**（收 handle / 收
+// 组件路径 / 写动词收 kind）—— 引擎侧是 Manifest.AdvertisedErrors，Go 侧是
+// tzs_verb_e2e_test.go 的 TestE2EManifestAdvertisesImpliedCodes（外部复核）。
 //
-// 有一处不一致（实测，不是猜测）：`set_local_string` / `set_spec_description` 在
-// 内容已经是目标值时会把 E_NO_OP 当**错误帧**抛出来（Fns/Semantic.cs 的 NoOp()），
-// 而 Rpc.Map 的 default 分支给它的 kind 是 `internal`。于是命令层会看到
-// `ok:false, kind:internal, code:E_NO_OP`。
+// 为什么在这边也给它们名字：`--help` 的 errors[] 与错误帧里的 code 是同一套词汇，
+// 测试和命令层照着名字引用，比照着字符串引用少一次拼错的机会。
+const (
+	CodeNoHandle     = "E_NO_HANDLE"
+	CodePathNotFound = "E_PATH_NOT_FOUND"
+	CodeNoSpecNode   = "E_NO_SPEC_NODE"
+)
+
+// E_NO_OP / E_ATTR_CLAMPED 是**成功码**：它们出现在 `result.code` 里（ok:true），
+// 表示「你要的状态已经是这样了」/「写进去了但被栅格吸附过」。SPEC §11.24 (a) 把它们
+// 定义成**结局**而不是失败，三种结局各带恰好一个正向标记（applied / clamped / noop）。
 //
-// 结论写在 IsSuccessCode 上：**kind:internal + E_NO_OP 不是「报 bug、别重试」**，
-// 它是「什么也没改」。退出码仍按契约表走（kind=internal → 1），但文案该说人话。
+// 2026-09-25 起引擎里**没有任何路径**再把它当错误帧发：最后一处偏离是
+// `set_local_string` / `set_spec_description` 的 NoOp 分支（Fns/Semantic.cs 的 NoOp()），
+// 它抛 DetailedError，而 Rpc.Map 的 default 分支给未知 E_* 码的 kind 是 `internal`
+// —— 于是调用方看到的 `kind:internal` 意思是「未预期异常，上报，别重试」，正好是反的。
+// 那条路已改成和 Attr.cs / Action.cs 一样的成功帧（`set_code_template` 也补上了它一直
+// 缺的 `noop:true` + `code`）。
+//
+// 下面两个常量与 IsSuccessCode 因此变成**兜底**：判据留着，是因为旧引擎仍可能在跑
+// （守护进程按 MVID 命名，重编前后各有一批），而且"成功码被扔进 error"这件事本身
+// 值得在文案上认出来，而不是当成「报 bug」。
 const (
 	CodeNoOp        = "E_NO_OP"
 	CodeAttrClamped = "E_ATTR_CLAMPED"
@@ -202,8 +218,8 @@ func (e *WireError) ExitCode() int {
 
 // IsSuccessCode 报告这个码在语义上是不是成功（见 CodeNoOp 的注释）。
 //
-// 只有一个地方会以 ok:false 发出它：set_local_string / set_spec_description 的
-// NoOp 分支。用它在文案上区分「什么也没改」和「真的坏了」。
+// 现在没有任何引擎路径会以 ok:false 发出它（2026-09-25 起，见上）—— 留着是为了让
+// "成功码出现在 error 里"这件事在文案上仍是「什么也没改」而不是「真的坏了」。
 func (e *WireError) IsSuccessCode() bool {
 	if e == nil {
 		return false
@@ -227,7 +243,9 @@ func frameExitCode(code, kind string) int {
 	case KindDesigner:
 		return ExitDesigner
 	}
-	// kind=internal 走这里（含 E_NOT_IMPLEMENTED、E_NO_OP）。
+	// kind=internal 走这里（含 E_NOT_IMPLEMENTED）。E_NO_OP 曾经也从这里走（引擎把它
+	// 发成错误帧时），2026-09-25 起引擎不再有那条路径 —— 表不动：真收到这种帧，按
+	// 「未分类的内部错误」退 1 仍是对的兜底。
 	// 未知/缺失的 kind 也落在这里：契约表没给它行，按「未分类的内部错误」兜底。
 	return ExitFrameErr
 }

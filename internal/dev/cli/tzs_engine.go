@@ -858,16 +858,17 @@ func printHumanReply(fn string, r *tzs.Reply, err error, code int) int {
 	if r.Error != nil {
 		fmt.Fprintf(os.Stderr, "%s (%s): %s\n", r.Error.Code, r.Error.Kind, r.Error.Message)
 		if r.Error.IsSuccessCode() {
-			// E_NO_OP / E_ATTR_CLAMPED 在语义上是"什么也没改"（见 client.go:66-75）。
+			// E_NO_OP / E_ATTR_CLAMPED 在语义上是"什么也没改"（见 client.go 的 CodeNoOp 注释）。
 			//
-			// **这里只改文案，不改退出码**：退出码仍按契约表走（kind=internal → 1），
-			// 因为引擎确实把它发成了错误帧。真正该改的在引擎侧 —— SPEC §11.24(a) 把这两条
-			// 定义成**成功帧**（该出现在 result 里而不是 error 里），`set_local_string` /
-			// `set_spec_description` 的 NoOp 分支没照做。那属于引擎批次。
+			// **兜底，不是主路**（2026-09-25 起）：引擎里已经没有任何路径把成功码发成错误帧了
+			// —— 最后一处（`set_local_string` / `set_spec_description` 的 NoOp 分支）已按
+			// SPEC §11.24(a) 改成成功帧。主路是上面那个 `r.OK` 分支：`ok:true` +
+			// `result.code`，原样打 JSON，`code`/`noop`/`clamped` 都在里面，看得见，
+			// 不需要再加一层。
 			//
-			// 另一条路由**不在这里**：正常情况下 E_NO_OP / E_ATTR_CLAMPED 是以
-			// `ok:true` + `result.code` 回来的（Attr.cs 那几处就是这样），走上面那个分支，
-			// 原样打 JSON —— `code`/`noop`/`clamped` 都在里面，看得见，不需要再加一层。
+			// 留着这段是因为它可以由**旧引擎**触发（守护进程按 MVID 命名，重编前后各有一批），
+			// 而那正是最需要说人话的时刻：**退出码不动**（仍按契约表 kind=internal → 1），
+			// 只把文案从"内部错误、上报"改成"什么也没改"。
 			line(os.Stderr, "    这不是错误：请求的值与当前值相同，设计器同值短路，什么都没改。")
 			line(os.Stderr, "    （退出码 1 来自契约表把它的 kind 归成 internal；见 SPEC §11.24(a)。）")
 		}

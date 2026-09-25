@@ -704,12 +704,28 @@ namespace TzsCli.Designer
                     + string.Join("|", ids.ToArray()), ids.ToArray());
 
             string old = Read.Str(Reflect.Call(s.Si, "GetCodeTemplate"));
-            if (string.Equals(old, canonical, StringComparison.Ordinal))
-                return new JObject {
-                    { "path", path }, { "template", canonical }, { "old", old }, { "changed", false },
-                    { "scope", "form" }, { "file", file },
-                    { "note", "值没变，什么也没写（这里不把它当错误：E_NO_OP 正在按 SPEC 改成成功语义）" }
-                };
+            if (string.Equals(old, canonical, StringComparison.Ordinal)) {
+                // SPEC §11.24 (a): a no-op is an OUTCOME, not a failure. This site has always returned
+                // a success, but without the two markers the table requires (`noop:true` +
+                // `code:E_NO_OP`) -- so a caller that forwards only the markers had no way to tell
+                // "already this value" from a write this file declined to describe. Same shape as the
+                // write path below, so the two answers read the same.
+                var noop = new JObject();
+                noop["path"] = path;
+                noop["template"] = canonical;
+                noop["old"] = old;
+                noop["changed"] = false;
+                noop["written"] = old;
+                noop["desc"] = descs.ContainsKey(canonical) ? descs[canonical] : null;
+                noop["scope"] = "form";
+                noop["file"] = file;
+                noop["legal"] = Read.StrArray(ids);
+                noop["layoutDelta"] = JValue.CreateNull();   // .4fd 不动
+                noop["noop"] = true;
+                noop["code"] = "E_NO_OP";
+                noop["note"] = "代码模板已经是 \"" + canonical + "\"，未修改任何值";
+                return noop;
+            }
 
             Urm(s);
             Reflect.Call(s.Si, "SetCodeTemplate", canonical);

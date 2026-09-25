@@ -42,7 +42,13 @@ namespace TzsCli.Designer
     /// Every one of those becomes an error carrying a machine-readable <c>detail.reason</c>, because
     /// the whole point of this layer is that "the designer ignored you" and "it worked" must not
     /// look alike. E_DESIGNER (wire kind `designer`: do not retry) for designer rules, E_NOT_FOUND /
-    /// E_NO_OP where that is the honest classification -- see Rpc.Map for how each reaches the wire.
+    /// E_NO_SPEC_NODE where that is the honest classification -- see Rpc.Map for how each reaches the
+    /// wire.
+    ///
+    /// The one case that is NOT an error is the designer's *other* silent path: old == new. That is
+    /// the form already holding the requested state, which SPEC §11.24 (a) classifies as a success
+    /// and which lands in `result` as `noop:true` + `code:"E_NO_OP"` (see NoOp below) -- never in
+    /// `error`, where kind `internal` would tell the caller to report a bug instead of stopping.
     ///
     /// The .tsd side of every change is rendered by the designer itself: `save` calls SaveToTSD,
     /// which rebuilds &lt;strings&gt;, &lt;table&gt;, &lt;prog_rel&gt; and the per-node CDATA from the
@@ -90,11 +96,28 @@ namespace TzsCli.Designer
             return new DetailedError("not_found", what + " 不存在: " + value, detail);
         }
 
-        static DetailedError NoOp(string message, JObject detail) {
-            if (detail == null) detail = new JObject();
-            detail["reason"] = "no_op";
-            detail["changed"] = false;
-            return new DetailedError("E_NO_OP", message, detail);
+        /// <summary>
+        /// The "already this value" answer, as a SUCCESS frame carrying `noop:true` and
+        /// `code:"E_NO_OP"`. SPEC §11.24 (a) makes a no-op an OUTCOME, not a failure, and the three
+        /// outcomes carry exactly one positive marker each (applied / clamped / noop).
+        ///
+        /// Both callers below used to THROW this. Rpc.Map classifies an E_* code it does not know as
+        /// `kind:internal`, whose contract meaning is "unexpected exception -- report it, do not
+        /// retry": the one answer that makes a caller abandon a request the form had already
+        /// satisfied. Attr.cs and Action.cs have returned the success shape since the mid-wave
+        /// amendment (commit 0c607df); these two were the last holdouts.
+        ///
+        /// The payload is the same shape a real write would have produced (path / name / value /
+        /// after / target / cdata …), so the caller reads one vocabulary either way -- `after` is
+        /// read back from the model, which is what makes "already this" a fact and not an assumption.
+        /// </summary>
+        static JObject NoOp(JObject res, string note) {
+            if (res == null) res = new JObject();
+            res["changed"] = false;
+            res["noop"] = true;
+            res["code"] = "E_NO_OP";
+            if (note != null) res["note"] = note;
+            return res;
         }
 
         static JObject Detail(string key, object value) {
@@ -217,17 +240,21 @@ namespace TzsCli.Designer
             res["before"] = old == null ? (JToken)JValue.CreateNull() : new JValue(old);
             res["referencedBy"] = Read.StrArray(ReferencedBy(el, name));
 
+            bool unchanged = false;
             if (text.Length == 0) {
                 Reflect.Call(si, deleter, name);
                 res["deleted"] = true;
                 res["note"] = "软删除：节点留在 <strings> 里、lstr 置 d（SPEC §6.3 的墓碑机制），"
                     + "不是从 .tsd 里摘掉";
             } else {
-                if (old == text)
-                    throw NoOp("本地化串 \"" + name + "\" 已经是这个内容（AbstractStringNode."
-                        + "AttributeChanged 对 old==value 直接 return）", Detail("name", name));
-                Reflect.Call(si, setter, name, text);
                 res["value"] = text;
+                if (old == text) {
+                    // Nothing to write: AbstractStringNode.AttributeChanged returns on old==value.
+                    // A no-op SUCCESS (SPEC §11.24 (a)) -- see NoOp below.
+                    unchanged = true;
+                } else {
+                    Reflect.Call(si, setter, name, text);
+                }
             }
 
             object node = FindStringNode(s, isAct, name);
@@ -239,7 +266,10 @@ namespace TzsCli.Designer
             string st = Json.StatusLetter(node);
             if (st != null) res["status"] = st;
             res["tombstoned"] = st == "d";
-            return res;
+            return unchanged
+                ? NoOp(res, "本地化串 \"" + name + "\" 已经是这个内容（AbstractStringNode.AttributeChanged"
+                    + " 对 old==value 直接 return），未修改任何值")
+                : res;
         }
 
         static readonly string[] LocalStringAttrs = { "text", "title", "comment", "placeholder" };
@@ -744,9 +774,12 @@ namespace TzsCli.Designer
         ///
         /// -- a cited node's description belongs to the standard (its Source is a copy of the cited
         /// XML, see set_cited), so the write is refused *silently*. Reporting "ok" there would be the
-        /// exact lie this layer exists to prevent, so IsCited and old==new are checked here and
-        /// surfaced as E_DESIGNER `cited` and E_NO_OP. The check is not redundant: the command class
-        /// has no guard of its own, so anything that invoked it directly would bypass the rule.
+        /// exact lie this layer exists to prevent, so IsCited is checked here and surfaced as
+        /// E_DESIGNER `cited`. The other half of the same guard, old==new, is the opposite case: the
+        /// form already says what the caller asked for, so that one *is* reported as ok -- as the
+        /// no-op success of §11.24 (a), carrying `noop:true` + `code:"E_NO_OP"`. The check is not
+        /// redundant either way: the command class has no guard of its own, so anything that invoked
+        /// it directly would bypass the rule.
         ///
         /// THE FOUR PROGRAM-LEVEL SPECS are the same CDATA on SpecificationInfo's four program nodes
         /// -- ProgramSpec (&lt;all&gt;), ProgramMISpec (&lt;mi_all&gt;), ProgramDBSpec (&lt;db_all&gt;),
@@ -786,10 +819,18 @@ namespace TzsCli.Designer
                 object fsm = Attr.Fsm(s, el);
                 node = Reflect.Prop(fsm, SpecSlots.ByKind[kind]);
                 target = kind;
-                if (node == null)
-                    throw Refused("no_spec_node",
+                if (node == null) {
+                    // E_NO_SPEC_NODE, not the `designer` kind Refused() would give -- same reasoning as
+                    // the identical refusal in set_cited below and in Attr.SpecNode: the message tells
+                    // the caller to ask for another kind, so the classification must be not_found
+                    // ("self-correctable") rather than designer ("do not retry, tell the user").
+                    var dn = Detail("path", path);
+                    dn["kind"] = kind;
+                    dn["reason"] = "no_spec_node";
+                    throw new DetailedError("E_NO_SPEC_NODE",
                         "元素 \"" + Read.Str(Session.Raw(el, "name")) + "\" 没有 " + kind
-                        + " 节点（先用 get_component 看它有哪些 kind）", Detail("kind", kind));
+                        + " 节点（先用 get_component 看它有哪些 kind）", dn);
+                }
             }
 
             if (IsCited(node))
@@ -799,18 +840,24 @@ namespace TzsCli.Designer
                     + "标准；要改先 set_cited cited:false 取消引用", Detail("target", target));
 
             string old = Read.Str(Reflect.Prop(node, "CDATA"));
-            if (old == content)
-                throw NoOp("规格描述已经是这个内容（setter 对 value==CDATA 直接 return）",
-                    Detail("target", target));
-
-            // The designer's own path: CDATA property -> SDSpecUndoRedoCommand -> ReplaceNodes(XCData).
-            Reflect.SetProp(node, "CDATA", content);
 
             var res = new JObject();
             res["target"] = target;
             if (alias < 0) res["path"] = path;
             res["oldLength"] = old == null ? 0 : old.Length;
             res["newLength"] = content.Length;
+
+            if (old == content) {
+                // The other half of the guard below: a no-op SUCCESS, not an error (SPEC §11.24 (a)).
+                res["cdata"] = old;
+                string nst = Json.StatusLetter(node);
+                if (nst != null) res["status"] = nst;
+                return NoOp(res, "规格描述已经是这个内容（setter 对 value==CDATA 直接 return），未修改任何值");
+            }
+
+            // The designer's own path: CDATA property -> SDSpecUndoRedoCommand -> ReplaceNodes(XCData).
+            Reflect.SetProp(node, "CDATA", content);
+
             res["cdata"] = Read.Str(Reflect.Prop(node, "CDATA"));
             string st = Json.StatusLetter(node);
             if (st != null) res["status"] = st;

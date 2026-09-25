@@ -41,6 +41,27 @@ namespace TzsCli.Designer
         /// <summary>The codes a declared function may put on the wire. Kept as arrays so the
         /// help and the (future) MCP tool schema cannot drift from what the Fns throw.</summary>
         static readonly string[] E_STD = { "E_NOT_FOUND", "E_BAD_PARAM", "E_DESIGNER", "E_INTERNAL" };
+
+        /// <summary>`base_` + `extra`, minus duplicates. Exists so a family can be stated as "the
+        /// common set plus what makes this one different" instead of as a fresh literal: the fresh
+        /// literal is how E_STD's four codes got copy-pasted into five arrays, and how a code added
+        /// to the common set would have been remembered in none of them.</summary>
+        static string[] Plus(string[] base_, params string[] extra) {
+            var codes = new List<string>(base_);
+            foreach (string e in extra) if (!codes.Contains(e)) codes.Add(e);
+            return codes.ToArray();
+        }
+
+        /// <summary>E_STD plus the no-op outcome code, for the writers that can answer "the value you
+        /// asked for is already there".
+        ///
+        /// E_NO_OP belongs in the advertised set even though it arrives in `result` and not in
+        /// `error` (SPEC §11.24 (a)): `noop:true` + `code:"E_NO_OP"` is one of the three outcomes a
+        /// caller has to tell apart from `applied`, and a caller writing its branches from `--help`
+        /// cannot branch on a code the help never mentions. Measured 2026-09-25: twelve verbs can
+        /// answer it, and only the four attribute writers (E_SPEC / E_LAYOUT) advertised it -- the
+        /// other eight were reachable through no declared vocabulary at all.</summary>
+        static readonly string[] E_NOOP = Plus(E_STD, "E_NO_OP");
         // `open` is the only verb that loads a package, so it is the only one the engine's own
         // watchdog can kill mid-call (E_FATAL_LOAD_TIMEOUT, written by the watchdog thread just
         // before exit(3)). Kept as its own array rather than added to a shared one because no other
@@ -60,14 +81,14 @@ namespace TzsCli.Designer
         // (SPEC §11.24 (a)), not as errors: they are the two outcomes a caller must be able to tell
         // apart from `applied`, so leaving them out of the advertised set would hide exactly the
         // vocabulary the distinction needs.
-        static readonly string[] E_SPEC = {
-            "E_NOT_FOUND", "E_BAD_PARAM", "E_DESIGNER",
-            "E_ATTR_NOT_WHITELIST", "E_ATTR_VALUE_ILLEGAL", "E_ATTR_PARTIAL",
-            "E_NO_SPEC_NODE",   // 元素没有这个 kind 的规格节点：换一个 kind 就行（Attr.SpecNode）
-            "E_NO_OP", "E_INTERNAL" };
-        static readonly string[] E_LAYOUT = {
-            "E_NOT_FOUND", "E_BAD_PARAM", "E_DESIGNER",
-            "E_ATTR_NOT_WHITELIST", "E_ATTR_VALUE_ILLEGAL", "E_ATTR_PARTIAL", "E_ATTR_CLAMPED", "E_NO_OP", "E_INTERNAL" };
+        static readonly string[] E_SPEC = Plus(E_NOOP,
+            "E_ATTR_NOT_WHITELIST", "E_ATTR_VALUE_ILLEGAL", "E_ATTR_PARTIAL");
+        // E_NO_SPEC_NODE is deliberately not listed here: AdvertisedErrors derives it for every
+        // Mutating verb that takes a spec-node `kind`, which is exactly the set of verbs that
+        // resolves one. It was hand-listed here once and the verb in the next array over was
+        // forgotten (Fns/Semantic.cs's set_spec_description, 2026-09-25).
+        static readonly string[] E_LAYOUT = Plus(E_NOOP,
+            "E_ATTR_NOT_WHITELIST", "E_ATTR_VALUE_ILLEGAL", "E_ATTR_PARTIAL", "E_ATTR_CLAMPED");
 
         /// <summary>The codes one function can put on the wire: its declared array, plus the ones its
         /// own parameters imply.
@@ -81,22 +102,29 @@ namespace TzsCli.Designer
         /// path is already in its declaration, so the advertisement is computed rather than
         /// remembered. Of those eight: E_HANDLE_BUSY turned out to be unreachable and is gone from
         /// Rpc.Map; E_FATAL_LOAD_TIMEOUT is declared on `open`, the only verb that loads;
-        /// E_NO_SPEC_NODE is in E_SPEC, the only family that resolves a spec node.
+        /// E_NO_SPEC_NODE is derived for every Mutating verb that takes a spec-node `kind`, and
+        /// hand-declared on the one verb that resolves a node without taking a kind (set_cited).
         ///
         /// NOT advertised, deliberately: E_BAD_REQUEST and E_UNKNOWN_METHOD (refused before a verb
         /// is dispatched) and E_SERVER_DIED (synthesised by the CLI). Those are facts about the
         /// call, not about the verb's body.</summary>
         static JArray AdvertisedErrors(SpecFn f) {
             var codes = new List<string>(f.Errors);
-            bool handle = false, path = false;
+            bool handle = false, path = false, kind = false;
             foreach (Param p in f.Params) {
                 if (p.Type == PType.Handle) handle = true;
                 // A name-path, not a package path: only the former can come back E_PATH_NOT_FOUND
                 // (`open.path` is a .tzs file, and a missing one is a load failure, not this).
                 if (p.Role == Role.ComponentPath) path = true;
+                if (p.Type == PType.Kind) kind = true;
             }
             if (handle && !codes.Contains("E_NO_HANDLE")) codes.Add("E_NO_HANDLE");
             if (path && !codes.Contains("E_PATH_NOT_FOUND")) codes.Add("E_PATH_NOT_FOUND");
+            // A Mutating verb that takes a spec-node `kind` resolves one, so "this element has no
+            // such node -- ask for another kind" is one of its answers. `Mutating` is the load-bearing
+            // half: the read verbs take the same `kind` to filter a list, and an empty list is not
+            // this code.
+            if (kind && f.Mutating && !codes.Contains("E_NO_SPEC_NODE")) codes.Add("E_NO_SPEC_NODE");
             return new JArray(codes);
         }
 
@@ -288,13 +316,13 @@ namespace TzsCli.Designer
                 P.Handle(),
                 new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path", Role = Role.ComponentPath },
                 P.Attrs("attrs", "{\"属性名\":\"值\", …}；一次请求改多个，合成一步撤销")),
-            F("set_tree_source", G_ATTR, "Tree 数据来源的某一格", true, "delta", E_STD,
+            F("set_tree_source", G_ATTR, "Tree 数据来源的某一格", true, "delta", E_NOOP,
                 P.Handle(),
                 new Param { Name = "path", Type = PType.Path, Required = true, Desc = "Tree 的 name-path", Role = Role.ComponentPath },
                 P.Str("element", true, "子元素名"),
                 P.Str("property", true, "属性名"),
                 P.Str("value", true, "新值")),
-            F("rename_component", G_ATTR, "改控件代号（设计器强制全表单唯一）", true, "delta", E_STD,
+            F("rename_component", G_ATTR, "改控件代号（设计器强制全表单唯一）", true, "delta", E_NOOP,
                 P.Handle(),
                 new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path", Role = Role.ComponentPath },
                 P.As(P.Str("name", true, "新代号"), Role.NewName)),
@@ -404,7 +432,7 @@ namespace TzsCli.Designer
                 P.Handle(),
                 new Param { Name = "path", Type = PType.Path, Required = true, Desc = "父容器的 name-path", Role = Role.ComponentPath },
                 P.Enum("use", new[] { "reference", "multilang", "progrel" })),
-            F("add_action", G_SEM, "新增 Action（<act>，id=控件代号）", true, "el", E_STD,
+            F("add_action", G_SEM, "新增 Action（<act>，id=控件代号）", true, "el", E_NOOP,
                 P.Handle(),
                 new Param { Name = "path", Type = PType.Path, Required = true,
                             Desc = "父容器的 name-path；空串 = 独立动作（无按钮）", Role = Role.ComponentPath },
@@ -417,10 +445,10 @@ namespace TzsCli.Designer
                 // carries it on rejection. W3-C found this.
                 P.Str("type", false, "型态，逗号分隔；合法集是该表单自己的（见返回体的 vocabulary）"),
                 P.As(Opt(PType.Str, "name", "action id"), Role.ActionId)),
-            F("delete_action", G_SEM, "删除 Action", true, "delta", E_STD,
+            F("delete_action", G_SEM, "删除 Action", true, "delta", E_NOOP,
                 P.Handle(),
                 P.As(P.Str("id", true, "action id"), Role.ActionId)),
-            F("set_action_types", G_SEM, "改 Action 的类型组合", true, "delta", E_STD,
+            F("set_action_types", G_SEM, "改 Action 的类型组合", true, "delta", E_NOOP,
                 P.Handle(),
                 P.As(P.Str("id", true, "action id"), Role.ActionId),
                 // Same reason as add_action's `type`: the legal set is per-form, so it cannot be
@@ -428,7 +456,7 @@ namespace TzsCli.Designer
                 P.Str("types", true, "型态，逗号分隔；合法集见返回体的 vocabulary，\"none\" 表示空集")),
 
             // ------------------------------------------------------------ 多语言 / 选项 / 串查 (6)
-            F("set_local_string", G_MULTI, "写一条本地化串（sfield）", true, "delta", E_STD,
+            F("set_local_string", G_MULTI, "写一条本地化串（sfield）", true, "delta", E_NOOP,
                 P.Handle(),
                 new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path", Role = Role.ComponentPath },
                 P.Str("name", true, "串名，如 lbl_pmdlud001"),
@@ -447,17 +475,33 @@ namespace TzsCli.Designer
                 new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path", Role = Role.ComponentPath },
                 P.Str("table", true, "表名"),
                 Opt(PType.Str, "column", "列名")),
-            F("set_spec_description", G_MULTI, "写 SD 规格描述（CDATA）", true, "delta", E_STD,
+            F("set_spec_description", G_MULTI, "写 SD 规格描述（CDATA）", true, "delta", E_NOOP,
                 P.Handle(),
                 // `path` before `kind`, like every other verb that takes both (set_spec_attr,
                 // set_spec_attrs). Declaration order IS the wire key order (internal/dev/tzs's
                 // argmap builds the frame in manifest order), and one verb emitting its keys in a
                 // different order from its three siblings is the kind of difference a reader has to
                 // stop and explain.
-                new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path", Role = Role.ComponentPath },
-                P.Kind(),
+                new Param { Name = "path", Type = PType.Path, Required = true,
+                    Desc = "name-path；或程序级规格的 all / mi_all / db_all / di_all",
+                    Role = Role.ComponentPath },
+                // Deliberately NOT P.Kind(): that helper declares `kind` required, and for the four
+                // program-level aliases above it is ignored -- the function body's own check
+                // ("set_spec_description 需要 kind（七种之一），或 path=\"all\"…", Semantic.cs) is the
+                // one that knows the difference. Declaring it required here made the natural call
+                // {"path":"all","content":"…"} impossible: the CLI refused it before the request was
+                // ever sent, so the four program-level specs this verb implements on purpose were
+                // unreachable from the wire. Same shape as Action.cs's branch, which validates
+                // `type` in the body because the answer depends on the path.
+                new Param { Name = "kind", Type = PType.Kind, Required = false,
+                    Desc = "哪一类规格节点；path 是 all/mi_all/db_all/di_all 时忽略" },
                 P.Str("content", true, "新内容")),
-            F("set_cited", G_MULTI, "引用 / 取消引用标准（SpecCitedUndoRedoCommand）", true, "delta", E_STD,
+            F("set_cited", G_MULTI, "引用 / 取消引用标准（SpecCitedUndoRedoCommand）", true, "delta",
+                // Not E_NOOP: set_cited has no "already this value" answer -- it runs the command
+                // unconditionally and reports wasCited/cited. It does resolve a spec node though
+                // (FirstSlot), so it is the one verb that needs E_NO_SPEC_NODE without taking a
+                // `kind` (and therefore without the derivation in AdvertisedErrors).
+                Plus(E_STD, "E_NO_SPEC_NODE"),
                 P.Handle(),
                 new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path", Role = Role.ComponentPath },
                 P.Bool("cited", true, "true = 引用")),
@@ -487,7 +531,7 @@ namespace TzsCli.Designer
             // missing here, so a workspace that has it (hengshuo/prd does: F/P/Q/R/W) could never
             // set it -- the manifest rejected the value before the body ever saw the file.
             // W3-B found it. Keep this list a superset of what any workspace ships.
-            F("set_code_template", G_TOOL, "改 code_template（F/P/Q/R/W）", true, "delta", E_STD,
+            F("set_code_template", G_TOOL, "改 code_template（F/P/Q/R/W）", true, "delta", E_NOOP,
                 P.Handle(),
                 new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path（只校验，作用域是整张表单）", Role = Role.ComponentPath },
                 P.Enum("template", new[] { "F", "P", "Q", "R", "W" })),

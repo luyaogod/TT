@@ -144,6 +144,10 @@ tt dev tzs stop                                          # 停本工作区的常
 - **path 的根不等于 `--form` 的程序名**：`--form apmt500_wf` 但 path 是
   `managedform/`**`apmt500`**`/HBoxT1/…`。拿程序名去拼 path 会 `E_NOT_FOUND`。照 `find_component`
   回的那条原样用。
+- 改**程序级**规格描述（SD 描述里的 `all` / `mi_all` / `db_all` / `di_all`）用
+  `set_spec_description`，**不需要 `kind`** —— 那四个是程序自己的规格节点，不是某个元素的。
+  给它元素路径时才要 `kind`（缺了会退 2 并提示这两种写法）；给错 kind 退 2 `E_NO_SPEC_NODE`
+  （`not_found`，不是"设计器拒绝"：换一个 kind 就行）。
 
 **几处容易记混的**：`move` **只改 Z 序**（同一父容器内前后挪），换父容器要用 `reparent`
 （设计器的拖拽命令，仅限同表单）；`add_field` 是加字段、`wrap` 是拿选中元素**包一层新容器**；
@@ -310,15 +314,25 @@ tt dev tzs set_spec_attr --form aapp320 --args '{"path":"…","kind":"field","at
 | 码 | 含义 |
 |---|---|
 | `0` | 帧 `ok:true` |
-| `1` | 引擎内部错（`kind=internal`，含 `E_NOT_IMPLEMENTED`）。**少数情形**：`E_NO_OP`（"什么都没改"）被 `set_local_string` / `set_spec_description` 发成了错误帧，也落这一格 —— 那不是出错，见下 |
+| `1` | 引擎内部错（`kind=internal`，含 `E_NOT_IMPLEMENTED`）。**`E_NO_OP` 不属于这一格** —— 它是成功码，见下 |
 | `2` | 参数/环境不对：本地参数错、未知动词、manifest 拉不到、引擎的 `validation` 与 `not_found` |
 | `4` | **设计器拒绝**（`kind=designer`，含 `E_KEY_IN_USE`） |
 | `5` | 传输或环境失败（含加载超时、没配工作区、`--args-file` 读不到） |
 
-**`E_NO_OP` 分两路，别只记上面那条。** 绝大多数动词把"什么都没改"放在**成功帧**里：
-`ok:true` + `result.code="E_NO_OP"` + `noop:true`，**退出码 0**（`set_spec_attr` /
-`set_layout_attr` 等写动词，目标值已等于当前值时就是这样）。只有上面指出那两个动词把它发成
-错误帧（→ 退 1）。两路含义相同：**请求的值与当前值相同、什么都没改** —— 不是失败，也不用重试。
+**`E_NO_OP` 是成功码，不在错误那一侧。** "你请求的值就是当前值"回**成功帧**：
+`ok:true` + `result.code="E_NO_OP"` + `noop:true` + `changed:false`，**退出码 0**。
+会这样答的写入动词：`set_spec_attr` / `set_spec_attrs` / `set_layout_attr` /
+`set_layout_attrs` / `set_tree_source` / `rename_component` / `add_action` / `delete_action` /
+`set_action_types` / `set_local_string` / `set_spec_description` / `set_code_template`。
+（2026-09-25 起全部一致：在那之前后三个各有自己的形状，`E_NO_OP` 甚至会以**错误帧**回来、
+落进上表的 `1` —— 所以看到 `ok:false` + `code:E_NO_OP` 只可能是引擎比你的 SKILL 旧。）
+含义只有一个：**请求的值与当前值相同、什么都没改** —— 不是失败，也不用重试。
+同理 `E_ATTR_CLAMPED` 也是成功帧：应用了，但值被栅格门禁改过，`result.written` 才是真值。
+
+**收到 no-op 不用改流程。** 它说的是"**这一次调用**没动模型"，不是"你可以跳过剩下的步骤"：
+接着改别的属性、照样 `save`（`save` 写的是**当前模型**，与它前面有没有 no-op 无关）。
+唯一要小心的是别把"no-op"当成"我这次改成功了"的凭据 —— 值本来就在模型里，所以后面回读
+也确实会是你想要的结果；真正证明"改对了"的仍然是回读，不是这一次的返回码。
 
 **报错默认就会把"怎么改对"打出来**（不用加 `--json`）：`合法值`（`detail.legal`）、
 `提示`（近似值）、`候选（key 可直接拿去重试）`、以及复数写入的 `已写入`/`失败` 两栏，

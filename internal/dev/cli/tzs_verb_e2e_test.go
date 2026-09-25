@@ -14,6 +14,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -189,6 +190,182 @@ func countParams(m *tzs.Manifest) int {
 		n += len(f.Args)
 	}
 	return n
+}
+
+// TestE2EManifestAdvertisesImpliedCodes —— 声明的 `errors[]` 必须含盖**声明本身就蕴含**的那些码。
+//
+// 为什么值得一条：这类偏离的形态是"能力真的存在、词汇表里却没有"，后果是照 `--help` 写分支的
+// 调用方**漏掉那个码** —— 而漏掉 `E_NO_OP` 恰恰会把"什么也没改"当成失败（本轮正在修的那个）。
+// 2026-09-25 实测到两处：八个能答 no-op 的动词（语义 / Action / 工具那几族）从没广告过
+// `E_NO_OP`；`set_spec_description` 能答 `E_NO_SPEC_NODE` 而它不在表里。
+//
+// 前三条不变量**从声明算出来**（收 handle / 收组件路径 / 是写动词且收 kind），所以它们不需要
+// 再维护一份名单 —— 引擎的 `AdvertisedErrors` 就是按同样三条算的，这条测试是它的**外部复核**：
+// 引擎自己算错了（比如把 `Mutating` 判反）这里会红。第四条算不出来，见 noopVerbs。
+func TestE2EManifestAdvertisesImpliedCodes(t *testing.T) {
+	m := requireRealManifest(t)
+	problems := impliedCodeProblems(m)
+	for _, p := range problems {
+		t.Error(p)
+	}
+	t.Logf("查了 %d 个动词的蕴含码、%d 个 no-op 动词", len(m.Fns), len(noopVerbs))
+}
+
+// impliedCodeProblems 把"声明蕴含了某个码、`errors[]` 却没广告"（以及反向的"广告了不该有的"）
+// 逐个列出来。抽成**纯函数**是为了能用**手造的 manifest** 证明它真的会红：
+// 只跑真引擎的那一版在修好的当天永远是绿的，而没见过它红的断言不算防线 —— 这个仓库的既有做法。
+func impliedCodeProblems(m *tzs.Manifest) []string {
+	var out []string
+	advertises := func(f *tzs.SpecFn, code string) bool {
+		for _, c := range f.Errors {
+			if c == code {
+				return true
+			}
+		}
+		return false
+	}
+	inList := map[string]bool{}
+	for _, n := range noopVerbs {
+		inList[n] = true
+	}
+
+	for _, f := range m.Fns {
+		var handle, componentPath, kindParam bool
+		for _, p := range f.Args {
+			if p.Type == tzs.TypeHandle {
+				handle = true
+			}
+			if p.Role == tzs.RoleComponentPath {
+				componentPath = true
+			}
+			if p.Type == tzs.TypeKind {
+				kindParam = true
+			}
+		}
+		implied := map[string]bool{
+			tzs.CodeNoHandle:     handle,
+			tzs.CodePathNotFound: componentPath,
+			tzs.CodeNoSpecNode:   kindParam && f.Writes,
+		}
+		for code, want := range implied {
+			if want && !advertises(f, code) {
+				out = append(out, fmt.Sprintf("%s：声明蕴含 %s（handle=%v 组件路径=%v kind=%v writes=%v），"+
+					"errors[] 里却没有：%v", f.Name, code, handle, componentPath, kindParam, f.Writes, f.Errors))
+			}
+		}
+		// 反向：读动词不该广告 no-op 类的成功码（它们是"没改任何值"的结局，只有写动词才有）。
+		if !f.Writes && advertises(f, tzs.CodeNoOp) {
+			out = append(out, fmt.Sprintf("%s 不写模型，却广告了 %s", f.Name, tzs.CodeNoOp))
+		}
+
+		// 第四条：能在 noopVerbs 里的必须广告 E_NO_OP，**不在的必须不广告**。
+		// 后半条同样重要：空广告会让照 `--help` 写分支的调用方写出一个永远走不到的分支。
+		got := advertises(f, tzs.CodeNoOp)
+		if got && !inList[f.Name] {
+			out = append(out, fmt.Sprintf("%s 广告了 %s，但不在 noopVerbs 里：要么它答不了 no-op（那条广告是空的，"+
+				"写下这个分支的调用方永远走不到），要么它答得了 —— 那就把它加进 noopVerbs（并写清在哪个文件读到的）",
+				f.Name, tzs.CodeNoOp))
+		}
+		if !got && inList[f.Name] {
+			out = append(out, fmt.Sprintf("%s 在 noopVerbs 里，errors[] 却没有 %s：%v", f.Name, tzs.CodeNoOp, f.Errors))
+		}
+	}
+	return out
+}
+
+// TestImpliedCodeProblemsFiresOnDoctoredManifests —— 上一条的"见过它红"。
+//
+// 不用引擎：手造 manifest，五种毛病各来一次，断言**每一条都被点名**（不是"有问题"，
+// 而是"点到那个动词、那个码"）。少了这条，上一条测试会在某天悄悄退化成恒绿。
+func TestImpliedCodeProblemsFiresOnDoctoredManifests(t *testing.T) {
+	handle := func() *tzs.Param { return &tzs.Param{Name: "handle", Type: tzs.TypeHandle, Required: true} }
+	split := func() []*tzs.Param {
+		return []*tzs.Param{handle(), {Name: "path", Type: tzs.TypePath, Role: tzs.RoleComponentPath}}
+	}
+
+	cases := []struct {
+		name string
+		fn   *tzs.SpecFn
+		want string // 期望被点到的码；空 = 期望无问题
+	}{
+		{"正常：handle 与组件路径都广告了", &tzs.SpecFn{
+			Name: "ok", Writes: true, Args: split(),
+			Errors: []string{tzs.CodeNoHandle, tzs.CodePathNotFound},
+		}, ""},
+		{"收 handle 却没广告 E_NO_HANDLE", &tzs.SpecFn{
+			Name: "no-handle", Writes: false, Args: []*tzs.Param{handle()}, Errors: nil,
+		}, tzs.CodeNoHandle},
+		{"收组件路径却没广告 E_PATH_NOT_FOUND", &tzs.SpecFn{
+			Name: "no-path", Writes: false,
+			Args:   []*tzs.Param{handle(), {Name: "path", Type: tzs.TypePath, Role: tzs.RoleComponentPath}},
+			Errors: []string{tzs.CodeNoHandle},
+		}, tzs.CodePathNotFound},
+		{"写动词收 kind 却没广告 E_NO_SPEC_NODE", &tzs.SpecFn{
+			Name: "set_spec_attr", Writes: true,
+			Args:   []*tzs.Param{handle(), {Name: "kind", Type: tzs.TypeKind}},
+			Errors: []string{tzs.CodeNoHandle},
+		}, tzs.CodeNoSpecNode},
+		{"读动词收 kind：**不该**广告 E_NO_SPEC_NODE", &tzs.SpecFn{
+			Name: "list_spec_nodes", Writes: false,
+			Args:   []*tzs.Param{handle(), {Name: "kind", Type: tzs.TypeKind}},
+			Errors: []string{tzs.CodeNoHandle},
+		}, ""},
+		{"读动词广告了 E_NO_OP", &tzs.SpecFn{
+			Name: "list_open", Writes: false, Args: []*tzs.Param{handle()},
+			Errors: []string{tzs.CodeNoHandle, tzs.CodeNoOp},
+		}, tzs.CodeNoOp},
+		{"能答 no-op 却不在名单里", &tzs.SpecFn{
+			Name: "some_new_writer", Writes: true, Args: []*tzs.Param{handle()},
+			Errors: []string{tzs.CodeNoHandle, tzs.CodeNoOp},
+		}, tzs.CodeNoOp},
+		{"在名单里却没广告", &tzs.SpecFn{
+			Name: "set_code_template", Writes: true, Args: []*tzs.Param{handle()},
+			Errors: []string{tzs.CodeNoHandle},
+		}, tzs.CodeNoOp},
+	}
+
+	for _, c := range cases {
+		problems := impliedCodeProblems(&tzs.Manifest{Fns: []*tzs.SpecFn{c.fn}})
+		if c.want == "" {
+			if len(problems) != 0 {
+				t.Errorf("%s：不该有问题，得到 %v", c.name, problems)
+			}
+			continue
+		}
+		if len(problems) == 0 {
+			t.Errorf("%s：该报 %s，一个都没报", c.name, c.want)
+			continue
+		}
+		hit := false
+		for _, p := range problems {
+			if strings.Contains(p, c.want) && strings.Contains(p, c.fn.Name) {
+				hit = true
+			}
+		}
+		if !hit {
+			t.Errorf("%s：报的话里没同时点到 %s 与 %s：%v", c.name, c.fn.Name, c.want, problems)
+		}
+	}
+}
+
+// noopVerbs 是**读过 Fns/ 之后确认会回 `noop:true` + `code:"E_NO_OP"` 的动词**。
+//
+// 它算不出来：参数声明里没有"这个动词能不能答 no-op"这件事（有的话它就该像 `role` 一样进声明，
+// 而不是写在这里）。所以加一个能答 no-op 的写动词时**来加一行**，并写下在哪个文件读到的。
+//
+// 十二处的出处（2026-09-25 逐个读过）：
+//
+//	Attr.cs       set_spec_attr / set_spec_attrs / set_layout_attr / set_layout_attrs（Noop()）
+//	              set_tree_source（Noop(...,"tree/"+element,...)）/ rename_component（就地构造）
+//	Action.cs     add_action / delete_action / set_action_types（Noop(id, fields, note)）
+//	Semantic.cs   set_local_string / set_spec_description（Noop(res, note)）
+//	PageTab.cs    set_code_template（就地构造；2026-09-25 之前缺 noop/code 两个标记）
+//
+// 反例：`set_cited` 不在这里 —— 它无条件跑命令并回报 wasCited/cited，没有"已经是这个值"的答案。
+var noopVerbs = []string{
+	"add_action", "delete_action", "rename_component", "set_action_types", "set_code_template",
+	"set_layout_attr", "set_layout_attrs", "set_local_string", "set_spec_attr", "set_spec_attrs",
+	"set_spec_description", "set_tree_source",
 }
 
 // TestE2EDocsVerbCountMatchesManifest 把"动词数"这个数字钉在 manifest 上。
