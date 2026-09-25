@@ -2013,7 +2013,7 @@ TDev 的两点被完整保留：位置无关的参数解析（`-o`/`--json` 可�
    - **顺带更正这条自己**：它原先说 `field_add` 声明了 `column` —— 查源码**没有**
      （`field_add` 的 `columns` 本来就是必填）。那个 `column` 属于**细粒度 `add_field`**，而它确实读它
      （`Struct.cs:611`）。这是本清单里第二次"照抄普查结论差点改错东西"。
-9. **`describe_kind` 收不下 `kind:"layout"`，于是"布局属性合法集"这条路走不通。**
+9. ✅ **`describe_kind` 收不下 `kind:"layout"`，于是"布局属性合法集"这条路走不通（已修，见条目末尾）。**
    函数体**实现了**它（`Read.cs:458`：`else if (want == "layout") res["layout"] = StrArray(LayoutAttrUnion(s))`），
    注释还写着"`kind:"layout"` is how the layout side is asked for explicitly" —— 但它在
    **参数校验层**就被挡掉了：`Manifest.cs:197` 把 `describe_kind` 的 `kind` 声明成 `PType.Kind`，
