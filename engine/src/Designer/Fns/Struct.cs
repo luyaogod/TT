@@ -794,6 +794,19 @@ namespace TzsCli.Designer
                 one["path"] = ep;
                 one["name"] = NameOf(e);
                 one["tag"] = TagOf(e);
+                // `table`/`column` per node -- the caller's very next question is "which of these
+                // bound to which column", and the answer is on the element itself: the same
+                // sqlTabName / colName that find_component reports (Json.cs reads them at exactly
+                // one place, and so does this line, so the two cannot drift). Absent on a node that
+                // is not a data field -- a companion Label has neither, and that absence is
+                // information too: it is not the thing you bind.
+                //
+                // 2026-09-25 的评测里，执行者在这一层看不到绑定信息，只能靠节点名猜或回读
+                // （"引擎知道却没说出来" —— 与 §11.9 第 14、15 条同族）。
+                string et = Session.Raw(e, "sqlTabName") as string;
+                string ec = Session.Raw(e, "colName") as string;
+                if (et != null) one["table"] = et;
+                if (ec != null) one["column"] = ec;
                 added.Add(one);
             }
             res["added"] = added;

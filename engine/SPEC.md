@@ -1263,7 +1263,7 @@ new AddComponetsUndoRedoCommand(list, parent, index).Execute();
 | 组 | 函数 | 底层 |
 |---|---|---|
 | 会话 (5) | `open` `save` `close` `verify` `list_open` | `SettingManager.OpenSpecFiles` / `SaveSetting` |
-| 读 (9) | `form_tree` `find_component` `get_component` `list_spec_nodes` `describe_kind` `list_tables` `list_columns` `list_records` `list_local_strings` | `FormNode` / `*ForView` / `Other*` / `TableColumnHelper` / `GetRecords` |
+| 读 (10) | `form_tree` `find_component` `get_component` `list_spec_nodes` `describe_kind` `list_packages` `list_tables` `list_columns` `list_records` `list_local_strings` | `FormNode` / `*ForView` / `Other*` / 工作区目录 / `TableColumnHelper` / `GetRecords` |
 | 属性 (6) | `set_spec_attr` `set_spec_attrs` `set_layout_attr`（含批量 `paths`）`set_layout_attrs` `set_tree_source` `rename_component` | `SpecAttribute` / `MultiFormAttributes` / `SpecTreeAttribute` / `Rename` |
 | 结构 (12) | `add_widget` `add_field` `insert_at` `delete` `move` `nudge` `align` `fit_size` `wrap` `break_layout` `convert_widget` `convert_container` | 对应 12 个命令类 |
 | ~~复制 (1)~~ | **已摘除**：`copy_component` 不复制（它是 cut+paste，同容器下就是重排），而且 `TargetContainer` 取的是**源容器自己**的相对路径，所以换容器不可达、跨表单必被拒。命令类在设计器里存在，但**不暴露**——完整理由见 `HANDOFF.md §18` |`Cut`/`Paste`/`DesignerClipboardData`（不暴露） |

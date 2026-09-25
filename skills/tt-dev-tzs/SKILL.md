@@ -1,6 +1,6 @@
 ---
 name: tt-dev-tzs
-description: 读写 T100 设计器**表单包**（.tzs/.tzv）：由设计器自己的引擎驱动（52 个具名动词，命名管道 JSON-RPC），参数一律用 JSON 给，不是拼 XML。按数据表加字段用任务级动词 field_add（一条命令做完挑容器+建字段+校验+另存）；改属性用 set_spec_attr / set_layout_attr，改多个用它们的复数形式（一次请求、先全量校验再全量写）；布局/页签等用细粒度动词（open → 读 → 改 → validate → save）。要改表单、按表加字段、查表单结构或字段时用。**前提：先配工作区，且包与 out 都必须用绝对路径落在工作区目录之下。代码包（.tzc/.tzf/.tzx）不归这里，用 tt-dev-tzc。**
+description: 读写 T100 设计器**表单包**（.tzs/.tzv）：由设计器自己的引擎驱动（53 个具名动词，命名管道 JSON-RPC），参数一律用 JSON 给，不是拼 XML。按数据表加字段用任务级动词 field_add（一条命令做完挑容器+建字段+校验+另存）；改属性用 set_spec_attr / set_layout_attr，改多个用它们的复数形式（一次请求、先全量校验再全量写）；布局/页签等用细粒度动词（open → 读 → 改 → validate → save）。要改表单、按表加字段、查表单结构或字段时用。**前提：先配工作区，且包与 out 都必须用绝对路径落在工作区目录之下。代码包（.tzc/.tzf/.tzx）不归这里，用 tt-dev-tzc。**
 license: 与 tt 仓库一致（见随包 README.md）
 metadata:
   tool: tdev
@@ -29,6 +29,7 @@ metadata:
 | **按某张表的列加字段**（最高频） | **`field_add`** —— 挑容器 + 建字段 + 报校验增量 + 存新包，一条命令（§2） |
 | 改属性 / 挪布局 / 换容器 / 页签 / 多语言 / Tab 顺序 | **细粒度动词链**（§3）—— 先看清结构，再改一处 |
 | 只看结构、字段、开着的表单 | `form_tree` / `find_component` / `get_component` / `list_spec_nodes` / `list_columns` / `list_open` |
+| **还不知道该开哪个文件** | `list_packages`（按程序名筛，见 §1 那段） |
 
 **跑之前要配一样东西**：工作区（`tt config set tzs.workspace "D:\ws"` 或环境变量 `TZSCLI_WS`；
 **本文档的 `D:\ws` 一律指工作区**）。**这条没有缺省、也不回落** —— 引擎内置的默认工作区是一个
@@ -36,12 +37,22 @@ metadata:
 工作区还**圈定了你能碰哪些包**：包的目录必须在它之下，`out` 也一样（§4.4）。
 
 **包就在工作区里，而"程序名"不是文件名**：`aapt300` 的包叫 `aapt300(c).tzs`
-（`(c)` = 客户版、`(s)` = 标准版，一般读写用 `(c)`）。**没有"列出工作区里有哪些包"的动词** ——
-52 个动词 + 4 个内建命令里都没有，所以**手上有程序名就照约定拼路径**
-（`<工作区>/<程序名>(c).tzs`），或者按名字收窄地列：`ls <工作区>/<程序名>*`。
+（`(c)` = 客户版、`(s)` = 标准版，一般读写用 `(c)`）。**要问"哪个文件是 aapt300"就用
+`list_packages`**（不需要句柄，与 `list_tables` 同族）：
 
-> ⚠️ **别裸 `ls <工作区>`。** 一个真实工作区里几十上百个包（`.tzs`/`.tzc`/`.bak` 变体混着），
-> 实测一次回 **29.9 KB** —— 那是纯噪音，而且它是 §4.7 那条"先过滤"规矩**对自己**的同一件事。
+```bash
+tt dev tzs list_packages --args '{"query":"aapt300"}' --json
+# → {"count":2,"returned":2,"packages":[{"name":"aapt300(c).tzs","path":"…","program":"aapt300",
+#                                        "sizeBytes":57818,"modified":"2026-09-25 12:00:00"}, …]}
+```
+
+`query` 是**文件名子串**，`limit` 默认 200。里面的 `program` 是**从文件名推的**
+（`<程序名>(c).tzs` 那条约定），拿来挑文件用；**权威答案永远是 `open`**（它回的 `program`
+是设计器自己算的）。手上有程序名时，照约定直接拼 `<工作区>/<程序名>(c).tzs` 也一样快。
+
+> ⚠️ **别裸 `ls <工作区>`。** 一个真实工作区里几十上百个文件（`.tzs`/`.tzc`/`.bak` 混着），
+> 实测一次回 **29.9 KB** —— 那是纯噪音，而 §4.7 那条"先过滤"的规矩正是对同一件事立的
+>（`list_packages` 就是为了替掉这一步而加的）。非要看目录也按名字收窄：`ls <工作区>/<程序名>*`。
 >
 > （`open` 只收 `path`；`--form` 收的是**程序名**，两个不是一回事。）
 
@@ -103,9 +114,11 @@ tt dev tzs field_add --args '{"file":"D:/ws/x.tzs","table":"pmdl_t","columns":["
 > 而它旁边的 `added.path` 才是**被挑中的容器**的 name-path。`promoted` = 被提升/补建的节点数、
 > `bound` = 真正绑到表列的字段数。
 >
-> ⚠️ **里层 `added[]` 每个节点只有 `{path,name,tag}`** —— **不带 `table`/`column`**。所以
-> "哪个节点绑到哪一列"在那一层**看不出来**，要靠节点名（`pmdl_t.pmdlent`）或回读
-> （`find_component` 会给出 `table`/`column`/`fieldType`）。别在 `added[]` 里找绑定信息。
+> ⚠️ **里层 `added[]` 每个节点带自己的绑定**（2026-09-25 起）：字段节点有 `table` 与 `column`
+> （如 `{"path":"…/pmdl_t.pmdlent","name":"pmdl_t.pmdlent","tag":"Edit","table":"pmdl_t","column":"pmdlent"}`），
+> 而配套的 `Label` 节点**两个都没有** —— **缺席本身就是信息**：它是同伴，不是字段。
+> 外层那个 `columns` 是**你请求的那份列清单**，里层每个节点上的 `column` 才是**它自己绑到哪一列**。
+> （要更全的绑定信息 —— 比如 `fieldType` —— 仍然回读：`find_component` 会给。）
 
 > ⚠️ **`field_add` 的 `validate.newErrorCount: 0` 只有在 `baselineCached:true` 时才算数。**
 > 它头一次碰这个会话时，那次校验**就是建基线的那次**（§5），增量按构造是空 —— 那时候
@@ -365,6 +378,10 @@ tt dev tzs set_spec_attr --form aapp320 --args '{"path":"…","kind":"field","at
 **最容易白花 context 的一处**（实测）：`list_columns --table pmdl_t` 不给 `query` 会回 109 列的
 完整元数据 **44,655 字节**；`"query":"pmdl00"` → **3,833 字节**；`"query":"site"` → **517 字节**。
 
+还有一处**最该先过滤的**（2026-09-25 实测）：`list_packages` 不给 `query` 会把这一个工作区的
+全部包回给你 —— 实测 67 个包 **11.8 KB**，而 `"query":"aapt"` 只剩 5 条。它的 `--help`
+里也有这句提示。
+
 另外两个大头（2026-09-25 实测，`aapt300(c)`）：`list_spec_nodes` 不过滤回 **701 个节点 /
 29,918 字节**，`"query":"app"` → **11 个 / 555 字节**（差 54 倍）；`list_local_strings` 337 条 /
 13,807 字节，`"query":"lbl_apca"` → 84 条 / 3,312 字节，再叠 `"path":"<子树>"` → **6 条 / 398 字节**
@@ -540,7 +557,7 @@ tt dev tzs export "D:/ws/aapt300(c).tzs" -o D:/out --force    # 目标非空时�
 > 包不是原样拷贝的容器。**要证明落盘就比 `sha256`**（返回里那个与 `sha256sum <out>`），
 > 不必靠字节数推断。
 
-## 10. 动词全表（52 个）
+## 10. 动词全表（53 个）
 
 `tt dev tzs --help` 会列出它们（`[工作流]` 在最前；会改模型的标 `[写]`，慢的标 `[slow]`）：
 
@@ -548,7 +565,7 @@ tt dev tzs export "D:/ws/aapt300(c).tzs" -o D:/out --force    # 目标非空时�
 |---|---|
 | 工作流 | `field_add` |
 | 会话 | `open` `save` `close` `verify` `list_open` |
-| 读 | `form_tree` `find_component` `get_component` `list_spec_nodes` `describe_kind` `list_tables` `list_columns` `list_records` `list_local_strings` |
+| 读 | `form_tree` `find_component` `get_component` `list_spec_nodes` `describe_kind` `list_packages` `list_tables` `list_columns` `list_records` `list_local_strings` |
 | 属性 | `set_spec_attr` `set_spec_attrs` `set_layout_attr` `set_layout_attrs` `set_tree_source` `rename_component` |
 | 结构 | `add_widget` `add_field` `insert_at` `delete` `move` `reparent` `nudge` `align` `fit_size` `wrap` `break_layout` `convert_widget` `convert_container` |
 | 页签 | `add_page` `delete_page` |
@@ -560,7 +577,7 @@ tt dev tzs export "D:/ws/aapt300(c).tzs" -o D:/out --force    # 目标非空时�
 > `open` **没有 `force` 参数**（2026-09-25 删掉的，原因见 §6）；`export` 的 `-o` / `--force`
 > 见 §9 —— 它是内建命令，`--help` 走不通，只能照文档写。
 
-**这 52 个来自引擎的函数表。另有 4 个是 `tt` 自己的内建命令，不在表里、也不接受 `--help`：**
+**这 53 个来自引擎的函数表。另有 4 个是 `tt` 自己的内建命令，不在表里、也不接受 `--help`：**
 `export`（§9，本地解压，不用引擎）、`doctor`（自检）、`stop`、`reap`。`tt dev tzs stop --help`
 会退 2 —— 它走的是另一条路径。
 
@@ -578,8 +595,9 @@ tt dev tzs export "D:/ws/aapt300(c).tzs" -o D:/out --force    # 目标非空时�
 - ❌ 参数写成 flag（`--handle h9`）或用位置参数（裸词）→ 退 2。参数一律进 `--args` 的 JSON。
 - ❌ 中文/长内容直接写在命令行里被重编码 → 用 `--args-file` 写 UTF-8 文件。
 - ❌ 给 `path` / `file` / `out` 写相对路径 → 由**守护进程**的 cwd 解释（不是你的 cwd），裸文件名必拒；一律写绝对路径（§4.4）。
-- ❌ `list_columns` / `list_spec_nodes` / `list_local_strings` 不给过滤直接打 → 可能回几十 KB
-  （先看 `--help` 的"先过滤"提示；`list_spec_nodes` 不过滤实测 29,918 字节）。
+- ❌ `list_columns` / `list_spec_nodes` / `list_local_strings` / `list_packages` 不给过滤直接打
+  → 可能回几十 KB（先看 `--help` 的"先过滤"提示；`list_spec_nodes` 不过滤实测 29,918 字节，
+  `list_packages` 实测 67 个包 11.8 KB）。
 - ❌ `attrs` 写成数组、写空对象、或值不带引号（`{"gridWidth":20}`）→ 退 2，点名是哪个键；值一律是字符串。
 
 **改属性**

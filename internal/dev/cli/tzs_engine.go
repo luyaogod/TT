@@ -235,7 +235,7 @@ func placeholder(p *tzs.Param) string {
 
 // ---------- 具名动词：把命令行翻成一次 JSON-RPC ----------
 //
-// 52 个动词（open/save/close/field_add/…）**不是 52 段代码**，而是同一段代码跑 52 次：动词表来自
+// 53 个动词（open/save/close/field_add/…）**不是 53 段代码**，而是同一段代码跑 53 次：动词表来自
 // 引擎的 manifest，参数定型来自同一份 manifest。所以引擎加/改一个函数，这里一行都不用动
 // —— 这正是 internal/dev/tzs/manifest.go 那句「本地绝不抄第二份参数表」的兑现方式。
 

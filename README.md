@@ -97,7 +97,7 @@ tt serve                                    # 起服务，浏览器打开它打�
 tt debug start <作业> -m <模块>              # 调程序 → 细节见 skills/tt-debug
 tt dev tzc export "D:\pkg\x.tzc"            # 改 4GL 客制 → 细节见 skills/tt-dev-tzc
 tt dev tzs field add --args '{"file":"D:\\pkg\\x.tzs","table":"pmdl_t","columns":["pmdlent","pmdlsite"],"out":"D:\\pkg\\_ai.tzs"}'
-                                            # 改表单 → 细节见 skills/tt-dev-tzs（52 个具名动词 + JSON 参数）
+                                            # 改表单 → 细节见 skills/tt-dev-tzs（53 个具名动词 + JSON 参数）
 tt dict r.t --kw 应收                        # 查字典     → 细节见 skills/tt-dict
 ```
 

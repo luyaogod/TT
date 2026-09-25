@@ -312,6 +312,12 @@ namespace TzsCli.Designer
               false, "kindmap", E_STD,
                 P.Handle(),
                 P.KindOrLayout("kind", "七种之一，或 layout（布局属性：名字 + 类型 + 取值集）；省略则返回全部七种")),
+            // 工作区里有哪些**表单包**。加它的理由（2026-09-25 的评测 F23，三个执行者都撞上）：
+            // "哪个文件是 aapt300" 从前只有一个答案 —— 自己 `ls` 工作区，而真实工作区里那是
+            // 29.9 KB 噪音（`.tzc`/`.bak` 混着）。它与 list_tables 同族：不需要句柄，答案来自文件系统。
+            N("list_packages", G_READ, "工作区里的表单包（.tzs/.tzv）", "list<el>", E_STD,
+                Opt(PType.Str, "query", "文件名子串（程序名就是文件名前缀，按程序名筛就行）"),
+                Opt(PType.Int, "limit", "最多回多少条，默认 200")),
             N("list_tables", G_READ, "工作区数据字典里的表", "list<el>", E_STD,
                 Opt(PType.Str, "query", "名称子串"),
                 // `limit` was read by the implementation (IntArg(a,"limit",200)) but declared

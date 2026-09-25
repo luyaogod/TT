@@ -43,6 +43,7 @@ namespace TzsCli.Designer
             into["get_component"]     = GetComponent;
             into["describe_kind"]     = DescribeKind;
             into["list_spec_nodes"]   = ListSpecNodes;
+            into["list_packages"]     = ListPackages;
             into["list_tables"]       = ListTables;
             into["list_columns"]      = ListColumns;
             into["list_records"]      = ListRecords;
@@ -689,6 +690,97 @@ namespace TzsCli.Designer
 
         internal static IEnumerable Tables(Session s) {
             return Reflect.Call(Reflect.Find(Designer.A, "TableColumnHelper"), "GetTables") as IEnumerable;
+        }
+
+        // ================================================================ list_packages
+
+        /// <summary>The two extensions the designer's form side owns: .tzs (表单) and .tzv
+        /// (view). NOT .tzc/.tzf/.tzx -- those belong to the code-package line (tt-dev-tzc),
+        /// and this verb's whole job is "which form package do I open".</summary>
+        static readonly string[] PackageExts = { "*.tzs", "*.tzv" };
+
+        /// <summary>
+        /// The form packages under the workspace, by name.
+        ///
+        /// WHY IT EXISTS (SPEC §11.9's Go-side list; found by the 2026-09-25 eval, F23 --
+        /// three of four executors hit it). "Which file is aapt300?" had no answer anywhere:
+        /// the docs could only say "ls the workspace yourself", which in a real workspace is
+        /// 29.9 KB of noise with .tzc/.bak variants mixed in, and every executor hand-filtered
+        /// it. The designer's own rule (TzpManager.InCurrentWorkspace) is a *directory prefix*
+        /// test, so anything under the workspace counts, nested module directories included --
+        /// this walks the same way.
+        ///
+        /// IT DELIBERATELY DOES NOT READ THE PACKAGES. `program` is derived from the file NAME
+        /// (the `<program>(c).tzs` convention), so it is a hint for picking a file; `open`
+        /// remains the authority on what a package actually contains. Reading each package's
+        /// .tsd to answer that would be 50-200 zip reads per call -- a different, much more
+        /// expensive verb, and one whose answer goes stale the moment someone renames a file.
+        ///
+        /// No session: it answers from the filesystem, like list_tables answers from the data
+        /// dictionary (the dispatch passes a null Session for a NeedsHandle=false verb).
+        /// </summary>
+        public static object ListPackages(Session s, JObject a) {
+            string ws = Workspace(s);
+            if (string.IsNullOrEmpty(ws))
+                throw TzsError.Validation("list_packages 按工作区找包，而工作区是空的："
+                    + "检查配置里的 tzs.workspace（它没有缺省，见 SKILL §1）");
+            string filter = Arg(a, "query");
+            if (filter == null) filter = Arg(a, "filter");   // 别名，与 list_tables / list_columns 同一条规矩
+            int limit = IntArg(a, "limit", 200);
+
+            var paths = new List<string>();
+            try {
+                foreach (string ext in PackageExts)
+                    paths.AddRange(Directory.GetFiles(ws, ext, SearchOption.AllDirectories));
+            } catch (Exception ex) {
+                // 读不动就是读不动：说清是哪个目录、为什么，别让它变成 E_INTERNAL（"上报，别重试"）
+                // —— 这对调用方是"环境不对"，退 2 才对得上。
+                throw TzsError.Validation("扫工作区失败（" + ws + "）：" + ex.Message);
+            }
+            paths.Sort(StringComparer.OrdinalIgnoreCase);
+
+            var arr = new JArray();
+            int total = 0;
+            foreach (string p in paths) {
+                string name = Path.GetFileName(p);
+                if (filter != null && name.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                total++;
+                if (limit > 0 && arr.Count >= limit) continue;
+                var o = new JObject();
+                o["name"] = name;
+                o["path"] = p;
+                string prog = ProgramFromName(name);
+                if (prog != null) o["program"] = prog;
+                try {
+                    var fi = new FileInfo(p);
+                    o["sizeBytes"] = fi.Length;
+                    o["modified"] = fi.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss");
+                } catch {
+                    // 单条 stat 失败不影响整份清单：那几个字段缺席就是"没读到"。
+                }
+                arr.Add(o);
+            }
+
+            var res = new JObject();
+            res["workspace"] = ws;
+            res["count"] = total;
+            res["returned"] = arr.Count;
+            res["truncated"] = limit > 0 && arr.Count < total;
+            res["packages"] = arr;
+            res["note"] = "program 是从**文件名**推的（<程序名>(c).tzs 那条约定），不是打开包读的 —— "
+                        + "权威答案用 open（它回的 program 是设计器自己算的）；这里只用来挑文件";
+            return res;
+        }
+
+        /// <summary>`aapt300(c).tzs` → `aapt300`；`aapt300_wf(s).tzv` → `aapt300_wf`。
+        /// 只认"最后一段括号"，没有就当文件名就是程序名。见 ListPackages 的说明：这是提示，
+        /// 不是权威。</summary>
+        static string ProgramFromName(string name) {
+            if (string.IsNullOrEmpty(name)) return null;
+            string stem = Path.GetFileNameWithoutExtension(name);
+            int i = stem.LastIndexOf('(');
+            if (i > 0 && stem.EndsWith(")")) stem = stem.Substring(0, i);
+            return stem.Length == 0 ? null : stem;
         }
 
         /// <summary>

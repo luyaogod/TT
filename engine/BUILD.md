@@ -71,7 +71,7 @@ TZSCLI_INSTALL=<目录> ./build.sh  # 用别的设计器换掉仓库里那份（
 ```
 tzs-server.exe        服务端（命名管道 / --stdio 两种模式）
 TzsCli.dll            纯文本/zip 层，不反射
-TzsCli.Designer.dll   反射管线 + 52 个动词（函数表）
+TzsCli.Designer.dll   反射管线 + 53 个动词（函数表）
 designer\             设计器的 28 个 .dll（就是本目录下 designer\ 那一份）
 ```
 

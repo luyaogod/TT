@@ -1638,3 +1638,76 @@ func sameStrings(a, b []string) bool {
 	}
 	return true
 }
+
+// listPackagesReply 是 `list_packages` 的返回（只列我们读的字段）。
+type listPackagesReply struct {
+	Count     int  `json:"count"`
+	Returned  int  `json:"returned"`
+	Truncated bool `json:"truncated"`
+	Packages  []struct {
+		Name    string `json:"name"`
+		Path    string `json:"path"`
+		Program string `json:"program"`
+		Size    int64  `json:"sizeBytes"`
+	} `json:"packages"`
+}
+
+// TestCorpusListPackagesNamesWhatItSays —— `list_packages` 报的 `program` 是**从文件名推的**，
+// 而 `open` 的 `program` 是设计器自己算的：这条在**真实工作区**上把两者对一遍。
+//
+// 为什么值得一条：那个 `program` 只是"挑文件"的提示，一旦推错（文件名里多一对括号、后缀没剥干净、
+// `.tzv` 的少见形态），调用方会以为"这个程序没有包" —— 而它**不是权威**，文档与返回体的 note
+// 都这么写。所以判据是"两个答案一致"，顺带把"报的路径真的存在"一起验了。
+func TestCorpusListPackagesNamesWhatItSays(t *testing.T) {
+	env := requireCorpus(t)
+	seen := map[string]bool{}
+	checked := 0
+	for _, src := range env.pkgs {
+		ws := workspaceOf(src)
+		if ws == "" || seen[ws] {
+			continue
+		}
+		seen[ws] = true
+		s := startStdio(t, env.exe, ws, 3*time.Minute)
+		rep, ok := ask[listPackagesReply](t, s, "listpackages", "list_packages",
+			map[string]any{"limit": 5})
+		if !ok {
+			s.close()
+			continue
+		}
+		if rep.Count < rep.Returned {
+			t.Errorf("count=%d 比 returned=%d 还小", rep.Count, rep.Returned)
+		}
+		if rep.Count == 0 {
+			t.Errorf("%s 里一个包都没有？工作区明明有 .tzs（%s）", ws, filepath.Base(src))
+		}
+		opened := false
+		for _, p := range rep.Packages {
+			if p.Name == "" || p.Path == "" {
+				t.Errorf("每条都该有 name 与 path：%+v", p)
+				continue
+			}
+			if _, err := os.Stat(p.Path); err != nil {
+				t.Errorf("%s 报的路径不存在：%v", p.Name, err)
+			}
+			if p.Program == "" || opened {
+				continue // 每个工作区开一个就够：其余条目的路径已由上面那次 Stat 覆盖
+			}
+			o, ok := ask[openReply](t, s, "listpackages/open", "open", map[string]any{"path": p.Path})
+			if !ok {
+				continue
+			}
+			if o.Program != p.Program {
+				t.Errorf("%s：list_packages 推的 program=%q，open 回的是 %q —— 推导与权威不一致",
+					p.Name, p.Program, o.Program)
+			}
+			s.call("close", map[string]any{"handle": o.Handle})
+			opened, checked = true, checked+1
+		}
+		s.close()
+	}
+	if checked == 0 {
+		t.Skip("没验到（语料里没有推得出工作区的包）")
+	}
+	t.Logf("在 %d 个工作区上对过 program（list_packages 推的 vs open 回的）", checked)
+}
