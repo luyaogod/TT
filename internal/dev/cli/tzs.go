@@ -26,7 +26,6 @@ import (
 
 	"tt/internal/dev/model"
 	"tt/internal/dev/pkgfile"
-	"tt/internal/dev/tzs"
 )
 
 const tzsUsage = `tt dev tzs —— 表单包工具（导出只读；读写表单由一个常驻引擎跑）
@@ -103,12 +102,16 @@ func cmdTzs(args []string) int {
 //
 // 为什么允许"可有可无"：`--help` 是**还没有环境时唯一能用的一条命令**。要求引擎可达
 // 就等于把说明书锁在门里面（而那条门锁正是 `tt dev tzs doctor` 要告诉你怎么开的）。
+//
+// 可达性判断**必须是有限的**：`fetchManifest(exe, verbIndexTimeout)` 那个期限不是装饰 ——
+// 从前这条走 `tzsCtx()`（没有期限），引擎卡住时帮助会**永远**挂着（2026-09-25 实测），
+// 而那正是对上面那句话的反讽。
 func printVerbIndexIfReachable(w io.Writer) {
 	exe, err := tzsEngineExe()
 	if err != nil {
 		return
 	}
-	m, err := tzs.FetchManifest(tzsCtx(), exe)
+	m, err := fetchManifest(exe, verbIndexTimeout)
 	if err != nil {
 		fmt.Fprintln(w, "\n（这次没能列出动词名：引擎不可达。tt dev tzs doctor 看差什么）")
 		return

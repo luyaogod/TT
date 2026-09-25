@@ -463,7 +463,7 @@ func runTzsVerb(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 5
 	}
-	m, err := tzs.FetchManifest(tzsCtx(), exe)
+	m, err := fetchManifest(exe, manifestTimeout)
 	if err != nil {
 		return emitFailure(err, f.asJSON)
 	}
@@ -802,6 +802,32 @@ func cmdTzsDoctor(args []string) int {
 // tzsCtx 是一次命令的 context。引擎那侧的超时由 tzs.Call 自己管（命名管道不支持 deadline），
 // 所以这里只用来传递取消。
 func tzsCtx() context.Context { return context.Background() }
+
+// 函数表拉取的时限。两处调用给的值不同，但**都必须有上限**。
+//
+// 为什么必须（2026-09-25 实测，一次真事故）：`tzsCtx()` 是 `context.Background()` —— 没有期限，
+// 而 `FetchManifest` 会去 spawn `tzs-server.exe --manifest`。引擎 exe 存在但卡住时（半死、被
+// 安全软件挂着），这条调用会**永远**挂着，而它是**每一条** `tt dev tzs <动词>` 的第一件事，
+// 包括 `<动词> --help` —— 于是"还没有环境时唯一能用的一条命令"变成了唯一一条会挂死的命令。
+// 那次是 `--help` 的测试挂满 10 分钟被 go test 判超时，goroutine dump 停在写动词索引上。
+// （那是**第二个** bug，见 pos_test.go 的 captureStdout；两个叠在一起才让它显形。）
+//
+// 上限该给多少，看函数的体量：spawn 一个 8 KB 的 exe、打印 41 KB JSON，本机实测 ~50 ms。
+const (
+	// manifestTimeout 是"派发前要校验参数"的那条路：拿不到就退 5，所以给足冷启动、杀软扫描、
+	// 机器正忙的时间 —— 但绝不是"永远"。
+	manifestTimeout = 60 * time.Second
+	// verbIndexTimeout 是 `--help` 末尾那段动词索引：它是**装饰**，拿不到就少一段、退出码不变，
+	// 所以短得多 —— 谁都不该为了看帮助等一分钟。
+	verbIndexTimeout = 10 * time.Second
+)
+
+// fetchManifest 拉函数表，**带一个期限**（理由见上）。
+func fetchManifest(exe string, d time.Duration) (*tzs.Manifest, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), d)
+	defer cancel()
+	return tzs.FetchManifest(ctx, exe)
+}
 
 func replyString(r *tzs.Reply, key string) string {
 	var m map[string]any

@@ -734,6 +734,12 @@ func TestRemovedCommandsAreNotAdvertised(t *testing.T) {
 // 这条是刻意的：`--help` 是"我还没有环境时唯一能用的一条命令"，
 // 让它去 Boot 一个设计器（或在没配工作区时退 5）等于把说明书锁在门里面。
 // 动词索引是**尽力而为**的附加物：拿不到就少一段，不影响退出码。
+//
+// ⚠️ 这条曾经挂死过（2026-09-25）：`TT_CONFIG` 恰好把引擎指通时，`--help` 会附上动词索引，
+// 整份输出 4,574 字节 —— 越过 `captureStdout` 那个管道的缓冲，于是写端阻塞、读端在等它返回。
+// 当时表现为这条测试挂满 10 分钟被 go test 判超时，看着像"引擎不可达时帮助卡住"，其实是
+// **测试装置**的锅（见 pos_test.go 的 captureStdout）。修复后它现在跑的是**两条**路都要过：
+// 引擎不可达（默认）与可达（配了 TT_CONFIG 时）。
 func TestCmdTzsHelpIsStatic(t *testing.T) {
 	for _, a := range []string{"-h", "--help", "help"} {
 		code, out := captureStdout(t, func() int { return cmdTzs([]string{a}) })
@@ -746,5 +752,33 @@ func TestCmdTzsHelpIsStatic(t *testing.T) {
 	}
 	if got := silent(t, func() int { return cmdTzs(nil) }); got != 2 {
 		t.Errorf("没有子命令该退 2，得 %d", got)
+	}
+}
+
+// TestFetchManifestHonorsItsDeadline —— 函数表拉取必须**可取消**。
+//
+// 测的不是"多久算超时"，而是**期限真的被用上了**：给一个 1 纳秒的期限，调用必须失败。
+// 谁把这个 context 换回 `context.Background()`（2026-09-25 之前就是那样），这条立刻红
+// —— 那时候 exe 会真的被 spawn 起来打印 41 KB，调用成功返回，`err == nil`。
+//
+// 为什么这条要紧：拉函数表是**每一条** `tt dev tzs <动词>` 的第一件事，包括
+// `<动词> --help`。没有期限时，一个卡住的引擎 exe 会让每一条命令永远挂着 ——
+// 那次真事故是 `--help` 挂满 10 分钟（POSIX 侧的 captureStdout 让它显形，见 pos_test.go）。
+//
+// 关于本文件开头那条"这一层不碰引擎"：这条**不连引擎**——1 纳秒的期限让进程根本起不来，
+// 它只 Stat 一下那个 exe，不在的话跳过。所以它不依赖本机配置，也不会时好时坏。
+func TestFetchManifestHonorsItsDeadline(t *testing.T) {
+	exe := filepath.Join("..", "..", "..", "engine", "out", "tzs-server.exe")
+	if _, err := os.Stat(exe); err != nil {
+		t.Skipf("没有引擎 exe（%v）：这条测的是期限机制本身", err)
+	}
+	start := time.Now()
+	_, err := fetchManifest(exe, time.Nanosecond)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Error("1 纳秒的期限该让拉取失败 —— 成功了就说明期限没被用上")
+	}
+	if elapsed > 20*time.Second {
+		t.Errorf("该很快返回，等了 %v —— 期限没传到子进程上", elapsed)
 	}
 }

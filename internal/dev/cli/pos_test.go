@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,24 +14,55 @@ import (
 )
 
 // captureStdout 把命令的 stdout 收进字符串（命令里 `line(w, …)` 直接写 os.Stdout）。
-// 进程内 os.Pipe 即可：输出量小，先关写端再读不会阻塞。
+//
+// **必须边写边读**（2026-09-25 实测）。原来的写法是"先跑完 fn，关掉写端，再读"，注释里写着
+// "输出量小，先关写端再读不会阻塞" —— 那个前提有边界，而边界就在 4 KB 左右：进程内管道的缓冲
+// 是有限的，`tt dev tzs --help` 在**引擎可达**时会附上动词索引，整份输出 4,574 字节，恰好越过
+// 缓冲。于是写端阻塞、而它在等 fn() 返回、fn() 在等写成功 —— 一条测试挂满 10 分钟被 go test
+// 判超时，goroutine dump 停在 `Manifest.Index` 的 Fprintf 上。
+//
+// 这个坑一直存在，只是平时不显形：默认跑测试时引擎不可达（没有 `TT_CONFIG`），索引那段不打印，
+// 输出就小。它是被"环境变量恰好把引擎指通了"这件事**偶然**翻出来的。
 func captureStdout(t *testing.T, fn func() int) (int, string) {
 	t.Helper()
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("建管道失败: %v", err)
 	}
+	done := make(chan string, 1)
+	go func() {
+		b, _ := io.ReadAll(r)
+		done <- string(b)
+	}()
 	old := os.Stdout
 	os.Stdout = w
 	code := fn()
 	os.Stdout = old
 	w.Close()
-	out, err := io.ReadAll(r)
+	out := <-done
 	r.Close()
-	if err != nil {
-		t.Fatalf("读管道失败: %v", err)
+	return code, out
+}
+
+// TestCaptureStdoutSurvivesBigOutput 钉住上面那个边界（约 4 KB）。
+//
+// 判据是"它回来了"—— 而这一条**必须见过它红**：把 captureStdout 退回"先跑完再读"的写法，
+// 这条测试不会失败，它会**挂住**（写端阻塞在管道缓冲上，读端在等 fn 返回），最后靠 go test 的
+// 超时兜底。所以输出量给到 64 KB，远超任何管道缓冲。
+func TestCaptureStdoutSurvivesBigOutput(t *testing.T) {
+	const n = 64 * 1024
+	code, out := captureStdout(t, func() int {
+		for i := 0; i < n; i++ {
+			fmt.Fprint(os.Stdout, "x")
+		}
+		return 0
+	})
+	if code != 0 {
+		t.Errorf("退出码该原样返回 0，得 %d", code)
 	}
-	return code, string(out)
+	if len(out) != n {
+		t.Errorf("该收全 %d 字节，得 %d（收不全说明读端没跟上）", n, len(out))
+	}
 }
 
 // exportFixture 导出一个合成包到临时工作区，返回 (工作区目录, 包路径, 渲染文档字节)。

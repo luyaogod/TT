@@ -252,7 +252,8 @@ namespace TzsCli.Designer
                 // SPEC.md §11.24 (g) says what the caller must do instead: close, then open.
                 // A clean executor in the 2026-09-24 baseline read `open --help`, saw `force` listed
                 // and §6 saying it is unimplemented, and reported the contradiction.
-            F("save", G_SESSION, "把句柄的模型写回新包（不改会话状态）", false, "void", E_STD,
+            F("save", G_SESSION, "把句柄的模型写回新包（不改会话状态）；回 bytesIn/bytesOut 与写入字节的 sha256",
+                false, "void", E_STD,
                 P.Handle(),
                 P.As(P.Str("out", true, "输出 .tzs 路径"), Role.PackagePath)),
             // Mutating=false, and the argument for it was sitting in Fns/Session.cs's dead

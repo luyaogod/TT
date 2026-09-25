@@ -478,6 +478,15 @@ func TestCorpusPin(t *testing.T) {
 
 // sha16 取 sha256 的前 16 位十六进制（与 make-manifest.sh 的 cut -c1-16 同一个口径）。
 func sha16(path string) (string, error) {
+	full, err := sha256full(path)
+	if err != nil {
+		return "", err
+	}
+	return full[:16], nil
+}
+
+// sha256full 是整条 64 位十六进制摘要 —— 引擎 `save` 的返回里给的就是它。
+func sha256full(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err
@@ -487,7 +496,7 @@ func sha16(path string) (string, error) {
 	if _, err := io.Copy(h, f); err != nil {
 		return "", err
 	}
-	return hex.EncodeToString(h.Sum(nil))[:16], nil
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 //---------------------------------------------------------------------------
@@ -654,11 +663,38 @@ func oneCorpusFile(t *testing.T, env *corpusEnv, op corpusOp, idx int, src, ws s
 	}
 }
 
-// saveTo 让引擎把句柄的模型写回 out；只看成败（save 的返回内容这里用不上）。
+// saveTo 让引擎把句柄的模型写回 out，并**就地断言两条**：返回的 sha256 就是盘上那份文件的
+// 摘要，且返回里带着新包的 key。
+//
+// 为什么在这条最热的路径上顺手验（它每个包都会跑一遍）：这两个字段的存在理由，就是让调用方
+// **不必**再开三次引擎调用去证明"改动落了盘"（2026-09-25 的评测 F10：回读要 save → close →
+// open 新包 → 读，而 get_component / verify 读的都是内存模型，拿它们回读是自证循环）。
+// 一个"我写了 X"的摘要如果不能与盘上的字节对上，它比没有更坏 —— 所以这条断言与那两个字段
+// 是同一次改动的一部分，不是锦上添花。
 func saveTo(t *testing.T, s *stdioSession, label, h, out string) bool {
 	t.Helper()
-	_, ok := ask[saveReply](t, s, label, "save", map[string]any{"handle": h, "out": out})
-	return ok
+	rep, ok := ask[saveReply](t, s, label, "save", map[string]any{"handle": h, "out": out})
+	if !ok {
+		return false
+	}
+	if rep.Sha256 == "" {
+		t.Errorf("%s: save 的返回里没有 sha256", label)
+		return false
+	}
+	disk, err := sha256full(out)
+	if err != nil {
+		t.Errorf("%s: 读产出算摘要失败：%v", label, err)
+		return false
+	}
+	if disk != rep.Sha256 {
+		t.Errorf("%s: save 说写了 %s…，盘上却是 %s… —— 摘要与文件不符", label, rep.Sha256[:16], disk[:16])
+		return false
+	}
+	if rep.Key == "" {
+		t.Errorf("%s: save 的返回里没有 key（新包沿用源包 ProgramKey，回读它要先 close，这个字段就是给那件事的）", label)
+		return false
+	}
+	return true
 }
 
 // mustDiffer 断言两个产出不同 —— 即那一次写真的落到了文件上。
@@ -701,6 +737,8 @@ type saveReply struct {
 	Out         string `json:"out"`
 	BytesIn     int    `json:"bytesIn"`
 	BytesOut    int    `json:"bytesOut"`
+	Sha256      string `json:"sha256"`
+	Key         string `json:"key"`
 	LayoutDirty bool   `json:"layoutDirty"`
 	State       string `json:"state"`
 }

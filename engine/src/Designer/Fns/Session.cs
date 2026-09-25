@@ -186,6 +186,10 @@ namespace TzsCli.Designer.Fns
         ///
         /// Nothing about the handle changes: no UndoRedoManager, no state transition, which is
         /// why this is not a mutating fn.
+        ///
+        /// The result carries `sha256` (of the bytes just written) and `key` (which the saved
+        /// package keeps) -- see the comment at the return below for why those two, of all the
+        /// fields, are the ones a caller cannot compute for itself.
         /// </summary>
         static object SaveFn(DS s0, JObject args) {
             DS s = Resolve(s0, args);
@@ -207,8 +211,19 @@ namespace TzsCli.Designer.Fns
                 { "out",        outPath },
                 { "bytesIn",    (long)original.Length },
                 { "bytesOut",   (long)result.Length },
+                // The two facts a caller needs to CLOSE the loop on its own (SPEC §11.9 item 14):
+                // the digest of what was just written (so `sha256sum <out>` proves those bytes
+                // landed), and the key, because a saved package keeps the source's ProgramKey --
+                // so opening it to read back collides with this very session unless it is closed
+                // first. Making the caller derive either of those from prose is what the eval
+                // measured (F10/F11): the read-back step cost three engine calls, and every
+                // executor had to discover the collision by hitting it.
+                { "sha256",     TzsCli.Designer.Save.Sha256Hex(result) },
+                { "key",        KeyString(s.Key) },
                 { "layoutDirty", w4.Dirty },
                 { "state",      State(s) },
+                { "note",       "新包沿用源包的 ProgramKey（回读它要先 close 本句柄）；"
+                                + "sha256 是刚写进 out 的那份字节的摘要，与 `sha256sum <out>` 比对即可证明落盘" },
             };
         }
 

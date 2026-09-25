@@ -90,7 +90,8 @@ tt dev tzs field_add --args '{"file":"D:/ws/x.tzs","table":"pmdl_t","columns":["
 `container` / `added`（**对象**：`{tag,name,path,container,table,columns,promoted,bound,added[]}` ——
 节点清单在里层那个**也叫 `added` 的数组**里；`promoted` = 被提升/补建的节点数、
 `bound` = 真正绑到表列的字段数）/ `validate`（`newErrorCount`/`newWarningCount` + 明细）/
-`baselineCached` / `saved`（`out`、字节数）。**不回表单全量，也不回校验的 baseline/after 全表** ——
+`baselineCached` / `saved`（`out`、`bytesIn`/`bytesOut`、`sha256`、`key` —— 与 `save` 的返回同一个
+形状，见下）。**不回表单全量，也不回校验的 baseline/after 全表** ——
 要看全量就单独调 `validate`。
 
 > ⚠️ **`field_add` 的 `validate.newErrorCount: 0` 只有在 `baselineCached:true` 时才算数。**
@@ -98,10 +99,22 @@ tt dev tzs field_add --args '{"file":"D:/ws/x.tzs","table":"pmdl_t","columns":["
 > `baselineCached` 是 `false`，那个 0 什么都没证明。判断"改对了"用回读（见下），
 > 不是用这个计数。
 
-**存了新包之后要回读它，先 `close`。** `save`/`field_add --out` 出的新包 **program 名与源包
-相同**（`aapt300(c).tzs` → `_ai.tzs` 都叫 `aapt300`），而 `open` 的 key 是 `程序名|Form`、
-**不含路径** —— 所以不先 `close` 源会话，`open` 新包会撞 `E_KEY_IN_USE`（退 4）。顺序是
-`close --form <程序名>` → `open --args '{"path":"<新包>"}'`，拿到的是**新句柄**（§6：句柄永不复用）。
+**"落了盘没有"和"盘上内容对不对"是两个问题，各有便宜的问法。**
+
+| 你想知道 | 怎么问 | 代价 |
+|---|---|---|
+| 改动**落了盘**（文件里就是引擎刚写的那份字节） | `sha256sum <out>` 与 `save` 返回里的 `sha256` 比一次 | **一条 shell 命令，不碰引擎** |
+| 盘上那个包**内容**是什么 | `close` 源会话 → `open <新包>` → 读 | 三次引擎调用，但看得到内容 |
+
+前者为什么成立：`save` 渲染的就是**当前模型**（§11.24(b) 的不动点，语料回归在每个包上验它），
+而 `sha256` 是它刚写下去那份字节的摘要 —— 两个已知事实一叠，"盘上就是这个包"就闭合了。
+（`get_component` / `verify` 证明不了这一条：它们读的都是**内存模型**，而 save 正是把那个模型写盘。）
+
+**要 `open` 新包就必须先 `close`**：新包 **program 名与源包相同**（`aapt300(c).tzs` → `_ai.tzs` 都叫
+`aapt300`），而 `open` 的 key 是 `程序名|Form`、**不含路径** —— 不先 `close` 源会话就撞
+`E_KEY_IN_USE`（退 4）。`save` 的返回里**就写着这个 key**（`key` 字段）与一句 `note`，
+不必自己去推。顺序是 `close --form <程序名>` → `open --args '{"path":"<新包>"}'`，
+拿到的是**新句柄**（§6：句柄永不复用）。
 
 **边界**：它只做"按表的列加字段"。改属性、挪布局、页签、多语言仍是细粒度动词 —— 走 §3。
 
@@ -112,12 +125,16 @@ tt dev tzs doctor                                        # 先自检：引擎/�
 tt dev tzs <动词> --help                                 # 参数表 + 一条能直接粘的示例
 
 # 正解顺序（全程 --form 寻址，不搬运句柄）：
-#   open → 读 → validate(建基线) → 改 → validate(增量) → save → close → open(新包) → 回读
+#   open → 读 → validate(建基线) → 改 → validate(增量) → save → 落盘证明
+# 落盘证明有两种问法，按你要问什么选（§2 有表）：
+#   · "文件里就是引擎刚写的那份字节" → save 返回的 `sha256` 与 `sha256sum <out>` 比一次（不碰引擎）
+#   · "盘上那个包的内容" → close → open(新包) → 读（多两次调用）
 # 三处容易走错的：
 #   · validate 想报增量，第一次必须排在**改之前**（§5：一个会话上的首调就是建基线那次）
-#   · `save` 出的新包 program 名与源包**相同**，直接 open 会撞 E_KEY_IN_USE（§6）→ 先 close
-#   · 要证明**盘上**那个包带上了改动，只能 close 后 open 新包再读：`get_component` 与
-#     `verify` 读的都是**句柄里的内存模型**，而 save 正是把那个模型写盘 —— 拿它们回读是自证循环
+#   · `save` 出的新包 program 名与源包**相同**（返回里的 `key` 就写着它），要 open 它必须先
+#     close，否则 E_KEY_IN_USE（§6）
+#   · `get_component` 与 `verify` 读的都是**句柄里的内存模型**，而 save 正是把那个模型写盘
+#     —— 拿它们回读证明不了**盘上**的字节，那是自证循环
 tt dev tzs open           --args '{"path":"D:/ws/aapt300(c).tzs"}' --json   # → {"program":"aapt300",…}
 tt dev tzs form_tree      --form aapt300 --args '{"depth":3}' --json            # 结构树，每节点带 name-path
 tt dev tzs find_component --form aapt300 --args '{"query":"worksheet"}' --json  # 控件代号 → name-path
@@ -129,16 +146,22 @@ tt dev tzs set_spec_attr  --form aapt300 --args '{"path":"<path>","kind":"field"
 tt dev tzs set_spec_attrs --form aapt300 --args '{"path":"<path>","kind":"field","attrs":{"can_edit":"Y","can_query":"N"}}' --json
 tt dev tzs validate       --form aapt300 --json                                 # ② 真增量（①已经建过基线）
 tt dev tzs save           --form aapt300 --args '{"out":"D:/ws/_ai.tzs"}' --json  # 写**新**包；原包一字节不动
+                                                                                #   → 记下返回里的 sha256 与 key
+# ③ 落盘证明（二选一；下面这条不碰引擎）
+sha256sum D:/ws/_ai.tzs                                                         # 与上一步的 sha256 比一次即证
+#   （不在 Git Bash 里就用 PowerShell：Get-FileHash -Algorithm SHA256 D:\ws\_ai.tzs）
+# 或者要看内容（多两次调用，且必须先 close）：
 tt dev tzs close          --form aapt300 --json
-tt dev tzs open           --args '{"path":"D:/ws/_ai.tzs"}' --json               # ③ 从盘重载新包…
-tt dev tzs get_component  --form aapt300 --args '{"path":"<path>"}' --json       # …这才证明改动**落了盘**
+tt dev tzs open           --args '{"path":"D:/ws/_ai.tzs"}' --json               # 从盘重载新包
+tt dev tzs get_component  --form aapt300 --args '{"path":"<path>"}' --json       # 回读它内容
 tt dev tzs stop                                          # 停本工作区的常驻引擎（内建命令，不是引擎动词）
 ```
 
 > ⚠️ **validate 的增量只对"改动之后的那次"成立**，而一个会话上第一次调用永远是建基线那次（§5）。
 > 所以上面那个 ① 不能省：省掉它，改动后那次就是首调，`newErrors` 按构造是空 —— 那不是"没改坏"，
-> 是没测。反过来，**纯布局改动可以不跑 validate**（回读就是证明，见 ③），它值得跑的时候是
-> 你怀疑这次改动有语义副作用。真正的"改对了"永远由**回读**证明，validate 只回答"有没有改坏"。
+> 是没测。反过来，**纯布局改动可以不跑 validate**（落盘证明 + 回读就是证明，见 ③），
+> 它值得跑的时候是你怀疑这次改动有语义副作用。
+> validate 只回答"有没有改坏"；"改对了"由**回读**回答，而"落盘了"由 `sha256` 那条一比回答。
 
 **要改多个属性就用复数形式**（`set_spec_attrs` / `set_layout_attrs`）：一次请求、一次寻址、**先全量校验再全量写**
 —— 名字或值有一个不合法，一个都不会写。它省掉的是 N 遍那条 100 多字符的 name-path。
@@ -435,7 +458,8 @@ tt dev tzs export "D:/ws/aapt300(c).tzs"    # 纯解压到 <包目录>\aapt300-u
 > ⚠️ **新包通常比源包小，那不是丢数据。** `save` / `field_add --out` 的返回里 `bytesIn` 是源包、
 > `bytesOut` 是写出来的新包，两者常差一截（实测 57,818 → 45,480；13,138 → 11,167）—— 设计器
 > 按模型**重算**了各条目并去冗余。这也是"别手改 `export` 的产物再塞回包"的另一个理由：
-> 包不是原样拷贝的容器。想确认内容，只能**回读**（见 §3 的 ③）。
+> 包不是原样拷贝的容器。**要证明落盘就比 `sha256`**（返回里那个与 `sha256sum <out>`），
+> 不必靠字节数推断。
 
 ## 10. 动词全表（52 个）
 

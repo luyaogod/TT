@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Security.Cryptography;
 using System.Text;
 using System.Xml.Linq;
 using TzsCli;
@@ -49,6 +50,29 @@ namespace TzsCli.Designer
             byte[] result = TzsRepacker.Repack(original, repl);
             File.WriteAllBytes(outPath, result);
             return result;
+        }
+
+        /// <summary>
+        /// The digest of a package's bytes, so a caller can prove WHICH bytes landed on disk
+        /// without a second engine call.
+        ///
+        /// WHY IT EXISTS (SPEC §11.9 item 14; measured by the 2026-09-25 eval, F10). "Prove the
+        /// change reached the file" used to cost three engine calls -- save, close, open the new
+        /// package, read -- because `get_component` and `verify` both read the in-memory model that
+        /// save writes FROM, which makes them circular. With this digest the chain closes in one
+        /// shell command: `get_component` shows the change in the model, `save` returns the digest
+        /// of what it wrote, and `sha256sum <out>` on the file proves those are the bytes on disk.
+        /// Two already-tested invariants hold that together -- save renders the current model
+        /// (SPEC §11.24 (b)'s fixed point, which the corpus RoundTrip oracle runs on every package),
+        /// and a digest of the written bytes is what it says it is.
+        /// </summary>
+        public static string Sha256Hex(byte[] bytes) {
+            using (SHA256 h = SHA256.Create()) {
+                byte[] d = h.ComputeHash(bytes);
+                var sb = new StringBuilder(d.Length * 2);
+                foreach (byte b in d) sb.Append(b.ToString("x2"));
+                return sb.ToString();
+            }
         }
     }
 }
