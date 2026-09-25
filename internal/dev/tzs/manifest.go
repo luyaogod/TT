@@ -34,16 +34,19 @@ const FnStop = "stop"
 // 契约给的清单漏了 `handle` —— 而它在真 manifest 里出现 44 次（每个需要句柄的函数都
 // 有一个必填的 handle 参数）。它按字符串处理即可（形如 "h1"），所以类型表必须收它。
 const (
-	TypeString   = "string"
-	TypePath     = "path"
-	TypeInt      = "int"
-	TypeBool     = "bool"
-	TypeKind     = "kind"
-	TypeAttr     = "attr"
-	TypeEnum     = "enum"
-	TypeHandle   = "handle"
-	TypePathList = "path[]"
-	TypeStrList  = "string[]"
+	TypeString = "string"
+	TypePath   = "path"
+	TypeInt    = "int"
+	TypeBool   = "bool"
+	TypeKind   = "kind"
+	// describe_kind 自己的词汇：七种规格节点，或 layout（那张表单上布局属性名的并集）。
+	// 与 TypeKind 分开是有意的 —— 三个写动词的 kind 收不下 layout（没有布局规格节点可写）。
+	TypeKindOrLayout = "kind-or-layout"
+	TypeAttr         = "attr"
+	TypeEnum         = "enum"
+	TypeHandle       = "handle"
+	TypePathList     = "path[]"
+	TypeStrList      = "string[]"
 	// 「一次改多个属性」的参数：`{"属性名":"值", …}`。和 path[]/string[] 一样是**容器**，
 	// 所以本地必须认形状（对象、值是字符串）—— 把它当字符串处理会让一个合法调用被本地判死。
 	TypeAttrs = "attrs"
@@ -57,7 +60,7 @@ const (
 // 合法的新参数判成「未知类型」。
 func KnownType(t string) bool {
 	switch t {
-	case TypeString, TypePath, TypeInt, TypeBool, TypeKind, TypeAttr, TypeEnum, TypeHandle, TypePathList, TypeStrList, TypeAttrs:
+	case TypeString, TypePath, TypeInt, TypeBool, TypeKind, TypeKindOrLayout, TypeAttr, TypeEnum, TypeHandle, TypePathList, TypeStrList, TypeAttrs:
 		return true
 	}
 	return false

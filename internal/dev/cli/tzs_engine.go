@@ -218,7 +218,7 @@ func placeholder(p *tzs.Param) string {
 			return tzs.JSONString("<包路径>")
 		}
 		return tzs.JSONString("<name-path>")
-	case tzs.TypeKind:
+	case tzs.TypeKind, tzs.TypeKindOrLayout:
 		return tzs.JSONString("<kind>")
 	case tzs.TypeAttr:
 		return tzs.JSONString("<属性名>")

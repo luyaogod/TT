@@ -1241,12 +1241,11 @@ tt dev tzs nudge --form aapp320 --args '{"paths":["a/b","c/d"],"direction":"righ
 换来的是一条清晰的边界：`tt` 对外只有"动词"这一层，引擎的函数表（名字 + 参数 + 类型 + 取值集）
 是它自己的内部契约 —— 想直接看它，用引擎自己的开关 `tzs-server --manifest`。
 
-代价写在明处（其二）：**manifest 会声明"引擎故意不实现"的参数**。目前是 `open` 的 `force` ——
-参数表里有它（`Manifest.cs:156`），函数体则直接拒绝并给出正确做法（先 `close` 占用者；
-`Fns/Session.cs:168-172`），理由是"接管占用者"正是契约禁止的静默驱逐。所以
-`tt dev tzs open --help` 会把一个照写必失败的参数列出来（`E_NOT_IMPLEMENTED`，退 1）。
-删掉那行声明属于引擎改动（`SPEC.md:1572` 也一并改），排到引擎批次；在那之前按 SKILL §6
-的说法走：占用者只能被显式 `close`。
+代价写在明处（其二）：**manifest 里一度声明过"引擎故意不实现"的参数**。`open` 的 `force` 就是
+（参数表里有它、函数体直接拒绝），于是 `--help` 会列出一个照写必失败的参数 —— 2026-09-24 的
+评测基线里，一个干净执行者读到 `--help` 与 SKILL §6 之间的矛盾并如实报了出来。
+**已于 2026-09-25 删掉那行声明**（连同 SPEC §11.24(g) 里那句），理由是项目自己的标准：
+advertised-but-inert 比不存在更坏。引擎侧那个拒绝**留着当兜底** —— 声明哪天回来了，它也还拦得住。
 
 #### 7.5.3 帮助里的示例是**生成**的
 
@@ -1957,7 +1956,7 @@ TDev 的两点被完整保留：位置无关的参数解析（`-o`/`--json` 可�
 
 剩下的是**必须重建一次引擎**才能做的那批（重建会换 MVID → 管道名变 → 在跑的守护进程
 变孤儿，靠 `tt dev tzs reap --yes` 收，再加一次重打包，所以攒在一起做）。
-**第 1 条已于 2026-09-24 完成（单独一次重建、单独提交）；其余 8 条等下一次重建。**
+**第 1 条 2026-09-24 已发；第 2 / 4 / 8 / 9 条 2026-09-25 随第二次重建一起发；其余四条（3 / 5 / 6 / 7）等下一次。**
 
 1. ✅ **`save` / `field_add` 的 `out` 闸门（已做，2026-09-24，`Fns/Session.cs` 的 `CheckOutPath`）。**
    指到源包会覆盖原始素材（`Save.Run` 结尾就是 `File.WriteAllBytes`），而这条此前**只写在
@@ -1974,9 +1973,12 @@ TDev 的两点被完整保留：位置无关的参数解析（`-o`/`--json` 可�
    **这条闸门是"撤掉它之后被证明有用"的**：把那一行注掉重建、跑同一个测试，它当场把语料里的
    `109/35/bsft001_wf(s).tzs` 覆盖了（sha `3258ac73…` → `f6577d9d…`）。那次事故的账记在
    §9.3。
-2. **`list_tables` 的 `limit` 声明进 manifest。** 实现读 `IntArg(a,"limit",200)`，而
-   `Manifest.Check` 拒未声明的键 —— 于是 200 行这个上限**对调用方是死的**（既不能调高拿第
-   201 张表，也不能调低）。`filter` 别名同理。
+2. ✅ **`list_tables` 的 `limit` 已声明进 manifest（2026-09-25）。** 实现读 `IntArg(a,"limit",200)`，
+   而 `Manifest.Check` 拒未声明的键 —— 于是那个上限对调用方是死的。实测它盖住了多少：工作区
+   数据字典里 **3886 张表**，默认 200 时调用方看不到另外 3686 张，而且**既不能调高也不能调低**。
+   现在 `--args '{"limit":500}'` 拿得到 500 行。
+   附注：`filter` 那几处读**不是死路**（`Read.cs:664` 的注释写着它是给**进程内库调用方**的别名，
+   线上名是 `query`），所以留着没动 —— 我先前把"线上不可达"当成了"没有用"。
 3. **manifest 加 `role` 标注，不改任何参数名。** 参数名是从 C# 函数签名继承的
    （`open.path` vs `field_add.file`、`save.out` 是 `string` 而 `field_add.out` 是 `path`、
    `move.to` / `tab_action.action` / `nudge.direction` / `align.option` 四个名字一个意思）。
@@ -1984,9 +1986,10 @@ TDev 的两点被完整保留：位置无关的参数解析（`-o`/`--json` 可�
    ① 生成的示例按 role 选占位符 —— 现在 `placeholder` 只看参数名是不是 `file`，
    于是 `open.path` 与 `field_add.out` 这两个**包路径**都被教成 `<name-path>`；
    ② 跨动词的同一概念可以被机械检查（"凡 role 相同的参数，占位符规则相同"）。
-4. **`force` 从 manifest 删掉**（`Manifest.cs:156`），并改 `SPEC.md:1572`。与 `add_field.name`
-   的先例一致 —— 那条注释写着 "an advertised parameter that silently does nothing is worse
-   than an absent one"。**在那之前 `tt dev tzs open --help` 会继续列出一个照写必失败的参数。**
+4. ✅ **`force` 已从 manifest 与 SPEC 删掉（2026-09-25）。** 理由与 `add_field.name` 那条同源：
+   advertised-but-inert 比不存在更坏。传它现在得到的是准确的话 —— `E_BAD_REQUEST`
+   「参数 force 不在 manifest 里（函数 open）（该函数的参数：path timeout）」，而不是从前的
+   「force 尚未实现」（那还让人觉得"以后会有"）。**引擎侧那个拒绝留着当兜底**。
 5. **容器枚举收敛到函数体白名单这一个产地。** `Manifest.cs:75-78` 声明 10 个值（含
    `HBox/VBox/Page/Folder`），函数体只收 6 个；根因是引擎里容器名本来就有三份集合
    （`Semantic.cs:911` 十个、`Session.cs:279` 九个、Manifest 十个）。验法：E2E 对**每个
@@ -1999,9 +2002,17 @@ TDev 的两点被完整保留：位置无关的参数解析（`-o`/`--json` 可�
    的 NoOp 分支把"什么也没改"发成了错误帧（`kind=internal` → 退 1），而那份契约明确说这两条
    是**成功帧**（该出现在 `result` 里）。`tt` 侧现在只把文案说清楚了（§7.6），改回去之后
    `IsSuccessCode` 就退化成纯防线。
-8. 小的两条：`add_field` 的 `column`/`columns` 写着"二选一"但两个都是选填（都不给也过本地校验）；
-   `set_spec_description` 的参数声明顺序与其它动词不同（`kind` 在 `path` 之前），而**声明顺序
-   就是线上键序**。
+8. ✅ **一条改了，一条核查后决定不改（2026-09-25）。**
+   - `set_spec_description` 的参数顺序已对齐（`path` 在 `kind` 之前，与 `set_spec_attr` /
+     `set_spec_attrs` 一致）—— 声明顺序就是线上键序，一个动词与它三个兄弟的键序不同，
+     是读的人必须停下来解释的那种差异。
+   - `add_field` 的 `column`/`columns`：**不动**。manifest 的 `Required` 是按参数打的，
+     **表达不了"二选一"**；而函数体已经有那句判据（`Struct.cs:613`「add_field 需要 column（单列）
+     或 columns（多列）之一」）。把任一个改成必填反而会拒掉合法调用。只把那两条 `Desc` 补成
+     "（两个都不给会被拒）"，让 `--help` 别让人误以为可以都不给。
+   - **顺带更正这条自己**：它原先说 `field_add` 声明了 `column` —— 查源码**没有**
+     （`field_add` 的 `columns` 本来就是必填）。那个 `column` 属于**细粒度 `add_field`**，而它确实读它
+     （`Struct.cs:611`）。这是本清单里第二次"照抄普查结论差点改错东西"。
 9. **`describe_kind` 收不下 `kind:"layout"`，于是"布局属性合法集"这条路走不通。**
    函数体**实现了**它（`Read.cs:458`：`else if (want == "layout") res["layout"] = StrArray(LayoutAttrUnion(s))`），
    注释还写着"`kind:"layout"` is how the layout side is asked for explicitly" —— 但它在
@@ -2014,6 +2025,20 @@ TDev 的两点被完整保留：位置无关的参数解析（`-o`/`--json` 可�
    修法：给这一个参数单独的声明（七种 + `layout`），别动全局的 `PType.Kind`（`set_spec_attr`
    的 `kind` 本来就不该收 `layout`）；顺带把描述里那句"七种之一"改掉。这是本项目第三次
    撞上"同一个知识写在两处、只改了一处"（前两次：容器名三份集合、`gate-w3-fns.py` 的 import）。
+   **✅ 已修（2026-09-25）**：新增 `PType.KindOrLayout`（不动全局 `PType.Kind`，因为三个写动词
+   的 `kind` 本来就不该收 `layout`），`describe_kind` 改用它声明；`spec:` 前缀那种老写法一并保留
+   （校验器与函数体都认）。实测 `kind:"layout"` 现在返回**那张表单上所有布局属性名的并集**
+   （`aapt300` 上是 132 个，各表单不同），`set_layout_attr` 的 `from:"layout"` 终于指向一条走得通的路。
+
+10. **`list_local_strings` 从线上根本没有过滤参数。** 它声明的是 `P.Handle()` +
+    `Opt(PType.Path, "path")`，而实现读的是 `Read.Arg(a, "filter")`（`Read.cs:859`）——
+    那个名字**从未声明过**，于是"按关键字过滤多语言串"这条能力**从线上够不到**（进程内库调用方
+    仍可用，与 `list_tables` 的别名同理）。这与 SKILL §4.7 的"清单类动词先过滤"是矛盾的：
+    那一条对别的 read 动词成立，对这个不成立 —— 而多语言串在一张 670 元素的表单上正是大块头。
+    修法二选一：把 `query` 声明上（与 `list_tables`/`list_columns`/`find_component` 同名），
+    或把实现里的读法改成 `Arg(a,"query")`；**两条要一起改，别只改一处**。
+    **2026-09-25 发现，未做** —— 那属于这个动词自己的契约问题（它到底该不该有过滤器），
+    不该由顺手一起做。
 
 不需要重建引擎的（Go 侧，可单独发）：
 

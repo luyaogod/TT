@@ -21,6 +21,7 @@ namespace TzsCli.Designer {
         Path,        // a .tzs path or a name-path inside the form
         Handle,      // a server-minted handle ("h1")
         Kind,        // one of the seven spec node kinds
+        KindOrLayout,// those seven, or "layout" -- describe_kind's own vocabulary
         AttrName,    // describe_from decides the legal set at runtime
         Enum,        // Values decides it statically
         StrList, PathList,
@@ -76,6 +77,21 @@ namespace TzsCli.Designer {
             { return new Param { Name = n, Type = PType.Handle, Required = true }; }
         public static Param Kind(string n = "kind")
             { return new Param { Name = n, Type = PType.Kind, Required = true }; }
+        /// <summary>describe_kind's own vocabulary: the seven spec kinds plus "layout" (the union
+        /// of layout attribute names, which is what set_layout_attr's `attr` is drawn from).
+        ///
+        /// A SEPARATE TYPE rather than a wider <see cref="PType.Kind"/>, because the three writers
+        /// that take a spec `kind` must not accept layout -- there is no layout spec node to write,
+        /// and accepting it there would push a request into the body that can only fail.
+        ///
+        /// Why this exists at all: the function body has answered `kind:"layout"` since W2
+        /// (Fns/Read.cs, "kind:\"layout\" is how the layout side is asked for explicitly"), but the
+        /// parameter was declared as PType.Kind, whose validator accepts only the seven -- so the
+        /// body's layout branch was unreachable from the wire and `set_layout_attr`'s declared
+        /// `from:"layout"` pointed at a call nobody could make. Found by a clean executor in the
+        /// 2026-09-24 baseline (docs/eval-baseline.md, F5), then located here.</summary>
+        public static Param KindOrLayout(string n = "kind", string desc = null)
+            { return new Param { Name = n, Type = PType.KindOrLayout, Required = false, Desc = desc }; }
         public static Param Attr(string n, string from, bool req = true)
             { return new Param { Name = n, Type = PType.AttrName, Required = req, DescribeFrom = from }; }
         public static Param Enum(string n, string[] values, bool req = true)

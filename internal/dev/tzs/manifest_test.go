@@ -235,13 +235,16 @@ func TestParseManifestRejects(t *testing.T) {
 	}
 }
 
-// TestKnownTypeMatchesEngine：参数类型名的集合就是引擎 Manifest.TypeName 的十一个分支。
+// TestKnownTypeMatchesEngine：参数类型名的集合就是引擎 Manifest.TypeName 的十二个分支。
 //
 // 契约给的清单里**漏了 handle**，而它在真 manifest 里出现 44 次 ——
 // 这一条不是多余的：漏了它，每个需要句柄的函数都会因为「未知类型」被本地判死。
 func TestKnownTypeMatchesEngine(t *testing.T) {
-	// 这十一个就是 engine/src/Designer/Manifest.cs 的 TypeName 全部返回值。
-	all := []string{"int", "bool", "handle", "kind", "attr", "enum", "path", "path[]", "string[]", "attrs", "string"}
+	// 这十二个就是 engine/src/Designer/Manifest.cs 的 TypeName 全部返回值。
+	// ⚠️ 引擎那边**加一个 PType 成员就必须在两个 switch 里各加一行**：TypeName 的 default 是
+	// "string"，漏了只会静默丢掉类型信息（2026-09-25 的 KindOrLayout 就这样过了一版构建）。
+	// 这条测试拦不住那种漏 —— 它拦的是相反的方向（这边认了引擎产不出的名字）。
+	all := []string{"int", "bool", "handle", "kind", "kind-or-layout", "attr", "enum", "path", "path[]", "string[]", "attrs", "string"}
 	for _, ty := range all {
 		if !KnownType(ty) {
 			t.Errorf("引擎会产出 t=%q，KnownType 却说不知道", ty)

@@ -152,8 +152,16 @@ namespace TzsCli.Designer
                 // second copy of this table that nothing read; that copy is now deleted and the
                 // declaration moved here, where callers are actually validated against.
                 new Param { Name = "timeout", Type = PType.Int, Required = false,
-                            Desc = "加载看门狗秒数；默认 $TZSCLI_RELOAD_TIMEOUT 或 90" },
-                Opt(PType.Bool, "force", "占用者只是 Loaded 时强制接管（Mutable 的会被拒绝）")),
+                            Desc = "加载看门狗秒数；默认 $TZSCLI_RELOAD_TIMEOUT 或 90" }),
+                // `force` used to be declared here ("占用者只是 Loaded 时强制接管") and was never
+                // implemented: Fns/Session.cs refuses it with E_NOT_IMPLEMENTED, because taking over
+                // an occupant IS the silent eviction the contract forbids. An advertised parameter
+                // that always throws is worse than an absent one -- the same reason `add_field.name`
+                // was deleted -- so it is gone from the wire. The guard stays in Session.cs as a
+                // backstop (if the declaration ever comes back, the refusal still holds), and
+                // SPEC.md §11.24 (g) says what the caller must do instead: close, then open.
+                // A clean executor in the 2026-09-24 baseline read `open --help`, saw `force` listed
+                // and §6 saying it is unimplemented, and reported the contradiction.
             F("save", G_SESSION, "把句柄的模型写回新包（不改会话状态）", false, "void", E_STD,
                 P.Handle(),
                 P.Str("out", true, "输出 .tzs 路径")),
@@ -194,10 +202,14 @@ namespace TzsCli.Designer
             F("describe_kind", G_READ, "某类规格节点运行时可写的属性白名单（§11.24(c) from:describe_kind）",
               false, "kindmap", E_STD,
                 P.Handle(),
-                new Param { Name = "kind", Type = PType.Kind, Required = false,
-                            Desc = "七种之一；省略则返回全部七种" }),
+                P.KindOrLayout("kind", "七种之一，或 layout（布局属性名集）；省略则返回全部七种")),
             N("list_tables", G_READ, "工作区数据字典里的表", "list<el>", E_STD,
-                Opt(PType.Str, "query", "名称子串")),
+                Opt(PType.Str, "query", "名称子串"),
+                // `limit` was read by the implementation (IntArg(a,"limit",200)) but declared
+                // nowhere -- and Manifest.Check refuses an argument that is not in Params, so the
+                // cap could be neither raised (get table 201) nor lowered. Same class as `timeout`
+                // on `open`, above.
+                Opt(PType.Int, "limit", "最多返回多少张表；默认 200")),
             N("list_columns", G_READ, "一张表的列（含 widget/attribute/type/req 等列元数据）", "list<el>", E_STD,
                 P.Str("table", true, "表名，如 pmdl_t"),
                 Opt(PType.Str, "query", "列名子串")),
@@ -275,8 +287,8 @@ namespace TzsCli.Designer
                 P.Handle(),
                 new Param { Name = "path", Type = PType.Path, Required = true, Desc = "父容器的 name-path" },
                 P.Str("table", true, "表名"),
-                P.Str("column", false, "单列名；与 columns 二选一"),
-                P.StrList("columns", false, "一次加多列；与 column 二选一。N 列走同一次构造调用，"
+                P.Str("column", false, "单列名；与 columns 二选一（两个都不给会被拒）"),
+                P.StrList("columns", false, "一次加多列；与 column 二选一（两个都不给会被拒）。N 列走同一次构造调用，"
                     + "所以 container=Table 得到的是「一个 Table 装 N 列」而不是每列一个容器"),
                 OptEnum("container", CONTAINERS, "容器模式，默认 None（就地放一对标签+控件）"),
                 // `name` used to be declared here and was never read by AddFieldFn -- an
@@ -396,8 +408,13 @@ namespace TzsCli.Designer
                 Opt(PType.Str, "column", "列名")),
             F("set_spec_description", G_MULTI, "写 SD 规格描述（CDATA）", true, "delta", E_STD,
                 P.Handle(),
-                P.Kind(),
+                // `path` before `kind`, like every other verb that takes both (set_spec_attr,
+                // set_spec_attrs). Declaration order IS the wire key order (internal/dev/tzs's
+                // argmap builds the frame in manifest order), and one verb emitting its keys in a
+                // different order from its three siblings is the kind of difference a reader has to
+                // stop and explain.
                 new Param { Name = "path", Type = PType.Path, Required = true, Desc = "name-path" },
+                P.Kind(),
                 P.Str("content", true, "新内容")),
             F("set_cited", G_MULTI, "引用 / 取消引用标准（SpecCitedUndoRedoCommand）", true, "delta", E_STD,
                 P.Handle(),
@@ -538,6 +555,20 @@ namespace TzsCli.Designer
                     if (!In(SpecSlots.Kinds, (string)v))
                         return "不是七种规格节点之一: " + (string)v + "；可用: " + Join(SpecSlots.Kinds);
                     return null;
+                case PType.KindOrLayout:
+                    // describe_kind only. Accepts the seven, "layout", and the "spec:<kind>" spelling
+                    // the body also strips (Fns/Read.cs) -- that spelling is the shape `attr`'s
+                    // describe_from template publishes ("spec:<kind>"), so a caller that copied it
+                    // from there still works.
+                    if (v.Type != JTokenType.String) return "需要一个字符串，收到 " + v.Type;
+                    {
+                        string k = (string)v;
+                        if (In(SpecSlots.Kinds, k) || k == "layout") return null;
+                        if (k.StartsWith("spec:", StringComparison.Ordinal) && In(SpecSlots.Kinds, k.Substring(5)))
+                            return null;
+                        return "不是七种规格节点之一、也不是 layout: " + k
+                             + "；可用: " + Join(SpecSlots.Kinds) + ",layout";
+                    }
                 default:   // Str / Path / Handle / AttrName
                     if (v.Type == JTokenType.Object || v.Type == JTokenType.Array)
                         return "需要一个字符串，收到 " + v.Type;
@@ -611,12 +642,21 @@ namespace TzsCli.Designer
                 case PType.Bool:     return "bool";
                 case PType.Handle:   return "handle";
                 case PType.Kind:     return "kind";
+                // Its own name, not "kind": the point of the type is that the accepted set is
+                // wider, and a reader of --manifest should be able to see that. Publishing
+                // "string" here (which is what the default below does) silently erases the
+                // difference.
+                case PType.KindOrLayout: return "kind-or-layout";
                 case PType.AttrName: return "attr";
                 case PType.Enum:     return "enum";
                 case PType.Path:     return "path";
                 case PType.PathList: return "path[]";
                 case PType.StrList:  return "string[]";
                 case PType.Attrs:    return "attrs";
+                // ADD A LINE HERE WHEN YOU ADD A PType MEMBER. A forgotten member publishes as
+                // "string", which every consumer already knows -- so nothing fails, the type
+                // information just disappears. KindOrLayout was built that way once
+                // (2026-09-25) before the live check caught it.
                 default:             return "string";
             }
         }

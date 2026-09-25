@@ -509,6 +509,9 @@ func TestPlaceholder(t *testing.T) {
 		{tzs.Param{Name: "l2", Type: tzs.TypeStrList}, "[]"},
 		{tzs.Param{Name: "p", Type: tzs.TypePath}, `"<name-path>"`},
 		{tzs.Param{Name: "k", Type: tzs.TypeKind}, `"<kind>"`},
+		// describe_kind 自己那一种（七种 kind 或 layout）：示例里给 `<kind>`，
+		// 与 TypeKind 同一个占位符 —— 示例要能直接粘，多数调用给的是一个规格 kind。
+		{tzs.Param{Name: "kl", Type: tzs.TypeKindOrLayout}, `"<kind>"`},
 		{tzs.Param{Name: "a", Type: tzs.TypeAttr}, `"<属性名>"`},
 		{tzs.Param{Name: "s", Type: tzs.TypeString}, `"<值>"`},
 		{tzs.Param{Name: "h", Type: tzs.TypeHandle}, `"<值>"`},

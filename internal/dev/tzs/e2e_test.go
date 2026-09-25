@@ -19,6 +19,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -26,6 +27,40 @@ import (
 	"testing"
 	"time"
 )
+
+// closeIfOpen 把某个包在当前工作区守护进程里的会话关掉（没有就什么都不做）。
+//
+// 用途只有一个：让一条会改内存模型的用例可以从干净状态起跑 —— 模型是**先改后存**，
+// save 被拒也会留下改动，于是第二次跑就撞重名。
+func closeIfOpen(ctx context.Context, t *testing.T, o Options, m *Manifest, pkg string) {
+	t.Helper()
+	pipe, err := Ensure(ctx, o)
+	if err != nil {
+		t.Fatalf("Ensure 失败: %v", err)
+	}
+	raw, err := BuildArgsFromJSON(m, "list_open", json.RawMessage(`{}`))
+	if err != nil {
+		return
+	}
+	r, err := Call(ctx, DefaultDialer(), pipe, 99, "list_open", raw, DefaultTimeout)
+	if err != nil || !r.OK {
+		return
+	}
+	var rows []struct{ Handle, Path string }
+	if json.Unmarshal(r.Result, &rows) != nil {
+		return
+	}
+	for _, row := range rows {
+		if !strings.EqualFold(filepath.ToSlash(row.Path), filepath.ToSlash(pkg)) {
+			continue
+		}
+		a, err := BuildArgsFromJSON(m, "close", json.RawMessage(`{"handle":`+JSONString(row.Handle)+`}`))
+		if err != nil {
+			continue
+		}
+		_, _ = Call(ctx, DefaultDialer(), pipe, 98, "close", a, DefaultTimeout)
+	}
+}
 
 // requireE2E 把「对真引擎」的测试设为显式开关。
 func requireE2E(t *testing.T) (exe, ws, install string) {
@@ -313,7 +348,18 @@ func TestE2EFieldAdd(t *testing.T) {
 	}
 	shaBefore := sha256.Sum256(before)
 
-	outPkg := filepath.Join(t.TempDir(), "field_add_out.tzs")
+	// `out` 必须落在**工作区内**：引擎写盘时会拒（2026-09-24 加的闸门），而这条测试原先
+	// 写进 t.TempDir() —— 那正是闸门要拦的写法（从前它退 0 成功，那个包之后才 open 不了）。
+	// 前缀沿用语料关卡那一套（`_tdev_<pid>_…`，语料发现把它排除在外），
+	// 于是就算跑在别人的工作区上，也不会留下一个被当成语料的东西。
+	// 让这次运行**从头开始**：`field_add --file` 会复用已经开着的会话，而上一次运行可能已经
+	// 往那个会话的模型里加过这两个字段了 —— 加字段是**先改模型、再 save**，所以哪怕 save 被拒
+	// （比如闸门拦下 out），改动也留在内存里。不清干净的话，第二次跑就会撞重名：那是"时好时坏"，
+	// 比不测更糟（本文件第二条纪律）。实测过：紧接在闸门拒绝之后的那一次就失败了。
+	closeIfOpen(ctx, t, o, m, pkg)
+
+	outPkg := filepath.Join(ws, fmt.Sprintf("_tdev_%d_e2e_fieldadd.tzs", os.Getpid()))
+	defer os.Remove(outPkg)
 	call := func(id int, args string) *Reply {
 		t.Helper()
 		raw, err := BuildArgsFromJSON(m, "field_add", json.RawMessage(args))

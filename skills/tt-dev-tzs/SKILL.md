@@ -91,6 +91,7 @@ tt dev tzs form_tree      --form aapt300 --args '{"depth":3}' --json            
 tt dev tzs find_component --form aapt300 --args '{"query":"worksheet"}' --json  # 控件代号 → name-path
 tt dev tzs get_component  --form aapt300 --args '{"path":"managedform/aapt300/HBoxT1/worksheet"}' --json
 tt dev tzs describe_kind  --form aapt300 --args '{"kind":"field"}' --json       # 这类节点**运行时**能写哪些属性
+tt dev tzs describe_kind  --form aapt300 --args '{"kind":"layout"}' --json      # 布局侧：这张表单上所有布局属性名
 tt dev tzs set_spec_attr  --form aapt300 --args '{"path":"<path>","kind":"field","attr":"can_edit","value":"N"}' --json
 tt dev tzs set_spec_attrs --form aapt300 --args '{"path":"<path>","kind":"field","attrs":{"can_edit":"Y","can_query":"N"}}' --json
 tt dev tzs validate       --form aapt300 --json                                 # 慢（实测 3–5 秒）；报**增量**
@@ -123,12 +124,11 @@ tt dev tzs stop                                          # 停本工作区的常
 否则撞 `E_ATTR_NOT_WHITELIST`）；`list_spec_nodes` 列字段/动作等规格节点；`list_tables` /
 `list_columns` 查数据字典；`list_records` / `list_local_strings` 看记录与多语言。
 
-> ⚠️ **要改的是布局属性（`set_layout_attr` 的 `attr`）时，`describe_kind` 帮不上忙** ——
-> 它只答那七种规格节点，`kind:"layout"` 会被参数校验拒掉（引擎侧的声明问题，见
-> `docs/WIKI.md` §11.9 第 9 条）。两条实际可用的路：
-> ① `get_component` 看这个元素**现有**的属性名（`layout` 那一段就是）；
-> ② 直接写，被拒时看 `E_ATTR_NOT_WHITELIST` 的 `detail.legal` —— 它会把这个元素能用的属性名列全。
-> 而布局属性的**值**集有另一份依据：见 §7 的表（引擎按工作区的 `mta/mod-fd.spec` 拒）。
+> ⚠️ **要改的是布局属性（`set_layout_attr` 的 `attr`）时，先问一次 `describe_kind --args '{"kind":"layout"}'`** ——
+> 它给的是**这张表单上所有布局属性名**的并集（各表单不同：`aapt300` 那份实测 132 个），是 `attr` 的词汇来源；
+> 某个元素**具体能用哪些**比它窄，写错时 `E_ATTR_NOT_WHITELIST` 的 `detail.legal` 会把该元素可用的名字列全。
+> （2026-09-24 之前这条路是断的：函数体实现了 `layout` 分支，参数校验却收不下 —— 见 §11.9 第 9 条。）
+> 布局属性的**值**集是另一回事：见 §7 的表（引擎按工作区的 `mta/mod-fd.spec` 拒）。
 
 **两个返回形状不一样，别按一个猜**：`get_component` 的 `spec` 是**按 kind 分层的**
 （`spec.field.attrs.can_edit`），而 `layout` 是**扁平的**（`layout.noEntry`，没有 `.attrs`）。
@@ -250,8 +250,8 @@ tt dev tzs set_spec_attr --form aapp320 --args '{"path":"…","kind":"field","at
 
 - **句柄永不复用**：`close` 后再 `open` 同一个包拿到的是新号。旧号去调 → `E_NOT_FOUND`（退 2，安全失败）。
 - **同一个程序已经开着又 `open` → `E_KEY_IN_USE`（退 4）**：先 `close` 占用者（`list_open` 看是谁）。
-  **`open` 的 `force` 参数尚无实现** —— 它在 manifest 里声明着，用了会明确回
-  `E_NOT_IMPLEMENTED`（引擎故意不做"静默接管占用者"），别照参数表去试。
+  （`open` 曾有一个 `force` 参数，**已于 2026-09-25 从参数表删除** —— 它从未实现，而"接管占用者"
+  正是契约禁止的静默驱逐，留着只会引诱人照参数表去试。拿一个被占用的 key 只能先 `close` 再 `open`。）
   **用 `field_add` + `file` 不会有这个问题**（已开着就复用）。
 - 会话只活在常驻守护进程里：**进程一死全部失效**，重新 `open` 即可。
 - **请求一旦上线绝不重试**：协议没有幂等键，这些动词都在改设计器内存里的模型，重试是在赌

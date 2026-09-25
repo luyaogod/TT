@@ -1569,7 +1569,9 @@ open(path)  → state = Loaded    （进 tzpMap、EAM.CreateInstance，但【不
 close(h)    → 摘 tzpMap[key] / undoRedoManagerMap[key] / EAM[key]；state = Closed，句柄串永不复用
 
 open(path2) 而 key(path2) 已有活句柄 → E_KEY_IN_USE
-                                       force:true 仅对 Loaded 句柄生效；对 Mutable 句柄拒绝
+                                       force:true 已于 2026-09-25 从 manifest 删除（从未实现，
+                                       且"接管占用者"正是契约禁止的静默驱逐）；要拿一个被占用的
+                                       key 只能先 close 占用者再 open（§11.24 (g-1) 实测可行）
 ```
 
 - **禁止 `map.Remove(k); map.Add(k,t)` 式静默驱逐**——`E_KEY_IN_USE` 存在的全部意义就是不让一个活的

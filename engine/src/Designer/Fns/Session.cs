@@ -158,11 +158,11 @@ namespace TzsCli.Designer.Fns
             string path = Str(args, "path");
             if (string.IsNullOrEmpty(path)) throw TzsError.Validation("open 需要一个 path");
 
-            // Manifest.cs declares `force`, and §11.24 (g) gives it a meaning: take over an
-            // occupant that is still only Loaded, refuse a Mutable one. It is NOT implemented
-            // here, and the reason is the same reason the refusal itself is not implemented here:
-            // Session.Open owns the occupancy check, and force means evicting that occupant --
-            // exactly the "silent eviction" the contract forbids and this file must not
+            // `force` is NOT implemented, and this refusal stays here even though its declaration
+            // is gone (Manifest.cs, 2026-09-25): if it ever comes back, this is what holds the line.
+            // The reason it is not implemented is the same reason the occupancy check is not
+            // implemented here: Session.Open owns that check, and force means evicting the occupant
+            // -- exactly the "silent eviction" the contract forbids and this file must not
             // reintroduce. Saying so is the only honest option; ignoring the flag would hand the
             // caller an E_KEY_IN_USE with no hint that the flag they used does nothing.
             if (Bool(args, "force", false))

@@ -160,6 +160,11 @@ func dummyValue(p *tzs.Param) any {
 		return "x"
 	case tzs.TypePathList, tzs.TypeStrList:
 		return []string{"x"}
+	case tzs.TypeAttrs:
+		// `attrs` 是**对象**（属性名 → 字符串值），不是字符串。少了这一支，set_spec_attrs /
+		// set_layout_attrs 会给本地定型判死 —— 这条测试从此一直红，而它归 TTZS_E2E，默认不跑，
+		// 所以直到 2026-09-25 才被看见（见到它红的那一刻，先怀疑的对象是当天的改动，不是它）。
+		return map[string]string{"can_edit": "N"}
 	}
 	return "x"
 }
