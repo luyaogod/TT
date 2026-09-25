@@ -746,11 +746,18 @@ func cmdTzsStop(args []string) int {
 func cmdTzsReap(args []string) int {
 	fs := flag.NewFlagSet("tzs reap", flag.ContinueOnError)
 	yes := fs.Bool("yes", false, "确认结束这些进程")
-	ws := fs.String("workspace", "", "工作区（默认取 TZSCLI_WS / 配置）")
+	ws := fs.String("workspace", "", "工作区（可选：reap 按**记录**收，与当前工作区无关）")
 	if err := parseArgs(fs, args, "workspace"); err != nil {
 		return 2
 	}
-	o, err := tzsEngineOptions(*ws)
+	// **宽松版**，与 doctor 同一个理由：`reap` 从不 spawn，所以"没配工作区就不许开工"那条
+	// 保护对它不成立 —— 它遍历的是状态文件里**每一条记录自己的** workspace（`e.Workspace`），
+	// 当前配置里有没有工作区与它要收哪些进程毫无关系。
+	//
+	// 从前这里走的是严格版（tzsEngineOptions），于是"引擎重编过、旧守护进程收不掉"这件事
+	// 发生在**恰恰最需要它的场合**：换机器、换工作区、或者刚把配置改坏了的时候，reap 先
+	// 因为"没配工作区"退 5，而它正是来收拾这种残局的。实测 2026-09-24 记在 §11.9。
+	o, err := tzsExecOptions(*ws)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 5

@@ -11,6 +11,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/spf13/cobra"
+
 	"tt/internal/config"
 	"tt/internal/output"
 )
@@ -100,4 +102,24 @@ func PrintJSON(v any) error { return output.WriteJSONValue(os.Stdout, v) }
 func Fatal(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, format+"\n", args...)
 	os.Exit(1)
+}
+
+// UnknownSubcommand 给「组命令收到一个不认识的子命令」造一个错误。
+//
+// 为什么需要它（实测 2026-09-25）：**不设 RunE 的组命令会让 cobra 打一份帮助就退 0** ——
+// `tt debug nope` 与 `tt dict nope` 都是这样，而 `tt dict` 自己的契约写着「1 = 用法错」。
+// 把「我打错了命令」读成成功，是调用方（尤其是 AI）最难自己发现的失败形态：它会以为
+// 活干完了。返回一个普通 error，根命令打一份并退 1 —— 与这两个组里 flag 打错的码一致
+// （`tt dict r.t --bogus` 也是 1）。
+//
+// 子命令名一并列出：调用方下一步要的就是那串名字，而 cobra 默认只给一句"unknown command"。
+func UnknownSubcommand(cmd *cobra.Command, args []string) error {
+	names := make([]string, 0, len(cmd.Commands()))
+	for _, c := range cmd.Commands() {
+		if c.IsAvailableCommand() && !c.Hidden {
+			names = append(names, c.Name())
+		}
+	}
+	return fmt.Errorf("未知子命令 %q（%s）；可用：%s\n  看全部：%s --help",
+		args[0], cmd.CommandPath(), strings.Join(names, " / "), cmd.CommandPath())
 }

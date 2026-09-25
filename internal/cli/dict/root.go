@@ -48,6 +48,14 @@ func init() {
 		if err := runRootPreRun(args); err != nil {
 			return err
 		}
+		// 落在**命令组自己**身上（没给子命令，或给了一个不认识的）时不碰数据源：
+		// 这两种情况没人要查库，而 openQuerySource 在没配库的机器上会当场失败 ——
+		// 于是 `tt dict` 想看一份命令列表，却拿到一句"本地数据库文件未找到"，
+		// 而 `tt dict nope` 连"你打错了命令"都说不出来，被那句挡在前面（实测 2026-09-25）。
+		// 判据用 `cmd == Group`：cobra 解析不到子命令时返回的就是组命令本身。
+		if cmd == Group {
+			return nil
+		}
 		loadQueryPolicy()
 		return openQuerySource()
 	}
@@ -200,7 +208,8 @@ func emitCapped(capping bool, data any, columns []string, rows [][]string) error
 		// 三处说同一件事(notes / truncated+计数 / localPath),因为它最容易被读漏:
 		// 只看 notes 的、只看计数的、只看 data 的,都得撞上"这不是全部"。
 		m.Notes = append(m.Notes, fmt.Sprintf(
-			"结果已截断:只回了 %d / %d 条。完整结果在 %s(要直接看全量加 --limit 0)", limit, total, path))
+			"结果已截断:只回了 %d / %d 条。完整结果在 %s —— 翻页读它:tt dict spill show %s --offset %d"+
+				"(要重查一次拿全量也可以:加 --limit 0)", limit, total, path, filepath.Base(path), limit))
 	}
 	return emitWith(m, data, columns, rows)
 }
