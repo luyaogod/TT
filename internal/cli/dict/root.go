@@ -43,7 +43,7 @@ func init() {
 		"结果最多返回多少条 (0 = 不限;-1 = 跟随配置;缺省取 config.json query.limit,再缺省 20)")
 
 	// 打开/关闭查询数据源:本地 SQLite(--db/TDICT_DB)或远程库(--env/query.source)。
-	// 不依赖本地字典库的子命令(env/mirror/db/install/serve/bdldoc)各自覆盖本钩子。
+	// 不依赖本地字典库的子命令(bdldoc/db/mirror/spill)各自覆盖本钩子。
 	Group.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		if err := runRootPreRun(args); err != nil {
 			return err

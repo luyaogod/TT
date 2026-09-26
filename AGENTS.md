@@ -40,7 +40,7 @@ TT（`tt`）是面向 Agent 的 T100 / Genero BDL 开发工具：**一个 Go 二
 
 ```bash
 go build -o tt.exe .                     # 后端（前端未构建也能过，见下方 .gitkeep 那条）
-go test ./...                            # 全量；21 个包，深档语料回归默认跳过（约 2–3 分钟）
+go test ./...                            # 全量；35 个包，深档语料回归默认跳过（约 2–3 分钟）
 cd web && npm run check:app              # 前端三项检查：fgltokens / fgloutline / store
 cd web && npm run build                  # 含 tsc --noEmit（**check:app 不做类型检查**）
 cd engine && ./build.sh                  # 只在改了 engine/ 时才跑！理由见第 4 节

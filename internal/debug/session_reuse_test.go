@@ -9,6 +9,8 @@ import (
 
 // 单一常驻会话:目标身份判定/空闲宿主复用/环境克隆的纯逻辑单测
 // (SSH 登录等依赖真实 T100,不在此覆盖)
+//
+// 断点存档(bpsstore.go)目前**没有**覆盖,那个域不在这里 —— 别再按文件名找它。
 
 func cfgFor(h, zone string) *Config {
 	c := &Config{}

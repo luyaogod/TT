@@ -10,7 +10,7 @@ import (
 )
 
 // helpCmdFamilies 数据命令 → 它依赖的数据族,用于 --help 末尾的「本地数据」提示。
-// 命令不在表里(env/install/mirror/serve/db 等)不显示提示。
+// 命令不在表里(bdldoc/db/mirror/spill 等)不显示提示。
 var helpCmdFamilies = map[string][]string{
 	"r.t":  {"table", "progtable"},
 	"r.v":  {"check"},
