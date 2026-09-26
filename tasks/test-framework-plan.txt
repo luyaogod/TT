@@ -811,6 +811,27 @@ fgloutline.fixtures.mjs、store.test.mjs），套路是**用 esbuild 打成临�
   ./tt.exe dev tzc selftest                                        # 输出不变（生产侧没动）
   反向判据必须执行一次（见【四】末尾）
 
+【批 1 已完成 2026-09-26】新增 internal/dev/cli/selftest_test.go 一个文件（36 行，
+只写驱动不写断言），生产代码零改动（selftest.go 的 diff 是 0 行）。
+  判据实测：31 个子测试全 PASS、0 SKIP，不设任何环境变量；耗时 16.4 s
+            ./tt.exe dev tzc selftest 仍是"通过 31，失败 0"
+            go test ./... 24 个带测试的包全 ok，无 FAIL
+            PASS/SKIP：批 0 的 408/25 → 409/25（+1 就是 TestSelftestCases 本身）
+
+  反向判据**执行过并把结论留档**：把 selftest.go 里 stRoundtrip 的
+  `pkg.Entries[i].Sha256 != pkg2.Entries[i].Sha256` 改成 `==`（反过来比 —— 比注掉更好，
+  因为它仍然编译，红的是断言本身而不是编译错误），跑出来正是：
+      --- FAIL: TestSelftestCases/合成包-零改动_roundtrip（逐条目_sha256_一致）
+              selftest_test.go:32: …：条目内容变了：adzi999.4gl
+  红的**恰好那一条**，消息也从驱动透出来了。随后还原，`git diff selftest.go` = 0 行。
+
+  **一处判据本身的不准确，记下来免得批 5 踩**：本文【九】9.1 与【十六】给的分诊命令
+      go test ./... -count=1 -v 2>&1 | grep -E '^--- (PASS|SKIP)' | sort | uniq -c
+  **只数顶层测试**（子测试那行带前导空格，匹配不上）。本批的 31 条子测试它一条都看不见，
+  表现为 "PASS 数只涨了 1"。批 5 的 skipLedger 若要按"SKIP 数 == 白名单条数"判，
+  得先想清口径是**调用点**还是**测试**（本文【九】自己就混着用了这两个单位）。
+  改法：要么把 grep 放宽到 `^ *--- (PASS|SKIP)`，要么明确只认顶层。
+
 **批 2** —— 见【三】表里那 8 个包。判据：
   go test ./internal/dev/verify ./internal/dev/split ./internal/erpdb \
           ./internal/dict/live ./internal/entdir ./internal/dbconfig \
