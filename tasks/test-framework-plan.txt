@@ -9,7 +9,10 @@
   go list -f '{{if or .TestGoFiles .XTestGoFiles}}T{{else}}.{{end}} {{.ImportPath}}' ./...
       → 35 个包，22 个带测试 / 13 个没有
   （逐包 源码行 / 测试行 / func Test 数）：见【三】的表头命令
-  grep -rn "t\.Skip" --include=*_test.go internal/ | wc -l    → 44
+  grep -roE 't\.Skipf?\(' --include=*.go internal/ | wc -l    → 38   （真实调用点）
+      # **别用 `grep -rn "t\.Skip" | wc -l`** —— 那是按行数，会把注释与错误文案里
+      # 的提及也算进去（实测那个口径现在给 46，其中 8 处是本台账文件自己在说"t.Skip"）。
+      # 只有 _test.go 是 36，另 2 处在 internal/testkit/corpus.go（**普通 .go 文件**）。
   grep -rn "t\.Parallel()" --include=*_test.go . | wc -l  → 0
   grep -rl '^package .*_test$' --include=*_test.go . | wc -l  → 0（全仓都是内部测试包）
 
@@ -75,14 +78,20 @@ L2 的"本地资源"指：`t.TempDir()`、真 SQLite（`internal/dict/db` 已是
 
 **默认档 = L0 + L1 + L2，目标 `t.Skip` 数为 0。**
 
-今天 44 处 `t.Skip` 的归类（这个分类只在这里声明一次，【九】的白名单直接引用）：
+38 处 `t.Skip` 的层分布（**已由 internal/testkit 的 skipLedger 落地并盯着**，
+分类的唯一定义处是 internal/testkit/skipledger_test.go 的台账，这里只是概述）：
 
-  · 39 处 = "语料 / 引擎 exe / 工作区不在这台机器上"（L3+L4）
-  ·  4 处 = "本机环境"：config/paths_test.go:45 无用户配置目录、
+  · 32 处 = "语料 / 引擎 / 工作区不在这台机器上"，其中
+            L3      9 处：语料根或开关**没设**（TDEV_DEEP / TTZS_DEEP / TTZS_CORPUS）
+            L3-缺件 13 处：语料**在**，但里面没有这一件（没有 .tzs / 没有那个叶子 / 没有包）
+                          —— 这一类**没有开关可点名**，补救是换一份带它的语料
+            L4     10 处：真引擎 exe / 真工作区 / 真包（TTZS_E2E / TTZS_EXE / TTZS_WS / TTZS_PKG）
+  ·  4 处 = "本机环境"（L0-环境）：config/paths_test.go:45 无用户配置目录、
            config/realdata_test.go:18 无统一用户目录、:41 无本机旧配置、
            dev/store/store_test.go:618 无 git
   ·  1 处 = "这条断言这一次没有对象"：dev/cli/tzs_verb_test.go:434
            （文档里没有「N 个动词」这句话）
+  ·  1 处 = "前提"：dev/verify/verify_test.go 的那条（解析层先拦住了，测试失去对象）
 
 **L3/L4 永远靠环境变量开关 + 显式 `-timeout 30m`，不靠调大默认超时。**
 理由 corpus_test.go:22-27 已经写明并被实测过：杀进程来自 **go 命令**（默认 `-timeout=10m`），
@@ -579,7 +588,7 @@ tzs_verb_test.go 的 liveDocs 已经证明"从包目录上溯读仓库本体"这
 **判据**：
   go test ./internal/testkit -run TestSkipLedger -v -count=1
   go test ./... -count=1 -v 2>&1 | grep -E '^--- (PASS|SKIP)' | sort | uniq -c
-  # 期望：SKIP 数 == 白名单条数 == 44（本次落地时以实测为准）
+  # 期望：台账 38 条 == 真实调用点 38 处（**不是**按行数的那个 46）
 **反向判据**：在一个 _test.go 里加一处 t.Skip，TestSkipLedger 必须红。
 
 
@@ -954,6 +963,44 @@ fgloutline.fixtures.mjs、store.test.mjs），套路是**用 esbuild 打成临�
 **批 5** —— 见【八】与【九】。判据：
   go test ./internal/testkit ./internal/dev/fgl -count=1
   反向判据两条（改一个字符 / 加一处 t.Skip）
+
+【批 5 已完成 2026-09-26】两件守卫都落地了，零生产改动：
+
+  internal/dev/fgl/outline_fixtures_test.go   加 TestFixtureCopiesAreIdentical
+  internal/testkit/skipledger_test.go         新文件（跳过台账 + 三条断言）
+
+  **双份夹具守卫**：比对两份 fgl-fixtures 的**集合 + 逐字节**（122 个负载文件）。
+  三条刻意的取舍都写在注释里：不比对 README（两份本来就不同，纳进来会误报然后被人
+  "顺手"删掉这条测试）；缺文件**不 skip**（属仓库本体，缺了就是坏了）；只比 .4gl 与
+  .expected.json。
+  反向判据执行过：往前端副本一个 .4gl 尾部加一个字节，它立刻红并报出
+  「block-comment-braces.4gl 逐字节不同（230 vs 231 字节，首个差异在第 231 字节）」
+  加上同步命令。还原后 git status 为 0 条。
+
+  **跳过台账**：扫描 internal/ 下**所有 .go**（不只是 _test.go ——
+  internal/testkit/corpus.go 是普通 .go，里面有 2 处 t.Skipf，只扫 _test.go 会漏），
+  逐条按 文件 + 文案 与台账比对。多一处、少一处、文案改了都红。
+  台账每条带层标记，四个层：L3 / L3-缺件 / L4 / L0-环境 / 无对象 / 前提。
+  **L3 与 L3-缺件分开是落地时才发现的必要**：后者是"语料在，但里面没有这一件"，
+  **没有开关可点名**（补救是换一份带它的语料）—— 混在一起的话，"why 必须点名开关"
+  那条纪律会把 13 条本来就说得很清楚的条目判成不合格。
+  反向判据执行过：往 internal/dev/tglfile/tglfile_test.go 加一处未登记的 t.Skip，
+  立刻红并列出它。还原后 git diff 为 0 行。
+
+  **顺带更正了本文一个从头就错的数字**：见【〇】与【二】的 44 → 38。
+  44 是按**行**数的（`grep -rn "t.Skip" | wc -l`），会把注释与错误文案里的**提及**
+  算进去 —— 现在那个口径给 46，其中 8 处就是台账文件自己在说"t.Skip"。
+  真实调用点（`t.Skip(` / `t.Skipf(`）是 38，与台账逐条对上。
+
+  实测：带测试的包仍 32；PASS/SKIP：批 4 的 505/25 → 509/25（+4 条顶层用例，
+        运行时的 25 条跳过一处未变 —— 台账里的 38 是**调用点**，与运行时"跳过的测试数"
+        是两个单位，别混）；全量墙钟 47 s → 46 s；
+        go build 通过；./tt.exe dev tzc selftest 通过 31，失败 0；
+        gofmt -l 空；git diff --stat 与 --ignore-cr-at-eol --stat 一致。
+
+  **扫描器的一处已知限制**（写在文件注释里）：它只抓 t.Skip/Skipf 的**第一个**字符串
+  字面量，而有的跳过文案是拼接的（如 e2e_test.go 那条，TTZS_INSTALL 在后半段没被捕获）。
+  所以 switchNames 那张表要按**捕获得到**的名字列，且它挡不住"第二个字面量里的开关名写错"。
 
 **批 6** —— 见【十一】。判据见该节。
 

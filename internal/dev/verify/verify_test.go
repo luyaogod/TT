@@ -99,10 +99,12 @@ func TestGate1EOLNormalizationIsInfoNotError(t *testing.T) {
 	base, fenced := synthBase(t, "adzi999")
 
 	// 先把 CRLF 全部归一成 LF（模拟编辑器另存）。围栏文本里本来就有两种行尾
-	// （合成夹具刻意混用，见 testutil/fixture.go），所以这一步必然产生差异。
+	// （合成夹具刻意混用，见 testutil/fixture.go），所以这一步**必然**产生差异。
 	normalized := bytes.ReplaceAll(fenced, []byte("\r\n"), []byte("\n"))
 	if bytes.Equal(normalized, fenced) {
-		t.Skip("这份夹具里没有 CRLF，构造不出行尾差异 —— 换个夹具或去掉这条测试")
+		// 判失败而不是 Skip：夹具是我们可以控制的，没有 CRLF 说明夹具变了 ——
+		// 那时这条测试会**静默变成空转**（跳过的测试和通过的测试在报告里一样无害）。
+		t.Fatal("夹具里没有 CRLF，构造不出行尾差异 —— 这条测试失去对象了，别让它静默跳过")
 	}
 
 	parsed, err := fence.Parse(base, normalized)

@@ -1,6 +1,7 @@
 package fgl
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -258,4 +259,154 @@ func TestParseOutlineFixtures(t *testing.T) {
 	if fatal != 0 {
 		t.Fatalf("失败: %d 个用例与文档推导的期望树不符（判据是文档，不是实现）", fatal)
 	}
+}
+
+//---------------------------------------------------------------------------
+// 两份副本的守卫
+//---------------------------------------------------------------------------
+
+// webFixturesDir 返回**前端那侧**的同名夹具目录（web/app/scripts/fgl-fixtures）。
+//
+// 与 fixturesDir 一样逐级上溯，只是找的是另一条路径。两份副本的存在是刻意的：
+// Go 侧的对拍读仓库根的 testdata/，前端侧的 `npm run check:outline` 读它自己目录下那份
+// （前端脚本在 esbuild 打包后跑，不该往仓库根去取数据）。
+func webFixturesDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("取不到当前目录: %v", err)
+	}
+	for i := 0; i < 8; i++ {
+		cand := filepath.Join(dir, "web", "app", "scripts", "fgl-fixtures")
+		if st, err := os.Stat(cand); err == nil && st.IsDir() {
+			return cand
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	t.Fatalf("缺少夹具目录 web/app/scripts/fgl-fixtures（从包目录上溯未找到）")
+	return ""
+}
+
+// payloadNames 列出夹具目录里的**负载文件**（.4gl 与 .expected.json），升序。
+//
+// README 之类**不算负载**，不参与比对 —— 见下面那条测试的注释。
+func payloadNames(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("读 %s 失败：%v", dir, err)
+	}
+	var out []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		n := e.Name()
+		if strings.HasSuffix(n, ".4gl") || strings.HasSuffix(n, ".expected.json") {
+			out = append(out, n)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// TestFixtureCopiesAreIdentical 两份 fgl-fixtures 必须**逐字节相同**。
+//
+// **为什么这条住在 Go 侧**：`go test ./...` 是默认档、会自动跑；前端侧没有默认档
+// （`check:app` 是显式命令，web/package.json 里连 test 脚本都没有）。
+// 放前端侧等于"只有人记得跑 check:app 时才生效"，那与今天的口头约定没本质差别。
+//
+// 两份目录的 README 都明写着"两份内容必须逐字节相同，改一处要同步另一处"，
+// 而此前**没有任何东西在看** —— 这是全仓唯一一处"写成书面约定却没进测试"的一致性规则。
+//
+// 三条要留神的：
+//   - **不比对 README**：两份 README 本来就不同（一份 Go 侧口吻、一份前端侧口吻），
+//     testdata 那侧还多一个 README.source.md。把它们纳进来会立刻误报，
+//     然后下一个人会"顺手"把这条测试删掉。
+//   - **缺文件不 skip**：这两份属于仓库本体，不是语料那样的外部数据 ——
+//     缺了就是仓库坏了（同 internal/dev/cli/tzs_verb_test.go:369 与
+//     internal/cli/root_test.go:24 立的规矩）。
+//   - 比对的是**集合**再加**逐字节**：只比内容不比名字，会漏掉"一边改名了"。
+func TestFixtureCopiesAreIdentical(t *testing.T) {
+	goDir := fixturesDir(t)
+	webDir := webFixturesDir(t)
+
+	goFiles := payloadNames(t, goDir)
+	webFiles := payloadNames(t, webDir)
+
+	if len(goFiles) == 0 {
+		t.Fatalf("%s 里一个负载文件都没有 —— 夹具被删光了？", goDir)
+	}
+
+	// 1) 集合相等
+	goSet := map[string]bool{}
+	for _, n := range goFiles {
+		goSet[n] = true
+	}
+	webSet := map[string]bool{}
+	for _, n := range webFiles {
+		webSet[n] = true
+	}
+	var onlyGo, onlyWeb []string
+	for _, n := range goFiles {
+		if !webSet[n] {
+			onlyGo = append(onlyGo, n)
+		}
+	}
+	for _, n := range webFiles {
+		if !goSet[n] {
+			onlyWeb = append(onlyWeb, n)
+		}
+	}
+	if len(onlyGo) > 0 || len(onlyWeb) > 0 {
+		t.Errorf("两份夹具的文件名集合不一致：\n"+
+			"  只在 testdata/fgl-fixtures：%v\n"+
+			"  只在 web/app/scripts/fgl-fixtures：%v\n\n"+
+			"两份必须逐字节相同（见两份目录各自的 README）。改一处要同步另一处。",
+			onlyGo, onlyWeb)
+	}
+
+	// 2) 逐字节相等
+	for _, n := range goFiles {
+		if !webSet[n] {
+			continue // 上面已经报过集合不一致，这里不重复刷屏
+		}
+		goB, err := os.ReadFile(filepath.Join(goDir, n))
+		if err != nil {
+			t.Fatalf("读 %s 失败：%v", n, err)
+		}
+		webB, err := os.ReadFile(filepath.Join(webDir, n))
+		if err != nil {
+			t.Fatalf("读 %s 失败：%v", n, err)
+		}
+		if !bytes.Equal(goB, webB) {
+			t.Errorf("两份 fgl-fixtures 不一致：%s 逐字节不同（%d vs %d 字节，首个差异在第 %d 字节）\n\n"+
+				"两份必须逐字节相同 —— 见两份目录各自的 README。改一处要同步另一处：\n"+
+				"  Copy-Item web\\app\\scripts\\fgl-fixtures\\%s testdata\\fgl-fixtures\\ -Force\n\n"+
+				"（只比对 .4gl 与 .expected.json；两份 README 本来就不同，别改它们来「修」这条。）",
+				n, len(goB), len(webB), firstDiff(goB, webB), n)
+		}
+	}
+}
+
+// firstDiff 返回两段字节第一个不同的位置（1-based）；相同则返回 0。
+// 报"第几个字节不同"比报"长度不同"有用 —— 长度一样时后者是 0 信息。
+func firstDiff(a, b []byte) int {
+	n := len(a)
+	if len(b) < n {
+		n = len(b)
+	}
+	for i := 0; i < n; i++ {
+		if a[i] != b[i] {
+			return i + 1
+		}
+	}
+	if len(a) != len(b) {
+		return n + 1
+	}
+	return 0
 }
