@@ -340,7 +340,7 @@ namespace TzsCli.Designer
             // must decide whether retrying is safe -- and the answer is three-valued on purpose:
             // an entry (ok/error) means retry is safe, a `pending` entry means do not, and NO entry
             // means the request never arrived, which is also safe to retry. That trichotomy is the
-            // whole feature (docs/WIKI.md 的幂等 op log); the log itself is per-process, and the
+            // whole feature (幂等 op log，见 internal/dev/tzs/README.md); the log is per-process, and the
             // answer says so with daemonStartedAt.
             N("list_ops", G_SESSION, "写请求的操作日志：超时后问「那次写到底进去没有」", "list<el>", E_STD,
                 Opt(PType.Str, "op", "只列这个名字的写请求（精确匹配；不给就是最近的全部）"),

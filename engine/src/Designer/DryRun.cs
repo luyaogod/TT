@@ -10,7 +10,7 @@ namespace TzsCli.Designer
     ///
     /// WHY THE ROLLBACK IS NOT "UNDO"  (2026-09-26, 实测推翻了原来的落法)
     ///
-    /// docs/WIKI.md 记的落法是「应用 → 读 diff → 批量 undo，撤销栈是现成的」。**那句话是错的**，
+    /// 落法不是「应用 → 读 diff → 批量 undo，撤销栈是现成的」。**那条路是错的**，
     /// 而错法很具体：撤销栈管的是设计师的 command，而写动词的很大一部分写在 command 之外。
     /// 拿 15 个动词在 aapp320 上跑同一套判据（save → dry-run → save，比 sha256），结果分成两半：
     ///

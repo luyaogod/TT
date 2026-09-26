@@ -8,7 +8,7 @@ namespace TzsCli.Designer
     /// The operation log: one entry per **write request that carried an `op`**, written before the
     /// body runs and completed after it.
     ///
-    /// WHY IT EXISTS (SPEC §11.9 item 20; the Go-side list in docs/WIKI.md is where it was asked for)
+    /// WHY IT EXISTS (SPEC §11.9 item 20; asked for by the Go-side list, now in internal/dev/tzs/README.md)
     ///
     /// 从前只有一条禁令："请求一旦上线绝不重试"（协议里没有幂等键，重发一个 add_field 就是加两遍
     /// 列）。那条禁令治的是**重复**，没治**不知道**：调用方超时之后既不能重发，也问不出"到底写进去
