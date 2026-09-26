@@ -900,6 +900,47 @@ fgloutline.fixtures.mjs、store.test.mjs），套路是**用 esbuild 打成临�
   grep -c "^## 判据" $(find . -name README.md -not -path '*/node_modules/*') | grep ':0'  # 只剩 7 份非 Go 目录
   wc -l TEST.md                                                   # 体例对齐（参考 BUILD.md 的规模）
 
+【批 3 已完成 2026-09-26】文档架构落地，零代码改动。实际改了 20 份文件 + 新增 1 份。
+
+  3a 架构（TEST.md 独占测试）：
+    · 新建根 TEST.md（155 行、8 节）：默认档是什么、四层 L0–L4、命令表、**开关总表**
+      （10 个环境变量）、真环境怎么配（config.local.json + 优先级 + 四字段表）、
+      怎么回读"跑了多少跳了多少"、两条硬纪律、跳过台账、细节去哪
+    · BUILD.md §7「自检」压成一条最小序列 + 一行指向 TEST.md（原内容全部搬走）
+    · docs/README.md 的文档分工表加一行「跑测试 → 根 TEST.md」
+    · 根 README.md 的文档地图同样加一行
+    · **7 处**原本指向 BUILD.md 说"两条纪律 / 语料回归"的引用改指 TEST.md
+      （internal/dev、dev/testutil、dev/tzs、testkit、testdata×2、README.md）
+    · AGENTS.md §2 那张深档回归表与两条纪律压成三句提醒 + 指向 TEST.md ——
+      同一件事写两处就会漂，而这份文件里的数字**已经漂过一次**（包数）
+
+  3b 判据节写实（两件事）：
+    · **修掉 9 处"本包没有自己的测试文件"的谎报** —— 那是我自己批 2/4 造成的：
+      给 7 个包加了测试，却没同步它们的 README，违反了仓库"文档与代码同一个提交"。
+      涉及：cli/common、dbconfig、dev/split、dev/tglfile、dev/verify（**两处**）、
+      entdir、erpdb、dict/live。全部改写成"命令 + 覆盖了什么 + 故意不覆盖什么"。
+      （dev/testutil、sshtun、winproc 那三处的"没有测试"仍然成立，没动。）
+    · 另更新 3 份被本批碰过的：dev/cli（31 项自检现在有两个入口、同一个定义处）、
+      internal/debug（补 bpsstore 与五个端点错误半边；写明两处**故意不覆盖**；
+      并记下那处**已知缺口**：未注册的 /api/* 回 200 + HTML）、
+      internal/web（补三个动作端点与 hConnTest 的快乐路径；写明 502 与
+      200+stage 两种约定并存）
+    · **判据节的内部体例写进 docs/README.md**（一处定义，别处引用）：
+      四件 —— 可重放命令 / 期望结果 / 覆盖了什么 / **故意不覆盖什么**，
+      并注明"没有真的不覆盖就别硬写"
+
+  判据（都当场跑过）：
+    · **机械核查**：把 47 份判据节里点名的测试函数逐个对全仓 532 个 `func Test` 比对 ——
+      **0 个过期**（只有 4 处命中是 `-run` 的前缀，不是名字）
+    · 那两条读 .md 的漂移防线通过（`TestRootHelpAndReadmeHaveNoStaleAdvice`、
+      `TestLiveDocsHaveNoStaleAdvice`），动词数仍是「55 个（共 3 处声明）」
+    · go test ./... -count=1 → 32 个带测试的包全 ok，无 FAIL
+    · 20 份改动的文件 + TEST.md 全部 LF；git diff --stat 与 --ignore-cr-at-eol --stat 一致
+      （20 files, +222/−93）
+
+  一处**没做**（如实记）：12 份判据节写了"故意不覆盖"，而 47 份里其余 35 份**没写** ——
+  这是按体例故意不写（没有真的不覆盖就别硬写），不是漏做。
+
 **批 4** —— 见【六】与【五】。判据：
   go build -o tt.exe . && go test ./... -count=1
   ./tt.exe dict --help && ./tt.exe serve --help     # 与改动前逐字一致

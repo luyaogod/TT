@@ -69,8 +69,23 @@
 go test ./internal/web -count=1
 ```
 
-覆盖：路由与挂载（含"未知 API 路径回 JSON 而不是 HTML 兜底页"）、SPA 回落、
-配置端点的校验与保留字段、派生状态。
+**覆盖**：路由与挂载、SPA 回落（深链接回落入口 HTML，而未知顶层路径由 `hRoot` 回 404）、
+配置端点的校验与保留字段、派生状态；**三个"动作"端点的错误半边与其中一条快乐路径**
+（`action_test.go`）。
+
+**故意不覆盖**：`hDBProbe` / `hDBAccVerify` 的快乐路径（要真服务器，属 L4）；
+`hConnTest` 是三条里**唯一能测全的** —— 它的下游 `erpdb.Open` 返回的是 `Connector`
+**接口**，所以可以注入一个假实现走完 `Open → ServerVersion → Close`
+（含"失败路径也要把连接关掉"这条）。
+
+`Options` 上那三个函数字段（`ProbeDB` / `VerifyAcc` / `OpenDB`）就是为这个开的：
+**nil = 用真实现**，所以生产路径的行为一字不差。它们与既有的 `Shutdown func()`
+（"nil 表示不注册该端点"）是同一个惯例。
+
+两种约定并存，读代码时别串：`dbprobe` / `dbaccverify` 失败回 **502**；
+`conntest` 失败回 **200 + `{"ok":false,"stage":…}`** —— 后者是刻意的，
+"连不上"正是这个端点要回答的问题，用 502 表达会让前端把"测试结果是连不上"
+当成"请求本身失败了"。
 
 ## 改动影响面
 

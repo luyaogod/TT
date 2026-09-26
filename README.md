@@ -110,7 +110,8 @@ tt dev tzs field_add --args '{"file":"D:\\pkg\\x.tzs","table":"pmdl_t","columns"
 
 | 想知道 | 去哪 |
 |---|---|
-| 从源码构建、依赖、跑测试、打包 | [BUILD.md](BUILD.md) |
+| 从源码构建、依赖、打包 | [BUILD.md](BUILD.md) |
+| **跑测试**：跑什么、分层、开关、真环境怎么配 | [TEST.md](TEST.md) |
 | 整体结构、分层、关系、术语 | [DESIGN_DOC.md](DESIGN_DOC.md) |
 | 在仓库里改代码：改哪块先读什么、什么不能碰、做完的定义 | [AGENTS.md](AGENTS.md) |
 | 怎么**用**某个命令（含各命令的坑） | [skills/](skills/) 下对应的 `SKILL.md` |

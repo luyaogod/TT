@@ -48,4 +48,4 @@ go test ./internal/testkit -count=1
 ## 细节去哪
 
 - 语料根怎么定、哪些文件算语料 → [`../dev/testutil/README.md`](../dev/testutil/README.md)
-- 语料回归的两条硬纪律（先在副本上跑、整轮进行中不重建引擎） → 根 [`BUILD.md`](../../BUILD.md)
+- 语料回归的两条硬纪律（先在副本上跑、整轮进行中不重建引擎） → 根 [`TEST.md`](../../TEST.md)

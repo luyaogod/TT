@@ -89,13 +89,26 @@ gate3 在写之前、对内存里的新包执行。**任何一步失败，原包
 
 ## 判据
 
-本包没有自己的测试文件；行为由使用者覆盖：
+各条**拒绝路径**由端到端用例覆盖，而且它们**已经在默认档里跑** ——
+`tt dev tzc selftest` 的 31 项被接进了 `go test`（见根 `TEST.md`）。
+所以本包的单测不重测那些，补的是端到端钉不到的两件：
 
 ```bash
-./tt.exe dev tzc selftest                       # 对抗用例（改只读区、删围栏、塞非法字符…）
-TDEV_DEEP=1 go test ./internal/dev/cli -run TestCorpusExportVerify
-                                               # 全语料验证（9–11 分钟）
+go test ./internal/dev/verify -count=1
 ```
+
+**覆盖**：
+- **干净路径零误报** —— 原样渲染、原样解析的文档不该有任何 error。端到端只会在
+  "该拒绝的没拒绝"时红，而"不该拒绝的拒绝了"在它那边是一片对不上的失败，
+  定位不到是哪个闸门误报。
+- **gate1 的行尾等价那条设计决定**：受保护字节的 CRLF↔LF 归一算 **info 不算 error**
+  （不然编辑器一次"另存为"整份文档全红，真问题会淹在里面）；而等价**有边界** ——
+  只读区正文里真的动了内容照样拦下，且带 `Denied` 标记（退出码 4 而不是 3）。
+- `Report` 的计数与摘要：**`Denied` 是 `Errors` 的子集**（一条被拒的发现同时计入两栏），
+  且只认 error 级。
+
+**故意不覆盖**：gate3 的装载模拟（要真包与真字节）—— 那由 `tt dev tzc selftest` 的
+apply 用例负责。**它验不了"设计器会不会拒绝这个容器"**，那要靠真机验收。
 
 ## 改动影响面
 
@@ -106,11 +119,13 @@ TDEV_DEEP=1 go test ./internal/dev/cli -run TestCorpusExportVerify
 | 新增发现码 | 码是**对外文本**（`--json` 里出现、报错里出现），改名等于改契约 |
 | gate3 的步骤 | 它是"设计器打得开吗"的最后一道自动化判决；**它验不了"设计器会不会拒绝这个容器"**，那要靠真机验收 |
 
-本包**没有自己的测试文件**：改动之后至少要跑
+改动之后至少要跑：
 
 ```bash
-./tt.exe dev tzc selftest
+go test ./internal/dev/verify -count=1      # 本包单测（干净路径 + 行尾等价 + Report 计数）
+./tt.exe dev tzc selftest                   # 对抗用例（改只读区、删围栏、塞非法字符…）
 TDEV_DEEP=1 go test ./internal/dev/cli -run TestCorpusExportVerify
+                                            # 全语料验证（9–11 分钟）
 ```
 
 ## 细节去哪

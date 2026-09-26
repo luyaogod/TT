@@ -34,11 +34,17 @@
 
 ## 判据
 
-本包没有自己的测试；行为由根包与各命令组的用例覆盖：
-
 ```bash
-go test ./internal/cli/... -count=1
+go test ./internal/cli/common -count=1
 ```
+
+**覆盖**：`OutputFormat` 那 11 种开关合流（`--json` / `--csv` 压过 `--format`，
+认不出的形态落回 json 而不是报错）、`CurrentMeta` 没注入 provider 时返回零值、
+`ConfigHint` / `ResolveConfig` 的**接线**（取值依赖环境，所以钉转发而不是钉具体值）、
+`PrintJSON` 的输出形态、`UnknownSubcommand` 要列出可用子命令。
+`resetCommon(t)` 自己也有断言 —— 它是本包所有用例的地基，坏了会让别处的失败长得很怪。
+
+**故意不覆盖**：`Fatal` —— 它 `os.Exit`，一调就带走整个测试进程。
 
 ## 细节去哪
 

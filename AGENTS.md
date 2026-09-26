@@ -48,32 +48,23 @@ cd engine && ./build.sh                  # 只在改了 engine/ 时才跑！理�
 ./tt.exe dev tzs doctor                  # .tzs 引擎环境自检（引擎 exe / 设计器 / 工作区 / 管道名）
 ```
 
-### 深度回归：显式开关，别顺手开
+### 测试：全在 TEST.md
 
-| 开关 | 跑什么 | 代价 |
-|---|---|---|
-| `TDEV_DEEP=1 go test ./... -timeout 30m` | `.tzc` 全语料 export+verify / apply 仿真 | 9–11 分钟 |
-| `TTZS_DEEP=1 go test ./internal/dev/tzs/ -run TestCorpus -timeout 30m` | `.tzs` 全语料回归 | 17 分钟 |
-| `TTZS_VALIDATE=all` | 把 `validate` 从"每轴一个样本"扩到全部包 | 再加十几分钟 |
-| `TTZS_CORPUS_LIMIT=N` | 只跑前 N 个包（冒烟） | 秒级 |
+**跑什么、四层怎么分、开关总表（含深档回归）、真环境怎么配、怎么回读"跑了多少跳了多少"
+—— 都在根 [TEST.md](TEST.md)。** 这里不再展开一遍：同一件事写两处就会漂，
+而这份文件里的数字已经漂过一次（包数）。
 
-**为什么必须显式**：这些用例对上百个真实包各跑一遍，`go test` 默认 `-timeout=10m`，表现为
-**随机器负载时好时坏的假失败** —— "那种假失败比不跑更糟"（`internal/dev/cli/corpus_test.go` 顶部）。
-改这个开关之前先读那里的注释。
+三条改代码时最容易踩的，留在这里当提醒：
 
-### 跑语料的两条硬纪律（都是踩出来的事故，2026-09-26）
+1. **深档回归是显式开关**（`TDEV_DEEP=1` / `TTZS_DEEP=1` / `TTZS_E2E=1`），别顺手开 ——
+   它们对上百个真实包各跑一遍，`go test` 默认 `-timeout=10m`，表现为随机器负载时好时坏的
+   **假失败**，而"那种假失败比不跑更糟"（`internal/dev/cli/corpus_test.go` 顶部）。
+2. **先在副本上跑**（`TTZS_CORPUS=%TEMP%\ttws`）：缺省语料根是**真实客户目录**。
+3. **整轮在跑的时候不要重建引擎**：`build.sh` 覆盖 `out/*.exe` 会造成两三条**假红**。
 
-1. **先在副本上跑。** 缺省语料根 `D:\t100_wrok_dir` 是**真实客户目录**，而回归会**在源包旁边**写
-   `_tdev_*` / `_tt_dry_*` 临时包。用 `TTZS_CORPUS=%TEMP%\ttws`（整份拷贝）跑。要单独证明真语料
-   一个字节没动，就跑 `TestCorpusPin` 且**不设** `TTZS_CORPUS`。
-2. **整轮在跑的时候不要重建引擎。** `engine/build.sh` 会覆盖 `out/*.exe`，而每个包都要 spawn
-   `RoundTrip.exe` —— 撞上重写那一瞬间得到 `fork/exec … RoundTrip.exe: The system cannot find the
-   file specified`，表现为两三条**假红**，报告上看不出是构建造成的。
-
-语料相关的环境变量：`TDEV_CORPUS` / `TTZS_CORPUS`（**两个都认，谁先设谁说话**）、`TTZS_E2E=1`
-（真机引擎测试，配 `TTZS_EXE` / `TTZS_WS` / `TTZS_INSTALL`）。语料根的解析只有一处
-（`internal/dev/testutil/corpus.go`，两条管线共用）—— 别再写第二份：漂移的结果是
-**"0 个包全部通过"这种最坏的假绿**。注意覆盖变量**设了但指不到目录时返回空**，不会回落到缺省。
+**语料根的解析只有一处：`internal/testenv`**（`internal/dev/testutil` 只剩**遍历**）。
+别再写第二份 —— 漂移的结果是**"0 个包全部通过"这种最坏的假绿**。
+`internal/testkit` 有一条测试盯着这件事。
 
 ---
 

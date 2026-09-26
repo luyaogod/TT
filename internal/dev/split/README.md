@@ -41,12 +41,24 @@
 
 ## 判据
 
-本包没有自己的测试文件；它的正确性由端到端用例证明：
+端到端那一层（改名事务、新增点、删除授权、真实语料写回仿真）**已经在默认档里跑** ——
+`tt dev tzc selftest` 的 31 项被接进了 `go test`（见根 `TEST.md`）。所以本包的单测
+**不重测那些**，只钉端到端钉不到的纯函数：
 
 ```bash
-./tt.exe dev tzc selftest                 # 含改名事务、新增点、删除授权的对抗用例
+go test ./internal/dev/split -count=1
+```
+
+**覆盖**：点名怎么拆（`isSelfDef` / `bare` 去前缀与参数列表 / `prefixOf`）、
+**签名行怎么拼**（`BuildSignature`：FUNCTION 恒写限定符，DIALOG/REPORT 在 PUBLIC 时
+**省略** —— 错一个字就是静默走偏）、order 怎么分配（跳过已删除与非自订点）、
+`Plan.Describe` 的摘要按种类报数、`content` 的区间越界兜底、两个错误类型的退出码。
+
+**故意不覆盖**：`Split` 本身（它要 `Document` + `ParseResult` + `Package` 三件套）。
+那条链由 `tt dev tzc selftest` 的端到端用例与 `TDEV_DEEP=1` 的真实语料写回仿真负责：
+
+```bash
 TDEV_DEEP=1 go test ./internal/dev/cli -run TestCorpusApplySimulation
-                                          # 真实语料写回仿真：只动目标点，其余字节不变
 ```
 
 ## 细节去哪

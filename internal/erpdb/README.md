@@ -26,11 +26,25 @@
 
 ## 判据
 
-本包没有自己的测试文件；行为由字典线的用例覆盖：
-
 ```bash
-go test ./internal/dict/... -count=1
+go test ./internal/erpdb -count=1
 ```
+
+**覆盖**的是**转义与闸门**那一层（安全关键，所以判据写得比"能跑"严）：
+标识符白名单 `ValidIdent`（拒绝空格 / 分号 / 引号 / 点号 / 非 ASCII / 数字开头；
+**不过滤保留字** —— 那是库的事）、`QuoteLit` 的单引号翻倍（含一组"想破墙"的载荷）、
+`SelectAllSQL` 对用户名与表名的双重校验、`checkReadOnlySQL` 的**强度与边界**、
+两个 DSN 的拼法（oracle 走 URL 形式要转义 `% : @ / ?`，金仓走 key=value）、
+`scanString` 把驱动给的任意值文本化。
+
+**故意不覆盖**：真连库（`Open` / `OpenOracle` / `OpenKingbase` / 各连接器的 `Query`）——
+属 L4，要真 Oracle 或金仓。
+
+一处**要读清的**：`checkReadOnlySQL` 是**前缀检查，不是解析器** —— 它挡的是"手写的
+DML 直接贴进来"这种最常见的情况，**挡不住**前面加注释的写法。它不是唯一的闸门：
+真正的文本闸门是 `internal/safesql`（会先剥注释），而 `internal/dict/live` 那条路径
+自己构造 SQL（值走 `QuoteLit`、表名走 `ValidIdent`）。测试里把它的边界一并钉住了，
+免得有人把它当"完善"来用。
 
 ## 细节去哪
 

@@ -149,7 +149,7 @@ go test ./internal/dev/tzs -count=1        # 本包测试量最大（约 5.7k �
 TTZS_E2E=1 go test ./internal/dev/cli -run TestE2E   # 需要真引擎（配 TTZS_EXE / TTZS_WS / TTZS_INSTALL）
 ./tt.exe dev tzs doctor                    # 五个失败面自检，不引导任何东西
 TTZS_DEEP=1 go test ./internal/dev/tzs -run TestCorpus -timeout 30m
-                                           # 全语料回归（17 分钟；先在副本上跑，见 BUILD.md）
+                                           # 全语料回归（17 分钟；先在副本上跑，见 TEST.md）
 ```
 
 ## 改动影响面

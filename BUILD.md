@@ -31,7 +31,7 @@ git clone <repo> && cd TT
 
 cd web && npm install && npm run build && cd ..   # ① 前端（可先跳过，见下）
 go build -o tt.exe .                              # ② 后端 —— 到这里 debug / dict / dev tzc 就能用
-go test ./...                                     # ③ 自检
+go test ./...                                     # ③ 自检（详见 TEST.md）
 
 cd engine && ./build.sh && cd ..                  # ④ .tzs 引擎（只在要用 tzs 时）
 ```
@@ -105,30 +105,15 @@ cd web && npm run dev:app    # 前端热更新，代理到后端
 
 ## 7. 自检
 
+**测试的全部内容在 [TEST.md](TEST.md)** —— 跑什么、四层怎么分、开关总表、真环境怎么配、
+怎么回读"跑了多少跳了多少"。这里只留一句最小序列：
+
 ```bash
-go test ./...                        # Go 全量；默认跳过 .tzs 语料回归
-cd web && npm run check:app          # 前端三项检查（词法 / 大纲 / 状态容器）
-cd web && npm run build              # 构建含类型检查（check:app 不做类型检查）
-./tt.exe dev tzc selftest            # .tzc 的内置对抗用例，不需要真实语料
-./tt.exe dev tzs doctor              # .tzs 引擎环境自检
+go test ./... -count=1                   # 默认档，任何机器上都该全绿
+cd web && npm run check:app && npm run build
+./tt.exe dev tzc selftest
+./tt.exe dev tzs doctor
 ```
-
-**深度回归是显式开关，别顺手开**：
-
-| 开关 | 跑什么 | 代价 |
-|---|---|---|
-| `TDEV_DEEP=1 go test ./... -timeout 30m` | `.tzc` 全语料 export+verify / apply 仿真 | 9–11 分钟 |
-| `TTZS_DEEP=1 go test ./internal/dev/tzs/ -run TestCorpus -timeout 30m` | `.tzs` 全语料回归 | 17 分钟 |
-| `TDEV_CORPUS` / `TTZS_CORPUS` | 覆盖语料根（两条管线都认） | — |
-| `TTZS_CORPUS_LIMIT=N` | 只跑前 N 个包（冒烟） | 秒级 |
-
-它们对上百个真实包各跑一遍，而 `go test` 默认超时 10 分钟 —— 表现为**随机器负载时好时坏的假
-失败**，所以默认跳过。两条纪律：
-
-1. **先在副本上跑。** 缺省语料根是**真实客户目录**，而回归会**在源包旁边**写临时包。
-   用 `TTZS_CORPUS=%TEMP%\ttws`（整份拷贝）跑。
-2. **整轮在跑的时候不要重建引擎。** 构建会覆盖产物，而每个包都要 spawn 探测程序，撞上重写会
-   得到"文件找不到"的假红，报告上看不出是构建造成的。
 
 ## 8. 打包
 

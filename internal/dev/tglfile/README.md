@@ -28,13 +28,22 @@
 
 ## 判据
 
-本包没有自己的测试文件（`go test ./internal/dev/tglfile` 报 `no test files`）。它的行为由
-使用者覆盖：
-
 ```bash
-go test ./internal/dev/...           # synth / fence / verify / split 的用例
-./tt.exe dev tzc selftest            # 含"改区段后 .tap 与 .tgl 必须一致"的对抗用例
+go test ./internal/dev/tglfile -count=1
 ```
+
+**覆盖**：`TrimEnd` 去掉**所有**尾部空白（含 CR/LF/VT/FF）、区段配对（数量不等 → 格式错，
+退出码 2，且详情里报两个计数）、`readonly="Y"` 的大小写不敏感、占位符的**大小写敏感**
+（与区段标记相反，这是设计器的真实差别）、锚点正则里那个 `.` 是**任意字符**
+（`other_function` / `otherXfunction` 也命中 —— 照抄设计器）、`PatchSection` 的补丁格式
+（`标记 + eol + 正文 + eol + 标记`，eol 由调用方给）。
+
+还有一条**注释与代码不符**的实证：`ReplaceAnchor` 的注释说用 `ReplaceAllLiteral` 防
+`$` 展开，而代码调的是 `ReplaceAll`（**会**展开）。实践上不出事（repl 里不会有 `$`），
+但注释承诺的那层保护不存在 —— `TestReplaceAnchorExpandsDollarInRepl` 钉的是**实际行为**。
+
+**故意不覆盖**：设置器的真实行为（那要装设计器）。这里的判据来源是反编译源码里的位置，
+都逐条写在了包注释里。
 
 ## 细节去哪
 

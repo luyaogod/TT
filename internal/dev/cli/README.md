@@ -75,13 +75,25 @@
 ## 判据
 
 ```bash
-go test ./internal/dev/cli          # 含语料用例；corpus_test.go 顶部说明了深度回归为何要显式开关
-./tt.exe dev tzc selftest           # 内置对抗用例：通过 31，失败 0
+go test ./internal/dev/cli -count=1   # 约 26 秒；含语料用例与那 31 项自检
 ```
 
-`selftest` 用的包是**合成**的（不依赖真实语料），覆盖改围栏行、改只读区、删围栏、
-塞非法字符、结构行被改、越权删除与追加、改名事务、新函数模板等被拒的场景，
-并且断言**被拒的 apply 不改包**。
+`corpus_test.go` 顶部说明了深度回归为何要显式开关（9–11 分钟 > `go test` 默认超时）。
+
+**那 31 项内置对抗用例现在有两入口，同一个定义处**：
+
+```bash
+go test ./internal/dev/cli -run TestSelftestCases -v -count=1   # 默认档：31 个子测试
+./tt.exe dev tzc selftest                                       # 命令行：通过 31，失败 0
+```
+
+`TestSelftestCases` **只写驱动不写断言** —— `selftestCases()` 是那 31 项的唯一定义处，
+谁加一项 `go test` 自动跟着长。它们走的是 `cmdExport` / `cmdApply` / `cmdVerify` /
+`cmdRename` / `cmdNewfn` / `cmdUnlock` 的**完整命令路径**，用的包是**合成**的
+（不依赖真实语料），覆盖改围栏行、改只读区、删围栏、塞非法字符、结构行被改、
+越权删除与追加、改名事务、新函数模板等被拒的场景，并且断言**被拒的 apply 不改包**。
+
+**故意不覆盖**：真实语料的形状分布 —— 那归 `TDEV_DEEP=1` 的两条（见 `TEST.md`）。
 
 ## 细节去哪
 

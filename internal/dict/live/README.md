@@ -19,11 +19,20 @@
 
 ## 判据
 
-本包没有自己的测试文件；它与本地镜像的**同语义**由命令层的对拍用例承担：
-
 ```bash
-go test ./internal/cli/dict -count=1
+go test ./internal/dict/live -count=1
 ```
+
+**覆盖**的是**拼 SQL 那一层**（纯字符串）：`lit` 的引号翻倍、`tableLit` 走的是
+**白名单而不是转义**（非法表名退化成空字面量"查不到、不报错"，不是"转义后照样拼进去"）、
+`kwWhere` 的两端 `UPPER` 与 `%` 包裹、`inUpperLits` 的 IN 列表、`liveMsgWhere` 每个
+条件子句的形状与拼法。
+
+这一层是**注入的落点**（erpdb 走 simple protocol，没有绑定参数，值只能内联），
+所以测试里带了一组"想破墙"的载荷，并断言字形没被改变。
+
+**故意不覆盖**：`Query*` 系列的全部查询语义（列序、方言差异）—— 要真远程库，属 L4。
+它与本地镜像的**同语义**由命令层的对拍用例承担：`go test ./internal/cli/dict -count=1`。
 
 ## 改动影响面
 
