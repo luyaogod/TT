@@ -898,6 +898,59 @@ fgloutline.fixtures.mjs、store.test.mjs），套路是**用 esbuild 打成临�
   go test ./internal/web   -run 'TestActionEndpoints' -v -count=1
   反向判据：删掉 resetDictPackageState 里一行 → 那条清单齐全断言必须红
 
+【批 4 已完成 2026-09-26】唯一动生产代码的一批，动了两处、都是"加一个注入点"：
+
+  internal/debug/api.go     Server 加未导出字段 dial（NewServer 里默认 host.Dial），
+                            5 处 host.Dial(s.cfg.SSH) 改成 s.dial(s.cfg.SSH)
+  internal/web/server.go    Options 加 ProbeDB / VerifyAcc / OpenDB 三个函数字段，
+                            New 里 nil 回落真实现；三个 handler 改走 s.probeDB / s.verifyAcc / s.openDB
+
+  生产路径的行为**一字不差**：两处都是"没注入就用真实现"，实测两个二进制在同一目录下
+  跑 dict/serve/dev/debug/install/--help 与 dict msg/r.t/install path 的 --help，逐字节一致
+  （依据：git archive HEAD 导到临时目录单独编译，两个二进制逐条 cmp）。
+
+  新增 4 个测试文件：
+    internal/debug/api_action_test.go   五个动作端点的错误半边（400/500/stage）+ **入参校验在拨号之前**
+    internal/debug/bpsstore_test.go     断点存档的落盘/读取/路径（此前零覆盖）
+    internal/web/action_test.go         三个动作端点 + connTest 的**快乐路径**（假 Connector）
+    internal/cli/dict/reset_test.go     resetDictPackageState + 清单齐全断言 + 两条拒绝路径
+
+  实测：带测试的包仍是 32（这批没新增包，补的是已有 3 个包的测试）
+        PASS/SKIP：批 2 的 480/25 → 505/25（+25 条顶层用例，跳过集合逐条未变）
+        全量墙钟 47 s → 47 s
+        go build -o tt.exe . 通过；./tt.exe dev tzc selftest 通过 31，失败 0
+        gofmt -l internal/ main.go 空；git diff --stat 与 --ignore-cr-at-eol --stat 一致
+
+  **反向判据执行过**：往 internal/cli/dict/win.go 尾部加一个包级 var，
+  TestDictGlobalsAreAllInReset 立刻报"这些包级 var 没有归属：zzProbeNewGlobal"。
+  还原后 git diff 为 0 行。
+
+  **本批核实到的第三个事实（前两个在【批 2】）—— 这条是**产品面**的，值得单列**：
+
+  3. **未注册的 `/api/*` 路径返回 200 + HTML，不是 404。**
+     internal/debug 的路由里有一条 `mux.HandleFunc("/", s.hStatic)` 的 SPA 兜底，
+     它把任何未注册路径都吞掉。实测（同一次探测，注入失败 dial 之后）：
+         GET  /api/wstest        → 200  text/html
+         GET  /api/根本不存在      → 200  text/html
+         POST /api/根本不存在      → 200  text/html
+         GET  /api/status        → 200  application/json   ← 注册过的照常
+         GET  /api/wslogs        → 500  application/json   ← 注册过的照常
+     也就是说：调用方（尤其 AI）打错一个 API 路径时，拿到的是一个**看起来成功**的
+     HTML 页面，解析失败时报的错与真实原因（接口不存在）完全对不上。
+     而本仓库在字典那侧**专门为这件事立过规矩** ——
+     internal/dict/server/handler_test.go:29 的原话："这里断言 404 JSON 而不是某个 HTML 页:
+     API 路径落到 HTML 页会让调用方拿到 200 + HTML，解析失败时报的错与真实原因(接口不存在)
+     完全对不上。"
+     本次**没有修**：那是可观察的对外行为变化（200→404），不在批 4 范围内，
+     而且"改了会不会影响独立运行的 tt debug serve"要先想清。
+     改法很小：hStatic 里对 `/api/` 前缀且未命中注册路由的，回 404 + JSON 信封。
+
+  顺带记一条**两种约定并存**的事实（不是问题，但读代码时容易串）：
+    POST /api/dbprobe、/api/dbaccverify 失败 → **502** BadGateway
+    POST /api/conntest   失败 → **200** + {"ok":false,"stage":"connect|version"}
+  后者是刻意的："连不上"正是这个端点要回答的问题，用 502 表达会让前端把
+  "测试结果是连不上"当成"请求本身失败了"。stage 的取值也是契约。
+
 **批 5** —— 见【八】与【九】。判据：
   go test ./internal/testkit ./internal/dev/fgl -count=1
   反向判据两条（改一个字符 / 加一处 t.Skip）

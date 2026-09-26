@@ -76,6 +76,25 @@ type Options struct {
 	//
 	// 留空 = 用 config.DefaultSyncTarget()（当前目录的 erp_data.db）。
 	SyncDefaultTarget string
+
+	// ---- 三个"动作"端点的外部依赖 ----
+	//
+	// 它们三个都要连服务器/连库，所以默认档的测试进不去 —— 而这三条路径上的
+	// **错误分支**（信封形状、HTTP 码、stage 取值）恰恰是对外契约，改了没人会响。
+	// 抽成函数字段就能只测那一半，不必造一个假的 *host.SSHConn
+	// （那个结构体的 cli 是私有字段，伪造要付 8 个方法，见 internal/debug 的 dial 字段）。
+	//
+	// 全是 nil = 用真实现，所以**生产路径的行为一字不差**。
+
+	// ProbeDB POST /api/dbprobe。nil = host.ProbeDBConfig。
+	ProbeDB func(host.DBProbeReq) (*host.DBProbeOut, error)
+	// VerifyAcc POST /api/dbaccverify。nil = host.VerifyDBAcct。
+	VerifyAcc func(host.DBAccVerifyReq) error
+	// OpenDB POST /api/conntest。nil = erpdb.Open。
+	//
+	// 与前两个不同：它的返回值 `erpdb.Connector` 是**接口**，所以注入一个假 Connector
+	// 能测到 hConnTest 的**快乐路径** —— 那是这三个端点里唯一一条能测全的。
+	OpenDB func(context.Context, dbconfig.Connection) (erpdb.Connector, error)
 }
 
 // ConfigReloader 由持有配置内存态的子系统实现；本服务在配置写入成功后调用它。
@@ -461,12 +480,34 @@ func (s *Server) hDBProbe(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	out, err := host.ProbeDBConfig(req)
+	out, err := s.probeDB(req)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// probeDB 走注入的实现；没注入就用真的。三处同款，理由见 Options 的字段注释。
+func (s *Server) probeDB(req host.DBProbeReq) (*host.DBProbeOut, error) {
+	if s.opt.ProbeDB != nil {
+		return s.opt.ProbeDB(req)
+	}
+	return host.ProbeDBConfig(req)
+}
+
+func (s *Server) verifyAcc(req host.DBAccVerifyReq) error {
+	if s.opt.VerifyAcc != nil {
+		return s.opt.VerifyAcc(req)
+	}
+	return host.VerifyDBAcct(req)
+}
+
+func (s *Server) openDB(ctx context.Context, c dbconfig.Connection) (erpdb.Connector, error) {
+	if s.opt.OpenDB != nil {
+		return s.opt.OpenDB(ctx, c)
+	}
+	return erpdb.Open(ctx, c)
 }
 
 // hDBAccVerify 逐账号在服务器侧验证。
@@ -476,7 +517,7 @@ func (s *Server) hDBAccVerify(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := host.VerifyDBAcct(req); err != nil {
+	if err := s.verifyAcc(req); err != nil {
 		writeErr(w, http.StatusBadGateway, err)
 		return
 	}
@@ -500,7 +541,7 @@ func (s *Server) hConnTest(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 
-	conn, err := erpdb.Open(ctx, c)
+	conn, err := s.openDB(ctx, c)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok": false, "stage": "connect", "error": err.Error(),

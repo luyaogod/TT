@@ -28,6 +28,16 @@ type Server struct {
 	addr    string // 实际监听地址(端口顺延时与 cfg.Listen 不同;不写回配置)
 	mgr     *Manager
 
+	// dial 是拨 SSH 的入口。抽成**字段**是为了让默认测试不拨真机
+	// （与 internal/dev/tzs 的 Dialer 接口、internal/web.Options 的函数字段同一个理由）。
+	// 五个 handler 直接调它，注入一个必然失败的实现就能测它们的 400/500 分支 ——
+	// 那批分支里有一处**顺序**性质（入参先校验、再收口会话，见 hWSLogDebug 的注释），
+	// 改动它没有任何东西会响。
+	//
+	// NewServer 里默认成 host.Dial，所以**生产路径的行为与从前一字不差**；
+	// 只有 _test.go 会替换它。
+	dial func(host.SSHConfig) (*host.SSHConn, error)
+
 	// mu 同时保护两类运行态:
 	//   stop —— Serve 期间指向该次运行的 cancel(POST /api/shutdown 用,优雅停止);
 	//   *cfg 的替换 —— 配置热替换必须整个换掉,不能让别人看到半个新配置。
@@ -50,7 +60,7 @@ func NewServer(cfg *Config, web fs.FS, cfgPath string) *Server {
 	// /api/status 报不出主机,从 /api/sessions 起的会话也会拿空地址去连。
 	// 重复调用无副作用(CLI 的 serve 路径本来就会先调一次)。
 	cfg.ApplyDefaultEnv()
-	s := &Server{cfg: cfg, cfgPath: cfgPath, web: web, mgr: NewManager(cfg)}
+	s := &Server{cfg: cfg, cfgPath: cfgPath, web: web, mgr: NewManager(cfg), dial: host.Dial}
 	if web != nil {
 		if f, err := web.Open("index.html"); err == nil {
 			f.Close()
@@ -1424,7 +1434,7 @@ func (s *Server) hWSTest(w http.ResponseWriter, r *http.Request) {
 	if req.URL == "" {
 		req.URL = WSDefaultURLFor(s.cfg, req.Mode)
 	}
-	conn, err := host.Dial(s.cfg.SSH)
+	conn, err := s.dial(s.cfg.SSH)
 	if err != nil {
 		fail(w, 500, fmt.Errorf("SSH 连接失败: %w", err))
 		return
@@ -1454,7 +1464,7 @@ func (s *Server) hWSLogs(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	page, _ := strconv.Atoi(q.Get("page"))
 	pageSize, _ := strconv.Atoi(q.Get("pageSize"))
-	conn, err := host.Dial(s.cfg.SSH)
+	conn, err := s.dial(s.cfg.SSH)
 	if err != nil {
 		fail(w, 500, fmt.Errorf("SSH 连接失败: %w", err))
 		return
@@ -1489,7 +1499,7 @@ func (s *Server) hWSLogs(w http.ResponseWriter, r *http.Request) {
 // hWSLogContent GET /api/wslogs/content?rowid=
 func (s *Server) hWSLogContent(w http.ResponseWriter, r *http.Request) {
 	rowid := r.URL.Query().Get("rowid")
-	conn, err := host.Dial(s.cfg.SSH)
+	conn, err := s.dial(s.cfg.SSH)
 	if err != nil {
 		fail(w, 500, fmt.Errorf("SSH 连接失败: %w", err))
 		return
@@ -1527,7 +1537,7 @@ func (s *Server) hWSLogDebug(w http.ResponseWriter, r *http.Request) {
 	if !s.sessOfWriteGlobal(w, r) {
 		return
 	}
-	conn, err := host.Dial(s.cfg.SSH)
+	conn, err := s.dial(s.cfg.SSH)
 	if err != nil {
 		fail(w, 500, fmt.Errorf("SSH 连接失败: %w", err))
 		return
@@ -1625,7 +1635,7 @@ func (s *Server) hDBSQL(w http.ResponseWriter, r *http.Request) {
 			ent = cur.TopentIntForDB()
 		}
 	}
-	conn, err := host.Dial(s.cfg.SSH)
+	conn, err := s.dial(s.cfg.SSH)
 	if err != nil {
 		fail(w, 500, fmt.Errorf("SSH 连接失败: %w", err))
 		return
