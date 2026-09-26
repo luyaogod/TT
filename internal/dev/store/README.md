@@ -60,6 +60,12 @@ git 是**可选**的：环境里没有 git 可执行文件时，`export` 照常�
 | `BackupPackage(srcPath)` | 覆盖前把**上一版包**整文件备份一份（可回滚） |
 | `SnapshotEntry(name)` | 取某个条目的原始字节（恢复源） |
 
+## manifest 里的工具标识
+
+`manifest.json` 记着两个字段：`tool` 与 `tool_version`。**`tool` 的值仍写作 `"tdev tzc"`**
+（合并前的工具名），而且**全仓没有任何代码读它** —— 保持这个字符串不变是有意的：
+它是持久化字段，改名只会让已有工作区的 manifest 看起来"换了身份"，没有收益。
+
 ## 锁
 
 `Lock()` 用 `O_CREATE|O_EXCL` 原子抢占 `.tdev/lock`（两个进程不可能同时成功）。

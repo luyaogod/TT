@@ -112,6 +112,23 @@
   | 依据：grep ResolveSection 在 internal/dev/synth/synth.go:277 起
   | 已按代码把 S1–S5 写进 internal/dev/synth/README.md
 
+- **§11.9 的"现状接口"逐条回代码核实的结果**（批 2，读 engine/src 与 internal/dev/tzs）：
+  | 说法 | 核实结论 | 依据 |
+  |---|---|---|
+  | `save`/`field_add` 的 `out` 闸门 | **成立**，且是两条拒绝：指向任一已打开的包、落到工作区之外（后者会"写入成功但之后打不开"） | `engine/src/Designer/Fns/Session.cs` 的 `CheckOutPath` |
+  | `save` 返回 `sha256` + `key` | **成立**，另有 `written`：dry-run 下 `written:false` 而 sha256 是"本该写入的字节"的摘要 | 同上，`Fns/Session.cs:287-305` |
+  | `force` 已从 manifest 删掉 | **成立**（Manifest.cs 里没有它），但**函数体里的兜底拒绝还在** | `Fns/Session.cs:232` |
+  | `E_NO_OP` 是成功码 | **成立** | `internal/dev/tzs/client.go` 的 `CodeNoOp`/`IsSuccessCode` |
+  | `describe_kind` 支持 `kind:"layout"` 并报 type/values/initial | **成立** | `Manifest.cs:386`（`P.KindOrLayout`）、`Fns/Read.cs:479-480` |
+  | `list_packages` 只列 .tzs/.tzv、不开包 | **成立** | `Fns/Read.cs:697-700` |
+  | `dry_run` 不是靠撤销栈 | **成立**：渲染临时包 → 跑 → 重读；`reverted.mode` 可为 `none` | `engine/src/Designer/DryRun.cs` |
+  | `reload` 的 baseline 三态 | **成立**：`kept`/`dropped`/`none`；`fileChanged` 也是三态，**null = 无法证明** | `Fns/Session.cs:596-618` |
+  | `op` / `list_ops` 幂等日志 | **成立**，日志只在进程内、不落盘 | `engine/src/Designer/OpLog.cs` |
+  | `field_add` 的 `added[]` 带绑定 | **成立**：返回 `added` / `validate` / `baselineCached`（存了包另给 `saved`） | `Fns/Session.cs:715-719` |
+  | `store.ToolName` 仍是 `"tdev tzc"` | **成立**，且**全仓无任何代码读它**（唯一出现处就是写入点） | `internal/dev/store/store.go:62`、`store/manifest.go:143` |
+  | 函数面覆盖为空（`gate-w3-fns.py` 起不来） | **成立**：它在运行时用 importlib 从路径加载 `gate-w3.py`，那份从未进仓库 | `engine/gate-w3-fns.py:71-73`、`engine/TASKS.md:23-27` |
+  | `tt --config` 对 `tt dev` 需转成 `TT_CONFIG` | **成立**（含位置无关的两处写法都要摘） | `internal/cli/dev/run.go` 的 `takeRootFlags` |
+
 - **两处代码注释仍用过时的 `--allow-sec` 说法**（该开关 v2 起已废弃，cli.go:469 保留它只为
   给出明确指引）：`verify/verify.go:10`（gate1 的权限类描述）与
   `split/split.go:72`（TglPatches 的条件）。实际机制是 `model.SectionState`（unlock 状态机）。
