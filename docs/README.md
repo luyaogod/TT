@@ -54,6 +54,7 @@
 | 目录 | 理由 |
 |---|---|
 | `web/dist/` | 构建产物；且 `main.go` 的 `//go:embed all:web/dist` 会把它嵌进二进制，前端构建还会清空该目录 |
+| `engine/out/` | 引擎的构建产物，本就不入库（`.gitignore` 里忽略）；只有本机构建过才存在 |
 | `engine/designer/` | 第三方二进制程序集（28 个 dll），`.gitattributes` 已标为 binary |
 | `engine/src/**`、`engine/test/` | 由 `engine/SPEC.md`、`engine/HANDOFF.md`、`engine/BUILD.md` 覆盖 |
 | `skills/<名字>/` | `SKILL.md` 就是该目录的说明；且技能目录的目录名必须等于 frontmatter 里的 `name`，不再加别的文件 |

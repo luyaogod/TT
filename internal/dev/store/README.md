@@ -62,9 +62,9 @@ git 是**可选**的：环境里没有 git 可执行文件时，`export` 照常�
 
 ## manifest 里的工具标识
 
-`manifest.json` 记着两个字段：`tool` 与 `tool_version`。**`tool` 的值仍写作 `"tdev tzc"`**
-（合并前的工具名），而且**全仓没有任何代码读它** —— 保持这个字符串不变是有意的：
-它是持久化字段，改名只会让已有工作区的 manifest 看起来"换了身份"，没有收益。
+`manifest.json` 记着两个字段：`tool` 与 `tool_version`。**`tool` 的值写作 `"tdev tzc"`**，
+而且**全仓没有任何代码读它** —— 保持这个字符串不变是有意的：它是持久化字段，
+改名只会让已有工作区的 manifest 看起来"换了身份"，没有收益。
 
 ## 锁
 
@@ -78,7 +78,7 @@ git 是**可选**的：环境里没有 git 可执行文件时，`export` 照常�
 |---|---|
 | `Create(dir, doc, pkg, fenced)` / `Open(dir)` | 建 / 开工作区（目标已存在、或工作区不完整 → 拒绝） |
 | `ReadEdited` / `WriteEdited` / `ReadBase` | 编辑文件与基线 |
-| `Manifest()` / `Regions()` / `EffectiveUnlockState()` | 读索引、Region 表、合并后的解锁状态 |
+| `Manifest()` / `Regions()` / `EffectiveUnlockState()` | 读索引、Region 表、综合两处事实后的解锁状态 |
 | `WriteSectionState` / `ReadSectionState` | 工作区的解锁意图 |
 | `UpdateAfterApply(doc, fenced)` | 基线前进一格（见上） |
 | `Lock` / `GitInit` / `GitCommit` / `GitHead` | 互斥与版本留痕 |
