@@ -254,5 +254,5 @@ tt dict mirror pull  [<环境名>]   # 下载/更新该环境源码镜像(增量
   
 ## 工具参考
 
-- 查询数据字典(表/字段中文含义):参见 [docs/WIKI.md](../../docs/WIKI.md#8-tt-dict-数据字典)
+- 查询数据字典(表/字段中文含义):参见 [tt-dict](../tt-dict/SKILL.md)
 - BDL 语言语法/库函数参考:项目内 `docs/bdl`(Genero BDL 文档;路径用 `tt dict bdldoc dir` 查/设)

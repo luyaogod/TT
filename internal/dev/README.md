@@ -72,6 +72,19 @@ pkgfile ─┬─ tapfile    包与条目（只读视图 + 字节级重建）
 | R6 | 一切落盘走原子写（同目录临时文件 → Rename） | `store/atomic.go` |
 | R7 | 时间戳不是功能：同一输入必须产出逐字节相同的工作区 | `store.go`、`cli/newfn_template.go:17` |
 
+## 有意的偏差（D-n）
+
+设计指南假设的几条规则，与真实包或真实行为不符，于是按**实测**做了偏离。编号出现在代码注释里，
+所以列在这里对照：
+
+| 编号 | 偏差 | 在哪落地 |
+|---|---|---|
+| **D-1** | 新增点的状态写 `"u"` 而**不是** `"c"` —— 写 `"c"` 会被设计器在下次保存时静默丢弃 | [fence](./fence/README.md)、[split](./split/README.md)、[cli](./cli/README.md)（自检用例盯着） |
+| **D-2** | 允许"区段 → 点"**一层嵌套**（指南要求围栏不嵌套）；真实框架里自订点就住在区段内 | [fence](./fence/README.md)、[model](./model/README.md) |
+| **D-3** | 允许**未归属字节段**（前缀 / 区段之间的空行 / 后缀），但全部纳入字节恒等比对 | [model](./model/README.md)、[fence](./fence/README.md) |
+| **D-6** | 写回前校验**源包自导出后未被改动**，变了就拒绝 | [cli](./cli/README.md) |
+| **DV-3** | "类型 → scope"的映射是**新建点对话框的默认值**，不是对既有文本的硬约束 → 只给 warn | [verify](./verify/README.md)（`structtx.go`） |
+
 ## 退出码
 
 ```

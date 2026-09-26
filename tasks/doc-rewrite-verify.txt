@@ -141,3 +141,31 @@
 - 两份夹具副本的 .4gl / .expected.json **逐字节相同**（只有 README 不同）
   | 命令：diff -rq testdata/fgl-fixtures web/app/scripts/fgl-fixtures
 - 夹具规模：各 61 个 .4gl + 61 个 .expected.json
+
+
+================================================================================
+【四】批 6 原子切换的记录（2026-09-26）
+================================================================================
+
+已做：
+- `git rm docs/WIKI.md`
+- `liveDocs()` 清单：WIKI → `internal/dev/cli/README.md` + `internal/dev/tzs/README.md`
+  | 证据：`TestDocVerbCountsAgree` 的日志从"共 6 处声明"变成"**55 个（共 3 处声明）**"——
+    防线没退化成空转；三处 = tzsUsage 常量 + SKILL 元数据 + engine/BUILD.md
+- `tzs_verb_test.go` 的三处注释改写（`callGatewayRules` 的豁免理由、checkNoStaleLines 的举例、
+  TestLiveDocs 的说明）——它们原先都在引用那份被删的文档
+- `tools/eval/prompts.md` 的禁读清单：点名禁读"各目录下的 README.md"
+  | 注意：**提示词改了，前四轮评测数字（58/62/52/48）与后续轮次不可比**
+- 三份 SKILL 的链接行改指新位置（措辞一字未动）
+- `AGENTS.md`：顶部路由表、§3 整表、§5 加"tzs 动词数"一行、§8 的文档分区声明
+- `docs/eval-baseline.md` 顶部加说明（它内部的历史行保留原样，以便重放）
+- `engine/TASKS.md` 两处"现在怎么跑"的指向
+- `docs/README.md` 去掉 WIKI 那一行，改为一句退休说明
+- 根 `README.md` 补"文档地图"
+- `internal/dev/README.md` 补 **D-n 偏差索引**（代码里现存 D-1 / D-2 / D-3 / D-6 / DV-3；
+  其余 D-n 只存在于被删文档里，按"只写能证实的"原则未进新文档）
+
+一处**与计划的偏离**（提前说明，避免被当成漏做）：
+- 计划里写了"`DESIGN_DOC.md` 补链接"，但**没有做**。理由：那份文档在建立时有一条明确要求——
+  "不要创建朝向任何文档的引用"。文档地图改由根 `README.md` 的「文档地图」一节与
+  `docs/README.md` 的分工表承担。

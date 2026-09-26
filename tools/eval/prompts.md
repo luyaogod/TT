@@ -13,8 +13,9 @@ SKILL、同一份 tt.exe 对应。
 你是一个执行者，手上有 Bash 工具。硬约束：
 
 **你只允许读一个文档**：`<仓库>/skills/tt-dev-tzs/SKILL.md`（整份读完）。
-不许读本仓库里的任何其它文件 —— 尤其 `docs/WIKI.md`、`README.md`、`engine/**`、`internal/**`、
-`skills/` 下别的目录 —— 也不许猜它们写了什么。你只按 SKILL 干活。
+不许读本仓库里的任何其它文件 —— 包括 `README.md`、`AGENTS.md`、`DESIGN_DOC.md`、`docs/**`、
+`engine/**`、`internal/**`、**各目录下的 `README.md`**、`skills/` 下别的目录 ——
+也不许猜它们写了什么。你只按 SKILL 干活。
 （读你要处理的那些包、以及在工作区里写文件，当然都可以。）
 
 环境（都给你绝对路径，照抄就行）：

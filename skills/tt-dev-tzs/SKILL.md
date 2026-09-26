@@ -717,4 +717,4 @@ tt dev tzs export "D:/ws/aapt300(c).tzs" -o D:/out --force    # 目标非空时�
 - 引擎为什么单独构建（不在 Go 构建链里、设计器目录是构建期与运行期都要的依赖、重编会让在跑的
   守护进程变孤儿）：[engine/BUILD.md](../../engine/BUILD.md)
 - `.tzs` 格式与引擎契约：[engine/SPEC.md](../../engine/SPEC.md)
-- 命令面、验收清单、设计依据：[docs/WIKI.md](../../docs/WIKI.md#7-tt-dev-tzs-表单包)
+- 命令面、验收清单、设计依据：[internal/dev/tzs/README.md](../../internal/dev/tzs/README.md)

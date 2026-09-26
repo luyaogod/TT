@@ -115,4 +115,4 @@ tt install skills    # 把技能文件复制到当前目录的 skills/
 ```
 
 细节（围栏协议、不变量 I1–I15、结构事务 V1–V7、与设计器的全部偏差 D-1…D-10/DV-2/DV-3、
-真机验收清单 S7）见随包 `README.md` 与 [docs/WIKI.md](../../docs/WIKI.md#6-tt-dev-tzc-代码包)。
+真机验收清单 S7）见随包 `README.md` 与 [internal/dev/README.md](../../internal/dev/README.md)。
