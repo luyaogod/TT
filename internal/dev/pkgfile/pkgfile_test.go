@@ -15,7 +15,6 @@ import (
 // 小工具
 //---------------------------------------------------------------------------
 
-
 func writeTemp(t *testing.T, b []byte) string {
 	t.Helper()
 	f, err := os.CreateTemp(t.TempDir(), "*.tzc")

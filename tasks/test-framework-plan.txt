@@ -838,6 +838,49 @@ fgloutline.fixtures.mjs、store.test.mjs），套路是**用 esbuild 打成临�
           ./internal/dev/tglfile ./internal/cli/common -count=1     # 全部 ok，无 SKIP
   go test ./... -count=1
 
+  【批 2 已完成 2026-09-26】8 个包全部补上了：
+    dbconfig / entdir / erpdb / dict/live / cli/common / tglfile / split / verify
+  实测（判据命令原样跑）：
+    go test 那 8 个包 -count=1                    全 ok，无 SKIP
+    go test ./... -count=1                        32 个带测试的包全 ok，无 FAIL
+    PASS/SKIP：批 1 的 409/25 → 480/25（+71 条顶层用例，跳过集合 25 条逐条未变）
+    全量墙钟 46 s → 47 s（71 条新用例一共只加了 1 秒 —— 这批全是微秒级）
+    gofmt -l internal/ main.go                    空（顺手修了批 0 遗留的一处格式）
+    git diff --stat 与 --ignore-cr-at-eol --stat  一致
+
+  **一处对本文的偏离，理由是实测**：本文说这批"允许用 t.Parallel()"。实测下来
+  这八个包各自 `go test` 只有 0.12–0.30 s，而其中几乎全是**测试进程启动**的开销，
+  用例本身是微秒级 —— 并行买不到任何东西，只多一层 goroutine 调度。
+  所以这批**没有**加 t.Parallel()。真需要它的地方是"一条用例要跑几十毫秒以上、
+  且条数多"的场景；到那时再加，那时才有可测的收益。
+
+  **本批核实到的四个事实（都不是本次要修的，记下来免得重推）**：
+
+  1. **SQL 标识符白名单有三份逐字相同的实现** ——
+     internal/erpdb/ident.go:7（导出的 ValidIdent）、internal/erpdb/erpdb.go:149
+     （同包内又抄一份）、internal/dict/db/db.go:240（另一个包再抄一份）。
+     三份逐字相同，只有函数名大小写不同（依据：把三段抠出来 diff）。
+     这是**安全相关**的白名单（挡表名/列名注入），而 AGENTS.md §5 的单一来源清单里
+     **没有它**。本次不改（批 2 的约定是零生产改动，且"归到哪个家"需要先定：
+     erpdb 是远端库层、dict/db 是本地 SQLite 层，互相 import 方向都不顺；
+     自然的位置是 internal/safesql —— 那本来就是"SQL 文本层防线"）。
+     internal/dict/db 那份**没有任何测试碰到**（grep validIdent 在 dict/db 的 _test.go 里零命中）。
+
+  2. **两个同名不同义的 QuoteIdent** —— erpdb.QuoteIdent（ident.go:21）只做白名单校验、
+     原样返回；dict/db.quoteIdent（db.go:253）是 `"` + s + `"`（SQLite 双引号包裹）。
+     名字一样、语义不同，读代码时容易串。
+
+  3. **tglfile.ReplaceAnchor 的注释与代码不符** —— 注释写着"用 ReplaceAllLiteral 避免
+     repl 里的 $ 被当作替换模板"，而代码调的是 `re.ReplaceAll(tgl, repl)`，那个**会**展开
+     `$1` / `$$`。实践上不出事（repl 是插回去的锚点标记，点名里不允许 $），
+     但注释承诺的那层保护并不存在。已由 TestReplaceAnchorExpandsDollarInRepl 钉住实际行为。
+
+  4. **verify 的夹具有一个坑，踩过**：闸门要的 `base` 必须是"把基线自己的**围栏文本**
+     解析一遍"得到的文档（`loadBase` 读的是 `base.full.4gl` + regions.json），
+     **不能**直接拿 `synth.Synthesize` 的产物 —— 那个的 Text 是未加围栏的正文、Regions
+     也是那套坐标。两者混用会让 gate1 把每一条围栏行都判成"锚定部分被改动"，
+     一份什么都没改的文档报出 14 条 error。已写在 verify_test.go 的 synthBase 注释里。
+
 **批 3** —— 见"已定下的架构决策 C"：新建根 `TEST.md`（独占测试：命令表、开关总表、
 分层定义、真环境怎么配、怎么回读跑了多少跳了多少）；`BUILD.md §7「自检」`压成一行指
 过去；`docs/README.md:19` 的路由"跑测试"从 BUILD.md 改指 TEST.md；
