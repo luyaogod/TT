@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"tt/internal/dev/testutil"
+	"tt/internal/testkit"
 )
 
 // formPkg 造一个合成的表单包（.tzs）：纯文本 + 二进制各一，用于验证「纯解压逐字节一致」。
@@ -152,7 +153,7 @@ func TestTzsExportJSON(t *testing.T) {
 	dir := t.TempDir()
 	p, _ := formPkg(t, filepath.Join(dir, "src"), "adzi999.tzs")
 	out := filepath.Join(dir, "out")
-	code, text := captureStdout(t, func() int {
+	code, text := testkit.CaptureStdout(t, func() int {
 		return cmdTzs([]string{"export", p, "-o", out, "--json"})
 	})
 	if code != 0 {

@@ -66,6 +66,7 @@ import (
 	"time"
 
 	"tt/internal/dev/testutil"
+	"tt/internal/testenv"
 )
 
 const (
@@ -132,7 +133,7 @@ type corpusEnv struct {
 func requireCorpus(t *testing.T) *corpusEnv {
 	t.Helper()
 	requireDeep(t)
-	exe := strings.TrimSpace(os.Getenv("TTZS_EXE"))
+	exe := testenv.EngineExe()
 	if exe == "" {
 		// 从包目录出发的相对缺省（本仓库里引擎的产物就在那儿），只是省事，不是保证。
 		exe = filepath.Join("..", "..", "..", "engine", "out", "tzs-server.exe")

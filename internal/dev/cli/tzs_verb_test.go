@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"tt/internal/dev/tzs"
+	"tt/internal/testkit"
 )
 
 // verbFixtureManifest 是给 lookupVerb / verbExample 用的小夹具。
@@ -737,7 +738,7 @@ func TestRemovedCommandsAreNotAdvertised(t *testing.T) {
 // 引擎不可达（默认）与可达（配了 TT_CONFIG 时）。
 func TestCmdTzsHelpIsStatic(t *testing.T) {
 	for _, a := range []string{"-h", "--help", "help"} {
-		code, out := captureStdout(t, func() int { return cmdTzs([]string{a}) })
+		code, out := testkit.CaptureStdout(t, func() int { return cmdTzs([]string{a}) })
 		if code != 0 {
 			t.Errorf("tt dev tzs %s 该退 0，得 %d", a, code)
 		}

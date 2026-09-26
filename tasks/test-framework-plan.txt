@@ -784,6 +784,28 @@ fgloutline.fixtures.mjs、store.test.mjs），套路是**用 esbuild 打成临�
   grep -rn "func corpusRoot"    --include=*_test.go internal/ | wc -l    # 0
   grep -rn "func captureStdout" --include=*_test.go internal/ | wc -l    # 0
 
+【批 0 已完成 2026-09-26】结果与四处与本文的偏离，落在这里免得后来人重新推：
+  · 新增两个包（本文只写了 testkit 一个）：internal/testkit（带 testing，只被 _test.go import）
+    与 internal/testenv（**不带 testing**，配置解析）。分两个是因为 testutil 要用配置定语料根，
+    而 testutil 被生产代码 import —— 那条链上不能出现 testing。
+  · 收敛的份数比本文记的多：corpusRoot 5→0、captureStdout **3**→0（本文写 2，
+    漏了 internal/cli/dict 的 runDict 里那一份）、resetFlags 1→0。
+  · **本文的 doctor 判据写错了**：它假定存在 `tt dev doctor`，实际没有（`tt dev doctor` 报
+    "未知子命令"）。已改接到实际存在的 `tt dev tzs doctor` 上，加第 ⑥ 项"语料根"，
+    级别是 **warn 不是 fail**（缺语料只是跑不了那一批回归，不是命令会失败；
+    用 fail 会把每个没语料的人的 doctor 变成红的）。"真机主机 / 字典库"两项**没做** ——
+    它们不属于 .tzs 这条线，塞进 tzs doctor 是错的层。
+  · 另一处偏离：`RequireDir` 没做。它到批 5 才有消费者，现在加就是"为还没写的东西加代码"，
+    与本文【五】对 dbProbeCache 的判据自相矛盾。
+
+  实测（2026-09-26，判据命令原样跑）：
+    go build -o tt.exe .                                  通过；tt 依赖图里 testing=0、testkit=0
+    go test ./... -count=1                                37 个包全 ok
+    PASS/SKIP：基线 396/25 → 408/25（新增 12 条全是本批的，无一消失，跳过集合逐条相同）
+    ./tt.exe dev tzc selftest                             通过 31，失败 0（生产行为没动）
+    ./tt.exe dev tzs doctor                               出现第 ⑥ 项"语料根"
+    git diff --stat 与 --ignore-cr-at-eol --stat 一致（20 files, +132/−348）
+
 **批 1** —— 见【四】。判据：
   go test ./internal/dev/cli -run TestSelftestCases -v -count=1   # 31 PASS / 0 SKIP
   ./tt.exe dev tzc selftest                                        # 输出不变（生产侧没动）

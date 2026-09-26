@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"tt/internal/testenv"
 	"tt/internal/winproc"
 )
 
@@ -201,6 +202,20 @@ func Doctor(ctx context.Context, o Options) *DoctorReport {
 		} else {
 			r.add(LevelOK, "守护进程", "没在跑（下一条命令会自己起来）")
 		}
+	}
+
+	// ⑥ 语料根：**只有深档语料回归需要它**，所以是 warn 而不是 fail ——
+	// 少了它 `tt dev tzs <动词>` 照常能用；缺的是"跑不了那一批回归"，不是"命令会失败"。
+	// 用 fail 会把每个没语料的人的 doctor 变成红的。
+	//
+	// "这次是怎么定的、卡在哪一处"由 testenv 说了算（CorpusRootDetail）—— 这里自己猜的话
+	// 会把指引指到错的那条路上（比如明明是环境变量指错了，却说"你没设环境变量"）。
+	if root := testenv.CorpusRoot(); root != "" {
+		r.add(LevelOK, "语料根", fmt.Sprintf("%s（来自 %s）", root, testenv.CorpusRootDetail()))
+	} else {
+		r.add(LevelWarn, "语料根", fmt.Sprintf(
+			"没找到 —— %s。只有 TTZS_DEEP=1 / TDEV_DEEP=1 的深档语料回归需要它",
+			testenv.CorpusRootDetail()))
 	}
 
 	return r

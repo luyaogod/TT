@@ -9,29 +9,14 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-)
 
-func corpusRoot() string {
-	if v := os.Getenv("TDEV_CORPUS"); v != "" {
-		if st, err := os.Stat(v); err == nil && st.IsDir() {
-			return v
-		}
-		return ""
-	}
-	def := `D:\t100_wrok_dir`
-	if st, err := os.Stat(def); err == nil && st.IsDir() {
-		return def
-	}
-	return ""
-}
+	"tt/internal/testkit"
+)
 
 // corpusTaps 返回语料里所有 .tap 条目的字节（按包名排序，稳定）。
 func corpusTaps(t *testing.T) map[string][]byte {
 	t.Helper()
-	root := corpusRoot()
-	if root == "" {
-		t.Skip("没有真实语料（设置 TDEV_CORPUS 或准备 D:\\t100_wrok_dir）")
-	}
+	root := testkit.CorpusRoot(t)
 	out := map[string][]byte{}
 	err := filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || !strings.EqualFold(filepath.Ext(p), ".tzc") {

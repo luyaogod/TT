@@ -26,6 +26,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"tt/internal/testenv"
 )
 
 // closeIfOpen 把某个包在当前工作区守护进程里的会话关掉（没有就什么都不做）。
@@ -66,21 +68,23 @@ func closeIfOpen(ctx context.Context, t *testing.T, o Options, m *Manifest, pkg 
 func requireE2E(t *testing.T) (exe, ws, install string) {
 	t.Helper()
 	if os.Getenv("TTZS_E2E") == "" {
-		t.Skip("需要真引擎：设 TTZS_E2E=1 + TTZS_EXE + TTZS_WS（可选 TTZS_INSTALL），见本文件顶部注释")
+		t.Skip("需要真引擎：设 TTZS_E2E=1 + 引擎 exe + 工作区（TTZS_EXE / TTZS_WS，" +
+			"或写进仓库根的 config.local.json），可选 TTZS_INSTALL。见本文件顶部注释")
 	}
-	exe = os.Getenv("TTZS_EXE")
+	exe = testenv.EngineExe()
 	if exe == "" {
 		// 从包目录出发的相对缺省（本仓库里引擎的产物就在那儿），只是省事，不是保证。
 		exe = filepath.Join("..", "..", "..", "engine", "out", "tzs-server.exe")
 	}
 	if _, err := os.Stat(exe); err != nil {
-		t.Skipf("找不到引擎 exe（TTZS_EXE=%s）：%v", exe, err)
+		t.Skipf("找不到引擎 exe（%s）：%v", exe, err)
 	}
-	ws = os.Getenv("TTZS_WS")
+	ws = testenv.Workspace()
 	if strings.TrimSpace(ws) == "" {
-		t.Skip("没给 TTZS_WS。工作区绝不替你选：引擎自己的缺省是一个真实客户目录")
+		t.Skip("没给工作区（TTZS_WS 或 config.local.json 的 workspace）。" +
+			"工作区绝不替你选：引擎自己的缺省是一个真实客户目录")
 	}
-	return exe, ws, os.Getenv("TTZS_INSTALL")
+	return exe, ws, testenv.DesignerDir()
 }
 
 // TestE2EManifest 用真 manifest 校验我们的解析层：两个「不 Boot」的开关，

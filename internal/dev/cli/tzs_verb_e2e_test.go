@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"tt/internal/dev/tzs"
+	"tt/internal/testenv"
 )
 
 func requireRealManifest(t *testing.T) *tzs.Manifest {
@@ -30,7 +31,7 @@ func requireRealManifest(t *testing.T) *tzs.Manifest {
 	if os.Getenv("TTZS_E2E") == "" {
 		t.Skip("需要真引擎：设 TTZS_E2E=1（可选 TTZS_EXE），见本文件顶部注释")
 	}
-	exe := os.Getenv("TTZS_EXE")
+	exe := testenv.EngineExe()
 	if exe == "" {
 		exe = filepath.Join("..", "..", "..", "engine", "out", "tzs-server.exe")
 	}

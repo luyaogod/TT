@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"testing"
+
+	"tt/internal/testkit"
 )
 
 //---------------------------------------------------------------------------
@@ -77,7 +79,7 @@ func readAllViaStdlib(t *testing.T, b []byte) map[string][]byte {
 // TestRawParseMatchesStdlib 交叉验证：自己的原始解析与 archive/zip 逐字段一致。
 // （写回的保真度建立在解析正确之上，所以先钉住解析。）
 func TestRawParseMatchesStdlib(t *testing.T) {
-	pkgs := corpusPackages(t)
+	pkgs := testkit.CorpusFiles(t, ".tzc")
 	n := 0
 	for _, p := range pkgs {
 		b, err := os.ReadFile(p)
@@ -162,7 +164,7 @@ func mustRead(t *testing.T, zf *zip.File) []byte {
 //   - 少数 tdev 早期产出的 bit3 包 → 归一化成设计器形态（不写数据描述符），
 //     且归一化之后是稳定不动点。
 func TestRebuildIdentityByteExact(t *testing.T) {
-	pkgs := corpusPackages(t)
+	pkgs := testkit.CorpusFiles(t, ".tzc")
 	same, normalized := 0, 0
 	for _, p := range pkgs {
 		orig, err := os.ReadFile(p)
@@ -232,7 +234,7 @@ func TestRebuildIdentityByteExact(t *testing.T) {
 //   - 未改动条目的局部头 + 压缩数据逐字节照抄；中央目录记录只动偏移字段；
 //   - extra 字段（UT-time / ux-infozip / Zip64 占位）一个字节都不变。
 func TestRebuildKeepsDesignerZipShape(t *testing.T) {
-	pkgs := corpusPackages(t)
+	pkgs := testkit.CorpusFiles(t, ".tzc")
 	// 挑一个设计器形态、且带 .tap 的包
 	var target string
 	for _, p := range pkgs {
@@ -392,7 +394,7 @@ func TestRebuildKeepsDesignerZipShape(t *testing.T) {
 // （zip: not a valid zip file），真机自然是打不开的。
 func TestRebuildZip64EntryRewriteIsReadable(t *testing.T) {
 	var target string
-	for _, p := range corpusPackages(t) {
+	for _, p := range testkit.CorpusFiles(t, ".tzc") {
 		b, err := os.ReadFile(p)
 		if err != nil {
 			t.Fatal(err)

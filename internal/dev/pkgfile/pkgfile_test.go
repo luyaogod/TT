@@ -6,54 +6,15 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
+
+	"tt/internal/testkit"
 )
 
 //---------------------------------------------------------------------------
 // 小工具
 //---------------------------------------------------------------------------
 
-// corpusRoot 返回真实语料根目录。缺失时返回 ""，相关测试自动跳过
-// （保证在无语料的机器上 go test ./... 依然能过）。
-func corpusRoot() string {
-	if v := os.Getenv("TDEV_CORPUS"); v != "" {
-		if st, err := os.Stat(v); err == nil && st.IsDir() {
-			return v
-		}
-		return ""
-	}
-	def := `D:\t100_wrok_dir`
-	if st, err := os.Stat(def); err == nil && st.IsDir() {
-		return def
-	}
-	return ""
-}
-
-func corpusPackages(t *testing.T) []string {
-	t.Helper()
-	root := corpusRoot()
-	if root == "" {
-		t.Skip("没有真实语料（设置 TDEV_CORPUS 或准备 D:\\t100_wrok_dir）")
-	}
-	var out []string
-	err := filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		if !info.IsDir() && strings.EqualFold(filepath.Ext(p), ".tzc") {
-			out = append(out, p)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("扫描语料失败: %v", err)
-	}
-	if len(out) == 0 {
-		t.Skipf("%s 下没有 .tzc", root)
-	}
-	return out
-}
 
 func writeTemp(t *testing.T, b []byte) string {
 	t.Helper()
@@ -105,7 +66,7 @@ func rawEntries(t *testing.T, p string) ([]string, map[string]string) {
 //---------------------------------------------------------------------------
 
 func TestRoundtripZeroChangeCorpus(t *testing.T) {
-	pkgs := corpusPackages(t)
+	pkgs := testkit.CorpusFiles(t, ".tzc")
 	bad := 0
 	for _, p := range pkgs {
 		p := p

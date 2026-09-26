@@ -27,6 +27,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"tt/internal/testenv"
 )
 
 // chainTargetName 是这一条链的靶包。选它是因为它是文档里每个例子都用的那张表单
@@ -54,9 +56,10 @@ func TestSixRequestChain(t *testing.T) {
 	}
 	ws := workspaceOf(target)
 	if ws == "" {
-		// 推不出工作区时才退到 TTZS_WS（照 batch.sh 的回落）。注意这里退的仍是**调用方给的值**，
-		// 不是引擎内置的缺省 —— 引擎的缺省是一个真实客户目录（包注释纪律 2）。
-		ws = strings.TrimSpace(os.Getenv("TTZS_WS"))
+		// 推不出工作区时才退到 TTZS_WS / config.local.json（照 batch.sh 的回落）。
+		// 注意这里退的仍是**调用方给的值**，不是引擎内置的缺省 ——
+		// 引擎的缺省是一个真实客户目录（包注释纪律 2）。
+		ws = testenv.Workspace()
 	}
 	if ws == "" {
 		t.Skipf("%s 的祖先目录里没有 mta/，且没给 TTZS_WS —— 工作区绝不替你选", filepath.Base(target))
@@ -66,7 +69,7 @@ func TestSixRequestChain(t *testing.T) {
 	defer cancel()
 	o := Options{
 		Exe:        env.exe,
-		InstallDir: strings.TrimSpace(os.Getenv("TTZS_INSTALL")),
+		InstallDir: testenv.DesignerDir(),
 		Workspace:  ws,
 		// 状态文件与守护进程日志落在测试自己的临时目录里：默认落点（config.json 旁边）是
 		// 用户的东西，一次测试没理由往那儿写。日志丢了也不影响诊断 —— Ensure 的报错文案

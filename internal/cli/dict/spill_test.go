@@ -9,9 +9,9 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 
 	"tt/internal/cli/common"
+	"tt/internal/testkit"
 )
 
 // 这一组测的是 tt dict spill：那条"读已经落盘的那份完整结果"的入口。
@@ -116,12 +116,8 @@ func TestSpillRows(t *testing.T) {
 // 就能跑 —— 不需要库、不需要环境。命令走**真实的命令树**（Group → spill → show），
 // 于是 `--limit` 挂在组上这件事也一并被验到。
 func TestSpillShowPagesAFile(t *testing.T) {
-	dir := t.TempDir()
 	// 一份"配置"（只需要它的目录）：spill 目录就是 config.json 旁边的 spill/。
-	common.ConfigPath = filepath.Join(dir, "config.json")
-	if err := os.WriteFile(common.ConfigPath, []byte("{}"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	dir := tempConfigDir(t)
 	spill := filepath.Join(dir, spillDirName)
 	if err := os.MkdirAll(spill, 0o755); err != nil {
 		t.Fatal(err)
@@ -189,36 +185,41 @@ func TestSpillShowPagesAFile(t *testing.T) {
 
 // runDict 从**真实的命令树**跑一条 tt dict 子命令，把 stdout 收回来。
 //
-// 为什么用临时文件当 stdout 而不是管道：进程内管道的缓冲只有几 KB，写端会阻塞到有人读
-// —— 2026-09-25 刚在 internal/dev/cli 的 captureStdout 上踩过这个坑。
+// stdout 捕获走 testkit.CaptureStdout（边写边读的管道实现）：从前这里另有一份"临时文件当
+// stdout"的写法，是本仓库的**第三份** stdout 捕获实现，签名与另外两份都不一样。
+// flag 重置同理，走 testkit.ResetFlags。
 func runDict(t *testing.T, args ...string) string {
 	t.Helper()
-	f, err := os.CreateTemp(t.TempDir(), "dict-out-*.txt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	old := os.Stdout
-	os.Stdout = f
-	defer func() { os.Stdout = old }()
-
-	root := &cobra.Command{Use: "tt", SilenceUsage: true, SilenceErrors: true}
-	root.AddCommand(Group)
-	root.SetArgs(append([]string{"dict"}, args...))
-	runErr := root.Execute()
-	resetFlags(Group) // 下一次调用要像全新进程（见下）
-
-	os.Stdout = old
-	if err := f.Close(); err != nil {
-		t.Fatal(err)
-	}
-	b, err := os.ReadFile(f.Name())
-	if err != nil {
-		t.Fatal(err)
-	}
+	var runErr error
+	_, out := testkit.CaptureStdout(t, func() int {
+		root := &cobra.Command{Use: "tt", SilenceUsage: true, SilenceErrors: true}
+		root.AddCommand(Group)
+		root.SetArgs(append([]string{"dict"}, args...))
+		runErr = root.Execute()
+		testkit.ResetFlags(Group) // 下一次调用要像全新进程
+		return 0
+	})
 	if runErr != nil {
 		t.Fatalf("命令 %v 失败：%v", args, runErr)
 	}
-	return string(b)
+	return out
+}
+
+// tempConfigDir 造一份临时配置（spill 目录就是 config.json 旁边的 spill/），返回那个目录。
+//
+// `common.ConfigPath` 是**包级 var**（命令层的单例），所以用完必须用 t.Cleanup 还回去。
+// 不还的话，下一条用例会拿到这条留下的临时目录 —— 而 t.TempDir 早就把它删了，
+// 表现是"目录找得到、里面的东西没了"这种难查的失败。从前两处都直接赋值、都不还。
+func tempConfigDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	old := common.ConfigPath
+	t.Cleanup(func() { common.ConfigPath = old })
+	common.ConfigPath = filepath.Join(dir, "config.json")
+	if err := os.WriteFile(common.ConfigPath, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
 }
 
 // TestTruncationPointsAtIndexSpill 截断时那句 note 必须指向 spill 入口（而不是只给路径）。
@@ -227,11 +228,7 @@ func runDict(t *testing.T, args ...string) string {
 // 跑不到真实查询，但它只要一个 payload 就能跑 —— 而**它写出的那个文件正是 spill show 要读的**，
 // 所以顺带验了命名与目录的一致性。
 func TestTruncationPointsAtIndexSpill(t *testing.T) {
-	dir := t.TempDir()
-	common.ConfigPath = filepath.Join(dir, "config.json")
-	if err := os.WriteFile(common.ConfigPath, []byte("{}"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	tempConfigDir(t) // 只要那个目录存在，spill 落在它旁边
 	oldLimit := queryLimit
 	queryLimit = 2 // 本次最多回 2 条 → 3 条必然被截
 	// srcConfigPath 是落盘目录的依据，真机上由查询组的 PersistentPreRunE（loadQueryPolicy）
@@ -240,10 +237,11 @@ func TestTruncationPointsAtIndexSpill(t *testing.T) {
 	srcConfigPath = common.ConfigPath
 	defer func() { queryLimit = oldLimit; srcConfigPath = "" }()
 
-	out := captureStdout(t, func() {
+	_, out := testkit.CaptureStdout(t, func() int {
 		if err := emitCapped(true, []any{"a", "b", "c"}, nil, nil); err != nil {
 			t.Fatalf("emitCapped 失败：%v", err)
 		}
+		return 0
 	})
 	env := decodeEnvelope(t, out)
 	if env["truncated"] != true || env["returned"] != float64(2) || env["totalRows"] != float64(3) {
@@ -268,40 +266,6 @@ func TestTruncationPointsAtIndexSpill(t *testing.T) {
 	env = decodeEnvelope(t, out)
 	if env["totalRows"] != float64(3) {
 		t.Errorf("spill show 读到的该是同一份（3 条），得 %v", env["totalRows"])
-	}
-}
-
-// captureStdout 把一段输出收回来（临时文件当 stdout，不用管道：见 runDict 的注释）。
-func captureStdout(t *testing.T, fn func()) string {
-	t.Helper()
-	f, err := os.CreateTemp(t.TempDir(), "dict-cap-*.txt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	old := os.Stdout
-	os.Stdout = f
-	fn()
-	os.Stdout = old
-	if err := f.Close(); err != nil {
-		t.Fatal(err)
-	}
-	b, err := os.ReadFile(f.Name())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(b)
-}
-
-// resetFlags 把这些命令的 flag 恢复成默认值 —— 每次调用都要像**全新进程**一样。
-//
-// cobra 的 flag 值挂在命令对象上，而 `Group` 是这个包的**单例**：不重置的话，上一条用例
-// 里的 `--offset 2` 会留到下一条（实测：③ 那条因此报"越界：这份结果共 1 条"）。
-// 真机上一条命令一个进程，所以这不是产品缺陷 —— 是测试必须自己补上的那一步。
-func resetFlags(c *cobra.Command) {
-	c.Flags().VisitAll(func(f *pflag.Flag) { _ = f.Value.Set(f.DefValue) })
-	c.PersistentFlags().VisitAll(func(f *pflag.Flag) { _ = f.Value.Set(f.DefValue) })
-	for _, sub := range c.Commands() {
-		resetFlags(sub)
 	}
 }
 

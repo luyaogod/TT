@@ -32,10 +32,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"tt/internal/testenv"
 )
 
 // stdioSession 是一个 `tzs-server --stdio` 进程。
@@ -105,7 +106,7 @@ func startStdio(t *testing.T, exe, ws string, budget time.Duration) *stdioSessio
 // 日志淹掉 -v 的输出）。
 func engineEnv(ws string) []string {
 	env := append(os.Environ(), "TZSCLI_WS="+ws, "TZSCLI_QUIET=1")
-	if d := strings.TrimSpace(os.Getenv("TTZS_INSTALL")); d != "" {
+	if d := testenv.DesignerDir(); d != "" {
 		env = append(env, "TZSCLI_INSTALL="+d)
 	}
 	return env

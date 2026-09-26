@@ -3,11 +3,11 @@ package fgl
 import (
 	"archive/zip"
 	"io"
-	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
+
+	"tt/internal/testkit"
 )
 
 /* ============================================================================
@@ -20,39 +20,9 @@ import (
  * 正文；只测 name 以 function./dialog./report. 开头且正文非空的点。正文**不做任何
  * 规范化**（连首行 `<![CDATA[` 前缀都照原样留给行网格）。
  *
- * 语料目录缺失（且没设 TDEV_CORPUS）时整条测试跳过 —— 仓库里没有这 1.6GB。
+ * 语料目录缺失时整条测试跳过 —— 仓库里没有这 1.6GB。根怎么定只有一处：
+ * testkit.CorpusRoot（认 TDEV_CORPUS 与 TTZS_CORPUS 两个变量）。
  * ========================================================================== */
-
-// corpusRoot 返回语料根目录；两者都不存在时返回 ""（→ 跳过）。
-func corpusRoot() string {
-	if v := strings.TrimSpace(os.Getenv("TDEV_CORPUS")); v != "" {
-		return v
-	}
-	const def = `D:\t100_wrok_dir`
-	if st, err := os.Stat(def); err == nil && st.IsDir() {
-		return def
-	}
-	return ""
-}
-
-// tzcFiles 递归收集语料下的 .tzc（与设计器一样，按扩展名判定，大小写不敏感）。
-func tzcFiles(root string) ([]string, error) {
-	var out []string
-	err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil // 单个目录不可读不该让整场扫场失败
-		}
-		if d.IsDir() {
-			return nil
-		}
-		if strings.EqualFold(filepath.Ext(p), ".tzc") {
-			out = append(out, p)
-		}
-		return nil
-	})
-	sort.Strings(out)
-	return out, err
-}
 
 // scanPoints 扫描 XML 文本里的 `<point …>…</point>`，对每个点回调其 name 属性与
 // CDATA 正文。回调返回 false 可提前结束。
@@ -158,18 +128,7 @@ const (
 )
 
 func TestCorpusEnvelope(t *testing.T) {
-	root := corpusRoot()
-	if root == "" {
-		t.Skip("语料目录 D:\\t100_wrok_dir 与 TDEV_CORPUS 都不存在，跳过")
-	}
-
-	files, err := tzcFiles(root)
-	if err != nil {
-		t.Fatalf("遍历语料目录失败: %v", err)
-	}
-	if len(files) == 0 {
-		t.Skipf("语料目录 %s 下没有 .tzc，跳过", root)
-	}
+	files := testkit.CorpusFiles(t, ".tzc")
 
 	var (
 		points      int

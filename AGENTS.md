@@ -40,7 +40,7 @@ TT（`tt`）是面向 Agent 的 T100 / Genero BDL 开发工具：**一个 Go 二
 
 ```bash
 go build -o tt.exe .                     # 后端（前端未构建也能过，见下方 .gitkeep 那条）
-go test ./...                            # 全量；35 个包，深档语料回归默认跳过（约 2–3 分钟）
+go test ./...                            # 全量；37 个包，深档语料回归默认跳过（约 2–3 分钟）
 cd web && npm run check:app              # 前端三项检查：fgltokens / fgloutline / store
 cd web && npm run build                  # 含 tsc --noEmit（**check:app 不做类型检查**）
 cd engine && ./build.sh                  # 只在改了 engine/ 时才跑！理由见第 4 节
@@ -140,7 +140,8 @@ cd engine && ./build.sh                  # 只在改了 engine/ 时才跑！理�
 | tzs 动词参数 | **引擎的 manifest**（`internal/dev/tzs/manifest.go`） | Go 侧抄一份 `map[string][]Param`，引擎一改就静默过期 |
 | tzs 动词数 | 只在 `tzsUsage` 常量与 `skills/tt-dev-tzs` 的元数据里声明（`TestDocVerbCountsAgree` 盯着） | 散在多处就会互相漂移；README 一律写"数见 `tt dev tzs --help`" |
 | tzs 管道名 | **问引擎**（`--pipe-name --workspace`） | 自己算 → 静默失败，看起来像"冷启动 60 秒没就绪" |
-| 语料根发现 | `internal/dev/testutil/corpus.go` | 一边认 `TDEV_CORPUS`、一边只认 `TTZS_CORPUS` → 假绿 |
+| 语料根发现 | `internal/dev/testutil/corpus.go`（`*testing.T` 那层在 `internal/testkit`） | 一边认 `TDEV_CORPUS`、一边只认 `TTZS_CORPUS` → 假绿。**`internal/testkit` 的 `TestHelpersHaveNoLocalCopies` 盯着** |
+| 测试里抓 stdout / 重置 flag | `internal/testkit`（`CaptureStdout` / `ResetFlags`） | 曾经有三份 stdout 捕获、签名各异；管道那份写错了会挂满 10 分钟被 go test 判超时 |
 | 危险字符/SQL | `safesql` + `shQuote`/`bashLC`；**SQL 一律走 stdin** | `--zone "36; id"` 曾在远端执行任意命令 |
 
 **分层规则**：三个命令组（`cli/debug`、`cli/dev`、`cli/dict`）**互不 import**，共享上下文在叶子包

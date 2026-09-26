@@ -12,8 +12,8 @@ import (
 	"tt/internal/dev/model"
 	"tt/internal/dev/pkgfile"
 	"tt/internal/dev/tapfile"
-	"tt/internal/dev/testutil"
 	"tt/internal/dev/verify"
+	"tt/internal/testkit"
 )
 
 // requireDeep 把「对全部真实包」的深度回归设为**显式开关**。
@@ -63,31 +63,9 @@ func silent(t *testing.T, fn func() int) int {
 	return fn()
 }
 
-// corpusRoot / corpusPackages 现在只是 testutil 之上的两个薄壳。
-//
-// 发现逻辑（根怎么定、怎么走、哪些草稿文件不算语料）搬去了 internal/dev/testutil/corpus.go，
-// 与 `.tzs` 那条管线（internal/dev/tzs/corpus_test.go）共用一份 —— 两边各写一份的后果是
-// 其中一个环境变量只在一边生效，于是同一条命令在两台机器上跑的不是同一批包。
-// 留在本文件里的是**跳过文案**：它属于这条管线的验收口径（TDEV_DEEP / README），不是发现逻辑。
-
-func corpusRoot(t *testing.T) string {
-	t.Helper()
-	if v := testutil.CorpusRoot(); v != "" {
-		return v
-	}
-	t.Skip("没有真实语料（设置 TDEV_CORPUS 或准备 D:\\t100_wrok_dir）")
-	return ""
-}
-
-func corpusPackages(t *testing.T) []string {
-	t.Helper()
-	root := corpusRoot(t)
-	out := testutil.CorpusFiles(root, ".tzc")
-	if len(out) == 0 {
-		t.Skipf("%s 下没有 .tzc", root)
-	}
-	return out
-}
+// 语料发现不在这里：根怎么定、怎么走、哪些草稿文件不算语料，都在 internal/dev/testutil，
+// 跳过文案在 internal/testkit。从前本文件自己留了两个薄壳，现在连壳也去掉了 ——
+// 各包各留一层壳，就是"再抄一份"的入口。
 
 // gateReports 复算 gate1+gate2（失败诊断用）。
 func gateReports(t *testing.T, ws *wsHandle, base *model.Document, parsed *fence.ParseResult) *verify.Report {
@@ -135,7 +113,7 @@ func reportString(rep *verify.Report) string {
 
 func TestCorpusExportVerify(t *testing.T) {
 	requireDeep(t)
-	pkgs := corpusPackages(t)
+	pkgs := testkit.CorpusFiles(t, ".tzc")
 	tmp := t.TempDir()
 	totalRegions, totalPoints, totalSections := 0, 0, 0
 	totalWarns, totalInfos := 0, 0
@@ -206,7 +184,7 @@ func dumpRegions(parsed *fence.ParseResult) string {
 
 func TestCorpusApplySimulation(t *testing.T) {
 	requireDeep(t)
-	pkgs := corpusPackages(t)
+	pkgs := testkit.CorpusFiles(t, ".tzc")
 	tmp := t.TempDir()
 	applied, skipped := 0, 0
 	for i, p := range pkgs {

@@ -2,8 +2,6 @@ package fence
 
 import (
 	"bytes"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -11,40 +9,8 @@ import (
 	"tt/internal/dev/pkgfile"
 	"tt/internal/dev/synth"
 	"tt/internal/dev/testutil"
+	"tt/internal/testkit"
 )
-
-func corpusRoot() string {
-	if v := os.Getenv("TDEV_CORPUS"); v != "" {
-		if st, err := os.Stat(v); err == nil && st.IsDir() {
-			return v
-		}
-		return ""
-	}
-	if st, err := os.Stat(`D:\t100_wrok_dir`); err == nil && st.IsDir() {
-		return `D:\t100_wrok_dir`
-	}
-	return ""
-}
-
-func corpusPackages(t *testing.T) []string {
-	t.Helper()
-	root := corpusRoot()
-	if root == "" {
-		t.Skip("没有真实语料")
-	}
-	var out []string
-	_ = filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || !strings.EqualFold(filepath.Ext(p), ".tzc") {
-			return nil
-		}
-		out = append(out, p)
-		return nil
-	})
-	if len(out) == 0 {
-		t.Skipf("%s 下没有 .tzc", root)
-	}
-	return out
-}
 
 // asBase 把 Render 的产物包装成 Parse 需要的基线 Document。
 func asBase(doc *model.Document, fenced []byte, regions []*model.Region, spans []model.Span) *model.Document {
@@ -61,7 +27,7 @@ func asBase(doc *model.Document, fenced []byte, regions []*model.Region, spans [
 //---------------------------------------------------------------------------
 
 func TestFenceRoundTripCorpus(t *testing.T) {
-	pkgs := corpusPackages(t)
+	pkgs := testkit.CorpusFiles(t, ".tzc")
 	totalRegions := 0
 	for _, p := range pkgs {
 		pkg, err := pkgfile.Open(p, pkgfile.OpenOptions{})
