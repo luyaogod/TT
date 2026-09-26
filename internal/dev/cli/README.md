@@ -1,13 +1,17 @@
 # internal/dev/cli — `tt dev` 的命令行入口
 
-`tt dev` 的**完整 CLI**：`.tzc` 的八个动词、`tt dev tzs` 的转发、`tt dev install`。
+`tt dev` 的**完整 CLI**：`.tzc` 的八个动词与 `tt dev tzs` 的转发。
 它不走 cobra 树 —— 根命令那层只做参数原样转发与退出码透传（见
 [../../cli/dev/README.md](../../cli/dev/README.md)）。
 
+**安装不在这条线上**：skills 与 PATH 统一走 `tt install skills` / `tt install path`。
+本包曾经有一份同形的 `tt dev install` 实现，已删除；`install` 这个子命令保留一块墓碑，
+只打印指向 `tt install` 的指引。
+
 ## 分发
 
-`Run(args)` 是两级手写分发：一级 `install` / `tzs` / `tzc`（外加 `help`），二级是 `.tzc` 的动词。
-未知子命令或未知动词一律打 `Usage` 并退 2。
+`Run(args)` 是两级手写分发：一级 `tzs` / `tzc`（外加 `help`），二级是 `.tzc` 的动词。
+未知子命令或未知动词一律打 `Usage` 并退 2；`install` 是唯一例外，它打指引也退 2。
 
 | 动词 | 作用 | 写盘吗 |
 |---|---|---|

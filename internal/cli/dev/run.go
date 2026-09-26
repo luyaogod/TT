@@ -17,7 +17,7 @@ const devLong = `T100 设计器包工具：.tzc 代码包 + .tzs 表单包
 在 tt 里，原来 tdev 的命令整体后移一级：
   tdev tzc export …   →  tt dev tzc export …
   tdev tzs export …   →  tt dev tzs export …
-  tdev install path   →  tt dev install path（也可用统一的 tt install）
+  tdev install …      →  tt install …（安装不再住在这条线上）
 
 .tzc 的退出码与参数写法完全不变（0 成功 / 2 包格式或用法错 / 3 校验失败 /
 4 拒绝写入 / 5 IO 与环境失败）。.tzs 那条线**没有 3**，另有一个 1（引擎内部错）。` + "\n\n" + devcli.Usage

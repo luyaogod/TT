@@ -325,19 +325,16 @@ func checkNoStaleLines(t *testing.T, name, text string, rules []staleRule) {
 // 说明"手写的一定漂移"。所以禁断言覆盖所有面向调用方的文本 ——
 // 常量这一层用两套规则，文档那一层见 TestLiveDocsHaveNoStaleAdvice。
 func TestUsageTextHasNoStaleAdvice(t *testing.T) {
+	// 只有这两份文本面向调用方：tzs 的动词用法与整个命令组的用法。
+	// （`tt dev install` 的用法文本已随命令删除 —— 它并入 tt install 后不再住在这个包里。）
 	consts := map[string]string{
-		"tzsUsage":     tzsUsage,
-		"Usage":        Usage,
-		"installUsage": installUsage,
+		"tzsUsage": tzsUsage,
+		"Usage":    Usage,
 	}
 	for name, text := range consts {
 		checkNoStaleLines(t, name, text, callGatewayRules)
 		checkNoStaleLines(t, name, text, valueRules)
-	}
-
-	// "必须教"的那几条只对 .tzs 的用法文本成立 —— install 的用法讲的是 skills 与 PATH，
-	// 那里不该出现 <动词>。
-	for name, text := range map[string]string{"tzsUsage": tzsUsage, "Usage": Usage} {
+		// "必须教"的那几条：动词按名字给、参数只用 JSON、按程序名寻址。
 		for _, want := range []string{"<动词>", "--args", "--form"} {
 			if !strings.Contains(text, want) {
 				t.Errorf("%s 里该出现 %s（参数只用 JSON、按程序名寻址）：\n%s", name, want, text)

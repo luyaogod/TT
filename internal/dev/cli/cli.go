@@ -67,8 +67,7 @@ const Usage = `tt dev —— T100 设计器包工具：.tzc 代码包 + .tzs 表
   tt dev tzs stop                    # 停本工作区的常驻引擎（不启动）
   tt dev tzs reap [--yes]            # 清理引擎重编后停不掉的孤儿守护进程
 
-  tt dev install skills [--to <dir>] [--force] [--json]   # 复制 exe 旁边的 skills/ 到 <当前目录>/skills
-  tt dev install path [--dry-run] [--json]                # 把 exe 目录加进用户 PATH（HKCU，免管理员）
+安装不在本命令组：skills 与 PATH 统一走 tt install skills / tt install path。
 
 两条管线别用错：
   .tzc 代码包 → tzc export（渲染围栏工作区，改完 apply 写回；唯一写路径）
@@ -159,7 +158,12 @@ func Run(args []string) int {
 		fmt.Print(Usage)
 		return 0
 	case "install":
-		return cmdInstall(args[1:])
+		// 已并入 tt install（本命令组不再提供）。这里给指引而不是"未知子命令"：
+		// 退出码与原先的"未知子命令"一致（都是 2），脚本行为不变，但人能看懂该敲什么。
+		fmt.Fprint(os.Stderr, "tt dev install 已并入 tt install：\n"+
+			"  tt install skills [--to <dir>] [--force]\n"+
+			"  tt install path   [--dry-run]\n")
+		return 2
 	case "tzs":
 		return cmdTzs(args[1:])
 	case "tzc":
