@@ -1,0 +1,93 @@
+文档重写工程（docs/WIKI.md → 每目录一份 README.md）的核实记录。
+写哪份 README 时就地追加；结论落地后删掉已了结的条目。
+工程背景与批次见 .claude/plans/ 下的计划文件。
+
+================================================================================
+【一】待验证（需要真机 / 客户环境 / 设计器 / 深度回归 / 未安装的依赖）
+================================================================================
+
+- WIKI §9.1 的十条验收数据（零改动 roundtrip 165/165、围栏可逆 165 包 73,107 Region、
+  apply 仿真 137 包、.tzs 语料 67 包、对抗用例 31 项、TAP 恒等写 36,373 次…）
+  | 想证实：这些数字今天是否仍成立
+  | 怎么证实：TDEV_DEEP=1 go test ./... -timeout 30m（9–11 分钟）、
+             TTZS_DEEP=1 go test ./internal/dev/tzs/ -run TestCorpus -timeout 30m（17 分钟）、
+             ./tt.exe dev tzc selftest
+  | 落在：待写进 internal/dev/* 各包的「判据」节（本批只写判据，不写数字）
+
+- WIKI §6.16 与 §9.1 的语料统计自相矛盾：§6.16 说 <point>=32,678、<section>=3,646、
+  CDATA 36,324 段；§9.1 说 32,571 / 3,641 / 36,212
+  | 想证实：真实口径是哪个（或两者是不是同一口径）
+  | 怎么证实：go test ./internal/dev/tapfile -count=1 -v（语料对拍），看它自己报的数
+  | 落在：internal/dev/tapfile/README.md（批 1）
+
+- testdata/fgl-fixtures/README.md（改写前）声称「166 个包、4,336 个自订点，4,335 个通过」
+  本次实跑 go test ./internal/dev/fgl -count=1 -v 得到的是
+  「ParseBlock(EnvelopeKindFor(点名前缀))：通过 3639 map[DIALOG:17 FUNCTION:3622]，失败 1」
+  | 想证实：两个数是不是同一口径（子集 vs 全集），还是真的漂了
+  | 怎么证实：读 internal/dev/fgl/corpus_test.go:248 附近的计数逻辑，确认它数的是什么集合
+  | 落在：internal/dev/fgl/README.md（批 1）
+
+- 前端侧夹具基线「用例 61 个：通过 58，已知偏差 3，不符 0」本次未跑
+  | 原因：web/node_modules 不存在，npm run check:outline 跑不起来
+  | 怎么证实：cd web && npm install && npm run check:app
+  | 落在：web/app/scripts/fgl-fixtures/README.md（已写复现命令，未写数字）
+
+- 真机验收（S7）：在装了设计器的机器上打开 `tt dev tzc apply` 产出的包，应无异常对话框、
+  改动可见、保存后重开仍在
+  | 需要：装了客户端 + 设计器的机器；输入必须是设计器产出的原生包
+  | 落在：internal/dev/README.md（批 1）
+
+- 三处 C# 注释指向 docs/WIKI.md（engine/src/Designer/{DryRun,Manifest,OpLog}.cs）
+  | 计划：批 7 改注释 + 重编引擎 + reap 孤儿守护进程（重编换 MVID → 管道名变）
+  | 注意：engine/ 下部分 C# 是 CRLF，改的时候别用文本模式批量替换
+
+
+================================================================================
+【二】已证伪 / 与代码不符（一律以代码为准，此处只记录）
+================================================================================
+
+- WIKI §1.2 的目录树画在合并前的路径上：把 pkgfile / tapfile / tglfile / fence / verify /
+  split / synth / model 画在 internal/ 根下；实际都在 internal/dev/ 下。
+  另外树里列出 internal/fgl、internal/atomic、web/debug、web/dict —— **这四个路径不存在**。
+  | 依据：find . -type d 的目录清单
+
+- WIKI §9.1 的复现命令用的是合并前路径，照抄跑不通：
+    go test ./internal/pkgfile          → 实际 ./internal/dev/pkgfile
+    go test ./internal/tapfile          → 实际 ./internal/dev/tapfile
+    go test ./internal/fence            → 实际 ./internal/dev/fence
+    go test ./internal/fgl              → 实际 ./internal/dev/fgl
+    TDEV_DEEP=1 go test ./internal/cli -run TestCorpusExportVerify
+                                        → 实际 ./internal/dev/cli（TestCorpusExportVerify 与
+                                          TestCorpusApplySimulation 都在 internal/dev/cli/corpus_test.go）
+    go test ./internal/model ./internal/cli -run …
+                                        → 实际 ./internal/dev/model ./internal/dev/cli
+  | 依据：grep -rn "func TestCorpus" internal --include=*_test.go
+
+- testdata/fgl-fixtures/README.md（改写前）把消费者写成 internal/fgl 与
+  internal/fgl/outline_fixtures_test.go；实际是 internal/dev/fgl/。
+  | 依据：ls internal/dev/fgl/、grep -rn "fgl-fixtures" internal
+
+- web/app/scripts/fgl-fixtures/README.md（改写前）引用 web/scripts/fgloutline.fixtures.mjs
+  与 web/src/fgloutline.ts；实际是 web/app/scripts/fgloutline.fixtures.mjs 与
+  web/app/src/fgloutline.ts。重新同步那段 PowerShell 也写的是 web\scripts\fgl-fixtures\。
+  | 依据：ls web/app/scripts/、ls web/app/src/
+
+- 根 README.md（本轮改写前）写「go test ./...  21 个包」；实际 35 个包，其中 22 个带测试文件。
+  | 依据：go list ./... | wc -l = 35；go list -f '{{if or .TestGoFiles .XTestGoFiles}}X{{end}}' ./... 共 22 个 X
+
+- testdata/fgl-fixtures/README.source.md 与 web/app/scripts/fgl-fixtures/README.md
+  **逐字相同**（同一份 TDebug 侧原文被放了两处），且两处都带着上面那批过期路径。
+  | 处理：批 0 把 source 那份压成纯溯源说明，另一份改写为面向前端侧的说明
+  | 依据：cmp 两份文件
+
+================================================================================
+【三】本次已当场取到的数（写进 README 时引用，别外推）
+================================================================================
+
+- internal/dev/fgl 的夹具对拍：用例 61 个，通过 58，已知偏差 3，不符 0
+  | 命令：go test ./internal/dev/fgl -count=1 -v
+  | 三个已知偏差：dialog-subdialog（SUBDIALOG 未识别为节点）、
+    input-by-name-record-star（标签丢 .*）、input-nested-semicolon（; 不作终止符）
+- 两份夹具副本的 .4gl / .expected.json **逐字节相同**（只有 README 不同）
+  | 命令：diff -rq testdata/fgl-fixtures web/app/scripts/fgl-fixtures
+- 夹具规模：各 61 个 .4gl + 61 个 .expected.json
