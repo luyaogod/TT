@@ -1,0 +1,921 @@
+测试框架的重新规划（Go 35 个包 + 引擎 C# + 前端 SPA + 文档架构）。
+这份是**规划**，不含任何代码改动；落地按【十三】的批次另做，做完一批就把该批条目在这里划掉。
+数字只在本文件声明一次，来源命令见【〇】；别处引用时不再重复给数字。
+
+================================================================================
+【〇】本文数字的唯一来源（复现这三条即可，别处不再给数字）
+================================================================================
+
+  go list -f '{{if or .TestGoFiles .XTestGoFiles}}T{{else}}.{{end}} {{.ImportPath}}' ./...
+      → 35 个包，22 个带测试 / 13 个没有
+  （逐包 源码行 / 测试行 / func Test 数）：见【三】的表头命令
+  grep -rn "t\.Skip" --include=*_test.go internal/ | wc -l    → 44
+  grep -rn "t\.Parallel()" --include=*_test.go . | wc -l  → 0
+  grep -rl '^package .*_test$' --include=*_test.go . | wc -l  → 0（全仓都是内部测试包）
+
+其中"全仓都是内部测试包"这一条是【五】与【六】的承重前提，先说在前：
+77 个测试文件全部是 `package X` 形式，**没有一个** `package X_test`。所以同包测试
+本来就能直接读写包级 var —— 这决定了不需要为测试在生产代码上开任何 API。
+
+
+================================================================================
+【一】结论先行
+================================================================================
+
+三句话：
+
+1. **这个仓库的测试问题不是"覆盖不够"，是"已经写好的东西没接进 `go test`"。**
+   `internal/dev/cli/selftest.go` 有一套 31 项合成包端到端自检**已经在跑**，
+   而 `grep selftest --include=*_test.go` 零命中 —— 它走的那 7 个 `cmd*` 在默认档里
+   一条断言都没有。接上它只欠一条 `_test.go`，生产代码零改动。
+2. **框架要改的只有六处**（【四】–【九】），其中四处是"把已经存在的东西接上"，
+   一处是新建一个只被 `_test.go` import 的 helper 包，一处是新建一份文档。
+3. **最大的结构性缺陷是"真环境没有统一的配置入口"**：约 11 个环境变量散在各处，
+   而 `.gitignore:19` 早就给 `/config.local.json` 留了位子、至今没有任何代码读它。
+
+值得动的包，按性价比排（不是字母序）：
+
+  序  包                    为什么                                          生产改动
+  --  --------------------  ----------------------------------------------  ----------------
+  1   internal/dev/cli      31 项 selftest 已在跑，只欠一条 _test.go        零
+  2   internal/dev/verify   三道关输入全是内存对象，一道都没被测过          零
+  3   internal/dev/split    Split:122 同上，纯函数                          零
+  4   internal/erpdb        ident.go:7,21,29 标识符/字面量转义，安全关键     零
+  5   internal/dict/live    source.go 五个 SQL 字符串构造，防注入敏感       零
+  6   internal/cli/dict     20 个包级 var 无重置；已有真泄漏                零
+  7   internal/web          3 个动作端点零覆盖，其中一条能测全路径          Options 加 3 字段
+  8   internal/debug（两处）bpsstore.go 零覆盖；api.go 的错误半边          Server 加 1 个字段
+
+其余 27 个包里写"保持现状"的有 15 个 —— 不是没洞，是洞不值得填（逐个见【三】）。
+
+
+================================================================================
+【二】分层 L0–L4
+================================================================================
+
+分层的唯一硬约束，是仓库自己已经写下的那句（internal/dev/cli/corpus_test.go:22）：
+
+  一条依赖本机配置的测试会时好时坏，那比不测更糟。
+
+所以判据是：**默认档（`go test ./...` 不带任何环境变量）永不因环境而红**。
+凡"这台机器上有没有"决定结果的，一律推到显式开关后面。
+
+  层            跑一次多少钱        干净克隆跑得起来吗  红了是什么意思            入口
+  ------------  ------------------  ------------------  -----------------------  -------------------
+  L0 编译期     go build ~10s；     跑得起来            改坏了                    go build / npm build
+                npm run build ~30s  （web 需先 npm ci）
+  L1 纯逻辑     毫秒级，全仓 < 5s    跑得起来            只可能是改坏了            go test ./...
+  L2 本地资源   秒级                跑得起来            只可能是改坏了            同上
+  L3 真语料     9–11 分 / 17 分     跑不起来（会 skip） 改坏了 / 语料变了         TDEV_DEEP / TTZS_DEEP
+  L4 真机 E2E   分钟级到十几分钟    跑不起来            改坏了 / 环境不对         TTZS_E2E / 真 SSH
+
+L2 的"本地资源"指：`t.TempDir()`、真 SQLite（`internal/dict/db` 已是这个样板）、
+`httptest`、`127.0.0.1:0` 回读、临时注册表键（`internal/pathinstall` 已是样板）、
+合成 .tzc 包（`internal/dev/testutil`）。这些都不依赖外部世界。
+
+**默认档 = L0 + L1 + L2，目标 `t.Skip` 数为 0。**
+
+今天 44 处 `t.Skip` 的归类（这个分类只在这里声明一次，【九】的白名单直接引用）：
+
+  · 39 处 = "语料 / 引擎 exe / 工作区不在这台机器上"（L3+L4）
+  ·  4 处 = "本机环境"：config/paths_test.go:45 无用户配置目录、
+           config/realdata_test.go:18 无统一用户目录、:41 无本机旧配置、
+           dev/store/store_test.go:618 无 git
+  ·  1 处 = "这条断言这一次没有对象"：dev/cli/tzs_verb_test.go:434
+           （文档里没有「N 个动词」这句话）
+
+**L3/L4 永远靠环境变量开关 + 显式 `-timeout 30m`，不靠调大默认超时。**
+理由 corpus_test.go:22-27 已经写明并被实测过：杀进程来自 **go 命令**（默认 `-timeout=10m`），
+"测试二进制内部改 `-test.timeout` 是拦不住的"；表现为同一份代码有时 530s 通过、
+有时 660s 被杀，那种假失败会污染"全绿"这条验收证据。
+
+**明确不做：把 L3 当迭代手段。** AGENTS.md:194 已写死"语料是关卡手段，不是迭代手段"，
+本次不改这条 —— L3 只在"改完了要留证据"时跑。
+
+
+================================================================================
+【三】逐包定档表（35 行）
+================================================================================
+
+数字来源（本节只在这里给一次）：
+
+  go list -f '{{.ImportPath}}' ./... | while read d; do
+    printf "%s|%s|%s|%s\n" "$d" \
+      "$(ls "$d"/*.go 2>/dev/null | grep -v _test | xargs cat 2>/dev/null | wc -l)" \
+      "$(ls "$d"/*_test.go 2>/dev/null | xargs cat 2>/dev/null | wc -l)" \
+      "$(ls "$d"/*_test.go 2>/dev/null | xargs grep -h '^func Test' 2>/dev/null | wc -l)"
+  done
+  # 全仓合计：非测试 44155 行 / 测试 20076 行；func Test 421 个
+
+列义：源/测/例 = 源码行 | 测试行 | func Test 数。"下一步"写"保持现状"是允许且经常正确的答案。
+
+  包                     源/测/例        档       下一步
+  ---------------------  -------------  -------  --------------------------------------------
+  tt（main）             36/0/0         L0       保持现状。只有 go:embed + cli.Execute
+  internal/cli           1679/183/8     L2       补 4 个文件的纯逻辑：config.go /
+                                                 env.go / serve.go / cache.go 全无测试
+  internal/cli/common    125/0/0        L2       补 2 条 + resetCommon(t)（见【五】）
+  internal/cli/debug     3023/508/9     L2       补 debugctl.go 的参数解析与信封渲染，不拨真 SSH
+  internal/cli/dev       163/0/0        L2       保持现状。薄转发，行为由 dev/cli 的 Usage 断言覆盖
+  internal/cli/dict      4666/376/7     L2       本批最该动（见【五】与批 4）
+  internal/config        1732/1424/40   L2+L3    保持现状。比值 0.82 全仓最高，是别包的模板
+  internal/dbconfig      228/0/0        L1       补。全是纯函数，约 60 行
+  internal/debug         8231/2578/87   L2+L4    保持现状 + 只补两处（bpsstore / api 错误半边）
+  internal/dev/cli       4380/2616/51   L2+L3    本批第二该动：把 31 项 selftest 接进 go test
+  internal/dev/fence     889/350/7      L1+L3    保持；L3 部分做 corpusRoot 收敛
+  internal/dev/fgl       1287/1300/15   L2+L3    保持；加一份双副本守卫（见【八】）
+  internal/dev/model     572/119/4      L1       可选补。正确性由 fence/split/verify 间接覆盖
+  internal/dev/pkgfile   1164/763/10    L1+L3    保持；L3 部分做 corpusRoot 收敛
+  internal/dev/split     539/0/0        L1       补（高性价比）。输入全是内存对象
+  internal/dev/store     1340/958/11    L2       保持现状。AtomicWrite / Manifest / git 已覆盖
+  internal/dev/synth     794/153/2      L1+L2    保持现状。它是夹具制造者，判据由使用者承担
+  internal/dev/tapfile   908/472/10     L1+L3    保持；L3 部分做 corpusRoot 收敛
+  internal/dev/testutil  302/0/0        —        保持无测试（夹具提供方）。但要守一条约束见【七】
+  internal/dev/tglfile   239/0/0        L1       补。模板是 fence
+  internal/dev/tzs       2611/5694/83   L2+L3/L4 保持 + 新增一个 L4 关卡（见【十一】）
+  internal/dev/verify    1265/0/0       L1       补（高性价比）。三道关一道都没被测过
+  internal/dict/db       1890/696/17    L2       保持现状。全仓"真 SQLite"的样板
+  internal/dict/dbsync   378/113/3      L2       保持现状
+  internal/dict/live     904/0/0        L1（半） 补纯 SQL 构造那一半，Query* 要真库不做
+  internal/dict/server   543/323/9      L2       保持现状
+  internal/entdir        155/0/0        L1       补。纯函数 + 走 t.TempDir()，约 40 行
+  internal/erpdb         345/0/0        L1（半） 补纯逻辑与安全关键那半，连接不做
+  internal/host          1560/480/18    L2+L4    保持现状。纯 helper 全覆盖；MirrorPull 主流程不做
+  internal/output        420/214/7      L1+L2    保持现状
+  internal/pathinstall   255/115/4      L2       补 Preview() 直接断言（批 7，可选）
+  internal/safesql       359/230/7      L1       保持现状。7 例把"不过度拦截"分得很清，是好样板
+  internal/sshtun        115/0/0        L4       不做。纯逻辑为零
+  internal/web           926/411/12     L2       补 3 个动作端点（见【六】）
+  internal/winproc       132/0/0        L2       默认不动（批 7 可选一条 Alive/Kill 往返）
+
+13 个零测试包逐个结案：
+
+  包                     结论           一句话理由
+  ---------------------  -------------  --------------------------------------------
+  tt（main, 36）         保持现状       L0 覆盖，go build 就是判据
+  internal/cli/common    补             8 个包级 var + MetaProvider 是跨包状态的家
+  internal/cli/dev       保持现状       薄转发，行为由 internal/dev/cli 的 Usage 断言覆盖
+  internal/dbconfig      补             纯函数，约 60 行
+  internal/dev/split     补             高性价比
+  internal/dev/testutil  保持无测试     夹具提供方，判据在使用者（且被生产代码 import，见【七】）
+  internal/dev/tglfile   补             模板是 fence
+  internal/dev/verify    补             高性价比
+  internal/dict/live     补一半         只补 5 个 SQL 构造函数
+  internal/entdir        补             纯函数 + 单一来源
+  internal/erpdb         补一半         只补纯逻辑与安全关键那半
+  internal/sshtun        明确不做       纯逻辑为零
+  internal/winproc       可选补一条     测试要 spawn 真进程，有留孤儿风险
+
+
+================================================================================
+【四】框架决策①：默认档怎么扩大 —— 最大一块是"接上已在跑的东西"
+================================================================================
+
+**事实**（三条命令都可重放）：
+
+  grep -rn "selftest" --include=*_test.go internal/        # 零命中
+  grep -n "type selftestCase" -A 3 internal/dev/cli/selftest.go
+      # :21  type selftestCase struct { Name string; Run func(dir string) error }
+  grep -n "func selftestCases\|func cmdSelftest" internal/dev/cli/selftest.go
+      # :76 selftestCases()  /  :28 cmdSelftest(args []string) int
+
+`cmdSelftest` 自己就是一条测试驱动循环（selftest.go:35-56）：`cases := selftestCases()`，
+然后对每一项 `os.MkdirTemp("", "tdev-selftest-")` → `c.Run(dir)` → `os.RemoveAll(dir)`。
+这**正是** `t.Run` + `t.TempDir()` 的形状，只差一个 `*testing.T`。
+
+**要做的**：新建 `internal/dev/cli/selftest_test.go`，**只写驱动，不写断言**：
+
+  func TestSelftestCases(t *testing.T) {
+      for _, c := range selftestCases() {
+          t.Run(c.Name, func(t *testing.T) {
+              dir := t.TempDir()
+              if err := c.Run(dir); err != nil {
+                  t.Fatalf("%s：%v", c.Name, err)
+              }
+          })
+      }
+  }
+
+**生产代码一行不动。** 收益是**单一来源**的：`selftestCases()` 是那 31 项的唯一定义处，
+任何人给 `tt dev tzc selftest` 加一项，`go test` 自动跟着长，第二份实现的风险是零。
+
+**为什么这是"默认档扩大"而不是"多几条测试"**：这 31 项里有十几项走的是
+`cmdExport` / `cmdApply` / `cmdVerify` / `cmdRename` / `cmdNewfn` / `cmdUnlock`
+的**完整命令路径**（例如"改正文 → apply → 回读 sha256"、"改 → apply → 再改 → 再 apply"
+这类迭代操作）。这批代码约 1200 行，今天在默认档里没有一条断言碰到。
+
+**合成夹具能覆盖到哪、覆盖不到哪**（internal/dev/testutil/fixture.go）：
+它能构造的是"任意一个形状正常的包"——8 个区段（含 3 个强制只读锚点区段）、
+一个 `function.` 自订定义点、几个裸名插入点、混用行尾。
+
+  · 能覆盖（全称命题，"对任意包 P 成立"）：围栏 render∘parse 可逆性、
+    export→apply 的事务性与"只动目标点"、三道关的拒绝码、save(pre) vs save(post) 必须不同。
+  · 覆盖不到（分布性质，在真实包的形状分布上才成立）：区段标记与 CDATA 形态的**变体**、
+    "这个包本来就报 N 条"的基线性质、长度/编码/Zip64 形态。
+
+**哪些语料用例可以改成合成驱动、哪些必须留真语料** —— 给三条可操作的判据：
+
+  1. 可证伪判据：一条语料断言若形如"对每一个包，属性 P 成立"，且**合成包能构造出违反 P 的
+     输入**，它就能替。`TestCorpusExportVerify`（corpus_test.go:135）不满足后半条 ——
+     合成包只能覆盖 P 为真的那条路径，**证伪不了**"真实包里有合成包造不出的形状会违反 P"。
+  2. f.Code 台账判据（**要先实测，不能在规划里断言结论**）：把 corpus_test.go 的
+     `reportString` 收集到的 f.Code 按 code 分组统计一次，列出"哪些 code 只在真实语料里
+     出现过"。**只对合成包已能触发的 code**，把语料断言降级为冒烟（`TTZS_CORPUS_LIMIT=N`）。
+  3. 成本判据：降级不是删除 —— 改成 `TTZS_CORPUS_LIMIT=3` 的冒烟留在默认档，
+     全量仍归 `TDEV_DEEP`。
+
+**明确不做**：不把 `TDEV_DEEP` 那两条（`TestCorpusExportVerify` / `TestCorpusApplySimulation`）
+整体降级。它们是上百个真实包的分布回归，合成包在定义上就替不了。
+
+**判据**：
+  go test ./internal/dev/cli -run TestSelftestCases -v -count=1
+  # 期望：31 个 subtest 全 PASS，0 个 SKIP；命令里不设任何环境变量
+
+**反向判据（必须执行一次）**：临时注掉 selftest.go 里 `stRoundtrip` 的一行 sha256 比对，
+上面那条必须红。依据 internal/dev/cli/pos_test.go:47 立的规矩 —— **没见过它红的断言不算数**。
+
+
+================================================================================
+【五】框架决策②：包级状态重置 —— 测试侧快照，**不加 ResetForTest()**
+================================================================================
+
+**病灶清单**（都已核实）：
+
+  internal/cli/dict     约 20 个包级 var：root.go 的 dbPath / srcConfigPath / queryLimit /
+                        srcQueryLimit，source.go 的 dataSrc / srcLocal / srcTarget /
+                        srcNotes / srcStarted，各命令的 flag 变量；外加 register.go:14 的
+                        `var Group` 这个 cobra 单例
+                        其中 dataSrc / srcLocal / srcTarget / srcNotes / srcStarted /
+                        dbCfg / mirrorCfg **在测试里零引用** —— 也就是说
+                        `openQuerySource` / `closeQuerySource` 这条路径从未被单测跑到
+  internal/cli/common   common.go:21-37 的 8 个 var（ConfigPath / JSON / CSV / Format /
+                        Verbose / Env / WebFS / Version）+ :87 的 MetaProvider
+                        现有测试 spill_test.go:121,231 直接写 common.ConfigPath **不恢复**
+  internal/debug        db.go:103 dbProbeCache + :106 dbProbeTTL = 10 分钟（包级缓存）
+                        session.go:22 rawDebug = os.Getenv("TDBG_RAW") == "1"（init 时定死）
+  进程级                os.Chdir（config/paths_test.go:95，已有 t.Cleanup 还原）；
+                        os.Stdout 重定向（两份手写实现，见【七】）
+  全仓重置 helper 数    1 —— 只有 spill_test.go:300 的 resetFlags，且只服务一条用例
+
+resetFlags 自己的注释已经把病因写清楚了：
+
+  cobra 的 flag 值挂在命令对象上，而 `Group` 是这个包的**单例**：不重置的话，上一条用例
+  里的 `--offset 2` 会留到下一条…真机上一条命令一个进程，所以这不是产品缺陷 ——
+  是测试必须自己补上的那一步。
+
+**推荐：测试侧 `t.Cleanup` 快照/恢复，生产代码零改动。**
+
+决定性理由是本文【〇】那条前提：**全仓 0 个外部测试包**。同包测试本来就能直接读写包级
+var，所以 `ResetForTest()` 能提供而 `_test.go` 提供不了的能力是 **0**。它唯一的区别是
+"能被外部包调用"，而外部包没有这些 var 的语境（`dbProbeCache` 之类是未导出的）。
+而引入它要付的代价是**"只有测试用的生产代码"** —— `internal/debug/wstest.go`（156 行，
+算进源码行数）已经是这类坏味道的一次教训。
+
+具体形态：
+
+  · 包级普通 var → 快照进局部变量，`t.Cleanup` 还原（连同 cobra flag 一起，复用现有的
+    resetFlags(Group)）。
+  · MetaProvider 这种"init 已永久赋值"的函数变量（被 internal/cli/dict/root.go:69 的
+    init() 赋成 srcMeta，无法撤销）→ **不要试图撤销它，改成保存/还原函数值**：
+        old := common.MetaProvider
+        t.Cleanup(func() { common.MetaProvider = old })
+    这比 ResetForTest 干净：连"init 已经赋过值"这个事实都不需要知道。
+  · dbProbeCache 这种跨用例缓存 → **先不做**。`resolveDBRun` 要 `*host.SSHConn`，
+    而 `SSHConn.cli` 是私有字段（host/ssh.go:18）—— 今天**没有任何测试能碰到这个缓存**。
+    为还没发生的污染写 reset 是给假想的问题加代码。真要写那条测试时，同包测试直接
+    `dbProbeMu.Lock(); dbProbeCache = map[...]{}; dbProbeMu.Unlock()` 即可；
+    届时 `dbProbeTTL`（包级 const，测试改不了）也要改成 var —— **等那条测试真写的时候再做**。
+
+**配套守卫：一条"快照清单必须齐全"的断言。** 上面这个方案的代价是"漏一个 var 就静默泄漏"，
+这条代价**必须用断言堵住，不能靠自觉**。做法（仓库有先例：tzs_verb_test.go 的
+`docVerbCountClaims` 就在正则扫文本）：
+
+  扫 internal/cli/dict/*.go（`grep -v _test`）里所有包级 var 的标识符，
+  每一个都必须在 resetDictPackageState 的名字清单里出现，否则红。
+
+  白名单：cobra 命令单例（它们的 flag 由 resetFlags(Group) 递归覆盖）、Group 本身、
+  只读常量表（msgColumns / helpCmdFamilies 这类）。
+  失败文案要点名：`internal/cli/dict/source.go 的 srcTarget 是新加的包级 var，
+  但 resetDictPackageState 里没有它 —— 它会从这条用例泄漏到下一条。要么加进快照，
+  要么加进只读白名单并注明理由。`
+
+**判据**：故意删掉 resetDictPackageState 里一行，上面那条必须红。
+
+**方案对比（如实列，含它买不到的东西）**：
+
+  方案                      生产改动    买到的                   代价
+  ------------------------  ----------  -----------------------  ----------------------------
+  测试侧 t.Cleanup 快照     0 行        逐用例隔离；并行前提     要手列清单，漏一个就静默泄漏
+  生产加 ResetForTest()     每包 10-30  同上，清单在一处         引入只有测试用的生产代码
+  把状态收进结构体          大          结构性隔离               一次大重构，与"不为测试改生产"冲突
+  每包 TestMain 快照/恢复   每包 5 行   —                        **买不到逐用例隔离**，包内照样串
+
+
+================================================================================
+【六】框架决策③：seam 怎么开
+================================================================================
+
+**先照抄现成的先例，别发明新形态**：
+
+  internal/dev/tzs  Dialer 接口（client.go:336 附近，注释原文"抽成接口是为了让默认测试
+                    不碰真实管道"）+ client_test.go 的 fakeDialer / fakeConn
+  internal/web      Options 里的函数字段（server.go:44；已有 Shutdown func()，
+                    注释"nil 表示不注册该端点"）
+  internal/pathinstall  改写包级 var（userEnvKeyPath）+ defer 还原
+
+**推荐形态的优先级：构造参数函数字段 > 包级函数变量 > 接口。**
+
+理由（每条可证实）：
+  · 接口排最后 —— `*host.SSHConn` 的 `cli *ssh.Client` 是私有字段（host/ssh.go:18），
+    要从外部伪造一个 `*SSHConn` 得实现 8 个方法（ssh.go:39,69,98,104,114,120,170,173），
+    其中 NewPTY 返回 `*PTYSession`、SFTP 返回 `*sftp.Client`，都不可构造。
+    为一个测试付这个代价不划算。
+  · 构造参数排第一 —— 被测对象已经在测试里被构造了
+    （internal/debug/api_test.go:18 `NewServer(&Config{Listen:"127.0.0.1:0"}, nil, "")`；
+    internal/web/server_test.go 的 newTestServer），加一个字段**零调用点改动**。
+  · 包级 var 排中间 —— internal/cli/dict 那 20 个已是这个形态（历史遗留），
+    不为它们开新口子，但也别新增。
+
+### 6.1 internal/debug/api.go 的 5 个 handler
+
+**事实**：`grep -n "host.Dial" internal/debug/api.go` → :1427, :1457, :1492, :1530, :1628
+（分别落在 hWSTest / hWSLogs / hWSLogContent / hWSLogDebug / hDBSQL），且都长成同一个形状：
+
+  conn, err := host.Dial(s.cfg.SSH)
+  if err != nil { fail(w, 500, fmt.Errorf("SSH 连接失败: %w", err)); return }
+  defer conn.Close()
+
+**处置**：`Server` 加一个未导出字段 `dial func(host.SSHConfig) (*host.SSHConn, error)`，
+`NewServer`（api.go:46）里默认 `host.Dial`，5 处改成 `s.dial(...)`。**行为一字不变。**
+测试里注入一个必然失败的 dial。
+
+**买到什么**（这才是重点）：
+  · 5 个 handler 的 **500 分支**（"SSH 连接失败: %w" 这 5 处信封形状）
+  · `readBody`（17 处）的 **400 分支**：hWSTest 的空 URL、hWSLogs 的 page/pageSize 解析等
+  · 路由与方法：POST 端点用 GET 打 → 405
+  · **一个顺序断言**：api.go:1523 的注释写着"入参先校验:非法请求不该先把当前会话收口
+    (旧顺序是收口后才在 LaunchReplay 里失败)" —— 这是个**顺序**性质，今天无人守
+
+**买不到（明确不追求）**：5 个 handler 的**快乐路径**，那要 `*host.SSHConn`（见上）。
+
+### 6.2 internal/web 的 3 个动作端点 —— 其中一条能测全路径
+
+  handler        位置              体内调                        可测到哪
+  -------------  ----------------  ----------------------------  ------------------
+  hDBProbe       server.go:458     host.ProbeDBConfig(req)       错误半边
+  hDBAccVerify   server.go:473     host.VerifyDBAcct(req)        错误半边
+  hConnTest      server.go:493     erpdb.Open(ctx, c)            **全路径**
+
+关键：`erpdb.Open` 的返回类型是 `Connector` **接口**（erpdb.go:16,28），所以 hConnTest 里
+`conn.ServerVersion(ctx)` / `conn.Type()` / `conn.Close()` 全可以 fake ——
+**它是这次唯一能测到快乐路径的动作端点**，因为它下游正好是个接口。
+
+处置：`Options`（server.go:44）加 `ProbeDB` / `VerifyAcc` / `OpenDB` 三个函数字段，
+`New` 里 nil 回落真实现 —— 与既有的 `Shutdown func()`（"nil 表示不注册该端点"）同一惯例。
+
+**这是本次规划里唯一一处扩对外接口。** 退路：只做 `OpenDB`（那一条就能测全路径）。
+
+### 6.3 internal/host/env.go 那 4 个函数变量：建议**删掉**，不是改成 seam
+
+`internal/host/env.go:37,40,43,46` 的 `LoadHosts` / `LoadConfigRoot` / `ResolveConfigPath`
+/ `DefaultConfigPathHint` 是**函数值别名**（`= config.LoadHosts` 等），**全仓零调用点**
+（生产零、测试零；`grep -rn "host\.LoadHosts\|…"` 只剩注释命中）。
+
+它们天然可注入，但**注入一个没有任何调用方的函数变量，收益是 0**。留着它们的害处是实的：
+会让人以为"host 有一层可替换的配置入口"，实际没人用。
+
+**反方意见（如实记录）**：它们是同一个函数值的别名，**不是第二份实现**，漂移风险为 0；
+删掉只买"少 4 行 + 消除误导"。**所以这条是低优先的清理，可以不做。**
+
+### 6.4 明确不做的 seam
+
+  · `host.Dial` 改成接口 —— 见上（*SSHConn 不可伪造）。有 13 个调用点：
+    api.go 的 5 处、debug/db.go:311、debug/ents.go:218、debug/manager.go:293,359、
+    debug/session.go:299、debug/srcmirror.go:196、host/dbprobe.go:264,344
+  · `erpdb.Open` 改成函数变量 —— 它**已经是接口返回**，要注入在**调用方**做
+    （web.Options.OpenDB、dict/live），不在 erpdb 里做
+  · host/mirror.go 的 MirrorPull 开 seam —— 要 SFTP + 远端 tar 两层，买家只有一个主流程
+  · internal/sshtun 开 seam —— 115 行纯转发，开了也没东西可测
+
+
+================================================================================
+【七】框架决策④：共享测试 helper 放哪
+================================================================================
+
+**硬约束**：`_test.go` 不能被跨包 import（Go 语言规则，无解）。
+
+**唯一正解**：把共享件放进一个**普通包**，让各包的 `_test.go` import 它。
+仓库已经在用这个解法（internal/dev/testutil 就是这样一个包）。
+
+**但 testutil 不能再塞东西进去**，因为一条已核实的事实：
+
+  grep -rn "dev/testutil" --include=*.go internal/ | grep -v _test
+  → internal/dev/cli/selftest.go:16   "tt/internal/dev/testutil"
+
+**生产代码在 import 它**（selftest.go 是 `tt dev tzc selftest` 的实现）。所以它
+**不能** import `testing` —— 那会把整个 `testing` 包拖进 `tt` 二进制。而"没有语料就
+`t.Skip`"这件事**必须**有 `*testing.T`。
+
+**推荐：新建 `internal/testkit/`（只被 `_test.go` import）**
+
+  internal/testkit/
+      corpus.go    CorpusRoot(t) / CorpusFiles(t, ext) —— 发现逻辑 + skip 文案
+      capture.go   CaptureStdout(t, fn func() int) (int, string)
+      flags.go     ResetFlags(cmd *cobra.Command)
+      runner.go    RequireDir(t, path, why) —— 仓库本体的文件，缺了就是坏，不是 skip
+      env.go       LoadLocalConfig(t) —— 真环境配置的单处解析（见【十】）
+      README.md    短版四节体例
+
+命名与放置：**不在 `internal/dev/` 下** —— 它服务的不只是 .tzc 管线
+（internal/dict/*、internal/debug、internal/web 都要用 CaptureStdout 一类）。
+`internal/testkit` 与 `internal/cli/common`、`internal/safesql` 平级，是"被多方共享的叶子"。
+
+收敛对象：
+
+  corpusRoot()      5 份：dev/fence/fence_test.go:16、dev/pkgfile/pkgfile_test.go:19、
+                    dev/tapfile/tapfile_test.go:14、dev/fgl/corpus_test.go:27、
+                    dev/cli/corpus_test.go:73
+  corpusPackages()  3 份：fence_test.go:31、pkgfile_test.go:35、tapfile_test.go:24
+  captureStdout()   2 份，见下
+
+**两份 captureStdout 收敛到哪一份 —— 这里有一个判据，别选错：**
+
+  internal/dev/cli/pos_test.go:26   os.Pipe + goroutine 边写边读，返回 (code, out)
+                                    :52 TestCaptureStdoutSurvivesBigOutput 钉住边界
+  internal/cli/dict/spill_test.go:275  os.CreateTemp 落临时文件，只返回 out
+
+  **留 pos_test.go 那一版。** 理由是**它多返回一个退出码**，且有边界测试 ——
+  **不是**因为"另一版大输出会挂住"：写临时文件没有管道缓冲，压根不会挂；
+  会挂的是**写坏的管道版**，而 pos_test.go 那版已经用 goroutine 修好了，
+  :44 那一条钉的就是这个边界（它的注释写着"把 captureStdout 退回'先跑完再读'的写法，
+  这条测试不会失败，它会**挂住**"）。这个区别要写进注释，否则下一个人会照错理由做决定。
+  spill_test.go 的 3 处调用点忽略 code 即可。
+
+**防回退断言**（放 internal/testkit 自己的测试里，它也是默认档的一部分）：
+扫仓库里所有 `*_test.go`，出现 `func corpusRoot(` 就红。失败文案直接用
+internal/dev/testutil/corpus.go:7 与 README.md 已经写过的原话：
+"两边各自漂移的后果是一边认 TDEV_CORPUS、另一边只认 TTZS_CORPUS，于是同一条命令在
+一台机器上跑全量、在另一台上静默跑零个包（'0 个包全部通过'是最坏的一种假绿）。"
+**这不是新写的文案** —— 只是把已经写下的散文变成断言。
+
+**os.Stdout 与 os.Chdir 的并行冲突如实记录**：这两件是进程级的，
+与任何 `t.Parallel()` 天然互斥。所以【十三】里只有批 2 那 7 个零全局状态的包允许并行。
+
+**判据（收敛完成的证据）**：
+  grep -rn "func corpusRoot"    --include=*_test.go internal/ | wc -l   # 期望 0
+  grep -rn "func captureStdout" --include=*_test.go internal/ | wc -l   # 期望 0
+  grep -rn "t100_wrok_dir"      --include=*_test.go internal/ | wc -l   # 期望 1（只剩 testkit）
+
+
+================================================================================
+【八】框架决策⑤：两份 fgl-fixtures 的守卫
+================================================================================
+
+**事实（实测，不是转述）**：
+
+  ls testdata/fgl-fixtures/*.4gl | wc -l                    → 61
+  ls testdata/fgl-fixtures/*.expected.json | wc -l          → 61
+  ls web/app/scripts/fgl-fixtures/*.4gl | wc -l             → 61
+  ls web/app/scripts/fgl-fixtures/*.expected.json | wc -l   → 61
+  逐字节比对 122 个负载文件（cmp 循环）                      → 全部相同
+  testdata/ 侧多一个 README.source.md（不是负载，是来源说明）
+  两侧 README.md **有意不同**（一份 Go 侧口吻，一份前端侧口吻）
+
+两侧 README 都明写"**两份内容必须逐字节相同**，改一处要同步另一处"，
+**而没有任何自动化测试在比对** —— 这是全仓唯一一处"写成书面约定却没进测试"的一致性规则。
+
+`grep -rn fgl-fixtures --include=*_test.go .` 只有 Go 侧读取点
+（internal/dev/fgl/outline_fixtures_test.go:155 从包目录上溯找 `testdata/fgl-fixtures`）；
+前端侧是 web/app/scripts/fgloutline.fixtures.mjs:19 与 fgltokens.test.mjs:25 各自拼路径。
+**两侧各读各的，没人比。**
+
+**方案：在 Go 侧加一条比对断言。**
+
+为什么在 Go 侧：`go test ./...` 是**默认档**，会自动跑；前端侧没有默认档
+（`check:app` 是显式命令，web/package.json 里没有 `test` 脚本）。放前端侧等于
+"只有人记得跑 check:app 时才生效"，那与今天的口头约定没本质差别。
+
+放哪个文件：`internal/dev/fgl/outline_fixtures_test.go` —— 它已经有一套"从包目录逐级
+上溯找 testdata/fgl-fixtures"的逻辑，同一套上溯同时定位 web/app/scripts/fgl-fixtures，
+不用另写发现代码。
+
+比对什么：
+  1. 集合相等：两侧 .4gl + .expected.json 的 basename 集合必须相同（排序后逐项比对）
+  2. 逐字节相等：`bytes.Equal`
+  3. **不比对** README.md / README.source.md —— 两份 README 本来就该不同。
+     这条要写进测试注释，否则下一个人会"顺手"把它加进去然后删掉。
+  4. **缺文件不 skip**。依据 internal/dev/cli/tzs_verb_test.go:369 的原话：
+     "这些属于仓库本体，不是语料那样的外部数据 —— 缺了就是仓库坏了"
+     （同一规矩的另一处：internal/cli/root_test.go:24）
+
+**判据**：
+  go test ./internal/dev/fgl -run TestFixtureCopiesAreIdentical -v -count=1
+  # 期望：PASS，不需要任何环境变量
+**反向判据**：临时改 web 侧一个 .4gl 的一个字符，上面那条必须红。
+
+**顺带记录一个数字**（只声明一次）：前端脚本注释里写着"用例 61 个：通过 58，
+已知偏差 3，不符 0"。这个 61 与上面 `ls | wc -l` 的 61 是**同一件事的两个来源** ——
+守卫加上之后，如果脚本注释里的 61 漂了仍不会有人发现。
+**可选**：断言"夹具组数 == 61"，逼改夹具的人同时改那句注释（属"会漂移的数字只声明
+一次"的机械防线，收益小，列为可选）。
+
+
+================================================================================
+【九】框架决策⑥：怎么让"跳过"不变成"静默全绿"
+================================================================================
+
+**先承认 go test 已经给的能力，别重复造**：
+
+  · `t.Skipf` 的**文案**已经完整 —— 例如 dev/tzs/corpus_test.go:152 把两个环境变量名
+    与缺省根都打出来了
+  · `go test -v` 会打印 `--- SKIP: TestXxx (0.00s)` + 跳过原因
+  · **`go test` 不带 -v 时**，一个全跳过的包打印 `ok  tt/internal/dev/tzs  0.5s` ——
+    看不出跑了 0 条还是 80 条。**这才是真缺口。**
+
+所以**不新增工具、不新增包装**。做两件事：
+
+### 9.1 一条可重放的分诊命令（给人看）
+
+  go test ./... -count=1 -v 2>&1 | grep -E '^--- (PASS|SKIP)' | sort | uniq -c
+  # 期望形如：  381 --- PASS  /  41 --- SKIP
+
+这条命令**不新增一行代码**，只是把今天已有的能力写进 `TEST.md` 的对应节
+（今天 AGENTS.md:52 只写了 `go test ./...`，没写怎么**回读**"这次到底验了多少"）。
+仓库的规矩是"判据是回读，不是自述"（AGENTS.md:189），所以这条命令本身就是
+"全绿"这个说法的判据。
+
+### 9.2 skipLedger —— 让"多一跳"必须是一次可 review 的动作（给闸门）
+
+一条测试，扫仓库里**所有** `*_test.go` 的 `t.Skip` / `t.Skipf` 调用点，与一份
+**写在同一个文件里的白名单**比对。多一处、少一处都红。白名单每条带层标记：
+
+  type skipSite struct {
+      where string // 文件 + 文案的稳定子串
+      layer string // "L3" | "L4" | "L0-环境" | "无对象"
+      why   string // "需真语料：TDEV_CORPUS / TTZS_CORPUS；开关 TTZS_DEEP=1"
+  }
+
+它买到四件事：
+
+  1. "静默跳过"变成"必须改白名单"，而改白名单是一个会被 review 的 diff
+  2. 白名单就是分层归属的唯一来源：L3 条数 = 开 TDEV_DEEP 该多跑多少条；
+     L4 条数 = 开 TTZS_E2E 该多跑多少条。"这次到底跳了多少"不再靠数
+  3. 顺手断言"L3/L4 的跳过文案里必须出现开关名"（正则扫 why 里出现
+     TDEV_DEEP | TTZS_DEEP | TTZS_E2E | TTZS_CORPUS）—— 今天大半已经做到了，
+     这条只是把它变成不可回退的：**人看到 skip 就知道怎么打开**
+  4. "L0-环境"那几处被点名（无 git / 无用户配置目录 / 无本机旧配置），必须写明
+     "这条跳过为什么不算假绿"。这一条逼着人区分"这台机器没有 git"与
+     "这台机器没有语料" —— 前者不影响结论，后者影响
+
+**放哪个包**：internal/testkit（它 walk 仓库根，与【七】的 helper 同住；
+tzs_verb_test.go 的 liveDocs 已经证明"从包目录上溯读仓库本体"这条路走得通）。
+
+**代价（如实写）**：
+  · 每次新增一处 t.Skip 都要改一次白名单 —— 这是**故意的摩擦**，但摩擦多了人会烦
+  · 白名单里的位置会随文件变动而漂移。**解法**：只记 `文件 + 文案前 20 字的稳定子串`，
+    **不记行号**；行号只在报错时现算。这样改文件不会让白名单失效，
+    而改文案会让它红（文案是"这条跳过在说什么"，改文案本就该 review）
+
+**判据**：
+  go test ./internal/testkit -run TestSkipLedger -v -count=1
+  go test ./... -count=1 -v 2>&1 | grep -E '^--- (PASS|SKIP)' | sort | uniq -c
+  # 期望：SKIP 数 == 白名单条数 == 44（本次落地时以实测为准）
+**反向判据**：在一个 _test.go 里加一处 t.Skip，TestSkipLedger 必须红。
+
+
+================================================================================
+【十】真环境怎么配（决策 B 的展开）
+================================================================================
+
+**现状**：约 11 个环境变量散在各处，没有一个地方能说"我的环境是什么"：
+
+  TTZS_E2E  真引擎测试总开关        TTZS_EXE    引擎 exe 路径
+  TTZS_WS   工作区                  TTZS_INSTALL 设计器目录（可省）
+  TTZS_PKG  一个真 .tzs 的绝对路径  TTZS_DEEP   .tzs 全语料回归总开关
+  TDEV_DEEP .tzc 全语料回归总开关   TTZS_VALIDATE sample|all
+  TTZS_CORPUS_LIMIT 只跑前 N 个包    TDEV_CORPUS / TTZS_CORPUS  语料根覆盖
+
+**关键事实：`.gitignore:19` 早就忽略了 `/config.local.json`，但全仓没有任何代码读它**
+（`grep -rn "config.local"` 零命中）。仓库当初预留了这个位子，从没建起来。
+
+**方案：`config.local.json` + env 覆盖，解析只有一处。**
+
+  优先级：**env var > config.local.json > 内置缺省**
+  与 internal/dev/testutil/corpus.go:34 已立下的"谁先设谁说话"同构。
+  **覆盖变量设了但指不到目录时返回空，不回落缺省** —— 沿用 corpus.go 已写的理由：
+  "那表示调用方想指出一份语料而指错了；静默换一份别的语料去跑，
+  会留下'我以为跑的是这份'这种错误结论"。
+
+  字段（只放**机器路径**，见下）：引擎 exe、语料根、工作区、设计器目录。
+
+**为什么不放进现有的 `config.json`**：那个文件装的是 hosts 与 **明文 SSH / DB 口令**
+（AGENTS.md §9），是**凭据**；测试配置是**机器路径**。而且 `config.json` 本身已 gitignore
+（工作区里就没有它），是用户在用的东西。混在一起等于让测试配置继承凭据的处理规矩。
+**这条区分要写进 TEST.md。**
+
+**`tt dev doctor` 从四个面扩成覆盖面**：今天它只查引擎产物 / 设计器目录 / 工作区 / 管道名
+（internal/dev/cli/tzs_engine.go:721,776），且已经用结构化的 `Checks`
+（每条 `Level` / `Name` / `Message`，`--json` 也能出）—— 这是现成的形状，
+直接加"语料根 / 真机主机 / 字典库"三项即可，比"让人去猜该设哪个变量"强得多。
+注意扩的时候要保住它今天那条设计约束：**缺工作区时 doctor 自己要在报告里说出来，
+不能因为它自己先退 5 而永远走不到那条自检项**（tzs_engine.go:72 的注释，且 `-`/宽松版
+逻辑在 :780 附近）。
+
+**判据**：
+  ./tt.exe dev doctor                 # 期望：多出语料根/主机/字典库三项，各有 Level
+  ./tt.exe dev doctor --json          # 期望：Checks 数组里能 grep 到新增项
+
+
+================================================================================
+【十一】非 Go 侧①：引擎 C# 的函数面覆盖
+================================================================================
+
+**现状**（engine/README.md 自己承认）：
+
+  引擎的语料回归驱动的是 8–10 个函数，是**回归网，不是函数面的覆盖网**…
+  **函数面覆盖目前是空的**，要补得在 Go 侧补。
+
+`engine/gate-w3-fns.py`（75,888 字节）的诉求是：把 Manifest.cs 声明 `Mutating=true`
+的 33 个函数，在**一个长驻 `tzs-server --stdio` 进程**里逐个驱动一遍，四类判决
+（CHANGED / NOOP / REFUSED / FAIL）+ 一个必须点名的 SKIP。
+它**今天跑不起来**：文件在运行时用 importlib 从同目录加载 `gate-w3.py`，那份不在仓库里。
+
+**结论：能在 Go 侧驱动全部 33 个，且不需要那份脚本。**
+理由：它从 gate-w3.py 借的每一个共享位，Go 侧都有对应物，而且**已经在跑**：
+
+  借的                          Go 侧对应物                                    状态
+  ----------------------------  --------------------------------------------  --------
+  帧分类器 g3.res()             tzs.Call / tzs.CallConn + tzs.Reply           已有
+  长驻进程 srv()                internal/dev/tzs/stdio_test.go 的 stdioSession 已有
+  roundtrip + rt_parse          corpus_test.go 的 runRoundTrip + parseRt      已有
+  rt_ok() 的基线相对判据        requireFixedPoint（注释里就写着 gate-w3 第一版
+                                犯过的错："stale 等于基线，不是等于 0"）      已有
+  ws_of() 工作区                engineEnv / workspaceOf                        已有
+  corpus() 语料                 testutil.CorpusRoot + CorpusFiles              已有
+  sha() 摘要                    corpus_test.go 的 sha256full                   已有
+  33 个写函数的硬编码名单        **不抄**：tzs.FetchManifest + SpecFn.Writes
+                                （manifest.go，"改名前的 Mutating"）—— 问引擎   改问引擎
+  契约拒绝码表                  同样问引擎：SpecFn.Errors                       改问引擎
+  负向对照（bogus args → 契约
+  码 + 零字节改动）             **缺 —— 这是 Go 侧唯一要新写的**                要补
+
+驱动骨架也已经在 Go 里：corpus_test.go 的 `corpusOp` + `corpusPass` 就是
+"每包：pristine 基线 → 一个 --stdio 进程做一件事 → 产出跑 RoundTrip"，
+今天有 4 个 corpusOp（roundtrip / write / edit / action）。
+
+**形态**：internal/dev/tzs/ 新增一个 corpusOp 家族 + 新开关 `TTZS_FNS=1`。
+
+  每包，在**同一个** stdioSession 里：
+    open → 读一遍并把路径快照下来 → validate(baseline) → save(pre)
+    → [负向对照：每个写函数分组至少一条 bogus args] → 必须被契约码拒
+    → save(mid)            必须与 pre **逐字节相同**
+    → [每个适用的写函数，按依赖顺序]（DIRTY 组每步之后重读树）
+    → validate(after)      newErrors 必须 0
+    → save(post)           必须与 pre **不同**，否则每个写都是静默空操作
+    → close
+  然后另起一个进程，对 pristine 与 post 各跑一次 RoundTrip，判据用 requireFixedPoint。
+
+四类判决与 gate-w3-fns.py 逐字对齐（那四类是对的）：
+  CHANGED = ok:true 且有正向标记
+  NOOP    = ok:true 且 noop:true —— **是声明的成功，不是失败**
+  REFUSED = ok:false 且 code 在契约里声明
+  FAIL    = 其余一切，**包括 E_NOT_IMPLEMENTED 与 E_INTERNAL**
+            （"声明了但没实现"与"意外异常"正是这个关卡要暴露的两件事）
+  SKIP 必须点名缺哪个前置，裸 skip 不算证据
+
+**"一进程跑完整个序列"这条判据必须保住。** 理由（gate-w3-fns.py 文件头，可核实）：
+`ComponentTabIndexService.Register` 不清它的两个列表，所以同一进程里第二次 tab 操作
+会接着第一次编号（实测：第二次 clear 编 8..15 而不是 1..8）。
+**一个"每次调用一个进程"的装置看不见这个。** Go 侧的 stdioSession 天然满足这条。
+
+**判据**：
+  TTZS_FNS=1 TTZS_CORPUS=%TEMP%\ttws TTZS_EXE=<repo>\engine\out\tzs-server.exe \
+    go test ./internal/dev/tzs -run TestFnsGate -timeout 30m -v
+  # 期望：一行汇总 "33 driven / a CHANGED / b NOOP / c REFUSED / 0 FAIL / 0 unnamed-SKIP"
+  # 且不开 TTZS_FNS 时这条完全不出现在 go test ./... 的输出里（不是 SKIP，是不注册）
+
+**两条硬纪律跟着守**（AGENTS.md §2）：① 只在副本上跑（会往源包旁边写临时包）；
+② 整轮跑的时候不要重建引擎（`build.sh` 覆盖 out/*.exe 会让 spawn RoundTrip.exe 得到
+"The system cannot find the file specified"，表现为几条假红）。
+
+**落地后必须改 `engine/README.md` 那一节**（"函数面覆盖目前是空的"）——
+依据 docs/README.md 写作规矩 3"不写历史"，修好之后要改成现状 + 判据命令。
+**`engine/gate-w3-fns.py` 保留不删**：它的文件头是"四类判决 + DIRTY_FNS + 基线相对判据"
+这三件事的原始论证；只补一句指向 Go 侧实现。
+
+
+================================================================================
+【十二】非 Go 侧②：前端 SPA
+================================================================================
+
+**现状**：SPA 源码在 `web/app/src/`（6991 行 / 23 个模块，最大的是 SettingsView.tsx、
+store.ts、WsLogView.tsx、Panels.tsx、fgloutline.ts）。**没有 jest / vitest / playwright /
+@testing-library，web/package.json 没有 test 脚本。**
+
+替代品是 3 个手写 Node 检查脚本（web/app/scripts/，共 562 行：fgltokens.test.mjs、
+fgloutline.fixtures.mjs、store.test.mjs），套路是**用 esbuild 打成临时脚本再交给 node 跑**，
+聚合成 `npm run check:app`。约束写在 web/app/scripts/README.md：
+"被检查的模块必须在没有 DOM 的环境下能被**加载**（也就是模块顶层不能碰 DOM）"。
+所以 23 个模块里只有 3 个能被这样测，**UI 组件零覆盖**。
+`npm run build` 里的 `tsc --noEmit` 是**唯一全局防线**。
+
+**推荐：不引入 vitest。** 三条理由（每条可证实）：
+
+  1. 它**不替代**现有防线，只加一条平行的：`tsc --noEmit` 已经在 npm run build 里跑
+     全部模块，vitest 覆盖的是其中一小撮，两者不互相替代
+  2. 代价不是"装个包"：`web/package-lock.json` **入库**，引入 vitest + jsdom/happy-dom +
+     @testing-library/react 是这份锁文件的一次大改动；而 AGENTS.md §1 立的规矩是
+     "没有的东西（别去找，也别顺手加）：CI、Makefile、linter…"
+  3. **"能测的模块是因为它顶层不碰 DOM"这条约束是设计约束，不是缺陷。** store.ts 能被测，
+     是因为它被刻意提纯了。**要扩大覆盖面，该做的是把更多纯逻辑从 .tsx 里提出来**，
+     而不是引入一个能渲染 DOM 的 runner 去测视图 —— 后者会让人**不再提纯**
+
+**要做的两件小事（零新依赖）**：
+
+  1. 加第 4 个检查脚本，沿用 esbuild + node 的现成套路（web/app/package.json 加一个
+     `check:xxx`，web/package.json 的 `check:app` 后面 `&&` 接上）。
+     推荐对象：从 `SettingsView.tsx` 里**提纯**出表单合并/默认值这类纯函数放进 `.ts`
+     再覆盖 —— store.ts 1263 行只有 179 行脚本盯着，而视图层是纯逻辑最集中的地方。
+     **判据**：`cd web && npm run check:app` 是**唯一入口**不变，不许新增第二个入口名。
+  2. web/app/scripts/README.md 的表里加一行（新脚本叫什么、检查什么）。
+
+**明确不做**：
+  · vitest / playwright / testing-library（见上）
+  · `web/dist` 的产物断言 —— `.gitkeep` 是承重墙（AGENTS.md §4.4），
+    且 vite 的 emptyOutDir 每次构建删它；断言产物与"产出一致性"是另一件事
+  · SPA 的 DOM 快照测试 —— 没有 DOM runner；引入它就是上面第 3 条那条
+
+
+================================================================================
+【十三】分批路线图（批 0–6 + 可选批 7）
+================================================================================
+
+排序逻辑是**依赖 / 风险 / 收益，不是字母序**：先立基础设施与"零生产改动"的覆盖面
+（批 0–2）→ 再落文档（批 3）→ 才动生产代码（批 4）→ 然后加不回退的守卫（批 5）→
+最后是需要真引擎的新关卡（批 6）。理由：前三批建立"默认档全绿"这条基线，
+批 4 是唯一动生产代码的一批，放在有基线之后；批 6 需要一台有引擎的机器，不阻塞别人。
+
+  批  内容                                                      生产改动    为什么排这里
+  --  --------------------------------------------------------  ----------  --------------------------
+  0   internal/testkit + 收敛 5 份 corpusRoot / 2 份            零         后面每批都要用这些 helper；
+      captureStdout + config.local.json 解析 + doctor 扩展                 风险最低、可立即回退
+      + 修 spill_test.go:121,231 的 common.ConfigPath 泄漏                （doctor 是唯一例外）
+      + 防回退断言
+  1   31 项 selftest 接进 go test                               零         默认档扩大的最大一块
+  2   8 个零测试包的纯逻辑（verify/split/erpdb/dict-live/       零         纯增量；**这批允许
+      entdir/dbconfig/tglfile/cli-common）                              t.Parallel()**（被测函数
+                                                                        零全局状态，全仓第一次
+                                                                        引入并行）
+  3   文档架构落地：新建 TEST.md + BUILD.md §7 收敛 +            零         依赖批 0 的 config 定稿；
+      docs/README.md 路由 + 45 份判据节写实                              判据节要描述**已存在**的测试，
+                                                                        故排在覆盖面扩大之后
+  4   seam 与状态：debug.Server.dial + bpsstore_test +          **唯一**   放到"默认档全绿"基线之后
+      web.Options 三字段 + resetDictPackageState
+  5   守卫：fgl-fixtures 双副本 + skipLedger                    零         守卫是"不回退保险"，
+                                                                        放在覆盖面扩大之后才有东西可守
+  6   引擎函数面 TTZS_FNS=1                                     零         需一台有引擎的机器，
+                                                                        **不阻塞任何别的批**
+  7   pathinstall.Preview() 直接断言 + winproc 一条            零         只买既有代码的覆盖，
+      Alive/Kill 往返（可选）                                            不解锁别的批
+
+**批 0** —— internal/testkit（见【七】）+ 真环境配置的单处解析（见【十】）+ doctor 扩展。
+判据：
+  go build -o tt.exe . && go test ./... -count=1      # 与改动前同样的 PASS/SKIP 数
+  grep -rn "func corpusRoot"    --include=*_test.go internal/ | wc -l    # 0
+  grep -rn "func captureStdout" --include=*_test.go internal/ | wc -l    # 0
+
+**批 1** —— 见【四】。判据：
+  go test ./internal/dev/cli -run TestSelftestCases -v -count=1   # 31 PASS / 0 SKIP
+  ./tt.exe dev tzc selftest                                        # 输出不变（生产侧没动）
+  反向判据必须执行一次（见【四】末尾）
+
+**批 2** —— 见【三】表里那 8 个包。判据：
+  go test ./internal/dev/verify ./internal/dev/split ./internal/erpdb \
+          ./internal/dict/live ./internal/entdir ./internal/dbconfig \
+          ./internal/dev/tglfile ./internal/cli/common -count=1     # 全部 ok，无 SKIP
+  go test ./... -count=1
+
+**批 3** —— 见"已定下的架构决策 C"：新建根 `TEST.md`（独占测试：命令表、开关总表、
+分层定义、真环境怎么配、怎么回读跑了多少跳了多少）；`BUILD.md §7「自检」`压成一行指
+过去；`docs/README.md:19` 的路由"跑测试"从 BUILD.md 改指 TEST.md；
+45 份 `## 判据` 节按统一体例写实（**可重放命令 + 期望结果 + 覆盖了什么 + 故意不覆盖什么**；
+**不新增 `## 测试` 节**，保持 docs/README.md:29-42 的 8 节体例）。
+判据：
+  grep -n "跑测试" docs/README.md                                  # 指向 TEST.md
+  grep -c "^## 判据" $(find . -name README.md -not -path '*/node_modules/*') | grep ':0'  # 只剩 7 份非 Go 目录
+  wc -l TEST.md                                                   # 体例对齐（参考 BUILD.md 的规模）
+
+**批 4** —— 见【六】与【五】。判据：
+  go build -o tt.exe . && go test ./... -count=1
+  ./tt.exe dict --help && ./tt.exe serve --help     # 与改动前逐字一致
+  go test ./internal/debug -run 'TestActionEndpoints|TestBPs' -v -count=1
+  go test ./internal/web   -run 'TestActionEndpoints' -v -count=1
+  反向判据：删掉 resetDictPackageState 里一行 → 那条清单齐全断言必须红
+
+**批 5** —— 见【八】与【九】。判据：
+  go test ./internal/testkit ./internal/dev/fgl -count=1
+  反向判据两条（改一个字符 / 加一处 t.Skip）
+
+**批 6** —— 见【十一】。判据见该节。
+
+**每批都要给反向判据**：故意改坏，必须**见过它红**。
+这是 internal/dev/cli/pos_test.go:47 立的规矩（"没见过它红的断言不算数"）。
+
+**文档与代码同一个提交**（仓库既有做法），所以批 4 会顺带改它碰的那几个包的判据节。
+
+
+================================================================================
+【十四】明确不做的事
+================================================================================
+
+  不做                                          理由与依据
+  --------------------------------------------  ----------------------------------------------
+  internal/debug/session.go（3034 行）主流程    要真 SSH PTY + fgldb 交互（19 处 time.Now()、
+                                                多处硬编码 time.Sleep）。断言只能是"最终态"，
+                                                而最终态要真引擎 —— 那是一次依赖反转。
+                                                同上一份规划否掉 debug 拆包的理由：
+                                                "为一处只买'好找、好测'的改动付一次依赖反转，
+                                                不划算"
+  internal/debug/api.go 的快乐路径              要 *host.SSHConn，cli 是私有字段（ssh.go:18），
+                                                fake 一个要实现 8 个方法、其中 3 个返回不可
+                                                构造的类型。只买错误半边（见【六】）
+  internal/host/mirror.go 的 MirrorPull 主流程  要真 SFTP + 远端 tar；纯 helper 已覆盖
+  internal/sshtun（115 行）                     纯 SSH 转发，纯逻辑为零
+  internal/winproc 的完整单测                   测试要 spawn 真进程，有留孤儿风险，
+                                                而它本身正是"拉孤儿进程"的工具（批 7 只补一条）
+  给生产代码加 ResetForTest()                   全仓 0 个外部测试包，同包测试本就能读写包级
+                                                var —— 买到 0。而 internal/debug/wstest.go
+                                                已是"只有测试用的生产代码"的一次教训
+  建 tests/ 目录（见"决策 A"）                  未导出访问是硬约束；tests/ 挡不住假绿；
+                                                与"目录 = 能力 + README + 判据"的映射冲突
+  引入 vitest / playwright / testing-library    见【十二】
+  引入 CI / Makefile / linter                   AGENTS.md:38 明写这是"别去找，也别顺手加"
+                                                的清单；§7 把人工序列定为**全部**闸门
+  把默认档的 -timeout 调大                      假失败来自 go 命令的杀进程，测试二进制内部改
+                                                -test.timeout 拦不住（corpus_test.go:22-27）
+  t.Parallel() 全面铺开                         需先做【五】的状态重置；且 os.Chdir 与
+                                                os.Stdout 重定向与并行天然冲突
+  删 engine/gate-w3-fns.py                      它的文件头是"四类判决 + DIRTY_FNS +
+                                                基线相对判据"的原始论证（见【十一】）
+
+
+================================================================================
+【十五】本次规划没核实的三件事（诚实边界，别当成结论）
+================================================================================
+
+1. **没跑 `go test ./...`。** 本文件里没有一条"当前全绿"的断言 —— 所有现状数字来自
+   `grep` / `wc` / `cmp` / `ls` 的静态回读，命令都写在【〇】与【三】。
+   落地批 0 之前应先跑一次并记下基线：
+     go test ./... -count=1 -v 2>&1 | grep -E '^--- (PASS|SKIP)' | sort | uniq -c
+
+2. **没核实 `TTZS_FNS=1` 那条新关卡的实际工作量。** 核实的是"它需要的每一块 Go 侧都有"
+   （【十一】的对照表逐条给了位置）；实际量取决于 33 个函数里有多少需要 DIRTY 组那样的
+   树重读，那要跑一遍才知道。
+
+3. **没测【四】那个 f.Code 台账。** 它是"哪些语料用例可以降级为冒烟"的判据，
+   本身要先跑一次 `TDEV_DEEP=1` 才有数据 —— 所以写在规划里的是**测量方法**，不是结论。
+
+4. **没核实前端第 4 个检查脚本该测哪个模块。** 给的是判据（"模块顶层不能碰 DOM"）
+   与推荐对象（从 SettingsView.tsx 提纯出来的表单逻辑），具体提哪一个要读那 1355 行才知道。
+
+
+================================================================================
+【十六】判据汇总（都是可重放的）
+================================================================================
+
+  # L0
+  go build -o tt.exe .
+  cd web && npm run build
+
+  # L1+L2（默认档）—— 本次规划的全部覆盖面都跑在这条里
+  go test ./... -count=1
+
+  # 分诊：这次到底跑了多少、跳了多少（本次新增，写进 TEST.md）
+  go test ./... -count=1 -v 2>&1 | grep -E '^--- (PASS|SKIP)' | sort | uniq -c
+
+  # 批 0
+  grep -rn "func corpusRoot"    --include=*_test.go internal/ | wc -l   # 0
+  grep -rn "func captureStdout" --include=*_test.go internal/ | wc -l   # 0
+  ./tt.exe dev doctor                                                   # 多出三个面
+
+  # 批 1
+  go test ./internal/dev/cli -run TestSelftestCases -v -count=1          # 31 PASS / 0 SKIP
+
+  # 批 3
+  grep -n "跑测试" docs/README.md                                        # 指向 TEST.md
+
+  # 批 4
+  go test ./internal/debug -run 'TestActionEndpoints|TestBPs' -v -count=1
+  go test ./internal/web   -run 'TestActionEndpoints' -v -count=1
+  ./tt.exe dict --help && ./tt.exe serve --help                          # 与改动前逐字一致
+
+  # 批 5
+  go test ./internal/testkit ./internal/dev/fgl -count=1
+
+  # 批 6（L4，先满足 AGENTS.md 第 2 节两条纪律）
+  TTZS_FNS=1 TTZS_CORPUS=%TEMP%\ttws TTZS_EXE=<repo>\engine\out\tzs-server.exe \
+    go test ./internal/dev/tzs -run TestFnsGate -timeout 30m -v
+
+  # L3（本次不改动，仅在需要证据时跑）
+  TDEV_DEEP=1 go test ./... -timeout 30m
+  TTZS_DEEP=1 go test ./internal/dev/tzs/ -run TestCorpus -timeout 30m
