@@ -84,6 +84,39 @@
 【三】本次已当场取到的数（写进 README 时引用，别外推）
 ================================================================================
 
+- tapfile 语料对拍（2026-09-26 实测，go test ./internal/dev/tapfile -count=1 -v）：
+  .tap=141 个、<point>=26,196、<section>=3,146、带 CDATA 元素=29,342、
+  独立正则对拍通过 29,341（重名点 1 个）、恒等改写逐字节一致 141 包 / 29,482 次写操作
+  | 注意：**WIKI 的两组数字都过时了** —— §6.16 写 32,678/3,646/36,324（105 包），
+    §9.1 写 32,571/3,641/36,212/36,373 恒等写（165 包）；今天实跑都对不上。
+    语料是活目录（人在里面干活），规模数字随时变 —— 所以 README 里只给命令、不写死数字。
+  | 结论：**WIKI §6.16 与 §9.1 的 TAP 数字冲突，两方都不是今天的真值**
+- internal/dev/cli 的 selftest：通过 31，失败 0（./tt.exe dev tzc selftest）
+- `.tzc` 走 `tzs export` 会被挡住并指回 `tzc export`（退出码 2）—— 由 selftest 实测
+  （不是照抄文档：见 selftest 输出"错误（退出码 2）：这是代码包…"）
+
+- **`tt dev tzc apply` 的真实管线顺序**（读 cli.go 的 cmdApply 得到）：
+  解析围栏 → gate1 → 源包未变校验（D-6）→ I15 拒绝 → split → gate2 → 改写字节 → gate3
+  → 原子写 → git 提交
+  | **WIKI §6.7 写的顺序是错的**：它写"gate1 → 源包未变校验 → gate2 → split → 原子写"，
+    把 split 放在 gate2 之前还是之后写反了（代码里 split 先算计划，gate2 再判原包与文档的一致性）。
+  | 已按代码写进 internal/dev/README.md 与 internal/dev/verify/README.md
+
+- **代码注释里的「设计指南 §x.y」指向一份不在仓库里的文档**：全仓与 git 历史都找不到它
+  （find/git log 皆空）。仓库里有的是 `docs/T100设计器-README.md`（第三方材料副本）与
+  反编译源码的 file:line（源码树也不在仓库）。
+  | 处理：新 README 只写条文本身 + 代码依据，不把「设计指南 §x」当可读文献引用；
+    在 internal/dev/README.md 的「与外部材料的关系」里说明了这一点。
+
+- **区段权限链 S1–S5 的实际归属是 `synth`**（synth.ResolveSection），不是计划里写的 `tglfile`。
+  | 依据：grep ResolveSection 在 internal/dev/synth/synth.go:277 起
+  | 已按代码把 S1–S5 写进 internal/dev/synth/README.md
+
+- **两处代码注释仍用过时的 `--allow-sec` 说法**（该开关 v2 起已废弃，cli.go:469 保留它只为
+  给出明确指引）：`verify/verify.go:10`（gate1 的权限类描述）与
+  `split/split.go:72`（TglPatches 的条件）。实际机制是 `model.SectionState`（unlock 状态机）。
+  | 处理：README 按**实际机制**写；这两处以代码为准后属于待清理的注释（不在本次范围）
+
 - internal/dev/fgl 的夹具对拍：用例 61 个，通过 58，已知偏差 3，不符 0
   | 命令：go test ./internal/dev/fgl -count=1 -v
   | 三个已知偏差：dialog-subdialog（SUBDIALOG 未识别为节点）、
