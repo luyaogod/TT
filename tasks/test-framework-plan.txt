@@ -818,6 +818,18 @@ fgloutline.fixtures.mjs、store.test.mjs），套路是**用 esbuild 打成临�
 
 **批 6** —— 见【十一】。判据见该节。
 
+**批 7** —— pathinstall 与 winproc。除 `Preview()` 的直接断言外，这里还要带上一条
+**从已删的 `tasks/structure-refactor-plan.txt` 转来的现状事实**（别丢）：
+
+  `tt install path` 写回用户 PATH 时**无条件用 REG_EXPAND_SZ** ——
+  `writeUserPath` 直接调 `k.SetExpandStringValue(pathValueName, v)`
+  （internal/pathinstall/pathinstall_windows.go:111），**不读原值是什么类型**。
+  注释（同文件 :104）说明了为什么这么选："值里常有 %USERPROFILE% 等可展开变量"。
+  但原值是 REG_SZ（不含任何 `%`）时也会被改写成 REG_EXPAND_SZ。
+  原先会保留原类型的那份实现在 `tt dev install` 里，已随该命令一起删除 ——
+  **现在没有第二份实现兜着了**。
+  | 若要改这里的行为，先想清楚：改类型会不会影响 `%VAR%` 展开、以及卸载时的摘除。
+
 **每批都要给反向判据**：故意改坏，必须**见过它红**。
 这是 internal/dev/cli/pos_test.go:47 立的规矩（"没见过它红的断言不算数"）。
 
