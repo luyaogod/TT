@@ -136,13 +136,13 @@ func requireCorpus(t *testing.T) *corpusEnv {
 	return requireCorpusEnv(t)
 }
 
-// requireCorpusEnv 只解析「真引擎 + 真语料 + 工作区」，**不碰深度开关**。
+// engineExeAndDir 解析「引擎 exe 在哪、它的产物目录在哪」，缺了就说清缺什么、怎么办。
 //
-// 之所以拆出来：函数面那条关卡（fns_test.go）有自己的开关 TTZS_FNS，
-// 不该被迫把整个 17 分钟的深档回归也打开。
-func requireCorpusEnv(t *testing.T) *corpusEnv {
+// 单独拆出来是因为它服务的**不只是**真语料那几条：mini_corpus_test.go 用的是仓库自带的
+// 语料，同样需要一个引擎 —— 那条测试的前置只有引擎这一样，语料不需要。
+func engineExeAndDir(t *testing.T) (exe, dir string) {
 	t.Helper()
-	exe := testenv.EngineExe()
+	exe = testenv.EngineExe()
 	if exe == "" {
 		// 从包目录出发的相对缺省（本仓库里引擎的产物就在那儿），只是省事，不是保证。
 		exe = filepath.Join("..", "..", "..", "engine", "out", "tzs-server.exe")
@@ -153,10 +153,20 @@ func requireCorpusEnv(t *testing.T) *corpusEnv {
 	if _, err := os.Stat(exe); err != nil {
 		t.Skipf("找不到引擎 exe（TTZS_EXE=%s）：%v；先在 engine/ 里跑 build.sh", exe, err)
 	}
-	dir := filepath.Dir(exe)
+	dir = filepath.Dir(exe)
 	if _, err := os.Stat(filepath.Join(dir, "RoundTrip.exe")); err != nil {
 		t.Skipf("%s 旁边没有 RoundTrip.exe：%v", dir, err)
 	}
+	return exe, dir
+}
+
+// requireCorpusEnv 只解析「真引擎 + 真语料 + 工作区」，**不碰深度开关**。
+//
+// 之所以拆出来：函数面那条关卡（fns_test.go）有自己的开关 TTZS_FNS，
+// 不该被迫把整个 17 分钟的深档回归也打开。
+func requireCorpusEnv(t *testing.T) *corpusEnv {
+	t.Helper()
+	exe, dir := engineExeAndDir(t)
 	root := testutil.CorpusRoot()
 	if root == "" {
 		t.Skipf("没有真实语料（%s / %s 都没指到一个目录）：设 TTZS_CORPUS，或准备 %s",

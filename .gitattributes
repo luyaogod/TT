@@ -2,3 +2,9 @@
 # git 通常能自己认出二进制（文件里有 NUL 字节），这条是把它写成明示 —— 免得哪天有人
 # 开着 core.autocrlf 让它们变成"每次 clone 都改动"。
 engine/designer/*.dll binary
+
+# 最小语料的**工作区那一半**是**被 sha256 钉住的**：`manifest.txt` 记的是每个文件的前 16 位
+# 摘要，而 `TestMiniCorpusIsPinned` 拿**工作区里的字节**去比。行尾转换会让它们在 checkout
+# 之后对不上 —— 那不是夹具坏了，是这条属性没写。
+# 只罩 `ws/**`：README / build.py / manifest.txt 是普通文本，要能 diff、要正常的行尾处理。
+testdata/tzs-mini/ws/** binary

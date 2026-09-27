@@ -146,6 +146,10 @@
 
 ```bash
 go test ./internal/dev/tzs -count=1        # 本包测试量最大（约 5.7k 行）
+go test ./internal/dev/tzs -run TestMiniCorpus -count=1 -v
+                                           # 冒烟回归，跑在**仓库自带**的语料上
+                                           # （testdata/tzs-mini/ws，3.2 MB）：
+                                           # 不需要任何环境变量，只要能构建引擎
 TTZS_E2E=1 go test ./internal/dev/cli -run TestE2E   # 需要真引擎（配 TTZS_EXE / TTZS_WS / TTZS_INSTALL）
 ./tt.exe dev tzs doctor                    # 五个失败面自检，不引导任何东西
 TTZS_DEEP=1 go test ./internal/dev/tzs -run TestCorpus -timeout 30m

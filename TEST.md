@@ -30,11 +30,18 @@ go test ./... -count=1 -v 2>&1 | grep -E '^--- (PASS|SKIP)' | sort | uniq -c
 | **L0 编译期** | `go build` ~10s；前端 `npm run build` ~30s | 跑得起来（前端需先 `npm ci`） | 改坏了 | `go build` / `npm run build` |
 | **L1 纯逻辑** | 毫秒级 | 跑得起来 | **只可能是改坏了** | `go test ./...` |
 | **L2 本地资源** | 秒级 | 跑得起来 | **只可能是改坏了** | 同上 |
+| **L2+ 自带语料** | 十几秒 | **跑得起来**（要先 `cd engine && ./build.sh`） | 只可能是改坏了 | `go test ./...`（语料在仓库里） |
 | **L3 真语料** | 9–11 分 / 17 分 | 跑不起来（会 skip） | 改坏了 **或** 语料在两次运行之间变了 —— 要人分诊 | `TDEV_DEEP=1` / `TTZS_DEEP=1` |
 | **L4 真机 E2E** | 分钟级到十几分钟 | 跑不起来 | 改坏了 **或** 环境不对 —— 要人分诊 | `TTZS_E2E=1` + 真引擎 / 真 SSH |
 
 **默认档 = L0 + L1 + L2。** L2 的"本地资源"指：`t.TempDir()`、真 SQLite、
 `httptest`、`127.0.0.1:0` 回读、临时注册表键、合成 `.tzc` 包 —— 都不依赖外部世界。
+
+**L2+ 是 2026-09-27 新加的一层，它买到的正是"语料不再只能在那台机器上跑"。**
+`testdata/tzs-mini/`（3.2 MB）里是三个典型 `.tzs` 包 + 它们要的最小元数据，
+于是 `TestMiniCorpus*` 四条回归**不需要任何环境变量**（也不需要 `TTZS_CORPUS`），
+唯一的门槛是引擎 —— 引擎不在仓库里（`engine/out/` 是构建产物），所以干净克隆上要先构建它。
+**它不替代 L3**：三个包是冒烟网，上百个真实包的分布回归仍然只认 `TTZS_DEEP`。
 
 **L3/L4 永远靠环境变量开关 + 显式 `-timeout 30m`，不靠调大默认超时。**
 理由被实测过：杀进程来自 **go 命令**（默认 `-timeout=10m`），
@@ -49,6 +56,10 @@ cd web && npm run check:app              # 前端三项检查：fgltokens / fglo
 cd web && npm run build                  # 含 tsc --noEmit（check:app 不做类型检查）
 ./tt.exe dev tzc selftest                # .tzc 的内置对抗用例，不需要真实语料
 ./tt.exe dev tzs doctor                  # .tzs 引擎环境自检（含语料根一项）
+go test ./internal/dev/tzs -run TestMiniCorpus -count=1 -v
+                                         # .tzs 的冒烟回归，跑在**仓库自带**的语料上（3.2 MB）：
+                                         # 不需要任何环境变量，只要能构建引擎
+python testdata/tzs-mini/build.py --src <真工作区>   # 重新生成那份夹具
 ```
 
 包数与测试文件数会漂移，别写死在文档里：
