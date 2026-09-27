@@ -259,6 +259,10 @@ for name in "${!LINK_SRC[@]}"; do
     *)    echo "FAILED  $name  (unknown LINK_SRC mode '${LINK_SRC[$name]}')"; fail=1; continue ;;
   esac
 
+  # 设计器语言包的加载器，探测程序共用一份（见 test/DesignerLang.cs 的文件头）。
+  # `ref` 模式的两个是引擎本体，不碰设计器的资源，所以不给它们。
+  [ "${LINK_SRC[$name]}" = ref ] || files+=( "$HERE\\test\\DesignerLang.cs" )
+
   compile "$name" "$OUT/$name.exe" "${RFLAGS[@]}" "${files[@]}" "$src"
 done
 

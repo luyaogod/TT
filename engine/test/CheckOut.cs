@@ -27,7 +27,6 @@ class CheckOut
         // 与发行包 <引擎目录>\designer\ 是同一个布局。没有硬编码缺省 —— 见 engine/BUILD.md。
         return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "designer");
     }
-    const string SRC     = @"D:\我的项目\T100设计器";
     const string WS      = @"D:\t100_wrok_dir\hengshuo\prd";
 
     static object Call(object target, string name, params object[] args) {
@@ -72,8 +71,7 @@ class CheckOut
             return File.Exists(p) ? Assembly.LoadFrom(p) : null; };
 
         Application app = new Application();
-        using (FileStream fs = File.OpenRead(Path.Combine(SRC, "SpecDesignerCommon", "langs", "zh-cn.xaml")))
-            app.Resources.MergedDictionaries.Add((ResourceDictionary)XamlReader.Load(fs));
+        DesignerLang.Merge(app, INSTALL);
         Assembly A = Assembly.LoadFrom(Path.Combine(INSTALL, "SpecDesignerCommon.dll"));
         Type smT = A.GetType("SpecDesignerCommon.SettingManager");
         Type modelT = A.GetType("SpecDesignerCommon.Site.ViewModels.SettingModel");

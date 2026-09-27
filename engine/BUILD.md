@@ -110,6 +110,18 @@ baml 资源、按路径取不到"。那句是对的，但停在了一步之前�
 找不到任何一份时**明确抛异常**——字典缺失会让 `FindResource("Message_...")` 返回 null，
 然后在很远的地方以 `ArgumentNullException` 炸出来。
 
+**探测程序曾经没跟上这一改**（2026-09-27 修）：8 个 `test/*.cs` 各自硬编码了那棵源码树的路径
+（`const string SRC = @"D:\我的项目\T100设计器"`，`const` 所以任何 `TZSCLI_*` 都改不了），
+于是**没有那棵树的机器上 `RoundTrip` 一跑就 `DirectoryNotFoundException`**。
+而 `RoundTrip` 是 `TestCorpus*` / `TestMiniCorpus*` / `TestFnsGate` 全都要起的程序 ——
+最阴的是**照文档做才会红**：`engineExeAndDir` 在引擎不存在时跳过，
+所以不建引擎反而是绿的，照 BUILD.md 建完引擎才红。
+
+现在那 8 个调用点共用 `test/DesignerLang.cs`（Bootstrap 那段逻辑在探测程序这一侧的同一实现；
+不能直接调 `Bootstrap`，因为探测程序是 `link` / `none` 模式编译的，引用不到 `TzsCli.Designer`）。
+`build.sh` 把它加进每种模式的 `files`。**新加探测程序直接调 `DesignerLang.Merge(app, INSTALL)`**，
+`TestEngineProbesDoNotHardcodeAuthorPaths` 盯着别退回硬编码。
+
 ## 其余文档
 
 | 文件 | 内容 |

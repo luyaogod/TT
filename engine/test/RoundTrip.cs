@@ -37,7 +37,6 @@ class RoundTrip
         // 与发行包 <引擎目录>\designer\ 是同一个布局。没有硬编码缺省 —— 见 engine/BUILD.md。
         return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "designer");
     }
-    const string SRC     = @"D:\我的项目\T100设计器";
     // The workspace is per-module: each one has its own mta/ and <module>/tbl/*.tbl, and
     // TzpManager refuses to open a package that lives outside the configured one
     // (NotInCurrentWorkspaceException). batch.sh points this at the nearest ancestor
@@ -169,8 +168,7 @@ class RoundTrip
             return File.Exists(p) ? Assembly.LoadFrom(p) : null; };
 
         Application app = new Application();
-        using (FileStream fs = File.OpenRead(Path.Combine(SRC, "SpecDesignerCommon", "langs", "zh-cn.xaml")))
-            app.Resources.MergedDictionaries.Add((ResourceDictionary)XamlReader.Load(fs));
+        DesignerLang.Merge(app, INSTALL);
         Assembly A = Assembly.LoadFrom(Path.Combine(INSTALL, "SpecDesignerCommon.dll"));
         object SM = Call(A.GetType("SpecDesignerCommon.SettingManager"), "Get");
         object model = Call(A.GetType("SpecDesignerCommon.Site.ViewModels.SettingModel"), "Create");

@@ -50,7 +50,6 @@ class ProbeReopen
         // 与发行包 <引擎目录>\designer\ 是同一个布局。没有硬编码缺省 —— 见 engine/BUILD.md。
         return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "designer");
     }
-    const string SRC     = @"D:\我的项目\T100设计器";
     static readonly string WS =
         Environment.GetEnvironmentVariable("TZSCLI_WS") ?? @"D:\t100_wrok_dir\hengshuo\prd";
 
@@ -718,8 +717,7 @@ class ProbeReopen
             string p = Path.Combine(INSTALL, new AssemblyName(e.Name).Name + ".dll");
             return File.Exists(p) ? Assembly.LoadFrom(p) : null; };
         var app = new Application();
-        using (var fs = File.OpenRead(Path.Combine(SRC, "SpecDesignerCommon", "langs", "zh-cn.xaml")))
-            app.Resources.MergedDictionaries.Add((ResourceDictionary)XamlReader.Load(fs));
+        DesignerLang.Merge(app, INSTALL);
         A  = Assembly.LoadFrom(Path.Combine(INSTALL, "SpecDesignerCommon.dll"));
         FE = Assembly.LoadFrom(Path.Combine(INSTALL, "SpecDesigner.FormEditor.dll"));
         SM = Call(A.GetType("SpecDesignerCommon.SettingManager"), "Get");

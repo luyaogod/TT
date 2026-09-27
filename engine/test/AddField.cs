@@ -53,7 +53,6 @@ class AddField
         // 与发行包 <引擎目录>\designer\ 是同一个布局。没有硬编码缺省 —— 见 engine/BUILD.md。
         return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "designer");
     }
-    const string SRC     = @"D:\我的项目\T100设计器";
     // The workspace is per-module: each has its own mta/ and <module>/tbl/*.tbl, and
     // TzpManager refuses a package from outside the configured one. batch-write.sh points
     // this at the nearest ancestor holding an mta/ directory.
@@ -207,8 +206,7 @@ class AddField
             string p = Path.Combine(INSTALL, new AssemblyName(e.Name).Name + ".dll");
             return File.Exists(p) ? Assembly.LoadFrom(p) : null; };
         var app = new Application();
-        using (var fs = File.OpenRead(Path.Combine(SRC, "SpecDesignerCommon", "langs", "zh-cn.xaml")))
-            app.Resources.MergedDictionaries.Add((ResourceDictionary)XamlReader.Load(fs));
+        DesignerLang.Merge(app, INSTALL);
         A = Assembly.LoadFrom(Path.Combine(INSTALL, "SpecDesignerCommon.dll"));
         FE = Assembly.LoadFrom(Path.Combine(INSTALL, "SpecDesigner.FormEditor.dll"));
         var smT = A.GetType("SpecDesignerCommon.SettingManager");
