@@ -69,6 +69,7 @@ go list -f '{{if or .TestGoFiles .XTestGoFiles}}T{{end}}' ./... | grep -c T   # 
 |---|---|---|
 | `TDEV_DEEP=1` | `.tzc` 全语料回归（export+verify / apply 仿真） | 9–11 分钟 |
 | `TTZS_DEEP=1` | `.tzs` 全语料回归 | 17 分钟 |
+| `TTZS_FNS=1` | 引擎**函数面**关卡：每个语料包起一个 `--stdio` 进程，把引擎声明的全部写函数逐个驱动一遍（含每分组一条负向对照） | 19 分钟 |
 | `TTZS_VALIDATE=all` | 把 `validate` 从"每轴一个样本"扩到全部包 | 再加十几分钟 |
 | `TTZS_E2E=1` | 真引擎测试（要配 `TTZS_EXE`、`TTZS_WS`，可选 `TTZS_INSTALL`） | 分钟级 |
 | `TTZS_PKG=<真 .tzs 的绝对路径>` | 逻辑键寻址 / 任务级动词那两条 | 秒级 |

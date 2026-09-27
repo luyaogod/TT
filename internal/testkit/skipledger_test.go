@@ -62,7 +62,7 @@ const (
 // 拼接出来的（如 e2e_test.go 那条，`TTZS_INSTALL` 在后半段未被捕获）。
 // 所以这张表要按**捕获得到**的名字列。
 var switchNames = []string{
-	"TDEV_DEEP", "TTZS_DEEP", "TTZS_E2E",
+	"TDEV_DEEP", "TTZS_DEEP", "TTZS_E2E", "TTZS_FNS",
 	"TTZS_CORPUS", "TDEV_CORPUS",
 	"TTZS_EXE", "TTZS_WS", "TTZS_PKG",
 }
@@ -103,6 +103,8 @@ var skipLedger = []skipSite{
 	{file: "internal/dev/tzs/corpus_test.go", msg: "%s 下没有 .tzs（排除掉 %s 之后）", layer: layL3Missing, why: "语料在，但里面没有 .tzs"},
 	{file: "internal/dev/tzs/corpus_test.go", msg: "没有真实语料：设 TTZS_CORPUS（或 TDEV_CORPUS），或准备 %s", layer: layL3, why: "需真实语料：开关 TTZS_CORPUS（或 TDEV_CORPUS）"},
 	{file: "internal/dev/tzs/corpus_test.go", msg: "%s 下没有 .tzs", layer: layL3Missing, why: "语料在，但里面没有 .tzs"},
+	{file: "internal/dev/tzs/fns_test.go", msg: "函数面关卡未启用：设 %s=1（它会对每个语料包驱动一遍全部写函数，见 fns_test.go 顶部）", layer: layL4, why: "需真引擎 + 真语料：开关 TTZS_FNS=1（它自己对每个包起一个 --stdio 进程驱动全部写函数）"},
+	{file: "internal/dev/tzs/fns_test.go", msg: "找不到引擎 exe（TTZS_EXE=%s）：%v；先在 engine/ 里跑 build.sh", layer: layL4, why: "需真引擎：开关 TTZS_EXE 指到 tzs-server.exe（或先跑 engine/build.sh）"},
 	{file: "internal/dev/tzs/corpus_test.go", msg: "pin 里 %d 条路径在本机一条都不存在（语料根=%s）：pin 描述的是另一份语料，", layer: layL3, why: "pin 描述的是另一份语料：用 TTZS_CORPUS 指到正确那份"},
 	{file: "internal/dev/tzs/corpus_test.go", msg: "语料里没有包", layer: layL3Missing, why: "语料在，但里面没有包"},
 	{file: "internal/dev/tzs/corpus_test.go", msg: "没有一个工作区能验（都缺 mta/mod-fd.spec，或包打不开）", layer: layL3, why: "需真工作区：开关 TTZS_WS"},

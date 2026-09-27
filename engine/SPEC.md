@@ -1528,6 +1528,19 @@ BOOLEAN 的 `true|false` 是一处声明的常量，两边共用）。`values` �
    `new FormAttributesUndoRedoCommand(...)`。索引器依次做：白名单（属性不存在就拒）→ 同值短路 →
    `repeat`/`stepX`/`rowCount` 门禁 → `MinGrid*` 夹紧 → **最后才**调那个命令类。
    直接调它 = 跳过前面全部（P0 实测：会把不存在的属性写进去）。
+   **`name` 是这条规则的例外，而且是唯一一个**：它既是名字路径的构成，又是
+   `FormSpeDictionary` 的键。索引器写得到模型、写不到 `.4fd` 文本，所以**布局侧的
+   `name` 只改得动一半**。实测（2026-09-27，Go 侧函数面关卡跑 65 个真实包）：写完之后新代号
+   查得到、文本里还是旧代号，引擎自己在同一个容器上的 `add_field` 报
+   `E_INTERNAL：模型子节点 … 在布局文本里没有对应元素——模型和文本已经分叉，不能继续写`，
+   `delete`/`nudge`/`align`/`fit_size` 拿新代号一律 `E_NOT_FOUND`。
+   所以**布局侧那四个入口**（`set_layout_attr` 的 `path`/`paths` 两种形态 + `set_layout_attrs`）
+   **在入口就拒 `attr="name"`**（`E_BAD_PARAM`，`kind:validation`，实现在 `Attr.RejectRename`）。
+   **规格侧不拒，这个不对称是实测的**：`set_spec_attr {attr:"name"}` 走
+   `SpecificationInfo.Rename`，元素名一起推过去，收尾的 `Patch()` 也把文本改到了 ——
+   改完之后 `find_component` 解析的是**新路径**、旧名一个都不剩、容器里的 `add_field` 照常成功。
+   把它一起禁掉等于砍掉一条能用的路。`rename_component` 仍比它多一样东西：**重名预检**
+   （`IsExists`）。**不要**在布局侧补第二份改名实现。
 2. **规格属性写之前先查白名单**——同一个病在规格侧的形态，就是 `Edit set` 往 `.tsd` 里写
    `case="upper"` 那种垃圾。
 

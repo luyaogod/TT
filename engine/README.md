@@ -61,12 +61,31 @@
 | `HANDOFF.md` | 交接：现状、核心结论、最后一次关卡的结论与已知缺陷 | 接手时；想知道"哪些已验证、哪些没验" |
 | `TASKS.md` | **阶段记录，不是现状说明书** —— 里面的数字与命令是那个时点的正确值 | 只在追溯历史决策时；**照它敲命令会被带到沟里** |
 
-## 一条现状约束：函数面覆盖目前是空的
+## 函数面覆盖在 Go 侧跑（2026-09-27 起）
 
-引擎的语料回归驱动的是 8–10 个函数，是**回归网，不是函数面的覆盖网**。
-把全部写函数跑在一个长驻进程里的脚本（`gate-w3-fns.py`）**跑不起来** —— 它在运行时从路径加载
-`gate-w3.py`，而那份不在仓库里。于是脚本里那批"每个写函数分组至少一条、必须以契约码被拒
-且零字节改动"的负向对照也**没有在跑**。**函数面覆盖目前是空的**，要补得在 Go 侧补。
+引擎的语料回归驱动的是 8–10 个函数，是**回归网，不是函数面的覆盖网**；函数面那层由
+`internal/dev/tzs/fns_test.go` 补上了：对**每个**写函数，在一个长驻 `tzs-server --stdio`
+进程里逐个驱动一遍，四类判决（CHANGED / NOOP / REFUSED / FAIL）+ 必须点名的 SKIP，
+外加每分组一条"bogus args 必须被契约码拒、且保存下来逐字节没变"的负向对照。
+函数的名单与契约码**问引擎要**（`--manifest`），不在 Go 侧手抄一份。
+
+```bash
+TTZS_FNS=1 TTZS_CORPUS=%TEMP%\ttws go test ./internal/dev/tzs -run TestFnsGate -timeout 30m -v
+```
+
+判据：0 FAIL，且每个函数至少成功驱动过一次 —— 例外只有 `set_cited`，
+它只对 `prog != std_prog` 的自订程序有意义，而语料里一个都没有；
+这条豁免由引擎自己回的 `detail.reason = standard_program` 背书（见 `fnsNoPositiveCase`）。
+两条硬纪律跟着守：只在副本上跑、整轮跑的时候不要重建引擎。
+
+`gate-w3-fns.py` 保留不删（它的文件头是那四类判决与"一进程跑完整个序列"的原始论证），
+但它跑不起来也不能跑：见它文件头的 `IS THIS STILL THE PLACE TO RUN IT`。
+
+**函数面关卡上线时抓到的第一个缺陷**：布局侧的 `attr="name"`（`set_layout_attr` 的两种形态
+与 `set_layout_attrs`）只改得动模型那一半，`.4fd` 文本留着旧代号 —— 之后同一个容器上的
+`add_field` 会报"模型和文本已经分叉"。现在这三个入口都拒 `name`（`Attr.RejectRename`）。
+**规格侧不拒**，因为实测它是完整的改名（`SpecificationInfo.Rename` + 文本跟着改），
+禁掉等于砍掉一条能用的路 —— 这条不对称写在 `RejectRename` 与 `SPEC.md` 的 (d) 1 下面。
 
 ## 构建与判据
 

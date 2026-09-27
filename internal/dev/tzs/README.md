@@ -150,7 +150,26 @@ TTZS_E2E=1 go test ./internal/dev/cli -run TestE2E   # 需要真引擎（配 TTZ
 ./tt.exe dev tzs doctor                    # 五个失败面自检，不引导任何东西
 TTZS_DEEP=1 go test ./internal/dev/tzs -run TestCorpus -timeout 30m
                                            # 全语料回归（17 分钟；先在副本上跑，见 TEST.md）
+TTZS_FNS=1 TTZS_CORPUS=%TEMP%\ttws go test ./internal/dev/tzs -run TestFnsGate -timeout 30m -v
+                                           # 函数面覆盖：每个语料包一个 --stdio 进程，
+                                           # 逐个驱动引擎声明的**全部**写函数（见 fns_test.go 顶部）
 ```
+
+`TestFnsGate` 是自己的开关（不要求 `TTZS_DEEP`）：它问的是"声明出来的每个写函数被驱动过没有"，
+与"这一包写回去还对不对"是两张网。**它只管函数面，不管语料形状** —— 语料回归归 `TestCorpus`。
+
+**它今天不是全绿，而且红的那一条是它自己找到的东西**（2026-09-27 首次全量跑，65 个包）：
+
+  · 判据一/二/三全过：0 个 FAIL，36 个写函数每一个都至少成功驱动过一次；
+    唯一没有正面用例的 `set_cited` 由引擎自己的 `detail.reason = standard_program` 背书（见
+    `fnsNoPositiveCase`）
+  · **判据四（写完之后 `RoundTrip` 的不动点）在 37 个包上报 stale 与 pristine 不符** ——
+    单独复现到 **`set_items`**：一个干净的会话里只跑它，`aapt110(c).tzs` 的 stale 就从 0 变成 1。
+    也就是说 `set_items`（`XmlElement.ReplaceItems`，.4fd 那一侧）改完之后，模型记的 items
+    与文件里存的对不上 —— 与 `attr="name"` 是同一族"只写了一边"的病，只是这次是 items。
+    **本次只定位、不修**：修它要动引擎的 `ReplaceItems` 调用点，那是另一件事。
+    复现：`TTZS_FNS=1 TTZS_CORPUS=<副本> go test ./internal/dev/tzs -run TestFnsGate -timeout 30m -v`，
+    看 `stale=…，基线是 …` 那些行
 
 ## 改动影响面
 

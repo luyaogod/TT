@@ -349,6 +349,13 @@ namespace TzsCli.Designer
             SpecNode(s, path, kind, out el, out node, out legal);
             if (legal.IndexOf(attr) < 0)
                 throw NotWhitelisted(kind + " 节点", attr, legal, path, kind);
+            // NO RejectRename here, deliberately -- do not "unify" this with the layout side.
+            // `name` on a spec node IS a complete rename: it goes through
+            // SpecificationInfo.Rename, which pushes the element's name, and the trailing
+            // Patch() lands the same change on the .4fd text. Measured (2026-08 probe):
+            // after set_spec_attr {attr:"name"}, find_component resolves the NEW path, the old
+            // name resolves to nothing, and add_field in the container still succeeds.
+            // The layout verbs are the broken half; see RejectRename below.
             GuardSpecValue(attr, value, path, kind);
 
             // NO GuardValue here, deliberately -- do not "fix" this by adding one.
@@ -463,9 +470,11 @@ namespace TzsCli.Designer
 
             // Names first, across the whole set, against the element that will receive them.
             List<string> legal = new List<string>(Session.Attrs(el).Keys);
-            foreach (JProperty p in attrs.Properties())
+            foreach (JProperty p in attrs.Properties()) {
                 if (legal.IndexOf(p.Name) < 0)
                     throw NotWhitelisted("元素", p.Name, legal, path, null);
+                RejectRename(p.Name);
+            }
             // Then values, also across the whole set: GuardValue is what One() calls, and one bad
             // value must stop the request before the first write rather than after it.
             foreach (JProperty p in attrs.Properties())
@@ -740,9 +749,45 @@ namespace TzsCli.Designer
         /// no-op -- it is the designer refusing -- and reporting it as success would be the
         /// silent-corruption failure mode this project exists to remove. It maps to E_DESIGNER.
         /// </summary>
+        /// <summary>
+        /// Refuses `name` on the two LAYOUT attribute verbs -- and only on those.
+        ///
+        /// The layout write goes through the XmlElement indexer, which reaches the model and not
+        /// the .4fd text, so `name` there moves the element in one half only. The trailing Patch()
+        /// then addresses the old path -- which the write has already re-indexed out from under it
+        /// -- so it misses and nothing repairs the split.
+        ///
+        /// Measured, not reasoned (2026-09-27, the Go function-surface gate over 65 corpus files):
+        /// afterwards the engine's own add_field in that container throws
+        /// `E_INTERNAL：模型子节点 … 在布局文本里没有对应元素——模型和文本已经分叉，不能继续写`,
+        /// and delete/nudge/align/fit_size resolve the new name to E_NOT_FOUND. With no guard the
+        /// run reports 4 such FAIL; guarding the singular verb took it to 2, guarding the plural
+        /// to 0. (The count moved between runs because customLayoutAttr(s) walk the element's
+        /// attribute map in Go's random order -- which corpus file trips it is a coin flip.)
+        ///
+        /// The SPEC verbs are NOT guarded, and that asymmetry is measured rather than assumed:
+        /// set_spec_attr {attr:"name"} goes through SpecificationInfo.Rename, which pushes the
+        /// element's name, and the trailing Patch lands it on the text too -- find_component then
+        /// resolves the new path, the old name resolves to nothing, and add_field in the container
+        /// still succeeds. Guarding it too would have removed a working rename.
+        ///
+        /// RenameComponent remains the full path (RenameUndoRedoCommand + collision and legality
+        /// checks + the FormWriter patch); what it adds over the spec verb is the collision check.
+        /// </summary>
+        static void RejectRename(string attr) {
+            if (attr != "name") return;
+            throw TzsError.Validation("attr=\"name\" 不接受：改控件代号要同时动规格模型与 .4fd 文本两边，"
+                + "而布局属性只写得了其中一边 —— 只写它会让两边分叉（新代号查得到、文本里还是旧代号，"
+                + "之后往同一个容器里加字段会报「模型和文本已经分叉」）。"
+                + "用 rename_component（或 set_spec_attr kind=… attr=name）：它们走设计器自己的改名路径，"
+                + "两边一起动，rename_component 还顺带做重名校验。");
+        }
+
         public static object SetLayoutAttr(Session s, JObject a) {
             string attr = Read.Need(a, "attr");
             string value = Read.NeedKey(a, "value");
+
+            RejectRename(attr);
 
             string one = null;
             string[] paths = Read.ListArg(a, "paths");

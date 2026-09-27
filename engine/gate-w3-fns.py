@@ -48,6 +48,18 @@ SKIP is a first-class result too, and it must NAME the file precondition that is
 ("no Tree element", "no <tbl> row in the <table> section"). A bare skip is not evidence.
 
 Usage: python gate-w3-fns.py [--files a,b,c] [--root DIR] [--only-fn f1,f2] [--keep] [--timeout S]
+
+IS THIS STILL THE PLACE TO RUN IT -- no. It was reimplemented on the Go side and that is what runs
+now, because this file cannot: it loads gate-w3.py from its own directory at import time and that
+file is not in the repository. Keeping it anyway, on purpose: the header above is the original
+argument for the four verdicts, for one-process-per-corpus-file, and for the baseline-relative
+roundtrip rule -- the Go gate was written against it. What to run instead:
+
+    TTZS_FNS=1 TTZS_CORPUS=%TEMP%\\ttws go test ./internal/dev/tzs -run TestFnsGate -timeout 30m -v
+    (criteria + the two hard rules: internal/dev/tzs/fns_test.go, 根 TEST.md)
+
+One thing did NOT carry over: the Go gate resolves the function list and the contract codes by
+asking the engine (--manifest), where this file hardcodes both. Do not take its lists as current.
 """
 import hashlib
 import importlib.util

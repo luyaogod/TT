@@ -133,6 +133,15 @@ type corpusEnv struct {
 func requireCorpus(t *testing.T) *corpusEnv {
 	t.Helper()
 	requireDeep(t)
+	return requireCorpusEnv(t)
+}
+
+// requireCorpusEnv 只解析「真引擎 + 真语料 + 工作区」，**不碰深度开关**。
+//
+// 之所以拆出来：函数面那条关卡（fns_test.go）有自己的开关 TTZS_FNS，
+// 不该被迫把整个 17 分钟的深档回归也打开。
+func requireCorpusEnv(t *testing.T) *corpusEnv {
+	t.Helper()
 	exe := testenv.EngineExe()
 	if exe == "" {
 		// 从包目录出发的相对缺省（本仓库里引擎的产物就在那儿），只是省事，不是保证。

@@ -9,7 +9,8 @@
   go list -f '{{if or .TestGoFiles .XTestGoFiles}}T{{else}}.{{end}} {{.ImportPath}}' ./...
       → 35 个包，22 个带测试 / 13 个没有
   （逐包 源码行 / 测试行 / func Test 数）：见【三】的表头命令
-  grep -roE 't\.Skipf?\(' --include=*.go internal/ | wc -l    → 38   （真实调用点）
+  grep -roE 't\.Skipf?\(' --include=*.go internal/ | wc -l    → 40   （真实调用点；批 5 时是 38，
+                                                             批 6 的 fns_test.go 加了 requireFns 那条）
       # **别用 `grep -rn "t\.Skip" | wc -l`** —— 那是按行数，会把注释与错误文案里
       # 的提及也算进去（实测那个口径现在给 46，其中 8 处是本台账文件自己在说"t.Skip"）。
       # 只有 _test.go 是 36，另 2 处在 internal/testkit/corpus.go（**普通 .go 文件**）。
@@ -1044,6 +1045,69 @@ fgloutline.fixtures.mjs、store.test.mjs），套路是**用 esbuild 打成临�
   所以 switchNames 那张表要按**捕获得到**的名字列，且它挡不住"第二个字面量里的开关名写错"。
 
 **批 6** —— 见【十一】。判据见该节。
+
+【批 6 已完成 2026-09-27】函数面关卡落地，但它**不是零生产改动** —— 它在跑到第一条判据之前
+就抓到了两个引擎缺陷，其中一个必须当场修，否则关卡永远红。
+
+  落地的东西（Go 侧，零生产改动）：
+    internal/dev/tzs/fns_test.go        关卡本体（36 个写函数的登记表 + 靶子 + 四类判决 + 负向对照）
+    internal/dev/tzs/corpus_test.go     改 9 行：把 requireCorpusEnv 从 requireCorpus 里拆出来
+    internal/testkit/skipledger_test.go 加 2 条白名单（TTZS_FNS 那两处跳过）
+
+  判据实测（65 个包，每个包一个 --stdio 进程，整轮 18m55s）：
+    判据一  0 个 FAIL
+    判据二  36 个写函数每一个都至少成功驱动过一次（成功次数 14–65 不等）
+    判据三  set_cited 没有正面用例，由引擎的 detail.reason = standard_program 背书（×65）
+    判据四  **红**：37 个包上写完之后 RoundTrip 的 stale 与 pristine 不符（见下）
+
+  三条与本文的偏离（第一条是**计划本身写错了**）：
+  1. 【十一】说"不开 TTZS_FNS 时这条完全不出现在 go test ./... 的输出里（不是 SKIP，是不注册）"。
+     落地用的是 `t.Skipf` + 一条台账白名单。理由：**"不注册"等于隐形**，而仓库对"跳过"的
+     既有机制就是 internal/testkit 的跳过台账（批 5 立的）；用台账它才可数、可 review。
+  2. 【十一】里"33 个写函数"是转述 gate-w3-fns.py 文件头的旧数字。**今天 manifest 声明 36 个**，
+     关卡每次去问引擎，不抄数（`TestFnsRegistryMatchesManifest` 盯着）。
+  3. 判据三（`fnsNoPositiveCase`）是本文没有的。加它的原因见下 —— 它把"这条没法成功"
+     从一句注释变成一条断言：每一次调用都必须以同一个**理由码**被拒，语料一变就红。
+     **这里必须用 `detail.reason` 而不是 `error.code`**：一级码只有 `E_DESIGNER` 那么粗，
+     而 `standard_program` 与 `no_cited_spec` 是两件不同的事，区别只在 detail 里。
+
+  抓到的两个缺陷（都是"引擎只写了一边"，都在 `engine/src/Designer/Fns/Attr.cs`）：
+
+  A. **已经修**：布局侧的 `attr="name"` 把元素改得模型里是新代号、`.4fd` 文本里是旧代号。
+     `SetLayoutAttr`（含 `paths` 批量形态）与 `SetLayoutAttrs` 三个入口现在都在开头拒 `name`
+     （`E_BAD_PARAM`，文案指向 `rename_component`，实现在 `Attr.RejectRename` 一处）。
+     实测路径：改完之后同一个容器上的 `add_field` 报
+     `E_INTERNAL：模型子节点 "logo-tdev" 在布局文本里没有对应元素——模型和文本已经分叉`，
+     `delete`/`nudge`/`align`/`fit_size` 拿新代号一律 `E_NOT_FOUND`。
+     未修时的 FAIL 数是 4 → 只修单数动词 2 → 两个都修 0。
+     （哪几个包中招是**随机的**：`customLayoutAttr(s)` 按 Go 的 map 乱序遍历元素属性表，
+     所以每轮红的是不同的包 —— 这条本身值得记住。）
+  B. **只定位、没修**：`set_items`（`XmlElement.ReplaceItems`）让 RoundTrip 的 stale 从 0 变 1。
+     干净会话里只跑它就能复现（`aapt110(c).tsz`）。它与 A 同族 —— 改了 .4fd 那一半，
+     模型记的 items 对不上。修它要动 ReplaceItems 的调用点，是另一件事。
+
+  **一条被证伪的假设，留着免得下一个人重走**：一度以为规格侧的 `set_spec_attr {attr:"name"}`
+  也是坏的（`name` 确实是 `field` 节点的合法属性，`describe_kind field` 24 个里有它），
+  于是加了守卫。**实测它是对的**：改完之后 `find_component` 解析的是新路径、旧名一个不剩、
+  容器里的 `add_field` 照常成功 —— 它走 `SpecificationInfo.Rename`，收尾的 `Patch()` 把文本也改了。
+  守卫已撤，那条不对称写进 SPEC.md 的 (d) 1 与 `RejectRename` 的注释。
+  教训：**"只写了一边"这个诊断要从行为上验，不能从"某条路径上没有写文本"推**。
+
+  另一条顺手核实的边界：非法控件代号（含 `-`）经 `set_spec_attr` 改会以
+  `E_INTERNAL：Exception: 仅允许英数字、底线、点(.)` 出来 —— 是契约拒绝的位置却报成了内部异常。
+  **本次没修**：它在另一个代码路径上，且"把异常重分类"要先把抛出点找出来，顺手改容易盖住真异常。
+
+  实测（判据命令原样跑）：
+    ./tt.exe dev tzc selftest                     通过 31，失败 0（生产侧没动）
+    go test ./... -count=1                        （见提交信息）
+    gofmt -l internal/ main.go                    空
+    engine/build.sh                               通过（改了 Attr.cs，所以重编是必须的）
+    git diff --stat 与 --ignore-cr-at-eol --stat   一致（SPEC.md 仍是 CRLF）
+
+  两处诚实的边界：
+  · **判据四今天红**，本文不改判据去迁就它 —— 它红得对，且指得准（见 B）。
+  · `roundtrip` 那条判据是**借** corpus_test.go 的 `requireFixedPoint`，不是新写的；
+    它在本关卡里量的是"36 个写函数跑完之后的产出"，与 `TestCorpus` 量的是同一件事的两个时点。
 
 **批 7** —— pathinstall 与 winproc。除 `Preview()` 的直接断言外，这里还要带上一条
 **从已删的 `tasks/structure-refactor-plan.txt` 转来的现状事实**（别丢）：
