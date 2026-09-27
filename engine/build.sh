@@ -126,10 +126,14 @@ DESIGNER_ASMS=( SpecDesignerCommon SpecDesigner.FormEditor SpecDesigner.Controls
 # -r:TzsCli.dll, and TzsCli references nothing. Two agents found this independently (W1-A by
 # reproducing CS0433, W1-B by noting the combined artifact carries both type sets), which is
 # what settled it. Do not reintroduce ${LIB[@]} into the designer library's compile line.
+# 表里没有名字的 test/*.cs **不会被编译** —— 那不是一个中性的状态：
+# `ProbeReopen.cs` 就这样躺了几个月，谁改了它都没有产物能验（2026-09-27 的一次外部评估
+# 就是这么发现它的修改两头都验不了的）。表里每一条都对应一个会被编出来的 .exe；
+# 加一个探针就加一行，别让它悬着。
 declare -A LINK_SRC=(
   [TestRebuild]=link [TestWriter]=link [TestRepack]=link [VerifyRepack]=link
   [E2E]=link [MakeTestFile]=link [AddField]=link [Edit]=link
-  [CheckOut]=none [RoundTrip]=none [Probe]=none
+  [CheckOut]=none [RoundTrip]=none [Probe]=none [ProbeReopen]=none
   [tzs-server]=ref [tzs-cli]=ref
 )
 

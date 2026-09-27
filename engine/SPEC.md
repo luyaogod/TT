@@ -1674,7 +1674,11 @@ open(path2) 而 key(path2) 已有活句柄 → E_KEY_IN_USE
 
 #### (g-1) close/reopen 已实测：**可以**，但 close 不止三步
 
-`test/ProbeReopen.cs`（sha256 `4f8c06b8…`）在真实包上跑完三个测试。
+`test/ProbeReopen.cs`（sha256 `07ca34193ee74988…`）在真实包上跑完三个测试。
+（这个 sha 原先写的是 `4f8c06b8…`，**和那个文件的任何一个历史版本都对不上** ——
+一条没人检查的 pin 漂了多久也没人知道。2026-09-27 改成真值，并由
+`internal/dev/tzs` 的 `TestEngineDocsCiteRealProbeHashes` 逐条盯着：
+以后改这个探针就必须连这句一起改。）
 
 **结论：key 可以释放并重新打开。** §11.24(g) 的会话模型成立，不需要退化成"一个 key 一个句柄、不许重开"。
 `CheckUndoRedoManager`（SettingManager.cs:79）确实是裸的 `undoRedoManagerMap.ContainsKey(key)`，
