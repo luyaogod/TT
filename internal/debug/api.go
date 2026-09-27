@@ -1823,7 +1823,24 @@ func (s *Server) hWS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// hStatic 是 `mux.HandleFunc("/", …)` 那条兜底：先服务 web/dist 里的静态文件，
+// 未命中再回 index.html(SPA 客户端路由)。
+//
+// **但 `/api/` 前缀不走兜底**。兜底会把任何未注册路径都吞掉，于是打错的 API 路径
+// 拿到的是 **200 + HTML**（前端没构建时是"前端尚未构建"那页，构建过是 index.html）——
+// 调用方按 JSON 解析时报的错与真实原因（接口不存在）完全对不上。这条规矩本仓库
+// 在 internal/web（hRoot 对非 `/` 路径回 404）与 internal/dict/server
+// （TestSharedEndpointsNotServedHere）两侧都已经立过，这里是最后一处。
+//
+// 代价是方法不匹配也归到这里（`GET /api/wstest` 得 404 而不是 405）：Go 的 mux
+// 只在**没有** catch-all 时才会自己产生 405，这里有一条，所以 405 得手写。
+// 404 与 405 对调用方是同一件事——"这个路径上你没有可用的接口"——不值得为它
+// 再维护一张注册表。
 func (s *Server) hStatic(w http.ResponseWriter, r *http.Request) {
+	if p := r.URL.Path; p == "/api" || strings.HasPrefix(p, "/api/") {
+		fail(w, http.StatusNotFound, fmt.Errorf("接口不存在：%s %s", r.Method, p))
+		return
+	}
 	if s.webSub == nil {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprint(w, `<!doctype html><html lang="zh"><meta charset="utf-8">

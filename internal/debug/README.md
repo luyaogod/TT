@@ -122,12 +122,21 @@ go test ./internal/debug -count=1
   字段（生产默认 `host.Dial`，行为一字不差），测试只注入**必然失败**的实现 ——
   买到的是错误半边，不是快乐路径。
 
-**一处已知缺口（不是本包的，记在这里免得有人以为它被盯着）**：未注册的 `/api/*` 路径
-返回的是 **200 + HTML** —— 路由里那条 `mux.HandleFunc("/", s.hStatic)` 的 SPA 兜底把
-任何未注册路径都吞掉。调用方打错一个 API 路径时拿到的是**看起来成功**的 HTML 页。
-本仓库在 `internal/web`（`hRoot` 对非 `/` 路径回 404）与 `internal/dict/server`
-（`TestSharedEndpointsNotServedHere`）两侧都已经做对了，这里是唯一没做对的一处。
-改法很小：`hStatic` 里对 `/api/` 前缀且未命中注册路由的回 404 + JSON 信封。
+**一处缺口，2026-09-27 已修**：未注册的 `/api/*` 路径曾返回 **200 + HTML** —— 路由里那条
+`mux.HandleFunc("/", s.hStatic)` 的 SPA 兜底把任何未注册路径都吞掉，调用方打错一个 API
+路径时拿到的是**看起来成功**的 HTML 页（前端构建过时是一张真的 index.html，更看不出异样）。
+现在 `hStatic` 对 `/api` 或 `/api/` 前缀回 **404 + JSON 信封**，与 `internal/web`
+（`hRoot` 对非 `/` 路径回 404）和 `internal/dict/server`（`TestSharedEndpointsNotServedHere`）
+两侧的规矩对齐。
+
+判据两条，都在 `api_action_test.go`：`TestUnregisteredAPIPathsReturnJSON404` 覆盖
+**前端构建 / 未构建两种状态**；反向的 `TestStaticFallbackStillServesSPA` 守住
+"收窄兜底不能顺手把 SPA 打掉"（`/apifoo`、`/api2/x` 这两个边界证明判据是
+`/api` 或 `/api/` 前缀，不是松的 `HasPrefix(p, "/api")`）。
+
+**405 是刻意没做的**：`GET /api/wstest`（方法不对）现在得 404 而不是 405。路由里有
+catch-all 时 Go 的 mux 不会自己产生 405，要拿它得手写一张注册表；而 404 与 405 对调用方
+是同一件事——"这个路径上你没有可用的接口"。理由也写在 `hStatic` 的注释里。
 
 ## 改动影响面
 

@@ -2,9 +2,11 @@ package debug
 
 import (
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"tt/internal/host"
 )
@@ -20,7 +22,8 @@ import (
 // 买到的四类东西，都是端到端测不到的：
 //   1. 请求体解析失败 → 400（而不是拿半个请求去拨号）
 //   2. 拨号失败 → 500 且信封形状一致（"SSH 连接失败: %w"）
-//   3. 方法不匹配 → 405（路由声明是 "POST /…"，Go 1.22 的 mux 自己管）
+//   3. 未注册的 API 路径 → 404 + JSON 信封（**不是** 405，也不是 200 + HTML ——
+//      路由里有一条 catch-all，Go 的 mux 就不会自己产生 405 了。见 hStatic 的注释）
 //   4. **入参校验在拨号之前** —— hWSLogDebug 里那处注释专门说过的顺序性质
 //      （"非法请求不该先把当前会话收口"）。今天没有任何东西守着它。
 
@@ -86,20 +89,69 @@ func TestActionEndpointsReportDialFailure(t *testing.T) {
 	}
 }
 
-// 这里本来还有一条"用 GET 打 POST 端点应当 405"。
+// TestUnregisteredAPIPathsReturnJSON404 钉住"打错的 API 路径不是 200 + HTML"。
 //
-// **它错了，而且错得有价值**：实测是 **200**，不是 405 —— 因为路由里有一条
-// `mux.HandleFunc("/", s.hStatic)` 的 SPA 兜底，它把任何未注册路径都吞掉，
-// 未构建前端时回"前端尚未构建"那页、构建过就回 index.html，两种都是 **200 + HTML**。
+// 这条断言本来长得不一样：它原先写的是"用 GET 打 POST 端点应当 405"，而那是**错的**
+// —— 实测 200，因为路由里那条 `mux.HandleFunc("/", s.hStatic)` 的 SPA 兜底把任何
+// 未注册路径都吞掉，未构建前端时回"前端尚未构建"那页、构建过就回 index.html。
 //
-// 于是 `GET /api/wstest`、乃至 `GET /api/随便什么` 都是一个看起来成功的 HTML 响应。
-// 这正是本仓库在字典那侧**专门立过规矩**的那种失败形态
-// （internal/dict/server/handler_test.go:29："API 路径落到 HTML 页会让调用方拿到
-// 200 + HTML，解析失败时报的错与真实原因（接口不存在）完全对不上"）。
+// 当时撤掉了断言而不是把 200 钉下来（把已知不对的行为写成契约更坏），并把它记成一条
+// 待定项。现在兜底收窄了，断言以它本来的意图回来，只把期望值从 405 改成 404 ——
+// 405 要手写一张注册表才拿得到，而 404 与 405 对调用方是同一件事。理由见 hStatic 注释。
 //
-// 撤掉这条断言而不是把 200 钉下来，是因为把已知不对的行为写成契约更坏。
-// 要不要把 hStatic 改成"`/api/` 前缀未命中 → 404 JSON"，记在
-// tasks/test-framework-plan.txt 的【批 4】下，等定。
+// 两种前端状态都测，因为**构建过的那半更坏**：它回的是一张真的 index.html，
+// 调用方看不出任何异样；未构建那半至少文案里写着"前端尚未构建"。
+func TestUnregisteredAPIPathsReturnJSON404(t *testing.T) {
+	built := func() *httptest.Server {
+		web := fstest.MapFS{"index.html": {Data: []byte("<html>APP</html>")}}
+		hs := httptest.NewServer(NewServer(&Config{Listen: "127.0.0.1:0"}, web, "").Handler())
+		t.Cleanup(hs.Close)
+		return hs
+	}()
+	servers := map[string]*httptest.Server{"前端未构建": actionTestServer(t), "前端已构建": built}
+
+	cases := []struct{ method, path string }{
+		{"GET", "/api/wstest"}, // 路径注册了，方法不对
+		{"GET", "/api/根本不存在"},  // 路径压根没有
+		{"POST", "/api/根本不存在"},
+		{"GET", "/api"}, // 前缀本身
+		{"GET", "/api/"},
+		{"DELETE", "/api/sessions/xyz/nope"}, // 注册前缀之下的未知子路径
+	}
+	for name, hs := range servers {
+		for _, c := range cases {
+			t.Run(name+" "+c.method+" "+c.path, func(t *testing.T) {
+				resp := doReq(t, c.method, hs.URL+c.path, "", "")
+				if resp.StatusCode != http.StatusNotFound {
+					t.Fatalf("未注册的 API 路径该退 404，得 %d（%s）", resp.StatusCode, respError(t, resp))
+				}
+				if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "application/json") {
+					t.Errorf("该回 JSON 信封，Content-Type 得 %q", ct)
+				}
+				if msg := respError(t, resp); msg == "" {
+					t.Errorf("信封里该有错误原因（前端与 CLI 按它显示）,否则等于没说")
+				}
+			})
+		}
+	}
+}
+
+// TestStaticFallbackStillServesSPA 是上一条的**反向判据**：收窄兜底不能顺手把 SPA 打掉。
+//
+// `/apifoo` 与 `/api2/x` 是刻意的边界 —— 判据是 `/api` 或 `/api/` 前缀，不是
+// `strings.HasPrefix(p, "/api")` 那种松写法，否则这两个正常的客户端路由会被误判成 API。
+func TestStaticFallbackStillServesSPA(t *testing.T) {
+	web := fstest.MapFS{"index.html": {Data: []byte("<html>APP</html>")}}
+	hs := httptest.NewServer(NewServer(&Config{Listen: "127.0.0.1:0"}, web, "").Handler())
+	t.Cleanup(hs.Close)
+
+	for _, p := range []string{"/", "/sessions/abc", "/apifoo", "/api2/x"} {
+		resp := doReq(t, "GET", hs.URL+p, "", "")
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("%s 该走 SPA 兜底得 200，得 %d", p, resp.StatusCode)
+		}
+	}
+}
 
 // TestWSLogDebugValidatesInputBeforeDialing 钉住 hWSLogDebug 的**判定顺序**。
 //
