@@ -205,7 +205,7 @@ var dictMutableVars = []string{
 // dictReadOnlyVars 是**只读**的包级 var：常量表、列名、预编译的 help 函数。
 // 它们不需要快照（没人改），列在这里是为了让上面那条"没落在清单之外"是**有意义**的。
 var dictReadOnlyVars = []string{
-	"helpCmdFamilies", "baseHelpFunc",
+	"baseHelpFunc",
 	"msgTypeValues", "msgStatusValues",
 	"msgColumns", "specCSVHeaders", "tableDetailColumns",
 }

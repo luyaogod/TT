@@ -4,9 +4,9 @@ import "strings"
 
 // Source 是 ERP 数据字典"语义查询"的统一数据源接口:本地 SQLite 镜像(*DB)
 // 与远程 ERP 库直查(live.Live,金仓/人大金仓 + Oracle)实现同一组查询方法,
-// 返回同一批 DTO,rt/rv/desc/scc/rq 五个查询命令只依赖本接口 —— 查询的表
-// (dzea_t~dzeg_t/dzcd~dzch/dzep/gzca/gzcb/dzca~dzcc 等 24 张)在三个后端
-// 都是同一套,数据源由配置/CLI 决定,命令层不再区分本地与远程。
+// 返回同一批 DTO,rt/rv/desc/scc/rq 五个查询命令只依赖本接口 —— 两个后端读的是
+// **同一套表**(数见 dbsync.Families,别在这里抄第二份会漂的数字;两侧集合相等由
+// dbsync/tablequeries_test.go 钉着),数据源由配置/CLI 决定,命令层不再区分本地与远程。
 type Source interface {
 	// rt 表字典:表档 dzea_t / 字段档 dzeb_t / 键值档 dzed_t / 索引档 dzec_t
 	QueryTableMeta(tableName string) (*TableMeta, error) // 未收录返回 (nil, nil)

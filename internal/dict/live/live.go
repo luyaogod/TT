@@ -1,6 +1,7 @@
 // Package live 提供"远程 ERP 库直查"的数据访问层。
 // *Live 实现 db.Source:与本地 SQLite 镜像(db 包)同语义 —— 同一套字典表
-// (dzea_t 等 24 张)与 JOIN SQL,直接连远程库执行,rt/rv/desc/scc/rq 的数据源
+// (清单见 dbsync.Families,不留数字副本;两侧集合相等由 dbsync/tablequeries_test.go
+// 钉着)与 JOIN SQL,直接连远程库执行,rt/rv/desc/scc/rq 的数据源
 // 切到某环境时即经本包(金仓 + Oracle 双方言,见 source.go)。
 //
 // 设计要点:

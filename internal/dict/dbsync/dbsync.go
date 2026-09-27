@@ -29,12 +29,19 @@ type Family struct {
 }
 
 // Families 全部数据族,顺序即同步顺序(表字典一族放在最前,先有表才有别的)。
+//
+// Commands 记的是"**会读到**这一族里至少一张表的命令" —— 含跨族 JOIN(比如 desc 要
+// JOIN dzeb_t 取字段名),不含"只在本族内查"之外的省略。命令 → 族的方向由
+// FamilyKeysForCommand 反推,不另抄一份(抄了就会与本表漂移)。
 var Families = []Family{
-	{Key: "table", Name: "表字典", Commands: []string{"r.t"},
+	// 跨族:dzea_t/dzeal_t 被 prog/sysp/docp 取表名与说明,dzeb_t/dzebl_t 被 desc 取字段名。
+	{Key: "table", Name: "表字典", Commands: []string{"r.t", "desc", "prog", "sysp", "docp"},
 		Tables: []string{"dzea_t", "dzeal_t", "dzeb_t", "dzebl_t", "dzec_t", "dzed_t", "dzee_t", "dzef_t", "dzeg_t"}},
 	{Key: "check", Name: "校验带值", Commands: []string{"r.v"},
 		Tables: []string{"dzcd_t", "dzcdl_t", "dzce_t", "dzcel_t", "dzch_t"}},
-	{Key: "scc", Name: "系统分类码", Commands: []string{"scc"},
+	// 跨族:gzcbl_t 被 docp 取单据性质名称;gzca_t/gzcal_t 被 desc 单字段模式取 SCC 名称
+	// (那一路缺失是静默降级,所以更该在提示里显出来)。
+	{Key: "scc", Name: "系统分类码", Commands: []string{"scc", "docp", "desc"},
 		Tables: []string{"gzca_t", "gzcal_t", "gzcb_t", "gzcbl_t"}},
 	{Key: "spec", Name: "字段画面规格", Commands: []string{"desc"},
 		Tables: []string{"dzep_t"}},
@@ -47,7 +54,8 @@ var Families = []Family{
 	// 程序与作业 (azzi900 程式基本資料 / azzi910 作業基本資料):
 	// 程序档 + 程序名称多语言 + 作业编号设置表(作业用 gzzz002 挂程序,一个程序可被多个作业使用)
 	// + 程序应用参数组设置表。gzzal_t 同时服务 msg 族,展平时去重。
-	{Key: "prog", Name: "程序与作业", Commands: []string{"prog"},
+	// 跨族:r.t --who(反查用表程序)JOIN gzzal_t 取程序名。
+	{Key: "prog", Name: "程序与作业", Commands: []string{"prog", "r.t"},
 		Tables: []string{"gzza_t", "gzzz_t", "gzzk_t", "gzzal_t"}},
 	// 程序 ↔ 表格(gzdg_t 程序与应用表格功能分析表,由 T100 自己维护;参考作业 azzq902
 	// 程式編號對應表格查詢):主键 = 程序编号 + 表格编号 + 功能类别(SCC 212: I/S/U/D)。
@@ -87,6 +95,26 @@ func FamilyByKey(key string) *Family {
 		}
 	}
 	return nil
+}
+
+// FamilyKeysForCommand 返回会读到 cmd 所需数据的族键,按 Families 顺序;cmd 不依赖任何族则 nil。
+//
+// 这是 Families[].Commands 的反面,由它现场反推而不是另存一份映射:各命令 --help 末尾那句
+// 「本地数据齐不齐」用的就是它。抄成第二份的后果是 Families 一改提示就漂 —— 提示说「齐了」
+// 而命令仍报缺表,人就会去查 SQL 而不是去同步。
+//
+// 每次现场组装(10 个族 × 十几条命令),不值得缓存;缓存反而会在测试里留下过期状态。
+func FamilyKeysForCommand(cmd string) []string {
+	var out []string
+	for _, f := range Families {
+		for _, c := range f.Commands {
+			if c == cmd {
+				out = append(out, f.Key)
+				break
+			}
+		}
+	}
+	return out
 }
 
 // Progress 同步过程回调(CLI 打印/Web 进度条用)。

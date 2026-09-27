@@ -9,20 +9,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// helpCmdFamilies 数据命令 → 它依赖的数据族,用于 --help 末尾的「本地数据」提示。
-// 命令不在表里(bdldoc/db/mirror/spill 等)不显示提示。
-var helpCmdFamilies = map[string][]string{
-	"r.t":  {"table", "progtable"},
-	"r.v":  {"check"},
-	"scc":  {"scc"},
-	"desc": {"spec"},
-	"r.q":  {"win"},
-	"msg":  {"msg"},
-	"sysp": {"param"},
-	"docp": {"param"},
-	"prog": {"prog", "progtable", "subprog"},
-}
-
 // baseHelpFunc 是 cobra 的默认 help 实现。用一个无父命令的临时命令取出来,
 // 免得取到自己或别的命令 SetHelpFunc 装过的那份(那会重复输出)。
 var baseHelpFunc = (&cobra.Command{}).HelpFunc()
@@ -57,7 +43,9 @@ func attachDataHint() {
 			fmt.Fprintln(out, localDataHint())
 			return
 		}
-		if keys, ok := helpCmdFamilies[c.Name()]; ok {
+		// 依赖哪些族由 Families 现场反推(见 dbsync.FamilyKeysForCommand),
+		// 不在这里另存一份映射 —— 那份抄本一定会和 Families 漂开。
+		if keys := dbsync.FamilyKeysForCommand(c.Name()); len(keys) > 0 {
 			fmt.Fprintln(out, localDataHint(keys...))
 		}
 	})
