@@ -162,18 +162,31 @@ TTZS_FNS=1 TTZS_CORPUS=%TEMP%\ttws go test ./internal/dev/tzs -run TestFnsGate -
 `TestFnsGate` 是自己的开关（不要求 `TTZS_DEEP`）：它问的是"声明出来的每个写函数被驱动过没有"，
 与"这一包写回去还对不对"是两张网。**它只管函数面，不管语料形状** —— 语料回归归 `TestCorpus`。
 
-**它今天不是全绿，而且红的那一条是它自己找到的东西**（2026-09-27 首次全量跑，65 个包）：
+**它今天是全绿的**（2026-09-27，65 个包）。四条判据各自的结论：
 
-  · 判据一/二/三全过：0 个 FAIL，36 个写函数每一个都至少成功驱动过一次；
-    唯一没有正面用例的 `set_cited` 由引擎自己的 `detail.reason = standard_program` 背书（见
-    `fnsNoPositiveCase`）
-  · **判据四（写完之后 `RoundTrip` 的不动点）在 37 个包上报 stale 与 pristine 不符** ——
-    单独复现到 **`set_items`**：一个干净的会话里只跑它，`aapt110(c).tzs` 的 stale 就从 0 变成 1。
-    也就是说 `set_items`（`XmlElement.ReplaceItems`，.4fd 那一侧）改完之后，模型记的 items
-    与文件里存的对不上 —— 与 `attr="name"` 是同一族"只写了一边"的病，只是这次是 items。
-    **本次只定位、不修**：修它要动引擎的 `ReplaceItems` 调用点，那是另一件事。
-    复现：`TTZS_FNS=1 TTZS_CORPUS=<副本> go test ./internal/dev/tzs -run TestFnsGate -timeout 30m -v`，
-    看 `stale=…，基线是 …` 那些行
+  · 判据一/二：0 个 FAIL，36 个写函数每一个都至少成功驱动过一次
+  · 判据三：唯一没有正面用例的 `set_cited` 由引擎自己的 `detail.reason = standard_program`
+    背书（见 `fnsNoPositiveCase`）
+  · 判据四（写完之后 `RoundTrip` 的不动点）：过
+
+**为了走到全绿，改过两处 —— 两处都不是"把判据放宽"，一处是假阳性、一处是判据与它自己的文案矛盾：**
+
+  1. **`set_items` 的靶子只挑非列派生的**（`pickItems`）。列派生元素（`fieldType` 是
+     `COLUMN_LIKE` / `TABLE_COLUMN`）的 `items` 是**派生值**：设计器换列时用新列的 `col_attr`
+     覆盖它（`SpecFieldNode.cs:389-397`，反编译源码直证），加载时也重算 —— 写进去下次加载就没了。
+     **那是忠实复现设计器，不是缺陷**（引擎自己也知道，返回里带 `derivedFromColumn:true`；
+     属性可见性按 ComboBox 控件分，不问是否列绑定，`SpecPropertyEditor.xaml.cs:272`）。
+     但判据四量的是"产出还是不是不动点"，会把这件不是缺陷的事报成红 —— 实测 aapt110 上
+     13 个候选全是列派生的，写 4 个 → stale 从 0 变 4。所以靶子换掉；
+     一个包**只有**列派生的候选时**在报告里说出来**（那 24 条 SKIP 的理由就是它），不静默换靶子。
+  2. **`requireFixedPoint` 的 stale 比较从 `!=` 改成 `>`**。它的注释一直写着"判据是
+     「不比 pristine 差」"，而 `!=` 实现的是"等于"——差的这一半实测会咬人：`wrap` 在 capt111 上
+     把 stale 从 3 降到 2（**把一条本来就存在的不一致写好了**），而 `!=` 把"变好"判成了失败。
+     兜底是紧挨着它的四个零（产出没有多出/少掉任何 spec 节点与布局路径），所以一条 stale 的减少
+     只可能是属性值收敛，不可能是"把带这个属性的东西删掉了"。
+
+     **这条改的是共享实现**（`corpus_test.go`，真语料那几条也走它），所以两边都重跑过：
+     真语料 65 个包的 `TestCorpusRoundTrip` 仍全过。
 
 ## 改动影响面
 

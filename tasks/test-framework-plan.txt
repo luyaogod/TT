@@ -1105,9 +1105,43 @@ fgloutline.fixtures.mjs、store.test.mjs），套路是**用 esbuild 打成临�
     git diff --stat 与 --ignore-cr-at-eol --stat   一致（SPEC.md 仍是 CRLF）
 
   两处诚实的边界：
-  · **判据四今天红**，本文不改判据去迁就它 —— 它红得对，且指得准（见 B）。
+  · **判据四当时是红的**（37 个包）—— **已解决，见下面「批 6 补」**。当时没改判据去迁就它。
   · `roundtrip` 那条判据是**借** corpus_test.go 的 `requireFixedPoint`，不是新写的；
     它在本关卡里量的是"36 个写函数跑完之后的产出"，与 `TestCorpus` 量的是同一件事的两个时点。
+
+【批 6 补 —— 判定四跑绿，2026-09-27】原先那 37 个包的红**一条都不是引擎缺陷**，
+而是两个各自独立的问题，各自修法都不同（都不是"把判据放宽"）：
+
+  1. **假阳性：`set_items` 挑了列派生的靶子。** 列绑定元素（`fieldType` 是 COLUMN_LIKE /
+     TABLE_COLUMN）的 `items` 是**派生值**：设计器换列时用新列的 col_attr 覆盖它
+     （`SpecFieldNode.cs:389-397`）与加载时都会重算，写进去下次加载就没了 —— 引擎自己早就
+     记着这件事（`HANDOFF.md` 的缺陷表第 3 条判"设计器自己的行为，我们忠实复现"，
+     返回里带 `derivedFromColumn:true`）。**这一条是去反编译源码里核实过的，不是采信注释**：
+     `SpecFieldNode.cs` 里 `specAttributeUndoRedoCommand.AddAttributeChanged("items", …,
+     columnAttrInfo.Attribute("items").Value)`，以及 `SpecPropertyEditor.xaml.cs` 的属性可见性
+     按 **ComboBox 控件**分。判据四量的是"产出还是不是不动点"，于是把这件不是缺陷的事报成红。
+     实测 aapt110 上 13 个候选全是列派生的，写 4 个 → stale 从 0 变 4。
+     **修法**：`pickItems` 只挑非列派生的（`fieldType` 不是那两个），一个包**只有**列派生的
+     候选时把理由写进 SKIP（全量 24 条），不静默换靶子。新增的靶子类型实测存在：
+     `NON_DATABASE` 的 ComboBox，20 个包里 6 个有。
+
+  2. **判据与它自己的文案矛盾：`requireFixedPoint` 的 stale 比较写的是 `!=`，
+     而它的注释一直说"判据是「不比 pristine 差」"。** 差的这一半实测会咬人：`wrap` 在 capt111 上
+     把 stale 从 3 降到 2 —— **把一条本来就存在的不一致写好了**，而 `!=` 把"变好"判成失败。
+     改成 `>`（不比基线差）。兜底是紧挨着它的四个零：产出没有多出/少掉任何 spec 节点与布局路径，
+     所以一条 stale 的减少只可能是属性值收敛，不可能是"把带这个属性的东西删掉了"。
+     **这条改的是共享实现**，真语料那几条也走它 —— 所以两边都重跑过（见下）。
+
+  全绿实测（判据命令原样跑，65 个包，19m02s）：
+    判据一 0 个 FAIL；判据二 36 个全部驱动成功；判据三 set_cited 由理由码背书（×65）；
+    判据四 0 个包 stale 不比基线差
+    set_items 那一行的分布值得记住：成功 19 / REFUSED 22 / SKIP 24 ——
+    也就是说语料里**大多数** ComboBox 是列派生的，这个动词的"正面用例"本来就少
+    真语料 `TestCorpusRoundTrip`（65 个包，共享的 requireFixedPoint 改过）仍全过
+
+  一处**没做**、留着的：`set_items` 的 SKIP 24 条在报告里是可读的，但
+  internal/testkit 的跳过台账只管 `t.Skip`，不管 tally 的 SKIP ——
+  这类"靶子不存在"的跳过今天没有台账盯着。要盯的话是另一件事。
 
 **批 7** —— pathinstall 与 winproc。除 `Preview()` 的直接断言外，这里还要带上一条
 **从已删的 `tasks/structure-refactor-plan.txt` 转来的现状事实**（别丢）：

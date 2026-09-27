@@ -1163,6 +1163,43 @@ func pickItems(r *fnsRun) ([]fnsTarget, string) {
 		if why != "" {
 			return nil, why
 		}
+	} else {
+		// 再**剔掉列派生的那些**，这一步是这个函数唯一不显然的地方。
+		//
+		// 列派生元素（fieldType 是 COLUMN_LIKE / TABLE_COLUMN）的 `items` 是**派生值**：
+		// 设计器换列时用新列的 col_attr 覆盖它（SpecFieldNode.cs:389-397，反编译源码直证），
+		// 加载时也会重算，所以写进去的值下次加载就没了。**那是忠实复现设计器，不是缺陷** ——
+		// 设计器自己的 items 编辑器同样写得住，因为属性可见性按 **ComboBox 控件**分、
+		// 不问是否列绑定（SpecPropertyEditor.xaml.cs:272）。引擎也知道这件事，
+		// 返回里带了 `derivedFromColumn:true` 与说明（Semantic.cs 的 SetItems）。
+		//
+		// 但本关卡的判据四是「写完之后产出还是不是设计器自己的不动点」，而 RoundTrip 的
+		// `stale` 量的正是"模型记的属性值与文件里存的对不上" —— 它会把这件**不是缺陷**的事
+		// 报成红。实测：aapt110 上 13 个候选全是列派生的，写 4 个 → stale 从 0 变 4。
+		//
+		// 所以这里只挑非列派生的：写得住，判据才有意义。一个包**只有**列派生的候选时
+		// 不换别的靶子、不静默，把理由说出来（它会进 tally 的 SKIP 那一栏，报告里看得见）。
+		kept := make([]fnsTarget, 0, len(tgs))
+		colBacked := 0
+		for _, tg := range tgs {
+			gc, ok := ask[componentReply](r.t, r.s, r.label+" get_component "+filepath.Base(tg.path),
+				"get_component", map[string]any{"handle": r.h, "query": filepath.Base(tg.path)})
+			if !ok {
+				continue
+			}
+			switch gc.Attrs["fieldType"] {
+			case "COLUMN_LIKE", "TABLE_COLUMN":
+				colBacked++
+			default:
+				kept = append(kept, tg)
+			}
+		}
+		if len(kept) == 0 {
+			return nil, fmt.Sprintf("本包的 %d 个 ComboBox/RadioGroup 全是列派生的：items 对它们是"+
+				"派生值，写进去下次加载会被列定义覆盖（SpecFieldNode.cs:389-397，设计器自己也这样）；"+
+				"拿它当靶子只会让判据四报一个不是缺陷的红", colBacked)
+		}
+		tgs = kept
 	}
 	for i := range tgs {
 		tgs[i].extra = map[string]any{"items": []string{"tdev_a|甲|", "tdev_b|乙|"}}

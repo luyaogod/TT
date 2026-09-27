@@ -87,6 +87,13 @@ TTZS_FNS=1 TTZS_CORPUS=%TEMP%\ttws go test ./internal/dev/tzs -run TestFnsGate -
 **规格侧不拒**，因为实测它是完整的改名（`SpecificationInfo.Rename` + 文本跟着改），
 禁掉等于砍掉一条能用的路 —— 这条不对称写在 `RejectRename` 与 `SPEC.md` 的 (d) 1 下面。
 
+关卡跑绿之前在 `set_items` 上还红过一次，**那一次查下来不是引擎的缺陷**，记在这里免得下一个人
+再查一遍：列绑定元素的 `items` 是派生值，设计器换列时（`SpecFieldNode.cs:389-397`）与加载时都会
+重算，所以写进去的值下次加载就没了。设计器自己的 items 编辑器同样如此（属性可见性按 ComboBox
+控件分、不问是否列绑定，`SpecPropertyEditor.xaml.cs:272`），我们复现了它，并在返回里给了
+`derivedFromColumn:true`。**要改的是关卡的靶子，不是引擎**（见
+[../internal/dev/tzs/README.md](../internal/dev/tzs/README.md) 的判据四那一节）。
+
 ## 构建与判据
 
 ```bash
