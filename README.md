@@ -27,7 +27,7 @@ TT 是一款面向 Agent 的 CLI 开发工具，用于开发基于 Genero BDL �
 
 ### MSI 安装包
 
-`TT-0.1.0-x64.msi` 双击安装，**全程不需要管理员**：装到 `%LOCALAPPDATA%\Programs\TT`，
+`TT-0.2.0-x64.msi` 双击安装，**全程不需要管理员**：装到 `%LOCALAPPDATA%\Programs\TT`，
 安装目录追加到用户 PATH，卸载时自动摘掉。
 
 ### 把 tt 加进 PATH

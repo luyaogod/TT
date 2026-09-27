@@ -24,7 +24,7 @@ cd /d "%~dp0"
 set STAGE=dist\tt-portable
 set GOPROXY=https://goproxy.cn,direct
 rem Release version, injected into the binary via -ldflags (shown by `tt version`).
-set VERSION=0.1.0
+set VERSION=0.2.0
 
 if exist dist rmdir /s /q dist
 mkdir "%STAGE%"

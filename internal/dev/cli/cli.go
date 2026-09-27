@@ -32,7 +32,7 @@ import (
 )
 
 // ToolVersion 是工具版本（写进 manifest）。
-const ToolVersion = "0.1.0"
+const ToolVersion = "0.2.0"
 
 // Usage 是总帮助。
 const Usage = `tt dev —— T100 设计器包工具：.tzc 代码包 + .tzs 表单包

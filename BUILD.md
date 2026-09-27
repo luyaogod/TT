@@ -119,7 +119,7 @@ cd web && npm run check:app && npm run build
 
 ```bash
 build_portable.bat        # → dist/tt-portable/ 与 dist/tt-portable.zip
-build_msi.bat             # → dist/TT-0.1.0-x64.msi（需 WiX v3）
+build_msi.bat             # → dist/TT-0.2.0-x64.msi（需 WiX v3）
 ```
 
 两个脚本都**只采集、不构建**：
@@ -136,6 +136,9 @@ build_msi.bat             # → dist/TT-0.1.0-x64.msi（需 WiX v3）
 
 **版本号写在多处，改版本要一起改**：`build_portable.bat`、`build_msi.bat`、
 `internal/dev/cli/cli.go` 的 `ToolVersion`、以及 `web/` 与 `web/app/` 的 `package.json`。
+还有 `web/package-lock.json`（**3 处**：顶层 `version` 与 `packages` 下的 `""` / `app` 两条）——
+它跟两个 `package.json` 是同一份版本号的镜像，漏改不会立刻报错，但下一次 `npm install`
+会把它改回去，于是 `npm ci` 与工作区不一致。
 
 ## 9. 几条构建相关的约束
 
