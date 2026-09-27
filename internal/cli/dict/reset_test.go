@@ -212,7 +212,15 @@ var dictReadOnlyVars = []string{
 
 var (
 	reSingleVar = regexp.MustCompile(`(?m)^var\s+([A-Za-z_]\w*)\s`)
-	reVarBlock  = regexp.MustCompile(`(?m)^var\s*\(\n([\s\S]*?)^\)`)
+	// `\r?\n` 里的 `\r?` 不是装饰：少写它，CRLF 工作树上**整块 var ( … ) 会静默消失**。
+	// 实测（2026-09-27，一份最小复现）：同一份源码 LF 版找到 2 个名字，CRLF 版找到 **0 个**。
+	// 触发条件只是开发者本机 `core.autocrlf=true`（Windows 常见），仓库里的 blob 一直是 LF，
+	// 所以 Linux/CI 绿、他那台机器红 —— 症状与原因离得极远。
+	//
+	// 后果是**两条守卫同时失效**：TestDictVarListsHaveNoTypos 报假红（清单里的名字"不存在"），
+	// 而 TestDictGlobalsAreAllInReset 报假绿（漏掉的 var 自然不会被判为"没有归属"）。
+	// 见 TestScanVarsInIsEOLInvariant。
+	reVarBlock  = regexp.MustCompile(`(?m)^var\s*\(\r?\n([\s\S]*?)^\)`)
 	reBlockName = regexp.MustCompile(`(?m)^\t([A-Za-z_]\w*)[\s=]`)
 )
 
@@ -231,12 +239,6 @@ func scanDictPackageVars(t *testing.T) []string {
 	}
 	seen := map[string]bool{}
 	var out []string
-	add := func(n string) {
-		if !seen[n] {
-			seen[n] = true
-			out = append(out, n)
-		}
-	}
 	for _, e := range entries {
 		name := e.Name()
 		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
@@ -246,20 +248,70 @@ func scanDictPackageVars(t *testing.T) []string {
 		if err != nil {
 			t.Fatalf("读 %s 失败：%v", name, err)
 		}
-		src := string(b)
-		// `var x = …` 与 `var x T`（单行）
-		for _, m := range reSingleVar.FindAllStringSubmatch(src, -1) {
-			add(m[1])
-		}
-		// `var ( … )` 块里的每个名字
-		for _, blk := range reVarBlock.FindAllStringSubmatch(src, -1) {
-			for _, m := range reBlockName.FindAllStringSubmatch(blk[1], -1) {
-				add(m[1])
+		for _, n := range scanVarsIn(string(b)) {
+			if !seen[n] {
+				seen[n] = true
+				out = append(out, n)
 			}
 		}
 	}
 	sort.Strings(out)
 	return out
+}
+
+// scanVarsIn 从一份源码文本里扫出全部包级 var 名（升序、去重）。
+//
+// 单独抽出来，是为了能喂**内存里的**一段源码：scanDictPackageVars 读的是磁盘，
+// 而这条扫描器最大的坑恰恰是**行尾** —— 见 TestScanVarsInIsEOLInvariant。
+func scanVarsIn(src string) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(n string) {
+		if !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	// `var x = …` 与 `var x T`（单行）
+	for _, m := range reSingleVar.FindAllStringSubmatch(src, -1) {
+		add(m[1])
+	}
+	// `var ( … )` 块里的每个名字
+	for _, blk := range reVarBlock.FindAllStringSubmatch(src, -1) {
+		for _, m := range reBlockName.FindAllStringSubmatch(blk[1], -1) {
+			add(m[1])
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// TestScanVarsInIsEOLInvariant 把"扫描器对行尾敏感"这件事钉死。
+//
+// **这条测试有来历**：2026-09-27 一位在 Windows 上评估本仓库的执行者报回来 ——
+// 他那台机器 `core.autocrlf=true`，248 个 .go 全被 checkout 成 CRLF，于是
+// `TestDictVarListsHaveNoTypos` 红了 30+ 行、而 `TestDictGlobalsAreAllInReset` **假绿**
+// （漏掉的 var 自然不会被判为"没有归属"）。两条守卫同时失效，而仓库里的 blob 一直是 LF，
+// 所以 Linux/CI 上永远看不见。
+//
+// 光改正则不够 —— 没有这条断言，下一个人把 `\r?` 删掉时不会有任何东西拦住他，
+// 而这正是本仓库立的规矩："没见过它红的断言不算数"。
+func TestScanVarsInIsEOLInvariant(t *testing.T) {
+	lf := "package x\n\n" +
+		"var single int\n\n" +
+		"var (\n\tmirrorCfg     string\n\tmirrorCfgPath string\n)\n"
+	crlf := strings.ReplaceAll(lf, "\n", "\r\n")
+
+	want := "mirrorCfg,mirrorCfgPath,single"
+	if got := strings.Join(scanVarsIn(lf), ","); got != want {
+		t.Fatalf("LF 版扫出来 [%s]，期望 [%s] —— 连 LF 都不对，先查正则本身", got, want)
+	}
+	if got := strings.Join(scanVarsIn(crlf), ","); got != want {
+		t.Errorf("CRLF 版扫出来 [%s]，期望 [%s]。\n"+
+			"差的就是 `var ( … )` 那一块 —— CRLF 下 `var (\\r\\n` 让 `^var\\s*\\(\\n` 匹配不上，\n"+
+			"整块静默消失（少了 `\\r?`）。后果不只是这条红：\n"+
+			"TestDictGlobalsAreAllInReset 会**假绿**，因为漏掉的 var 不会被判为没有归属。", got, want)
+	}
 }
 
 // isCobraVar 判断这个包级 var 是不是 cobra 命令单例（Group 与各 *Cmd）。
