@@ -28,3 +28,10 @@ testdata/tzs-mini/ws/** binary
 # 于是每次构建后 `git status` 都多一条 `M web/dist/.gitkeep`（内容其实没变）。
 # 一行属性消掉这层噪音 —— 同一个根因，见上面 *.go 那段。
 web/dist/.gitkeep text eol=lf
+
+# `designer-src/` 是**反编译出来的参考源码**，原样保留、不做任何行尾转换：它是 dnSpy 的产物，
+# 全部是 CRLF，而它存在的意义之一就是**引擎源码注释里那些 `file:line` 能在仓库里对上**
+# （见 DESIGN_DOC.md §3.1）。转换会改变字节，于是"这条注释指的是哪一行"就不再可复核。
+# `-text` 只关掉行尾转换，**保留 diff**（与上面那些 `binary` 不同 —— 那些是二进制，
+# 这些是要能读、能搜、能 diff 的源码）。
+designer-src/** -text

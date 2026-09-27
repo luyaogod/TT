@@ -83,12 +83,51 @@ TT/
 ├─ web/             前端：一套 SPA + 一套共享设计件
 ├─ engine/          .tzs 引擎（C#）：自己的构建链、自己的产物目录
 │  └─ designer/     设计器程序集（入库，随包分发）
+├─ designer-src/    设计器的**反编译源码**：只读参考，不构建（见 §3.1）
 ├─ skills/          五套 AI 技能，同时是对外操作手册
 ├─ tools/           评测装置与打包辅助脚本
 ├─ installer/       安装包定义
 ├─ testdata/        测试夹具
 └─ docs/            设计材料与第三方材料副本
 ```
+
+### 3.1 `designer-src/` 是干什么的（**只读参考，不是我们的代码**）
+
+`designer-src/` 是 T100 设计器（厂商标识 DSC）的**反编译源码**，16 个工程 + `solution.sln`，
+约 9 MB / 1188 个文件。**它不参与任何构建**，`solution.sln` 与那些 `.csproj` 是反编译带出来的，
+不是我们的构建链（那是 `engine/build.sh`）。
+
+**它入库只为一件事：让引擎源码注释里的 `file:line` 在仓库里就能对上。** 举例（都是真的、
+都可以当场复核）：
+
+```
+engine/src/Designer/Fns/Semantic.cs   引 SpecFieldNode.cs:389-397
+  → designer-src/SpecDesignerCommon/ViewModel/SpecFieldNode.cs:389   "string items = this.Items;"
+engine/src/Designer/Fns/Semantic.cs   引 SpecPropertyEditor.xaml.cs:272
+  → designer-src/SpecDesigner.SpecEditor/SpecPropertyEditor.xaml.cs:272
+      ComponentPropertyVisibilityMap.Add("ComboBox", …)
+engine/src/Designer/…                 引 ComponentFactory.cs:19
+  → designer-src/SpecDesignerCommon/Helpers/ComponentFactory.cs:19
+```
+
+**为什么值得为这件事塞 9 MB 进来**：在它入库之前，那些注释指向的是
+**作者本机的一个绝对路径**（`D:\我的项目\T100设计器\`）—— 也就是说**除了那台机器，
+谁都核不了"这条注释引的那一行到底是不是那个意思"**。这与本项目反复在修的那一类缺陷同形：
+一条没人能验的断言，写了等于没写。2026-09-27 修 `set_items` 那个"stale 是否算缺陷"的判断时，
+正是靠翻这份树里的 `SpecFieldNode.cs:389` 才定的案（结论：**不是我们的缺陷**，
+`items` 对列派生元素是派生值，设计器自己也覆盖它）。
+
+**四条边界**：
+
+1. **只看不改。** 改了它，引擎注释里的行号就开始静默指错 —— 参考基准不能随手动。
+2. **不进发行包。** `build_portable.bat` 是按名字手列的，别把它加进去；它也不会落进 `dist/`。
+3. **行尾是原样的 CRLF**（`.gitattributes` 里 `designer-src/** -text`）。不做转换的理由同上：
+   转换改变字节，`file:line` 就不再可复核。
+4. **它是反编译产物，可信度分级不是"全信"**：`docs/T100设计器-README.md` 用四种标记区分
+   🟢反编译直证 / 🟡对发行版 DLL 反射确证 / 🔵真实语料实测确证 / ⚪推断 —— **要引一条结论，
+   先看它标的是哪一种**。那份文档同时是这套源码的来历与逐条推导记录。
+
+**它不属于我们**，是第三方商业软件的反编译还原物。这条要一直清楚。
 
 `internal/` 内部按**层次**组织，只有四层：
 

@@ -102,6 +102,14 @@ func readUserPath() (string, error) {
 }
 
 // writeUserPath 写回用户 PATH,保持 REG_EXPAND_SZ(值里常有 %USERPROFILE% 等可展开变量)。
+//
+// **它是无条件写的**：不读原值是什么类型，所以原值本来是 REG_SZ（不含任何 `%`）时，
+// 也会被改写成 REG_EXPAND_SZ。原先会保留原类型的那份实现在 `tt dev install` 里，
+// **已随该命令一起删除，现在没有第二份实现兜着了**（2026-09-27 从已删的规划文档转来，
+// 那条注着"别丢"）。
+//
+// 若要改这里的行为，先想清楚两件事：改类型会不会影响 `%VAR%` 的展开、
+// 以及卸载时按类型摘除的那条路径还成不成立。
 func writeUserPath(v string) error {
 	k, err := registry.OpenKey(registry.CURRENT_USER, userEnvKeyPath, registry.SET_VALUE)
 	if err != nil {
