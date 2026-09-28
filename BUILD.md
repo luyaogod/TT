@@ -128,7 +128,7 @@ build_msi.bat             # → dist/TT-0.2.0-x64.msi（需 WiX v3）
   示例配置 + README + `skills/` → 采引擎那三个文件到 `tzs\` → 采设计器到 `tzs\designer\` → 打 zip。
   它**刻意不打包本机的 `config.json`**（含真实口令）。
 - **MSI** 复用便携包的载荷（先跑一遍便携打包），再剥掉便携标记与配置文件 —— 装出来的版本配置
-  应落在 `%APPDATA%\T100\tt\`，不是安装目录。文件清单由 `heat.exe` 采集，卸载要删的目录由
+  应落在 `%APPDATA%\TT\`，不是安装目录。文件清单由 `heat.exe` 采集，卸载要删的目录由
   `tools/wix_removefolders.py` 补。WiX 放在 `D:\tt-build-tools\wix3`，或用 `WIX_BIN` 指向它。
 
 **进包的文件是按名字手列的**（引擎那三个 + README + skills + 设计器），缺一个都会让脚本报错退出；

@@ -18,17 +18,25 @@ import (
 //  1. TT_CONFIG 环境变量（兼容旧名 TDEBUG_CONFIG / TDICT_CONFIG）  显式指定
 //  2. --config <路径>                                             显式指定
 //  3. <exe 目录>\.portable 存在                                    便携包：配置留在包内
-//  4. %APPDATA%\T100\tt\config.json                               默认：固定用户的统一位置
+//  4. %APPDATA%\TT\config.json                                    默认：数据目录
 //  5. 旧位置兜底（首次运行自动合并迁移到 4）：
+//     %APPDATA%\T100\tt\config.json（0.2.0 及更早的默认落点）、
 //     <exe 目录>\config.json、<当前目录>\config.json、
 //     %APPDATA%\T100\tdebug\config.json、%APPDATA%\T100\tdict\config.json、
 //     %APPDATA%\TDebug\config.json
 //
-// 统一位置可用 T100_HOME 环境变量整体改写（如 T100_HOME=D:\t100）。
+// 数据目录可用 TT_HOME 环境变量整体改写（如 TT_HOME=D:\tt）；旧名 T100_HOME 仍被识别，
+// 语义相同。两者都不设时是 %APPDATA%\TT。
+//
+// 为什么从 %APPDATA%\T100\tt 挪出来：那一层 T100 是合并前两个工具
+// （T100\tdebug、T100\tdict）的产品根，合并之后只剩一个工具，它底下没有别的东西了。
 
 const (
-	// ToolDirName 统一用户目录下本工具的子目录。数据目录 = 配置所在目录，
-	// 所以 srccache / debug-bps / logs / .tt-serve.json 都跟着落在同一个目录里。
+	// ToolDirName 本工具在**旧**产品根（%APPDATA%\T100）下的子目录名。
+	//
+	// 它不再是新落点的一层 —— 新落点就是数据目录本身（%APPDATA%\TT，见 UserConfigDir）。
+	// 留着这个常量，是因为 %APPDATA%\T100\tt\config.json 是 0.2.0 及更早的默认落点，
+	// 现在得当迁移来源把它找回来；常量留着，值改了会让老用户配置找不着。
 	ToolDirName = "tt"
 	// DefaultConfigName 缺省配置文件名。
 	DefaultConfigName = "config.json"
@@ -36,32 +44,78 @@ const (
 	PortableMark = ".portable"
 )
 
-// legacyTools 旧工具在统一用户目录下的子目录名。用于发现待合并的旧配置。
+// legacyTools 两个旧工具在旧产品根下的子目录名。用于发现待合并的旧配置。
 var legacyTools = []string{"tdebug", "tdict"}
 
 // configEnvVars 显式指定配置路径的环境变量，按优先级排列。
 // TT_CONFIG 是本工具的；另两个是合并前各自的，保留以免既有脚本失效。
 var configEnvVars = []string{"TT_CONFIG", "TDEBUG_CONFIG", "TDICT_CONFIG"}
 
-// ToolsHome 固定用户的统一工具目录：T100_HOME 优先，否则 %APPDATA%\T100
-// （os.UserConfigDir() 在 Windows 上即 %AppData%）。
-func ToolsHome() string {
-	if env := os.Getenv("T100_HOME"); env != "" {
-		if abs, err := filepath.Abs(env); err == nil {
-			return abs
+// legacyRoots 可能放着本工具**旧**配置的"产品根"，按优先级排列。
+//
+// 每个根底下可能挂着：本工具的旧落点 tt\config.json，以及合并前两个工具的
+// tdebug\ / tdict\。两个来源都是历史 ——
+//
+//   - T100_HOME：用户显式指定的目录。**改落点之前**它是产品根（配置在它下面的 tt\ 里），
+//     现在它直接就是数据目录本身，所以它底下那份 tt\config.json 得当成旧配置找回来。
+//   - %APPDATA%\T100：合并前那个产品根，tdebug\ / tdict\ / tt\ 都挂在它下面。
+//
+// **TT_HOME 不在其中**：它是这次新加的，语义就是数据目录本身，没有任何"旧配置"会落在
+// 它底下 —— 把它当产品根，只会让我们去 <TT_HOME>\tt\ 找一个从不存在的文件。
+//
+// **不导出**：新代码只该问 UserConfigDir()/UserConfigPath()。它存在只为两件事 ——
+// 迁移时找到旧配置，以及把"本机还有哪些旧配置"报给设置页。
+func legacyRoots() []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(p string) {
+		if p == "" {
+			return
 		}
-		return env
+		if abs, err := filepath.Abs(p); err == nil {
+			p = abs
+		}
+		if seen[p] {
+			return
+		}
+		seen[p] = true
+		out = append(out, p)
 	}
+	add(os.Getenv("T100_HOME")) // 旧名，改落点前它是产品根
 	if dir, err := os.UserConfigDir(); err == nil {
-		return filepath.Join(dir, "T100")
+		add(filepath.Join(dir, "T100"))
 	}
-	return ""
+	return out
 }
 
-// UserConfigDir 统一用户目录下的本工具目录；定位不到时返回空串。
+// dataDirOfEnv 把一个"数据目录"取值规范化成绝对路径；空串原样返回。
+func dataDirOfEnv(env string) string {
+	if env == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(env); err == nil {
+		return abs
+	}
+	return env
+}
+
+// UserConfigDir 数据目录（= 配置所在目录）；定位不到时返回空串。
+//
+// TT_HOME 优先，旧名 T100_HOME 次之。两者语义相同，都是**数据目录本身** ——
+// 注意这与改落点之前不同：那时 T100_HOME=D:\t100 指的是 D:\t100\tt，现在指 D:\t100，
+// 所以老用户设过它的机器会走一次迁移（来源是 <T100_HOME>\tt\config.json）。
+//
+// 缓存、快照、服务状态与日志都从这一个值派生（见 cache.go 的 CacheSubdirs），
+// 多一个派生源就会多一处"清缓存没清到"或"配置被一起删了"。
 func UserConfigDir() string {
-	if home := ToolsHome(); home != "" {
-		return filepath.Join(home, ToolDirName)
+	if dir := dataDirOfEnv(os.Getenv("TT_HOME")); dir != "" {
+		return dir
+	}
+	if dir := dataDirOfEnv(os.Getenv("T100_HOME")); dir != "" {
+		return dir
+	}
+	if dir, err := os.UserConfigDir(); err == nil {
+		return filepath.Join(dir, "TT")
 	}
 	return ""
 }
@@ -74,18 +128,18 @@ func UserConfigPath() string {
 	return ""
 }
 
-// LegacyToolConfigPaths 合并前的两个工具在统一用户目录下的配置路径。
-// 只列出真正存在的。
+// LegacyToolConfigPaths 合并前两个旧工具留下的配置路径，只列出真正存在的。
+//
+// 与 legacyConfigPaths 一样从 legacyRoots 出发，但**用途不同**：这是给设置页展示
+// "这台机器上还有哪些旧工具的配置可以并进来"，不含本工具自己的旧落点。
 func LegacyToolConfigPaths() []string {
-	home := ToolsHome()
-	if home == "" {
-		return nil
-	}
 	var out []string
-	for _, tool := range legacyTools {
-		p := filepath.Join(home, tool, DefaultConfigName)
-		if _, err := os.Stat(p); err == nil {
-			out = append(out, p)
+	for _, root := range legacyRoots() {
+		for _, tool := range legacyTools {
+			p := filepath.Join(root, tool, DefaultConfigName)
+			if _, err := os.Stat(p); err == nil {
+				out = append(out, p)
+			}
 		}
 	}
 	return out
@@ -110,10 +164,30 @@ func exeDir() string {
 	return filepath.Dir(exe)
 }
 
+// oldToolConfigPaths 本工具**改落点之前**可能放配置的位置（%APPDATA%\T100\tt\config.json
+// 及设过 T100_HOME 时对应的 <T100_HOME>\tt\config.json），按 legacyRoots 顺序。
+//
+// "旧落点在哪"这件事只算这一次，两处用它 —— 用途不同但对象是同一份：
+// legacyConfigPaths 拿它当读兜底的第一梯队，migrate.collectSources 拿它当合并来源。
+func oldToolConfigPaths() []string {
+	var out []string
+	for _, root := range legacyRoots() {
+		out = append(out, filepath.Join(root, ToolDirName, DefaultConfigName))
+	}
+	return out
+}
+
 // legacyConfigPaths 旧位置，按优先级排列。是本工具的配置（凭内容判断），
 // 但不在默认落点上。
+//
+// 顺序 = **读兜底**优先级（第一个存在的胜出）。这与 collectSources 的**合并**顺序
+// 不是一回事 —— 那边要的是"谁覆盖谁"。两份顺序别合成一套：合错了会改掉 query 那一节
+// 的行为（MergeConfigs 里各节的胜出方向不一致，见那里的注释）。
+//
+// 旧 tt 落点排最前，因为它是所有旧位置里最权威的一份（0.2.0 及更早的现役配置）。
+// 它只在迁移没跑成时才轮得到 —— 正常路径下新落点已在前一个候选里命中。
 func legacyConfigPaths() []string {
-	var out []string
+	out := oldToolConfigPaths()
 	if dir := exeDir(); dir != "" {
 		out = append(out, filepath.Join(dir, DefaultConfigName))
 	}
@@ -214,9 +288,9 @@ func ResolvePath(flagPath string, allowMissing bool) (string, error) {
 				candidates = append(candidates, filepath.Join(dir, DefaultConfigName))
 			}
 		} else if p := UserConfigPath(); p != "" {
-			// 4. 统一用户目录；首次运行先把旧配置合并过来
+			// 4. 数据目录；首次运行先把旧配置迁过来
 			if src := Migrate(); len(src) > 0 {
-				fmt.Fprintf(os.Stderr, "[tt] 已合并旧配置到统一位置: %s -> %s\n",
+				fmt.Fprintf(os.Stderr, "[tt] 已迁移旧配置到数据目录: %s -> %s\n",
 					joinPaths(src), p)
 			}
 			candidates = append(candidates, p)
@@ -284,7 +358,7 @@ func migrateInPlace(p string) string {
 		return p
 	}
 	if err := plan.Apply(); err != nil {
-		fmt.Fprintf(os.Stderr, "[tt] 合并旧配置到 %s 失败: %v\n", p, err)
+		fmt.Fprintf(os.Stderr, "[tt] 迁移旧配置到 %s 失败: %v\n", p, err)
 	}
 	return p
 }

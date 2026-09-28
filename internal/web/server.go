@@ -569,7 +569,6 @@ func (s *Server) hConfigMeta(w http.ResponseWriter, r *http.Request) {
 		"config":         path,
 		"defaultConfig":  config.DefaultConfigPath(),
 		"portable":       config.IsPortable(),
-		"toolsHome":      config.ToolsHome(),
 		"schemaVersion":  config.SchemaVersion,
 		"defaultListen":  DefaultListen,
 		"legacyTools":    config.LegacyToolConfigPaths(),

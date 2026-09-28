@@ -74,7 +74,7 @@ var legacyAliases = map[string]string{
 
 func init() {
 	pf := rootCmd.PersistentFlags()
-	pf.StringVar(&common.ConfigPath, "config", "", "配置文件路径 (JSON;缺省取统一用户目录 "+common.ConfigHint()+")")
+	pf.StringVar(&common.ConfigPath, "config", "", "配置文件路径 (JSON;缺省取数据目录 "+common.ConfigHint()+")")
 	pf.BoolVar(&common.JSON, "json", false, "以 JSON 输出（--format json 的语法糖，也是默认）")
 	pf.BoolVar(&common.CSV, "csv", false, "以 CSV 输出（--format csv 的语法糖）")
 	pf.StringVar(&common.Format, "format", "json",

@@ -34,7 +34,7 @@ debug / query / mirror / bdldoc / sync / tdev 是各工具自己的设置。
   2. --config <路径>
   3. <exe 目录>\.portable 存在 → 便携包，配置留在包内
   4. ` + config.DefaultConfigPathHint() + `
-统一位置可用 T100_HOME 环境变量整体改写。`,
+数据目录可用 TT_HOME 环境变量整体改写（旧名 T100_HOME 仍认，语义相同）。`,
 	}
 
 	cmd.AddCommand(&cobra.Command{
@@ -149,11 +149,14 @@ func newConfigMigrateCmd() *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "migrate",
-		Short: "把合并前 tdebug / tdict 的配置合并到统一位置",
-		Long: `把 TDebug 与 TDictCli 各自留下的配置合并成一份统一配置。
+		Short: "把旧位置的配置迁到数据目录（合并前的 tdebug / tdict 也一并并进来）",
+		Long: `把旧位置的配置迁到数据目录，并把 TDebug 与 TDictCli 各自留下的配置合并进来。
 
-合并规则：
-  - 环境清单取并集，同名环境以 TDictCli 那份为准（它是字典查询的现役配置）；
+规则：
+  - 已经是当前结构的配置（如 0.2.0 的 %APPDATA%\T100\tt\config.json）原样搬过去，
+    不参与合并 —— 合并只认识少数几节，会把 tzs 这类键丢掉；
+  - 只有全都还是旧结构时才合并：环境清单取并集，同名环境以 TDictCli 那份为准
+    （它是字典查询的现役配置）；
   - TDebug 的 debug 节被拆开：sshs 提升为 hosts.sshs，其余键留在 debug；
   - query / mirror / bdldoc / sync 原样带过来；
   - 原文件不删除，各留一份 .pre-merge.bak。
@@ -161,7 +164,7 @@ func newConfigMigrateCmd() *cobra.Command {
 tt 首次运行会自动做这件事，一般不需要手动执行 —— 这个命令用于预览结果，
 或在上次迁移中断后重跑。
 
---dry-run 只打印合并结果，不写任何文件。`,
+--dry-run 只打印将写入的内容（口令已打码），不写任何文件。`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if dryRun {
@@ -169,14 +172,14 @@ tt 首次运行会自动做这件事，一般不需要手动执行 —— 这个
 			}
 			path := config.UserConfigPath()
 			if path == "" {
-				return fmt.Errorf("定位不到统一用户目录（T100_HOME / %%APPDATA%%）")
+				return fmt.Errorf("定位不到数据目录（TT_HOME / T100_HOME / %%APPDATA%%）")
 			}
 			srcs := config.Migrate()
 			if len(srcs) == 0 {
 				cmd.Println("无需迁移：目标已是当前结构，或找不到可合并的旧配置。")
 				return nil
 			}
-			cmd.Printf("已合并 %d 份旧配置到 %s\n", len(srcs), path)
+			cmd.Printf("已迁移 %d 份旧配置到 %s\n", len(srcs), path)
 			for _, s := range srcs {
 				cmd.Printf("  ← %s\n", s)
 			}
@@ -184,14 +187,14 @@ tt 首次运行会自动做这件事，一般不需要手动执行 —— 这个
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "只打印合并结果，不写文件")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "只打印将写入的内容（口令已打码），不写文件")
 	return cmd
 }
 
 func runConfigMigrateDryRun(cmd *cobra.Command) error {
 	path := config.UserConfigPath()
 	if path == "" {
-		return fmt.Errorf("定位不到统一用户目录（T100_HOME / %%APPDATA%%）")
+		return fmt.Errorf("定位不到数据目录（TT_HOME / T100_HOME / %%APPDATA%%）")
 	}
 	plan, err := config.PlanMigration(path)
 	if err != nil {
@@ -202,15 +205,17 @@ func runConfigMigrateDryRun(cmd *cobra.Command) error {
 		return nil
 	}
 	cmd.Printf("将写入：%s\n", plan.Dst)
-	cmd.Println("将合并：")
+	cmd.Println("来源：")
 	for _, s := range plan.Sources {
 		cmd.Printf("  ← %s\n", s.Path)
 	}
-	out, err := json.MarshalIndent(plan.Merged, "", "  ")
+	// 必须打码：plan.Merged 里有 hosts.sshs[].password（明文）与 db.accounts[].password。
+	// 这一条与 config show / config get 走同一个实现（AGENTS.md §9：输出侧打码只有一个来源）。
+	out, err := json.MarshalIndent(config.RedactSecrets(plan.Merged), "", "  ")
 	if err != nil {
 		return err
 	}
-	cmd.Println("\n合并结果：")
+	cmd.Println("\n将写入的内容：")
 	cmd.Println(string(out))
 	return nil
 }

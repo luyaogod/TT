@@ -246,7 +246,6 @@ export interface ConfigMeta {
   config: string
   defaultConfig: string
   portable: boolean
-  toolsHome: string
   schemaVersion: number
   defaultListen: string
   legacyTools: string[] | null

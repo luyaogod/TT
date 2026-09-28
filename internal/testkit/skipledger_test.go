@@ -80,7 +80,6 @@ type skipSite struct {
 // 条目是脚本从源码里抽出来的（避免手抄错），层与理由是人逐条标的。
 var skipLedger = []skipSite{
 	{file: "internal/config/paths_test.go", msg: "拿不到用户配置目录", layer: layEnv, why: "本机取不到用户配置目录 —— 这台机器上没有那个目录"},
-	{file: "internal/config/realdata_test.go", msg: "定位不到统一用户目录", layer: layEnv, why: "本机取不到统一用户目录，那份真实旧配置无从谈起"},
 	{file: "internal/config/realdata_test.go", msg: "本机没有合并前的旧配置，跳过", layer: layEnv, why: "本机没有合并前的旧配置 —— 只有本机真有旧配置时才验得到"},
 	{file: "internal/dev/cli/corpus_test.go", msg: "深度语料回归未启用：设 TDEV_DEEP=1 并给足 -timeout 30m（见 README「测试与验收」）", layer: layL3, why: "需真实语料：开关 TDEV_DEEP=1"},
 	{file: "internal/dev/cli/tzs_verb_e2e_test.go", msg: "需要真引擎：设 TTZS_E2E=1（可选 TTZS_EXE），见本文件顶部注释", layer: layL4, why: "需真引擎：开关 TTZS_E2E=1（可选 TTZS_EXE）"},

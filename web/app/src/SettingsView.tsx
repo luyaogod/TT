@@ -1289,7 +1289,6 @@ ${sync?.target || ''}
                 <InfoRow label="配置文件" value={cfg.config} />
                 <InfoRow label="缺省配置位置" value={meta?.defaultConfig || '—'} />
                 <InfoRow label="便携模式" value={meta ? (meta.portable ? '是(配置留在程序目录)' : '否') : '—'} />
-                <InfoRow label="统一工具目录" value={meta?.toolsHome || '—'} />
                 <InfoRow label="配置结构版本" value={meta ? String(meta.schemaVersion) : '—'} />
                 <InfoRow label="支持的库类型" value={meta?.supportedTypes?.join(' / ') || '—'} />
                 <InfoRow label="默认环境" value={cfg.activeEnv || '(未设置)'} />

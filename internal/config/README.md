@@ -9,11 +9,15 @@
 1. `TT_CONFIG` 环境变量（另两个旧名仍被识别）
 2. `--config <路径>`
 3. `<exe 目录>\.portable` 存在 → 便携包，配置留在包内
-4. `%APPDATA%\T100\tt\config.json` —— 默认位置
-5. 旧位置兜底（首次运行自动合并迁移到 4）：
-   `<exe 目录>\config.json`、`<当前目录>\config.json`、旧工具的两个目录、以及更早的那个
+4. `%APPDATA%\TT\config.json` —— 默认位置
+5. 旧位置兜底（首次运行自动迁移到 4）：
+   `%APPDATA%\T100\tt\config.json`（0.2.0 及更早的默认落点，本工具自己的）、
+   `<exe 目录>\config.json`、`<当前目录>\config.json`、旧工具的两个目录、
+   `%APPDATA%\TDebug\config.json`
 
-统一目录可用 `T100_HOME` 整体改写（`T100_HOME=D:\t100`）。
+数据目录可用 `TT_HOME` 整体改写（`TT_HOME=D:\tt`）。旧名 `T100_HOME` 仍被识别，**语义与
+`TT_HOME` 相同**（都是数据目录本身）—— 注意这跟改落点之前不一样：那时 `T100_HOME=D:\x`
+指的是 `D:\x\tt`。所以设过它的机器会走一次迁移，来源是 `<T100_HOME>\tt\config.json`。
 
 **显式指定的路径就是答案。** `--config` / `TT_CONFIG` 指向一个还不存在的文件时，**不**悄悄
 改用默认落点 —— 否则便携版会把配置写进用户目录，测试脚本也会落在别处。
@@ -60,8 +64,19 @@ config.Edit(path, validate, mutate)   // Open → validate → mutate → Save
 迁移之后环境清单归 `hosts`、调试设置留在 `debug`。所以不能整节改名 —— 那会把调试设置
 一并吞进环境清单里。
 
-合并来源按固定顺序收集（**靠后的在冲突时胜出**）：旧工具目录 → 就地运行的遗留配置 →
+来源按固定顺序收集：旧工具目录 → 就地运行的遗留配置 → 本工具改落点之前的位置 →
 目标位置自身（上次迁移中断的情况）。落盘后给原有文件各留一份备份，**源文件本身不删除**。
+
+**哪一份胜出要看它是什么，不是一句"靠后的胜出"能概括的**（`PlanMigration` 里分两条路）：
+
+- 来源里**已经有一份当前结构**的配置（典型是 0.2.0 的 `%APPDATA%\T100\tt\config.json`，
+  它本来就是 SchemaVersion 2）→ **原样搬过去，不合并**。`MergeConfigs` 只认识
+  `hosts/debug/listen/query/mirror/bdldoc/sync/tdev`，走它会把 `tzs` 与未知顶层键丢掉 ——
+  而 `tzs.workspace` 没有缺省值，丢了用户就得回设置页重填。
+- 全都是旧结构 → 才走 `MergeConfigs`。那一节的胜出方向**按节不一致**：`hosts.sshs` /
+  `debug` / 顶层 `listen` 是**靠后者胜出**，`query` / `mirror` / `bdldoc` / `sync` / `tdev`
+  是**首个非空者胜出**。所以来源顺序不是随手排的 —— 改之前先去读那一节，
+  顺序由 `TestCollectSources_OldLocationSitsRightBeforeDst` 钉着。
 
 ## 哪些目录算缓存
 

@@ -42,6 +42,9 @@ func Migrate() []string {
 		return nil
 	}
 	if err := p.Apply(); err != nil {
+		// 迁移没跑成就等于没迁移，返回 nil 让调用方继续走旧位置兜底。
+		// 但要说一声：否则用户看到的是"我的环境全没了"，而没有任何线索。
+		fmt.Fprintf(os.Stderr, "[tt] 迁移配置到 %s 失败: %v\n", dst, err)
 		return nil
 	}
 	var paths []string
@@ -70,8 +73,29 @@ func PlanMigration(dst string) (*Plan, error) {
 	return &Plan{
 		Dst:     dst,
 		Sources: sources,
-		Merged:  MergeConfigs(sources),
+		Merged:  migrationResult(sources),
 	}, nil
+}
+
+// migrationResult 决定这次迁移往新落点写什么：**已经是当前结构的来源原样搬过去，
+// 只有全都是旧结构时才做合并**。
+//
+// 为什么不能一律走 MergeConfigs —— 这是改落点之后才出现的情形：
+// %APPDATA%\T100\tt\config.json 是 0.2.0 的现役配置，它已经是 SchemaVersion 2。
+// 它需要的不是"合并"，是"搬个地方"。而 MergeConfigs 是给合并前那两份不同结构写的，
+// 它只认识 hosts/debug/listen/query/mirror/bdldoc/sync/tdev 这几节 —— **tzs 与任何
+// 未知顶层键都会被丢掉**。tzs.workspace 没有缺省值，丢了它用户升级后 `tt dev tzs`
+// 直接不能跑，还得自己回设置页重填一遍。
+//
+// 取**最后一个**当前结构的来源：collectSources 把旧落点排在 dst 那一格之前，
+// 与"dst 自己排最后"是同一个位置，所以"谁是现役配置"由同一套顺序说了算。
+func migrationResult(sources []Source) map[string]any {
+	for i := len(sources) - 1; i >= 0; i-- {
+		if intOf(sources[i].Root["schemaVersion"]) >= SchemaVersion {
+			return sources[i].Root
+		}
+	}
+	return MergeConfigs(sources)
 }
 
 // Apply 把合并结果写到目标位置，并给原有文件各留一份 .pre-merge.bak。
@@ -92,33 +116,38 @@ func (p *Plan) Apply() error {
 }
 
 // collectSources 按优先级收集可合并的配置来源。
-// 顺序即优先级：靠后的在冲突时胜出。
 //
-//  1. 旧工具目录（%APPDATA%\T100\tdebug、%APPDATA%\T100\tdict）
+// 顺序即优先级，但**具体哪一份胜出取决于各节的合并规则** —— MergeConfigs 里
+// hosts.sshs / debug / 顶层 listen 是**靠后者胜出**，而 query/mirror/bdldoc/sync/tdev
+// 那几节是**首个非空者胜出**。动这里的顺序之前，先去读 MergeConfigs 对应那一段。
+//
+//  1. 旧工具目录（<旧产品根>\tdebug、<旧产品根>\tdict）
 //  2. exe 同目录 / 当前目录的 config.json（老式便携包或就地运行的遗留）
-//  3. 目标位置自身（已是旧结构的 tt 配置，例如上次迁移中断）
+//  3. 本工具改落点之前的位置（<旧产品根>\tt\config.json）
+//  4. 目标位置自身（已是旧结构的 tt 配置，例如上次迁移中断）
 func collectSources(dst string) []Source {
 	seen := map[string]bool{}
 	var out []Source
 
-	add := func(path string) {
+	add := func(path string) bool {
 		if path == "" {
-			return
+			return false
 		}
 		abs, _ := filepath.Abs(path)
 		if seen[abs] {
-			return
+			return false
 		}
 		seen[abs] = true
 		b, err := os.ReadFile(abs)
 		if err != nil || !LooksLikeOwnConfig(b) {
-			return
+			return false
 		}
 		var root map[string]any
 		if json.Unmarshal(b, &root) != nil || root == nil {
-			return
+			return false
 		}
 		out = append(out, Source{Path: abs, Root: root})
+		return true
 	}
 
 	// 1. 旧工具目录。tdebug 在后 → 同名环境以它为准（见 MergeConfigs 的说明）。
@@ -132,7 +161,20 @@ func collectSources(dst string) []Source {
 	if cwd, err := os.Getwd(); err == nil {
 		add(filepath.Join(cwd, DefaultConfigName))
 	}
-	// 3. 目标自身（旧结构）
+	// 3. 本工具改落点之前的位置（<旧产品根>\tt\config.json）。只收优先级最高的**那一份**：
+	// 正常情况下只可能有一份，多个旧产品根同时有配置只可能是用户改过 TT_HOME ——
+	// 那时低优先的那份是陈旧副本，并进来反而会让它把 query/mirror 那几节抢走
+	// （MergeConfigs 里那几节是"首个非空者胜出"）。
+	//
+	// 放在这里（而不是前面）是有意的：它占的正是 dst 改落点之前在顺序里的那一格，
+	// 所以"旧结构配置的合并优先级"与改落点之前逐条一致。顺序由
+	// TestCollectSources_OldLocationSitsRightBeforeDst 钉着。
+	for _, p := range oldToolConfigPaths() {
+		if add(p) {
+			break
+		}
+	}
+	// 4. 目标自身（旧结构）
 	add(dst)
 
 	return out
@@ -141,14 +183,15 @@ func collectSources(dst string) []Source {
 // legacyToolPaths 合并前两个工具的配置路径，按 tdebug → tdict 排列。
 // 顺序有意如此：两者都配了同一台环境时，tdict 那份是字典查询的现役配置，
 // 保留它能让查询侧行为完全不变；tdebug 独有的环境仍然会被并进来。
+//
+// 每个旧产品根下都排一遍（根的顺序见 legacyRoots）；多根同时有配置是异常情形，
+// 那时靠后的根胜出 —— 与"同名环境取靠后那份"是同一条规则。
 func legacyToolPaths() []string {
-	home := ToolsHome()
-	if home == "" {
-		return nil
-	}
 	var out []string
-	for _, tool := range legacyTools {
-		out = append(out, filepath.Join(home, tool, DefaultConfigName))
+	for _, root := range legacyRoots() {
+		for _, tool := range legacyTools {
+			out = append(out, filepath.Join(root, tool, DefaultConfigName))
+		}
 	}
 	// 桌面版旧数据目录
 	if appData := os.Getenv("APPDATA"); appData != "" {
@@ -167,6 +210,9 @@ func legacyToolPaths() []string {
 //     靠后的来源覆盖靠前的。
 //   - 其余节（query/mirror/bdldoc/sync/tdev）：首个非空者胜出。
 //   - listen：顶层 listen 优先，其次 debug.listen，最后缺省值。
+//
+// **tzs 与未知顶层键不在搬运范围内** —— 本函数只认识上面列出的那几节。所以"已经是
+// 当前结构的配置"绝不能走它（会丢 tzs.workspace 这类没有缺省值的键），见 migrationResult。
 func MergeConfigs(sources []Source) map[string]any {
 	root := map[string]any{}
 	root["schemaVersion"] = SchemaVersion

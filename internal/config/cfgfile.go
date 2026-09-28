@@ -36,7 +36,7 @@ func Open(path string) (map[string]any, error) {
 // Save 原子写回：MarshalIndent + 同目录临时文件 + fsync + 重命名，
 // 失败不留半截文件，也不会让读者看到只写了一半的内容。
 //
-// 配置目录不存在时自动创建 —— 缺省位置在 %APPDATA%\T100\tt\ 下，
+// 配置目录不存在时自动创建 —— 缺省位置在 %APPDATA%\TT\ 下，
 // 新机器上首次保存时该目录还没有。
 func Save(path string, root map[string]any) error {
 	out, err := json.MarshalIndent(root, "", "  ")

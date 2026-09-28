@@ -7,20 +7,17 @@ import (
 	"testing"
 )
 
-// 用本机真实存在的旧配置做一次迁移，检验合并没有丢东西。
+// 用本机真实存在的旧配置做一次合并，检验合并没有丢东西。
 //
 // 这是唯一一类能证明"迁移规则贴合现实"的测试 —— 前面那些用的是手写夹具，
 // 手写夹具只能验证我设想的旧结构；这个验证的是真的旧结构。
 // 本机没有旧配置时（CI、别人的机器）自动跳过，不制造噪声。
+//
+// 路径取自 legacyToolPaths()，与实际迁移用的是同一份清单 —— 否则测试"读到的东西"
+// 和线上"读的东西"会各自演化。
 func TestMigrate_RealLegacyConfigs(t *testing.T) {
-	home := ToolsHome()
-	if home == "" {
-		t.Skip("定位不到统一用户目录")
-	}
-
 	var sources []Source
-	for _, tool := range legacyTools {
-		p := filepath.Join(home, tool, DefaultConfigName)
+	for _, p := range legacyToolPaths() {
 		b, err := os.ReadFile(p)
 		if err != nil {
 			continue

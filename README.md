@@ -101,10 +101,14 @@ tt dev tzs field_add --args '{"file":"D:\\pkg\\x.tzs","table":"pmdl_t","columns"
 1. `TT_CONFIG` 环境变量
 2. `--config <路径>`
 3. `<exe 目录>\.portable` 存在 → 便携包，配置留在包内
-4. `%APPDATA%\T100\tt\config.json` —— 默认（MSI 安装的版本用这个）
+4. `%APPDATA%\TT\config.json` —— 默认（MSI 安装的版本用这个）
 
-`T100_HOME` 可以整体改写统一目录（如 `T100_HOME=D:\t100`）。配置里含明文口令，新建的文件权限
-是 0600，**不要提交、不要外发**。可参考随包分发的 `config.example.json` 的字段结构。
+`TT_HOME` 可以整体改写数据目录（如 `TT_HOME=D:\tt`；旧名 `T100_HOME` 仍被识别，语义相同）。
+配置里含明文口令，新建的文件权限是 0600，**不要提交、不要外发**。可参考随包分发的
+`config.example.json` 的字段结构。
+
+**从 0.2.0 升上来的机器会自动搬家**：旧位置 `%APPDATA%\T100\tt\config.json` 会在首次运行时
+被搬到上面第 4 条的新位置，旧文件及其 `.pre-merge.bak` 都留在原处不删（你可以自行清理）。
 
 ## 文档地图
 

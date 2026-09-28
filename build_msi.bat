@@ -12,7 +12,7 @@ rem admin rights. See installer/tt.wxs for why per-user.
 rem
 rem Difference from the portable zip: the MSI deliberately does NOT ship
 rem .portable -- an installed TT must keep its config in
-rem %APPDATA%\T100\tt\config.json (user-writable), not next to the exe (which
+rem %APPDATA%\TT\config.json (user-writable), not next to the exe (which
 rem lives under %LOCALAPPDATA%\Programs and is not where user data belongs).
 rem
 rem Requires the WiX v3 toolset (candle.exe + light.exe + heat.exe). Point
@@ -44,7 +44,7 @@ if exist "%STAGE%" rmdir /s /q "%STAGE%"
 mkdir "%STAGE%" || exit /b 1
 xcopy /e /i /y /q dist\tt-portable "%STAGE%" >nul || (echo STAGE COPY FAILED & exit /b 1)
 rem .portable: the installed copy must NOT be portable -- its config belongs in
-rem   %APPDATA%\T100\tt\config.json (user-writable), not next to the exe.
+rem   %APPDATA%\TT\config.json (user-writable), not next to the exe.
 rem config.json: ship no config at all. The installer would otherwise drop an
 rem   empty one in the install dir, which "tt" can pick up as a legacy fallback
 rem   location -- a confusing second config that looks like the real one.

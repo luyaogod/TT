@@ -1,51 +1,84 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 )
 
 // isolateEnv 把配置发现相关的环境变量全部指到临时目录，让测试不受本机
-// 真实存在的 %APPDATA%\T100\{tdebug,tdict} 与 %APPDATA%\TDebug 影响。
-// 返回统一用户目录（T100_HOME）。
-func isolateEnv(t *testing.T) string {
+// 真实存在的 %APPDATA%\T100\{tdebug,tdict,tt} 与 %APPDATA%\TDebug 影响。
+//
+// 返回两个根 —— 它们**不再是同一个目录**（改落点之前是）：
+//   - legacyRoot 旧产品根：tdebug/、tdict/ 以及"旧落点" tt/ 都种在这里
+//   - dataDir    新数据目录（TT_HOME）：配置直接落在它下面
+//
+// 两个都要给：只给 legacyRoot 的话新落点会落回真实的 %APPDATA%\TT。
+func isolateEnv(t *testing.T) (legacyRoot, dataDir string) {
 	t.Helper()
-	home := t.TempDir()
-	t.Setenv("T100_HOME", home)
+	legacyRoot, dataDir = t.TempDir(), t.TempDir()
+	t.Setenv("T100_HOME", legacyRoot)
+	t.Setenv("TT_HOME", dataDir)
 	t.Setenv("APPDATA", t.TempDir())
 	t.Setenv("TT_CONFIG", "")
 	t.Setenv("TDEBUG_CONFIG", "")
 	t.Setenv("TDICT_CONFIG", "")
-	return home
+	return legacyRoot, dataDir
 }
 
-// T100_HOME 整体改写统一目录。
-func TestToolsHome_T100HomeOverride(t *testing.T) {
+// TT_HOME 是数据目录本身。
+func TestUserConfigDir_TTHomeOverride(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("TT_HOME", dir)
+
+	if got := UserConfigDir(); got != dir {
+		t.Errorf("UserConfigDir() = %q, 期望 %q", got, dir)
+	}
+	want := filepath.Join(dir, DefaultConfigName)
+	if got := UserConfigPath(); got != want {
+		t.Errorf("UserConfigPath() = %q, 期望 %q", got, want)
+	}
+	if got := DefaultConfigPathHint(); got != want {
+		t.Errorf("DefaultConfigPathHint() = %q, 期望 %q", got, want)
+	}
+}
+
+// 旧名 T100_HOME 仍被识别。
+//
+// **语义与改落点之前不同**：那时 T100_HOME=D:\x 指的是 D:\x\tt（产品根多一层），
+// 现在指 D:\x 本身。所以设过它的机器会走一次迁移（来源 <T100_HOME>\tt\config.json）。
+func TestUserConfigDir_T100HomeStillWorks(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TT_HOME", "")
 	t.Setenv("T100_HOME", dir)
 
-	if got := ToolsHome(); got != dir {
-		t.Errorf("ToolsHome() = %q, 期望 %q", got, dir)
-	}
-	want := filepath.Join(dir, ToolDirName)
-	if got := UserConfigDir(); got != want {
-		t.Errorf("UserConfigDir() = %q, 期望 %q", got, want)
-	}
-	if got := UserConfigPath(); got != filepath.Join(want, DefaultConfigName) {
-		t.Errorf("UserConfigPath() = %q", got)
+	if got := UserConfigDir(); got != dir {
+		t.Errorf("UserConfigDir() = %q, 期望旧名指到的 %q", got, dir)
 	}
 }
 
-// 没有 T100_HOME 时落在 %APPDATA%\T100 下。
-func TestToolsHome_DefaultsUnderUserConfigDir(t *testing.T) {
+// 两个都设时 TT_HOME 优先。
+func TestUserConfigDir_TTHomeBeatsT100Home(t *testing.T) {
+	tt, legacy := t.TempDir(), t.TempDir()
+	t.Setenv("TT_HOME", tt)
+	t.Setenv("T100_HOME", legacy)
+
+	if got := UserConfigDir(); got != tt {
+		t.Errorf("UserConfigDir() = %q, 期望 TT_HOME 的 %q", got, tt)
+	}
+}
+
+// 两个环境变量都不设时落在 %APPDATA%\TT —— 不再多一层 T100。
+func TestUserConfigDir_DefaultsToAppDataTT(t *testing.T) {
+	t.Setenv("TT_HOME", "")
 	t.Setenv("T100_HOME", "")
 	base, err := os.UserConfigDir()
 	if err != nil {
 		t.Skip("拿不到用户配置目录")
 	}
-	if got, want := ToolsHome(), filepath.Join(base, "T100"); got != want {
-		t.Errorf("ToolsHome() = %q, 期望 %q", got, want)
+	if got, want := UserConfigDir(), filepath.Join(base, "TT"); got != want {
+		t.Errorf("UserConfigDir() = %q, 期望 %q", got, want)
 	}
 }
 
@@ -136,12 +169,12 @@ func TestResolvePath_NoneFound(t *testing.T) {
 	}
 }
 
-// 端到端迁移：旧工具目录下两份配置 → 合并成 %T100_HOME%\tt\config.json。
+// 端到端迁移：旧工具目录下两份配置 → 合并成新落点上的 config.json。
 func TestMigrate_EndToEnd(t *testing.T) {
-	home := isolateEnv(t)
+	legacyRoot, _ := isolateEnv(t)
 
 	write := func(tool, content string) {
-		dir := filepath.Join(home, tool)
+		dir := filepath.Join(legacyRoot, tool)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -179,7 +212,7 @@ func TestMigrate_EndToEnd(t *testing.T) {
 
 	// 源文件不删除，且各留一份备份
 	for _, tool := range []string{"tdebug", "tdict"} {
-		src := filepath.Join(home, tool, DefaultConfigName)
+		src := filepath.Join(legacyRoot, tool, DefaultConfigName)
 		if _, err := os.Stat(src); err != nil {
 			t.Errorf("源配置被删除了: %s", src)
 		}
@@ -189,11 +222,141 @@ func TestMigrate_EndToEnd(t *testing.T) {
 	}
 }
 
+// 改落点的核心用例：旧落点（<旧产品根>\tt\config.json，本机即 %APPDATA%\T100\tt\config.json）
+// 那份**现役**配置必须被搬到新落点，而且一个键都不能少。
+//
+// 为什么"一个键都不能少"是重点：旧落点是 0.2.0 的现役配置，已经是 SchemaVersion 2，
+// 里面 tzs.workspace 这类键没有缺省值。**它该被搬运，不该被合并** —— MergeConfigs 只认识
+// hosts/debug/listen/query/mirror/bdldoc/sync/tdev，走合并会把 tzs 整节丢掉，
+// 用户升级后 `tt dev tzs` 直接不能跑。
+//
+// 同时放一份 tdict 在旧工具目录里，是为了把"搬运"与"合并"两种结果区分开：
+// 若走的是合并，mirror 节会冒出来、环境会变成两个、tzs 会消失。
+func TestMigrate_FromOldDefaultLocation(t *testing.T) {
+	legacyRoot, dataDir := isolateEnv(t)
+
+	oldDir := filepath.Join(legacyRoot, ToolDirName)
+	if err := os.MkdirAll(oldDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := filepath.Join(oldDir, DefaultConfigName)
+	seed := `{
+  "schemaVersion": 2,
+  "listen": "127.0.0.1:8899",
+  "hosts": {"activeEnv": "现役", "sshs": [{"name": "现役", "host": "h", "user": "u"}]},
+  "query": {"source": "local"},
+  "tzs": {"workspace": "D:\\t100_wrok_dir", "serverExe": "D:\\tt\\out\\ttzs.exe"}
+}`
+	if err := os.WriteFile(old, []byte(seed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// 旧工具目录里还躺着一份没被删掉的 tdict（仓库规矩：迁移不删源文件）
+	if err := os.MkdirAll(filepath.Join(legacyRoot, "tdict"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyRoot, "tdict", DefaultConfigName), []byte(tdictStyle), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ResolvePath("", false)
+	if err != nil {
+		t.Fatalf("ResolvePath: %v", err)
+	}
+	if want := UserConfigPath(); got != want {
+		t.Fatalf("落点 = %q，期望新落点 %q", got, want)
+	}
+	if got == old {
+		t.Fatal("落点仍是旧位置 —— 没有搬家")
+	}
+	// 判据是"新路径上真的有文件"，不是"没报错"
+	b, err := os.ReadFile(got)
+	if err != nil {
+		t.Fatalf("新落点上没有配置文件: %v", err)
+	}
+	if filepath.Dir(got) != dataDir {
+		t.Errorf("落点目录 = %q，期望数据目录 %q", filepath.Dir(got), dataDir)
+	}
+
+	r, err := Load(got)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if r.Listen != "127.0.0.1:8899" {
+		t.Errorf("listen = %q", r.Listen)
+	}
+	if r.Query.Source != "local" {
+		t.Errorf("query.source = %q", r.Query.Source)
+	}
+	if len(r.Hosts.SSHs) != 1 || r.Hosts.SSHs[0].Name != "现役" {
+		t.Errorf("环境清单 = %+v，期望只有现役那一个", r.Hosts.SSHs)
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(b, &raw); err != nil {
+		t.Fatal(err)
+	}
+	// tzs 整节原样带过来 —— 这正是"走搬运而不是合并"的判据
+	tzs, _ := raw["tzs"].(map[string]any)
+	if tzs == nil || tzs["workspace"] != "D:\\t100_wrok_dir" {
+		t.Errorf("tzs 节丢失或被改写（MergeConfigs 不搬它）: %v", raw["tzs"])
+	}
+	// 反过来：旧工具那份的内容不该被并进来
+	if _, has := raw["mirror"]; has {
+		t.Error("tdict 的 mirror 节被并进来了 —— 目标是空的新落点，不该发生合并")
+	}
+
+	// 源文件不删除，且各留一份备份
+	if _, err := os.Stat(old); err != nil {
+		t.Errorf("旧落点的配置被删除了: %v", err)
+	}
+	if _, err := os.Stat(old + ".pre-merge.bak"); err != nil {
+		t.Errorf("旧落点的配置没有留备份: %v", err)
+	}
+}
+
+// 旧落点在 collectSources 里必须**紧邻 dst**（排在所有旧工具来源之后）。
+//
+// 这条顺序不是随手排的：MergeConfigs 里 query/mirror/bdldoc/sync/tdev 是"首个非空者
+// 胜出"，而 hosts.sshs / debug / listen 是"靠后者胜出"。旧落点占的正是 dst 改落点之前
+// 在顺序里的那一格，才能让旧结构配置的合并优先级与改落点之前逐条一致。
+// （已经是当前结构的那份走的是原样搬运，不看这个位置 —— 见 migrationResult。）
+func TestCollectSources_OldLocationSitsRightBeforeDst(t *testing.T) {
+	legacyRoot, dataDir := isolateEnv(t)
+
+	write := func(dir, content string) {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, DefaultConfigName), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(legacyRoot, "tdebug"), tdebugStyle)
+	write(filepath.Join(legacyRoot, "tdict"), tdictStyle)
+	// 旧落点放一份**旧结构**的配置：当前结构的那份走搬运，不参与这段顺序
+	write(filepath.Join(legacyRoot, ToolDirName), `{"query":{"source":"local"}}`)
+
+	dst := filepath.Join(dataDir, DefaultConfigName) // 不存在，所以不会出现在来源里
+	var got []string
+	for _, s := range collectSources(dst) {
+		got = append(got, filepath.Base(filepath.Dir(s.Path))+"/"+filepath.Base(s.Path))
+	}
+	want := []string{"tdebug/config.json", "tdict/config.json", ToolDirName + "/config.json"}
+	if len(got) != len(want) {
+		t.Fatalf("来源 = %v，期望 %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("来源顺序 = %v，期望 %v", got, want)
+		}
+	}
+}
+
 // 迁移是幂等的：第二次调用不该再动任何东西。
 func TestMigrate_Idempotent(t *testing.T) {
-	home := isolateEnv(t)
+	legacyRoot, _ := isolateEnv(t)
 
-	dir := filepath.Join(home, "tdebug")
+	dir := filepath.Join(legacyRoot, "tdebug")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -224,9 +387,9 @@ func TestMigrate_Idempotent(t *testing.T) {
 
 // 目标已是当前结构时不可被旧配置覆盖。
 func TestPlanMigration_CurrentWins(t *testing.T) {
-	home := isolateEnv(t)
+	legacyRoot, dataDir := isolateEnv(t)
 
-	dst := filepath.Join(home, ToolDirName, DefaultConfigName)
+	dst := filepath.Join(dataDir, DefaultConfigName)
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +397,7 @@ func TestPlanMigration_CurrentWins(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 同时放一份旧配置在旁边
-	old := filepath.Join(home, "tdict")
+	old := filepath.Join(legacyRoot, "tdict")
 	if err := os.MkdirAll(old, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -253,10 +416,10 @@ func TestPlanMigration_CurrentWins(t *testing.T) {
 
 // LooksLikeOwnConfig 必须挡住无关的 config.json，避免误迁。
 func TestCollectSources_IgnoresForeignConfig(t *testing.T) {
-	home := isolateEnv(t)
+	legacyRoot, _ := isolateEnv(t)
 
 	// 一个长得像 Node 项目的 config.json 放在旧工具目录里
-	foreign := filepath.Join(home, "tdict")
+	foreign := filepath.Join(legacyRoot, "tdict")
 	if err := os.MkdirAll(foreign, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +428,7 @@ func TestCollectSources_IgnoresForeignConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	srcs := collectSources(filepath.Join(home, ToolDirName, DefaultConfigName))
+	srcs := collectSources(filepath.Join(legacyRoot, ToolDirName, DefaultConfigName))
 	for _, s := range srcs {
 		if s.Path == filepath.Join(foreign, DefaultConfigName) {
 			t.Error("无关的 config.json 被当作可迁移来源")
@@ -313,8 +476,7 @@ func TestResolvePath_EnvWinsWhenMissing(t *testing.T) {
 // 所以旧结构的配置必须在选定路径上就地迁移 —— 否则用户把上一版的 config.json
 // 拷进新包后，环境清单会是空的。
 func TestMigrateInPlace_OldSchema(t *testing.T) {
-	home := isolateEnv(t)
-	_ = home
+	isolateEnv(t)
 
 	dir := t.TempDir()
 	p := filepath.Join(dir, DefaultConfigName)
@@ -391,9 +553,9 @@ func TestMigrateInPlace_NothingToDo(t *testing.T) {
 // 这个测试**必须先放一份可合并的旧配置**：没有来源时 plan.Sources 为空，谁都不会去写目标，
 // 那样测了等于没测 —— 无论修没修都会绿。
 func TestMigrateInPlace_CorruptFileIsNotATarget(t *testing.T) {
-	home := isolateEnv(t)
+	legacyRoot, _ := isolateEnv(t)
 
-	legacy := filepath.Join(home, "tdict", DefaultConfigName)
+	legacy := filepath.Join(legacyRoot, "tdict", DefaultConfigName)
 	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
 		t.Fatal(err)
 	}
