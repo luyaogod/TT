@@ -81,6 +81,7 @@ cd engine && ./build.sh                  # 只在改了 engine/ 时才跑！理�
 | `internal/dev/tzs/**`（引擎客户端） | [internal/dev/tzs/README.md](internal/dev/tzs/README.md) + `engine/SPEC.md`（冻结契约） |
 | `internal/cli/dict/**` `internal/dict/**` | [internal/dict/README.md](internal/dict/README.md)（数据族与数据源） |
 | `engine/**`（C#） | [engine/README.md](engine/README.md) → `engine/BUILD.md`（为什么必须单独构建）→ `SPEC.md` → `HANDOFF.md` → `TASKS.md`（**阶段记录，不是现状**，看它怎么跑会被带到沟里） |
+| 引擎注释里的 `file:line` 核对落点 / `designer-src/**`（**只读**） | [designer-src/README.md](designer-src/README.md)（16 工程 + 12 子包的代码地图；热点索引按文件所在层落位）——边界见 [DESIGN_DOC.md](DESIGN_DOC.md) §3.1 |
 | `build_*.bat` / `installer/` | [BUILD.md](BUILD.md) + [installer/README.md](installer/README.md)、[tools/README.md](tools/README.md) |
 | `skills/**` | 它是**对外文档**：改了工具面就要重跑 `tools/eval`（见第 7 节） |
 

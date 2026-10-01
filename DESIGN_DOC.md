@@ -129,6 +129,10 @@ engine/src/Designer/…                 引 ComponentFactory.cs:19
 
 **它不属于我们**，是第三方商业软件的反编译还原物。这条要一直清楚。
 
+**目录地图**：16 个工程每个目录都有自己的 README（[designer-src/README.md](designer-src/README.md)
+是总索引），12 个实质性子包再下一层；引擎注释引用的 `file:line` 由**文件所在层**的 README 用
+"热点索引"表逐条收录并注释 —— 核对一条引用：先定位文件在哪个目录，再进那份 README。
+
 `internal/` 内部按**层次**组织，只有四层：
 
 | 层 | 目录 | 关系 |
