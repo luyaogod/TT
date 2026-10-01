@@ -37,6 +37,7 @@
 
 # 编辑器与工具
 /.zcode/
+/.zcodeignore
 /.claude/skills/
 /.claude/settings.local.json
 .DS_Store
