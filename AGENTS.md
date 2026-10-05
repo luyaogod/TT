@@ -65,7 +65,7 @@ TT/
 ├─ installer/           MSI 安装包定义（WiX v3；perUser 装到 %LOCALAPPDATA%\Programs\TT）
 ├─ tools/               Go 小工具：zip(打包) / wixremovefolders(卸载清目录) / tzsmini(语料构建)
 ├─ testdata/            测试语料：tzs-mini(3.2MB 筛小钉住的标准件) / fgl-fixtures
-├─ skills/              对外技能手册（tt-debug / tt-dict / tt-dev-tzc / tt-dev-tzs / erp-read），
+├─ skills/              对外技能手册（tt-debug / tt-dict / tt-dev-tzc / tt-dev-tzs / tt-erp-read），
 │                       评测中执行者唯一能读的东西，与源代码同级重要
 └─ docs/                AGENTS（文档规范：住哪、写什么、什么不许写）+ DESIGN（整体结构分层）
 ```

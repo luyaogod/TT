@@ -9,7 +9,7 @@
 // 设计取舍：
 //   - skills **不进二进制**（不用 go:embed）：技能内容是文档，随包发布、可被人直接改；
 //     每个技能是一个带 SKILL.md 的目录。合并后 skills/ 下同时放 tt-debug、tt-dev-tzc、
-//     tt-dev-tzs、tt-dict、erp-read 五套技能，本命令整棵树一起装。
+//     tt-dev-tzs、tt-dict、tt-erp-read 五套技能，本命令整棵树一起装。
 //   - PATH 只动 HKCU\Environment，绝不碰 HKLM/系统 PATH；实现在 internal/pathinstall，
 //     与 Web 设置页的「加入 PATH」共用同一份。
 package cli
@@ -74,7 +74,7 @@ func newInstallSkillsCmd() *cobra.Command {
 
 skills/ 是普通可编辑的 markdown 文件（不内嵌二进制），每个技能是一个带 SKILL.md 的目录。
 合并后这里同时装着五套技能：tt-debug（调试）、tt-dev-tzc（设计器代码包 .tzc）、
-tt-dev-tzs（设计器表单包 .tzs）、tt-dict（数据字典）与 erp-read（读 ERP 代码）。
+tt-dev-tzs（设计器表单包 .tzs）、tt-dict（数据字典）与 tt-erp-read（读 ERP 代码）。
 
 要让 Claude Code 直接加载，装到它读的位置：
 

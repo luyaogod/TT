@@ -1,6 +1,6 @@
 ---
-name: erp-read
-description: 阅读并分析 TIPTOP ERP Genero BDL 源代码。使用 TDict CLI 将表/字段编号解码为中文含义。当用户打开包含 Genero BDL 代码的 .4gl/.per/.txt 文件，或询问 ERP 程序逻辑、代码中引用的数据库表结构、ERP 源文件中的字段含义时触发本技能。
+name: tt-erp-read
+description: 阅读并分析 鼎捷T100 ERP Genero BDL 源代码。使用 TT CLI 将表/字段编号解码为中文含义。当用户打开包含 Genero BDL 代码的 .4gl/.per/.txt 文件，或询问 ERP 程序逻辑、代码中引用的数据库表结构、ERP 源文件中的字段含义时触发本技能。
 ---
 
 # ERP 代码阅读 — Genero BDL 源代码阅读指南
