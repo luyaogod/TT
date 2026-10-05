@@ -1,6 +1,6 @@
 ---
 name: tt-dev-tzs
-description: 读写 T100 设计器**表单包**（.tzs/.tzv）：由设计器自己的引擎驱动（55 个具名动词，命名管道 JSON-RPC），参数一律用 JSON 给，不是拼 XML。按数据表加字段用任务级动词 field_add（一条命令做完挑容器+建字段+校验+另存）；改属性用 set_spec_attr / set_layout_attr，改多个用它们的复数形式（一次请求、先全量校验再全量写）；布局/页签等用细粒度动词（open → 读 → 改 → validate → save）。要改表单、按表加字段、查表单结构或字段时用。**前提：先配工作区，且包与 out 都必须用绝对路径落在工作区目录之下。代码包（.tzc/.tzf/.tzx）不归这里，用 tt-dev-tzc。**
+description: 改 T100 设计器**表单包**（.tzs/.tzv）时用：按数据表加字段、改字段与布局属性、查表单结构与字段、调页签与布局。**代码包（.tzc/.tzf/.tzx）不归这里，用 tt-dev-tzc。前提：先配工作区，包与 out 都要用绝对路径落在其下。**调用由设计器自己的引擎驱动，具名动词 + JSON 参数，不拼 XML。
 license: 与 tt 仓库一致（见随包 README.md）
 metadata:
   tool: tdev
