@@ -6,7 +6,7 @@
     · 装到 %LOCALAPPDATA%\Programs\TT,不碰 Program Files —— 全程不需要管理员,
       和这个工具一贯的取向一致(tt install path 也只动 HKCU\Environment,绝不碰系统 PATH)。
     · PATH 写在**用户** PATH(HKCU)上,卸载时由 MSI 自己摘掉。
-    · 装完不写 .portable:配置该落在 %APPDATA%\T100\tt\config.json(用户可写),
+    · 装完不写 .portable:配置该落在 %APPDATA%\tt\config.json(用户可写),
       而不是程序目录(那里普通用户写不进去)。
 
   文件清单由 heat.exe 从暂存目录采集(见 build_msi.bat),这里只管产品、目录、

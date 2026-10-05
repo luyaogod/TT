@@ -115,19 +115,16 @@ xcopy /y /q "%TZSDESIGNER%\*.dll" "%STAGE%\tzs\designer\" >nul || (echo COPY des
 echo     designer staged from %TZSDESIGNER%
 
 echo [4/5] Packing zip ...
-rem Recursive zip (includes the skills/ subtree); shutil.make_archive keeps the
-rem tt-portable/ top-level directory inside the archive.
-python tools\zip.py >nul 2>nul
+rem Recursive zip (includes the skills/ subtree); keeps the tt-portable/ top-level
+rem directory inside the archive. Go tool (tools/zip) replaced the old python
+rem script (zip.py, removed 2026-10). NO fallback by design: a failed pack must
+rem stop the build, not degrade silently. The old PowerShell fallback
+rem (Compress-Archive) wrote backslash entry names, which breaks cross-platform
+rem unzip tools -- that was a quality downgrade, not a backup.
+go run ./tools/zip >nul
 if errorlevel 1 (
-    python -c "import shutil; shutil.make_archive('dist/tt-portable','zip','dist','tt-portable')" >nul 2>nul
-)
-if errorlevel 1 (
-    echo   python unavailable, falling back to PowerShell ...
-    powershell -NoProfile -Command "Compress-Archive -Path '%STAGE%' -DestinationPath 'dist\tt-portable.zip' -Force" >nul 2>nul
-    if errorlevel 1 (
-        echo ZIP FAILED
-        exit /b 1
-    )
+    echo ZIP FAILED
+    exit /b 1
 )
 
 echo [5/5] Done: dist\tt-portable.zip

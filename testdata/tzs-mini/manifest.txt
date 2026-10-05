@@ -1,7 +1,7 @@
-# 最小语料的固定清单 —— 由 build.py 生成，内部/开发者不改。
-# 重新生成：python testdata/tzs-mini/build.py --src <真工作区>
+# 最小语料的固定清单 —— 由 tools/tzsmini 生成，内部/开发者不改。
+# 重新生成：go run ./tools/tzsmini --src <真工作区>
 # 形状：<sha256-16>  <字节>  <仓库相对路径>
-# 为什么要有它：见 build.py 里写它那一段注释。
+# 为什么要有它：见 tools/tzsmini/main.go 里写它那一段注释。
 0c98281dabecf19c     21419  aap/tbl/apba_t.tbl
 7f5092c592ac480c     40719  aap/tbl/apbb_t.tbl
 902f71f9190b2d3d     57254  aap/tbl/apca_t.tbl

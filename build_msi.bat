@@ -1,4 +1,7 @@
 @echo off
+rem Console codepage for the Go tools' UTF-8 output (same as build_portable.bat).
+rem The file itself must stay ASCII-only -- see the note below.
+chcp 65001 >nul
 rem Build the **user-level** MSI installer for TT.
 rem
 rem NOTE: this file must stay ASCII-only. cmd.exe parses .bat bytes in the OEM
@@ -60,8 +63,8 @@ mkdir "%OBJ%" || exit /b 1
     -dr INSTALLFOLDER -var var.SourceDir -out "dist\msi-files.wxs"
 if errorlevel 1 (echo HEAT FAILED & exit /b 1)
 rem heat does not emit the RemoveFolder entries ICE64 requires for per-user
-rem installs (see tools\wix_removefolders.py); patch them in before compiling.
-python tools\wix_removefolders.py dist\msi-files.wxs
+rem installs (see tools\wixremovefolders); patch them in before compiling.
+go run ./tools/wixremovefolders dist\msi-files.wxs
 if errorlevel 1 (echo REMOVEFOLDER PATCH FAILED & exit /b 1)
 
 echo [4/4] Compiling and linking TT-%VERSION%-x64.msi ...

@@ -40,6 +40,9 @@
 /.zcodeignore
 /.claude/skills/
 /.claude/settings.local.json
+# 本机装的第三方技能与其锁文件（与 /.claude/skills/ 同类：属于这台机器，不属于仓库）
+/.agents/
+/skills-lock.json
 .DS_Store
 Thumbs.db
 
