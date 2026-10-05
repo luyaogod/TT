@@ -23,4 +23,4 @@ RenderDocumentInfo / RenderProgramInfo / RenderSnapshot / RenderFields / RenderA
 ## 细节去哪
 
 - 被导出的画面模型：[../SpecDesigner.FormEditor/README.md](../SpecDesigner.FormEditor/README.md)
-- 上层索引：[../README.md](../README.md)；来历与可信度分级：[../../docs/T100设计器-README.md](../../docs/T100设计器-README.md)
+- 上层索引：[../README.md](../README.md)

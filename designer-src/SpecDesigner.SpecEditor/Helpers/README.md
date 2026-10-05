@@ -20,4 +20,3 @@
 - 两种转换器写法的分工：继承 ConverterMarkupExtension<T>（免注册，本目录为主）与直接实现
   IValueConverter（FormEditor/Helpers 为主 → [../../SpecDesigner.FormEditor/Helpers/README.md](../../SpecDesigner.FormEditor/Helpers/README.md)）
 - 上层索引：[../README.md](../README.md)；全树入口：[../../README.md](../../README.md)
-- 来历与可信度分级：[../../../docs/T100设计器-README.md](../../../docs/T100设计器-README.md)

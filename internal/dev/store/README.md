@@ -111,4 +111,4 @@ go test ./internal/dev/store -count=1
 
 - 工作区里那份文档是怎么合成与渲染的 → [../synth/README.md](../synth/README.md)、[../fence/README.md](../fence/README.md)
 - 逐条目写回计划从哪来 → [../split/README.md](../split/README.md)
-- 解锁命令怎么迁移状态 → [../cli/README.md](../cli/README.md)
+- 解锁命令怎么迁移状态 → [cli](../../cli/dev/README.md)

@@ -29,4 +29,3 @@
 
 - 上层：[../README.md](../README.md)（EXE 根）；全树入口：[../../README.md](../../README.md)
 - 文档模型（FileViewModel 族操作的对象）：[../../SpecDesignerCommon/ViewModel/README.md](../../SpecDesignerCommon/ViewModel/README.md)
-- 来历与可信度分级：[../../../docs/T100设计器-README.md](../../../docs/T100设计器-README.md)

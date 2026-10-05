@@ -14,7 +14,7 @@
 - **不遍历语料文件。** 根怎么定在这里，怎么走（递归找 `.tzc`、跳过哪些草稿产物）在
   `internal/dev/testutil`。
 - **不碰口令。** 本包只放**机器路径**。口令在 `config.json` 的 `hosts.sshs[].db` 里，
-  那是**凭据**（`AGENTS.md §9`），是另一件事；混在一起等于让测试配置继承凭据的处理规矩。
+  那是**凭据**，是另一件事；混在一起等于让测试配置继承凭据的处理规矩。
 - **不缓存。** 文件很小，而缓存 + `os.Chdir`（`internal/config` 的测试会 chdir）会得到
   "读的是上一个工作目录的配置"这种难查的错。
 
@@ -26,7 +26,7 @@
 | 依赖谁 | 只用标准库 | — |
 
 **为什么单独一个包、为什么不能带 `testing`**：`internal/dev/testutil` 要用它定语料根，而
-testutil 被**生产代码** import（`internal/dev/cli/selftest.go`，`tt dev tzc selftest` 的实现）。
+testutil 被**生产代码** import（`internal/cli/dev/selftest.go`，`tt dev tzc selftest` 的实现）。
 那条链上出现 `testing`，整个 `testing` 包就会进 `tt` 二进制。分层是：
 
 ```

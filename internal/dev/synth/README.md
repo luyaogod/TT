@@ -105,5 +105,5 @@ go test ./internal/dev/synth -count=1     # 两条权限链的真值表
 
 - 围栏怎么把权限渲染成可读标注 → [../fence/README.md](../fence/README.md)
 - 区段回写（解锁之后才可能发生） → [../split/README.md](../split/README.md)
-- 三方依据 → [`docs/T100设计器-README.md`](../../../docs/T100设计器-README.md) §3.4、§3.7、§4.3，
-  以及反编译源码的 `CodeEditorManager.cs` / `AddPointModel.cs` / `SectionModel.cs`（源码树不在本仓库）
+- 三方依据 → 设计器反编译源码 [`designer-src/`](../../../designer-src/README.md) 的
+  `CodeEditorManager.cs` / `AddPointModel.cs` / `SectionModel.cs`

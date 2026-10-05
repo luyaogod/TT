@@ -9,7 +9,7 @@
 | 组 | 实现 | 说明 |
 |---|---|---|
 | `tt debug …` | [./debug](./debug/README.md) | 调试线 |
-| `tt dev …` | [./dev](./dev/README.md) → [../dev/cli](../dev/cli/README.md) | 设计器包线（参数原样转发、退出码透传） |
+| `tt dev …` | [./dev](./dev/README.md) | 设计器包线（cobra 树挂动词；参数解析权在 tdev 自己的解析器，见其 README） |
 | `tt dict …` | [./dict](./dict/README.md) | 字典线 |
 | `tt env / config / cache / serve / install / version` | 本包 | 三条线共用 |
 
@@ -100,5 +100,5 @@ go test ./internal/cli/... -count=1
 ## 细节去哪
 
 - 调试线 → [./debug](./debug/README.md)；字典线 → [./dict](./dict/README.md)
-- 设计器包线 → [./dev](./dev/README.md)、[../dev/cli](../dev/cli/README.md)
+- 设计器包线 → [./dev](./dev/README.md)
 - 服务的 HTTP 层 → [../web/README.md](../web/README.md)；配置层 → [../config/README.md](../config/README.md)

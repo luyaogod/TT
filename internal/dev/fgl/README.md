@@ -15,7 +15,7 @@
 ## 关系
 
 - 被 [synth](../synth/README.md)、[verify](../verify/README.md)、[split](../split/README.md)、
-  [fence](../fence/README.md)、[cli](../cli/README.md) 使用；本包不 import 组内任何包。
+  [fence](../fence/README.md)、[cli](../../cli/dev/README.md) 使用；本包不 import 组内任何包。
 - 夹具在 [`testdata/fgl-fixtures/`](../../../testdata/fgl-fixtures/README.md)（61 组，
   期望值由 BDL 语言文档推导）。
 

@@ -27,4 +27,4 @@ View/（CodeTextEditor 等 4 件），见各自 README 的热点索引。
 - 子包：[./Helper/README.md](./Helper/README.md) · [./View/README.md](./View/README.md)
 - 语法/AST 与 diff 算法：[../CodeEditor.FglAnalysis/README.md](../CodeEditor.FglAnalysis/README.md) · [../DifferenceEngine/README.md](../DifferenceEngine/README.md)；加点模型：[../Infrastructure/README.md](../Infrastructure/README.md)
 - 上层索引：[../README.md](../README.md)
-- 为什么入库、四条边界：[../../DESIGN_DOC.md](../../DESIGN_DOC.md) §3.1；来历与可信度分级：[../../docs/T100设计器-README.md](../../docs/T100设计器-README.md)
+- 为什么入库、边界在哪：[../../README.md](../../README.md)

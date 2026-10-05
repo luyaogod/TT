@@ -97,5 +97,5 @@ go test ./internal/dev/tapfile -count=1     # 约 48 秒，跑真实语料
 
 - 谁产出这些 Op（回写拆分） → [../split/README.md](../split/README.md)
 - 权限链与合成（哪些点可编辑） → [../synth/README.md](../synth/README.md)
-- 三方依据 → [`docs/T100设计器-README.md`](../../../docs/T100设计器-README.md) §3.3 根元素与点/区段结构、
-  §3.6 混合换行、§3.9 属性改写规则
+- 三方依据 → 设计器反编译源码 [`designer-src/`](../../../designer-src/README.md)：
+  根元素与点/区段结构、混合换行、属性改写规则

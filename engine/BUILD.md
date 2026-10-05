@@ -115,7 +115,7 @@ baml 资源、按路径取不到"。那句是对的，但停在了一步之前�
 于是**没有那棵树的机器上 `RoundTrip` 一跑就 `DirectoryNotFoundException`**。
 而 `RoundTrip` 是 `TestCorpus*` / `TestMiniCorpus*` / `TestFnsGate` 全都要起的程序 ——
 最阴的是**照文档做才会红**：`engineExeAndDir` 在引擎不存在时跳过，
-所以不建引擎反而是绿的，照 BUILD.md 建完引擎才红。
+所以不建引擎反而是绿的，把引擎建起来才会红。
 
 现在那 8 个调用点共用 `test/DesignerLang.cs`（Bootstrap 那段逻辑在探测程序这一侧的同一实现；
 不能直接调 `Bootstrap`，因为探测程序是 `link` / `none` 模式编译的，引用不到 `TzsCli.Designer`）。
@@ -128,5 +128,4 @@ baml 资源、按路径取不到"。那句是对的，但停在了一步之前�
 |---|---|
 | `SPEC.md` | 格式与契约的完整记录（§11.24 是冻结的 agent 契约，§11.22 是函数清单） |
 | `HANDOFF.md` | 交接文档；§18 是最后一次关卡的结论与四个缺陷 |
-| `TASKS.md` | 任务板与语料样本集 |
 | `build.sh` 头部 | 两个库的分工、`LINK_SRC` 三值模式、纯净度守卫 |

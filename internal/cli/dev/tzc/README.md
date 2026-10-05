@@ -1,17 +1,13 @@
-# internal/dev/cli — `tt dev` 的命令行入口
+# internal/cli/dev/tzc — `.tzc` 代码包线的动词
 
-`tt dev` 的**完整 CLI**：`.tzc` 的八个动词与 `tt dev tzs` 的转发。
-它不走 cobra 树 —— 根命令那层只做参数原样转发与退出码透传（见
-[../../cli/dev/README.md](../../cli/dev/README.md)）。
+八个动词的实现体（`cli.go` 的 `cmdXxx`）、31 项对抗自检（`selftest.go`）、
+动词接线清单（`verbs.go`，父包的 cobra 树从这里取 Use/Short/Long/Run）。
+参数解析权在动词自己的解析器（`common.ParseArgs`，位置无关）——契约见 [../README.md](../README.md)。
 
-**安装不在这条线上**：skills 与 PATH 统一走 `tt install skills` / `tt install path`。
-本包曾经有一份同形的 `tt dev install` 实现，已删除；`install` 这个子命令保留一块墓碑，
-只打印指向 `tt install` 的指引。
+**安装不在这条线上**：skills 与 PATH 统一走 `tt install skills` / `tt install path`；
+`install` 子命令在父包留了一块墓碑。
 
-## 分发
-
-`Run(args)` 是两级手写分发：一级 `tzs` / `tzc`（外加 `help`），二级是 `.tzc` 的动词。
-未知子命令或未知动词一律打 `Usage` 并退 2；`install` 是唯一例外，它打指引也退 2。
+## 动词
 
 | 动词 | 作用 | 写盘吗 |
 |---|---|---|
@@ -52,30 +48,28 @@
 `--json` 下 stdout **恰好一个 JSON 对象**：
 
 - 成功：`{"ok":true, …}`（各动词字段不同，例如 `apply` 给新包的 sha256 与逐条目动作）
-- 失败：`{"ok":false,"exit_code":N,"error":"…"}`（**走 stdout**，不在 stderr）
+- 失败：`{"ok":false,"exit_code":N,"error":"…"}`（**走 stdout**，不在 stderr；
+  实现在 [../common/scaffold.go](../common/scaffold.go) 的 `Fail`，两条线同一份）
 
-不加 `--json` 时失败写 stderr（`错误（退出码 N）：…`）。**退出码**：
-`0` 成功 / `2` 包格式或用法错 / `3` 验证失败 / `4` 写入被拒 / `5` IO·环境失败
-（`1` 只作未分类内部错误的兜底）。
-
+不加 `--json` 时失败写 stderr（`错误（退出码 N）：…`）。
 `--strict`（只对 `verify`）把 warn 级发现也算作失败，供 CI 用。
 
 ## 配置接缝
 
-`config.json` 的 `tdev` 节只在这里被读，且**只在省略 flag 时**补默认值：
+`config.json` 的 `tdev` 节只在这里被读（[../common/scaffold.go](../common/scaffold.go)
+的 `LoadTdevSettings`），且**只在省略 flag 时**补默认值：
 
 | 键 | 作用 |
 |---|---|
 | `workspaceSuffix` | `tzc export` 省略 `-o` 时的默认后缀（缺省 `-ws`） |
-| `defaultOut` | `tzs export` 省略 `-o` 时的默认目录 |
 
-三条纪律写死在 `settings.go`：**命令行 flag 永远优先**；**绝不因为配置失败而失败**
-（读不到配置就静默退回硬编码行为）；**不进热路径**（只在确实要用默认值时读一次）。
+三条纪律：**命令行 flag 永远优先**；**绝不因为配置失败而失败**；**不进热路径**。
 
 ## 判据
 
 ```bash
-go test ./internal/dev/cli -count=1   # 约 26 秒；含语料用例与那 31 项自检
+go test ./internal/cli/dev/tzc -count=1   # 含语料用例与那 31 项自检（约 20 秒）
+./tt.exe dev tzc selftest                 # 命令行口：通过 31，失败 0
 ```
 
 `corpus_test.go` 顶部说明了深度回归为何要显式开关（9–11 分钟 > `go test` 默认超时）。
@@ -83,20 +77,22 @@ go test ./internal/dev/cli -count=1   # 约 26 秒；含语料用例与那 31 �
 **那 31 项内置对抗用例现在有两入口，同一个定义处**：
 
 ```bash
-go test ./internal/dev/cli -run TestSelftestCases -v -count=1   # 默认档：31 个子测试
-./tt.exe dev tzc selftest                                       # 命令行：通过 31，失败 0
+go test ./internal/cli/dev/tzc -run TestSelftestCases -v -count=1   # 默认档：31 个子测试
+./tt.exe dev tzc selftest                                           # 命令行：通过 31，失败 0
 ```
 
 `TestSelftestCases` **只写驱动不写断言** —— `selftestCases()` 是那 31 项的唯一定义处，
 谁加一项 `go test` 自动跟着长。它们走的是 `cmdExport` / `cmdApply` / `cmdVerify` /
-`cmdRename` / `cmdNewfn` / `cmdUnlock` 的**完整命令路径**，用的包是**合成**的
-（不依赖真实语料），覆盖改围栏行、改只读区、删围栏、塞非法字符、结构行被改、
-越权删除与追加、改名事务、新函数模板等被拒的场景，并且断言**被拒的 apply 不改包**。
+`cmdRename` / `cmdNewfn` / `cmdUnlock` 的**完整命令路径**（tzs 那一项走 `tzs.Run`，
+所以本包 import tzs），用的包是**合成**的（不依赖真实语料），覆盖改围栏行、改只读区、
+删围栏、塞非法字符、结构行被改、越权删除与追加、改名事务、新函数模板等被拒的场景，
+并且断言**被拒的 apply 不改包**。
 
-**故意不覆盖**：真实语料的形状分布 —— 那归 `TDEV_DEEP=1` 的两条（见 `TEST.md`）。
+**故意不覆盖**：真实语料的形状分布 —— 那归 `TDEV_DEEP=1` 的两条。
 
 ## 细节去哪
 
-- 各动词的用法、常见错误、退出码速查 → [`skills/tt-dev-tzc/SKILL.md`](../../../skills/tt-dev-tzc/SKILL.md)
-- 闸门与不变量的含义 → [../verify/README.md](../verify/README.md)
-- 工作区长什么样 → [../store/README.md](../store/README.md)
+- 结构与接线、根开关桥 → [../README.md](../README.md)
+- 闸门与不变量的含义 → [../../../dev/verify/README.md](../../../dev/verify/README.md)
+- 工作区长什么样 → [../../../dev/store/README.md](../../../dev/store/README.md)
+- 各动词的用法、常见错误、退出码速查 → [`skills/tt-dev-tzc/SKILL.md`](../../../../skills/tt-dev-tzc/SKILL.md)

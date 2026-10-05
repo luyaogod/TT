@@ -55,4 +55,3 @@ SpecEditor / CodeEditWindow）都在这层模型上读写，属性修改不直�
 
 - 撤销命令怎么包这些修改：[../UndoRedo/README.md](../UndoRedo/README.md)；列元数据从哪来：[../Helpers/README.md](../Helpers/README.md)
 - 上层索引：[../README.md](../README.md)；全树入口：[../../README.md](../../README.md)
-- 来历与可信度分级：[../../../docs/T100设计器-README.md](../../../docs/T100设计器-README.md)

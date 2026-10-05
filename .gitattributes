@@ -9,7 +9,7 @@ engine/designer/*.dll binary
 # 只罩 `ws/**`：README / build.py / manifest.txt 是普通文本，要能 diff、要正常的行尾处理。
 testdata/tzs-mini/ws/** binary
 
-# Go 源码一律 LF。仓库的约定一直是"Go 源与 Markdown 是 LF"（BUILD.md §9），
+# Go 源码一律 LF。仓库的约定一直是"Go 源与 Markdown 是 LF"，
 # 但那条约定**没有任何机制强制** —— 开发者本机 core.autocrlf=true 就会把工作树 checkout 成
 # CRLF，而 blob 仍是 LF，于是 git status 干净、看不出任何异常。
 #
@@ -18,12 +18,11 @@ testdata/tzs-mini/ws/** binary
 # `eol=lf` 让工作树恒为 LF，不管本机怎么配。
 #
 # **只罩 *.go**，不要顺手加 *.md 或 *.cs：这个仓库的 Markdown 与 C# 是**混合**行尾
-# （engine/SPEC.md 与 engine/TASKS.md 是有意的 CRLF），一律声明会炸出一大片行尾 diff。
+# （engine/SPEC.md 是有意的 CRLF），一律声明会炸出一大片行尾 diff。
 # 要收编那些得先做一次有意的规范化提交，那是另一件事。
 *.go text eol=lf
 
-# `web/dist/.gitkeep` 是**承重墙**（main.go 的 `//go:embed all:web/dist` 靠它成立，
-# AGENTS.md §4.4），而且 vite 每次构建删它、postbuild 用 LF 写回来。
+# `web/dist/.gitkeep` 是**承重墙**（main.go 的 `//go:embed all:web/dist` 靠它成立），而且 vite 每次构建删它、postbuild 用 LF 写回来。
 # 在 autocrlf=true 的机器上，它会被 checkout 成 CRLF、再被 postbuild 写成 LF，
 # 于是每次构建后 `git status` 都多一条 `M web/dist/.gitkeep`（内容其实没变）。
 # 一行属性消掉这层噪音 —— 同一个根因，见上面 *.go 那段。
@@ -35,3 +34,7 @@ web/dist/.gitkeep text eol=lf
 # `-text` 只关掉行尾转换，**保留 diff**（与上面那些 `binary` 不同 —— 那些是二进制，
 # 这些是要能读、能搜、能 diff 的源码）。
 designer-src/** -text
+
+# `Makefile` 的配方对行尾敏感（CRLF 会让某些 make 版本把命令行解析坏），而它没有扩展名，
+# 挂不到 *.go 那类通配上 —— 按文件名声明。
+Makefile text eol=lf

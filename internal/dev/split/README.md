@@ -28,7 +28,7 @@
 ```
 
 配套的校验（V1–V7）在 [../verify/README.md](../verify/README.md)；改名/新增的命令入口在
-[../cli/README.md](../cli/README.md)。
+[cli](../../cli/dev/README.md)。
 
 ## 入口
 
@@ -42,7 +42,7 @@
 ## 判据
 
 端到端那一层（改名事务、新增点、删除授权、真实语料写回仿真）**已经在默认档里跑** ——
-`tt dev tzc selftest` 的 31 项被接进了 `go test`（见根 `TEST.md`）。所以本包的单测
+`tt dev tzc selftest` 的 31 项被接进了 `go test`。所以本包的单测
 **不重测那些**，只钉端到端钉不到的纯函数：
 
 ```bash
@@ -58,7 +58,7 @@ go test ./internal/dev/split -count=1
 那条链由 `tt dev tzc selftest` 的端到端用例与 `TDEV_DEEP=1` 的真实语料写回仿真负责：
 
 ```bash
-TDEV_DEEP=1 go test ./internal/dev/cli -run TestCorpusApplySimulation
+TDEV_DEEP=1 go test ./internal/cli/dev -run TestCorpusApplySimulation
 ```
 
 ## 细节去哪

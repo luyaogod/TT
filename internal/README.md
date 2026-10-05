@@ -29,7 +29,7 @@
 ```
 命令层 ─┬─ cli/common ── config, output
         ├─ cli/debug ── config, dbconfig, debug, output, winproc
-        ├─ cli/dev   ── dev/cli
+        ├─ cli/dev   ── dev/{fence,model,store,…}, dev/tzs, cli/dev/{common,tzc,tzs}
         ├─ cli/dict  ── config, dbconfig, dict/{db,dbsync,live}, entdir, host, output
         ├─ debug ───── config, dbconfig, entdir, host, safesql
         ├─ dict/server ─ config, dict/dbsync, host
@@ -79,5 +79,4 @@ go build -o tt.exe .
 ## 细节去哪
 
 - 各层内部的细节 → 各目录的 README（见上表的目录名）
-- 整体结构与关系 → 根 [DESIGN_DOC.md](../DESIGN_DOC.md)
-- 怎么改、改哪块先读什么 → 根 [AGENTS.md](../AGENTS.md)
+- 整体结构与关系 → [docs/DESIGN.md](../docs/DESIGN.md)

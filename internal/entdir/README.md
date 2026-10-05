@@ -56,6 +56,6 @@ go test ./internal/entdir -count=1
 
 ## 细节去哪
 
-- 那条链的完整形状（登录 → 环境变量 → 企业 → 账号 → 库） → 根 [DESIGN_DOC.md](../../DESIGN_DOC.md)
+- 那条链的完整形状（登录 → 环境变量 → 企业 → 账号 → 库） → [docs/DESIGN.md](../../docs/DESIGN.md)
 - 客户端直连怎么用解析出来的账号 → [../dict/live/README.md](../dict/live/README.md)
 - 服务器侧怎么查 → [../debug/README.md](../debug/README.md)

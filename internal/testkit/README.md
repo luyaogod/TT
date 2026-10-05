@@ -29,7 +29,7 @@ flag 重置、仓库本体定位。
 | 依赖谁 | `internal/dev/testutil`（`CorpusRoot` / `CorpusFiles`，发现逻辑的单源） | 方向单向 |
 
 **依赖方向不能反过来**：`internal/dev/testutil` 被**生产代码** import
-（`internal/dev/cli/selftest.go:16`，`tt dev tzc selftest` 的实现），而本包 import `testing` ——
+（`internal/cli/dev/selftest.go:16`，`tt dev tzc selftest` 的实现），而本包 import `testing` ——
 testutil 一旦引本包，整个 `testing` 包就会进 `tt` 二进制。
 
 ## 判据
@@ -48,4 +48,3 @@ go test ./internal/testkit -count=1
 ## 细节去哪
 
 - 语料根怎么定、哪些文件算语料 → [`../dev/testutil/README.md`](../dev/testutil/README.md)
-- 语料回归的两条硬纪律（先在副本上跑、整轮进行中不重建引擎） → 根 [`TEST.md`](../../TEST.md)

@@ -35,4 +35,4 @@ CodeEditorMainWindow）与约 12 个对话窗口（书签、跳转、参数、Gl
 ## 细节去哪
 
 - 编辑器总管与分区正则：[../Helper/README.md](../Helper/README.md)；上层索引：[../README.md](../README.md)
-- 全树入口：[../../README.md](../../README.md)；来历与可信度分级：[../../../docs/T100设计器-README.md](../../../docs/T100设计器-README.md)
+- 全树入口：[../../README.md](../../README.md)

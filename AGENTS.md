@@ -1,227 +1,75 @@
 # AGENTS.md
 
-TT（`tt`）是面向 Agent 的 T100 / Genero BDL 开发工具：**一个 Go 二进制 + 一套 React 工作台 + 一个 C# 引擎**
-（引擎反射驱动 T100 设计器自己的程序集，不实现它的私有格式）。
+TT 是用于开发鼎捷数智旗下的大型ERP系统（T100）所构建的CLI工具。修改代码前请阅读[docs/DESIGN.md](docs/DESIGN.md)；编写文档请遵循[docs/AGENTS.md](docs/AGENTS.md)
 
-本文件是**在仓库里改代码**的入口：怎么跑、改哪块之前先读什么、什么不能碰、怎么证明没改坏。
+## 项目结构
 
-> **本文不重复别处的材料**，只做三件事：路由、边界、验证。凡是别处已经写清的，这里只给指路，
-> 不抄第二份 —— 抄了就会漂移。
-
-| 想知道 | 去哪 |
-|---|---|
-| 装 tt / 构建 tt / 配置文件放哪 | [README.md](README.md) |
-| **某个目录内部**的设计、契约、不变量与实测数据 | 该目录的 `README.md`（每目录一份，外层讲关系、内层讲细节）；总索引见 [docs/README.md](docs/README.md) |
-| 怎么**用**某个命令 | [skills/](skills/) 下对应的 `SKILL.md` |
-| `.tzs` 引擎（C#） | [engine/BUILD.md](engine/BUILD.md)、[engine/SPEC.md](engine/SPEC.md)、[engine/HANDOFF.md](engine/HANDOFF.md) |
-| 工具面评测装置 | [tools/eval/README.md](tools/eval/README.md) + [docs/eval-baseline.md](docs/eval-baseline.md) |
-
----
-
-## 1. 一张图
-
-| 目录 | 是什么 | 语言 / 工具链 | 怎么单独验 |
-|---|---|---|---|
-| 根 | `main.go` 只做 `//go:embed all:web/dist` → `cli.Execute` | Go 1.26.5+，**无 vendor**，直接依赖 8 个 | `go build -o tt.exe .` |
-| `internal/` | 全部 Go 侧能力。四个命令组：`cli/`（cobra 树）· `debug/` · `dev/`（`.tzc` 管线 + `tzs/` 引擎客户端）· `dict/` | Go | `go test ./...` |
-| `internal/host` | **唯一的 SSH / 远程服务器层**（debug 与 dict 共用） | Go | `go test ./internal/host` |
-| `web/` | `app/` 是唯一 SPA（调试工作台 + 统一设置页）；`shared/` 是主题变量、UI 基元、设置页布局件 | React 18 + Vite 6 + TS + Tailwind 4，npm workspaces | `cd web && npm run check:app` |
-| `engine/` | `.tzs` 引擎（C#）。**不在 Go 构建链里**，单独构建 | `csc.exe`（**C# 5**）+ Git Bash | `cd engine && ./build.sh` |
-| `engine/designer/` | 设计器的 28 个程序集，**入库、随仓库分发** | 二进制，别碰 | — |
-| `skills/` | 五套 AI 技能，同时是**给人看的操作手册** | Markdown，`SKILL.md` 的目录名必须 == frontmatter `name` | — |
-| `tools/eval/` | 派"只拿 SKILL 的干净执行者"做真事、再回读产物的评测装置 | Python 3 | `python tools/eval/grade.py` |
-
-**没有的东西**（别去找，也别顺手加）：CI、Makefile、linter、formatter、`.editorconfig`、pre-commit 钩子、`vendor/`。
-**没有任何自动门禁替你拦错** —— 下面第 7 节那条手工序列就是全部的闸门。
-
----
-
-## 2. 命令
-
-```bash
-go build -o tt.exe .                     # 后端（前端未构建也能过，见下方 .gitkeep 那条）
-go test ./...                            # 全量；37 个包，深档语料回归默认跳过（约 2–3 分钟）
-cd web && npm run check:app              # 前端三项检查：fgltokens / fgloutline / store
-cd web && npm run build                  # 含 tsc --noEmit（**check:app 不做类型检查**）
-cd engine && ./build.sh                  # 只在改了 engine/ 时才跑！理由见第 4 节
-./tt.exe dev tzc selftest                # .tzc 的 31 项内置对抗用例，不需要真实语料
-./tt.exe dev tzs doctor                  # .tzs 引擎环境自检（引擎 exe / 设计器 / 工作区 / 管道名）
+```
+TT/
+├─ AGENTS.md            仓库说明（AI/协作者必读）
+├─ Makefile             必跑命令的快捷方式（make = build + test；深档目标自带副本闸门）
+├─ config.example.json  配置文件样例（字段说明入口之一）
+│
+├─ internal/            Go 后端全部实现
+│  ├─ cli/              cobra 命令树装配处：四条线 + 共用命令；唯一的接线处
+│  │  ├─ common/        命令组间共享上下文（全局开关、MetaProvider、WebFS；叶子包防成环）
+│  │  ├─ debug/         调试命令组门面（fgldb 那条线）
+│  │  ├─ dev/           tt dev 命令组（三层，目录即分层）
+│  │  │  ├─ register.go/run.go   cobra 树：路由、组级帮助、未知命令退 2、install 墓碑
+│  │  │  │                       + 根开关桥 takeRootFlags + 退出码透传 exitCode
+│  │  │  ├─ common/     两条线共用的脚手架（契约件只此一份）：错误信封 Fail、
+│  │  │  │              稳定 JSON、ParseArgs、StripIdentitySuffix、
+│  │  │  │              config `tdev` 节接缝、总帮助 Usage
+│  │  │  ├─ tzc/        .tzc 代码包线：八个动词核心（export/status/verify/apply/
+│  │  │  │              unlock/rename/newfn/selftest）+ 31 项对抗自检 + 接线清单 Verbs()
+│  │  │  └─ tzs/        .tzs 表单包线：cmdTzs 分发、引擎定位/manifest、
+│  │  │                 detail 渲染；整线 DisableFlagParsing 透传（动词面由引擎定义）
+│  │  └─ dict/          字典命令组（查询 / db sync / mirror / spill）
+│  ├─ config/           统一配置层：位置解析、唯一写入口 Edit、原子写、打码、缓存清单
+│  │                    + 统一路径管理器 Locations（数据目录/缓存/服务状态/字典库/引擎 exe 落点）
+│  ├─ debug/            调试子系统：会话管理、断点存档、源码镜像 srccache、执行日志、企业快照
+│  ├─ dev/              .tzc 设计器包管线（纯管线，无命令层）
+│  │  ├─ fence/         围栏协议：渲染/解析/字节级写回编辑
+│  │  ├─ verify/        三道闸门 + 不变量 I1–I15
+│  │  ├─ store/         工作区落盘：manifest、基线、原子写、锁
+│  │  ├─ tzs/           .tzs 引擎客户端（管道协议、manifest、doctor；不 import cli/dev）
+│  │  └─ split/ tapfile/ tglfile/ fgl/ model/ pkgfile/ synth/ testutil/
+│  │                    写回计划、TAP/TGL 格式、FGL 处理、包模型、包格式、合成、语料夹具
+│  ├─ dict/             字典子系统：db(本地 SQLite 查询) / dbsync(同步) / live(远程直查) / server(web 面)
+│  ├─ host/             唯一的 SSH/远程服务器能力层（连接、登录、服务器侧只读探测）
+│  ├─ erpdb/            客户端直连库封装（Oracle / 金仓，一个接口两个实现）
+│  ├─ dbconfig/         配置里"库"那一节的连接模型
+│  ├─ sshtun/           SSH 端口转发隧道（本地监听 → 远端 host:port）
+│  ├─ entdir/           企业目录（ENT→账号）共享件：快照、指纹、新鲜期（debug 与 dict 共用）
+│  ├─ web/              统一 Web 服务端：REST + WebSocket，嵌入前端 SPA，挂载调试/字典子系统
+│  ├─ output/           唯一的输出出口（表格 / JSON / CSV 一个入口）
+│  ├─ safesql/          只读 SQL 的文本层防线（远端查询入口用）
+│  ├─ pathinstall/      用户 PATH（HKCU）增删，永不碰系统 PATH
+│  ├─ winproc/          起/判/杀不随本进程死的子进程（Windows）
+│  ├─ testenv/          本机测试环境解析（config.local.json + 环境变量，不带 testing）
+│  └─ testkit/          测试助手（stdout 捕获、吞输出 Silent、跳过台账、单源检查）
+│
+├─ web/                 前端（npm workspaces，根）
+│  ├─ app/              唯一 workspace 成员：React + vite 调试工作台/设置页
+│  ├─ shared/           前端共享层（主题、设计系统；被 @source 扫描，动它要小心）
+│  └─ dist/             构建产物，被 Go 嵌入（.gitkeep 是承重墙，删了 go build 失败）
+│
+├─ engine/              .tzs 表单引擎（C#，csc.exe 单独构建，只在改 engine/ 时重编）
+│  ├─ src/              引擎 C# 源码（tzs-server）
+│  ├─ designer/         设计器 28 个程序集（≈10.5MB，有意入库，保证全网同版设计器）
+│  ├─ out/              构建产物 + 十几个探测程序（不进发行包、不能落 dist/ 下）
+│  └─ test/ + build.sh / SPEC.md / HANDOFF.md  引擎测试、构建脚本、冻结契约、交接
+│
+├─ designer-src/        设计器反编译源码（只读）：16 工程 + 12 子包代码地图，
+│                       引擎注释里的 file:line 核对落点
+├─ installer/           MSI 安装包定义（WiX v3；perUser 装到 %LOCALAPPDATA%\Programs\TT）
+├─ tools/               Go 小工具：zip(打包) / wixremovefolders(卸载清目录) / tzsmini(语料构建)
+├─ testdata/            测试语料：tzs-mini(3.2MB 筛小钉住的标准件) / fgl-fixtures
+├─ skills/              对外技能手册（tt-debug / tt-dict / tt-dev-tzc / tt-dev-tzs / erp-read），
+│                       评测中执行者唯一能读的东西，与源代码同级重要
+└─ docs/                AGENTS（文档规范：住哪、写什么、什么不许写）+ DESIGN（整体结构分层）
 ```
 
-### 测试：全在 TEST.md
+## 开发命令
 
-**跑什么、四层怎么分、开关总表（含深档回归）、真环境怎么配、怎么回读"跑了多少跳了多少"
-—— 都在根 [TEST.md](TEST.md)。** 这里不再展开一遍：同一件事写两处就会漂，
-而这份文件里的数字已经漂过一次（包数）。
-
-三条改代码时最容易踩的，留在这里当提醒：
-
-1. **深档回归是显式开关**（`TDEV_DEEP=1` / `TTZS_DEEP=1` / `TTZS_E2E=1`），别顺手开 ——
-   它们对上百个真实包各跑一遍，`go test` 默认 `-timeout=10m`，表现为随机器负载时好时坏的
-   **假失败**，而"那种假失败比不跑更糟"（`internal/dev/cli/corpus_test.go` 顶部）。
-2. **先在副本上跑**（`TTZS_CORPUS=%TEMP%\ttws`）：缺省语料根是**真实客户目录**。
-3. **整轮在跑的时候不要重建引擎**：`build.sh` 覆盖 `out/*.exe` 会造成两三条**假红**。
-
-**语料根的解析只有一处：`internal/testenv`**（`internal/dev/testutil` 只剩**遍历**）。
-别再写第二份 —— 漂移的结果是**"0 个包全部通过"这种最坏的假绿**。
-`internal/testkit` 有一条测试盯着这件事。
-
----
-
-## 3. 改哪块之前先读哪份
-
-| 你要改 | 先读（**必读**） |
-|---|---|
-| 任何东西 | 该目录的 `README.md`。**契约与"为什么"现在住在被改的那一层旁边**，不再有一份集中文档 |
-| `internal/config/**` | [internal/config/README.md](internal/config/README.md)（位置解析、迁移、唯一写入口、缓存清单） |
-| `internal/host` `dbconfig` `erpdb` `entdir` `output` | 各自的 README；那条链的形状见 [DESIGN_DOC.md](DESIGN_DOC.md) |
-| `internal/web` 或 `web/**` | [internal/web/README.md](internal/web/README.md) + [web/shared/README.md](web/shared/README.md)（设计系统规则） |
-| `internal/debug/**` | [internal/debug/README.md](internal/debug/README.md) |
-| `internal/dev/**`（`.tzc` 管线） | [internal/dev/README.md](internal/dev/README.md)（**必读**：公理、围栏协议、三道闸门、红线 R1–R7、编号体系）+ 你要改的那个子包的 README |
-| `internal/dev/tzs/**`（引擎客户端） | [internal/dev/tzs/README.md](internal/dev/tzs/README.md) + `engine/SPEC.md`（冻结契约） |
-| `internal/cli/dict/**` `internal/dict/**` | [internal/dict/README.md](internal/dict/README.md)（数据族与数据源） |
-| `engine/**`（C#） | [engine/README.md](engine/README.md) → `engine/BUILD.md`（为什么必须单独构建）→ `SPEC.md` → `HANDOFF.md` → `TASKS.md`（**阶段记录，不是现状**，看它怎么跑会被带到沟里） |
-| 引擎注释里的 `file:line` 核对落点 / `designer-src/**`（**只读**） | [designer-src/README.md](designer-src/README.md)（16 工程 + 12 子包的代码地图；热点索引按文件所在层落位）——边界见 [DESIGN_DOC.md](DESIGN_DOC.md) §3.1 |
-| `build_*.bat` / `installer/` | [BUILD.md](BUILD.md) + [installer/README.md](installer/README.md)、[tools/README.md](tools/README.md) |
-| `skills/**` | 它是**对外文档**：改了工具面就要重跑 `tools/eval`（见第 7 节） |
-
----
-
-## 4. 硬边界
-
-1. **不实现设计器的私有格式。** `.tzc` 靠设计器发行物反推；`.tzs` 更彻底 —— 反射调用设计器自己的
-   程序集，格式由它自己算。任何"我来解析/我来拼这段 XML"的想法都违反这条。
-2. **设计器程序集入库是有意的**（`engine/designer/`，28 个 dll，约 10.5 MB）。它们保证"同一份 tt
-   在任何机器上跑的是同一版设计器"。换版本 = 换文件 + 提交，**是一次可 review 的动作**；不要
-   "清理"它们，也不要让它们走上行尾转换（`.gitattributes` 已明示 `binary`）。
-3. **引擎只在真的改了 `engine/` 时才重建。** 守护进程的管道名 = `hash(工作区)` + **本程序集 MVID 前 8 位**，
-   所以每次重编都会让**上一个构建起的守护进程再也停不掉**（新名字没人监听）。这是"一个与 tt 无关的
-   构建步骤造成用户可见后果"的典型。清理靠 `tt dev tzs reap --yes`；没被记录过 pid 的守护进程
-   `stop`/`reap` 都够不到，只能手工 `taskkill`。
-4. **生成的产物不许手工编辑**：
-   - `web/dist/*` 除 `.gitkeep`；**`.gitkeep` 是承重墙** —— `main.go` 的 `//go:embed all:web/dist`
-     靠它成立，删了 `go build` 直接失败；vite 的 `emptyOutDir` 每次构建会删它，由 `postbuild` 还原。
-   - `engine/out/`（里面有十几个探测程序 `Probe`/`RoundTrip`/`Test*`/`E2E`，**只供开发，不进包**）；
-     它也不能落在 `dist/` 下（`build_portable.bat` 第一件事就是删 `dist`）。
-   - `web/package-lock.json` 是入库的；`web/app/scripts/.tmp-*.mjs` 是中间产物。
-5. **不许进包的东西**：本机 `config.json`（含明文口令）、`erp_data.db`（客户表字典/schema/企业码）、
-   引擎探测程序、`tzs-cli.exe`（对外只有 `tt` 一个入口 —— 两个客户端就是两套命令面与两套退出码）。
-   便携包的文件是**按名字手列**在 `build_portable.bat` 里的（引擎那三个 + `README.md` + `skills/`）；
-   MSI 侧不用改 `tt.wxs`（`heat.exe` 采集），但 `build_portable.bat` 要手工加。
-6. **`tt dev tzc unlock --yes` 必须由人确认。** 解开框架**不可逆**，等于主动放弃"跟随原厂样板自动
-   重产代码"的能力。**AI 不得自主触发**；没授权时加 `--yes` 也拒。
-7. **别在真客户目录上写**。工作区之外的写回、`out` 指向源包（会覆盖原始素材）、语料回归写在源包旁边
-   —— 前两条**代码里已有闸门**，第三条靠你按第 2 节的纪律做。
-8. **`config.json` 是唯一配置文件**，含明文 SSH / DB 口令（新建权限 0600）。不要新增第二个配置文件、
-   不要新增第二份位置解析（历史上那两份逐行相同、靠注释"改动请两边同步"，合并就是为了删掉它们）。
-
----
-
-## 5. 单一来源清单（别抄第二份）
-
-这个仓库反复出现的坏味道是"同一件事有第二份实现，然后在某次改动里静默过期"。以下都是**故意只留一份**的：
-
-| 事 | 唯一入口 | 抄第二份的后果 |
-|---|---|---|
-| 写配置 | `config.Edit` / `EditSection`（`internal/config/cfgfile.go`） | 未知顶层/节内键被悄悄抹掉 |
-| 环境解析（name → activeEnv → 首条） | `config.Hosts.Resolve` / `Root.ResolveForTool` | 历史上抄过五份，错误文案与边界全不一样 |
-| 账号取法 | `entdir` + `gzou_t` | 别自己取 `accounts[0]` |
-| 查询输出 | `output.Emit`（唯一的输出出口） | 曾经有四套 JSON 发射器、三套 CSV 写入器 |
-| 打码 | `config.RedactSecrets` / `RedactValue`（按键名，不按 tag） | 未知节的未知键漏出明文口令 |
-| 工作区落盘 | `store.AtomicWrite`（同目录临时文件 → Rename） | 红线 R6：出现"半个文件"或"原文件已丢" |
-| tzs 动词参数 | **引擎的 manifest**（`internal/dev/tzs/manifest.go`） | Go 侧抄一份 `map[string][]Param`，引擎一改就静默过期 |
-| tzs 动词数 | 只在 `tzsUsage` 常量与 `skills/tt-dev-tzs` 的元数据里声明（`TestDocVerbCountsAgree` 盯着） | 散在多处就会互相漂移；README 一律写"数见 `tt dev tzs --help`" |
-| tzs 管道名 | **问引擎**（`--pipe-name --workspace`） | 自己算 → 静默失败，看起来像"冷启动 60 秒没就绪" |
-| 语料根发现 | `internal/dev/testutil/corpus.go`（`*testing.T` 那层在 `internal/testkit`） | 一边认 `TDEV_CORPUS`、一边只认 `TTZS_CORPUS` → 假绿。**`internal/testkit` 的 `TestHelpersHaveNoLocalCopies` 盯着** |
-| 测试里抓 stdout / 重置 flag | `internal/testkit`（`CaptureStdout` / `ResetFlags`） | 曾经有三份 stdout 捕获、签名各异；管道那份写错了会挂满 10 分钟被 go test 判超时 |
-| 危险字符/SQL | `safesql` + `shQuote`/`bashLC`；**SQL 一律走 stdin** | `--zone "36; id"` 曾在远端执行任意命令 |
-
-**分层规则**：三个命令组（`cli/debug`、`cli/dev`、`cli/dict`）**互不 import**，共享上下文在叶子包
-`internal/cli/common`；往上通信靠**注入**（`common.MetaProvider` / `common.WebFS`），不是让叶子反向 import。
-`internal/dev/tzs` 不 import `internal/dev/cli` —— 那边 import 它。
-
----
-
-## 6. 会静默咬人的地方
-
-| 症状 | 原因 / 规矩 |
-|---|---|
-| 退出码按"通用含义"读 | **每个子命令一条线、语义各不同**：`tzc` 0/2/3/4/5；`tzs` 0/1/2/4/5（**没有 3**）；`dict` 0/1/2/3（3 = 缺表，是错误不是提示）；`debug` 0/1。`tt --help` 里有整张表 |
-| 脚本只看 `stderr` 非空判失败 | JSON 模式下**错误信封走 stdout**（`{ok:false,code,error,hint,exitCode}`）；`code` 是**冻结契约**，能加不能改名 |
-| 失败信封"形状不对" | 两条线**故意不同形**：`tzc` 是 `{"ok":false,"exit_code":…}`（snake）；`tzs` 是合成一个**帧**（`{id,ok,result,error,ms}`）；`dict`/`debug` 走 `output` 信封（camelCase） |
-| `grep -v '^# '` 把数据行切掉了 | 注释头**井号后必须有一个空格**（值本身以 `#` 开头是常事，如颜色 `#FF0000`） |
-| `tt dict nope` 退 0 却什么都没干 | cobra 组命令**没有 `RunE`** 时未知子命令返回成功。`dict`/`debug` 都加了未知子命令兜底，新增命令组照做 |
-| `tt dev … --csv` 被拒 | `tt dev` 是 `DisableFlagParsing` 的独立 CLI，不是 cobra 树；`--csv`/`--env` 被**故意拒绝**并给出正确指引（"要 CSV 拿到 JSON"是最该避免的静默走偏）；`--config` 靠转成 `TT_CONFIG` 转发 |
-| 同一程序的第二个包打不开 | `open` 的 key 是 `程序名|Form`，**不含路径**；新包与源包同名，必须先 `close` 再 `open`（`E_KEY_IN_USE`，退 4）。**别读 `TzpManager.Current`**，一律按 key 寻址 |
-| 无界面驱动卡住 90 秒 | 某些操作会弹**没有消息泵的模态框**（如缺基础资料、只拷 `mta/` 的工作区）。看门狗跑不掉这类；只能整份工作区 |
-| `git diff --stat` 行数是改动的几百倍 | **行尾被翻了**。仓库行尾是**混合**的（Go/`docs/`/`README.md` 是 LF，部分 C# 与 `engine/SPEC.md`、`engine/TASKS.md` 是 CRLF）。`Edit` 工具保留原行尾，**`sed -i` 与 Python 文本模式不会**。判据：`git diff --stat` vs `git diff --ignore-cr-at-eol --stat`，并比对 `file -b` |
-| 前端"构建绿但缺样式" | 共享层只被 `../shared` 的 `@source` 扫到；`web/app/src/index.css` 里那条 `@source "../../shared"` 动一下就是这个结果 |
-| 改了 `tokens.css` 主题后卡在亮色 | 暗色是 **class 驱动**（`@custom-variant dark`），导入方必须同时有首屏防闪脚本与 `applyDark`；存储键 `tt.theme` 在 `index.html` 与 `shared/theme.ts` 里各写了一次 |
-| `TestCorpusPin` 红 | pin（`engine/corpus.manifest`）与实际语料**逐条**比对，磁盘多出三个从未入册的 `*_test.tzs` 就红；它归 `TTZS_DEEP`，默认不跑所以平时看不见。重钉用 `engine/make-manifest.sh [root]`（**默认根是真客户目录**，别在已被改动的语料上重钉） |
-| 打包脚本报错退出 | 引擎那三个文件**按名字**采集，缺一个就报错；`engine/out/` 里的探测程序绝不能 xcopy 整个目录 |
-
----
-
-## 7. 做完的定义
-
-**没有 CI，所以每个改动都要自己跑完这条序列，并把结果如实报出来**（跑不了就说跑不了）：
-
-| 改了什么 | 至少跑到 |
-|---|---|
-| 任何 Go 代码 | `go build -o tt.exe .` + `go test ./...` |
-| `internal/dev/**`、`internal/pkgfile|tapfile|fence|fgl/**` | 上一行 + 相关包 `-count=1`；动了写回再考虑 `tt dev tzc selftest` |
-| `web/**` | `cd web && npm run check:app` + `npm run build`（类型检查在构建里） |
-| `engine/**` | `cd engine && ./build.sh` + `tt dev tzs doctor`，**再**考虑 `TTZS_DEEP`（先满足第 2 节两条纪律） |
-| `skills/**` 或**任何工具面**（动词、参数、退出码、错误文案） | 重跑工具面评测：`python tools/eval/setup.py --src <语料> --exe tt.exe` → 派只读 SKILL 的执行者 → `python tools/eval/grade.py --run %TEMP%\ttrun` |
-| 打包/发行 | README 的构建节 + `build_portable.bat` / `build_msi.bat`（版本号硬编码在**四处**，一起改） |
-
-**判据是回读，不是自述。** 这是评测装置立的规矩，也适用于你自己的改动：说"改好了"之前，
-用一条**能被别人重放**的命令证明它 —— `sha256sum` 比字节、`open` 回读内容、测试输出、`git diff --stat`。
-"看起来对"不算证据；文里凡是声称安全的地方都要给判据与复现命令，而不是形容词。
-
-**语料是关卡手段，不是迭代手段。** 如果 corpus_test 顶部的判据是"基线相对"而不是"等于零"，
-别把它改成硬编码零 —— 实测有三个包在**没人动过**的时候就报 stale。
-
----
-
-## 8. 提交与文档
-
-- **提交信息**：`<范围>: <一句话说清改了什么、代价是什么>`，范围用 `tzs` / `tzc` / `eval` / `docs` / `README` / `config` 这类词；
-  正文写**为什么**、**实测数字**、**被推翻的旧结论**、**踩到的坑**。这个仓库的历史是它的第二份文档，值得对齐。
-- **文档与代码同一个提交**。文档责任是分区明确的：**根 README 管装与配置，BUILD 管构建，DESIGN_DOC 管整体结构
-  与关系，AGENTS 管改代码的路由与边界，各目录 README 管该目录内部的细节与契约，skills 管怎么用**。
-  改了行为就去改**被改的那一层旁边**那份文档；外层只给结论并引用内层，**别把内容抄第二份**。
-- **`skills/**` 与源代码同级重要**：它是对外文档，也是评测里执行者唯一能读的东西。改它的措辞要当成
-  改 API 文档来对待（"说明书写得好不好"正是评测要测的东西）。
-- **中文**：面向人的输出（帮助、错误、提示、文档、注释）一律简体中文；JSON 键用英文 lowerCamelCase
-  （信封/元信息/错误面），**字典行数据的中文键是有意的**（对齐 T100 列名），两个方向都不要"顺手统一"。
-
----
-
-## 9. 凭据与安全
-
-- `config.json` 里有**明文** SSH / DB 口令。**不要**把它粘进对话、提交、issue、测试夹具；
-  测试一律用假口令（仓库里现成的是 `pw-dev` / `SECRET` 这类）。
-- **`GET /api/hosts` 返回明文口令**（设置页要能就地编辑与探测）。**任何 dump / 粘贴 `/api/hosts` 响应的行为
-  都是泄密**，包括贴进聊天窗口和 issue。
-- 输出侧打码只有一个实现（`internal/config/redact.go`，按**键名** `password`/`passwd`/`pwd` 判断）。
-  新增"把配置吐出来"的命令，走它。
-- `erp_data.db` 含客户字典与 schema，同样是数据而非代码：不进仓库、不进发行包。
-- **但"数据不进仓库"不是一刀切，2026-09-27 划清了一次**：判据是**这份数据是不是某个客户私有的**。
-  - **某家客户的东西**（`erp_data.db`、客户自己的模块与表单、活的工作区目录）→ 不进仓库、不进发行包。
-  - **随 T100 发行的标准件**（标准模块的表单包、标准表的 `.tbl` schema、`mta/` 元数据）
-    → **可以入库**，条件是筛小了并且钉住。先例是 `testdata/tzs-mini/`（3.2 MB：
-    三个典型包 + 它们读的元数据 + `manifest.txt`），它让 `.tzs` 的冒烟回归不再依赖
-    "有真客户语料的那台机器"。入库的那一份必须是**筛过的、被 pin 钉住的**，
-    不是把一个活的工作区目录整个搬进来 —— 判据与生成方式见该目录的 README 与 `build.py`。
-  - 拿不准时按私有处理；要把新的标准件入库，是一次要 review 的提交，不是顺手加。
-  - **拷到另一台开发机不越线**（2026-09-27 拍板，因为第二台开发机问过）：这条线的边界写的是
-    「不进仓库、不进发行包」，而一份**只读的开发用副本**两边都不是。但三条要跟着守：
-    ① 放**仓库之外**（缺省 `D:\t100_wrok_dir` 本来就在仓库外）；
-    ② 不进发行包 —— `build_portable.bat` 是**手列**的，别把它加进去，也别落进 `dist/`；
-    ③ **别放共享盘 / 网盘 / 任何会同步的通道** —— 那不叫"拷到一台机器"，叫"交给所有人可读"。
-    凭据不跟着副本走（`config.json` 永不过去；缺口令就在本机设置页填）。
-    实测一份完整工作区 **130 MB**，够 `.tzc` 与 `.tzs` **两批**回归用（别拷两份，见 TEST.md §6）。
-- 远端命令拼接：`zone` 之类要过白名单（历史事故：`--zone "36; id"` 在远端执行了任意命令）；
-  **SQL 一律走 stdin**，不拼进命令串。
-- `tt install path` 只写 **HKCU 用户 PATH**，永不碰系统 PATH。
+所有开发过程中用到的命令由[Makefile](Makefile)统一管理

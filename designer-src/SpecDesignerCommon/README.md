@@ -68,4 +68,4 @@ WPF 类库（.NET 4.0，SpecDesignerCommon.csproj:10-12），被其余工程共�
 
 - 子包地图：[./ViewModel/README.md](./ViewModel/README.md) · [./Events/README.md](./Events/README.md) · [./UndoRedo/README.md](./UndoRedo/README.md) · [./Helpers/README.md](./Helpers/README.md) · [./Connection/README.md](./Connection/README.md)
 - 上层索引：[../README.md](../README.md)
-- 为什么入库、四条边界：[../../DESIGN_DOC.md](../../DESIGN_DOC.md) §3.1；来历与可信度分级：[../../docs/T100设计器-README.md](../../docs/T100设计器-README.md)
+- 为什么入库、边界在哪：[../../README.md](../../README.md)

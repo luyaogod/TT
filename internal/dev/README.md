@@ -79,10 +79,10 @@ pkgfile ─┬─ tapfile    包与条目（只读视图 + 字节级重建）
 
 | 编号 | 偏差 | 在哪落地 |
 |---|---|---|
-| **D-1** | 新增点的状态写 `"u"` 而**不是** `"c"` —— 写 `"c"` 会被设计器在下次保存时静默丢弃 | [fence](./fence/README.md)、[split](./split/README.md)、[cli](./cli/README.md)（自检用例盯着） |
+| **D-1** | 新增点的状态写 `"u"` 而**不是** `"c"` —— 写 `"c"` 会被设计器在下次保存时静默丢弃 | [fence](./fence/README.md)、[split](./split/README.md)、[cli](../cli/dev/README.md)（自检用例盯着） |
 | **D-2** | 允许"区段 → 点"**一层嵌套**（指南要求围栏不嵌套）；真实框架里自订点就住在区段内 | [fence](./fence/README.md)、[model](./model/README.md) |
 | **D-3** | 允许**未归属字节段**（前缀 / 区段之间的空行 / 后缀），但全部纳入字节恒等比对 | [model](./model/README.md)、[fence](./fence/README.md) |
-| **D-6** | 写回前校验**源包自导出后未被改动**，变了就拒绝 | [cli](./cli/README.md) |
+| **D-6** | 写回前校验**源包自导出后未被改动**，变了就拒绝 | [cli](../cli/dev/README.md) |
 | **DV-3** | "类型 → scope"的映射是**新建点对话框的默认值**，不是对既有文本的硬约束 → 只给 warn | [verify](./verify/README.md)（`structtx.go`） |
 
 ## 退出码
@@ -91,7 +91,7 @@ pkgfile ─┬─ tapfile    包与条目（只读视图 + 字节级重建）
 0 成功 / 2 包格式或用法错 / 3 验证失败 / 4 写入被拒 / 5 IO·环境失败
 ```
 
-退出码映射在 [./cli](./cli/README.md)。同一条命令的 `--json` 输出里也带 `exit_code` 字段。
+退出码映射在 [./cli](../cli/dev/README.md)。同一条命令的 `--json` 输出里也带 `exit_code` 字段。
 
 ## 工作区布局
 
@@ -114,7 +114,7 @@ pkgfile ─┬─ tapfile    包与条目（只读视图 + 字节级重建）
 
 ## 与外部材料的关系
 
-- `docs/T100设计器-README.md`：第三方材料的恢复副本，**在仓库里**，注释里的 `§3.x` 指它。
+- [`designer-src/`](../../designer-src/README.md)：设计器反编译源码，**在仓库里**，注释里的 `file:line` 指它。
 - 注释里的「设计指南 §x.y」指一份**不在本仓库**的前身文档。R1–R7 的条文在代码注释里都有，
   D-n 的含义写在使用处 —— 读代码即可，不必去找那份文档。
 
@@ -123,8 +123,8 @@ pkgfile ─┬─ tapfile    包与条目（只读视图 + 字节级重建）
 ```bash
 go test ./internal/dev/...            # 各包单测（fence 与 tapfile 各约 48 秒）
 ./tt.exe dev tzc selftest             # 内置对抗用例，不需要真实语料：通过 31，失败 0
-TDEV_DEEP=1 go test ./internal/dev/cli -run 'TestCorpusExportVerify|TestCorpusApplySimulation'
-                                      # 全语料回归（9–11 分钟，见 TEST.md 的两条纪律）
+TDEV_DEEP=1 go test ./internal/cli/dev -run 'TestCorpusExportVerify|TestCorpusApplySimulation'
+                                      # 全语料回归（9–11 分钟）
 ```
 
 ## 子目录
@@ -142,5 +142,5 @@ TDEV_DEEP=1 go test ./internal/dev/cli -run 'TestCorpusExportVerify|TestCorpusAp
 | [split](./split/README.md) | 回写拆分：Document' → TapOp + TglPatch |
 | [store](./store/README.md) | 工作区落盘、原子写、锁、manifest、git |
 | [testutil](./testutil/README.md) | 合成测试包与真实语料发现 |
-| [cli](./cli/README.md) | 命令行入口与各动词 |
+| [cli](../cli/dev/README.md) | 命令行入口与各动词 |
 | [tzs](./tzs/README.md) | `.tzs` 表单包的引擎客户端（另一条线） |

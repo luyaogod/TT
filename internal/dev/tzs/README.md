@@ -12,8 +12,8 @@
 
 **依赖面刻意窄**：只 import [config](../../config/README.md)（状态文件落点）与
 [winproc](../../winproc/README.md)（起 / 判活 / 杀）加标准库。它**不 import
-`internal/dev/cli`** —— 那边 import 它，反过来就成环。命令层（动词分发、退出码、文案）住在
-[../cli/README.md](../cli/README.md)，本包只提供退出码映射这类纯函数供它调用。
+`internal/cli/dev`** —— 那边 import 它，反过来就成环。命令层（动词分发、退出码、文案）住在
+[cli](../../cli/dev/README.md)，本包只提供退出码映射这类纯函数供它调用。
 
 ## 三条纪律
 
@@ -131,6 +131,8 @@
 | **`dry_run` 不是靠撤销栈** | `DryRun.cs` | 撤销栈不是模型全部状态，逐字节回不去。实际做法是渲染临时包 → 跑 → 重读，`reverted.mode` 给回滚结论（`none` 表示这个动词的副作用只有文件） |
 | **`op` / `list_ops`** | `OpLog.cs` | 幂等操作日志（"超时之后那次写到底进去没有"的机械答案）。日志**只在进程内**、不落盘 |
 | **`field_add` 的返回** | `Fns/Session.cs` | 给 `added`（每个新字段带它的表/列绑定，缺失本身也是信息）、`validate`、`baselineCached`，存了包时另给 `saved` |
+| **同一程序的第二个包打不开** | `TzpManager`（设计器侧） | `open` 的 key 是 `程序名\|Form`，**不含路径**；新包与源包同名必须先 `close` 再 `open`（`E_KEY_IN_USE`，退 4）。**别读 `TzpManager.Current`**，一律按 key 寻址 |
+| **无界面驱动卡住 90 秒** | 设计器侧模态框 | 某些操作会弹**没有消息泵的模态框**（如缺基础资料、只拷 `mta/` 的工作区）。看门狗跑不掉这类——只能整份工作区重试 |
 
 ## 退出码
 
@@ -150,10 +152,10 @@ go test ./internal/dev/tzs -run TestMiniCorpus -count=1 -v
                                            # 冒烟回归，跑在**仓库自带**的语料上
                                            # （testdata/tzs-mini/ws，3.2 MB）：
                                            # 不需要任何环境变量，只要能构建引擎
-TTZS_E2E=1 go test ./internal/dev/cli -run TestE2E   # 需要真引擎（配 TTZS_EXE / TTZS_WS / TTZS_INSTALL）
+TTZS_E2E=1 go test ./internal/cli/dev -run TestE2E   # 需要真引擎（配 TTZS_EXE / TTZS_WS / TTZS_INSTALL）
 ./tt.exe dev tzs doctor                    # 五个失败面自检，不引导任何东西
 TTZS_DEEP=1 go test ./internal/dev/tzs -run TestCorpus -timeout 30m
-                                           # 全语料回归（17 分钟；先在副本上跑，见 TEST.md）
+                                           # 全语料回归（17 分钟；先在副本上跑）
 TTZS_FNS=1 TTZS_CORPUS=%TEMP%\ttws go test ./internal/dev/tzs -run TestFnsGate -timeout 30m -v
                                            # 函数面覆盖：每个语料包一个 --stdio 进程，
                                            # 逐个驱动引擎声明的**全部**写函数（见 fns_test.go 顶部）
@@ -202,5 +204,5 @@ TTZS_FNS=1 TTZS_CORPUS=%TEMP%\ttws go test ./internal/dev/tzs -run TestFnsGate -
 ## 细节去哪
 
 - 动词的用法与示例 → [`skills/tt-dev-tzs/SKILL.md`](../../../skills/tt-dev-tzs/SKILL.md)
-- 命令层（动词分发、退出码、文案） → [../cli/README.md](../cli/README.md)
+- 命令层（动词分发、退出码、文案） → [cli](../../cli/dev/README.md)
 - 引擎本身的格式与契约 → [../../../engine/README.md](../../../engine/README.md)

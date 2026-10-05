@@ -28,5 +28,4 @@ build_msi.bat        # → dist/TT-<版本>-x64.msi
 
 ## 细节去哪
 
-- 构建与依赖（含 WiX 工具集） → 根 [BUILD.md](../BUILD.md)
 - 打包脚本与目录补丁 → [../tools/README.md](../tools/README.md)

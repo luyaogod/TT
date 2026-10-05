@@ -37,5 +37,5 @@ go test ./internal/dev/model -count=1
 
 ## 细节去哪
 
-- 报错定位怎么串到用户面前 → [../README.md](../README.md) 与 [../cli/README.md](../cli/README.md)
+- 报错定位怎么串到用户面前 → [../README.md](../README.md) 与 [cli](../../cli/dev/README.md)
 - 权限判定链本身（G1–G7 / S1–S5） → [../synth/README.md](../synth/README.md)

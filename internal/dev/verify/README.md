@@ -90,7 +90,7 @@ gate3 在写之前、对内存里的新包执行。**任何一步失败，原包
 ## 判据
 
 各条**拒绝路径**由端到端用例覆盖，而且它们**已经在默认档里跑** ——
-`tt dev tzc selftest` 的 31 项被接进了 `go test`（见根 `TEST.md`）。
+`tt dev tzc selftest` 的 31 项被接进了 `go test`。
 所以本包的单测不重测那些，补的是端到端钉不到的两件：
 
 ```bash
@@ -124,7 +124,7 @@ apply 用例负责。**它验不了"设计器会不会拒绝这个容器"**，�
 ```bash
 go test ./internal/dev/verify -count=1      # 本包单测（干净路径 + 行尾等价 + Report 计数）
 ./tt.exe dev tzc selftest                   # 对抗用例（改只读区、删围栏、塞非法字符…）
-TDEV_DEEP=1 go test ./internal/dev/cli -run TestCorpusExportVerify
+TDEV_DEEP=1 go test ./internal/cli/dev -run TestCorpusExportVerify
                                             # 全语料验证（9–11 分钟）
 ```
 
@@ -132,4 +132,4 @@ TDEV_DEEP=1 go test ./internal/dev/cli -run TestCorpusExportVerify
 
 - 解析结果从哪来 → [../fence/README.md](../fence/README.md)
 - 发现怎么变成新包的字节 → [../split/README.md](../split/README.md)
-- 命令行与退出码 → [../cli/README.md](../cli/README.md)
+- 命令行与退出码 → [cli](../../cli/dev/README.md)

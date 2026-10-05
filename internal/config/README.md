@@ -1,24 +1,52 @@
-# internal/config — 统一配置层
+# internal/config — 统一配置层与路径管理器
 
-**只有一份配置文件**，所有命令组共用：位置解析、读写、校验、迁移、打码都在这一层。
+**只有一份配置文件**，所有命令组共用：位置解析、读写、校验、打码都在这一层。
+tt 访问的一切自有外部资源（缓存、服务状态、本地字典库、引擎 exe）的落点也在这里统一解析。
 
 ## 配置文件放在哪
 
 按优先级取**第一个存在**的：
 
-1. `TT_CONFIG` 环境变量（另两个旧名仍被识别）
+1. `TT_CONFIG` 环境变量
 2. `--config <路径>`
 3. `<exe 目录>\.portable` 存在 → 便携包，配置留在包内
-4. `%APPDATA%\T100\tt\config.json` —— 默认位置
-5. 旧位置兜底（首次运行自动合并迁移到 4）：
-   `<exe 目录>\config.json`、`<当前目录>\config.json`、旧工具的两个目录、以及更早的那个
+4. `%APPDATA%\tt\config.json` —— 默认位置
 
-统一目录可用 `T100_HOME` 整体改写（`T100_HOME=D:\t100`）。
+**没有旧位置兜底，也不做自动迁移。** 旧版的各种落点（`%APPDATA%\T100\tt`、tdebug/tdict、
+exe 或当前目录的 `config.json`）一律不读 —— 数据统一在 `%APPDATA%\tt`，不向后兼容。
+`tt config validate` 会对 `schemaVersion` 低于当前的配置给出提示（不再自动迁移）。
 
 **显式指定的路径就是答案。** `--config` / `TT_CONFIG` 指向一个还不存在的文件时，**不**悄悄
 改用默认落点 —— 否则便携版会把配置写进用户目录，测试脚本也会落在别处。
 
 **数据目录 = 配置所在目录**，所以缓存、快照、状态文件都跟着落在同一个目录下。
+
+## 统一路径管理器（locations.go）
+
+所有"东西放哪 / 去哪读"的问题都从 `Locations` 取答案，调用方不得自己拼这些路径 ——
+那会复制出第二份位置解析，某天两边悄悄分叉（历史上"服务写一处、命令行读另一处"就是这样来的）。
+
+```go
+loc, err := config.ResolveLocations(configFlag, allowMissing) // 从头解析
+loc := config.LocationsAt(configPath)                        // 已有配置路径时包装
+```
+
+| 方法 | 给什么 |
+|---|---|
+| `DataDir()` | 数据目录 = `config.json` 所在目录 |
+| `CacheDir(name)` | 数据目录下的缓存子目录；名字必须在 `CacheSubdirs` 清单里，否则空串 |
+| `StateFile()` / `LogFile()` | `.tt-serve.json` / `.tt-serve.log`（后台服务状态与日志） |
+| `DictDBCandidates(flagPath)` / `ResolveDictDB(flagPath)` | 本地字典库候选与读侧定位：`TDICT_DB` → `-d` → 数据目录下的 `erp_data.db` |
+| `SyncTarget(configured, flagPath)` | 写侧定位：`sync.target` → 已存在的库 → 绝对 `-d` → 数据目录缺省 |
+| `config.EngineExe(override)` | `.tzs` 引擎 exe：`tzs.serverExe` 覆盖 → `<tt.exe 目录>\tzs\tzs-server.exe` |
+
+两个配套约束：
+
+- **缓存子目录名只允许 `CacheSubdirs` 清单里的**（`ents` / `srccache` / `execlog` /
+  `debug-bps` / `spill`）。凡是 `<数据目录>/<名字>` 这种拼接都走 `config.CacheDir`，
+  写错名字当场得到空串，而不是悄悄建出一个清单外的新目录。
+- **本地字典库缺省在数据目录下**（便携包的数据目录就是包内，两种形态都成立）。
+  读侧（查询命令）要求文件存在，全不存在就报错；写侧（同步）永不报错，由同步过程创建。
 
 ## 一份文件、一个写入口
 
@@ -37,7 +65,7 @@ config.Edit(path, validate, mutate)   // Open → validate → mutate → Save
 
 ## 结构版本与缺省值
 
-`SchemaVersion = 2`；0 或缺失表示更早的结构版本，需要迁移（见下）。
+`SchemaVersion = 2`，随新配置文件写入（骨架与 `ensureSchemaVersion`）；旧结构不做自动迁移。
 
 各节都有自己的缺省常量（监听地址、调试参数、终端宽高、打印上限、SSH 端口、工作区后缀…），
 由 `FillDefaults` 在内存里补齐 —— **不写盘**。缺省值只在一处定义。
@@ -51,17 +79,6 @@ config.Edit(path, validate, mutate)   // Open → validate → mutate → Save
 
 **`GET /api/hosts` 返回明文口令**（设置页要能就地编辑与探测）—— 任何 dump 或粘贴这个响应的
 行为都是泄密，包括贴进聊天窗口与 issue。
-
-## 迁移
-
-目标配置不存在、或版本旧于当前时执行一次。
-
-**核心是"拆解"而不是"整节改名"**：迁移前的结构里，环境清单和调试设置挤在同一个节里；
-迁移之后环境清单归 `hosts`、调试设置留在 `debug`。所以不能整节改名 —— 那会把调试设置
-一并吞进环境清单里。
-
-合并来源按固定顺序收集（**靠后的在冲突时胜出**）：旧工具目录 → 就地运行的遗留配置 →
-目标位置自身（上次迁移中断的情况）。落盘后给原有文件各留一份备份，**源文件本身不删除**。
 
 ## 哪些目录算缓存
 
@@ -81,7 +98,8 @@ config.Edit(path, validate, mutate)   // Open → validate → mutate → Save
 
 ## 路径型取值
 
-配置里那些"这是个路径"的值，解析规则同样只有一份（绝对化、派生状态、同步目标缺省位置）。
+配置里那些"这是个路径"的值（`sync.target`、`mirror.dir`、`bdldoc.dir`、`tzs.workspace`…），
+解析规则同样只有一份（绝对化、派生状态、同步目标缺省位置）。
 理由：同一个值在两处各算一遍，会解析成不同结果 —— 那是最难查的一类 bug。
 
 ## 判据
@@ -90,18 +108,19 @@ config.Edit(path, validate, mutate)   // Open → validate → mutate → Save
 go test ./internal/config -count=1
 ```
 
-覆盖：位置解析的优先级与"显式路径就是答案"、迁移的拆解规则（断言调试设置**没有**被吞进
-环境清单）、原子写、打码口径（含未知节）、缓存清单的边界。
+覆盖：位置解析的优先级与"显式路径就是答案"、**旧位置兜底已移除**（当前目录与旧工具目录里
+的诱饵配置不被捡走）、原子写、打码口径（含未知节）、缓存清单的边界、路径管理器的各条
+优先级链（字典库读/写、引擎 exe、状态文件）。
 
 ## 改动影响面
 
 | 改什么 | 会波及 |
 |---|---|
 | 位置解析的优先级 | 便携版与安装版的落点都靠它；改错会让配置"消失"（其实是写到了别处） |
+| `Locations` 的各条优先级链 | 字典库读写、服务状态、引擎定位——调用方已经不再自己算，改这里=改所有地方 |
 | `Edit` / `Save` 的语义 | 全仓所有写配置的路径；原子写退化成直接写会重新引入"半截文件" |
 | 缺省值常量 | 各命令组的默认行为（调试参数、终端尺寸…） |
-| `CacheSubdirs` | 清理逻辑的唯一依据；**多列一项可能删掉用户数据** |
-| 迁移规则 | 只影响首次运行，但写错了会静默吞掉用户设置 |
+| `CacheSubdirs` | 清理逻辑与 `CacheDir` 校验的唯一依据；**多列一项可能删掉用户数据** |
 | 打码规则 | 一切把配置吐出来的地方 |
 
 ## 细节去哪

@@ -22,7 +22,7 @@
 ## 关系
 
 - 被 [synth](../synth/README.md)（占位符 ↔ 点配对）、[fence](../fence/README.md)、
-  [verify](../verify/README.md)、[split](../split/README.md)（打补丁）、[cli](../cli/README.md) 使用。
+  [verify](../verify/README.md)、[split](../split/README.md)（打补丁）、[cli](../../cli/dev/README.md) 使用。
 - **改区段要写两处**：`.tap` 的 `<section>` 与 `.tgl` 的同一区段必须逐字节一致 ——
   这条约束由 [split](../split/README.md) 落地、由 `selftest` 里的对抗用例盯着。
 
@@ -48,4 +48,4 @@ go test ./internal/dev/tglfile -count=1
 ## 细节去哪
 
 - 三类标记怎么与 TAP 配对、配对不上各是什么后果 → [../synth/README.md](../synth/README.md)、[../verify/README.md](../verify/README.md)
-- 三方依据（四个正则原文与锚点展开逻辑的出处） → [`docs/T100设计器-README.md`](../../../docs/T100设计器-README.md) §3.3、§3.4、§3.5
+- 三方依据（四个正则原文与锚点展开逻辑的出处） → 设计器反编译源码 [`designer-src/`](../../../designer-src/README.md) 的 `CodeEditorManager.cs`

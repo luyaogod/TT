@@ -29,11 +29,9 @@ tt install skills --to .claude/skills   # 装到 Claude Code 直接读的位置
 
 ```bash
 go test ./internal/cli -run TestInstall      # 安装面：复制、冲突拒绝、源=目标拒绝
-python tools/eval/grade.py --run <装置根>     # 工具面评测（回读产物，不接受自述）
 ```
 
 ## 细节去哪
 
 - 各技能怎么用：直接读它的 `SKILL.md`
-- 工具面评测装置 → [../tools/eval/README.md](../tools/eval/README.md)
 - 契约与不变量（技能里不讲的那部分） → [../internal/README.md](../internal/README.md)

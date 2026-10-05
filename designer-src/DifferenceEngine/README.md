@@ -21,4 +21,4 @@ SlowPerfect 三档精度（DiffEngineLevel.cs:6-13）—— 经典 CodeProject D
 
 - UI 消费方（DiffManager/DiffRenderer）：[../CodeEditWindow/README.md](../CodeEditWindow/README.md) ·
   [../CodeEditWindow/Helper/README.md](../CodeEditWindow/Helper/README.md)
-- 上层索引：[../README.md](../README.md)；来历与可信度分级：[../../docs/T100设计器-README.md](../../docs/T100设计器-README.md)
+- 上层索引：[../README.md](../README.md)

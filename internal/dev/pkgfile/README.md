@@ -104,4 +104,4 @@ go test ./internal/dev/pkgfile -count=1
 
 - zip 原始结构的读写实现 → `zipraw.go`（顶部注释是这套规则的完整说明）
 - 写回之后的事（拆分与落盘） → [../split/README.md](../split/README.md)、[../store/README.md](../store/README.md)
-- 三方依据 → [`docs/T100设计器-README.md`](../../../docs/T100设计器-README.md) §3.1 容器层、§3.2 条目→加载器分派、§3.6 打包
+- 三方依据 → 设计器反编译源码 [`designer-src/`](../../../designer-src/README.md)：容器层、条目→加载器分派、打包

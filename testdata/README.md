@@ -15,11 +15,10 @@
 「有真客户语料的那台机器」。它**不替代**真语料回归，两者分工见它的 README。
 
 真实语料（客户的 `.tzc` / `.tzs` 包）**不在仓库里**：它是活目录、是客户数据，
-由环境变量指向，见根 [TEST.md](../TEST.md) 的两条纪律。
+由环境变量指向。
 （`tzs-mini` 是**筛过的那一份**：只有三个包与它们读取的元数据，不是活目录、不是完整工作区。）
 
 ## 细节去哪
 
 - 夹具的来源、判据与改动约定 → [fgl-fixtures/README.md](./fgl-fixtures/README.md)、
   [tzs-mini/README.md](./tzs-mini/README.md)
-- 语料回归怎么跑 → 根 [TEST.md](../TEST.md)

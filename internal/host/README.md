@@ -75,6 +75,6 @@ go test ./internal/host -count=1
 
 ## 细节去哪
 
-- 环境与账号那条链 → 根 [DESIGN_DOC.md](../../DESIGN_DOC.md)、[../entdir/README.md](../entdir/README.md)
+- 环境与账号那条链 → [docs/DESIGN.md](../../docs/DESIGN.md)、[../entdir/README.md](../entdir/README.md)
 - 服务器侧库执行（调试线） → [../debug/README.md](../debug/README.md)
 - 客户端直连（字典线） → [../dict/live/README.md](../dict/live/README.md)

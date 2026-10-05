@@ -24,4 +24,4 @@ CodeTemplateSelector.xaml.cs），见 [./SpecDesigner/README.md](./SpecDesigner/
 
 - 主 UI 子树：[./SpecDesigner/README.md](./SpecDesigner/README.md)
 - 上层索引：[../README.md](../README.md)
-- 为什么入库、四条边界：[../../DESIGN_DOC.md](../../DESIGN_DOC.md) §3.1；来历与可信度分级：[../../docs/T100设计器-README.md](../../docs/T100设计器-README.md)
+- 为什么入库、边界在哪：[../../README.md](../../README.md)

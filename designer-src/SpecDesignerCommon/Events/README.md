@@ -21,4 +21,3 @@ EventAggregatorManager.cs:11,22）。
 ## 细节去哪
 
 - 上层索引：[../README.md](../README.md)；全树入口：[../../README.md](../../README.md)
-- 来历与可信度分级：[../../../docs/T100设计器-README.md](../../../docs/T100设计器-README.md)

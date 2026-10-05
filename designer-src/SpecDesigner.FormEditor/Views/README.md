@@ -31,4 +31,3 @@ TabIndexControl（tab 排序）、ResizeControl（尺寸手柄）及各类查看
 - AddWidgetAdornerHelper.Show（统一"把控件放上画布"出口）：[../Helpers/README.md](../Helpers/README.md)
 - 命令包装的对象：[../../SpecDesignerCommon/UndoRedo/README.md](../../SpecDesignerCommon/UndoRedo/README.md)
 - 上层索引：[../README.md](../README.md)；全树入口：[../../README.md](../../README.md)
-- 来历与可信度分级：[../../../docs/T100设计器-README.md](../../../docs/T100设计器-README.md)

@@ -37,4 +37,4 @@ Views/ 与 Helpers/ 的热点在各自 README；本表收 DBStructure/ 的两个
 
 - 子包：[./Views/README.md](./Views/README.md) · [./Helpers/README.md](./Helpers/README.md)
 - 上层索引：[../README.md](../README.md)
-- 为什么入库、四条边界：[../../DESIGN_DOC.md](../../DESIGN_DOC.md) §3.1；来历与可信度分级：[../../docs/T100设计器-README.md](../../docs/T100设计器-README.md)
+- 为什么入库、边界在哪：[../../README.md](../../README.md)

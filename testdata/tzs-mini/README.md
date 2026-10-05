@@ -3,7 +3,7 @@
 一套 `.tzs` 语料夹具：**三个典型表单包 + 它们需要的最小元数据，3.2 MB，进仓库**。
 
 它解决的是这个：`.tzs` 的语料回归从前只有「有真客户语料的那台机器」能跑 ——
-一份完整工作区 **130 MB**，而且 `mta/` + `tbl/` 是数据不是代码，按 `AGENTS.md §9` 不该入库。
+一份完整工作区 **130 MB**，而且 `mta/` + `tbl/` 是数据不是代码，不该入库。
 于是干净克隆上那几条回归**全跳**。有了这份夹具，clone + `cd engine && ./build.sh` 之后就能跑。
 
 ## 里面是什么
@@ -16,8 +16,10 @@ ws/                         ← 工作区（引擎的 TZSCLI_WS 指这一层）
   aapp320(c).tzs
   aapt300(c).tzs
 manifest.txt                ← 45 行的固定清单（sha256-16 + 字节 + 仓库相对路径）
-build.py                    ← 从一份真工作区重新生成这两样
 ```
+
+生成器在 [tools/tzsmini](../../tools/tzsmini)（2026-10 从本目录的 `build.py` 迁去），
+重新生成 `ws/` 与 `manifest.txt` 两样。
 
 三个包是**按"小 / 中 / 大 + 特征"挑的**，不是随手抓的：
 
@@ -48,14 +50,14 @@ go test ./internal/dev/tzs -run TestMiniCorpus -count=1 -v
 重新生成：
 
 ```bash
-python testdata/tzs-mini/build.py --src <一个真工作区>
+go run ./tools/tzsmini --src <一个真工作区>
 # --src 必须是工作区（该目录下有 mta/），包摊在它顶层
 ```
 
 ## 故意不覆盖什么
 
 - **只三个包**。它能证明「这条链路没坏」，**证明不了**「上百个真实包的形状分布还都对」。
-  那一条仍然归 `TTZS_DEEP` 的真语料回归（根 [TEST.md](../../TEST.md) 的两条纪律）。
+  那一条仍然归 `TTZS_DEEP` 的真语料回归。
   这份夹具是**冒烟网**，不是回归网。
 - **`mta/` 少了三份目录性数据**（`zooms.xml` 消息目录 / `subroutines.xml` 子程序 / `messages.xml`）。
   实测不影响这三个包的任何计数，但**若将来有测试要查这三样，看到的是一个更小的世界**。
@@ -67,7 +69,7 @@ python testdata/tzs-mini/build.py --src <一个真工作区>
 当基线），所以一份悄悄变了的夹具会让判据跟着一起搬而**全是绿的**。实测过一次：把 `mta/`
 裁到只剩四个文件时，引擎照样回 `SUMMARY|ok`，而 `aapt300` 的布局元素已经从 515 变成了 512。
 
-所以：**任何对 `ws/` 的改动都必须连 `manifest.txt` 一起重新生成**（`build.py` 一次做两件事）。
+所以：**任何对 `ws/` 的改动都必须连 `manifest.txt` 一起重新生成**（`tools/tzsmini` 一次做两件事）。
 `TestMiniCorpusIsPinned` 就是这么盯着的 —— 多一个、少一个、改一个字节都红。
 
 ## 两个路径陷阱（生成脚本里也写着）
@@ -79,6 +81,5 @@ python testdata/tzs-mini/build.py --src <一个真工作区>
 
 ## 细节去哪
 
-- 生成规则、为什么留哪些文件 → [build.py](./build.py) 的文件头（每条都注明是实测）
+- 生成规则、为什么留哪些文件 → [tools/tzsmini/main.go](../../tools/tzsmini/main.go) 的文件头（每条都注明是实测）
 - 那三条回归本身 → [internal/dev/tzs/mini_corpus_test.go](../../internal/dev/tzs/mini_corpus_test.go)
-- 真语料回归怎么跑、两条硬纪律 → 根 [TEST.md](../../TEST.md)

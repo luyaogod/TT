@@ -33,4 +33,3 @@ undoRedoManagerMap 按 PackageKey 管理（SettingManager.cs:69-82 → [../READM
 
 - 框架本体（双栈/分组）：[../../UndoRedoFramework/README.md](../../UndoRedoFramework/README.md)；被操作的对象模型：[../ViewModel/README.md](../ViewModel/README.md)
 - 上层索引：[../README.md](../README.md)；全树入口：[../../README.md](../../README.md)
-- 来历与可信度分级：[../../../docs/T100设计器-README.md](../../../docs/T100设计器-README.md)
