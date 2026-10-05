@@ -74,7 +74,7 @@ type Options struct {
 	// 「默认位置：X」，而字典子系统真正往那儿写。两边各算一次的话，显示的那个路径
 	// 可能不是实际写入的那个 —— 用户按显示去核对会发现文件不在那里。
 	//
-	// 留空 = 用 config.DefaultSyncTarget()（当前目录的 erp_data.db）。
+	// 留空 = 用 config.Locations 的缺省（数据目录下的 erp_data.db）。
 	SyncDefaultTarget string
 
 	// ---- 三个"动作"端点的外部依赖 ----
@@ -569,10 +569,9 @@ func (s *Server) hConfigMeta(w http.ResponseWriter, r *http.Request) {
 		"config":         path,
 		"defaultConfig":  config.DefaultConfigPath(),
 		"portable":       config.IsPortable(),
-		"toolsHome":      config.ToolsHome(),
+		"toolsHome":      config.UserConfigDir(),
 		"schemaVersion":  config.SchemaVersion,
 		"defaultListen":  DefaultListen,
-		"legacyTools":    config.LegacyToolConfigPaths(),
 		"supportedTypes": []string{"oracle", "kingbase"},
 	})
 }

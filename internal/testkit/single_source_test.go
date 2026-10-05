@@ -11,7 +11,7 @@ import (
 
 // TestHelpersHaveNoLocalCopies 钉住"这几个跨包 helper 只有一处实现"。
 //
-// 为什么值得一条测试：这个仓库反复出现"图省事再抄一份"的坏味道（AGENTS.md §5 整节在讲），
+// 为什么值得一条测试：这个仓库反复出现"图省事再抄一份"的坏味道，
 // 而**抄错语料根的后果是静默的** —— internal/dev/testutil/corpus.go 与它的 README 都写着：
 // "两边各自漂移的后果是一边认 TDEV_CORPUS、另一边只认 TTZS_CORPUS，于是同一条命令
 // 在一台机器上跑全量、在另一台上**静默跑零个包**（'0 个包全部通过'是最坏的一种假绿）。"
@@ -42,6 +42,13 @@ func TestHelpersHaveNoLocalCopies(t *testing.T) {
 			why: "stdout 捕获只有一处：testkit.CaptureStdout（边写边读，且有 64 KB 的边界判据）。\n" +
 				"    从前那份'写临时文件'的实现没有退出码，两边的签名不一样。\n" +
 				"    改成 testkit.CaptureStdout(t, func() int { …; return 0 })。",
+		},
+		{
+			name: "silent",
+			re:   regexp.MustCompile(`(?m)^func silent\(`),
+			why: "吞输出只有一处：testkit.Silent。tzc 与 tzs 两个测试包都要吞输出，\n" +
+				"    各抄一份就会有一天只改一份 —— 与 captureStdout 收敛到这里是同一个理由。\n" +
+				"    改成 testkit.Silent(t, func() int { … })。",
 		},
 	}
 

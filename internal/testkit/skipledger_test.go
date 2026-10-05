@@ -45,8 +45,6 @@ const (
 	// layEnv 本机环境：没有 git / 没有用户配置目录 / 没有旧配置。
 	// 这些**不影响"全绿"这个结论** —— 它们说的是"这台机器上没那个东西"。
 	layEnv skipLayer = "L0-环境"
-	// layNoSubject 这条断言这一次没有对象（比如文档里那句话被改写了）。
-	layNoSubject skipLayer = "无对象"
 	// layPremise 测试自己构造的前提没满足。归这一类的要特别当心：
 	// 前提长期不成立 = 这条测试**静默变成空转**，与删掉它没有区别。
 	layPremise skipLayer = "前提"
@@ -79,14 +77,10 @@ type skipSite struct {
 //
 // 条目是脚本从源码里抽出来的（避免手抄错），层与理由是人逐条标的。
 var skipLedger = []skipSite{
-	{file: "internal/config/paths_test.go", msg: "拿不到用户配置目录", layer: layEnv, why: "本机取不到用户配置目录 —— 这台机器上没有那个目录"},
-	{file: "internal/config/realdata_test.go", msg: "定位不到统一用户目录", layer: layEnv, why: "本机取不到统一用户目录，那份真实旧配置无从谈起"},
-	{file: "internal/config/realdata_test.go", msg: "本机没有合并前的旧配置，跳过", layer: layEnv, why: "本机没有合并前的旧配置 —— 只有本机真有旧配置时才验得到"},
-	{file: "internal/dev/cli/corpus_test.go", msg: "深度语料回归未启用：设 TDEV_DEEP=1 并给足 -timeout 30m（见 README「测试与验收」）", layer: layL3, why: "需真实语料：开关 TDEV_DEEP=1"},
-	{file: "internal/dev/cli/tzs_verb_e2e_test.go", msg: "需要真引擎：设 TTZS_E2E=1（可选 TTZS_EXE），见本文件顶部注释", layer: layL4, why: "需真引擎：开关 TTZS_E2E=1（可选 TTZS_EXE）"},
-	{file: "internal/dev/cli/tzs_verb_e2e_test.go", msg: "找不到引擎 exe（TTZS_EXE=%s）：%v", layer: layL4, why: "需真引擎：开关 TTZS_E2E=1 + TTZS_EXE"},
-	{file: "internal/dev/cli/tzs_verb_test.go", msg: "文档里没有「N 个动词」的声明 —— 这条断言没有对象了（改写了措辞就把它一起改）", layer: layNoSubject, why: "这条断言的对象是文档里那句话，措辞一改它就没有对象了"},
-	{file: "internal/dev/cli/tzs_verb_test.go", msg: "没有引擎 exe（%v）：这条测的是期限机制本身", layer: layL4, why: "需真引擎：开关 TTZS_E2E=1（这条测的是期限机制本身）"},
+	{file: "internal/cli/dev/tzc/corpus_test.go", msg: "深度语料回归未启用：设 TDEV_DEEP=1 并给足 -timeout 30m（见 README「测试与验收」）", layer: layL3, why: "需真实语料：开关 TDEV_DEEP=1"},
+	{file: "internal/cli/dev/tzs/tzs_verb_e2e_test.go", msg: "需要真引擎：设 TTZS_E2E=1（可选 TTZS_EXE），见本文件顶部注释", layer: layL4, why: "需真引擎：开关 TTZS_E2E=1（可选 TTZS_EXE）"},
+	{file: "internal/cli/dev/tzs/tzs_verb_e2e_test.go", msg: "找不到引擎 exe（TTZS_EXE=%s）：%v", layer: layL4, why: "需真引擎：开关 TTZS_E2E=1 + TTZS_EXE"},
+	{file: "internal/cli/dev/tzs/tzs_verb_test.go", msg: "没有引擎 exe（%v）：这条测的是期限机制本身", layer: layL4, why: "需真引擎：开关 TTZS_E2E=1（这条测的是期限机制本身）"},
 	{file: "internal/dev/pkgfile/zipshape_test.go", msg: "语料里没找到设计器形态的 .tap 包", layer: layL3Missing, why: "需真实语料：这一类形态只在真语料里出现"},
 	{file: "internal/dev/pkgfile/zipshape_test.go", msg: "语料里没有 Zip64 形态的 .tap 包", layer: layL3Missing, why: "需真实语料：这一类形态只在真语料里出现"},
 	{file: "internal/dev/store/store_test.go", msg: "环境里没有 git，跳过 git 相关断言", layer: layEnv, why: "本机没装 git（装了才跑 git 相关断言）"},

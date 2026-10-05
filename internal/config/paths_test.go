@@ -3,32 +3,31 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
 // isolateEnv 把配置发现相关的环境变量全部指到临时目录，让测试不受本机
-// 真实存在的 %APPDATA%\T100\{tdebug,tdict} 与 %APPDATA%\TDebug 影响。
-// 返回统一用户目录（T100_HOME）。
+// 真实存在的 %APPDATA% 内容影响。返回统一用户目录的**上级**（%APPDATA% 指向的临时目录，
+// 即 UserConfigDir = <返回值>\tt 的父目录）。
 func isolateEnv(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
-	t.Setenv("T100_HOME", home)
-	t.Setenv("APPDATA", t.TempDir())
+	switch runtime.GOOS {
+	case "windows":
+		t.Setenv("AppData", home)
+	default:
+		t.Setenv("XDG_CONFIG_HOME", home)
+	}
 	t.Setenv("TT_CONFIG", "")
-	t.Setenv("TDEBUG_CONFIG", "")
-	t.Setenv("TDICT_CONFIG", "")
 	return home
 }
 
-// T100_HOME 整体改写统一目录。
-func TestToolsHome_T100HomeOverride(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("T100_HOME", dir)
+// 默认落点：%APPDATA%\tt —— 中间不再有 T100 一层。
+func TestUserConfigDir(t *testing.T) {
+	home := isolateEnv(t)
 
-	if got := ToolsHome(); got != dir {
-		t.Errorf("ToolsHome() = %q, 期望 %q", got, dir)
-	}
-	want := filepath.Join(dir, ToolDirName)
+	want := filepath.Join(home, ToolDirName)
 	if got := UserConfigDir(); got != want {
 		t.Errorf("UserConfigDir() = %q, 期望 %q", got, want)
 	}
@@ -37,50 +36,23 @@ func TestToolsHome_T100HomeOverride(t *testing.T) {
 	}
 }
 
-// 没有 T100_HOME 时落在 %APPDATA%\T100 下。
-func TestToolsHome_DefaultsUnderUserConfigDir(t *testing.T) {
-	t.Setenv("T100_HOME", "")
-	base, err := os.UserConfigDir()
-	if err != nil {
-		t.Skip("拿不到用户配置目录")
-	}
-	if got, want := ToolsHome(), filepath.Join(base, "T100"); got != want {
-		t.Errorf("ToolsHome() = %q, 期望 %q", got, want)
-	}
-}
-
-// TT_CONFIG 优先级最高，且旧名 TDEBUG_CONFIG / TDICT_CONFIG 仍然生效 ——
-// 既有脚本和 AI skill 不改也能用。
-func TestResolvePath_EnvVars(t *testing.T) {
+// TT_CONFIG 优先级最高。
+func TestResolvePath_EnvVar(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "my.json")
 	if err := os.WriteFile(path, []byte(`{"hosts":{}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	for _, env := range []string{"TT_CONFIG", "TDEBUG_CONFIG", "TDICT_CONFIG"} {
-		t.Run(env, func(t *testing.T) {
-			t.Setenv("TT_CONFIG", "")
-			t.Setenv("TDEBUG_CONFIG", "")
-			t.Setenv("TDICT_CONFIG", "")
-			t.Setenv(env, path)
-
-			got, err := ResolvePath("", false)
-			if err != nil {
-				t.Fatalf("ResolvePath: %v", err)
-			}
-			if got != path {
-				t.Errorf("解析到 %q, 期望 %q", got, path)
-			}
-		})
-	}
-
-	// TT_CONFIG 应当压过另外两个旧名
+	isolateEnv(t)
 	t.Setenv("TT_CONFIG", path)
-	t.Setenv("TDEBUG_CONFIG", filepath.Join(dir, "不存在.json"))
+
 	got, err := ResolvePath("", false)
-	if err != nil || got != path {
-		t.Errorf("TT_CONFIG 未压过旧名: got=%q err=%v", got, err)
+	if err != nil {
+		t.Fatalf("ResolvePath: %v", err)
+	}
+	if got != path {
+		t.Errorf("解析到 %q, 期望 %q", got, path)
 	}
 }
 
@@ -136,140 +108,54 @@ func TestResolvePath_NoneFound(t *testing.T) {
 	}
 }
 
-// 端到端迁移：旧工具目录下两份配置 → 合并成 %T100_HOME%\tt\config.json。
-func TestMigrate_EndToEnd(t *testing.T) {
+// 旧位置兜底已经移除：哪怕当前目录、旧统一目录（%APPDATA%\T100\tt）、
+// 旧工具目录（tdebug / tdict）里摆着**长得完全像本工具配置**的诱饵，
+// 解析也不许捡走任何一份 —— 数据统一在 %APPDATA%\tt，不向后兼容。
+func TestResolvePath_NoLegacyFallback(t *testing.T) {
 	home := isolateEnv(t)
 
-	write := func(tool, content string) {
-		dir := filepath.Join(home, tool)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+	seed := `{"schemaVersion":2,"hosts":{"activeEnv":"诱饵","sshs":[{"name":"诱饵","host":"h","user":"u"}]}}`
+	legacyDirs := []string{
+		"T100\\tt",       // 旧版默认落点（中间多一层 T100）
+		"T100\\tdebug",   // 合并前的调试工具
+		"T100\\tdict",    // 合并前的字典工具
+		"TDebug",         // 更早的桌面版目录
+	}
+	for _, sub := range legacyDirs {
+		p := filepath.Join(home, sub, DefaultConfigName)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, DefaultConfigName), []byte(content), 0o600); err != nil {
+		if err := os.WriteFile(p, []byte(seed), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	write("tdebug", tdebugStyle)
-	write("tdict", tdictStyle)
 
-	dst, err := ResolvePath("", false)
-	if err != nil {
-		t.Fatalf("ResolvePath: %v", err)
-	}
-	if dst != UserConfigPath() {
-		t.Fatalf("落点 = %q, 期望 %q", dst, UserConfigPath())
-	}
-
-	r, err := Load(dst)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if r.SchemaVersion != SchemaVersion {
-		t.Errorf("迁移后 schemaVersion = %d", r.SchemaVersion)
-	}
-	if len(r.Hosts.SSHs) != 2 {
-		t.Errorf("合并后环境数 = %d, 期望 2", len(r.Hosts.SSHs))
-	}
-	if r.Debug.WatchdogSeconds != 240 {
-		t.Errorf("调试设置丢失: %+v", r.Debug)
-	}
-	if r.Query.Source != "local" {
-		t.Errorf("字典设置丢失: %+v", r.Query)
-	}
-
-	// 源文件不删除，且各留一份备份
-	for _, tool := range []string{"tdebug", "tdict"} {
-		src := filepath.Join(home, tool, DefaultConfigName)
-		if _, err := os.Stat(src); err != nil {
-			t.Errorf("源配置被删除了: %s", src)
-		}
-		if _, err := os.Stat(src + ".pre-merge.bak"); err != nil {
-			t.Errorf("未留下备份: %s", src+".pre-merge.bak")
-		}
-	}
-}
-
-// 迁移是幂等的：第二次调用不该再动任何东西。
-func TestMigrate_Idempotent(t *testing.T) {
-	home := isolateEnv(t)
-
-	dir := filepath.Join(home, "tdebug")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, DefaultConfigName), []byte(tdebugStyle), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := ResolvePath("", false); err != nil {
-		t.Fatalf("首次解析: %v", err)
-	}
-	before, err := os.ReadFile(UserConfigPath())
+	// 当前目录的 config.json 同样是诱饵
+	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	// 第二次：目标已是当前结构，Migrate 应当直接放弃
-	if got := Migrate(); got != nil {
-		t.Errorf("第二次迁移本应放弃, 却报告了来源 %v", got)
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	workdir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workdir, DefaultConfigName), []byte(seed), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	after, err := os.ReadFile(UserConfigPath())
+	if err := os.Chdir(workdir); err != nil {
+		t.Fatal(err)
+	}
+
+	// 读路径：统一目录（%APPDATA%\tt）没有文件 → 必须报错，而不是捡走诱饵
+	if got, err := ResolvePath("", false); err == nil {
+		t.Fatalf("旧位置兜底被捡走了: %q", got)
+	}
+	// 写路径：落点必须是 %APPDATA%\tt\config.json，而不是任何诱饵
+	got, err := ResolvePath("", true)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("allowMissing=true 不应报错: %v", err)
 	}
-	if string(before) != string(after) {
-		t.Error("第二次运行改动了配置内容")
-	}
-}
-
-// 目标已是当前结构时不可被旧配置覆盖。
-func TestPlanMigration_CurrentWins(t *testing.T) {
-	home := isolateEnv(t)
-
-	dst := filepath.Join(home, ToolDirName, DefaultConfigName)
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(dst, []byte(`{"schemaVersion":2,"hosts":{"activeEnv":"现役","sshs":[{"name":"现役"}]}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	// 同时放一份旧配置在旁边
-	old := filepath.Join(home, "tdict")
-	if err := os.MkdirAll(old, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(old, DefaultConfigName), []byte(tdictStyle), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	p, err := PlanMigration(dst)
-	if err != nil {
-		t.Fatalf("PlanMigration: %v", err)
-	}
-	if p != nil {
-		t.Error("目标已是当前结构，不该再生出迁移计划")
-	}
-}
-
-// LooksLikeOwnConfig 必须挡住无关的 config.json，避免误迁。
-func TestCollectSources_IgnoresForeignConfig(t *testing.T) {
-	home := isolateEnv(t)
-
-	// 一个长得像 Node 项目的 config.json 放在旧工具目录里
-	foreign := filepath.Join(home, "tdict")
-	if err := os.MkdirAll(foreign, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(foreign, DefaultConfigName),
-		[]byte(`{"name":"my-app","dependencies":{"react":"^18"}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	srcs := collectSources(filepath.Join(home, ToolDirName, DefaultConfigName))
-	for _, s := range srcs {
-		if s.Path == filepath.Join(foreign, DefaultConfigName) {
-			t.Error("无关的 config.json 被当作可迁移来源")
-		}
+	if want := filepath.Join(home, ToolDirName, DefaultConfigName); got != want {
+		t.Errorf("落点 = %q, 期望 %q", got, want)
 	}
 }
 
@@ -309,141 +195,136 @@ func TestResolvePath_EnvWinsWhenMissing(t *testing.T) {
 	}
 }
 
-// 便携包与 --config 显式指定都不会走"统一用户目录"那条迁移分支，
-// 所以旧结构的配置必须在选定路径上就地迁移 —— 否则用户把上一版的 config.json
-// 拷进新包后，环境清单会是空的。
-func TestMigrateInPlace_OldSchema(t *testing.T) {
-	home := isolateEnv(t)
-	_ = home
+// ---------- 统一路径管理器（locations.go） ----------
 
+// CacheDir 只认缓存清单里的名字：清单外的名字得到空串，不许悄悄建新目录。
+func TestCacheDir_ValidatesName(t *testing.T) {
 	dir := t.TempDir()
-	p := filepath.Join(dir, DefaultConfigName)
-	if err := os.WriteFile(p, []byte(tdebugStyle), 0o600); err != nil {
+	if got := CacheDir(dir, "ents"); got != filepath.Join(dir, "ents") {
+		t.Errorf("CacheDir(ents) = %q", got)
+	}
+	if got := CacheDir(dir, "not-in-list"); got != "" {
+		t.Errorf("清单外的名字应当得到空串, 得到 %q", got)
+	}
+	if got := CacheDir("", "ents"); got != "" {
+		t.Errorf("数据目录为空应当得到空串, 得到 %q", got)
+	}
+}
+
+// Locations 从配置路径派生：数据目录、状态文件、日志。
+func TestLocations_DataDir(t *testing.T) {
+	l := LocationsAt(filepath.Join(t.TempDir(), "tt", "config.json"))
+	want := filepath.Dir(l.ConfigPath)
+	if l.DataDir() != want {
+		t.Errorf("DataDir = %q, 期望 %q", l.DataDir(), want)
+	}
+	if l.StateFile() != filepath.Join(want, ".tt-serve.json") {
+		t.Errorf("StateFile = %q", l.StateFile())
+	}
+	if l.LogFile() != filepath.Join(want, ".tt-serve.log") {
+		t.Errorf("LogFile = %q", l.LogFile())
+	}
+	if l.CacheDir("spill") != filepath.Join(want, "spill") {
+		t.Errorf("CacheDir(spill) = %q", l.CacheDir("spill"))
+	}
+	if l.CacheDir("config.json") != "" {
+		t.Error("CacheDir 对清单外的名字应当返回空串")
+	}
+}
+
+// 字典库读侧：TDICT_DB → -d → 数据目录，取第一个存在的；全不存在报错。
+func TestLocations_ResolveDictDB(t *testing.T) {
+	dir := t.TempDir()
+	existing := filepath.Join(dir, "real.db")
+	if err := os.WriteFile(existing, []byte{}, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	l := LocationsAt(filepath.Join(dir, "tt", "config.json"))
 
-	if got := migrateInPlace(p); got != p {
-		t.Fatalf("migrateInPlace 返回 %q, 期望原路径", got)
+	// TDICT_DB 最高优先级
+	t.Setenv("TDICT_DB", existing)
+	if got, _, err := l.ResolveDictDB(""); err != nil || got != existing {
+		t.Errorf("TDICT_DB 未生效: got=%q err=%v", got, err)
 	}
 
-	// 迁移后必须是当前结构，且环境还在
-	b, err := os.ReadFile(p)
+	// -d 次之（相对路径按当前目录绝对化）
+	rel := "flag.db"
+	if err := os.WriteFile(filepath.Join(dir, rel), []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !isCurrentSchema(b) {
-		t.Fatal("旧结构没有被迁移")
-	}
-	r, err := Load(p)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if len(r.Hosts.SSHs) != 2 {
-		t.Errorf("环境数 = %d, 期望 2（旧 debug.sshs 里的两个）", len(r.Hosts.SSHs))
-	}
-	if r.Debug.WatchdogSeconds != 240 {
-		t.Errorf("调试设置丢失: %+v", r.Debug)
-	}
-	if r.Hosts.ByName("开发环境") == nil {
-		t.Error("环境名丢失")
-	}
-}
-
-// 已是当前结构的配置不该被就地迁移动到。
-func TestMigrateInPlace_AlreadyCurrent(t *testing.T) {
-	isolateEnv(t)
-
-	dir := t.TempDir()
-	p := filepath.Join(dir, DefaultConfigName)
-	seed := `{"schemaVersion":2,"listen":"127.0.0.1:9999","hosts":{"activeEnv":"x","sshs":[{"name":"x","host":"h","user":"u"}]}}`
-	if err := os.WriteFile(p, []byte(seed), 0o600); err != nil {
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(dir); err != nil {
 		t.Fatal(err)
 	}
-	before, _ := os.ReadFile(p)
-
-	migrateInPlace(p)
-
-	after, _ := os.ReadFile(p)
-	if string(before) != string(after) {
-		t.Error("已是当前结构的配置被改动了")
-	}
-}
-
-// 文件不存在且没有可合并的旧配置时，migrateInPlace 不该凭空造文件 ——
-// 首次运行的骨架由 EnsureExists 负责，那是调用方的决定。
-func TestMigrateInPlace_NothingToDo(t *testing.T) {
-	isolateEnv(t)
-
-	p := filepath.Join(t.TempDir(), DefaultConfigName)
-	migrateInPlace(p)
-	if _, err := os.Stat(p); err == nil {
-		t.Error("无可合并内容时不该创建文件")
-	}
-}
-
-// 不是配置的文件不能被就地迁移改写 —— 这是个凭据泄漏的口子，不只是一处不整洁。
-//
-// migrateInPlace 的职责是"把合并前的旧结构升级到当前结构"，而"旧结构"的前提是它**得先是一份
-// 配置**。修之前，任何解不出 JSON 的文件都会一路掉进 PlanMigration 并被当成迁移目标，而来源里
-// 包含 ToolsHome 下 legacyTools 的那几份配置（**含真实 SSH / 数据库口令**）。后果很具体：
-// `TT_CONFIG=D:\tmp\scratch.json` 里有个笔误，你的口令就被复制到了那个临时文件里。
-//
-// 这个测试**必须先放一份可合并的旧配置**：没有来源时 plan.Sources 为空，谁都不会去写目标，
-// 那样测了等于没测 —— 无论修没修都会绿。
-func TestMigrateInPlace_CorruptFileIsNotATarget(t *testing.T) {
-	home := isolateEnv(t)
-
-	legacy := filepath.Join(home, "tdict", DefaultConfigName)
-	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	seed := `{"hosts":{"activeEnv":"e","sshs":[{"name":"e","host":"h","user":"u","password":"SECRET"}]}}`
-	if err := os.WriteFile(legacy, []byte(seed), 0o600); err != nil {
-		t.Fatal(err)
+	t.Setenv("TDICT_DB", "")
+	if got, _, err := l.ResolveDictDB(rel); err != nil || got != filepath.Join(dir, rel) {
+		t.Errorf("-d 未按当前目录解析: got=%q err=%v", got, err)
 	}
 
-	dir := t.TempDir()
-	p := filepath.Join(dir, DefaultConfigName)
-	const broken = "这不是配置，是写坏的 JSON {\n"
-	if err := os.WriteFile(p, []byte(broken), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	if got := migrateInPlace(p); got != p {
-		t.Fatalf("migrateInPlace 返回 %q，期望原路径", got)
-	}
-
-	b, err := os.ReadFile(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(b) != broken {
-		t.Errorf("不是配置的文件被迁移改写了：\n  现在 = %q\n  应该 = %q", string(b), broken)
-	}
-	if contains(string(b), "SECRET") {
-		t.Error("旧配置里的口令被复制进了这个文件")
-	}
-}
-
-// looksLikeConfig 与 isCurrentSchema 的 false 含义不同：前者是"不是配置"，后者是
-// "是配置但结构旧"。只有后者该被迁移改写 —— 见上面那个测试。
-func TestLooksLikeConfig(t *testing.T) {
-	cases := []struct {
-		in   string
-		want bool
-	}{
-		{`{"hosts":{"sshs":[]}}`, true}, // 旧结构，但是配置
-		{`{"schemaVersion":2}`, true},   // 当前结构
-		{``, false},                     // 空文件
-		{`[]`, false},                   // 是 JSON，但不是对象
-		{`"x"`, false},                  // 同上
-		{`{`, false},                    // 坏 JSON
-		{"这不是 JSON", false},             // 根本不是
-	}
-	for _, c := range cases {
-		if got := looksLikeConfig([]byte(c.in)); got != c.want {
-			t.Errorf("looksLikeConfig(%q) = %v，期望 %v", c.in, got, c.want)
+	// 都没有 → 数据目录下的缺省名（这里不存在 → 报错并列出全部尝试）
+	if _, tried, err := l.ResolveDictDB(""); err == nil {
+		t.Error("数据目录没有库时应当报错")
+	} else if len(tried) == 0 {
+		t.Error("报错时应当列出尝试过的路径")
+	} else {
+		want := filepath.Join(filepath.Dir(l.ConfigPath), "erp_data.db")
+		if tried[len(tried)-1] != want {
+			t.Errorf("最后一个候选应当是数据目录缺省名: %q, 期望 %q", tried[len(tried)-1], want)
 		}
+	}
+}
+
+// 字典库写侧（SyncTarget）：sync.target 优先 → 已存在的库 → 绝对 -d → 数据目录缺省。
+func TestLocations_SyncTarget(t *testing.T) {
+	dir := t.TempDir()
+	l := LocationsAt(filepath.Join(dir, "tt", "config.json"))
+	dataDir := filepath.Dir(l.ConfigPath)
+
+	// 1. 配置值优先，存在与否都一样
+	cfgured := filepath.Join(dir, "configured.db")
+	if got := l.SyncTarget(cfgured, ""); got != cfgured {
+		t.Errorf("sync.target 未生效: %q", got)
+	}
+
+	// 4. 什么都不给 → 数据目录缺省名
+	if got := l.SyncTarget("", ""); got != filepath.Join(dataDir, "erp_data.db") {
+		t.Errorf("缺省目标 = %q", got)
+	}
+
+	// 2. 已存在的 -d 目标优先于缺省落点
+	flagDB := filepath.Join(dir, "flag.db")
+	if err := os.WriteFile(flagDB, []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TDICT_DB", "")
+	if got := l.SyncTarget("", flagDB); got != flagDB {
+		t.Errorf("已存在的 -d 库未生效: %q", got)
+	}
+
+	// 3. 不存在的绝对 -d 也写那里
+	absent := filepath.Join(dir, "absent.db")
+	if got := l.SyncTarget("", absent); got != absent {
+		t.Errorf("绝对 -d 未生效: %q", got)
+	}
+}
+
+// 引擎 exe：覆盖优先，否则 <tt.exe 目录>\tzs\tzs-server.exe。
+func TestEngineExe(t *testing.T) {
+	override := filepath.Join(t.TempDir(), "custom-tzs-server.exe")
+	if got := EngineExe(override); got != override {
+		t.Errorf("覆盖未生效: %q", got)
+	}
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("拿不到测试二进制路径: %v", err)
+	}
+	want := filepath.Join(filepath.Dir(self), "tzs", "tzs-server.exe")
+	if got := EngineExe(""); got != want {
+		t.Errorf("缺省引擎路径 = %q, 期望 %q", got, want)
 	}
 }
 

@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"time"
+
+	"tt/internal/config"
 )
 
 // StoredBP 持久化的断点
@@ -31,9 +33,13 @@ type bpStoreFile struct {
 
 var bpNameRe = regexp.MustCompile(`[^A-Za-z0-9._-]`)
 
+// bpStoreDir 断点存档目录名 —— 必须与 config.CacheSubdirs 里的清单一致,
+// config.CacheDir 会对它做校验。
+const bpStoreDir = "debug-bps"
+
 func bpStorePath(dataDir, module, prog string) string {
 	name := bpNameRe.ReplaceAllString(module+"__"+prog, "_")
-	return filepath.Join(dataDir, "debug-bps", name+".json")
+	return filepath.Join(config.CacheDir(dataDir, bpStoreDir), name+".json")
 }
 
 // saveBPs 原子写入断点存档;dataDir 为空时不落盘

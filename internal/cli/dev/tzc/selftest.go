@@ -1,4 +1,4 @@
-package cli
+package tzc
 
 import (
 	"bytes"
@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"tt/internal/cli/dev/common"
+	"tt/internal/cli/dev/tzs"
 	"tt/internal/dev/fence"
 	"tt/internal/dev/model"
 	"tt/internal/dev/pkgfile"
@@ -38,7 +40,7 @@ func cmdSelftest(args []string) int {
 	for _, c := range cases {
 		dir, err := os.MkdirTemp("", "tdev-selftest-")
 		if err != nil {
-			return fail(err, asJSON)
+			return common.Fail(err, asJSON)
 		}
 		cerr := c.Run(dir)
 		os.RemoveAll(dir)
@@ -56,7 +58,7 @@ func cmdSelftest(args []string) int {
 		}
 	}
 	if asJSON {
-		emitJSON(os.Stdout, map[string]any{
+		common.EmitJSON(os.Stdout, map[string]any{
 			"ok": failed == 0, "pass": pass, "fail": failed, "failures": failures,
 		})
 	} else {
@@ -536,7 +538,7 @@ func stTzsExport(dir string) error {
 		return err
 	}
 	out := filepath.Join(dir, "unzip")
-	if code := cmdTzs([]string{"export", p, "-o", out}); code != 0 {
+	if code := tzs.Run([]string{"export", p, "-o", out}); code != 0 {
 		return fmt.Errorf("tzs export 退出码 %d", code)
 	}
 	for name, want := range entries {
@@ -554,10 +556,10 @@ func stTzsExport(dir string) error {
 		}
 	}
 	// 非空目标默认拒绝；--force 才覆盖
-	if code := cmdTzs([]string{"export", p, "-o", out}); code != 5 {
+	if code := tzs.Run([]string{"export", p, "-o", out}); code != 5 {
 		return fmt.Errorf("非空目标应退出 5，实际 %d", code)
 	}
-	if code := cmdTzs([]string{"export", p, "-o", out, "--force"}); code != 0 {
+	if code := tzs.Run([]string{"export", p, "-o", out, "--force"}); code != 0 {
 		return fmt.Errorf("--force 应退出 0，实际 %d", code)
 	}
 	// 代码包走 tzs → 退出 2（指回 tzc）
@@ -565,7 +567,7 @@ func stTzsExport(dir string) error {
 	if err != nil {
 		return err
 	}
-	if code := cmdTzs([]string{"export", codePkg, "-o", filepath.Join(dir, "bad")}); code != 2 {
+	if code := tzs.Run([]string{"export", codePkg, "-o", filepath.Join(dir, "bad")}); code != 2 {
 		return fmt.Errorf("代码包走 tzs 应退出 2，实际 %d", code)
 	}
 	return nil

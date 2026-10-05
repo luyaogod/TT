@@ -249,7 +249,6 @@ export interface ConfigMeta {
   toolsHome: string
   schemaVersion: number
   defaultListen: string
-  legacyTools: string[] | null
   supportedTypes: string[]
 }
 

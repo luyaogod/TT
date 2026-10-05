@@ -8,7 +8,6 @@ package cli
 
 import (
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -118,13 +117,13 @@ func newCacheClearCmd() *cobra.Command {
 	return clear
 }
 
-// cacheDir 配置目录 —— 缓存就是它下面的那几个子目录。
+// cacheDir 数据目录 —— 缓存就是它下面的那几个子目录(落点规则在 config.Locations)。
 func cacheDir() (string, error) {
 	path, err := common.ResolveConfig(true)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Dir(path), nil
+	return config.LocationsAt(path).DataDir(), nil
 }
 
 // humanBytes 给人看的体积(与设置页同一套口径)。

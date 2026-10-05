@@ -52,10 +52,11 @@ func New(cfgPath string) *Server {
 	return &Server{cfgPath: cfgPath}
 }
 
-// SetDBTarget 注入数据同步的默认目标(便携版:exe 同目录的 erp_data.db,由挂载方传入)。
+// SetDBTarget 注入数据同步的默认目标(由挂载方传入,与设置页显示的值同源)。
 func (s *Server) SetDBTarget(p string) { s.dbPath = p }
 
-// defaultDBTarget 返回默认同步目标(未注入时用 config.DefaultSyncTarget)。
+// defaultDBTarget 返回默认同步目标(未注入时走 config.Locations 的缺省:
+// 数据目录下的 erp_data.db)。
 //
 // 默认位置只有 config 里那一份实现:统一设置页会显示「默认位置:X」,
 // 而这里真正往那儿写 —— 两边各算一次的话,显示的路径可能不是实际写入的那个。
@@ -63,7 +64,7 @@ func (s *Server) defaultDBTarget() string {
 	if s.dbPath != "" {
 		return s.dbPath
 	}
-	return config.DefaultSyncTarget()
+	return config.LocationsAt(s.cfgPath).SyncTarget("", "")
 }
 
 // syncTarget 返回当前同步目标:优先 config.json 顶层 sync.target(页面可改),

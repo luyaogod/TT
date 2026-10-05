@@ -12,6 +12,6 @@ import (
 // loadConfig 读类型化配置。文件不存在不是错误(首次运行返回填好缺省值的空配置)。
 func loadConfig(path string) (*config.Root, error) { return config.Load(path) }
 
-// 路径型取值的解析(AbsPath / DirStatusOf / FileStatusOf / DefaultSyncTarget)
+// 路径型取值的解析(AbsPath / DirStatusOf / FileStatusOf)
 // 已上移到 internal/config —— 统一设置页要用同一份判断,两边各算一遍会让同一个
 // sync.target 解析成不同结果。

@@ -2,8 +2,7 @@
 //
 // 依据：
 //   - 设计指南 §5.6、§4 规则 4/5、§7 红线 R1/R2/R4
-//   - docs/T100设计器-README.md §3.5（TglTag 折叠是命门）、§3.13（改框架要写两处 + 硬性约束）
-//   - 反编译源码 CodeEditorManager.cs:361-397（SaveADPContent）
+//   - 反编译源码（TglTag 折叠是命门；改框架要写两处）：CodeEditorManager.cs:361-397（SaveADPContent）
 //     CodeEditorManager.cs:400-496（SaveSectionContent，逐行把 EditObject 折回 TglTag）
 //     CodeEditorManager.cs:314-352（GenerateTGL）+ :408（section_flag="Y"）
 //     AddPointModel.cs:1086-1112（ToXML：status 只有 ' '/u/d；CREATE 直接 return null）

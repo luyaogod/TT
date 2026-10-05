@@ -8,7 +8,7 @@
 //  1. **本包只被 `_test.go` import。** 它 import `testing`，一旦有生产代码引它，
 //     整个 `testing` 包就会进 `tt` 二进制。所以它不进任何生产 import 图。
 //  2. **依赖方向只能 testkit → testutil。** `internal/dev/testutil` 被**生产代码**
-//     import（internal/dev/cli/selftest.go:16，`tt dev tzc selftest` 的实现），
+//     import（internal/cli/dev/selftest.go:16，`tt dev tzc selftest` 的实现），
 //     所以它不能反过来引本包 —— 那会把 `testing` 拖进二进制。
 //
 // 于是分工是：**发现逻辑**（语料根怎么定、文件怎么走）单源在 `testutil`，

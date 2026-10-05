@@ -19,7 +19,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"tt/internal/cli/common"
@@ -132,7 +131,7 @@ func openRemoteSource(target string) error {
 	srcTarget = dbconfig.NewTarget(cc, ref.Name, ref.Env.Host, ref.Env.User, ref.Env.Zone,
 		string(ref.Env.Topent), dbconfig.RouteClientDirect)
 	// 用哪个账号由企业编号(topent)决定:与 tt debug 同一条规则、同一份快照 —— 见 entacct.go
-	srcNotes = hookEntAccount(cc, ref, dataDirOf(path))
+	srcNotes = hookEntAccount(cc, ref, config.LocationsAt(path).DataDir())
 	if common.Verbose {
 		fmt.Fprintf(os.Stderr, "[dict] 数据源: 远程 %s (账号 %s/%s, %s %s)\n",
 			ref.Name, srcTarget.Account, srcTarget.AccountSource, cc.Type, cc.Address())
@@ -144,15 +143,6 @@ func openRemoteSource(target string) error {
 	dataSrc = l
 	srcLocal = false
 	return nil
-}
-
-// dataDirOf 数据目录 = 配置文件所在目录(与调试侧同一条约定:ents/、srccache/ 都跟着它)。
-// 企业目录快照两处共用一个文件,靠的就是这条约定。
-func dataDirOf(configPath string) string {
-	if configPath == "" {
-		return ""
-	}
-	return filepath.Dir(configPath)
 }
 
 // dbConnOf 取某环境一对一挂载的库连接(深拷贝:调用方要改 User/Password 等运行期槽位,

@@ -26,6 +26,26 @@ var CacheSubdirs = []string{
 	"spill",     // 查询被截断时落盘的完整结果(见 tt dict 的返回上限)
 }
 
+// CacheDir 数据目录下的缓存子目录。name 必须在 CacheSubdirs 清单里，
+// 不在返回空串 —— 缓存名只允许这份清单里的，调用方写错名字当场得到空串
+// （而不是悄悄建出一个清单外的新目录）。凡是 <数据目录>/<名字> 这种拼接都必须走它。
+func CacheDir(dataDir, name string) string {
+	if dataDir == "" {
+		return ""
+	}
+	ok := false
+	for _, n := range CacheSubdirs {
+		if n == name {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return ""
+	}
+	return filepath.Join(dataDir, name)
+}
+
 // CacheDirStatus 一个缓存子目录的状态。
 type CacheDirStatus struct {
 	Name   string `json:"name"`

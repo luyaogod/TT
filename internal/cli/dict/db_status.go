@@ -17,7 +17,7 @@ var dbStatusCmd = &cobra.Command{
 系统消息/参数定义/程序与作业)是否已同步、各多少行、缺哪些表。
 
 查询命令报「本地库尚未包含 XXX 数据」时用它定位;补齐用 tt dict db sync。
-看的是 -d/--db 或 TDICT_DB 指向的库(与查询命令同一份);库不存在只报状态、不报错。
+看的是 -d/--db 或 TDICT_DB 指向的库(与查询命令同一份;缺省 = 数据目录下的 erp_data.db);库不存在只报状态、不报错。
 只读,不改任何文件;也不需要 config.json(还没配环境也能看)。`,
 	Example: `  tt dict db status
   tt dict db status -d D:\data\erp_data.db

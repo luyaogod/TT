@@ -1,4 +1,5 @@
-// Package cli 实现 tdev 的命令行入口：tt dev tzc export/status/verify/apply（+ selftest）。
+// 本文件是 tdev 动词核心（原 internal/dev/cli，已并入 tt 的 cobra 树，见 register.go）：
+// tt dev tzc 的 export/status/verify/apply/unlock/rename/newfn（+ selftest）的实现体。
 //
 // 依据设计指南 §2「命令行接口」与 §6「apply 的执行管线（顺序即契约）」。
 //
@@ -6,7 +7,7 @@
 //
 //	0 成功 / 2 包格式错误 / 3 验证失败 / 4 写入被拒 / 5 IO·环境失败
 //	1 = 未分类的内部错误（设计指南未定义，仅用于兜底）
-package cli
+package tzc
 
 import (
 	"errors"
@@ -15,9 +16,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
+	"tt/internal/cli/dev/common"
 	"tt/internal/config"
 	"tt/internal/dev/fence"
 	"tt/internal/dev/fgl"
@@ -30,96 +31,6 @@ import (
 	"tt/internal/dev/tglfile"
 	"tt/internal/dev/verify"
 )
-
-// ToolVersion 是工具版本（写进 manifest）。
-const ToolVersion = "0.2.0"
-
-// Usage 是总帮助。
-const Usage = `tt dev —— T100 设计器包工具：.tzc 代码包 + .tzs 表单包
-
-用法：
-  tt dev tzc export <pkg.tzc> [-o <dir>] [--only <点名>...] [--json]
-        # -o 省略时默认导出到 <包所在目录>/<程序名>-ws
-        # （身份后缀 (c)/(s) 会去掉：D:\pkg\capt110(c).tzc → D:\pkg\capt110-ws\）
-  tt dev tzc status [<dir>] [--json]
-  tt dev tzc verify [<dir>] [--json] [--strict]
-  tt dev tzc apply  [<dir>] [-o <pkg.tzc>] [--dry-run] [--yes] [--json]
-  tt dev tzc unlock [<dir>] [--yes] [--json]     # 框架解锁（单向状态迁移，只改 workspace）
-  tt dev tzc rename [<dir>] <旧函数名> <新函数名> [--scope …] [--desc …]  # 结构事务（只改 workspace）
-  tt dev tzc newfn  [<dir>] --type FUNCTION|DIALOG|REPORT [--name …]      # 新增自订点（只改 workspace）
-  tt dev tzc selftest [--json]
-
-  tt dev tzs export <pkg.tzs> [-o <dir>] [--force] [--json]
-        # 表单包**纯解压**（.tzs / .tzv）：不解围栏、不校验、不产生工作区
-        # -o 省略时默认解压到 <包所在目录>/<程序名>-unzip
-        # 产物是**只读参考**（没有 tzs apply）；要改表单走下面的 tzs 动词
-  tt dev tzs <动词> --args '<JSON 对象>' [--form <程序名>] [--args-file <文件>] [--workspace <dir>] [--rpc-timeout <秒>] [--json]
-        # 读写表单，**唯一**写路径 —— 由设计器自己的引擎算，不是我们拼 XML
-        # 55 个动词由引擎的函数表生成（open / form_tree / set_spec_attr / set_spec_attrs /
-        # nudge / validate / save / close …），所以没有"函数名"这一层要填
-        # 参数**只用 JSON 给**；用 --form 指定是哪张已打开的表单（不必搬运句柄）
-        # 例：tt dev tzs open          --args '{"path":"D:\\pkg\\aapp320(c).tzs"}' --json
-        #     tt dev tzs nudge         --form aapp320 --args '{"paths":["<path>"],"direction":"right","offset":1}' --json
-        #     tt dev tzs set_spec_attr --form aapp320 --args '{"path":"<p>","kind":"field","attr":"can_edit","value":"Y"}'
-        #     tt dev tzs list_open --json                                   # 无参数可省 --args
-        # 动词全名：tt dev tzs --help     某个动词的参数与示例：tt dev tzs <动词> --help
-  tt dev tzs doctor [--json]         # 环境自检（引擎 / 设计器目录 / 工作区 / 管道名）
-  tt dev tzs stop                    # 停本工作区的常驻引擎（不启动）
-  tt dev tzs reap [--yes]            # 清理引擎重编后停不掉的孤儿守护进程
-
-安装不在本命令组：skills 与 PATH 统一走 tt install skills / tt install path。
-
-两条管线别用错：
-  .tzc 代码包 → tzc export（渲染围栏工作区，改完 apply 写回；唯一写路径）
-  .tzs 表单包 → tzs export 只解压（只读参考）；读写表单走 tzs 动词（设计器自己的引擎驱动）
-
-工作区动词的 <dir> 可以省略：先 cd 进工作区，命令就不用再写目录。
-  cd D:\pkg\capt110-ws
-  tt dev tzc status          # = tt dev tzc status D:\pkg\capt110-ws
-  tt dev tzc apply
-  tt dev tzc rename adzi999_calc adzi999_count   # 省略 <dir> 时 rename 收 2 个位置参数
-
-四个生命周期动词 + unlock 状态迁移 + selftest。
-改框架区段必须先 unlock：解锁改变的是门，不是所有房间（锚点区段永远只读）。
-  export  Package → Document → Workspace（含 git init），只读包
-  status  报告工作区相对上次 export/apply 的改动（含行号，不写盘）
-  verify  不写盘跑完整验证管线（gate1 + gate2）
-  apply   验证管线全阶段 + 原子写包 + git commit（唯一会改 .tzc 的命令）
-
-报错定位：验证失败会打印「prog.full.4gl:<行号>」+ 该行内容
-（基线侧问题给「.tdev/base.full.4gl:<行号>」）；--json 里有 file/line/snippet 字段。
-
-退出码：0 成功 / 2 包格式错 / 3 验证失败 / 4 写入被拒 / 5 IO·环境失败
-`
-
-// parseArgs 允许「位置参数 + 选项」任意顺序（设计指南 §2 的用法把 -o/--json 写在包名之后，
-// 而标准库 flag 遇到第一个位置参数就停止解析，所以这里先做一次稳定重排）。
-func parseArgs(fs *flag.FlagSet, args []string, valueFlags ...string) error {
-	isVal := map[string]bool{}
-	for _, v := range valueFlags {
-		v = strings.TrimLeft(v, "-")
-		isVal["-"+v] = true
-		isVal["--"+v] = true
-	}
-	var flags, pos []string
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		if !strings.HasPrefix(a, "-") || a == "-" {
-			pos = append(pos, a)
-			continue
-		}
-		flags = append(flags, a)
-		name := a
-		if eq := strings.IndexByte(a, '='); eq >= 0 {
-			name = a[:eq]
-		}
-		if isVal[name] && !strings.Contains(a, "=") && i+1 < len(args) {
-			flags = append(flags, args[i+1])
-			i++
-		}
-	}
-	return fs.Parse(append(flags, pos...))
-}
 
 // stringSlice 是可重复的字符串选项（--only 可给多次）。
 type stringSlice []string
@@ -135,85 +46,9 @@ func (s *stringSlice) Set(v string) error {
 	return nil
 }
 
-// exitCodeOf 把错误映射为退出码。
-func exitCodeOf(err error) int {
-	if err == nil {
-		return 0
-	}
-	var ec interface{ ExitCode() int }
-	if errors.As(err, &ec) {
-		return ec.ExitCode()
-	}
-	return 1
-}
-
-// Run 是入口：返回进程退出码。
-func Run(args []string) int {
-	if len(args) == 0 {
-		fmt.Fprint(os.Stderr, Usage)
-		return 2
-	}
-	switch args[0] {
-	case "-h", "--help", "help":
-		fmt.Print(Usage)
-		return 0
-	case "install":
-		// 已并入 tt install（本命令组不再提供）。这里给指引而不是"未知子命令"：
-		// 退出码与原先的"未知子命令"一致（都是 2），脚本行为不变，但人能看懂该敲什么。
-		fmt.Fprint(os.Stderr, "tt dev install 已并入 tt install：\n"+
-			"  tt install skills [--to <dir>] [--force]\n"+
-			"  tt install path   [--dry-run]\n")
-		return 2
-	case "tzs":
-		return cmdTzs(args[1:])
-	case "tzc":
-		// 继续
-	default:
-		fmt.Fprintf(os.Stderr, "未知子命令 %q\n\n%s", args[0], Usage)
-		return 2
-	}
-	if len(args) < 2 {
-		fmt.Fprint(os.Stderr, Usage)
-		return 2
-	}
-	verb, rest := args[1], args[2:]
-	switch verb {
-	case "export":
-		return cmdExport(rest)
-	case "status":
-		return cmdStatus(rest)
-	case "verify":
-		return cmdVerify(rest)
-	case "apply":
-		return cmdApply(rest)
-	case "unlock":
-		return cmdUnlock(rest)
-	case "rename":
-		return cmdRename(rest)
-	case "newfn":
-		return cmdNewfn(rest)
-	case "selftest":
-		return cmdSelftest(rest)
-	default:
-		fmt.Fprintf(os.Stderr, "未知动词 %q（export/status/verify/apply/selftest）\n", verb)
-		return 2
-	}
-}
-
 //---------------------------------------------------------------------------
 // 输出辅助
 //---------------------------------------------------------------------------
-
-func emitJSON(w io.Writer, v any) {
-	b, err := model.MarshalJSONStable(v)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "JSON 序列化失败: %v\n", err)
-		return
-	}
-	w.Write(b)
-}
-
-func line(w io.Writer, format string, a ...any) { fmt.Fprintf(w, format+"\n", a...) }
 
 // printFindings 统一渲染验证发现：等级/编号/消息 → 位置（文件:行 + 该行内容）→ 明细。
 //
@@ -224,15 +59,15 @@ func printFindings(w io.Writer, findings []verify.Finding, includeInfo bool) {
 		if f.Severity == verify.SevInfo && !includeInfo {
 			continue
 		}
-		line(w, "  [%-5s] %-22s %s", f.Severity, f.Code, f.Message)
+		common.Line(w, "  [%-5s] %-22s %s", f.Severity, f.Code, f.Message)
 		if f.File != "" && f.Line > 0 {
-			line(w, "            位置：%s:%d", f.File, f.Line)
+			common.Line(w, "            位置：%s:%d", f.File, f.Line)
 			if f.Snippet != "" {
-				line(w, "            该行：%s", f.Snippet)
+				common.Line(w, "            该行：%s", f.Snippet)
 			}
 		}
 		for _, d := range f.Detail {
-			line(w, "            %s", d)
+			common.Line(w, "            %s", d)
 		}
 	}
 }
@@ -319,7 +154,7 @@ func clipLine(s string) string {
 // printRegionRefs 打印清单：名字（文件:行），无位置时只打名字。
 func printRegionRefs(w io.Writer, label string, refs []regionRef) {
 	if len(refs) == 0 {
-		line(w, "%s无", label)
+		common.Line(w, "%s无", label)
 		return
 	}
 	parts := make([]string, 0, len(refs))
@@ -330,7 +165,7 @@ func printRegionRefs(w io.Writer, label string, refs []regionRef) {
 		}
 		parts = append(parts, r.Name)
 	}
-	line(w, "%s%s", label, strings.Join(parts, ", "))
+	common.Line(w, "%s%s", label, strings.Join(parts, ", "))
 }
 
 // loadBase 从工作区重建基线 Document（gate1 的左操作数）。
@@ -435,9 +270,6 @@ func looksLikeWorkspaceArg(a string) bool {
 // export
 //---------------------------------------------------------------------------
 
-// reIdentitySuffix 匹配设计器给包名加的客制/标准身份后缀，如 capt110(c).tzc 的 "(c)"。
-var reIdentitySuffix = regexp.MustCompile(`\([A-Za-z]\)$`)
-
 // defaultWorkspaceDir 是 -o 省略时的默认工作区目录：<包所在目录>/<程序名>-ws。
 //
 // 为什么是「包旁边的子目录」而不是「就在包旁边平铺」：
@@ -454,15 +286,7 @@ func defaultWorkspaceDir(pkgPath string) string {
 // tdev 里默认值的来源只有两种：写死的缺省，或合并后新增的 tdev 节；后者缺失时
 // config.WorkspaceSuffixOrDefault 会自己退回 -ws，所以这里不必再判空。
 func workspaceDirWithSuffix(pkgPath, suffix string) string {
-	dir := filepath.Dir(pkgPath)
-	base := strings.TrimSuffix(filepath.Base(pkgPath), filepath.Ext(pkgPath))
-	if m := reIdentitySuffix.FindString(base); m != "" {
-		base = strings.TrimSuffix(base, m) // capt110(c) → capt110
-	}
-	if base == "" {
-		base = "pkg"
-	}
-	return filepath.Join(dir, base+suffix)
+	return filepath.Join(filepath.Dir(pkgPath), common.StripIdentitySuffix(pkgPath)+suffix)
 }
 
 func cmdExport(args []string) int {
@@ -474,11 +298,11 @@ func cmdExport(args []string) int {
 	allowSec := fs.Bool("allow-sec", false, "已废弃：请改用 `tt dev tzc unlock <dir>`")
 	acceptVer := fs.String("accept-ver", "1.0", "可接受的 ver 主次版本")
 	asJSON := fs.Bool("json", false, "输出 JSON")
-	if err := parseArgs(fs, args, "o", "only", "accept-ver"); err != nil {
+	if err := common.ParseArgs(fs, args, "o", "only", "accept-ver"); err != nil {
 		return 2
 	}
 	if *allowSec {
-		return fail(&store.IOError{
+		return common.Fail(&store.IOError{
 			Msg: "--allow-sec 已废弃（v2 起由框架解锁状态机取代）",
 			Err: errors.New("请先 export，再执行 `tt dev tzc unlock <dir>`；" +
 				"解锁是一次单向、有代价的状态迁移，需要显式确认（--yes）"),
@@ -495,22 +319,22 @@ func cmdExport(args []string) int {
 	if outDir == "" {
 		// -o 缺省：先用 config.json 的 tdev.workspaceSuffix（缺省仍为 -ws）。
 		// 配置读不出来时是零值，WorkspaceSuffixOrDefault 会退回 -ws。
-		ts := loadTdevSettings()
+		ts := common.LoadTdevSettings()
 		outDir = workspaceDirWithSuffix(pkgPath, ts.WorkspaceSuffixOrDefault())
 	}
 	w := os.Stdout
 
 	pkg, err := pkgfile.Open(pkgPath, pkgfile.OpenOptions{AcceptVer: *acceptVer})
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	doc, err := synth.Synthesize(pkg, synth.Options{Only: only})
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	fenced, regions, spans, err := fence.Render(doc)
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	doc.Text = fenced
 	doc.Regions = regions
@@ -520,12 +344,12 @@ func cmdExport(args []string) int {
 	if err != nil {
 		var ioe *store.IOError
 		if errors.As(err, &ioe) && strings.Contains(ioe.Msg, "拒绝覆盖已存在的工作区") {
-			return fail(&store.IOError{
+			return common.Fail(&store.IOError{
 				Msg: "工作区已存在：" + outDir,
 				Err: errors.New("默认目录被占用；换一个位置：-o <新目录>，或先自行删除该工作区"),
 			}, *asJSON)
 		}
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	// git 提交（store.Create 已 init；这里补一次以确保 commit 信息带程序名）
 	hash, gerr := ws.GitCommit("tdev export: " + doc.Prog)
@@ -544,27 +368,27 @@ func cmdExport(args []string) int {
 			".tdev/base.sha256", ".tdev/regions.json", ".tdev/section-state", "snapshot/"},
 	}
 	if *asJSON {
-		emitJSON(w, rep)
+		common.EmitJSON(w, rep)
 		return 0
 	}
-	line(w, "已导出工作区：%s", outDir)
-	line(w, "  程序：%s（%s，ver %s）", doc.Prog, pkg.Kind.String(), pkg.Ver.Raw)
-	line(w, "  Region：%d 个（可编辑 %d，只读 %d）", mf.Stats.Points+mf.Stats.Sections, mf.Stats.Editable, mf.Stats.Readonly)
-	line(w, "  锚点：other.function=%v other.dialog=%v other.report=%v",
+	common.Line(w, "已导出工作区：%s", outDir)
+	common.Line(w, "  程序：%s（%s，ver %s）", doc.Prog, pkg.Kind.String(), pkg.Ver.Raw)
+	common.Line(w, "  Region：%d 个（可编辑 %d，只读 %d）", mf.Stats.Points+mf.Stats.Sections, mf.Stats.Editable, mf.Stats.Readonly)
+	common.Line(w, "  锚点：other.function=%v other.dialog=%v other.report=%v",
 		mf.Anchors["other.function"], mf.Anchors["other.dialog"], mf.Anchors["other.report"])
 	if mf.Section.State == string(model.SectionUnlocked) {
-		line(w, "  框架：已解开（section_flag=%s，来源 %s）→ 可编辑区段标 [EDITABLE-SEC]",
+		common.Line(w, "  框架：已解开（section_flag=%s，来源 %s）→ 可编辑区段标 [EDITABLE-SEC]",
 			mf.Section.SectionFlag, mf.Section.UnlockedBy)
 	} else {
-		line(w, "  框架：未解开（Locked）→ SectionRegion 全部只读")
-		line(w, "       要改框架区段：`tt dev tzc unlock %s`（单向、有代价：解开后规格调整不再自动生成程序代码）", outDir)
+		common.Line(w, "  框架：未解开（Locked）→ SectionRegion 全部只读")
+		common.Line(w, "       要改框架区段：`tt dev tzc unlock %s`（单向、有代价：解开后规格调整不再自动生成程序代码）", outDir)
 	}
 	if len(only) > 0 {
-		line(w, "  --only：只允许改 %s（其它点一律 READONLY not-exported）", strings.Join(only, ", "))
+		common.Line(w, "  --only：只允许改 %s（其它点一律 READONLY not-exported）", strings.Join(only, ", "))
 	}
-	line(w, "")
-	line(w, "唯一编辑文件：%s", filepath.Join(outDir, "prog.full.4gl"))
-	line(w, "下一步：编辑它，然后 `tt dev tzc verify %s` 或 `tt dev tzc apply %s`", outDir, outDir)
+	common.Line(w, "")
+	common.Line(w, "唯一编辑文件：%s", filepath.Join(outDir, "prog.full.4gl"))
+	common.Line(w, "下一步：编辑它，然后 `tt dev tzc verify %s` 或 `tt dev tzc apply %s`", outDir, outDir)
 	return 0
 }
 
@@ -633,29 +457,29 @@ func cmdUnlock(args []string) int {
 	fs := flag.NewFlagSet("unlock", flag.ContinueOnError)
 	yes := fs.Bool("yes", false, "确认「解开框架」的代价警告（单向、不可逆）")
 	asJSON := fs.Bool("json", false, "输出 JSON")
-	if err := parseArgs(fs, args, "o", "only", "accept-ver"); err != nil {
+	if err := common.ParseArgs(fs, args, "o", "only", "accept-ver"); err != nil {
 		return 2
 	}
 	dir, derr := resolveWorkspaceDir(fs.Arg(0)) // 省略 <dir> → 用当前目录
 	if derr != nil {
 		fmt.Fprintln(os.Stderr, "用法：tt dev tzc unlock [<dir>] [--yes] [--json]   # <dir> 省略时用当前目录")
-		return fail(derr, *asJSON)
+		return common.Fail(derr, *asJSON)
 	}
 	w := os.Stdout
 
 	ws, err := store.Open(dir)
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	release, err := ws.Lock()
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	defer release()
 
 	base, mf, err := loadBase(ws)
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	// ① 授权闸门（逐条重放设计器三分支；R9：无绕过）
 	dec := synth.CheckUnlockPermission(base.Env, *yes)
@@ -663,50 +487,50 @@ func cmdUnlock(args []string) int {
 		if dec.NeedYes {
 			// 需要二次确认：打印设计器原文，退出码 4
 			if *asJSON {
-				emitJSON(w, map[string]any{"ok": false, "stage": "unlock-gate",
+				common.EmitJSON(w, map[string]any{"ok": false, "stage": "unlock-gate",
 					"reason": dec.Reason, "detail": dec.Detail, "need_yes": true})
 				return 4
 			}
-			line(w, "拒绝解锁（退出码 4）：%s", dec.Reason)
+			common.Line(w, "拒绝解锁（退出码 4）：%s", dec.Reason)
 			for _, d := range dec.Detail {
-				line(w, "  %s", d)
+				common.Line(w, "  %s", d)
 			}
-			line(w, "  确认后加 --yes 重新执行（AI 不得自主加 --yes）")
+			common.Line(w, "  确认后加 --yes 重新执行（AI 不得自主加 --yes）")
 			return 4
 		}
 		if *asJSON {
-			emitJSON(w, map[string]any{"ok": false, "stage": "unlock-gate",
+			common.EmitJSON(w, map[string]any{"ok": false, "stage": "unlock-gate",
 				"reason": dec.Reason, "detail": dec.Detail})
 			return 4
 		}
-		line(w, "拒绝解锁（退出码 4）：%s", dec.Reason)
+		common.Line(w, "拒绝解锁（退出码 4）：%s", dec.Reason)
 		for _, d := range dec.Detail {
-			line(w, "  %s", d)
+			common.Line(w, "  %s", d)
 		}
 		return 4
 	}
 	// 已经是解开态 → no-op（设计器对这类包不设拦截）
 	if base.SectionState == model.SectionUnlocked && !base.PendingUnlock {
 		if *asJSON {
-			emitJSON(w, map[string]any{"ok": true, "dir": dir, "changed": false,
+			common.EmitJSON(w, map[string]any{"ok": true, "dir": dir, "changed": false,
 				"state": string(model.SectionUnlocked), "reason": dec.Reason})
 			return 0
 		}
-		line(w, "框架本来就是解开态（%s），无需 unlock", dec.Reason)
+		common.Line(w, "框架本来就是解开态（%s），无需 unlock", dec.Reason)
 		return 0
 	}
 	if base.SectionState == model.SectionUnlocked && base.PendingUnlock {
-		line(w, "框架已处于待落盘的解锁态（pending_unlock）；apply 时会把 section_flag 置 Y")
+		common.Line(w, "框架已处于待落盘的解锁态（pending_unlock）；apply 时会把 section_flag 置 Y")
 	}
 
 	// ② 读编辑后的文档，按 Unlocked 重判区段
 	edited, err := ws.ReadEdited()
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	parsed, err := fence.Parse(base, edited)
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	repl, updated := unlockRegions(parsed.Doc)
 
@@ -733,17 +557,17 @@ func cmdUnlock(args []string) int {
 	}
 	newText, newRegions, _, err := applyFenceFlags(parsed.Doc)
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	_ = newRegions
 	newBase, newBaseRegions, newBaseSpans, err := applyFenceFlags(base)
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 
 	// ④ 落盘：prog.full.4gl（保留 AI 的编辑）+ 基线（只翻旗标）+ regions + section-state
 	if err := ws.WriteEdited(newText); err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	newDoc := *base
 	newDoc.Text = newBase
@@ -754,12 +578,12 @@ func cmdUnlock(args []string) int {
 	newDoc.UnlockedBy = model.UnlockedByUnlockCmd
 	newDoc.Env.SectionState = model.SectionUnlocked
 	if err := ws.UpdateAfterApply(&newDoc, newBase); err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	if err := ws.WriteSectionState(&store.SectionStateFile{
 		State: string(model.SectionUnlocked), PendingUnlock: true, UnlockedBy: model.UnlockedByUnlockCmd,
 	}); err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	hash, gerr := ws.GitCommit("tdev unlock: " + base.Prog)
 	if gerr != nil {
@@ -780,49 +604,49 @@ func cmdUnlock(args []string) int {
 		"reason": dec.Reason, "editable_sections": editableSections, "commit": hash,
 	}
 	if *asJSON {
-		emitJSON(w, rep)
+		common.EmitJSON(w, rep)
 		return 0
 	}
-	line(w, "已解开框架（workspace 状态迁移，未碰 .tzc）")
-	line(w, "  工作区：%s", dir)
-	line(w, "  依据：%s", dec.Reason)
-	line(w, "  可编辑区段：%d 个（其余仍 READONLY：锚点区段 / readonly=\"Y\" / topstd 规则）", editableSections)
-	line(w, "  围栏已重渲染：可编辑区段标 [EDITABLE-SEC]")
-	line(w, "  pending_unlock=true（apply 时才会把 TAP 根 section_flag 置 Y）")
-	line(w, "")
-	line(w, "代价提醒：解开框架后，规格的任何调整都不会再产生对应的程序代码（不可逆）。")
-	line(w, "下一步：编辑区段正文 → `tt dev tzc apply %s`（已在该目录内可省 <dir>）", dir)
+	common.Line(w, "已解开框架（workspace 状态迁移，未碰 .tzc）")
+	common.Line(w, "  工作区：%s", dir)
+	common.Line(w, "  依据：%s", dec.Reason)
+	common.Line(w, "  可编辑区段：%d 个（其余仍 READONLY：锚点区段 / readonly=\"Y\" / topstd 规则）", editableSections)
+	common.Line(w, "  围栏已重渲染：可编辑区段标 [EDITABLE-SEC]")
+	common.Line(w, "  pending_unlock=true（apply 时才会把 TAP 根 section_flag 置 Y）")
+	common.Line(w, "")
+	common.Line(w, "代价提醒：解开框架后，规格的任何调整都不会再产生对应的程序代码（不可逆）。")
+	common.Line(w, "下一步：编辑区段正文 → `tt dev tzc apply %s`（已在该目录内可省 <dir>）", dir)
 	return 0
 }
 
 func cmdStatus(args []string) int {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "输出 JSON")
-	if err := parseArgs(fs, args, "o", "only", "accept-ver"); err != nil {
+	if err := common.ParseArgs(fs, args, "o", "only", "accept-ver"); err != nil {
 		return 2
 	}
 	dir, derr := resolveWorkspaceDir(fs.Arg(0)) // 省略 <dir> → 用当前目录
 	if derr != nil {
 		fmt.Fprintln(os.Stderr, "用法：tt dev tzc status [<dir>] [--json]   # <dir> 省略时用当前目录")
-		return fail(derr, *asJSON)
+		return common.Fail(derr, *asJSON)
 	}
 	w := os.Stdout
 
 	ws, err := store.Open(dir)
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	base, mf, err := loadBase(ws)
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	edited, err := ws.ReadEdited()
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	parsed, err := fence.Parse(base, edited)
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	g1 := verify.Gate1(base, parsed)
 
@@ -860,27 +684,27 @@ func cmdStatus(args []string) int {
 		"deleted_regions": deleted,
 	}
 	if *asJSON {
-		emitJSON(w, rep)
+		common.EmitJSON(w, rep)
 	} else {
-		line(w, "工作区：%s（程序 %s）", dir, base.Prog)
-		line(w, "基线：%s  sha256=%s", filepath.Join(dir, ".tdev", "base.full.4gl"), short(mf.Pkg.Sha256))
-		line(w, "")
-		line(w, "改动：")
+		common.Line(w, "工作区：%s（程序 %s）", dir, base.Prog)
+		common.Line(w, "基线：%s  sha256=%s", filepath.Join(dir, ".tdev", "base.full.4gl"), common.Short(mf.Pkg.Sha256))
+		common.Line(w, "")
+		common.Line(w, "改动：")
 		printRegionRefs(w, "  改动的点  ", changed)
 		printRegionRefs(w, "  新增的点  ", added)
 		printRegionRefs(w, "  删除的点  ", deleted)
-		line(w, "")
-		line(w, "验证（gate1）：%s", g1.Summary())
+		common.Line(w, "")
+		common.Line(w, "验证（gate1）：%s", g1.Summary())
 		printFindings(w, g1.Findings, false)
 		if len(predicted) > 0 {
-			line(w, "")
-			line(w, "预估写回面：")
+			common.Line(w, "")
+			common.Line(w, "预估写回面：")
 			for _, a := range predicted {
 				mark := "不变"
 				if a.Changed {
 					mark = "改写"
 				}
-				line(w, "  %-28s %s  %d → %d 字节", a.Name, mark, a.OldSize, a.NewSize)
+				common.Line(w, "  %-28s %s  %d → %d 字节", a.Name, mark, a.OldSize, a.NewSize)
 			}
 		}
 	}
@@ -1001,7 +825,7 @@ func cmdRename(args []string) int {
 	scope := fs.String("scope", "", "新的 scope：PUBLIC | PRIVATE（省略则不改）")
 	desc := fs.String("desc", "", "新的描述块（省略则不改）")
 	asJSON := fs.Bool("json", false, "输出 JSON")
-	if err := parseArgs(fs, args, "scope", "desc"); err != nil {
+	if err := common.ParseArgs(fs, args, "scope", "desc"); err != nil {
 		return 2
 	}
 	// 位置参数两种形态：`rename <dir> <旧> <新>` 或（cd 进工作区后）`rename <旧> <新>`
@@ -1013,7 +837,7 @@ func cmdRename(args []string) int {
 		d, derr := resolveWorkspaceDir("")
 		if derr != nil {
 			fmt.Fprintln(os.Stderr, "用法：tt dev tzc rename [<dir>] <旧函数名> <新函数名> [--scope …] [--desc …]")
-			return fail(derr, *asJSON)
+			return common.Fail(derr, *asJSON)
 		}
 		dir, oldName, newName = d, fs.Arg(0), fs.Arg(1)
 	default:
@@ -1030,7 +854,7 @@ func cmdRename(args []string) int {
 
 	ws, release, base, mf, _, parsed, err := loadEditable(dir)
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	defer release()
 
@@ -1046,13 +870,13 @@ func cmdRename(args []string) int {
 		}
 	}
 	if reg == nil {
-		return fail(&synth.DeniedError{
+		return common.Fail(&synth.DeniedError{
 			Msg:    "找不到要改名的自订定义点",
 			Detail: []string{oldName, "可用 `tt dev tzc status` 查看 Region 清单（改名只支持 function./dialog./report. 点）"},
 		}, *asJSON)
 	}
 	if !reg.Editable {
-		return fail(&synth.DeniedError{
+		return common.Fail(&synth.DeniedError{
 			Msg:    "目标点不可编辑，改名被拒（写入被拒）",
 			Detail: []string{reg.Name, "deny=" + reg.DenyCode, reg.Reason},
 		}, *asJSON)
@@ -1070,36 +894,36 @@ func cmdRename(args []string) int {
 
 	edits, err := editFenceFn(parsed.Doc, reg, targetFn, *scope, *desc, *desc != "")
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	newText, _, _, err := fence.ApplyEdits(parsed.Doc, edits)
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	// 预检：把新的文本当成「已编辑文档」跑一遍 gate1 + 结构事务校验
 	if err := preflight(base, parsed, newText, tapDocOf(mf)); err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	if err := ws.WriteEdited(newText); err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	rep := map[string]any{
 		"ok": true, "dir": dir, "region": reg.Name,
 		"from": oldFn, "to": targetFn, "scope": pickScope(*scope, reg.Scope),
 	}
 	if *asJSON {
-		emitJSON(w, rep)
+		common.EmitJSON(w, rep)
 		return 0
 	}
-	line(w, "已改名（只改 workspace，未碰 .tzc）")
-	line(w, "  Region：%s", reg.Name)
-	line(w, "  签名：%s → %s", oldFn, targetFn)
+	common.Line(w, "已改名（只改 workspace，未碰 .tzc）")
+	common.Line(w, "  Region：%s", reg.Name)
+	common.Line(w, "  签名：%s → %s", oldFn, targetFn)
 	if *scope != "" {
-		line(w, "  scope：%s → %s", reg.Scope, strings.ToUpper(*scope))
+		common.Line(w, "  scope：%s → %s", reg.Scope, strings.ToUpper(*scope))
 	}
-	line(w, "")
-	line(w, "注意：围栏的锚定点名（%s）不变 —— 点身份的切换由 apply 的改名事务完成", reg.Name)
-	line(w, "下一步：改完调用点后 `tt dev tzc verify %s`，再 `tt dev tzc apply %s`（已在该目录内可省 <dir>）", dir, dir)
+	common.Line(w, "")
+	common.Line(w, "注意：围栏的锚定点名（%s）不变 —— 点身份的切换由 apply 的改名事务完成", reg.Name)
+	common.Line(w, "下一步：改完调用点后 `tt dev tzc verify %s`，再 `tt dev tzc apply %s`（已在该目录内可省 <dir>）", dir, dir)
 	return 0
 }
 
@@ -1149,7 +973,7 @@ func cmdNewfn(args []string) int {
 	name := fs.String("name", "", "函数名（省略则默认 <prog>_newfunc，自动去重）")
 	scope := fs.String("scope", "", "PUBLIC | PRIVATE（省略按程序类型默认）")
 	asJSON := fs.Bool("json", false, "输出 JSON")
-	if err := parseArgs(fs, args, "type", "name", "scope"); err != nil {
+	if err := common.ParseArgs(fs, args, "type", "name", "scope"); err != nil {
 		return 2
 	}
 	if *typ == "" {
@@ -1159,17 +983,17 @@ func cmdNewfn(args []string) int {
 	}
 	dir, derr := resolveWorkspaceDir(fs.Arg(0)) // 省略 <dir> → 用当前目录
 	if derr != nil {
-		return fail(derr, *asJSON)
+		return common.Fail(derr, *asJSON)
 	}
 	w := os.Stdout
 	kind := strings.ToUpper(*typ)
 	if kind != "FUNCTION" && kind != "DIALOG" && kind != "REPORT" {
-		return fail(&synth.DeniedError{Msg: "--type 必须是 FUNCTION | DIALOG | REPORT", Detail: []string{*typ}}, *asJSON)
+		return common.Fail(&synth.DeniedError{Msg: "--type 必须是 FUNCTION | DIALOG | REPORT", Detail: []string{*typ}}, *asJSON)
 	}
 
 	ws, release, base, mf, _, parsed, err := loadEditable(dir)
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	defer release()
 
@@ -1184,7 +1008,7 @@ func cmdNewfn(args []string) int {
 		}
 	}
 	if sec == nil || !sec.Append {
-		return fail(&verify.VerifyErrorFromMsg{
+		return common.Fail(&verify.VerifyErrorFromMsg{
 			Msg: "该程序的 TGL 没有 " + anchor + " 锚点，无法注入新函数（I2b）",
 			Detail: []string{"锚点区段：" + secName,
 				"请在设计器里确认该程序模板是否包含该锚点"},
@@ -1202,7 +1026,7 @@ func cmdNewfn(args []string) int {
 	}
 	if used[fn] {
 		if *name != "" {
-			return fail(&synth.DeniedError{Msg: "函数名已存在", Detail: []string{fn}}, *asJSON)
+			return common.Fail(&synth.DeniedError{Msg: "函数名已存在", Detail: []string{fn}}, *asJSON)
 		}
 		for i := 2; ; i++ {
 			cand := fmt.Sprintf("%s%d", fn, i)
@@ -1223,24 +1047,24 @@ func cmdNewfn(args []string) int {
 	edits := []fence.Edit{{Start: at, End: at, Repl: []byte(blockText)}}
 	newText, _, _, err := fence.ApplyEdits(parsed.Doc, edits)
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	if err := preflight(base, parsed, newText, tapDocOf(mf)); err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	if err := ws.WriteEdited(newText); err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	rep := map[string]any{"ok": true, "dir": dir, "type": kind, "name": fn, "scope": sc, "anchor": secName}
 	if *asJSON {
-		emitJSON(w, rep)
+		common.EmitJSON(w, rep)
 		return 0
 	}
-	line(w, "已新增自订点（只改 workspace，未碰 .tzc）")
-	line(w, "  类型/名字：%s %s", kind, fn)
-	line(w, "  scope：%s", sc)
-	line(w, "  注入位置：%s（锚点末尾）", secName)
-	line(w, "下一步：编辑它的正文 → `tt dev tzc verify %s` → `tt dev tzc apply %s`（已在该目录内可省 <dir>）", dir, dir)
+	common.Line(w, "已新增自订点（只改 workspace，未碰 .tzc）")
+	common.Line(w, "  类型/名字：%s %s", kind, fn)
+	common.Line(w, "  scope：%s", sc)
+	common.Line(w, "  注入位置：%s（锚点末尾）", secName)
+	common.Line(w, "下一步：编辑它的正文 → `tt dev tzc verify %s` → `tt dev tzc apply %s`（已在该目录内可省 <dir>）", dir, dir)
 	return 0
 }
 
@@ -1314,31 +1138,31 @@ func cmdVerify(args []string) int {
 	fs := flag.NewFlagSet("verify", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "输出 JSON")
 	strict := fs.Bool("strict", false, "把 warn 级发现也算作失败（供 CI 使用）")
-	if err := parseArgs(fs, args, "o", "only", "accept-ver"); err != nil {
+	if err := common.ParseArgs(fs, args, "o", "only", "accept-ver"); err != nil {
 		return 2
 	}
 	dir, derr := resolveWorkspaceDir(fs.Arg(0)) // 省略 <dir> → 用当前目录
 	if derr != nil {
 		fmt.Fprintln(os.Stderr, "用法：tt dev tzc verify [<dir>] [--json] [--strict]   # <dir> 省略时用当前目录")
-		return fail(derr, *asJSON)
+		return common.Fail(derr, *asJSON)
 	}
 	w := os.Stdout
 
 	ws, err := store.Open(dir)
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	base, mf, err := loadBase(ws)
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	edited, err := ws.ReadEdited()
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	parsed, err := fence.Parse(base, edited)
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	g1 := verify.Gate1(base, parsed)
 
@@ -1377,16 +1201,16 @@ func cmdVerify(args []string) int {
 		ok = false
 	}
 	if *asJSON {
-		emitJSON(w, map[string]any{
+		common.EmitJSON(w, map[string]any{
 			"ok": ok, "dir": dir, "prog": base.Prog,
 			"summary": rep.Summary(), "findings": rep.Findings,
 			"errors": rep.Errors, "warns": rep.Warns, "infos": rep.Infos,
 		})
 	} else {
-		line(w, "验证工作区：%s（程序 %s）", dir, base.Prog)
+		common.Line(w, "验证工作区：%s（程序 %s）", dir, base.Prog)
 		printFindings(w, rep.Findings, true) // verify 是全量视图：info 也打印
-		line(w, "")
-		line(w, "结论：%s%s", rep.Summary(), map[bool]string{true: "（通过）", false: "（失败）"}[ok])
+		common.Line(w, "")
+		common.Line(w, "结论：%s%s", rep.Summary(), map[bool]string{true: "（通过）", false: "（失败）"}[ok])
 	}
 	if !ok {
 		if rep.HasDenied() {
@@ -1407,53 +1231,53 @@ func cmdApply(args []string) int {
 	dryRun := fs.Bool("dry-run", false, "跑完管线并输出逐条目 diff，不落盘、不 commit")
 	yes := fs.Bool("yes", false, "对「写区段（解开框架）」做二次确认")
 	asJSON := fs.Bool("json", false, "输出 JSON")
-	if err := parseArgs(fs, args, "o", "only", "accept-ver"); err != nil {
+	if err := common.ParseArgs(fs, args, "o", "only", "accept-ver"); err != nil {
 		return 2
 	}
 	dir, derr := resolveWorkspaceDir(fs.Arg(0)) // 省略 <dir> → 用当前目录
 	if derr != nil {
 		fmt.Fprintln(os.Stderr, "用法：tt dev tzc apply [<dir>] [-o <pkg.tzc>] [--dry-run] [--yes] [--json]   # <dir> 省略时用当前目录")
-		return fail(derr, *asJSON)
+		return common.Fail(derr, *asJSON)
 	}
 	w := os.Stdout
 
 	ws, err := store.Open(dir)
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	release, err := ws.Lock()
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	defer release()
 
 	base, mf, err := loadBase(ws)
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	// 1) 读取 edited
 	edited, err := ws.ReadEdited()
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	// 2) parse_fenced：结构性第一道（配对 / 归属 / 嵌套深度）
 	parsed, err := fence.Parse(base, edited)
 	if err != nil {
 		if *asJSON {
-			emitJSON(w, map[string]any{"ok": false, "stage": "parse_fenced", "message": err.Error()})
+			common.EmitJSON(w, map[string]any{"ok": false, "stage": "parse_fenced", "message": err.Error()})
 		} else {
-			line(w, "apply 失败（parse_fenced）：%v", err)
+			common.Line(w, "apply 失败（parse_fenced）：%v", err)
 		}
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	// 3) gate1：字节恒等（围栏行/围栏外/只读区/结构行）+ 写入授权
 	g1 := verify.Gate1(base, parsed)
 	if g1.HasDenied() || g1.HasError() {
 		if *asJSON {
-			emitJSON(w, map[string]any{"ok": false, "stage": "gate1", "findings": g1.Findings,
+			common.EmitJSON(w, map[string]any{"ok": false, "stage": "gate1", "findings": g1.Findings,
 				"summary": g1.Summary()})
 		} else {
-			line(w, "apply 被拒绝（gate1 %s）：", g1.Summary())
+			common.Line(w, "apply 被拒绝（gate1 %s）：", g1.Summary())
 			printFindings(w, g1.Findings, false)
 		}
 		if g1.HasDenied() {
@@ -1465,19 +1289,19 @@ func cmdApply(args []string) int {
 	// 源包必须未变（D-6）
 	pkgPath := mf.Pkg.Path
 	if pkgPath == "" {
-		return fail(fmt.Errorf("manifest 里没有记录源包路径"), *asJSON)
+		return common.Fail(fmt.Errorf("manifest 里没有记录源包路径"), *asJSON)
 	}
 	curSha, err := model.Sha256File(pkgPath)
 	if err != nil {
-		return fail(&store.IOError{Msg: "读不到源包 " + pkgPath, Err: err}, *asJSON)
+		return common.Fail(&store.IOError{Msg: "读不到源包 " + pkgPath, Err: err}, *asJSON)
 	}
 	if mf.Pkg.Sha256 != "" && curSha != mf.Pkg.Sha256 {
-		return fail(&store.IOError{Msg: "源包自 export 之后已被改动，拒绝写回",
-			Err: fmt.Errorf("manifest 记录 %s，当前 %s；请重新 export", short(mf.Pkg.Sha256), short(curSha))}, *asJSON)
+		return common.Fail(&store.IOError{Msg: "源包自 export 之后已被改动，拒绝写回",
+			Err: fmt.Errorf("manifest 记录 %s，当前 %s；请重新 export", common.Short(mf.Pkg.Sha256), common.Short(curSha))}, *asJSON)
 	}
 	pkg, err := pkgfile.Open(pkgPath, pkgfile.OpenOptions{})
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	// I15：TAP 条目基名 ≠ 根 prog → 引用标准程序的包，设计器 Packing 会走 CiteTAP，拒绝整体重写
 	if tap := pkg.Tap(); tap != nil {
@@ -1491,7 +1315,7 @@ func cmdApply(args []string) int {
 					Detail: []string{"条目基名：" + baseName, "根 prog：" + prog,
 						"设计器 Packing 在这种情况下会改用 CiteTAP 内容"},
 				}
-				return fail(me, *asJSON)
+				return common.Fail(me, *asJSON)
 			}
 		}
 	}
@@ -1499,16 +1323,16 @@ func cmdApply(args []string) int {
 	// 4) split + rewrite
 	plan, err := split.Split(base, parsed, pkg)
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	// 4b) gate2：不变量 I1–I15（对**原包**的 TAP 与编辑后的文档做一致性判定）
 	if tapDoc0, terr := tapfile.Parse(pkg.Tap().Data); terr == nil && tapDoc0 != nil {
 		g2 := verify.Gate2(base, parsed, tapDoc0)
 		if g2.HasError() {
 			if *asJSON {
-				emitJSON(w, map[string]any{"ok": false, "stage": "gate2", "findings": g2.Findings})
+				common.EmitJSON(w, map[string]any{"ok": false, "stage": "gate2", "findings": g2.Findings})
 			} else {
-				line(w, "apply 失败（gate2 不变量 %s）：磁盘未动", g2.Summary())
+				common.Line(w, "apply 失败（gate2 不变量 %s）：磁盘未动", g2.Summary())
 				printFindings(w, g2.Findings, false)
 			}
 			if g2.HasDenied() {
@@ -1522,44 +1346,44 @@ func cmdApply(args []string) int {
 	_ = yes
 	newTap, err := tapfile.Rewrite(pkg.Tap().Data, plan.Ops...)
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	newTgl := applyTglPatches(pkg, plan)
 
 	// 5) 逐条目写回计划
 	actions, err := pkg.Plan(pkgfile.Rebuild{Tap: newTap, Tgl: newTgl})
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	if *dryRun {
 		if *asJSON {
-			emitJSON(w, map[string]any{"ok": true, "dry_run": true, "plan": plan.Describe(),
+			common.EmitJSON(w, map[string]any{"ok": true, "dry_run": true, "plan": plan.Describe(),
 				"entries": actions, "changed": plan.Changed, "added": plan.Added,
 				"deleted": plan.Deleted, "sections": plan.Sections})
 			return 0
 		}
-		line(w, "--dry-run：将写入的逐条目 diff（未落盘、未 commit）")
+		common.Line(w, "--dry-run：将写入的逐条目 diff（未落盘、未 commit）")
 		for _, a := range actions {
 			mark := "不变"
 			if a.Changed {
 				mark = "改写"
 			}
-			line(w, "  %-28s %s  %8d → %-8d  %s → %s", a.Name, mark, a.OldSize, a.NewSize,
-				short(a.OldSha256), short(a.NewSha256))
+			common.Line(w, "  %-28s %s  %8d → %-8d  %s → %s", a.Name, mark, a.OldSize, a.NewSize,
+				common.Short(a.OldSha256), common.Short(a.NewSha256))
 		}
-		line(w, "计划：%s", plan.Describe())
+		common.Line(w, "计划：%s", plan.Describe())
 		return 0
 	}
 	// 6) gate3：对将要产出的新包重跑合成
 	g3, err := verify.Gate3(pkg, newTap, newTgl)
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	if g3.HasError() {
 		if *asJSON {
-			emitJSON(w, map[string]any{"ok": false, "stage": "gate3", "findings": g3.Findings})
+			common.EmitJSON(w, map[string]any{"ok": false, "stage": "gate3", "findings": g3.Findings})
 		} else {
-			line(w, "apply 失败（gate3 装载模拟）：磁盘未动")
+			common.Line(w, "apply 失败（gate3 装载模拟）：磁盘未动")
 			printFindings(w, g3.Findings, false)
 		}
 		return 3
@@ -1567,7 +1391,7 @@ func cmdApply(args []string) int {
 	// 7) 原子写
 	newBytes, _, err := pkg.Build(pkgfile.Rebuild{Tap: newTap, Tgl: newTgl})
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	writePath := pkgPath
 	if *outPkg != "" {
@@ -1583,7 +1407,7 @@ func cmdApply(args []string) int {
 		}
 	}
 	if err := store.AtomicWrite(writePath, newBytes); err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	// 8) 重算基线：**以刚写出的包为准**重新 synthesize + render（规范化）。
 	//
@@ -1624,7 +1448,7 @@ func cmdApply(args []string) int {
 	} else {
 		// 退化路径：读不回新包时，至少用编辑后的文本刷新基线（保持旧行为）
 		if uerr := ws.UpdateAfterApply(parsed.Doc, edited); uerr != nil {
-			return fail(uerr, *asJSON)
+			return common.Fail(uerr, *asJSON)
 		}
 		fmt.Fprintf(os.Stderr, "警告：写出的包无法读回（%v），基线按编辑文本刷新\n", nerr)
 	}
@@ -1644,31 +1468,31 @@ func cmdApply(args []string) int {
 		"entries": actions, "pkg_sha256": newSha, "commit": hash, "prev_pkg": backupPath,
 	}
 	if *asJSON {
-		emitJSON(w, rep)
+		common.EmitJSON(w, rep)
 		return 0
 	}
-	line(w, "apply 成功")
-	line(w, "  包：%s", writePath)
-	line(w, "  新包 sha256：%s", newSha)
+	common.Line(w, "apply 成功")
+	common.Line(w, "  包：%s", writePath)
+	common.Line(w, "  新包 sha256：%s", newSha)
 	if backupPath != "" {
-		line(w, "  上一步的包已备份到：%s", backupPath)
+		common.Line(w, "  上一步的包已备份到：%s", backupPath)
 	}
-	line(w, "  计划：%s", plan.Describe())
+	common.Line(w, "  计划：%s", plan.Describe())
 	for _, a := range actions {
 		mark := "不变"
 		if a.Changed {
 			mark = "改写"
 		}
-		line(w, "    %-28s %s  %8d → %-8d", a.Name, mark, a.OldSize, a.NewSize)
+		common.Line(w, "    %-28s %s  %8d → %-8d", a.Name, mark, a.OldSize, a.NewSize)
 	}
 	if plan.SetSectionFlag {
-		line(w, "  副作用：TAP 根 section_flag=\"Y\"（包从此永久处于已解开状态）")
+		common.Line(w, "  副作用：TAP 根 section_flag=\"Y\"（包从此永久处于已解开状态）")
 	}
 	if len(plan.Sections) > 0 {
-		line(w, "")
-		line(w, "提示：本包改过框架区段，**下次上传会触发服务器侧 adzi520 联动**（tdev 是本地工具，不代为执行）。")
+		common.Line(w, "")
+		common.Line(w, "提示：本包改过框架区段，**下次上传会触发服务器侧 adzi520 联动**（tdev 是本地工具，不代为执行）。")
 	}
-	line(w, "  基线已重算、git 已提交：%s", short(hash))
+	common.Line(w, "  基线已重算、git 已提交：%s", common.Short(hash))
 	return 0
 }
 
@@ -1691,22 +1515,3 @@ func applyTglPatches(pkg *pkgfile.Package, plan *split.Plan) []byte {
 }
 
 //---------------------------------------------------------------------------
-
-func fail(err error, asJSON bool) int {
-	code := exitCodeOf(err)
-	if asJSON {
-		emitJSON(os.Stdout, map[string]any{
-			"ok": false, "exit_code": code, "error": err.Error(),
-		})
-		return code
-	}
-	fmt.Fprintf(os.Stderr, "错误（退出码 %d）：%v\n", code, err)
-	return code
-}
-
-func short(s string) string {
-	if len(s) > 12 {
-		return s[:12]
-	}
-	return s
-}

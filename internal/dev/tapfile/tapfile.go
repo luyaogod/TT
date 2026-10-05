@@ -2,10 +2,9 @@
 //
 // 依据：
 //   - 设计指南 §5.4、§7 R3（禁止用 XML 库整体序列化 .tap）
-//   - docs/T100设计器-README.md §3.3（根元素真名 add_points、point/section 结构）
-//     §3.6 第 6 点（混合换行：元素间 CRLF / CDATA 内 LF）
-//     §3.9（旧工具教训：只用 CDATA 感知扫描器定位元素区间，改写仅重建 CDATA 内部；
-//     属性改动「有则改、无则加」；属性顺序/空白/引号全部原样保留）
+//   - 反编译源码：根元素真名 add_points、point/section 结构；混合换行（元素间 CRLF /
+//     CDATA 内 LF）；旧工具的教训是只用 CDATA 感知扫描器定位元素区间，改写仅重建
+//     CDATA 内部，属性改动「有则改、无则加」，属性顺序/空白/引号全部原样保留
 //
 // 本包是「不破坏」的物理基础之一：除了显式给定的改写点，其余字节逐字节不动。
 package tapfile
@@ -123,7 +122,7 @@ func (d *Doc) PointExact(name string) *Element {
 //
 // 真实语料里同名点会出现两次：先是 tombstone（status="d"），随后是 live（status="u"）。
 // 这正是设计器 ProgramInformation.AddPoint getter 的组装顺序（先删除点、后存活点，
-// 见 docs/T100设计器-README.md §5.3 与 ProgramInformation.cs:553-613）。
+// 见 ProgramInformation.cs:553-613）。
 func (d *Doc) PointsAll(name string) []*Element {
 	var out []*Element
 	for _, p := range d.Points {

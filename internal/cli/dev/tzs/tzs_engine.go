@@ -18,7 +18,7 @@
 //     守护进程中途死掉时重试是在赌「上一次写进去了没有」。
 //  3. **工作区没有缺省。** 引擎内置的默认工作区是一个真实客户目录，落到它上面会去 Boot
 //     别人的包。解析顺序末端是**拒绝**，不是回落。
-package cli
+package tzs
 
 import (
 	"context"
@@ -33,6 +33,7 @@ import (
 	"sync"
 	"time"
 
+	"tt/internal/cli/dev/common"
 	"tt/internal/config"
 	"tt/internal/dev/tzs"
 )
@@ -53,15 +54,12 @@ func tzsSettings() config.TzsSettings {
 // 把工作区也捆进来，会让两件事在"还没配工作区"的新机器上变成退 5 ——
 // "动词名打错"（本该退 2）和"`<动词> --help`"（本该退 0，它就是说明书本身）。
 func tzsEngineExe() (string, error) {
-	if exe := tzsSettings().ServerExe; exe != "" {
-		return exe, nil
+	// 候选与缺省只有一份实现 —— config.EngineExe(统一路径管理器):
+	// tzs.serverExe 覆盖优先,否则 <tt.exe 目录>	zs	zs-server.exe。
+	if p := config.EngineExe(tzsSettings().ServerExe); p != "" {
+		return p, nil
 	}
-	self, err := os.Executable()
-	if err != nil {
-		return "", fmt.Errorf("定位不到 tt.exe 自身：%w", err)
-	}
-	// 与 skills/ 同一种分发形态：exe 同目录的子目录，不进二进制。
-	return filepath.Join(filepath.Dir(self), "tzs", "tzs-server.exe"), nil
+	return "", fmt.Errorf("定位不到 tt.exe 自身")
 }
 
 // tzsExecOptions 解析出一次引擎调用需要的四样东西；**缺工作区不报错**（留给调用方决定）。
@@ -728,7 +726,7 @@ func cmdTzsStop(args []string) int {
 	// 文档提过它（所以删掉不带走谁的既有用法）。项目自己的标准：advertised-but-inert
 	// 比不存在更坏（见 Manifest.cs 里 add_field.name 那条注释）。
 	_ = fs.Bool("yes", false, "兼容保留")
-	if err := parseArgs(fs, args, "workspace"); err != nil {
+	if err := common.ParseArgs(fs, args, "workspace"); err != nil {
 		return 2
 	}
 	o, err := tzsEngineOptions(*ws)
@@ -738,7 +736,7 @@ func cmdTzsStop(args []string) int {
 	}
 	// stop 绝不 spawn：让 stop 去起一个服务器是件可笑的事。
 	if err := tzs.Stop(tzsCtx(), o); err != nil {
-		return fail(err, false)
+		return common.Fail(err, false)
 	}
 	return 0
 }
@@ -747,7 +745,7 @@ func cmdTzsReap(args []string) int {
 	fs := flag.NewFlagSet("tzs reap", flag.ContinueOnError)
 	yes := fs.Bool("yes", false, "确认结束这些进程")
 	ws := fs.String("workspace", "", "工作区（可选：reap 按**记录**收，与当前工作区无关）")
-	if err := parseArgs(fs, args, "workspace"); err != nil {
+	if err := common.ParseArgs(fs, args, "workspace"); err != nil {
 		return 2
 	}
 	// **宽松版**，与 doctor 同一个理由：`reap` 从不 spawn，所以"没配工作区就不许开工"那条
@@ -764,7 +762,7 @@ func cmdTzsReap(args []string) int {
 	}
 	pids, err := tzs.Reap(tzsCtx(), o, *yes)
 	if err != nil {
-		return fail(err, false)
+		return common.Fail(err, false)
 	}
 	if !*yes && len(pids) > 0 {
 		fmt.Fprintf(os.Stderr, "加 --yes 才会真的结束它们。\n")
@@ -775,7 +773,7 @@ func cmdTzsReap(args []string) int {
 func cmdTzsDoctor(args []string) int {
 	fs := flag.NewFlagSet("tzs doctor", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "输出 JSON")
-	if err := parseArgs(fs, args); err != nil {
+	if err := common.ParseArgs(fs, args); err != nil {
 		return 2
 	}
 	// 宽松版：缺工作区时 doctor **自己**要在报告里说出来（那是它的职责），
@@ -873,7 +871,7 @@ func printRawReply(r *tzs.Reply) {
 //
 // 非 --json 时文案与从前一致（人话进 stderr）。
 func emitFailure(err error, asJSON bool) int {
-	code := exitCodeOf(err)
+	code := common.ExitCodeOf(err)
 	if asJSON {
 		// **紧凑、一行**，与引擎帧一样。从前这里走 emitJSON（它会美化缩进），于是同一个
 		// `--json` 出口有两种形状：引擎发的帧是一行，客户端合成的帧是多行 —— 按行读的消费方
@@ -916,8 +914,8 @@ func printHumanReply(fn string, r *tzs.Reply, err error, code int) int {
 			// 留着这段是因为它可以由**旧引擎**触发（守护进程按 MVID 命名，重编前后各有一批），
 			// 而那正是最需要说人话的时刻：**退出码不动**（仍按契约表 kind=internal → 1），
 			// 只把文案从"内部错误、上报"改成"什么也没改"。
-			line(os.Stderr, "    这不是错误：请求的值与当前值相同，设计器同值短路，什么都没改。")
-			line(os.Stderr, "    （退出码 1 来自契约表把它的 kind 归成 internal；见 SPEC §11.24(a)。）")
+			common.Line(os.Stderr, "    这不是错误：请求的值与当前值相同，设计器同值短路，什么都没改。")
+			common.Line(os.Stderr, "    （退出码 1 来自契约表把它的 kind 归成 internal；见 SPEC §11.24(a)。）")
 		}
 		// 可操作的那一半（legal / hint / candidates / applied / failed）默认也要看得见 ——
 		// 引擎做它们就是为了让调用方自己纠正，只让 --json 看得见等于没做。

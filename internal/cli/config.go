@@ -18,23 +18,23 @@ var configGetRaw bool
 
 // newConfigCmd 是统一的配置管理命令组。
 //
-// 合并前两个工具各有自己的位置规则与迁移逻辑，注释里写着"与对方保持一致，
-// 改动请两边同步"。现在两者共用 internal/config 的实现，这里只做一层 CLI 门面。
+// 位置解析与落点规则只有一份实现（internal/config，见其 README），
+// 这里只做一层 CLI 门面。
 func newConfigCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
-		Short: "配置管理：位置 / 查看 / 读写 / 迁移 / 校验",
+		Short: "配置管理：位置 / 查看 / 读写 / 校验",
 		Long: `管理唯一的 config.json。
 
-三个工具共用这一份配置：顶层的 hosts 节是共用环境清单，
-debug / query / mirror / bdldoc / sync / tdev 是各工具自己的设置。
+顶层的 hosts 节是共用环境清单，
+debug / query / mirror / bdldoc / sync / tdev 是各命令组自己的设置。
 
 配置位置按以下顺序确定（第一个存在的胜出）：
-  1. TT_CONFIG 环境变量（兼容旧名 TDEBUG_CONFIG / TDICT_CONFIG）
+  1. TT_CONFIG 环境变量
   2. --config <路径>
   3. <exe 目录>\.portable 存在 → 便携包，配置留在包内
   4. ` + config.DefaultConfigPathHint() + `
-统一位置可用 T100_HOME 环境变量整体改写。`,
+没有旧位置兜底，也不做自动迁移 —— 数据统一在统一用户目录。`,
 	}
 
 	cmd.AddCommand(&cobra.Command{
@@ -139,80 +139,8 @@ debug / query / mirror / bdldoc / sync / tdev 是各工具自己的设置。
 		},
 	})
 
-	cmd.AddCommand(newConfigMigrateCmd())
 	cmd.AddCommand(newConfigValidateCmd())
 	return cmd
-}
-
-// newConfigMigrateCmd 预览/执行旧配置合并。
-func newConfigMigrateCmd() *cobra.Command {
-	var dryRun bool
-	cmd := &cobra.Command{
-		Use:   "migrate",
-		Short: "把合并前 tdebug / tdict 的配置合并到统一位置",
-		Long: `把 TDebug 与 TDictCli 各自留下的配置合并成一份统一配置。
-
-合并规则：
-  - 环境清单取并集，同名环境以 TDictCli 那份为准（它是字典查询的现役配置）；
-  - TDebug 的 debug 节被拆开：sshs 提升为 hosts.sshs，其余键留在 debug；
-  - query / mirror / bdldoc / sync 原样带过来；
-  - 原文件不删除，各留一份 .pre-merge.bak。
-
-tt 首次运行会自动做这件事，一般不需要手动执行 —— 这个命令用于预览结果，
-或在上次迁移中断后重跑。
-
---dry-run 只打印合并结果，不写任何文件。`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if dryRun {
-				return runConfigMigrateDryRun(cmd)
-			}
-			path := config.UserConfigPath()
-			if path == "" {
-				return fmt.Errorf("定位不到统一用户目录（T100_HOME / %%APPDATA%%）")
-			}
-			srcs := config.Migrate()
-			if len(srcs) == 0 {
-				cmd.Println("无需迁移：目标已是当前结构，或找不到可合并的旧配置。")
-				return nil
-			}
-			cmd.Printf("已合并 %d 份旧配置到 %s\n", len(srcs), path)
-			for _, s := range srcs {
-				cmd.Printf("  ← %s\n", s)
-			}
-			cmd.Println("源文件未删除，各留了一份 .pre-merge.bak。")
-			return nil
-		},
-	}
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "只打印合并结果，不写文件")
-	return cmd
-}
-
-func runConfigMigrateDryRun(cmd *cobra.Command) error {
-	path := config.UserConfigPath()
-	if path == "" {
-		return fmt.Errorf("定位不到统一用户目录（T100_HOME / %%APPDATA%%）")
-	}
-	plan, err := config.PlanMigration(path)
-	if err != nil {
-		return err
-	}
-	if plan == nil || len(plan.Sources) == 0 {
-		cmd.Println("无需迁移：目标已是当前结构，或找不到可合并的旧配置。")
-		return nil
-	}
-	cmd.Printf("将写入：%s\n", plan.Dst)
-	cmd.Println("将合并：")
-	for _, s := range plan.Sources {
-		cmd.Printf("  ← %s\n", s.Path)
-	}
-	out, err := json.MarshalIndent(plan.Merged, "", "  ")
-	if err != nil {
-		return err
-	}
-	cmd.Println("\n合并结果：")
-	cmd.Println(string(out))
-	return nil
 }
 
 // newConfigValidateCmd 校验配置能否被正常解析，并报出可疑之处。
@@ -258,7 +186,7 @@ func validateConfig(path string) []string {
 	}
 	if v := intOrZero(root["schemaVersion"]); v < config.SchemaVersion {
 		problems = append(problems, fmt.Sprintf(
-			"schemaVersion = %d，当前结构为 %d；这是合并前的旧配置，运行 tt config migrate 升级", v, config.SchemaVersion))
+			"schemaVersion = %d，当前结构为 %d；这可能是旧版本的配置（不做自动迁移），请确认 hosts.sshs 是否完整", v, config.SchemaVersion))
 	}
 
 	r, err := config.Load(path)

@@ -35,8 +35,8 @@ var srcConfigPath string
 
 func init() {
 	// 字典独有的 persistent flag:--db 只对 tt dict 有意义
-	Group.PersistentFlags().StringVarP(&dbPath, "db", "d", "erp_data.db",
-		"本地 SQLite 数据库路径(本地查询数据源;也可用 TDICT_DB)")
+	Group.PersistentFlags().StringVarP(&dbPath, "db", "d", "",
+		"本地 SQLite 数据库路径(本地查询数据源;也可用 TDICT_DB;缺省 = 数据目录下的 erp_data.db)")
 	// --limit 挂在命令组上而不是各命令上:返回条数上限是**全局策略**,不是某个命令的
 	// 显示选项 —— 从前只有 msg/prog/r.t 各自定义了一个,其余命令等于没有防线。
 	Group.PersistentFlags().IntVar(&queryLimit, "limit", -1,
@@ -92,51 +92,18 @@ func runRootPreRun(args []string) error {
 // 同时补跑祖先命令的钩子。
 func skipQuerySource(cmd *cobra.Command, args []string) error { return runRootPreRun(args) }
 
-// resolveDBPath 解析本地 SQLite 路径,优先级:
-//  1. TDICT_DB 环境变量
-//  2. -d 原样(绝对路径)
-//  3. -d 相对 exe 同目录
-//  4. -d 相对当前目录
-//
-// 全部不存在时报错并列出尝试过的路径。
+// resolveDBPath 读侧定位本地 SQLite。候选与优先级只有一份实现 —— config.Locations
+// (统一路径管理器):TDICT_DB → -d(相对路径按当前目录绝对化)→ 数据目录下的缺省名,
+// 取第一个**存在**的;全部不存在时报错并列出尝试过的路径。
 func resolveDBPath(flagPath string) (string, error) {
-	var candidates []string
-
-	// 1. TDICT_DB 环境变量(最高优先级)
-	if env := os.Getenv("TDICT_DB"); env != "" {
-		candidates = append(candidates, env)
+	p, tried, err := config.LocationsAt(srcConfigPath).ResolveDictDB(flagPath)
+	if err != nil {
+		return "", fmt.Errorf(
+			"本地数据库文件未找到。\n\n尝试了以下路径:\n%s\n\n设置 TDICT_DB 环境变量或用 -d 指定正确路径:\n  setx TDICT_DB \"D:\\path\\to\\erp_data.db\"\n  tt dict -d \"D:\\path\\to\\erp_data.db\" r.t dzea_t",
+			config.FormatTriedPaths(tried),
+		)
 	}
-
-	// 2. -d 原样
-	candidates = append(candidates, flagPath)
-
-	// 3. -d 相对 exe 同目录
-	if !filepath.IsAbs(flagPath) {
-		if execPath, err := os.Executable(); err == nil {
-			candidates = append(candidates, filepath.Join(filepath.Dir(execPath), flagPath))
-		}
-	}
-
-	// 4. -d 相对当前目录
-	if !filepath.IsAbs(flagPath) {
-		if cwd, err := os.Getwd(); err == nil {
-			candidates = append(candidates, filepath.Join(cwd, flagPath))
-		}
-	}
-
-	var tried []string
-	for _, p := range candidates {
-		abs, _ := filepath.Abs(p)
-		if _, err := os.Stat(abs); err == nil {
-			return abs, nil
-		}
-		tried = append(tried, abs)
-	}
-
-	return "", fmt.Errorf(
-		"本地数据库文件未找到。\n\n尝试了以下路径:\n%s\n\n设置 TDICT_DB 环境变量或用 -d 指定正确路径:\n  setx TDICT_DB \"D:\\path\\to\\erp_data.db\"\n  tt dict -d \"D:\\path\\to\\erp_data.db\" r.t dzea_t",
-		config.FormatTriedPaths(tried),
-	)
+	return p, nil
 }
 
 // GetDB 返回当前查询数据源(本地 SQLite 或某环境的远程库),
@@ -267,14 +234,17 @@ func truncatePayload(v any, n int) any {
 // 它**必须在截断之前**成功 —— 落不了盘就不截断(见 emitCapped)。想看全量就去 grep
 // 这个文件,而不必把 9 MB 灌回上下文,也不必重跑一次查询。
 func spillResult(data any) (string, error) {
-	dir := dataDirOf(srcConfigPath)
+	dir := config.LocationsAt(srcConfigPath).DataDir()
 	if dir == "" {
 		return "", errors.New("定位不到配置目录")
 	}
 	if data == nil {
 		return "", errors.New("没有可落盘的数据")
 	}
-	sub := filepath.Join(dir, spillDirName)
+	sub := config.CacheDir(dir, spillDirName)
+	if sub == "" {
+		return "", errors.New("定位不到配置目录")
+	}
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		return "", err
 	}

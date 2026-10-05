@@ -3,9 +3,8 @@
 //
 // 依据：
 //   - 设计指南 §5.2、§1 领域模型
-//   - docs/T100设计器-README.md §3.3（标记/根元素/point 属性语义）§3.4（合成管线六步）
-//     §3.7（point 名字命名空间三层）§4.3（可编辑性决策链）
-//   - 反编译源码：
+//   - 反编译源码（标记 / 根元素 / point 属性语义、合成管线六步、point 名字命名空间三层、
+//     可编辑性决策链）：
 //     CodeEditWindow/Helper/CodeEditorManager.cs:1070-1080（LoadContent）
 //     CodeEditorManager.cs:1142-1176（ProcessFunctionTypes，锚点展开）
 //     CodeEditorManager.cs:1179-1227（ProcessAddPoints，占位符替换/造空点/记 TglTag）

@@ -1,4 +1,4 @@
-package cli
+package tzs
 
 // tzs_reply_test.go —— 两帧渲染的测试：`printHumanReply` / `printWireDetail`。
 //

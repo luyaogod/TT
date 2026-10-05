@@ -2,7 +2,7 @@ package testutil
 
 // corpus.go —— 真实语料的**遍历**（`.tzc` 与 `.tzs` 两条管线共用）。
 //
-// 为什么抽到这里：`.tzc` 的语料回归（internal/dev/cli/corpus_test.go）与 `.tzs` 的
+// 为什么抽到这里：`.tzc` 的语料回归（internal/cli/dev/corpus_test.go）与 `.tzs` 的
 // （internal/dev/tzs/corpus_test.go）要找的是**同一批目录**，只是扩展名不同。抄两份的
 // 后果不是「多几行」，而是两边会各自漂移：一边认了 TDEV_CORPUS、另一边只认 TTZS_CORPUS，
 // 于是同一条命令在一台机器上跑全量、在另一台上静默跑零个包（"0 个包全部通过"是最坏的一种

@@ -7,8 +7,8 @@
 //	server.go   守护进程生命周期：spawn / 就绪握手 / 状态文件 / stop / reap
 //
 // 依赖面刻意窄：只 import internal/config（找状态文件落点）、internal/winproc
-// （起 / 判活 / 杀）和标准库。**它不 import internal/dev/cli** —— 那边 import 它，
-// 反过来就成环；命令层（动词分发、退出码、文案）住在 internal/dev/cli/tzs*.go，
+// （起 / 判活 / 杀）和标准库。**它不 import internal/cli/dev** —— 那边 import 它，
+// 反过来就成环；命令层（动词分发、退出码、文案）住在 internal/cli/dev/tzs*.go，
 // 本包只提供 exitCode 映射这类纯函数供它调用。
 //
 // 三条纪律，每条都有对应的坑（详见各文件注释）：
@@ -126,7 +126,7 @@ const (
 	MinTimeout = 120 * time.Second
 )
 
-// ExitCode 是 tdev 的退出码（与 internal/dev/cli 的 0/2/3/4/5 同一套口径）。
+// ExitCode 是 tdev 的退出码（与 internal/cli/dev 的 0/2/3/4/5 同一套口径）。
 //
 // 注意这里只有 0/1/2/4/5 五个取值，3 是 tzc 那条管线的「验证失败」，
 // tzs 这条线上没有对应物 —— 帧级失败一律落到 2（可自纠）或 4（设计器拒绝）。

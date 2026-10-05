@@ -8,7 +8,7 @@ import (
 
 // CaptureStdout 把一段写到 os.Stdout 的输出收回来，连同它的退出码。
 //
-// 命令层直接写 os.Stdout（internal/dev/cli 的 `line(w, …)`、internal/cli/dict 的
+// 命令层直接写 os.Stdout（internal/cli/dev 的 `line(w, …)`、internal/cli/dict 的
 // `emitWith` 都是），所以只能换掉 os.Stdout 来抓。
 //
 // **必须边写边读**（2026-09-25 实测的事故）。进程内管道的缓冲约 4 KB，而
@@ -18,7 +18,7 @@ import (
 // 这里用 goroutine 边读边收，从根上避开。判据是 TestCaptureStdoutSurvivesBigOutput
 // （64 KB 输出，远超任何管道缓冲）—— 那一条**必须见过它红**。
 //
-// fn 返回退出码，与命令函数的签名一致（internal/dev/cli 的 `cmd*` 都是 `func([]string) int`）。
+// fn 返回退出码，与命令函数的签名一致（internal/cli/dev 的 `cmd*` 都是 `func([]string) int`）。
 func CaptureStdout(t *testing.T, fn func() int) (int, string) {
 	t.Helper()
 	r, w, err := os.Pipe()

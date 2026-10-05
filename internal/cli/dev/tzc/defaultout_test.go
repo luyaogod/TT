@@ -1,10 +1,11 @@
-package cli
+package tzc
 
 import (
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"tt/internal/testkit"
 
 	"tt/internal/dev/testutil"
 )
@@ -46,7 +47,7 @@ func TestExportWithoutO(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if code := silent(t, func() int { return cmdExport([]string{p1}) }); code != 0 {
+	if code := testkit.Silent(t, func() int { return cmdExport([]string{p1}) }); code != 0 {
 		t.Fatalf("省略 -o 的 export 退出码 %d", code)
 	}
 	ws1 := filepath.Join(dir, "adzi999-ws")
@@ -57,14 +58,14 @@ func TestExportWithoutO(t *testing.T) {
 		t.Fatalf("默认工作区缺少 manifest.json: %v", err)
 	}
 	// 第二个包：另一个工作区，互不影响
-	if code := silent(t, func() int { return cmdExport([]string{p2}) }); code != 0 {
+	if code := testkit.Silent(t, func() int { return cmdExport([]string{p2}) }); code != 0 {
 		t.Fatalf("第二个包 export 退出码 %d", code)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "adzi998-ws", "prog.full.4gl")); err != nil {
 		t.Fatalf("第二个包的默认工作区没建出来: %v", err)
 	}
 	// 再导一次同一个包：必须明确拒绝（不静默覆盖已有工作区），且提示 -o
-	code := silent(t, func() int { return cmdExport([]string{p1}) })
+	code := testkit.Silent(t, func() int { return cmdExport([]string{p1}) })
 	if code == 0 {
 		t.Fatalf("重复导出同一个包必须被拒绝（不能静默覆盖已有工作区）")
 	}

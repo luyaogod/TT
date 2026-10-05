@@ -1,68 +1,32 @@
+// 根开关桥：把 tt 根命令的全局开关从透传给动词的原始参数里摘出来、翻译成这条线认识的东西。
+//
+// 为什么还需要它：动词叶命令是 DisableFlagParsing（参数契约冻结在 tdev 自己的解析器上，
+// 见 register.go 的包注释），cobra 不解析这条线上的任何 flag —— 所以 --config/--json/
+// --format/--csv/--env 无论写在哪个位置，都会原样落进这里，由本文件翻译。
 package dev
 
 import (
 	"fmt"
 	"os"
 	"strings"
-
-	"github.com/spf13/cobra"
-
-	devcli "tt/internal/dev/cli"
 )
 
-// devLong 是命令组的 --help 文本。参数与退出码契约沿用 tdev 自己的说明
-// （internal/dev/cli.Usage），这里只补一句在 tt 里的调用方式。
-const devLong = `T100 设计器包工具：.tzc 代码包 + .tzs 表单包
-
-在 tt 里，原来 tdev 的命令整体后移一级：
-  tdev tzc export …   →  tt dev tzc export …
-  tdev tzs export …   →  tt dev tzs export …
-  tdev install …      →  tt install …（安装不再住在这条线上）
-
-.tzc 的退出码与参数写法完全不变（0 成功 / 2 包格式或用法错 / 3 校验失败 /
-4 拒绝写入 / 5 IO 与环境失败）。.tzs 那条线**没有 3**，另有一个 1（引擎内部错）。` + "\n\n" + devcli.Usage
-
-// runDev 把参数原样交给 tdev 自己的解析器，并把它的退出码透传给根命令。
+// takeRootFlags 把根命令的常驻开关从透传给动词的参数里摘出来，翻译成这条线认识的东西。
 //
-// tdev 的 flag 解析是位置无关的（-o/--json 可以出现在位置参数之后），
-// 标准库 flag 做不到这一点，所以这里必须 DisableFlagParsing，
-// 不能交给 cobra 解析。
-func runDev(cmd *cobra.Command, args []string) error {
-	var err error
-	args, err = takeRootFlags(args)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return exitCode(2)
-	}
-	if code := devcli.Run(args); code != 0 {
-		return exitCode(code)
-	}
-	return nil
-}
-
-// takeRootFlags 把根命令的常驻开关从转发给 tdev 的参数里摘出来，翻译成这条线认识的东西。
+// `--config` 走环境变量而不是直接把值传给解析器：动词核心只经 config.ResolvePath 读配置，
+// 而 ResolvePath 本就认 TT_CONFIG —— 不必为这一个 flag 给这条线开新接口。
 //
-// 为什么需要这一步：本命令组是 DisableFlagParsing，cobra 不会替它解析任何 flag，
-// 所以 `tt --config X dev tzc export …` 和 `tt dev tzc export … --config X` 里的
-// --config 都会原样落进 tdev 自己的解析器，而它不认识这个 flag，结果是
-// 「未知子命令 "--config"」直接退出 2。摘掉它之后两种写法都能用。
+// `--json` / `--csv` / `--format`：根命令的 --help 把它们写作全局开关，但这条线只有
+// --json 一个机器可读开关（实测 2026-09-25：`tt dev tzc selftest --format csv` 与
+// `tt --format csv dev tzc selftest` 两种位置都只得到「未知子命令」）。翻译表见 devFormat：
+// json → --json；table/text → 丢掉（缺省就是人读文本）；csv → **明确拒绝**（这条线没有
+// CSV，而"要 CSV 拿到 JSON"正是最该避免的静默走偏）。`--env/--conn` 同理拒绝并点名它属于哪条线。
 //
-// `--json` / `--csv` / `--format` 是同一回事（实测 2026-09-25）：根命令的 --help 把它们
-// 写作全局开关，而 `tt dev tzc selftest --format csv` 与 `tt --format csv dev tzc selftest`
-// **两种位置**都只得到一句「未知子命令 "--format"」—— 位置不同、结果一样糟。
-//
-// `--config` 走环境变量而不是直接把值传给 internal/dev：那边只经 config.ResolvePath 读配置，
-// 而 ResolvePath 本就认 TT_CONFIG —— 不必为这一个 flag 给 TDev 侧开一条新接口。
-//
-// 翻译表见 devFormat：json → --json（这条线只有这一个机器可读开关）；table/text → 丢掉
-// （缺省就是人读文本）；csv → **明确拒绝**（这条线没有 CSV，而"要 CSV 拿到 JSON"正是最该
-// 避免的静默走偏）。`--env/--conn` 同理拒绝并点名它属于哪条线。
+// 翻译出来的开关**攒着挂到最后**，不能就地放进 out：`tt dev tzc export --json pkg` 里若
+// 就地保留，动词解析器虽然位置无关，但「第一个位置参数是子命令/包名」的语义会被打乱
+// —— 攒到最后与原 tdev 入口的顺序语义一致。
 func takeRootFlags(args []string) ([]string, error) {
 	out := make([]string, 0, len(args))
-	// 翻译出来的开关**攒着挂到最后**，不能就地放进 out：`tt --json dev tzc selftest` 里
-	// 那个 --json 本来就在最前面，就地保留的话 tdev 会把 `args[0]` 当成子命令名，报
-	// 「未知子命令 "--json"」—— 实测（2026-09-25）。tdev 的解析器位置无关，但"第一个
-	// 位置参数是子命令"这条它认。
 	extra := make([]string, 0, 2)
 	for i := 0; i < len(args); i++ {
 		a := args[i]

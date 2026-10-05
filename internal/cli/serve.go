@@ -113,13 +113,14 @@ func newServeCmd() *cobra.Command {
 			// 调试服务内嵌 SPA（统一前端构建产物）。统一服务只把 /debug/api/ 转给它、
 			// 页面由 internal/web 提供；这份 FS 是为了 `tt debug serve` 单独跑时也能出页面。
 			debugSrv := debug.NewServer(cfg, common.WebFrontend(), path)
-			// 字典同步的目标缺省取**当前目录**的 erp_data.db，与 `tt dict -d` 的解析顺序
-			// （cwd → exe 目录）第一条候选一致，所以"服务在这里同步、命令行在这里读"天然对得上。
+			// 字典同步的目标缺省取**数据目录**（config.json 同目录）下的 erp_data.db，
+			// 与 `tt dict -d` 的缺省一致（都来自 config.Locations，统一路径管理器），
+			// 所以"服务在这里同步、命令行在这里读"天然对得上。
 			// 要换地方用设置页的 sync.target，或命令行的 -d。
 			//
 			// 把这个值**同时**交给统一层与字典子系统：设置页会显示「默认位置：X」，
 			// 而同步动作真正往那儿写；两边各算一次的话，显示的那个路径可能不是实际写入的那个。
-			syncDefault := config.DefaultSyncTarget()
+			syncDefault := config.LocationsAt(path).SyncTarget("", "")
 			dictSrv := dictserver.New(path)
 			dictSrv.SetDBTarget(syncDefault)
 

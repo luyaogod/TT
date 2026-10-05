@@ -96,11 +96,13 @@ func EnvSeg(envName, sshHost, zone string) string {
 }
 
 // Path 快照路径;dataDir 为空返回空串(调用方据此跳过落盘)。
+// 子目录名经 config.CacheDir 校验 —— 名字不在缓存清单里会得到空串。
 func Path(dataDir, seg string) string {
-	if dataDir == "" {
+	sub := config.CacheDir(dataDir, dirName)
+	if sub == "" {
 		return ""
 	}
-	return filepath.Join(dataDir, dirName, seg+".json")
+	return filepath.Join(sub, seg+".json")
 }
 
 // Read 读快照。不存在 / 坏掉 / 版本不符 / 指纹不符一律返回 nil(当没有)。

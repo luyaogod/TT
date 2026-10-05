@@ -14,7 +14,7 @@
 // 程序集，布局属性走设计器自己的 `XmlElement` 索引器，验收用设计器自己的校验器加 RoundTrip
 // 不动点）。所以红线改成「**导出只读、要写走引擎**」：`export` 的产物仍然是只读参考，
 // 不要手工改完再塞回包；改表单走具名动词，让设计器自己算。
-package cli
+package tzs
 
 import (
 	"flag"
@@ -24,9 +24,18 @@ import (
 	"path/filepath"
 	"strings"
 
+	"tt/internal/cli/dev/common"
 	"tt/internal/dev/model"
 	"tt/internal/dev/pkgfile"
 )
+
+// Usage 是 tzs 线命令面说明的导出别名（父包 register.go 的 tzs 叶命令 Long 用它）；
+// 内容即 tzsUsage， stale-advice 测试两份都扫。
+const Usage = tzsUsage
+
+// Run 是 tzs 线的入口（父包接线用）：收**原始参数**（第一个词是动词名或
+// export/doctor/stop/reap/help），退出码契约见 tzsUsage 末尾。
+func Run(args []string) int { return cmdTzs(args) }
 
 const tzsUsage = `tt dev tzs —— 表单包工具（导出只读；读写表单由一个常驻引擎跑）
 
@@ -124,16 +133,9 @@ func printVerbIndexIfReachable(w io.Writer) {
 //
 // 用 -unzip 后缀（而不是 tzc 的 -ws）是为了让「工作区」和「纯解压产物」一眼可分：
 // 前者有 manifest/.tdev/git、能 apply；后者就是一包文件，只读。
+// 主名规则（去扩展名、去身份后缀）与 tzc 工作区共用 tzc.StripIdentitySuffix。
 func defaultUnzipDir(pkgPath string) string {
-	dir := filepath.Dir(pkgPath)
-	base := strings.TrimSuffix(filepath.Base(pkgPath), filepath.Ext(pkgPath))
-	if m := reIdentitySuffix.FindString(base); m != "" {
-		base = strings.TrimSuffix(base, m)
-	}
-	if base == "" {
-		base = "pkg"
-	}
-	return filepath.Join(dir, base+"-unzip")
+	return filepath.Join(filepath.Dir(pkgPath), common.StripIdentitySuffix(pkgPath)+"-unzip")
 }
 
 func cmdTzsExport(args []string) int {
@@ -141,7 +143,7 @@ func cmdTzsExport(args []string) int {
 	out := fs.String("o", "", "输出目录（可省略，默认 <包所在目录>/<程序名>-unzip）")
 	force := fs.Bool("force", false, "目标非空时也解压：覆盖同名文件")
 	asJSON := fs.Bool("json", false, "输出 JSON")
-	if err := parseArgs(fs, args, "o"); err != nil {
+	if err := common.ParseArgs(fs, args, "o"); err != nil {
 		return 2
 	}
 	if fs.NArg() < 1 {
@@ -156,13 +158,13 @@ func cmdTzsExport(args []string) int {
 	case ".tzs", ".tzv":
 		// 表单包，纯解压
 	case ".tzc", ".tzf", ".tzx":
-		return fail(&pkgfile.FormatError{
+		return common.Fail(&pkgfile.FormatError{
 			Msg: "这是代码包，请用 `tt dev tzc export`（tt dev tzs 只纯解压表单包）",
 			Detail: []string{"输入：" + pkgPath,
 				"代码包要走围栏渲染 + 三道闸门：`tt dev tzc export <pkg> [-o <dir>]`"},
 		}, *asJSON)
 	default:
-		return fail(&pkgfile.FormatError{
+		return common.Fail(&pkgfile.FormatError{
 			Msg:    "tt dev tzs export 只支持表单包 .tzs / .tzv",
 			Detail: []string{"输入：" + pkgPath},
 		}, *asJSON)
@@ -173,7 +175,7 @@ func cmdTzsExport(args []string) int {
 		// -o 缺省：先用 config.json 的 tdev.defaultOut；没配就退回
 		// <包所在目录>/<程序名>-unzip（旧行为）。配置缺失时 loadTdevSettings 返回零值，
 		// 等价于「没配」，因此没有配置文件的用户行为与合并前逐字一致。
-		if s := loadTdevSettings(); s.DefaultOut != "" {
+		if s := common.LoadTdevSettings(); s.DefaultOut != "" {
 			dst = s.DefaultOut
 		} else {
 			dst = defaultUnzipDir(pkgPath)
@@ -181,7 +183,7 @@ func cmdTzsExport(args []string) int {
 	}
 	entries, err := pkgfile.UnzipTo(pkgPath, dst, *force)
 	if err != nil {
-		return fail(err, *asJSON)
+		return common.Fail(err, *asJSON)
 	}
 	pkgSha, _ := model.Sha256File(pkgPath)
 	abs, _ := filepath.Abs(dst)
@@ -190,21 +192,21 @@ func cmdTzsExport(args []string) int {
 		total += e.Size
 	}
 	if *asJSON {
-		emitJSON(w, map[string]any{
+		common.EmitJSON(w, map[string]any{
 			"ok": true, "pkg": pkgPath, "pkg_sha256": pkgSha, "dir": abs,
 			"entries": entries, "count": len(entries), "bytes": total, "readonly": true,
 		})
 		return 0
 	}
-	line(w, "已纯解压（不做任何处理，也不产生工作区）：%s", abs)
-	line(w, "  来源：%s（%d B，sha256=%s）", pkgPath, fileSize(pkgPath), short(pkgSha))
-	line(w, "  文件：%d 个，共 %d B", len(entries), total)
+	common.Line(w, "已纯解压（不做任何处理，也不产生工作区）：%s", abs)
+	common.Line(w, "  来源：%s（%d B，sha256=%s）", pkgPath, fileSize(pkgPath), common.Short(pkgSha))
+	common.Line(w, "  文件：%d 个，共 %d B", len(entries), total)
 	for _, e := range entries {
-		line(w, "    %-28s %8d B  sha256=%s", e.Name, e.Size, short(e.Sha256))
+		common.Line(w, "    %-28s %8d B  sha256=%s", e.Name, e.Size, common.Short(e.Sha256))
 	}
-	line(w, "")
-	line(w, "提醒：这是**只读参考**（没有 tzs apply）；要改表单用 `tt dev tzs <动词>`（open/add_field/save…），由设计器自己的引擎算。")
-	line(w, "下一步：直接读上面的文件即可；不要把它当成 tzc 工作区去 apply。")
+	common.Line(w, "")
+	common.Line(w, "提醒：这是**只读参考**（没有 tzs apply）；要改表单用 `tt dev tzs <动词>`（open/add_field/save…），由设计器自己的引擎算。")
+	common.Line(w, "下一步：直接读上面的文件即可；不要把它当成 tzc 工作区去 apply。")
 	return 0
 }
 

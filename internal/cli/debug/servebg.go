@@ -37,9 +37,6 @@ import (
 )
 
 const (
-	serveStateName = ".tt-serve.json"
-	serveLogName   = ".tt-serve.log"
-
 	// APIBaseAtRoot / APIBaseUnderDebug 是两种挂载布局下调试 API 的前缀。
 	// 独立调试服务直接在根;统一服务把子系统挂在前缀下(见 internal/web 的 routes)。
 	APIBaseAtRoot     = ""
@@ -69,7 +66,8 @@ type ServeInfo struct {
 }
 
 // serveInfoFile 返回状态文件路径(dir = config.json 所在目录)。
-func serveInfoFile(dir string) string { return filepath.Join(dir, serveStateName) }
+// 文件名与落点规则在 config(统一路径管理器)——这里只传数据目录。
+func serveInfoFile(dir string) string { return filepath.Join(dir, config.ServeStateFileName) }
 
 func writeServeInfo(st *ServeInfo, dir string) error {
 	b, err := json.MarshalIndent(st, "", "  ")
@@ -145,9 +143,9 @@ func runningInstance(dir string) *ServeInfo {
 // configDir 定位 config.json 所在目录(状态文件/日志存放处)。
 func configDir() string {
 	if p, err := resolveConfigPath(); err == nil {
-		return filepath.Dir(p)
+		return config.LocationsAt(p).DataDir()
 	}
-	return filepath.Dir(config.DefaultConfigPath())
+	return config.LocationsAt(config.DefaultConfigPath()).DataDir()
 }
 
 // apiBaseFromState 读状态文件里记的调试 API 前缀。
@@ -276,7 +274,7 @@ func StartBackground(cfgPath string, spec ServeSpec) (*ServeInfo, error) {
 	}
 	removeServeInfo(dir)
 
-	logPath := filepath.Join(dir, serveLogName)
+	logPath := filepath.Join(dir, config.ServeLogFileName)
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("定位可执行文件失败: %w", err)

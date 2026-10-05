@@ -1,4 +1,4 @@
-package cli
+package tzc
 
 import (
 	"bytes"
@@ -50,18 +50,7 @@ func copyPkg(t *testing.T, dir string, i int, src string) string {
 	return dst
 }
 
-// silent 在测试期间把命令输出吞掉（命令直接写 os.Stdout）。
-func silent(t *testing.T, fn func() int) int {
-	t.Helper()
-	dev, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
-	if err != nil {
-		return fn()
-	}
-	oldOut, oldErr := os.Stdout, os.Stderr
-	os.Stdout, os.Stderr = dev, dev
-	defer func() { os.Stdout, os.Stderr = oldOut, oldErr; dev.Close() }()
-	return fn()
-}
+// silent 已收敛为 testkit.Silent（tzc 与 tzs 两个测试包共用，理由同 CaptureStdout）。
 
 // 语料发现不在这里：根怎么定、怎么走、哪些草稿文件不算语料，都在 internal/dev/testutil，
 // 跳过文案在 internal/testkit。从前本文件自己留了两个薄壳，现在连壳也去掉了 ——
@@ -121,7 +110,7 @@ func TestCorpusExportVerify(t *testing.T) {
 		// 一律在临时目录里对**副本**操作：真实语料是只读输入，绝不能被测试写到
 		p = copyPkg(t, tmp, i, p)
 		wsDir := filepath.Join(tmp, fmt.Sprintf("ws%03d", i))
-		if code := silent(t, func() int { return cmdExport([]string{p, "-o", wsDir}) }); code != 0 {
+		if code := testkit.Silent(t, func() int { return cmdExport([]string{p, "-o", wsDir}) }); code != 0 {
 			t.Fatalf("%s export 退出码 %d", p, code)
 		}
 		ws, err := storeOpen(wsDir)
@@ -136,7 +125,7 @@ func TestCorpusExportVerify(t *testing.T) {
 		totalPoints += mf.Stats.Points
 		totalSections += mf.Stats.Sections
 
-		code := silent(t, func() int { return cmdVerify([]string{wsDir}) })
+		code := testkit.Silent(t, func() int { return cmdVerify([]string{wsDir}) })
 		base, _, err := loadBase(ws)
 		if err != nil {
 			t.Fatal(err)
@@ -191,7 +180,7 @@ func TestCorpusApplySimulation(t *testing.T) {
 		// 一律在临时目录里对**副本**操作：真实语料是只读输入，绝不能被测试写到
 		p = copyPkg(t, tmp, i, p)
 		wsDir := filepath.Join(tmp, fmt.Sprintf("ws%03d", i))
-		if code := silent(t, func() int { return cmdExport([]string{p, "-o", wsDir}) }); code != 0 {
+		if code := testkit.Silent(t, func() int { return cmdExport([]string{p, "-o", wsDir}) }); code != 0 {
 			t.Fatalf("%s export 退出码 %d", p, code)
 		}
 		ws, err := storeOpen(wsDir)
@@ -247,7 +236,7 @@ func TestCorpusApplySimulation(t *testing.T) {
 		if err := ws.WriteEdited(newEdited); err != nil {
 			t.Fatal(err)
 		}
-		if code := silent(t, func() int { return cmdApply([]string{wsDir}) }); code != 0 {
+		if code := testkit.Silent(t, func() int { return cmdApply([]string{wsDir}) }); code != 0 {
 			t.Fatalf("%s apply 退出码 %d（目标点 %s，deny=%s）", p, code, target.Name, target.DenyCode)
 		}
 		pkg2, err := pkgfile.Open(mf.Pkg.Path, pkgfile.OpenOptions{})

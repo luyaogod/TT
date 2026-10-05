@@ -1,4 +1,4 @@
-package cli
+package tzs
 
 import (
 	"os"
@@ -36,7 +36,7 @@ func TestTzsExportUnzipsVerbatim(t *testing.T) {
 	p, want := formPkg(t, filepath.Join(dir, "src"), "adzi999.tzs")
 	out := filepath.Join(dir, "out")
 
-	if code := silent(t, func() int { return cmdTzs([]string{"export", p, "-o", out}) }); code != 0 {
+	if code := testkit.Silent(t, func() int { return cmdTzs([]string{"export", p, "-o", out}) }); code != 0 {
 		t.Fatalf("tzs export 退出码 %d", code)
 	}
 	for name, wb := range want {
@@ -78,7 +78,7 @@ func TestTzsExportRefusesWrongKind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := silent(t, func() int { return cmdTzs([]string{"export", code, "-o", filepath.Join(dir, "a")}) }); got != 2 {
+	if got := testkit.Silent(t, func() int { return cmdTzs([]string{"export", code, "-o", filepath.Join(dir, "a")}) }); got != 2 {
 		t.Errorf("代码包走 tzs 应退出 2，实际 %d", got)
 	}
 	// 非包扩展名
@@ -86,17 +86,17 @@ func TestTzsExportRefusesWrongKind(t *testing.T) {
 	if err := os.WriteFile(junk, []byte("not a package"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := silent(t, func() int { return cmdTzs([]string{"export", junk, "-o", filepath.Join(dir, "b")}) }); got != 2 {
+	if got := testkit.Silent(t, func() int { return cmdTzs([]string{"export", junk, "-o", filepath.Join(dir, "b")}) }); got != 2 {
 		t.Errorf("未知扩展名应退出 2，实际 %d", got)
 	}
 	// 用法错误
-	if got := silent(t, func() int { return cmdTzs([]string{"export"}) }); got != 2 {
+	if got := testkit.Silent(t, func() int { return cmdTzs([]string{"export"}) }); got != 2 {
 		t.Errorf("缺参数应退出 2，实际 %d", got)
 	}
-	if got := silent(t, func() int { return cmdTzs([]string{"apply"}) }); got != 2 {
+	if got := testkit.Silent(t, func() int { return cmdTzs([]string{"apply"}) }); got != 2 {
 		t.Errorf("tzs 没有 apply 动词，应退出 2，实际 %d", got)
 	}
-	if got := silent(t, func() int { return cmdTzs(nil) }); got != 2 {
+	if got := testkit.Silent(t, func() int { return cmdTzs(nil) }); got != 2 {
 		t.Errorf("无子命令应退出 2，实际 %d", got)
 	}
 }
@@ -106,7 +106,7 @@ func TestTzsExportNonEmptyTarget(t *testing.T) {
 	dir := t.TempDir()
 	p, want := formPkg(t, filepath.Join(dir, "src"), "adzi999.tzs")
 	out := filepath.Join(dir, "out")
-	if got := silent(t, func() int { return cmdTzs([]string{"export", p, "-o", out}) }); got != 0 {
+	if got := testkit.Silent(t, func() int { return cmdTzs([]string{"export", p, "-o", out}) }); got != 0 {
 		t.Fatalf("首次解压退出码 %d", got)
 	}
 	// 改脏一个文件，再解一次：默认拒绝，--force 覆盖回原样
@@ -114,10 +114,10 @@ func TestTzsExportNonEmptyTarget(t *testing.T) {
 	if err := os.WriteFile(target, []byte("脏了"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := silent(t, func() int { return cmdTzs([]string{"export", p, "-o", out}) }); got != 5 {
+	if got := testkit.Silent(t, func() int { return cmdTzs([]string{"export", p, "-o", out}) }); got != 5 {
 		t.Errorf("目标非空应退出 5，实际 %d", got)
 	}
-	if got := silent(t, func() int { return cmdTzs([]string{"export", p, "-o", out, "--force"}) }); got != 0 {
+	if got := testkit.Silent(t, func() int { return cmdTzs([]string{"export", p, "-o", out, "--force"}) }); got != 0 {
 		t.Errorf("--force 应退出 0，实际 %d", got)
 	}
 	got, err := os.ReadFile(target)
@@ -140,7 +140,7 @@ func TestTzsExportRejectsZipSlip(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := filepath.Join(dir, "out")
-	if got := silent(t, func() int { return cmdTzs([]string{"export", p, "-o", out}) }); got != 2 {
+	if got := testkit.Silent(t, func() int { return cmdTzs([]string{"export", p, "-o", out}) }); got != 2 {
 		t.Errorf("zip-slip 包应退出 2，实际 %d", got)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "escaped.txt")); err == nil {

@@ -24,7 +24,7 @@ var (
 var dbCmd = &cobra.Command{
 	Use:   "db",
 	Short: "管理 ERP 数据库连接与数据同步",
-	Long: `从 config.json 读取配置 (--config / TT_CONFIG / TDICT_CONFIG)。数据库连接按环境一对一挂载:
+	Long: `从 config.json 读取配置 (--config / TT_CONFIG)。数据库连接按环境一对一挂载:
 hosts.sshs[].db 即该环境的库(显式 host/port/service|库名 + 账号列表)。
 子命令: sync (从 ERP 拉取字典数据写入 SQLite) / list (列各环境的库) /
 ping (验证连接可达) / discover (SSH 自动发现连接要素并写入环境 db)。

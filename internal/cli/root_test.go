@@ -2,9 +2,9 @@ package cli
 
 // root_test.go —— 根命令帮助与 README 的漂移防线。
 //
-// **为什么这条测试住在这个包**：`internal/dev/cli` 里的 TestUsageTextHasNoStaleAdvice
+// **为什么这条测试住在这个包**：`internal/cli/dev` 里的 TestUsageTextHasNoStaleAdvice
 // 覆盖不到 rootCmd.Long，而那个包不能 import 本包（`internal/cli/root.go` →
-// `internal/cli/dev` → `internal/dev/cli`，反过来就成环）。rootCmd 是本包的包级变量，
+// `internal/cli/dev` → `internal/cli/dev`，反过来就成环）。rootCmd 是本包的包级变量，
 // 同包测试才直接看得到它 —— 所以这条断言只能住在这里。
 //
 // 它要抓的是**同一个事实写在两处、只改了一处**：`tt --help` 与 README 的首屏都有一张

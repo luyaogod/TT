@@ -12,9 +12,6 @@ import (
 	"strings"
 )
 
-// DefaultSyncFileName 字典同步产出的本地 SQLite 文件名。
-const DefaultSyncFileName = "erp_data.db"
-
 // AbsPath 把配置里的路径值转成绝对路径;空串原样返回空串(表示"未配置")。
 func AbsPath(p string) string {
 	p = strings.TrimSpace(p)
@@ -90,7 +87,8 @@ type TzsStatus struct {
 	Workspace DirStatus `json:"workspace"`
 }
 
-// TzsStatusOf 汇总引擎那几样东西的状态。defaultEngineExe 由调用方算(它要知道 tt.exe 在哪)。
+// TzsStatusOf 汇总引擎那几样东西的状态。defaultEngineExe 是缺省引擎 exe
+//（用 config.EngineExe("") 取 —— 候选只有那一份实现），参数注入是为了可测。
 //
 // Designer 的位置从**生效的**引擎 exe 推出来,而不是另配一个:引擎自己就是这么算的
 // (D.Bootstrap 的 Install = <自己的目录>\designer),两边各算一次的话,设置页会报"有"
@@ -108,18 +106,8 @@ func TzsStatusOf(s TzsSettings, defaultEngineExe string) TzsStatus {
 	}
 }
 
-// DefaultSyncTarget 同步目标的缺省位置:当前目录下的 erp_data.db(绝对化)。//
-// 与 `tt dict -d` 的解析顺序(cwd → exe 目录)第一条候选一致,所以
-// "服务在这里同步、命令行在这里读"天然对得上。
-func DefaultSyncTarget() string {
-	if abs, err := filepath.Abs(DefaultSyncFileName); err == nil {
-		return abs
-	}
-	return DefaultSyncFileName
-}
-
-// SyncTargetFor 数据同步(写本地 SQLite)的目标路径 = 配置里 sync.target 的绝对路径;
-// 未配置返回空串,由调用方自己决定便携版兜底位置。
+// SyncTargetFor 数据同步(写本地 SQLite)的配置值 = 配置里 sync.target 的绝对路径;
+// 未配置返回空串(落点交给 Locations.SyncTarget 的缺省规则)。
 //
 // 存在的理由:同一条配置,CLI 与 web 曾经各解析各的 —— 设置页改了 sync.target 之后
 // `tt dict db sync` 仍然写旧位置,两个本地库悄悄分叉,而"tt dict db status"看到的

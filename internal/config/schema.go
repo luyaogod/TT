@@ -9,7 +9,8 @@ import (
 	"tt/internal/dbconfig"
 )
 
-// SchemaVersion 当前配置结构版本。0/缺失 = 合并前的旧结构，需要迁移。
+// SchemaVersion 当前配置结构版本。随新配置文件写入（见 NewSkeleton / ensureSchemaVersion）。
+// 旧结构的配置不做自动迁移 —— 读侧只认当前结构。
 const SchemaVersion = 2
 
 // 缺省值。合并前三处各自硬编码，现在只有这一份。
@@ -278,15 +279,6 @@ func Load(path string) (*Root, error) {
 	r.Hosts.Normalize()
 	r.Listen = stringOf(root["listen"])
 	if r.Listen == "" {
-		// 旧结构把监听地址放在 debug.listen 里
-		var legacy struct {
-			Listen string `json:"listen"`
-		}
-		if err := decodeSection(root, "debug", &legacy); err == nil {
-			r.Listen = legacy.Listen
-		}
-	}
-	if r.Listen == "" {
 		r.Listen = DefaultListen
 	}
 	if err := decodeSection(root, "debug", &r.Debug); err != nil {
@@ -315,9 +307,7 @@ func Load(path string) (*Root, error) {
 
 // LoadHosts 读取配置文件并返回环境清单，要求至少配置了一个环境
 // （CLI 命令都按"有环境可连"的前提工作）。activeEnv 缺省取首条。
-//
-// 合并前 TDictCli/host.LoadHosts 的替代：那时它还要兼容顶层 debug 键，
-// 现在兼容性由 migrate.go 一次性做掉，读路径只认 hosts。
+// 读路径只认 hosts，不做任何旧结构兼容。
 func LoadHosts(path string) (*Hosts, error) {
 	r, err := Load(path)
 	if err != nil {

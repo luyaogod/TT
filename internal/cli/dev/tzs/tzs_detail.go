@@ -1,4 +1,4 @@
-package cli
+package tzs
 
 // tzs_detail.go —— 把一帧错误的 `detail` 渲染成人读的几行。
 //
@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strings"
 
+	"tt/internal/cli/dev/common"
 	"tt/internal/dev/tzs"
 )
 
@@ -76,7 +77,7 @@ func printWireDetail(w io.Writer, e *tzs.WireError) {
 		// detail 不是一个对象。引擎没发过这种，但真发了也不该在这里死 ——
 		// 原样打出来，读的人至少知道引擎说了什么。
 		if s := strings.TrimSpace(string(e.Detail)); s != "" && s != "null" {
-			line(w, "    detail（原样）：%s", s)
+			common.Line(w, "    detail（原样）：%s", s)
 		}
 		return
 	}
@@ -132,13 +133,13 @@ func printDetailValue(w io.Writer, label string, raw json.RawMessage) {
 		if len(list) == 0 {
 			return
 		}
-		line(w, "    %s：", label)
+		common.Line(w, "    %s：", label)
 		for i, el := range list {
 			if i == maxDetailItems {
-				line(w, "      …还有 %d 个没打（完整 detail 用 --json 看）", len(list)-maxDetailItems)
+				common.Line(w, "      …还有 %d 个没打（完整 detail 用 --json 看）", len(list)-maxDetailItems)
 				break
 			}
-			line(w, "      - %s", unquote(el))
+			common.Line(w, "      - %s", unquote(el))
 		}
 		return
 	}
@@ -148,7 +149,7 @@ func printDetailValue(w io.Writer, label string, raw json.RawMessage) {
 			// 空串是"没设/继承"，打出来只会让人以为有内容。
 			return
 		}
-		line(w, "    %s：%s", label, s)
+		common.Line(w, "    %s：%s", label, s)
 		return
 	}
 	if strings.TrimSpace(string(raw)) == "null" {
@@ -156,7 +157,7 @@ func printDetailValue(w io.Writer, label string, raw json.RawMessage) {
 	}
 	// 对象或其它：紧凑 JSON 原样打。**不逐字段拆 candidates 那种对象** ——
 	// 那正是"在 Go 侧抄一份 schema"，抄了就会漂。
-	line(w, "    %s：%s", label, strings.TrimSpace(string(raw)))
+	common.Line(w, "    %s：%s", label, strings.TrimSpace(string(raw)))
 }
 
 // unquote 把一个 JSON 值按字符串打出来：是字符串就去引号，不是就返回紧凑原文。

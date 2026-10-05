@@ -1,4 +1,4 @@
-package cli
+package tzs
 
 // tzs_verb_test.go —— 具名动词那一层的测试。
 //
@@ -9,15 +9,14 @@ package cli
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"tt/internal/cli/dev/common"
 	"tt/internal/dev/tzs"
 	"tt/internal/testkit"
 )
@@ -225,7 +224,7 @@ func TestReadArgsBody(t *testing.T) {
 		t.Errorf("--args-file 得 %q（code %d）", got, code)
 	}
 
-	code = silent(t, func() int {
+	code = testkit.Silent(t, func() int {
 		_, c := readArgsBody(verbFlags{argsFile: filepath.Join(dir, "nope.json"), argsFileSet: true})
 		return c
 	})
@@ -263,7 +262,7 @@ func TestRunTzsVerbLocalFailures(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := silent(t, func() int { return runTzsVerb(c.args) }); got != c.want {
+			if got := testkit.Silent(t, func() int { return runTzsVerb(c.args) }); got != c.want {
 				t.Errorf("该退 %d，得 %d", c.want, got)
 			}
 		})
@@ -276,22 +275,15 @@ type staleRule struct {
 	why string
 }
 
-// callGatewayRules 只在 Go 的用法常量上成立。
-//
-// 刻意**不**用到文档上：活文档只讲今天怎么调用，不解释那个已删除的网关长什么样 ——
-// 拿这条去扫文档没有对象，反而会在有人想解释"为什么没有 call 这一层"时误判成漂移。
-var callGatewayRules = []staleRule{
-	{regexp.MustCompile(`call <fn>|tzs call`),
-		"call 网关已删除：动词就是函数名，参数用 JSON 给"},
-}
-
-// valueRules 对**所有**面向调用方的文本成立，文档也在内 —— 文档里的示例正是被抄走的那个。
+// staleRules 用在所有面向调用方的文本上。
 //
 // 用正则而不是字面子串，因为**判据不是"值写错了"，是"属性与值配错了"**：布局侧
 // `scroll` 是 BOOLEAN，`{"attr":"scroll","value":"true"}` 是**合法**的，
 // 禁掉 `"value":"true"` 会误伤它。真正错的是把 `"true"` 给了下面那三个勾选位。
-var valueRules = []staleRule{
-	// 窗口卡在两个键之间（不跨行、不跨 }），免得把一份文档里相隔很远的
+var staleRules = []staleRule{
+	{regexp.MustCompile(`call <fn>|tzs call`),
+		"call 网关已删除：动词就是函数名，参数用 JSON 给"},
+	// 窗口卡在两个键之间（不跨行、不跨 }），免得把相隔很远的
 	// "can_edit" 与某个 "true" 连起来判成一处。
 	{regexp.MustCompile(`"(?:can_edit|can_query|req)"[^\n}]{0,80}"true"`),
 		"这三个是设计器面板的勾选位，只收 Y / N / 空串（写 true 引擎会拒）"},
@@ -314,7 +306,7 @@ func checkNoStaleLines(t *testing.T, name, text string, rules []staleRule) {
 	}
 }
 
-// TestUsageTextHasNoStaleAdvice 是文档漂移的机械防线（Go 侧的用法常量）。
+// TestUsageTextHasNoStaleAdvice 是用法文本漂移的机械防线。
 //
 // 这类漂移的共同后果是**调用方照着帮助敲一条注定失败的调用**，而它不会让任何别的测试失败：
 //
@@ -323,18 +315,16 @@ func checkNoStaleLines(t *testing.T, name, text string, rules []staleRule) {
 //	"force":true                  open 的 force 引擎故意没实现，用了必抛
 //
 // 前两条各自都真发生过，而且是**同一句话在多处**：改了一处而漏掉另一处，
-// 说明"手写的一定漂移"。所以禁断言覆盖所有面向调用方的文本 ——
-// 常量这一层用两套规则，文档那一层见 TestLiveDocsHaveNoStaleAdvice。
+// 说明"手写的一定漂移"。
 func TestUsageTextHasNoStaleAdvice(t *testing.T) {
 	// 只有这两份文本面向调用方：tzs 的动词用法与整个命令组的用法。
 	// （`tt dev install` 的用法文本已随命令删除 —— 它并入 tt install 后不再住在这个包里。）
 	consts := map[string]string{
 		"tzsUsage": tzsUsage,
-		"Usage":    Usage,
+		"Usage":    common.Usage,
 	}
 	for name, text := range consts {
-		checkNoStaleLines(t, name, text, callGatewayRules)
-		checkNoStaleLines(t, name, text, valueRules)
+		checkNoStaleLines(t, name, text, staleRules)
 		// "必须教"的那几条：动词按名字给、参数只用 JSON、按程序名寻址。
 		for _, want := range []string{"<动词>", "--args", "--form"} {
 			if !strings.Contains(text, want) {
@@ -342,106 +332,6 @@ func TestUsageTextHasNoStaleAdvice(t *testing.T) {
 			}
 		}
 	}
-}
-
-// liveDoc 是一份**活文档**（与阶段记录相对）：里面的说法必须与今天的代码一致。
-type liveDoc struct{ name, text string }
-
-// liveDocs 读仓库里那几份活文档。**逐个列名**，不通配扫描：`dist/` 在 .gitignore 里
-// 但磁盘上有一份陈旧的 skills 副本，而 `web/node_modules` 里全是 .md ——
-// 扫到它们只会测一份没人看的拷贝。
-//
-// `engine/TASKS.md` 刻意不在里面：它是 Wave 0–3 并行实现期的**阶段记录**，
-// 写的是"当时的状态"与"当时的关卡脚本"，里面的数字是**正确的历史**，
-// 拿今天的真值去判它等于禁止一份记录保持原样。它要的是"标明自己是阶段记录"，
-// 那件事在文件顶部做，不在这里。
-func liveDocs(t *testing.T) []liveDoc {
-	t.Helper()
-	var out []liveDoc
-	for _, rel := range []string{
-		filepath.Join("..", "..", "..", "README.md"),
-		filepath.Join("..", "..", "..", "internal", "dev", "cli", "README.md"),
-		filepath.Join("..", "..", "..", "internal", "dev", "tzs", "README.md"),
-		filepath.Join("..", "..", "..", "skills", "tt-dev-tzs", "SKILL.md"),
-		filepath.Join("..", "..", "..", "engine", "BUILD.md"),
-	} {
-		b, err := os.ReadFile(rel)
-		if err != nil {
-			t.Errorf("读不到 %s：%v（这些属于仓库本体，不是语料那样的外部数据 —— 缺了就是仓库坏了）", rel, err)
-			continue
-		}
-		out = append(out, liveDoc{name: rel, text: string(b)})
-	}
-	return out
-}
-
-// TestLiveDocsHaveNoStaleAdvice 把同一套"教错值"的禁断言用到活文档上。
-//
-// 为什么值得单独一条：这些示例**就是被抄走的那个**。同一句教错的写法会同时活在
-// Go 的用法常量与文档里，只扫常量会漏掉文档那一半。
-//
-// 只扫 valueRules，不扫 callGatewayRules（见那边的注释）。
-func TestLiveDocsHaveNoStaleAdvice(t *testing.T) {
-	for _, d := range liveDocs(t) {
-		checkNoStaleLines(t, d.name, d.text, valueRules)
-	}
-}
-
-// verbCountClaim 是一处"这份文本说动词有多少个"的声明。
-type verbCountClaim struct {
-	where string // 文件:行（或常量名）
-	n     int
-	line  string
-}
-
-// docVerbCountClaims 收集所有用「N 个动词 / N 个具名动词」这个说法做出的声明。
-//
-// 只认这一种说法是刻意的：这条防线要的是"**凡是用这个说法写的，它必须是真的**"，
-// 而不是去猜任意一句话在说什么（"33 个写函数"、"31 项自检"、"4 个内建命令"都不是动词数）。
-func docVerbCountClaims(t *testing.T) []verbCountClaim {
-	t.Helper()
-	re := regexp.MustCompile(`(\d+)\s*个(?:具名)?动词`)
-	var claims []verbCountClaim
-	add := func(where, text string) {
-		for i, ln := range strings.Split(text, "\n") {
-			for _, mm := range re.FindAllStringSubmatch(ln, -1) {
-				n, err := strconv.Atoi(mm[1])
-				if err != nil {
-					continue
-				}
-				claims = append(claims, verbCountClaim{
-					where: fmt.Sprintf("%s:%d", where, i+1),
-					n:     n,
-					line:  strings.TrimSpace(ln),
-				})
-			}
-		}
-	}
-	add("tzsUsage", tzsUsage)
-	for _, d := range liveDocs(t) {
-		add(d.name, d.text)
-	}
-	return claims
-}
-
-// TestDocVerbCountsAgree 不需要引擎：散文里所有动词数声明**彼此**必须一致。
-//
-// 为什么这条留在不碰引擎的那一层：引擎不在手边时它照样跑，而 49/50/52 那种漂移
-// 恰恰是"改文档的人只看了一份文档"造成的。与真 manifest 对不对得上，由
-// tzs_verb_e2e_test.go 的 TestE2EDocsVerbCountMatchesManifest 保证（TTZS_E2E=1）。
-func TestDocVerbCountsAgree(t *testing.T) {
-	claims := docVerbCountClaims(t)
-	if len(claims) == 0 {
-		t.Skip("文档里没有「N 个动词」的声明 —— 这条断言没有对象了（改写了措辞就把它一起改）")
-	}
-	want := claims[0]
-	for _, c := range claims[1:] {
-		if c.n != want.n {
-			t.Errorf("动词数对不上：%s 说 %d，%s 说 %d\n    %s\n    %s",
-				want.where, want.n, c.where, c.n, want.line, c.line)
-		}
-	}
-	t.Logf("散文里的动词数一致：%d 个（共 %d 处声明）", want.n, len(claims))
 }
 
 // TestVerbExample 钉住"示例优先"的那条示例：从 manifest 生成，能直接粘。
@@ -706,7 +596,7 @@ func TestResultCount(t *testing.T) {
 // 两半都要钉：① 帮助文本里不再出现它们 —— 否则调用方敲一条注定退 2 的命令；
 // ② 它们不再是内建动词 —— 否则引擎那边万一有同名函数，会被内建抢走而不可达。
 func TestRemovedCommandsAreNotAdvertised(t *testing.T) {
-	for _, text := range []string{tzsUsage, Usage} {
+	for _, text := range []string{tzsUsage, common.Usage} {
 		for _, gone := range []string{"tzs fns", "tzs manifest"} {
 			if strings.Contains(text, gone) {
 				t.Errorf("帮助文本里还在教 %q：\n%s", gone, text)
@@ -719,7 +609,7 @@ func TestRemovedCommandsAreNotAdvertised(t *testing.T) {
 		}
 	}
 	for _, a := range []string{"fns", "manifest"} {
-		if got := silent(t, func() int { return cmdTzs([]string{a}) }); got != 2 {
+		if got := testkit.Silent(t, func() int { return cmdTzs([]string{a}) }); got != 2 {
 			t.Errorf("tt dev tzs %s 该退 2（已不是命令），得 %d", a, got)
 		}
 	}
@@ -746,7 +636,7 @@ func TestCmdTzsHelpIsStatic(t *testing.T) {
 			t.Errorf("tt dev tzs %s 的输出里该有动词用法：\n%s", a, out)
 		}
 	}
-	if got := silent(t, func() int { return cmdTzs(nil) }); got != 2 {
+	if got := testkit.Silent(t, func() int { return cmdTzs(nil) }); got != 2 {
 		t.Errorf("没有子命令该退 2，得 %d", got)
 	}
 }

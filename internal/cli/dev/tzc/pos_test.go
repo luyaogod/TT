@@ -1,4 +1,4 @@
-package cli
+package tzc
 
 import (
 	"bytes"
@@ -24,7 +24,7 @@ func exportFixture(t *testing.T, dir string) (string, string, []byte) {
 		t.Fatal(err)
 	}
 	ws := filepath.Join(dir, "ws")
-	if code := silent(t, func() int { return cmdExport([]string{p, "-o", ws}) }); code != 0 {
+	if code := testkit.Silent(t, func() int { return cmdExport([]string{p, "-o", ws}) }); code != 0 {
 		t.Fatalf("export 退出码 %d", code)
 	}
 	gl := filepath.Join(ws, "prog.full.4gl")

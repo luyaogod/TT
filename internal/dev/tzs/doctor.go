@@ -93,7 +93,7 @@ func Doctor(ctx context.Context, o Options) *DoctorReport {
 		r.add(LevelFail, "引擎 exe", fmt.Sprintf("%s 不存在或读不到（%v）\n"+
 			"        装的是发行包 → 包不完整，重装或重新打包；\n"+
 			"        从源码跑 → 引擎不在包里，先 cd engine && ./build.sh，"+
-			"再把 tzs.serverExe 指到 engine/out/tzs-server.exe（见 BUILD.md §4「从源码树跑 .tzs」）", o.Exe, err))
+			"再把 tzs.serverExe 指到 engine/out/tzs-server.exe", o.Exe, err))
 	} else if m, err := FetchManifest(ctx, o.Exe); err != nil {
 		r.add(LevelFail, "引擎 exe", fmt.Sprintf("%s 答不了 --manifest：%v", o.Exe, err))
 	} else {
@@ -124,7 +124,7 @@ func Doctor(ctx context.Context, o Options) *DoctorReport {
 			r.add(LevelFail, "设计器目录", fmt.Sprintf("%s 不是目录（%v）\n"+
 				"        装的是发行包 → 包不完整，重装或重新打包；\n"+
 				"        从源码跑 → 先 cd engine && ./build.sh，"+
-				"它会把仓库里的 engine/designer/ 采到 out/designer/（见 BUILD.md §4「从源码树跑 .tzs」）", d, err))
+				"它会把仓库里的 engine/designer/ 采到 out/designer/", d, err))
 		} else {
 			r.add(LevelFail, "设计器目录",
 				fmt.Sprintf("TZSCLI_INSTALL 指向的 %s 不是目录（%v）；改指到正确的路径，或取消这个环境变量", d, err))

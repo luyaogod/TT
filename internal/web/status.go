@@ -2,8 +2,6 @@ package web
 
 import (
 	"net/http"
-	"os"
-	"path/filepath"
 
 	"tt/internal/config"
 	"tt/internal/pathinstall"
@@ -37,17 +35,6 @@ type configStatus struct {
 	Cache config.CacheStatus `json:"cache"`
 }
 
-// defaultEngineExe 引擎 exe 的缺省位置:<tt.exe 所在目录>\tzs\tzs-server.exe。
-// 与 internal/dev/cli 那侧是同一条规则 —— 那边算出来是为了真的启动它,这里只是为了
-// 让设置页能显示它在不在。放同一处的理由:两边算出不同的路径,设置页就会说"有"而命令说"没有"。
-func defaultEngineExe() string {
-	self, err := os.Executable()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(filepath.Dir(self), "tzs", "tzs-server.exe")
-}
-
 // hConfigStatus 返回上述派生状态。配置读不到时不报错,返回缺省值 —— 设置页在没有
 // 配置文件的首次运行下也要能渲染。
 func (s *Server) hConfigStatus(w http.ResponseWriter, r *http.Request) {
@@ -63,19 +50,11 @@ func (s *Server) hConfigStatus(w http.ResponseWriter, r *http.Request) {
 		tzsCfg = root.Tzs
 	}
 	// 引擎 exe 的状态与配置读没读到无关(它随包分发),所以放在分支外。
-	st.Tzs = config.TzsStatusOf(tzsCfg, defaultEngineExe())
+	st.Tzs = config.TzsStatusOf(tzsCfg, config.EngineExe(""))
 	st.Install = pathinstall.Get()
-	// 缓存就在配置目录下,配置读不到也算得出来(缓存与配置文件无关)。
-	st.Cache = config.CacheStatusOf(cacheDirOf(path))
+	// 缓存就在数据目录下,配置读不到也算得出来(缓存与配置文件无关)。
+	st.Cache = config.CacheStatusOf(config.LocationsAt(path).DataDir())
 	writeJSON(w, http.StatusOK, st)
-}
-
-// cacheDirOf 缓存所在目录 = 配置目录(缓存是它下面那几个子目录)。
-func cacheDirOf(configPath string) string {
-	if configPath == "" {
-		return ""
-	}
-	return filepath.Dir(configPath)
 }
 
 // hCacheClear 清理缓存(设置页那个「清除缓存」按钮走的端点)。
@@ -88,7 +67,7 @@ func (s *Server) hCacheClear(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 		return
 	}
-	dir := cacheDirOf(path)
+	dir := config.LocationsAt(path).DataDir()
 	removed, freed, err := config.CleanCache(dir, 0)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
@@ -101,10 +80,12 @@ func (s *Server) hCacheClear(w http.ResponseWriter, r *http.Request) {
 }
 
 // syncDefaultTarget 同步目标的缺省位置。由 Options 注入以便与字典子系统取同一个值
-// (两边各算一次的话,设置页显示的"默认位置"可能和字典子系统实际写入的不是同一个)。
+// (两边各算一次的话,设置页显示的"默认位置"可能和字典子系统实际写入的不是同一个);
+// 未注入时统一走 config.Locations(数据目录下的 erp_data.db)。
 func (s *Server) syncDefaultTarget() string {
 	if s.opt.SyncDefaultTarget != "" {
 		return s.opt.SyncDefaultTarget
 	}
-	return config.DefaultSyncTarget()
+	path, _ := s.configPath(true)
+	return config.LocationsAt(path).SyncTarget("", "")
 }

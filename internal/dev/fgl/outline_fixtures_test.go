@@ -328,7 +328,7 @@ func payloadNames(t *testing.T, dir string) []string {
 //     testdata 那侧还多一个 README.source.md。把它们纳进来会立刻误报，
 //     然后下一个人会"顺手"把这条测试删掉。
 //   - **缺文件不 skip**：这两份属于仓库本体，不是语料那样的外部数据 ——
-//     缺了就是仓库坏了（同 internal/dev/cli/tzs_verb_test.go:369 与
+//     缺了就是仓库坏了（同 internal/cli/dev/tzs_verb_test.go:369 与
 //     internal/cli/root_test.go:24 立的规矩）。
 //   - 比对的是**集合**再加**逐字节**：只比内容不比名字，会漏掉"一边改名了"。
 func TestFixtureCopiesAreIdentical(t *testing.T) {

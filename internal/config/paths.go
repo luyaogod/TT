@@ -1,12 +1,11 @@
-// Package config 是 tt 的统一配置层：位置解析、读写、校验、迁移。
+// Package config 是 tt 的统一配置层：位置解析、读写、校验、打码。
 //
-// 合并自 TDebug/cli/root.go 与 TDictCli/cli/root.go 里两份逐行相同、各自标注
-// "与对方保持一致，改动请两边同步" 的路径解析，以及两份近乎相同的 cfgfile 包。
-// 现在只有这一份实现。
+// 外部资源（缓存子目录、服务状态、本地字典库、引擎 exe……）的落点也在这里统一解析，
+// 见 locations.go 的 Locations —— 所有"东西放哪/去哪读"的问题都从这一层取答案，
+// 调用方不得自己再拼一份。
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,21 +13,23 @@ import (
 
 // ---------- 配置文件位置 ----------
 //
-// 存放规则：
-//  1. TT_CONFIG 环境变量（兼容旧名 TDEBUG_CONFIG / TDICT_CONFIG）  显式指定
-//  2. --config <路径>                                             显式指定
-//  3. <exe 目录>\.portable 存在                                    便携包：配置留在包内
-//  4. %APPDATA%\T100\tt\config.json                               默认：固定用户的统一位置
-//  5. 旧位置兜底（首次运行自动合并迁移到 4）：
-//     <exe 目录>\config.json、<当前目录>\config.json、
-//     %APPDATA%\T100\tdebug\config.json、%APPDATA%\T100\tdict\config.json、
-//     %APPDATA%\TDebug\config.json
+// 存放规则（第一个存在的胜出）：
+//  1. TT_CONFIG 环境变量          显式指定
+//  2. --config <路径>             显式指定
+//  3. <exe 目录>\.portable 存在    便携包：配置留在包内
+//  4. %APPDATA%\tt\config.json    默认：固定用户的统一位置
 //
-// 统一位置可用 T100_HOME 环境变量整体改写（如 T100_HOME=D:\t100）。
+// 没有旧位置兜底，也不做自动迁移：旧版的各种落点（%APPDATA%\T100\tt、tdebug/tdict、
+// exe 或当前目录的 config.json）一律不读 —— 数据统一在 %APPDATA%\tt。
+//
+// 显式指定的路径就是答案。--config / TT_CONFIG 指向一个还不存在的文件时，**不**悄悄
+// 改用默认落点 —— 否则便携版会把配置写进用户目录，测试脚本也会落在别处。
+//
+// 数据目录 = 配置所在目录，所以缓存、快照、状态文件都跟着落在同一个目录下。
 
 const (
-	// ToolDirName 统一用户目录下本工具的子目录。数据目录 = 配置所在目录，
-	// 所以 srccache / debug-bps / logs / .tt-serve.json 都跟着落在同一个目录里。
+	// ToolDirName 统一用户目录（%APPDATA%）下本工具的目录。数据目录 = 配置所在目录，
+	// 所以 ents / srccache / .tt-serve.json 都跟着落在同一个目录里。
 	ToolDirName = "tt"
 	// DefaultConfigName 缺省配置文件名。
 	DefaultConfigName = "config.json"
@@ -36,32 +37,11 @@ const (
 	PortableMark = ".portable"
 )
 
-// legacyTools 旧工具在统一用户目录下的子目录名。用于发现待合并的旧配置。
-var legacyTools = []string{"tdebug", "tdict"}
-
-// configEnvVars 显式指定配置路径的环境变量，按优先级排列。
-// TT_CONFIG 是本工具的；另两个是合并前各自的，保留以免既有脚本失效。
-var configEnvVars = []string{"TT_CONFIG", "TDEBUG_CONFIG", "TDICT_CONFIG"}
-
-// ToolsHome 固定用户的统一工具目录：T100_HOME 优先，否则 %APPDATA%\T100
-// （os.UserConfigDir() 在 Windows 上即 %AppData%）。
-func ToolsHome() string {
-	if env := os.Getenv("T100_HOME"); env != "" {
-		if abs, err := filepath.Abs(env); err == nil {
-			return abs
-		}
-		return env
-	}
-	if dir, err := os.UserConfigDir(); err == nil {
-		return filepath.Join(dir, "T100")
-	}
-	return ""
-}
-
-// UserConfigDir 统一用户目录下的本工具目录；定位不到时返回空串。
+// UserConfigDir 统一用户目录：%APPDATA%\tt（os.UserConfigDir() 在 Windows 上即
+// %AppData%）。定位不到时返回空串。
 func UserConfigDir() string {
-	if home := ToolsHome(); home != "" {
-		return filepath.Join(home, ToolDirName)
+	if dir, err := os.UserConfigDir(); err == nil {
+		return filepath.Join(dir, ToolDirName)
 	}
 	return ""
 }
@@ -72,23 +52,6 @@ func UserConfigPath() string {
 		return filepath.Join(dir, DefaultConfigName)
 	}
 	return ""
-}
-
-// LegacyToolConfigPaths 合并前的两个工具在统一用户目录下的配置路径。
-// 只列出真正存在的。
-func LegacyToolConfigPaths() []string {
-	home := ToolsHome()
-	if home == "" {
-		return nil
-	}
-	var out []string
-	for _, tool := range legacyTools {
-		p := filepath.Join(home, tool, DefaultConfigName)
-		if _, err := os.Stat(p); err == nil {
-			out = append(out, p)
-		}
-	}
-	return out
 }
 
 // IsPortable 是否便携包（决定配置留在包内还是进统一用户目录）。
@@ -108,47 +71,6 @@ func exeDir() string {
 		return ""
 	}
 	return filepath.Dir(exe)
-}
-
-// legacyConfigPaths 旧位置，按优先级排列。是本工具的配置（凭内容判断），
-// 但不在默认落点上。
-func legacyConfigPaths() []string {
-	var out []string
-	if dir := exeDir(); dir != "" {
-		out = append(out, filepath.Join(dir, DefaultConfigName))
-	}
-	if cwd, err := os.Getwd(); err == nil {
-		out = append(out, filepath.Join(cwd, DefaultConfigName))
-	}
-	// 桌面版旧数据目录（安装版曾用 %APPDATA%\TDebug）
-	if appData := os.Getenv("APPDATA"); appData != "" {
-		out = append(out, filepath.Join(appData, "TDebug", DefaultConfigName))
-	}
-	return out
-}
-
-// LooksLikeOwnConfig 判断一段 JSON 是否像本工具的配置 —— 只认自己那几节的顶层键，
-// 避免把别的项目（当前目录下恰好存在的）config.json 误迁移过来。
-func LooksLikeOwnConfig(b []byte) bool {
-	var root map[string]json.RawMessage
-	if json.Unmarshal(b, &root) != nil {
-		return false
-	}
-	for _, k := range ownConfigKeys {
-		if _, ok := root[k]; ok {
-			return true
-		}
-	}
-	return false
-}
-
-// ownConfigKeys tt 配置的顶层键。hosts/debug/query/mirror/bdldoc/sync 是合并前
-// 两边的键，tdev/tzs/listen/schemaVersion 是合并后新增的。
-//
-// 漏掉一个键不是形式问题：LooksLikeOwnConfig 靠它判断"当前目录里恰好存在的 config.json
-// 是不是我们的"，漏了就会被当成陌生文件，于是旧位置检测与迁移都当它不存在。
-var ownConfigKeys = []string{
-	"hosts", "debug", "query", "mirror", "bdldoc", "sync", "tdev", "tzs", "listen", "schemaVersion",
 }
 
 // DefaultConfigPath 未经显式指定时的默认落点：
@@ -187,12 +109,9 @@ func ResolvePath(flagPath string, allowMissing bool) (string, error) {
 	explicit := false // 是否由用户显式指定（环境变量或 --config）
 
 	// 1. 环境变量（最高优先级）
-	for _, env := range configEnvVars {
-		if v := os.Getenv(env); v != "" {
-			candidates = append(candidates, v)
-			explicit = true
-			break
-		}
+	if v := os.Getenv("TT_CONFIG"); v != "" {
+		candidates = append(candidates, v)
+		explicit = true
 	}
 
 	if flagPath != "" {
@@ -209,27 +128,21 @@ func ResolvePath(flagPath string, allowMissing bool) (string, error) {
 		}
 	} else if !explicit {
 		if IsPortable() {
-			// 3. 便携包：配置留在包内，不参与统一用户目录与迁移
+			// 3. 便携包：配置留在包内，不进统一用户目录
 			if dir := exeDir(); dir != "" {
 				candidates = append(candidates, filepath.Join(dir, DefaultConfigName))
 			}
 		} else if p := UserConfigPath(); p != "" {
-			// 4. 统一用户目录；首次运行先把旧配置合并过来
-			if src := Migrate(); len(src) > 0 {
-				fmt.Fprintf(os.Stderr, "[tt] 已合并旧配置到统一位置: %s -> %s\n",
-					joinPaths(src), p)
-			}
+			// 4. 统一用户目录 %APPDATA%\tt
 			candidates = append(candidates, p)
 		}
-		// 5. 旧位置兜底（用户目录不可用或迁移失败时仍能用）
-		candidates = append(candidates, legacyConfigPaths()...)
 	}
 
 	var tried []string
 	for _, p := range candidates {
 		abs, _ := filepath.Abs(p)
 		if _, err := os.Stat(abs); err == nil {
-			return migrateInPlace(abs), nil
+			return abs, nil
 		}
 		tried = append(tried, abs)
 	}
@@ -240,7 +153,7 @@ func ResolvePath(flagPath string, allowMissing bool) (string, error) {
 		// 也会让 --config <临时目录> 的调用（测试与脚本）落在别处。
 		if explicit && len(candidates) > 0 {
 			if abs, err := filepath.Abs(candidates[0]); err == nil {
-				return migrateInPlace(abs), nil
+				return abs, nil
 			}
 			return candidates[0], nil
 		}
@@ -253,58 +166,6 @@ func ResolvePath(flagPath string, allowMissing bool) (string, error) {
 		"配置文件未找到。\n\n尝试了以下路径:\n%s\n\n缺省位置: %s\n设置 TT_CONFIG 环境变量或使用 --config 指定正确路径:\n  setx TT_CONFIG \"D:\\path\\to\\config.json\"\n  tt --config \"D:\\path\\to\\config.json\" debug status",
 		FormatTriedPaths(tried), DefaultConfigPath(),
 	)
-}
-
-// migrateInPlace 确保 p 处的配置是当前结构：若它还是合并前的旧结构，就地合并迁移。
-//
-// 为什么不能只依赖缺省落点上的那次迁移：
-//   - 便携包。`<exe 目录>\config.json` 在便携模式下优先于统一用户目录，所以
-//     迁移分支根本不会走；而便携用户最自然的做法就是把上一版的 config.json
-//     直接拷进新包 —— 不迁移的话，旧结构里的 `debug.sshs` 读不出来，环境清单
-//     会是空的，用户看到的是"我的环境全没了"。
-//   - `--config <路径>` 显式指定时同理。
-//
-// 文件不存在且没有可合并的旧配置时什么都不做（首次运行由调用方的 EnsureExists
-// 落骨架）。迁移失败不报错中断 —— 按未迁移的内容继续，读得出来多少算多少。
-func migrateInPlace(p string) string {
-	if b, err := os.ReadFile(p); err == nil {
-		if isCurrentSchema(b) {
-			return p
-		}
-		// 文件在、但连 JSON 对象都不是：这不是"合并前的旧配置"，是一份坏文件或根本不是
-		// 配置的东西（手改坏的、测试脚本写的临时文件）。**不能拿它当迁移目标** ——
-		// 迁移会把统一用户目录里那份（含真实 SSH/数据库口令）整个写进来，等于随手把一个
-		// 无关路径变成凭据副本。留给读路径去报"解析不了"。
-		if !looksLikeConfig(b) {
-			return p
-		}
-	}
-	plan, err := PlanMigration(p)
-	if err != nil || plan == nil || len(plan.Sources) == 0 {
-		return p
-	}
-	if err := plan.Apply(); err != nil {
-		fmt.Fprintf(os.Stderr, "[tt] 合并旧配置到 %s 失败: %v\n", p, err)
-	}
-	return p
-}
-
-// isCurrentSchema 判断一段配置内容是否已是合并后的结构。
-func isCurrentSchema(b []byte) bool {
-	var root map[string]any
-	if json.Unmarshal(b, &root) != nil {
-		return false // 解析不了就当需要处理，交给 PlanMigration 去报
-	}
-	return intOf(root["schemaVersion"]) >= SchemaVersion
-}
-
-// looksLikeConfig 只回答"这包内容看起来是不是一份配置"：是个 JSON 对象就算。
-//
-// 与 isCurrentSchema 分开，是因为两者的 false 含义完全不同 —— 前者是"不是配置"，
-// 后者是"是配置但结构旧"。只有后者该被就地迁移改写；前者改写就等于覆盖一个陌生文件。
-func looksLikeConfig(b []byte) bool {
-	var root map[string]any
-	return json.Unmarshal(b, &root) == nil
 }
 
 // FormatTriedPaths 把尝试过的路径渲染成 --help/报错里的清单。
@@ -328,16 +189,4 @@ func SamePath(a, b string) bool {
 		return a == b
 	}
 	return aa == bb
-}
-
-// joinPaths 把来源清单拼成一行，供日志使用。
-func joinPaths(paths []string) string {
-	if len(paths) == 1 {
-		return paths[0]
-	}
-	s := paths[0]
-	for _, p := range paths[1:] {
-		s += " + " + p
-	}
-	return s
 }

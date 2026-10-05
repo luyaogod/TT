@@ -19,7 +19,7 @@ func conn(user, typ, host string) dbconfig.Connection {
 // 转义这一层是**安全关键**：远端库的账号密码是明文配置、查询里拼的是用户给的表名与关键字，
 // 一处漏了就成注入。所以下面的判据写得比"能跑"严：**拒绝**的那些样例才是重点。
 //
-// **口令一律是假的**（AGENTS.md §9）：这里用 "pw-dev" 只为分辨取到了哪个值。
+// **口令一律是假的**：这里用 "pw-dev" 只为分辨取到了哪个值。
 
 func TestValidIdent(t *testing.T) {
 	valid := []string{"dzea_t", "DS", "a", "A1", "_x", "t35prd", "gzou003", "a_b_c", "x9"}

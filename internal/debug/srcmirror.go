@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"tt/internal/config"
 	"tt/internal/entdir"
 	"tt/internal/host"
 
@@ -80,12 +81,10 @@ func writeMirror(dataDir, envSeg, serverPath string, data []byte) string {
 	return p
 }
 
-// srcMirrorRoot 镜像根目录(<DataDir>/srccache)
+// srcMirrorRoot 镜像根目录(<DataDir>/srccache)。落点走 config.CacheDir(统一路径管理器),
+// 名字不在缓存清单里会得到空串。
 func srcMirrorRoot(dataDir string) string {
-	if dataDir == "" {
-		return ""
-	}
-	return filepath.Join(dataDir, srcMirrorDir)
+	return config.CacheDir(dataDir, srcMirrorDir)
 }
 
 // execLogDir 命令完整输出的落盘目录(<DataDir>/execlog)。
@@ -101,7 +100,7 @@ func writeExecLog(dataDir, envSeg, name string, data []byte) string {
 	if dataDir == "" || name == "" {
 		return ""
 	}
-	dir := filepath.Join(dataDir, execLogDir, pathSafeSeg(envSeg))
+	dir := filepath.Join(config.CacheDir(dataDir, execLogDir), pathSafeSeg(envSeg))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		log.Printf("[execlog] 建目录失败 %s: %v", dir, err)
 		return ""

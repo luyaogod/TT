@@ -26,7 +26,7 @@ import (
 //
 // `SRC` 是 `const`，任何 `TZSCLI_*` 变量都改不了它，所以在**没有那棵反编译源码树**的机器上，
 // RoundTrip 一跑就 `DirectoryNotFoundException`。2026-09-27 一位评估者就是这么撞上的：
-// 他干净克隆、照 BUILD.md 建好引擎，然后 `TestMiniCorpus*` 三条全红。
+// 他干净克隆、把引擎建好，然后 `TestMiniCorpus*` 三条全红。
 //
 // 最阴的一处是**照文档做才会红**：`engineExeAndDir` 在引擎不存在时 Skip，
 // 所以**不**建引擎反而是绿的（绿跳）。不修的话，"冒烟回归不再依赖某台机器"这句话就是假的 ——

@@ -41,7 +41,7 @@ var rootCmd = &cobra.Command{
   tt dict …    ERP 数据字典查询：r.t / desc / scc / r.q / prog 等，支持本地镜像与远程直查
 
   tt env …     环境管理：列出/查看/切换 SSH 环境（三个工具共用同一份环境清单）
-  tt config …  配置管理：位置/查看/修改/迁移/校验
+  tt config …  配置管理：位置/查看/读写/校验
   tt serve     启动本地 Web 配置服务（调试工作台，含覆盖所有命令组的统一设置页）
   tt install   安装 AI skills 到当前目录，或把 tt 加进用户 PATH
 

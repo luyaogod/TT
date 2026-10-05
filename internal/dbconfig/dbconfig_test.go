@@ -4,7 +4,7 @@ import "testing"
 
 // 本包全是纯函数（连接类型的取值规则），零外部依赖，所以全是表驱动单测。
 //
-// **口令一律是假的**（AGENTS.md §9）：真实的在 config.json 里，绝不进测试夹具。
+// **口令一律是假的**：真实的在 config.json 里，绝不进测试夹具。
 // 这里用 "pw-dev" / "SECRET" 这类只为了分辨"取到了哪个值"。
 
 func TestViaSSHEffectiveRemote(t *testing.T) {

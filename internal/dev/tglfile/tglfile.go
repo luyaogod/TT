@@ -1,8 +1,8 @@
 // Package tglfile 处理 .tgl 框架骨架里的标记：区段边界、插入点占位符、集合锚点。
 //
 // 依据：
-//   - docs/T100设计器-README.md §3.3（标记正则）、§3.4（合成管线）、§3.5（GenerateTGL）、§3.10（.tgl 的真身）
-//   - 反编译源码 CodeEditWindow/Helper/CodeEditorManager.cs:1694-1715（四个正则原文）
+//   - 反编译源码（标记正则、合成管线、GenerateTGL、.tgl 的真身）：
+//     CodeEditWindow/Helper/CodeEditorManager.cs:1694-1715（四个正则原文）
 //     CodeEditorManager.cs:314-352（GenerateTGL 的补丁格式）
 //     SpecDesignerCommon/TzpManager.cs:453-457（LoadCodeFile 对 TGL 做一次 TrimEnd）
 package tglfile

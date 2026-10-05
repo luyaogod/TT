@@ -1,4 +1,4 @@
-package cli
+package tzs
 
 // tzs_failure_test.go —— 失败出口的契约：`--json` 下 stdout **恰好一帧**。
 //

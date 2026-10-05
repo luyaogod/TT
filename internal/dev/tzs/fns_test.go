@@ -67,7 +67,7 @@ import (
 //	TTZS_FNS=1 TTZS_CORPUS=%TEMP%\ttws TTZS_EXE=<repo>\engine\out\tzs-server.exe \
 //	  go test ./internal/dev/tzs -run TestFnsGate -timeout 30m -v
 //
-// **两条硬纪律跟着守**（根 TEST.md）：只在副本上跑；整轮跑的时候不要重建引擎。
+// **两条硬纪律跟着守**：只在副本上跑；整轮跑的时候不要重建引擎。
 
 const fnsEnv = "TTZS_FNS"
 

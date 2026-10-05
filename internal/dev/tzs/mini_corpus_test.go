@@ -14,11 +14,11 @@ import (
 // ## 为什么要有它
 //
 // corpus_test.go 那几条只认 `TTZS_CORPUS` 指的真语料：一份完整工作区 **130 MB**，而且
-// `mta/` + `tbl/` 是数据不是代码（客户字典与 schema，AGENTS.md §9）。于是那几条回归
+// `mta/` + `tbl/` 是数据不是代码（客户字典与 schema）。于是那几条回归
 // **只有有那份语料的那台机器能跑** —— 干净克隆上全跳。
 //
 // 这里把挑出来的三个典型包 + 它们需要的最小元数据放进 `testdata/tzs-mini/ws`
-// （**3.2 MB**，生成方式见该目录的 `build.py` 与 README.md），
+// （**3.2 MB**，生成方式见 `tools/tzsmini` 与该目录的 README.md），
 // 于是任何人 clone 之后 `cd engine && ./build.sh`，就能跑 roundtrip / 写路径 / 改路径。
 //
 // ## 它不替代什么
@@ -32,7 +32,7 @@ import (
 // 引擎不在仓库里（`engine/out/` 是构建产物，见 engine/BUILD.md），所以**引擎缺了就跳过** ——
 // 与 corpus_test.go 同一个 `engineExeAndDir`，同一句跳过文案。
 //
-// 而**夹具缺了不跳过**：它是仓库本体，缺了就是仓库坏了。依据是 internal/dev/cli/tzs_verb_test.go
+// 而**夹具缺了不跳过**：它是仓库本体，缺了就是仓库坏了。依据是 internal/cli/dev/tzs_verb_test.go
 // 立的那条（"这些属于仓库本体，不是语料那样的外部数据 —— 缺了就是仓库坏了"），
 // internal/dev/fgl 的双份夹具守卫用的是同一条。
 
@@ -59,7 +59,7 @@ func miniCorpusRoot(t *testing.T) string {
 	}
 	t.Fatalf("缺少最小语料 testdata/tzs-mini/ws（从包目录 %s 上溯未找到）——\n"+
 		"它是仓库本体，不是可选的语料：缺了就是仓库坏了。\n"+
-		"若是误删，用 `python testdata/tzs-mini/build.py --src <真工作区>` 重新生成。",
+		"若是误删，用 `go run ./tools/tzsmini --src <真工作区>` 重新生成。",
 		mustGetwd(t))
 	return ""
 }
@@ -175,7 +175,7 @@ func TestMiniCorpusIsPinned(t *testing.T) {
 			"  清单里有、磁盘上没有：%v\n  磁盘上有、清单里没有：%v\n  内容变了：%v\n\n"+
 			"这是**故意的摩擦**：三条回归的基线是从这份夹具自己量的，所以它一旦悄悄变了，\n"+
 			"判据会跟着一起搬而全是绿的。改夹具请连 manifest 一起重新生成：\n"+
-			"  python testdata/tzs-mini/build.py --src <真工作区>",
+			"  go run ./tools/tzsmini --src <真工作区>",
 			missing, extra, changed)
 	}
 }

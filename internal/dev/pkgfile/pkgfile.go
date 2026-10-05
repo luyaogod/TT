@@ -2,8 +2,7 @@
 //
 // 依据：
 //   - 设计指南 §5.1 / §5.6 / §7 R2 R6 R7
-//   - docs/T100设计器-README.md §3.1 容器层、§3.2 条目→加载器分派表、§3.6 打包
-//   - 反编译源码 SpecDesignerCommon/TzpManager.cs:150-182（类型由扩展名决定）
+//   - 反编译源码（容器层、条目→加载器分派表、打包）：SpecDesignerCommon/TzpManager.cs:150-182（类型由扩展名决定）
 //     SpecDesignerCommon/PackageManager.cs:70-100（必需条目）
 //     SpecDesignerCommon/PackageManager.cs:589-604（ver 按名字取、取第一行）
 //     SpecDesignerCommon/TzpManager.cs:395-404（只比较 Major/Minor）
@@ -115,7 +114,7 @@ func (k Kind) UploadCode() string {
 	return ""
 }
 
-// Version 是 ver 条目的主次版本（docs/T100设计器-README.md §3.1）。
+// Version 是 ver 条目的主次版本。
 type Version struct {
 	Major, Minor int
 	Raw          string

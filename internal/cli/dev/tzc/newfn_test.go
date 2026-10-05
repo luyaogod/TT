@@ -1,8 +1,9 @@
-package cli
+package tzc
 
 import (
 	"strings"
 	"testing"
+	"tt/internal/testkit"
 )
 
 // TestNewFnHeaderTemplate 逐字节钉住新函数模板：
@@ -59,7 +60,7 @@ func TestNewFnHeaderTemplate(t *testing.T) {
 
 // TestNewfnRejectsDescFlag 钉住「newfn 不再有 --desc」。
 func TestNewfnRejectsDescFlag(t *testing.T) {
-	if code := silent(t, func() int {
+	if code := testkit.Silent(t, func() int {
 		return cmdNewfn([]string{"--type", "FUNCTION", "--desc", "#+ 旧用法"})
 	}); code != 2 {
 		t.Errorf("newfn --desc 应作为未知标志被拒（退出码 2），实际 %d", code)
