@@ -1,0 +1,10 @@
+{
+  "id": "ButtonQuery",
+  "title": "ButtonQuery 串查字段",
+  "tags": ["控件", "表单", "ButtonQuery", "串查字段", "串查", "链接", "跳转", "Link"],
+  "w": 100,
+  "h": 22,
+  "aspect": "variable",
+  "preset": "linkLabel",
+  "label": "ButtonQuery"
+}

@@ -1,0 +1,10 @@
+{
+  "id": "external-system",
+  "title": "外部系统",
+  "label": "外部系统",
+  "tags": ["T100", "外部"],
+  "w": 140,
+  "h": 90,
+  "aspect": "variable",
+  "style": "shape=cloud;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;"
+}

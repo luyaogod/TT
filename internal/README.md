@@ -7,14 +7,14 @@
 
 | 层 | 目录 | 关系 |
 |---|---|---|
-| 入口与命令层 | 根、`cli/`、`cli/{debug,dev,dict}/` | 三个能力组并列且互不依赖；统一命令组也在这一层 |
+| 入口与命令层 | 根、`cli/`、`cli/{debug,dev,dict,drawio}/` | 四个能力组并列且互不依赖；统一命令组也在这一层 |
 | 共享能力层 | `config/`、`host/`、`output/`、`dbconfig/`、`erpdb/`、`entdir/`、`safesql/`、`sshtun/`、`winproc/`、`pathinstall/` | 被上下两层共同依赖，**自身不反向依赖业务包** |
-| 能力层 | `debug/`、`web/`、`dev/`、`dict/` | 各自独立，之间只通过注入相连 |
+| 能力层 | `debug/`、`web/`、`dev/`、`dict/`、`drawio/` | 各自独立，之间只通过注入相连 |
 | 横向支撑 | `dev/tzs/` | 引擎客户端，依赖面刻意只有 `config` + `winproc` |
 
 ## 三条规矩
 
-1. **三个命令组互不 import**（`cli/debug`、`cli/dev`、`cli/dict` 之间没有任何依赖边）。
+1. **四个命令组互不 import**（`cli/debug`、`cli/dev`、`cli/dict`、`cli/drawio` 之间没有任何依赖边）。
    共享能力一律下沉到共享层。
 2. **往上通信靠注入，不让叶子反向 import**。共享的 CLI 上下文住在 `cli/common`（叶子包），
    需要命令组提供的东西以函数变量注入。
@@ -31,6 +31,7 @@
         ├─ cli/debug ── config, dbconfig, debug, output, winproc
         ├─ cli/dev   ── dev/{fence,model,store,…}, dev/tzs, cli/dev/{common,tzc,tzs}
         ├─ cli/dict  ── config, dbconfig, dict/{db,dbsync,live}, entdir, host, output
+        ├─ cli/drawio ── drawio
         ├─ debug ───── config, dbconfig, entdir, host, safesql
         ├─ dict/server ─ config, dict/dbsync, host
         └─ web ─────── config, dbconfig, erpdb, host, pathinstall

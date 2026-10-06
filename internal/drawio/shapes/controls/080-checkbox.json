@@ -1,0 +1,12 @@
+{
+  "id": "CheckBox",
+  "title": "CheckBox 多选",
+  "tags": ["控件", "表单", "CheckBox", "多选", "复选"],
+  "w": 209,
+  "h": 22,
+  "aspect": "variable",
+  "parts": [
+    { "kind": "checkbox",   "x": 5,  "y": 4, "w": 14,  "h": 14 },
+    { "kind": "labelBottom", "slot": "label", "x": 25, "y": 0, "w": 180, "h": 22, "text": "CheckBox" }
+  ]
+}

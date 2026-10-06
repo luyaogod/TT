@@ -1,0 +1,26 @@
+{
+  "id": "Tree",
+  "title": "Tree 树形",
+  "tags": ["控件", "容器", "Tree", "树", "树形", "层级", "s_browse"],
+  "w": 152,
+  "h": 120,
+  "aspect": "variable",
+  "parts": [
+    { "kind": "containerBox", "fill": true, "x": 0, "y": 0, "w": 152, "h": 120 },
+    { "kind": "treeArrowOpen", "deco": true,   "x": 8,  "y": 8.5,  "w": 7, "h": 7,
+      "style": "shape=triangle;direction=south;fillColor=#555555;strokeColor=none;" },
+    { "kind": "label", "deco": true, "slot": "n1", "x": 19, "y": 1,  "w": 128, "h": 22, "text": "全部" },
+    { "kind": "treeArrowClosed", "deco": true, "x": 22, "y": 30.5, "w": 7, "h": 7,
+      "style": "shape=triangle;direction=east;fillColor=#555555;strokeColor=none;" },
+    { "kind": "label", "deco": true, "slot": "n2", "x": 33, "y": 23, "w": 114, "h": 22, "text": "子项一" },
+    { "kind": "treeArrowClosed", "deco": true, "x": 22, "y": 52.5, "w": 7, "h": 7,
+      "style": "shape=triangle;direction=east;fillColor=#555555;strokeColor=none;" },
+    { "kind": "label", "deco": true, "slot": "n3", "x": 33, "y": 45, "w": 114, "h": 22, "text": "子项二" },
+    { "kind": "treeArrowClosed", "deco": true, "x": 12, "y": 74.5, "w": 7, "h": 7,
+      "style": "shape=triangle;direction=east;fillColor=#555555;strokeColor=none;" },
+    { "kind": "label", "deco": true, "slot": "n4", "x": 23, "y": 67, "w": 124, "h": 22, "text": "分类一" },
+    { "kind": "treeArrowClosed", "deco": true, "x": 12, "y": 96.5, "w": 7, "h": 7,
+      "style": "shape=triangle;direction=east;fillColor=#555555;strokeColor=none;" },
+    { "kind": "label", "deco": true, "slot": "n5", "x": 23, "y": 89, "w": 124, "h": 22, "text": "分类二" }
+  ]
+}

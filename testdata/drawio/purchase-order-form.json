@@ -1,0 +1,26 @@
+{
+  "library": "controls",
+  "title": "采购订单",
+  "grid": {
+    "originX": 60,
+    "originY": 60,
+    "colGap": 24,
+    "rowGap": 12,
+    "colWidths": [209, 209]
+  },
+  "items": [
+    { "shape": "ButtonEdit", "col": 0, "row": 0, "text": { "label": "供应商" } },
+    { "shape": "DateEdit",   "col": 1, "row": 0, "text": { "label": "下单日期" } },
+
+    { "shape": "SpinEdit",   "col": 0, "row": 1, "text": { "label": "项次", "field": "1" } },
+    { "shape": "ComboBox",   "col": 1, "row": 1, "text": { "label": "采购类型" } },
+
+    { "shape": "Edit",       "col": 0, "row": 2, "text": { "label": "单号" } },
+    { "shape": "CheckBox",   "col": 1, "row": 2, "text": { "label": "急件" } },
+
+    { "shape": "TextEdit",   "col": 0, "row": 3, "text": { "label": "备注" } },
+
+    { "shape": "RadioGroup", "col": 0, "row": 4, "text": { "label": "含税" } },
+    { "shape": "Button",     "col": 1, "row": 4, "text": { "value": "查询" } }
+  ]
+}

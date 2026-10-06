@@ -1,0 +1,59 @@
+{
+  "_comment": "组合控件的部件样式预设。部件用 kind 引用这里，也可以在部件上直接写 style 覆盖。",
+
+  "label": "text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#000000;spacingLeft=2;",
+
+  "_labelBottom": "同 label，只是文字贴着单元格底边。CheckBox / RadioGroup 用，让文字与方框/圆圈的关系更稳。",
+  "labelBottom": "text;html=1;align=left;verticalAlign=bottom;fontSize=11;fontColor=#000000;spacingLeft=2;",
+
+  "_linkLabel": "fontStyle 是位掩码：1=粗 2=斜 4=下划线，所以 4 就是纯下划线。",
+  "linkLabel": "text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#1a0dab;fontStyle=4;spacingLeft=2;",
+
+  "descLabel": "text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#00839c;spacingLeft=2;",
+
+  "field": "rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#808080;align=left;verticalAlign=middle;fontSize=11;fontColor=#000000;spacingLeft=4;",
+
+  "fieldRight": "rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#808080;align=right;verticalAlign=middle;fontSize=11;fontColor=#000000;spacingRight=4;",
+
+  "textArea": "rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#808080;align=left;verticalAlign=top;fontSize=11;fontColor=#000000;spacingLeft=4;spacingTop=3;",
+
+  "button": "rounded=0;whiteSpace=wrap;html=1;fillColor=#e8e8e8;gradientColor=#f8f8f8;strokeColor=#808080;fontSize=11;fontColor=#000000;",
+
+  "spinButton": "rounded=0;whiteSpace=wrap;html=1;fillColor=#3aa6db;strokeColor=#2b86b3;",
+
+  "arrow": "shape=triangle;direction=south;fillColor=#000000;strokeColor=none;",
+
+  "arrowUp": "shape=triangle;direction=north;fillColor=#ffffff;strokeColor=none;",
+
+  "arrowDown": "shape=triangle;direction=south;fillColor=#ffffff;strokeColor=none;",
+
+  "checkbox": "rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#555555;",
+
+  "radio": "ellipse;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#555555;",
+
+  "tab": "rounded=0;whiteSpace=wrap;html=1;fillColor=#ececec;strokeColor=#9a9a9a;fontSize=11;fontColor=#000000;",
+  "tabActive": "rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9a9a9a;fontSize=11;fontColor=#000000;",
+
+  "containerBox": "rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#808080;",
+
+  "_legend": "Group 左上角那行标题。白底无边框，压在容器上边线上，把边框「切」出一个缺口。whiteSpace 必须是 nowrap —— wrap 会让 autosize 按折行去量，算出来的宽度不对。",
+  "legend": "rounded=0;whiteSpace=nowrap;html=1;fillColor=#ffffff;strokeColor=none;align=left;verticalAlign=middle;fontSize=11;fontColor=#000000;spacingLeft=2;autosize=1;",
+
+  "_icons": "图标一律用矢量图元拼，不要用 image= 内联 SVG —— 实测那种写法位置会飘（见 README「几个坑」）。",
+
+  "ring": "ellipse;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#333333;strokeWidth=1.5;",
+
+  "bar": "rounded=0;whiteSpace=wrap;html=1;fillColor=#333333;strokeColor=none;",
+
+  "calBody": "rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#555555;",
+
+  "calHead": "rounded=0;whiteSpace=wrap;html=1;fillColor=#5b8cc4;strokeColor=#555555;",
+
+  "dot": "rounded=0;whiteSpace=wrap;html=1;fillColor=#7f7f7f;strokeColor=none;",
+
+  "_table": "Table 用 drawio 原生的表格结构：容器 shape=table + childLayout=tableLayout，子单元格是「行」，行的子单元格是「列」。drawio 的 isTable/isTableRow/isTableCell 只看父级链，所以 Arrange 面板会给出插入/删除行列的按钮。单元格相邻无间隙，各自描边在共用边上重合，看起来是一条线。",
+  "tableBox": "shape=table;startSize=0;container=1;collapsible=0;childLayout=tableLayout;fillColor=none;strokeColor=none;",
+  "tableRow": "fillColor=none;strokeColor=none;",
+  "tableHeader": "rounded=0;whiteSpace=wrap;html=1;fillColor=#f0f0f0;strokeColor=#808080;fontSize=11;align=left;verticalAlign=middle;spacingLeft=6;",
+  "tableCell": "rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#808080;fontSize=11;align=left;verticalAlign=middle;spacingLeft=6;"
+}

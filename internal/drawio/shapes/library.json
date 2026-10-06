@@ -1,0 +1,14 @@
+{
+  "business": {
+    "name": "T100 业务组件库",
+    "output": "t100",
+    "version": "0.1.0",
+    "description": "T100 ERP 业务组件：模块、单据、接口、外部系统"
+  },
+  "controls": {
+    "name": "T100 表单控件库",
+    "output": "t100-controls",
+    "version": "0.1.0",
+    "description": "T100 Designer 表单工具箱控件，id 与设计器对齐：ReferenceLabel（参考字段，FFLabel·reference 变体）、ButtonQuery（串查字段，Button·button_qrystr 变体）、MultiLangButtonEdit（多语言数据字段，ButtonEdit 变体）、Folder、Grid、Group、Table、Tree、Button、Label、ButtonEdit、CheckBox、ComboBox、DateEdit、Edit、RadioGroup、SpinEdit、TextEdit"
+  }
+}

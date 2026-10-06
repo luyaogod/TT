@@ -1,0 +1,12 @@
+{
+  "id": "RadioGroup",
+  "title": "RadioGroup 单选组",
+  "tags": ["控件", "表单", "RadioGroup", "单选", "单选框"],
+  "w": 209,
+  "h": 22,
+  "aspect": "variable",
+  "parts": [
+    { "kind": "radio",       "x": 5,  "y": 4, "w": 14,  "h": 14 },
+    { "kind": "labelBottom", "slot": "label", "x": 25, "y": 0, "w": 180, "h": 22, "text": "RadioGroup" }
+  ]
+}

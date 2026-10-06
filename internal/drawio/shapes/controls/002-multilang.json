@@ -1,0 +1,20 @@
+{
+  "id": "MultiLangButtonEdit",
+  "title": "MultiLangButtonEdit 多语言数据字段",
+  "tags": ["控件", "表单", "MultiLangButtonEdit", "多语言", "多语言数据字段", "翻译", "开窗"],
+  "w": 209,
+  "h": 22,
+  "aspect": "variable",
+  "parts": [
+    { "kind": "label",  "x": 0,     "y": 0,   "w": 100, "h": 22, "text": "MultiLang" },
+    { "kind": "field",  "x": 104,   "y": 0,   "w": 105, "h": 22, "text": "" },
+    { "kind": "button", "x": 190,   "y": 2,   "w": 17,  "h": 18,
+      "style": "rounded=0;whiteSpace=wrap;html=1;fillColor=#f79646;strokeColor=#c97b2d;" },
+    { "kind": "bar",    "x": 194.5, "y": 5,   "w": 1.2, "h": 9.5,
+      "style": "rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=none;" },
+    { "kind": "flag",   "x": 195.7, "y": 5,   "w": 4.8, "h": 3.2,
+      "style": "rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=none;" },
+    { "kind": "letter", "slot": "letter", "x": 199, "y": 9.5, "w": 6.5, "h": 8, "text": "A",
+      "style": "text;html=1;align=center;verticalAlign=middle;fontSize=7;fontColor=#ffffff;" }
+  ]
+}

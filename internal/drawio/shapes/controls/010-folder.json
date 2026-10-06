@@ -1,0 +1,13 @@
+{
+  "id": "Folder",
+  "title": "Folder 页签",
+  "tags": ["控件", "容器", "Folder", "页签", "标签页", "Tab"],
+  "w": 400,
+  "h": 244,
+  "aspect": "variable",
+  "multiTab": { "part": 2, "w": 100, "h": 24, "xStep": 100 },
+  "parts": [
+    { "kind": "containerBox", "fill": true, "x": 0, "y": 24,  "w": 400, "h": 220 },
+    { "kind": "tab", "deco": true, "slot": "label", "x": 0, "y": 0, "w": 100, "h": 24, "text": "页签" }
+  ]
+}

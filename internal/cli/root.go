@@ -1,10 +1,11 @@
 // Package cli 装配 tt 的根命令。
 //
-// 三个工具以子命令组并存，各自实现在独立子包里，互不 import：
+// 四个能力组并存，各自实现在独立子包里，互不 import：
 //
 //	tt debug …   原 tdebug（AI 人机协同调试）
 //	tt dev …     原 tdev（设计器包安全编辑）
 //	tt dict …    原 tdict（ERP 数据字典查询）
+//	tt drawio …  原型图（用 T100 组件库画界面草图）
 //
 // 共享的 CLI 上下文在 internal/cli/common（叶子包，避免循环依赖）。
 package cli
@@ -21,6 +22,7 @@ import (
 	"tt/internal/cli/debug"
 	"tt/internal/cli/dev"
 	"tt/internal/cli/dict"
+	"tt/internal/cli/drawio"
 	"tt/internal/output"
 )
 
@@ -39,6 +41,7 @@ var rootCmd = &cobra.Command{
   tt dev tzs … T100 设计器表单包（.tzs/.tzv）：export 纯解压只读；读写表单走具名动词
                （tt dev tzs <动词> --args '<JSON 对象>'），由设计器自己的引擎算，不是拼 XML
   tt dict …    ERP 数据字典查询：r.t / desc / scc / r.q / prog 等，支持本地镜像与远程直查
+  tt drawio …  画原型图：把 T100 组件库交给 drawio，按设计器惯例拼界面草图
 
   tt env …     环境管理：列出/查看/切换 SSH 环境（三个工具共用同一份环境清单）
   tt config …  配置管理：位置/查看/读写/校验
@@ -54,10 +57,11 @@ var rootCmd = &cobra.Command{
   tt dev tzs    0 成功 / 1 引擎内部错 / 2 参数或环境错 / 4 设计器拒绝 / 5 传输或环境失败
                 （**没有 3**；2 也包括"manifest 拉不到"）
   tt dict       0 成功（含"查无结果"）/ 1 用法错 / 2 数据源错 / 3 缺表
+  tt drawio     0 成功 / 1 用法或运行失败 / 2 输入错（spec 不合法、包读不出）/ 3 产物自查未通过
   顶层          0 成功 / 1 用法错（未知命令、未知开关）
 
-3 在 tzc 是"校验失败"、在 dict 是"缺表"、在 tzs 根本不用；4 只在 tzs 有（设计器拒绝）。
-包装脚本要按子命令辨认，别只看码。
+3 在 tzc 是"校验失败"、在 dict 是"缺表"、在 drawio 是"产物自查未通过"、在 tzs 根本不用；
+4 只在 tzs 有（设计器拒绝）。包装脚本要按子命令辨认，别只看码。
 
 合并前的命令名仍可直接当子命令组用：tt tdebug … = tt debug …，
 tt tdev … = tt dev …，tt tdict … = tt dict …。`,
@@ -88,6 +92,7 @@ func init() {
 	debug.Register(rootCmd)
 	dev.Register(rootCmd)
 	dict.Register(rootCmd)
+	drawio.Register(rootCmd)
 
 	rootCmd.AddCommand(newEnvCmd())
 	rootCmd.AddCommand(newConfigCmd())

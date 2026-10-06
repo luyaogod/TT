@@ -1,0 +1,10 @@
+{
+  "id": "Label",
+  "title": "Label 标签",
+  "tags": ["控件", "表单", "Label", "标签"],
+  "w": 100,
+  "h": 22,
+  "aspect": "variable",
+  "label": "Label",
+  "style": "text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#000000;spacingLeft=2;"
+}

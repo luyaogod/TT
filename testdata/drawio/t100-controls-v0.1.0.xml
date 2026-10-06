@@ -1,0 +1,259 @@
+<mxlibrary>[
+  {
+    "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"2\" value=\"ReferenceLabel\" style=\"text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#00839c;spacingLeft=2;\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry width=\"100\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+    "w": 100,
+    "h": 22,
+    "title": "ReferenceLabel 参考字段",
+    "aspect": "variable",
+    "tags": [
+      "控件",
+      "表单",
+      "ReferenceLabel",
+      "参考字段",
+      "描述",
+      "说明",
+      "Desc"
+    ]
+  },
+  {
+    "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"g\" value=\"\" style=\"group\" vertex=\"1\" connectable=\"0\" parent=\"1\"&gt;&lt;mxGeometry width=\"209\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p1\" value=\"MultiLang\" style=\"text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#000000;spacingLeft=2;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"100\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p2\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#808080;align=left;verticalAlign=middle;fontSize=11;fontColor=#000000;spacingLeft=4;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"104\" y=\"0\" width=\"105\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p3\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#f79646;strokeColor=#c97b2d;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"190\" y=\"2\" width=\"17\" height=\"18\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p4\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=none;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"194.5\" y=\"5\" width=\"1.2\" height=\"9.5\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p5\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=none;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"195.7\" y=\"5\" width=\"4.8\" height=\"3.2\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p6\" value=\"A\" style=\"text;html=1;align=center;verticalAlign=middle;fontSize=7;fontColor=#ffffff;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"199\" y=\"9.5\" width=\"6.5\" height=\"8\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+    "w": 209,
+    "h": 22,
+    "title": "MultiLangButtonEdit 多语言数据字段",
+    "aspect": "variable",
+    "tags": [
+      "控件",
+      "表单",
+      "MultiLangButtonEdit",
+      "多语言",
+      "多语言数据字段",
+      "翻译",
+      "开窗"
+    ]
+  },
+  {
+    "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"2\" value=\"ButtonQuery\" style=\"text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#1a0dab;fontStyle=4;spacingLeft=2;\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry width=\"100\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+    "w": 100,
+    "h": 22,
+    "title": "ButtonQuery 串查字段",
+    "aspect": "variable",
+    "tags": [
+      "控件",
+      "表单",
+      "ButtonQuery",
+      "串查字段",
+      "串查",
+      "链接",
+      "跳转",
+      "Link"
+    ]
+  },
+  {
+    "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"g\" value=\"\" style=\"group\" vertex=\"1\" connectable=\"0\" parent=\"1\"&gt;&lt;mxGeometry width=\"400\" height=\"244\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p1\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#808080;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"0\" y=\"24\" width=\"400\" height=\"220\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p2\" value=\"页签\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#ececec;strokeColor=#9a9a9a;fontSize=11;fontColor=#000000;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"100\" height=\"24\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+    "w": 400,
+    "h": 244,
+    "title": "Folder 页签",
+    "aspect": "variable",
+    "tags": [
+      "控件",
+      "容器",
+      "Folder",
+      "页签",
+      "标签页",
+      "Tab"
+    ]
+  },
+  {
+    "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"2\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#808080;\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry width=\"400\" height=\"220\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+    "w": 400,
+    "h": 220,
+    "title": "Grid",
+    "aspect": "variable",
+    "tags": [
+      "控件",
+      "容器",
+      "Grid",
+      "网格",
+      "框"
+    ]
+  },
+  {
+    "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"g\" value=\"\" style=\"group\" vertex=\"1\" connectable=\"0\" parent=\"1\"&gt;&lt;mxGeometry width=\"400\" height=\"228\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p1\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#808080;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"0\" y=\"8\" width=\"400\" height=\"220\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p2\" value=\"Group\" style=\"rounded=0;whiteSpace=nowrap;html=1;fillColor=#ffffff;strokeColor=none;align=left;verticalAlign=middle;fontSize=11;fontColor=#000000;spacingLeft=2;autosize=1;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"12\" y=\"0\" width=\"45\" height=\"16\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+    "w": 400,
+    "h": 228,
+    "title": "Group",
+    "aspect": "variable",
+    "tags": [
+      "控件",
+      "容器",
+      "Group",
+      "分组",
+      "框"
+    ]
+  },
+  {
+    "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"t\" value=\"\" style=\"shape=table;startSize=0;container=1;collapsible=0;childLayout=tableLayout;fillColor=none;strokeColor=none;\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry width=\"420\" height=\"156\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"h\" value=\"\" style=\"fillColor=none;strokeColor=none;\" vertex=\"1\" parent=\"t\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"420\" height=\"26\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"hc0\" value=\"Field\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#f0f0f0;strokeColor=#808080;fontSize=11;align=left;verticalAlign=middle;spacingLeft=6;\" vertex=\"1\" parent=\"h\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"140\" height=\"26\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"hc1\" value=\"Field\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#f0f0f0;strokeColor=#808080;fontSize=11;align=left;verticalAlign=middle;spacingLeft=6;\" vertex=\"1\" parent=\"h\"&gt;&lt;mxGeometry x=\"140\" y=\"0\" width=\"140\" height=\"26\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"hc2\" value=\"Field\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#f0f0f0;strokeColor=#808080;fontSize=11;align=left;verticalAlign=middle;spacingLeft=6;\" vertex=\"1\" parent=\"h\"&gt;&lt;mxGeometry x=\"280\" y=\"0\" width=\"140\" height=\"26\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"r0\" value=\"\" style=\"fillColor=none;strokeColor=none;\" vertex=\"1\" parent=\"t\"&gt;&lt;mxGeometry x=\"0\" y=\"26\" width=\"420\" height=\"26\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"r0c0\" value=\"DateTimeEdit\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#808080;fontSize=11;align=left;verticalAlign=middle;spacingLeft=6;\" vertex=\"1\" parent=\"r0\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"140\" height=\"26\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"r0c1\" value=\"ButtonEdit\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#808080;fontSize=11;align=left;verticalAlign=middle;spacingLeft=6;\" vertex=\"1\" parent=\"r0\"&gt;&lt;mxGeometry x=\"140\" y=\"0\" width=\"140\" height=\"26\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"r0c2\" value=\"Reference\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#808080;fontSize=11;align=left;verticalAlign=middle;spacingLeft=6;\" vertex=\"1\" parent=\"r0\"&gt;&lt;mxGeometry x=\"280\" y=\"0\" width=\"140\" height=\"26\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"r1\" value=\"\" style=\"fillColor=none;strokeColor=none;\" vertex=\"1\" parent=\"t\"&gt;&lt;mxGeometry x=\"0\" y=\"52\" width=\"420\" height=\"26\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"r1c0\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#808080;fontSize=11;align=left;verticalAlign=middle;spacingLeft=6;\" vertex=\"1\" parent=\"r1\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"140\" height=\"26\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"r1c1\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#808080;fontSize=11;align=left;verticalAlign=middle;spacingLeft=6;\" vertex=\"1\" parent=\"r1\"&gt;&lt;mxGeometry x=\"140\" y=\"0\" width=\"140\" height=\"26\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"r1c2\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#808080;fontSize=11;align=left;verticalAlign=middle;spacingLeft=6;\" vertex=\"1\" parent=\"r1\"&gt;&lt;mxGeometry x=\"280\" y=\"0\" width=\"140\" height=\"26\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"r2\" value=\"\" style=\"fillColor=none;strokeColor=none;\" vertex=\"1\" parent=\"t\"&gt;&lt;mxGeometry x=\"0\" y=\"78\" width=\"420\" height=\"26\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"r2c0\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#808080;fontSize=11;align=left;verticalAlign=middle;spacingLeft=6;\" vertex=\"1\" parent=\"r2\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"140\" height=\"26\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"r2c1\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#808080;fontSize=11;align=left;verticalAlign=middle;spacingLeft=6;\" vertex=\"1\" parent=\"r2\"&gt;&lt;mxGeometry x=\"140\" y=\"0\" width=\"140\" height=\"26\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"r2c2\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#808080;fontSize=11;align=left;verticalAlign=middle;spacingLeft=6;\" vertex=\"1\" parent=\"r2\"&gt;&lt;mxGeometry x=\"280\" y=\"0\" width=\"140\" height=\"26\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"r3\" value=\"\" style=\"fillColor=none;strokeColor=none;\" vertex=\"1\" parent=\"t\"&gt;&lt;mxGeometry x=\"0\" y=\"104\" width=\"420\" height=\"26\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"r3c0\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#808080;fontSize=11;align=left;verticalAlign=middle;spacingLeft=6;\" vertex=\"1\" parent=\"r3\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"140\" height=\"26\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"r3c1\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#808080;fontSize=11;align=left;verticalAlign=middle;spacingLeft=6;\" vertex=\"1\" parent=\"r3\"&gt;&lt;mxGeometry x=\"140\" y=\"0\" width=\"140\" height=\"26\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"r3c2\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#808080;fontSize=11;align=left;verticalAlign=middle;spacingLeft=6;\" vertex=\"1\" parent=\"r3\"&gt;&lt;mxGeometry x=\"280\" y=\"0\" width=\"140\" height=\"26\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"r4\" value=\"\" style=\"fillColor=none;strokeColor=none;\" vertex=\"1\" parent=\"t\"&gt;&lt;mxGeometry x=\"0\" y=\"130\" width=\"420\" height=\"26\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"r4c0\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#808080;fontSize=11;align=left;verticalAlign=middle;spacingLeft=6;\" vertex=\"1\" parent=\"r4\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"140\" height=\"26\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"r4c1\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#808080;fontSize=11;align=left;verticalAlign=middle;spacingLeft=6;\" vertex=\"1\" parent=\"r4\"&gt;&lt;mxGeometry x=\"140\" y=\"0\" width=\"140\" height=\"26\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"r4c2\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#808080;fontSize=11;align=left;verticalAlign=middle;spacingLeft=6;\" vertex=\"1\" parent=\"r4\"&gt;&lt;mxGeometry x=\"280\" y=\"0\" width=\"140\" height=\"26\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+    "w": 420,
+    "h": 156,
+    "title": "Table",
+    "aspect": "variable",
+    "tags": [
+      "控件",
+      "容器",
+      "Table",
+      "表格",
+      "明细"
+    ]
+  },
+  {
+    "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"g\" value=\"\" style=\"group\" vertex=\"1\" connectable=\"0\" parent=\"1\"&gt;&lt;mxGeometry width=\"152\" height=\"120\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p1\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#808080;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"152\" height=\"120\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p2\" value=\"\" style=\"shape=triangle;direction=south;fillColor=#555555;strokeColor=none;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"8\" y=\"8.5\" width=\"7\" height=\"7\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p3\" value=\"全部\" style=\"text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#000000;spacingLeft=2;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"19\" y=\"1\" width=\"128\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p4\" value=\"\" style=\"shape=triangle;direction=east;fillColor=#555555;strokeColor=none;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"22\" y=\"30.5\" width=\"7\" height=\"7\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p5\" value=\"子项一\" style=\"text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#000000;spacingLeft=2;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"33\" y=\"23\" width=\"114\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p6\" value=\"\" style=\"shape=triangle;direction=east;fillColor=#555555;strokeColor=none;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"22\" y=\"52.5\" width=\"7\" height=\"7\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p7\" value=\"子项二\" style=\"text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#000000;spacingLeft=2;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"33\" y=\"45\" width=\"114\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p8\" value=\"\" style=\"shape=triangle;direction=east;fillColor=#555555;strokeColor=none;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"12\" y=\"74.5\" width=\"7\" height=\"7\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p9\" value=\"分类一\" style=\"text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#000000;spacingLeft=2;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"23\" y=\"67\" width=\"124\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p10\" value=\"\" style=\"shape=triangle;direction=east;fillColor=#555555;strokeColor=none;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"12\" y=\"96.5\" width=\"7\" height=\"7\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p11\" value=\"分类二\" style=\"text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#000000;spacingLeft=2;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"23\" y=\"89\" width=\"124\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+    "w": 152,
+    "h": 120,
+    "title": "Tree 树形",
+    "aspect": "variable",
+    "tags": [
+      "控件",
+      "容器",
+      "Tree",
+      "树",
+      "树形",
+      "层级",
+      "s_browse"
+    ]
+  },
+  {
+    "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"2\" value=\"Button\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#e8e8e8;gradientColor=#f8f8f8;strokeColor=#808080;fontSize=11;fontColor=#000000;\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry width=\"105\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+    "w": 105,
+    "h": 22,
+    "title": "Button 按钮",
+    "aspect": "variable",
+    "tags": [
+      "控件",
+      "表单",
+      "Button",
+      "按钮"
+    ]
+  },
+  {
+    "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"2\" value=\"Label\" style=\"text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#000000;spacingLeft=2;\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry width=\"100\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+    "w": 100,
+    "h": 22,
+    "title": "Label 标签",
+    "aspect": "variable",
+    "tags": [
+      "控件",
+      "表单",
+      "Label",
+      "标签"
+    ]
+  },
+  {
+    "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"g\" value=\"\" style=\"group\" vertex=\"1\" connectable=\"0\" parent=\"1\"&gt;&lt;mxGeometry width=\"209\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p1\" value=\"ButtonEdit\" style=\"text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#000000;spacingLeft=2;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"100\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p2\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#808080;align=left;verticalAlign=middle;fontSize=11;fontColor=#000000;spacingLeft=4;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"104\" y=\"0\" width=\"105\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p3\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#e8e8e8;gradientColor=#f8f8f8;strokeColor=#808080;fontSize=11;fontColor=#000000;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"190\" y=\"2\" width=\"17\" height=\"18\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p4\" value=\"\" style=\"ellipse;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#333333;strokeWidth=1.5;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"193\" y=\"5.5\" width=\"8\" height=\"8\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p5\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#333333;strokeColor=none;rotation=-45;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"201.1\" y=\"11.3\" width=\"1.5\" height=\"6\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+    "w": 209,
+    "h": 22,
+    "title": "ButtonEdit 编辑开窗",
+    "aspect": "variable",
+    "tags": [
+      "控件",
+      "表单",
+      "ButtonEdit",
+      "编辑开窗",
+      "开窗"
+    ]
+  },
+  {
+    "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"g\" value=\"\" style=\"group\" vertex=\"1\" connectable=\"0\" parent=\"1\"&gt;&lt;mxGeometry width=\"209\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p1\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#555555;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"5\" y=\"4\" width=\"14\" height=\"14\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p2\" value=\"CheckBox\" style=\"text;html=1;align=left;verticalAlign=bottom;fontSize=11;fontColor=#000000;spacingLeft=2;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"25\" y=\"0\" width=\"180\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+    "w": 209,
+    "h": 22,
+    "title": "CheckBox 多选",
+    "aspect": "variable",
+    "tags": [
+      "控件",
+      "表单",
+      "CheckBox",
+      "多选",
+      "复选"
+    ]
+  },
+  {
+    "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"g\" value=\"\" style=\"group\" vertex=\"1\" connectable=\"0\" parent=\"1\"&gt;&lt;mxGeometry width=\"209\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p1\" value=\"ComboBox\" style=\"text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#000000;spacingLeft=2;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"100\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p2\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#808080;align=left;verticalAlign=middle;fontSize=11;fontColor=#000000;spacingLeft=4;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"104\" y=\"0\" width=\"105\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p3\" value=\"\" style=\"shape=triangle;direction=south;fillColor=#000000;strokeColor=none;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"196\" y=\"8\" width=\"9\" height=\"6\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+    "w": 209,
+    "h": 22,
+    "title": "ComboBox 下拉选单",
+    "aspect": "variable",
+    "tags": [
+      "控件",
+      "表单",
+      "ComboBox",
+      "下拉"
+    ]
+  },
+  {
+    "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"g\" value=\"\" style=\"group\" vertex=\"1\" connectable=\"0\" parent=\"1\"&gt;&lt;mxGeometry width=\"209\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p1\" value=\"DateEdit\" style=\"text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#000000;spacingLeft=2;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"100\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p2\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#808080;align=left;verticalAlign=middle;fontSize=11;fontColor=#000000;spacingLeft=4;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"104\" y=\"0\" width=\"105\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p3\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#e8e8e8;gradientColor=#f8f8f8;strokeColor=#808080;fontSize=11;fontColor=#000000;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"190\" y=\"2\" width=\"17\" height=\"18\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p4\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#555555;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"192\" y=\"6\" width=\"13\" height=\"11\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p5\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#5b8cc4;strokeColor=#555555;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"192\" y=\"6\" width=\"13\" height=\"3.5\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p6\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#333333;strokeColor=none;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"194.6\" y=\"4.4\" width=\"1.2\" height=\"3\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p7\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#333333;strokeColor=none;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"201.2\" y=\"4.4\" width=\"1.2\" height=\"3\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p8\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#7f7f7f;strokeColor=none;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"194.6\" y=\"11\" width=\"2\" height=\"1.6\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p9\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#7f7f7f;strokeColor=none;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"197.6\" y=\"11\" width=\"2\" height=\"1.6\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p10\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#7f7f7f;strokeColor=none;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"200.6\" y=\"11\" width=\"2\" height=\"1.6\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+    "w": 209,
+    "h": 22,
+    "title": "DateEdit 日期",
+    "aspect": "variable",
+    "tags": [
+      "控件",
+      "表单",
+      "DateEdit",
+      "日期"
+    ]
+  },
+  {
+    "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"g\" value=\"\" style=\"group\" vertex=\"1\" connectable=\"0\" parent=\"1\"&gt;&lt;mxGeometry width=\"209\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p1\" value=\"Edit\" style=\"text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#000000;spacingLeft=2;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"100\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p2\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#808080;align=left;verticalAlign=middle;fontSize=11;fontColor=#000000;spacingLeft=4;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"104\" y=\"0\" width=\"105\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+    "w": 209,
+    "h": 22,
+    "title": "Edit 文字编辑",
+    "aspect": "variable",
+    "tags": [
+      "控件",
+      "表单",
+      "Edit",
+      "文字编辑"
+    ]
+  },
+  {
+    "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"g\" value=\"\" style=\"group\" vertex=\"1\" connectable=\"0\" parent=\"1\"&gt;&lt;mxGeometry width=\"209\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p1\" value=\"\" style=\"ellipse;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#555555;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"5\" y=\"4\" width=\"14\" height=\"14\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p2\" value=\"RadioGroup\" style=\"text;html=1;align=left;verticalAlign=bottom;fontSize=11;fontColor=#000000;spacingLeft=2;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"25\" y=\"0\" width=\"180\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+    "w": 209,
+    "h": 22,
+    "title": "RadioGroup 单选组",
+    "aspect": "variable",
+    "tags": [
+      "控件",
+      "表单",
+      "RadioGroup",
+      "单选",
+      "单选框"
+    ]
+  },
+  {
+    "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"g\" value=\"\" style=\"group\" vertex=\"1\" connectable=\"0\" parent=\"1\"&gt;&lt;mxGeometry width=\"209\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p1\" value=\"SpinEdit\" style=\"text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#000000;spacingLeft=2;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"100\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p2\" value=\"0\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#808080;align=right;verticalAlign=middle;fontSize=11;fontColor=#000000;spacingRight=4;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"104\" y=\"0\" width=\"105\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p3\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#3aa6db;strokeColor=#2b86b3;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"196\" y=\"2\" width=\"13\" height=\"18\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p4\" value=\"\" style=\"shape=triangle;direction=north;fillColor=#ffffff;strokeColor=none;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"199.5\" y=\"5\" width=\"6\" height=\"5\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p5\" value=\"\" style=\"shape=triangle;direction=south;fillColor=#ffffff;strokeColor=none;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"199.5\" y=\"12\" width=\"6\" height=\"5\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+    "w": 209,
+    "h": 22,
+    "title": "SpinEdit 数值微调",
+    "aspect": "variable",
+    "tags": [
+      "控件",
+      "表单",
+      "SpinEdit",
+      "数值",
+      "微调"
+    ]
+  },
+  {
+    "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"g\" value=\"\" style=\"group\" vertex=\"1\" connectable=\"0\" parent=\"1\"&gt;&lt;mxGeometry width=\"314\" height=\"110\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p1\" value=\"TextEdit\" style=\"text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#000000;spacingLeft=2;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"100\" height=\"22\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"p2\" value=\"\" style=\"rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#808080;align=left;verticalAlign=top;fontSize=11;fontColor=#000000;spacingLeft=4;spacingTop=3;\" vertex=\"1\" parent=\"g\"&gt;&lt;mxGeometry x=\"104\" y=\"0\" width=\"210\" height=\"110\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+    "w": 314,
+    "h": 110,
+    "title": "TextEdit 多行文字",
+    "aspect": "variable",
+    "tags": [
+      "控件",
+      "表单",
+      "TextEdit",
+      "多行",
+      "文本域"
+    ]
+  }
+]</mxlibrary>

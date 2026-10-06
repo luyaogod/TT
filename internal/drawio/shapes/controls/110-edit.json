@@ -1,0 +1,12 @@
+{
+  "id": "Edit",
+  "title": "Edit 文字编辑",
+  "tags": ["控件", "表单", "Edit", "文字编辑"],
+  "w": 209,
+  "h": 22,
+  "aspect": "variable",
+  "parts": [
+    { "kind": "label", "x": 0, "y": 0, "w": 100, "h": 22, "text": "Edit" },
+    { "kind": "field", "x": 104, "y": 0, "w": 105, "h": 22, "text": "" }
+  ]
+}

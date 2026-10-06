@@ -1,0 +1,10 @@
+{
+  "id": "doc-purchase",
+  "title": "采购订单",
+  "label": "采购订单",
+  "tags": ["T100", "单据", "采购"],
+  "w": 120,
+  "h": 60,
+  "aspect": "variable",
+  "style": "rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;"
+}

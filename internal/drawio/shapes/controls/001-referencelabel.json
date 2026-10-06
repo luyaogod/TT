@@ -1,0 +1,10 @@
+{
+  "id": "ReferenceLabel",
+  "title": "ReferenceLabel 参考字段",
+  "tags": ["控件", "表单", "ReferenceLabel", "参考字段", "描述", "说明", "Desc"],
+  "w": 100,
+  "h": 22,
+  "aspect": "variable",
+  "preset": "descLabel",
+  "label": "ReferenceLabel"
+}

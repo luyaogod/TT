@@ -1,0 +1,22 @@
+{
+  "id": "Table",
+  "title": "Table",
+  "tags": ["控件", "容器", "Table", "表格", "明细"],
+  "aspect": "variable",
+  "table": {
+    "headerHeight": 26,
+    "rowHeight": 26,
+    "columns": [
+      { "title": "Field", "w": 140 },
+      { "title": "Field", "w": 140 },
+      { "title": "Field", "w": 140 }
+    ],
+    "rows": [
+      ["DateTimeEdit", "ButtonEdit", "Reference"],
+      ["", "", ""],
+      ["", "", ""],
+      ["", "", ""],
+      ["", "", ""]
+    ]
+  }
+}

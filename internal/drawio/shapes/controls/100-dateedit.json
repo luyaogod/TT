@@ -1,0 +1,21 @@
+{
+  "id": "DateEdit",
+  "title": "DateEdit 日期",
+  "tags": ["控件", "表单", "DateEdit", "日期"],
+  "w": 209,
+  "h": 22,
+  "aspect": "variable",
+  "parts": [
+    { "kind": "label",   "x": 0,     "y": 0,    "w": 100, "h": 22,   "text": "DateEdit" },
+    { "kind": "field",   "x": 104,   "y": 0,    "w": 105, "h": 22,   "text": "" },
+    { "kind": "button",  "x": 190,   "y": 2,    "w": 17,  "h": 18 },
+
+    { "kind": "calBody", "x": 192,   "y": 6,    "w": 13,  "h": 11 },
+    { "kind": "calHead", "x": 192,   "y": 6,    "w": 13,  "h": 3.5 },
+    { "kind": "bar",     "x": 194.6, "y": 4.4,  "w": 1.2, "h": 3 },
+    { "kind": "bar",     "x": 201.2, "y": 4.4,  "w": 1.2, "h": 3 },
+    { "kind": "dot",     "x": 194.6, "y": 11,   "w": 2,   "h": 1.6 },
+    { "kind": "dot",     "x": 197.6, "y": 11,   "w": 2,   "h": 1.6 },
+    { "kind": "dot",     "x": 200.6, "y": 11,   "w": 2,   "h": 1.6 }
+  ]
+}

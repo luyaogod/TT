@@ -1,0 +1,12 @@
+{
+  "id": "TextEdit",
+  "title": "TextEdit 多行文字",
+  "tags": ["控件", "表单", "TextEdit", "多行", "文本域"],
+  "w": 314,
+  "h": 110,
+  "aspect": "variable",
+  "parts": [
+    { "kind": "label",    "x": 0,   "y": 0, "w": 100, "h": 22,  "text": "TextEdit" },
+    { "kind": "textArea", "slot": "field", "x": 104, "y": 0, "w": 210, "h": 110, "text": "" }
+  ]
+}

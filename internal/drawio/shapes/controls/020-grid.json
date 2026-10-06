@@ -1,0 +1,10 @@
+{
+  "id": "Grid",
+  "title": "Grid",
+  "tags": ["控件", "容器", "Grid", "网格", "框"],
+  "w": 400,
+  "h": 220,
+  "aspect": "variable",
+  "preset": "containerBox",
+  "label": ""
+}

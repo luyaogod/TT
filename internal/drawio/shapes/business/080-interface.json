@@ -1,0 +1,10 @@
+{
+  "id": "interface",
+  "title": "接口 / API",
+  "label": "接口",
+  "tags": ["T100", "接口", "集成"],
+  "w": 100,
+  "h": 60,
+  "aspect": "variable",
+  "style": "shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;fixedSize=1;fillColor=#fff2cc;strokeColor=#d6b656;"
+}

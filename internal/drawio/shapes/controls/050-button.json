@@ -1,0 +1,10 @@
+{
+  "id": "Button",
+  "title": "Button 按钮",
+  "tags": ["控件", "表单", "Button", "按钮"],
+  "w": 105,
+  "h": 22,
+  "aspect": "variable",
+  "label": "Button",
+  "style": "rounded=0;whiteSpace=wrap;html=1;fillColor=#e8e8e8;gradientColor=#f8f8f8;strokeColor=#808080;fontSize=11;fontColor=#000000;"
+}

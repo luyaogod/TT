@@ -1,0 +1,10 @@
+{
+  "id": "module-erp",
+  "title": "ERP 主模块",
+  "label": "ERP 主模块",
+  "tags": ["T100", "模块"],
+  "w": 200,
+  "h": 120,
+  "aspect": "variable",
+  "style": "swimlane;whiteSpace=wrap;html=1;startSize=30;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;"
+}

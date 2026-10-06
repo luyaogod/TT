@@ -1,0 +1,13 @@
+{
+  "id": "ComboBox",
+  "title": "ComboBox 下拉选单",
+  "tags": ["控件", "表单", "ComboBox", "下拉"],
+  "w": 209,
+  "h": 22,
+  "aspect": "variable",
+  "parts": [
+    { "kind": "label", "x": 0, "y": 0, "w": 100, "h": 22, "text": "ComboBox" },
+    { "kind": "field", "x": 104, "y": 0, "w": 105, "h": 22, "text": "" },
+    { "kind": "arrow", "x": 196, "y": 8, "w": 9, "h": 6 }
+  ]
+}

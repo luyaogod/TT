@@ -1,0 +1,12 @@
+{
+  "id": "Group",
+  "title": "Group",
+  "tags": ["控件", "容器", "Group", "分组", "框"],
+  "w": 400,
+  "h": 228,
+  "aspect": "variable",
+  "parts": [
+    { "kind": "containerBox", "fill": true, "x": 0,  "y": 8, "w": 400, "h": 220 },
+    { "kind": "legend", "deco": true, "slot": "label", "x": 12, "y": 0, "h": 16, "text": "Group", "fitText": true }
+  ]
+}

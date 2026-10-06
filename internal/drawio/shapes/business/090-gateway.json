@@ -1,0 +1,9 @@
+{
+  "id": "gateway-composite",
+  "title": "T100 接口网关（多节点示例）",
+  "tags": ["T100", "接口", "集成", "组合"],
+  "w": 220,
+  "h": 120,
+  "aspect": "fixed",
+  "xmlFile": "raw/gateway-composite.xml"
+}

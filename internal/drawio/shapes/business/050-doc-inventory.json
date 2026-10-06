@@ -1,0 +1,10 @@
+{
+  "id": "doc-inventory",
+  "title": "库存异动",
+  "label": "库存异动",
+  "tags": ["T100", "单据", "库存"],
+  "w": 120,
+  "h": 60,
+  "aspect": "variable",
+  "style": "rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;"
+}

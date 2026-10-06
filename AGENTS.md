@@ -11,7 +11,7 @@ TT/
 ├─ config.example.json  配置文件样例（字段说明入口之一）
 │
 ├─ internal/            Go 后端全部实现
-│  ├─ cli/              cobra 命令树装配处：四条线 + 共用命令；唯一的接线处
+│  ├─ cli/              cobra 命令树装配处：五条线 + 共用命令；唯一的接线处
 │  │  ├─ common/        命令组间共享上下文（全局开关、MetaProvider、WebFS；叶子包防成环）
 │  │  ├─ debug/         调试命令组门面（fgldb 那条线）
 │  │  ├─ dev/           tt dev 命令组（三层，目录即分层）
@@ -65,7 +65,7 @@ TT/
 ├─ installer/           MSI 安装包定义（WiX v3；perUser 装到 %LOCALAPPDATA%\Programs\TT）
 ├─ tools/               Go 小工具：zip(打包) / wixremovefolders(卸载清目录) / tzsmini(语料构建)
 ├─ testdata/            测试语料：tzs-mini(3.2MB 筛小钉住的标准件) / fgl-fixtures
-├─ skills/              对外技能手册（tt-debug / tt-dict / tt-dev-tzc / tt-dev-tzs / tt-erp-read），
+├─ skills/              对外技能手册（tt-debug / tt-dict / tt-dev-tzc / tt-dev-tzs / tt-drawio / tt-erp-read），
 │                       评测中执行者唯一能读的东西，与源代码同级重要
 └─ docs/                AGENTS（文档规范：住哪、写什么、什么不许写）+ DESIGN（整体结构分层）
 ```
