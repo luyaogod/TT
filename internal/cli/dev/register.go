@@ -158,7 +158,7 @@ func newInstallTombstone() *cobra.Command {
 		Args:   cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fmt.Fprint(os.Stderr, "tt dev install 已并入 tt install：\n"+
-				"  tt install skills [--to <dir>] [--force]\n"+
+				"  tt install skills [--to <dir>|auto] [--agent <名字>] [--force]\n"+
 				"  tt install path   [--dry-run]\n")
 			return exitCode(2)
 		},

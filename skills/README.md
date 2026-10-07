@@ -15,6 +15,7 @@
 
 1. **目录名必须等于 `SKILL.md` 开头元数据里的 `name`** —— 这是技能规范的硬要求。
    所以**本目录下不再放 `README.md` 之类的文件**，那份 `SKILL.md` 就是该技能目录的说明。
+   `tt install skills` 装之前会连 `description`（非空、≤1024 字符）一起逐个校验，不合规当场拒绝。
 2. **它们是对外文档**：改了工具面（动词、参数、退出码、错误文案）就要当作改 API 文档对待。
    评测装置里，执行者**只能读这一份** —— 所以每一份都必须自足，不能出现"详见别处"式的唯一出处。
 3. **它们是发行物**：便携包与安装包都带着整个 `skills/` 目录，用户可以直接编辑。
@@ -22,17 +23,31 @@
 ## 安装到别处
 
 ```bash
-tt install skills                       # 复制到 <当前目录>/skills
-tt install skills --to .claude/skills   # 装到 Claude Code 直接读的位置
+tt install skills --to auto             # 装到 agent 会读的位置：已有 .claude/ 之类就用它，否则建 .agents/skills
+tt install skills --agent claude-code   # 按名字落到某家 agent 读的位置
+tt install skills --to .agents/skills   # 跨客户端公约数
+tt install skills                       # 复制到 <当前目录>/skills（与 exe 旁边同形的那一份，给人读）
 ```
+
+`--agent` 接受的名字：`agents` / `universal`、`claude-code` / `claude`、`copilot` / `github-copilot` /
+`vscode`、`cursor`。`.agents/skills` 是跨客户端公约数（pi、Codex、Cursor、Gemini CLI、
+OpenCode、Copilot 都扫它），所以 `--to auto` 在没有任何已初始化 agent 目录时新建它。
+
+安装前逐个校验：`SKILL.md` 里 frontmatter 的 `name` 必须等于目录名、`description` 非空且
+≤1024 字符。不合规的技能装出去不会报错，失败全在我们看不到的地方（description 缺失时客户端
+直接跳过，name 不匹配则各家宽容度不一），所以这里当场拒绝。
 
 ## 判据
 
 ```bash
-go test ./internal/cli -run TestInstall      # 安装面：复制、冲突拒绝、源=目标拒绝
+go test ./internal/cli -run 'TestInstall|TestListSkills|TestResolve' -count=1
 ```
+
+覆盖安装面（复制、冲突拒绝、源=目标拒绝）、frontmatter 校验（目录名≠name、description
+空/超长）、`--to auto` 探测与 `--agent` 名字表，以及仓库自带这棵树本身合规。
 
 ## 细节去哪
 
 - 各技能怎么用：直接读它的 `SKILL.md`
+- `SKILL.md` 的字段规范 → <https://agentskills.io/specification>
 - 契约与不变量（技能里不讲的那部分） → [../internal/README.md](../internal/README.md)
