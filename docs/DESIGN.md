@@ -87,7 +87,7 @@ TT/
 └─ 缓存：ents/ srccache/ execlog/ debug-bps/ spill/ update/   ← 清单见 config.CacheSubdirs
 ```
 
-清缓存只涉及上述五个目录，`config.json` 与 `.tt-serve.json` 不在其列。启动清理按年龄（7 天）删除，不整体清空——`spill/` 中可能正存放着上一条查询的完整结果。
+清缓存只涉及上面列出的缓存目录，`config.json` 与 `.tt-serve.json` 不在其列。启动清理按年龄（7 天）删除，不整体清空——`spill/` 中可能正存放着上一条查询的完整结果。
 
 **工作区**（`tt dev tzc export` 的产物）落在调用者指定的空目录，布局固定：
 
@@ -124,3 +124,26 @@ TT/
 ```
 
 ## 安装与更新
+
+发布产物（GitHub Releases · `luyaogod/TT`，每个资产带 sha256）：
+
+| 产物 | 怎么装 | 升级怎么换 |
+|---|---|---|
+| `tt-portable.zip` | 解压即用（包内有 `.portable` 标记，配置与数据跟着包走） | 就地覆盖程序目录；`config.json` 不动 |
+| `TT-<版本>-x64.msi` | 用户级安装 → `%LOCALAPPDATA%\Programs\TT`，不需要管理员 | 交给 `msiexec`（`MajorUpgrade` 先卸旧版） |
+| `t100-v*.xml`、`t100-controls-v*.xml` | drawio 形状库（版本号是形状库自己的），`File → Open Library from` 加载 | 不参与升级 |
+
+源码态（`make build` 的仓库根 `tt.exe`）只允许查版本；版本号只有根 `VERSION` 一个出处。
+
+`tt update` 的分工（实现见 `internal/update`）：
+
+```
+查      GitHub Releases API 取 tag 与各资产的 sha256
+下载    流式写 <数据目录>/update/，边下边算摘要，与发布方给的比对
+校验    便携包先解到旁边、跑一遍载荷里的 tt version：自报版本必须等于目标
+交棒    把自己复制到 %TEMP% 再脱离启动 —— 运行中的 exe 不能替换自己
+替换    停掉锁着安装目录的进程（后台服务与引擎守护进程）→ 覆盖 / msiexec → 装完再验一次版本
+收口    把 tt serve 拉回来；把 agent 目录里的技能刷成与二进制同版
+```
+
+落点见「文件管理」，命令面见 `tt update --help`。
