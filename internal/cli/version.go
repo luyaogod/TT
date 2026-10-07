@@ -8,7 +8,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Version 由打包脚本注入：build_portable.bat 传 -ldflags "-X tt/internal/cli.Version=0.2.0"。
+// Version 由打包脚本注入：build_portable.bat / build_msi.bat 的 VERSION 变量经
+// -ldflags "-X tt/internal/cli.Version=…" 进来（版本号的唯一出处是那两个脚本）。
 // 本地 go build 时为空，此时用 Go 构建信息里的 VCS 修订回答"这份二进制对应哪次提交"。
 var Version string
 

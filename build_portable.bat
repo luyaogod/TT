@@ -24,7 +24,7 @@ cd /d "%~dp0"
 set STAGE=dist\tt-portable
 set GOPROXY=https://goproxy.cn,direct
 rem Release version, injected into the binary via -ldflags (shown by `tt version`).
-set VERSION=0.2.0
+set VERSION=0.2.1
 
 rem Only the portable stage is ours to rebuild. dist\ also holds other products
 rem (tt drawio lib writes its .xml there; build_msi.bat keeps its staging and the

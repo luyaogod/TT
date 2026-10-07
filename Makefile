@@ -7,7 +7,7 @@ SHELL := sh
 .SHELLFLAGS := -c
 
 .DEFAULT_GOAL := all
-.PHONY: all help build test check-web web-build engine selftest doctor deep-tzc deep-tzs fns e2e skips package msi
+.PHONY: all help build test check-web web-build engine selftest doctor deep-tzc deep-tzs fns e2e skips drawio-lib package msi
 
 all: build test
 
@@ -53,6 +53,9 @@ e2e: ## 真引擎 E2E。闸门：需要 TTZS_EXE 与 TTZS_WS
 
 skips: ## 回读：跑了多少、跳了多少（会真跑一遍全量）
 	go test ./... -count=1 -v 2>&1 | grep -E '^--- (PASS|SKIP)' | sort | uniq -c
+
+drawio-lib: build ## drawio 形状库 → dist/ 下两个 mxlibrary .xml（File → Open Library from 加载）
+	./tt.exe drawio lib
 
 package: ## 便携包 → dist/tt-portable/ 与 dist/tt-portable.zip
 	cmd //c build_portable.bat

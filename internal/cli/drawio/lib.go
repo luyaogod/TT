@@ -35,7 +35,7 @@ func newLibCmd() *cobra.Command {
 			return runLib(out, catalog)
 		},
 	}
-	cmd.Flags().StringVarP(&out, "out", "o", "", "导出到哪个目录（默认：数据目录下的 drawio 缓存）")
+	cmd.Flags().StringVarP(&out, "out", "o", "", "导出到哪个目录（默认：<当前目录>/dist）")
 	cmd.Flags().BoolVar(&catalog, "catalog", false, "只打形状清单到 stdout，不落盘")
 	return cmd
 }

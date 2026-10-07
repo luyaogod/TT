@@ -26,7 +26,7 @@ cd /d "%~dp0"
 
 set STAGE=dist\tt-msi
 set OBJ=dist\msi-obj
-set VERSION=0.2.0
+set VERSION=0.2.1
 
 if "%WIX_BIN%"=="" set WIX_BIN=D:\tt-build-tools\wix3
 if not exist "%WIX_BIN%\candle.exe" (
