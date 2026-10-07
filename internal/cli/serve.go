@@ -140,8 +140,11 @@ func newServeCmd() *cobra.Command {
 					DebugFS:    common.WebFrontend(),
 					ConfigPath: path,
 					Version:    versionString(),
-					Debug:      debugSrv.Handler(),
-					Dict:       dictSrv.Handler(),
+					// 裸版本给更新机制用（与展示串分开，见 web.Options.BareVersion）：
+					// 干净件下就是构建注入的那个值；本地 go build 时为空 → 只允许查到“版本号不可用”。
+					BareVersion: Version,
+					Debug:       debugSrv.Handler(),
+					Dict:        dictSrv.Handler(),
 					// 配置写入后让持有内存态的调试服务重新加载，否则它内存里还是旧环境，
 					// 表现是"改了没生效"。
 					Reloaders: []web.ConfigReloader{debugSrv},

@@ -46,8 +46,16 @@ type Options struct {
 	DebugFS fs.FS
 	// ConfigPath 配置文件路径。空则按统一规则解析（写路径允许缺省落点）。
 	ConfigPath string
-	// Version 版本号，出现在 /api/health 与引导页上。
+	// Version 版本号，出现在 /api/health 与引导页上。**给人看的完整串**
+	// （`0.2.2 (commit 25a639d, 2026-10-07)`），不要拿它去比较版本。
 	Version string
+	// BareVersion 同一个版本的**裸形态**（`0.2.2`），只给更新机制用。
+	//
+	// 两个字段分开是必须的：检查缓存是以裸版本为键存的（`tt version` 读的也是它），
+	// 把展示串喂进比较会被解析器拒掉 —— 表现是设置页的「检查更新」永远失败，
+	// 而错误文案里那句 “不是 MAJOR.MINOR.PATCH” 看起来像是发布方写错了版本号。
+	// 空串 = 这份构建没有版本号（`make build`），更新只允许查到“版本号不可用”为止。
+	BareVersion string
 
 	// Debug 调试子系统（工作台页面 + 其 /debug/api/*）。nil = 未接入。
 	Debug http.Handler

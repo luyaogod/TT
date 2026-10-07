@@ -56,6 +56,7 @@ func TestUpdateGetReadsCacheOffline(t *testing.T) {
 
 // newVersionedServer 与 newTestServer 一样，但指定服务自报的版本号。
 // 版本号在这里很要紧：检查缓存的作废条件之一就是"记的版本 != 现在这个"。
+// 两处都设：Version 是给页面看的（完整串），BareVersion 是拿来比较的（见 Options）。
 func newVersionedServer(t *testing.T, seed, version string) (*Server, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -63,7 +64,7 @@ func newVersionedServer(t *testing.T, seed, version string) (*Server, string) {
 	if err := os.WriteFile(path, []byte(seed), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return New(Options{ConfigPath: path, Version: version}), path
+	return New(Options{ConfigPath: path, Version: version, BareVersion: version}), path
 }
 
 func TestUpdateGetWithoutCache(t *testing.T) {
@@ -135,5 +136,57 @@ func TestUpdateGetNeverTouchesNetwork(t *testing.T) {
 	}
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /api/update = %d", rec.Code)
+	}
+}
+
+// 回归：更新接口拿的必须是**裸版本**（`0.2.2`），不是给人看的完整串
+// （`0.2.2 (commit 25a639d, 2026-10-07)`）。
+//
+// 真机上踩过：serve 把 versionString() 传给了 web.Options.Version，于是设置页的
+// 「检查更新」永远失败，而错误文案是"版本号 … 不是 MAJOR.MINOR.PATCH" —— 看起来像发布方
+// 写错了版本号，实际是这一层把展示串当成了可比的值。
+func TestUpdateUsesBareVersionNotDisplayString(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, []byte(`{"schemaVersion":3,"hosts":{"sshs":[]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := New(Options{
+		ConfigPath:  path,
+		Version:     "0.2.2 (commit 25a639d, 2026-10-07)",
+		BareVersion: "0.2.2",
+	})
+
+	// 缓存是以裸版本为键写的（命令行那条路就是这么写的）——页面必须读得到它。
+	if err := update.SaveCheck(dir, &update.CheckResult{
+		Current: "0.2.2", Latest: "0.2.3", Newer: true, CheckedAt: time.Now(), Source: update.RepoSlug,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rec, body := doJSON(t, s, http.MethodGet, "/api/update", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/update = %d", rec.Code)
+	}
+	if body["version"] != "0.2.2 (commit 25a639d, 2026-10-07)" {
+		t.Errorf("页面上的当前版本该是完整串（带 commit），得到 %v", body["version"])
+	}
+	if _, ok := body["check"].(map[string]any); !ok {
+		t.Errorf("该用裸版本读得到缓存：%v", body["check"])
+	}
+	if hint, _ := body["hint"].(string); hint == "" {
+		t.Error("该给出有新版本的提示")
+	}
+
+	// 技能漂移同理：戳里记的是裸版本。
+	target := filepath.Join(t.TempDir(), "skills")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := update.RecordSkillsTarget(dir, target, "0.2.1"); err != nil {
+		t.Fatal(err)
+	}
+	_, body = doJSON(t, s, http.MethodGet, "/api/update", nil)
+	if drift, _ := body["skillsDrift"].(string); drift == "" {
+		t.Errorf("技能漂移该按裸版本比对出来：%v", body["skillsDrift"])
 	}
 }

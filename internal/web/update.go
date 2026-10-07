@@ -37,16 +37,16 @@ func (s *Server) hUpdateGet(w http.ResponseWriter, r *http.Request) {
 
 	out := map[string]any{
 		"ok":          true,
-		"version":     s.opt.Version,
+		"version":     s.opt.Version, // 展示用（带 commit）；比较用 BareVersion
 		"kind":        kind.String(),
-		"canInstall":  update.InstallRefusal(kind, exe, s.opt.Version) == "",
+		"canInstall":  update.InstallRefusal(kind, exe, s.opt.BareVersion) == "",
 		"source":      update.RepoSlug,
-		"skillsDrift": update.SkillsDriftHint(dataDir, s.opt.Version),
+		"skillsDrift": update.SkillsDriftHint(dataDir, s.opt.BareVersion),
 	}
-	if why := update.InstallRefusal(kind, exe, s.opt.Version); why != "" {
+	if why := update.InstallRefusal(kind, exe, s.opt.BareVersion); why != "" {
 		out["refusal"] = why
 	}
-	if res := update.LoadCachedCheck(dataDir, s.opt.Version, time.Now()); res != nil {
+	if res := update.LoadCachedCheck(dataDir, s.opt.BareVersion, time.Now()); res != nil {
 		out["check"] = res
 		out["hint"] = res.Message()
 	}
@@ -71,7 +71,7 @@ func (s *Server) hUpdateCheck(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
-	res, err := update.Check(ctx, client, s.opt.Version, false)
+	res, err := update.Check(ctx, client, s.opt.BareVersion, false)
 	if err != nil {
 		// 出网失败不是服务端的错，所以用 200 + ok:false 让页面按"检查没成"展示，
 		// 而不是当成 API 坏了。
@@ -103,7 +103,7 @@ func (s *Server) hUpdateApply(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	if why := update.InstallRefusal(update.DetectKind(exe), exe, s.opt.Version); why != "" {
+	if why := update.InstallRefusal(update.DetectKind(exe), exe, s.opt.BareVersion); why != "" {
 		writeErr(w, http.StatusBadRequest, errFromString(why))
 		return
 	}
@@ -128,7 +128,7 @@ func (s *Server) updateClient(cfgPath string) (*update.Client, error) {
 	if root, err := config.Load(cfgPath); err == nil && root != nil {
 		proxy = root.Net.Proxy
 	}
-	agent := "tt-update/" + s.opt.Version
+	agent := "tt-update/" + s.opt.BareVersion
 	return update.NewClient(update.ExplicitProxy("", proxy), agent)
 }
 
