@@ -25,6 +25,7 @@ import {
 import {
   api, type ConfigMeta, type ConfigStatus, type DBSyncJob, type DBSyncResp,
   type HostsDb, type HostsPatch, type HostsSsh, type HostsView, type MirrorJob, type MirrorResp,
+  type UpdateState,
 } from './api'
 import {
   Button, Input, Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -290,6 +291,10 @@ export function SettingsView() {
   const [installNote, setInstallNote] = useState('')
   const [cacheBusy, setCacheBusy] = useState(false)
   const [cacheNote, setCacheNote] = useState('')
+  // tt 自身的更新:状态靠 /api/update 读(不联网),查/装都是人去点才动作
+  const [upd, setUpd] = useState<UpdateState | null>(null)
+  const [updBusy, setUpdBusy] = useState('')
+  const [updNote, setUpdNote] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   // 源码镜像 / 字典同步的运行态:它们是**动作**(长跑任务 + 进度),不再是独立页面,
   // 就住在「数据字典」分区的对应卡片里。
   const [mirror, setMirror] = useState<MirrorResp | null>(null)
@@ -367,6 +372,8 @@ export function SettingsView() {
     // 派生状态与元信息:取不到不影响主流程(它们在卡片里只是提示)
     void api.configStatus().then(setStatus).catch(() => { /* 静默:提示性信息 */ })
     void api.configMeta().then(setMeta).catch(() => { /* 静默:提示性信息 */ })
+    // 更新状态同样是不联网的读端点(检查结论来自缓存)
+    void api.updateState().then(setUpd).catch(() => { /* 静默:提示性信息 */ })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -549,6 +556,36 @@ export function SettingsView() {
     } catch (ex: any) {
       setInstallNote('操作失败: ' + (ex.message || String(ex)))
     } finally { setInstallBusy(false) }
+  }
+
+  // ---- tt 自身的更新 ----
+  // 查:人去点才联网(服务不轮询——见 internal/web/update.go 的三条纪律)。
+  const doUpdateCheck = async () => {
+    setUpdBusy('check'); setUpdNote(null)
+    try {
+      const r = await api.updateCheck()
+      if (!r.ok) {
+        setUpdNote({ kind: 'err', text: (r.error || '检查未成') + (r.where ? `（${r.where}）` : '') })
+        return
+      }
+      setUpd((prev) => (prev ? { ...prev, check: r.check, hint: r.hint } : prev))
+      setUpdNote({ kind: 'ok', text: r.check?.newer ? (r.hint || `有新版本 ${r.check?.latest}`) : `已是最新（${r.check?.latest}）` })
+    } catch (ex: any) {
+      setUpdNote({ kind: 'err', text: '检查失败: ' + (ex.message || String(ex)) })
+    } finally { setUpdBusy('') }
+  }
+
+  // 装:服务端拉一个 `tt update --yes` 子进程去做 —— 本服务几分钟后会被它停掉替换,
+  // 所以这里只能告诉用户“已接手”,不能等结果。
+  const doUpdateApply = async () => {
+    if (!window.confirm('要现在升级 tt 吗？下载校验完成后会停掉本服务并替换程序文件，\n页面随后会断开，请稍后重新打开。')) return
+    setUpdBusy('apply'); setUpdNote(null)
+    try {
+      const r = await api.updateApply()
+      setUpdNote({ kind: 'ok', text: r.note || `更新器已接手（pid ${r.pid}）` })
+    } catch (ex: any) {
+      setUpdNote({ kind: 'err', text: '交棒失败: ' + (ex.message || String(ex)) })
+    } finally { setUpdBusy('') }
   }
 
   // ---- 缓存清理 ----
@@ -1294,6 +1331,44 @@ ${sync?.target || ''}
                 <InfoRow label="支持的库类型" value={meta?.supportedTypes?.join(' / ') || '—'} />
                 <InfoRow label="默认环境" value={cfg.activeEnv || '(未设置)'} />
                 <InfoRow label="环境数" value={String(cfg.sshs?.length ?? 0)} />
+              </Card>
+
+              <Card id="card-app-update" title="更新"
+                description="查 tt 自己有没有新版。查是**你点才联网**（服务不会替你轮询）；装会先下载并校验 sha256，再交给一个独立的更新器进程去做。">
+                <InfoRow label="当前版本" value={upd?.version || cfg.version || '(未知)'} />
+                <InfoRow label="安装形态" value={upd ? `${upd.kind}${upd.canInstall ? '' : '（不让自装）'}` : '—'} />
+                <InfoRow label="更新源" value={upd?.source || '—'} />
+                {upd?.check && (
+                  <InfoRow label="上次检查"
+                    value={`${upd.check.latest}${upd.check.newer ? '（有新版本）' : '（已是最新）'} · ${new Date(upd.check.checkedAt).toLocaleString()}`} />
+                )}
+                {upd?.last && (
+                  <InfoRow label="上次升级"
+                    value={`${upd.last.phase}${upd.last.target ? ` → ${upd.last.target}` : ''}${upd.last.error ? ` · ${upd.last.error}` : ''}`} />
+                )}
+                {upd?.skillsDrift && <InfoRow label="技能" value={upd.skillsDrift} />}
+                {upd && !upd.canInstall && upd.refusal && (
+                  <p className="text-[11px] text-muted-foreground">{upd.refusal}</p>
+                )}
+                <div className="flex items-center gap-1.5">
+                  <Button variant="outline" size="sm" disabled={updBusy !== ''}
+                    onClick={() => void doUpdateCheck()}>
+                    <RefreshCw className="h-3.5 w-3.5" />{updBusy === 'check' ? '检查中…' : '检查更新'}
+                  </Button>
+                  {upd?.check?.newer && upd.canInstall && (
+                    <Button size="sm" disabled={updBusy !== ''} onClick={() => void doUpdateApply()}>
+                      <Download className="h-3.5 w-3.5" />{updBusy === 'apply' ? '交棒中…' : `升级到 ${upd.check.latest}`}
+                    </Button>
+                  )}
+                  {(updBusy !== '' || upd?.check?.newer) && (
+                    <span className="text-[11px] text-muted-foreground">
+                      {updBusy === 'apply' ? '升级期间本页会断开，之后重新打开即可' : '也可以直接敲 tt update'}
+                    </span>
+                  )}
+                </div>
+                {updNote && (
+                  <p className={`text-[11px] ${updNote.kind === 'ok' ? 'text-muted-foreground' : 'text-destructive'}`}>{updNote.text}</p>
+                )}
               </Card>
 
               <Card id="card-app-cache" title="缓存">

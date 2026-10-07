@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "listen": "127.0.0.1:28670",
 
   "hosts": {
@@ -80,6 +80,10 @@
 
   "sync": {
     "target": ""
+  },
+
+  "net": {
+    "proxy": ""
   },
 
   "tdev": {

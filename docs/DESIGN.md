@@ -23,6 +23,7 @@ T100 ERP 系统的前后端代码开发依赖鼎捷内部封装的开发工具�
 - `tt dev tzs`：调度 T100 设计器 C# 引擎，提供直接操作 `.tzs` 前端文件的能力
 - `tt dict`：提供 T100 项目上下文的核心工具，包含表、字段、检验、开窗、消息、参数、程序等查询
 - `tt drawio`：用内置的 T100 组件库画原型图（`.drawio`），供需求调研后与客户确认方案
+- `tt update`：更新 tt 自身：查新版、下载并校验 sha256、交棒给一个脱离的更新器进程换文件
 
 > 1. 不实现设计器的私有格式：`.tzc` 的行为依据设计器的公开发行物反推；`.tzs` 更彻底——引擎直接加载**设计器自己的程序集**。
 > 2. 严禁任何对远程服务器的**非只读**操作。
@@ -81,7 +82,9 @@ TT/
 ├─ erp_data.db       本地字典库；TDICT_DB / --db 可覆盖
 ├─ .tt-serve.log     服务日志
 ├─ .tt-serve.json    运行中服务的 pid 与地址，--stop 靠它寻址
-└─ 缓存：ents/ srccache/ execlog/ debug-bps/ spill/     ← 清单见 config.CacheSubdirs
+├─ .tt-update.json   上一次升级的阶段与结果（.tt-update.log 是更新器写的日志）
+├─ .tt-skills.json   技能装到过哪些目录、装它们的是哪个 tt 版本
+└─ 缓存：ents/ srccache/ execlog/ debug-bps/ spill/ update/   ← 清单见 config.CacheSubdirs
 ```
 
 清缓存只涉及上述五个目录，`config.json` 与 `.tt-serve.json` 不在其列。启动清理按年龄（7 天）删除，不整体清空——`spill/` 中可能正存放着上一条查询的完整结果。
@@ -119,3 +122,5 @@ TT/
   ├─④ 查企业目录              企业编号 → 账号名
   └─⑤ 库地址                  来自配置，不由企业编号推导
 ```
+
+## 安装与更新

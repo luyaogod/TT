@@ -145,6 +145,11 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/install", s.hInstallGet)
 	m.HandleFunc("POST /api/install", s.hInstallAdd)
 	m.HandleFunc("DELETE /api/install", s.hInstallRemove)
+
+	// tt 自身的更新（查/装）。与 install 同一层：应用级动作，不属于任何子系统。
+	m.HandleFunc("GET /api/update", s.hUpdateGet)
+	m.HandleFunc("POST /api/update/check", s.hUpdateCheck)
+	m.HandleFunc("POST /api/update/apply", s.hUpdateApply)
 	if s.opt.Shutdown != nil {
 		m.HandleFunc("POST /api/shutdown", s.hShutdown)
 	}

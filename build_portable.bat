@@ -23,8 +23,18 @@ cd /d "%~dp0"
 
 set STAGE=dist\tt-portable
 set GOPROXY=https://goproxy.cn,direct
-rem Release version, injected into the binary via -ldflags (shown by `tt version`).
-set VERSION=0.2.1
+
+rem Release version: read from the repo-root VERSION file, the ONE place a version
+rem number is written. Injected into the binary via -ldflags (shown by `tt version`).
+rem Never put a version literal back in this file: two copies drift, and then
+rem `tt version` reports a version no release ever had.
+set VERSION=
+for /f "usebackq delims=" %%v in ("VERSION") do if not defined VERSION set VERSION=%%v
+if not defined VERSION (echo MISSING VERSION file ^(repo root^) & exit /b 1)
+rem Shape check via PowerShell, not findstr: `findstr /x` needs CRLF and this file
+rem is LF-only, so it would reject a perfectly good version. A malformed version
+rem here would quietly become a bogus `tt version` string and a bogus asset name.
+powershell -NoProfile -Command "exit ([int]((Get-Content VERSION -Raw).Trim() -notmatch '^\d+\.\d+\.\d+$'))" || (echo BAD VERSION in VERSION file: %VERSION% -- expected MAJOR.MINOR.PATCH & exit /b 1)
 
 rem Only the portable stage is ours to rebuild. dist\ also holds other products
 rem (tt drawio lib writes its .xml there; build_msi.bat keeps its staging and the

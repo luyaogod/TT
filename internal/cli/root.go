@@ -47,6 +47,7 @@ var rootCmd = &cobra.Command{
   tt config …  配置管理：位置/查看/读写/校验
   tt serve     启动本地 Web 配置服务（调试工作台，含覆盖所有命令组的统一设置页）
   tt install   把 AI skills 装到 agent 会读的位置，或把 tt 加进用户 PATH
+  tt update    更新 tt 自身：查新版、下载校验、交棒给更新器（默认问一句才装）
 
 所有输出使用简体中文 (zh_CN)。
 
@@ -58,10 +59,13 @@ var rootCmd = &cobra.Command{
                 （**没有 3**；2 也包括"manifest 拉不到"）
   tt dict       0 成功（含"查无结果"）/ 1 用法错 / 2 数据源错 / 3 缺表
   tt drawio     0 成功 / 1 用法或运行失败 / 2 输入错（spec 不合法、包读不出）/ 3 产物自查未通过
+  tt update     0 已是最新或已交棒 / 10 有可用更新 / 2 用法错 / 3 校验失败 /
+                4 拒绝自装（源码态、认不出的布局）/ 5 出网或落盘失败
   顶层          0 成功 / 1 用法错（未知命令、未知开关）
 
 3 在 tzc 是"校验失败"、在 dict 是"缺表"、在 drawio 是"产物自查未通过"、在 tzs 根本不用；
-4 只在 tzs 有（设计器拒绝）。包装脚本要按子命令辨认，别只看码。
+4 只在 tzs 与 update 有（设计器拒绝 / 拒绝自装）；10 只有 update 用（它得区分"查到了
+新版"与"命令失败"，而 3 在这条线上已经是别的意思）。包装脚本要按子命令辨认，别只看码。
 
 合并前的命令名仍可直接当子命令组用：tt tdebug … = tt debug …，
 tt tdev … = tt dev …，tt tdict … = tt dict …。`,
@@ -100,6 +104,7 @@ func init() {
 	rootCmd.AddCommand(newServeCmd())
 	rootCmd.AddCommand(newInstallCmd())
 	rootCmd.AddCommand(newVersionCmd())
+	rootCmd.AddCommand(newUpdateCmd())
 }
 
 // Execute 运行根命令。

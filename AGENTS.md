@@ -9,6 +9,7 @@ TT/
 ├─ AGENTS.md            仓库说明（AI/协作者必读）
 ├─ Makefile             必跑命令的快捷方式（make = build + test；深档目标自带副本闸门）
 ├─ config.example.json  配置文件样例（字段说明入口之一）
+├─ VERSION              版本号唯一出处（两个打包脚本读它，make version-check 对照 web）
 │
 ├─ internal/            Go 后端全部实现
 │  ├─ cli/              cobra 命令树装配处：五条线 + 共用命令；唯一的接线处
@@ -42,6 +43,7 @@ TT/
 │  ├─ sshtun/           SSH 端口转发隧道（本地监听 → 远端 host:port）
 │  ├─ entdir/           企业目录（ENT→账号）共享件：快照、指纹、新鲜期（debug 与 dict 共用）
 │  ├─ web/              统一 Web 服务端：REST + WebSocket，嵌入前端 SPA，挂载调试/字典子系统
+│  ├─ update/           tt 自身的更新：查新版/下载校验/交棒给脱离的更新器进程（不自动更新）
 │  ├─ output/           唯一的输出出口（表格 / JSON / CSV 一个入口）
 │  ├─ safesql/          只读 SQL 的文本层防线（远端查询入口用）
 │  ├─ pathinstall/      用户 PATH（HKCU）增删，永不碰系统 PATH

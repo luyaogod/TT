@@ -315,3 +315,37 @@ func TestTdevSettingsDefault(t *testing.T) {
 		t.Errorf("显式后缀 = %q", got)
 	}
 }
+
+// net 节是可选节：写了的读出代理，没写的（或整节缺失的）取零值 —— 缺省就是"没配代理"。
+// 这条同时钉住 schema 3 的读侧：老配置（schemaVersion 2、没有 net 节）必须照读不报错。
+func TestNetSettingsProxy(t *testing.T) {
+	dir := t.TempDir()
+
+	full := filepath.Join(dir, "full.json")
+	seed := `{"schemaVersion": 3, "net": {"proxy": "http://127.0.0.1:10808"}}`
+	if err := os.WriteFile(full, []byte(seed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Load(full)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if r.Net.Proxy != "http://127.0.0.1:10808" {
+		t.Errorf("net.proxy = %q，想要 http://127.0.0.1:10808", r.Net.Proxy)
+	}
+	if r.SchemaVersion != 3 {
+		t.Errorf("schemaVersion = %d，想要 3", r.SchemaVersion)
+	}
+
+	old := filepath.Join(dir, "old.json")
+	if err := os.WriteFile(old, []byte(`{"schemaVersion": 2, "listen": "127.0.0.1:28670"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r2, err := Load(old)
+	if err != nil {
+		t.Fatalf("旧结构（没有 net 节）该照读，却报错: %v", err)
+	}
+	if r2.Net.Proxy != "" {
+		t.Errorf("缺省的 net.proxy 该是空串，得到 %q", r2.Net.Proxy)
+	}
+}

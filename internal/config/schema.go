@@ -10,8 +10,8 @@ import (
 )
 
 // SchemaVersion 当前配置结构版本。随新配置文件写入（见 NewSkeleton / ensureSchemaVersion）。
-// 旧结构的配置不做自动迁移 —— 读侧只认当前结构。
-const SchemaVersion = 2
+// 旧结构的配置不做自动迁移 —— 读侧按当前结构解析，缺的节取缺省值。
+const SchemaVersion = 3
 
 // 缺省值。合并前三处各自硬编码，现在只有这一份。
 const (
@@ -230,6 +230,15 @@ func (t *TdevSettings) WorkspaceSuffixOrDefault() string {
 	return DefaultWorkspaceSuffix
 }
 
+// NetSettings 出网设置。目前只有代理一件事。
+//
+// 为什么放配置里而不是只认环境变量：代理地址是**机器级事实**（内网部署的常态就是
+// 出网必须经代理），而环境变量属于“这次会话”—— 换一个终端就没了，设置页也无从展示。
+// 生效优先级见 internal/update 的 ProxyFor：参数 → 本字段 → 环境变量 → 直连。
+type NetSettings struct {
+	Proxy string `json:"proxy,omitempty"` // 如 http://127.0.0.1:10808；空 = 看环境变量，再不行直连
+}
+
 // TzsSettings 是 .tzs 表单引擎（engine/，一个 C# 外部 exe）的运行时依赖。
 //
 // 注意这里**没有设计器目录**：设计器的程序集由发行包自带（`tzs\designer\`），引擎默认
@@ -262,6 +271,7 @@ type Root struct {
 	Sync          SyncSettings
 	Tdev          TdevSettings
 	Tzs           TzsSettings
+	Net           NetSettings
 }
 
 // Load 读取并解析配置，返回类型化视图。
@@ -300,6 +310,9 @@ func Load(path string) (*Root, error) {
 		return nil, err
 	}
 	if err := decodeSection(root, "tzs", &r.Tzs); err != nil {
+		return nil, err
+	}
+	if err := decodeSection(root, "net", &r.Net); err != nil {
 		return nil, err
 	}
 	return r, nil

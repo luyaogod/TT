@@ -12,11 +12,89 @@ package cli
 // 只看 tzsUsage/Usage 两个常量 —— 改一处不影响另一处，也没有任何测试会响。
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
+
+// TestBuildScriptsAreASCIIAndNotMixed 钉住两个 .bat 的两条硬约束。
+//
+// 为什么值得一条测试：cmd.exe 用 OEM 代码页解析 .bat 的**字节**，于是
+//
+//  1. 文件里不能有非 ASCII 字节。UTF-8 中文会被从半个字符处切开而把行拆坏 —— 脚本
+//     顶部的 `chcp 65001` 救不回来，因为出问题的行在它后面。这一条两个脚本的头部都写了。
+//  2. 行尾不能**混着来**。两个脚本今天的形态其实不一样：build_portable.bat 在仓库里
+//     是 LF（`git show HEAD:build_portable.bat` 里一个 CR 都没有），build_msi.bat 是
+//     CRLF。两种都能跑 —— 打包链一直在跑 —— 但“一部分行 LF、一部分行 CRLF”不是这两种
+//     中的任何一种：cmd 对 `if ( … )` 块与标签的解析会错位，而一次编辑器的部分重写
+//     （或一次 sed 只动了几行）就能造出这个状态，脚本本身看不出任何异样。
+//
+// 所以这里不强求统一成 CRLF（那是一次有意的规范化提交，不归这条测试管），只禁止混行。
+func TestBuildScriptsAreASCIIAndNotMixed(t *testing.T) {
+	for _, name := range []string{"build_portable.bat", "build_msi.bat"} {
+		p := filepath.Join("..", "..", name)
+		b, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("读不到 %s：%v（打包脚本是仓库本体的一部分，缺了就是仓库坏了）", p, err)
+		}
+		for i, c := range b {
+			if c >= 0x80 {
+				t.Fatalf("%s 第 %d 字节是 0x%02X：.bat 必须 ASCII-only（cmd 会按 OEM 代码页切字节）", name, i, c)
+			}
+		}
+		lines := bytes.Split(b, []byte("\n"))
+		if n := len(lines); n > 0 && len(lines[n-1]) == 0 {
+			lines = lines[:n-1] // 文件末尾换行产生的空片不算一行
+		}
+		crlf, lf := 0, 0
+		for i, ln := range lines {
+			switch {
+			case len(ln) > 0 && ln[len(ln)-1] == '\r':
+				crlf++
+			case i == len(lines)-1:
+				lf++ // 末行没有换行也算 LF 那一派
+			default:
+				lf++
+			}
+		}
+		if crlf > 0 && lf > 0 {
+			t.Errorf("%s 混了行尾（CRLF %d 行 / LF %d 行）：cmd 会错位解析块与标签", name, crlf, lf)
+		}
+	}
+}
+
+// TestVersionHasOneHome 钉住“版本号只有 VERSION 一个出处”。
+//
+// 版本号是更新机制、`tt version` 输出与资产文件名的共同输入：一旦 `VERSION` 与脚本里
+// 的第二份字面量分叉，发出去的包会报一个从来没有过的版本，而当场看不出任何异常。
+// 跨文件的一致性（VERSION ↔ web 的 package.json）由 `make version-check` 把关；
+// 这条只钉“脚本里不许再出现字面量”，两者管的是不同的事。
+func TestVersionHasOneHome(t *testing.T) {
+	p := filepath.Join("..", "..", "VERSION")
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatalf("读不到 %s：%v", p, err)
+	}
+	if v := strings.TrimSpace(string(b)); !versionShape.MatchString(v) {
+		t.Errorf("VERSION 内容 %q 不是 MAJOR.MINOR.PATCH", v)
+	}
+	hardcoded := regexp.MustCompile(`(?m)^\s*set VERSION=[0-9]`)
+	for _, name := range []string{"build_portable.bat", "build_msi.bat"} {
+		src, err := os.ReadFile(filepath.Join("..", "..", name))
+		if err != nil {
+			t.Fatalf("读不到 %s：%v", name, err)
+		}
+		if loc := hardcoded.Find(src); loc != nil {
+			t.Errorf("%s 里又写死了版本号（%q）：它必须读根目录的 VERSION 文件，否则两份会分叉", name, loc)
+		}
+	}
+}
+
+// versionShape 版本号形状：MAJOR.MINOR.PATCH，无 v 前缀（tag 才带 v）。
+var versionShape = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 
 // TestRootHelpAndReadmeHaveNoStaleAdvice 断言根帮助与 README 都不再教已删除的调用。
 //

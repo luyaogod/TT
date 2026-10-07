@@ -26,7 +26,13 @@ cd /d "%~dp0"
 
 set STAGE=dist\tt-msi
 set OBJ=dist\msi-obj
-set VERSION=0.2.1
+
+rem Release version: read from the repo-root VERSION file, the ONE place a version
+rem number is written (build_portable.bat reads the same file and validates its
+rem shape; `make version-check` pins it against web/package.json).
+set VERSION=
+for /f "usebackq delims=" %%v in ("VERSION") do if not defined VERSION set VERSION=%%v
+if not defined VERSION (echo MISSING VERSION file ^(repo root^) & exit /b 1)
 
 if "%WIX_BIN%"=="" set WIX_BIN=D:\tt-build-tools\wix3
 if not exist "%WIX_BIN%\candle.exe" (

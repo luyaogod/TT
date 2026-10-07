@@ -3,13 +3,19 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"runtime/debug"
+	"time"
 
 	"github.com/spf13/cobra"
+
+	"tt/internal/cli/common"
+	"tt/internal/update"
 )
 
-// Version 由打包脚本注入：build_portable.bat / build_msi.bat 的 VERSION 变量经
-// -ldflags "-X tt/internal/cli.Version=…" 进来（版本号的唯一出处是那两个脚本）。
+// Version 由打包脚本注入：build_portable.bat / build_msi.bat 读仓库根的 VERSION
+// 文件，经 -ldflags "-X tt/internal/cli.Version=…" 传进来（VERSION 是版本号唯一的
+// 一处，web 的 package.json 由 `make version-check` 与它对齐）。
 // 本地 go build 时为空，此时用 Go 构建信息里的 VCS 修订回答"这份二进制对应哪次提交"。
 var Version string
 
@@ -85,9 +91,44 @@ func newVersionCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
 		Short: "显示版本信息",
+		Long: `显示版本信息：注入的版本号 + 这次构建对应的提交。
+
+完全离线：它只读本地的构建信息与 <数据目录>/update/check.json 里上一次检查的
+结果（` + "`tt update check`" + ` 写的），不联网。`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.Println("tt " + versionString())
+			// 两行离线提示（有才打）：上次 `tt update check` 的结论、技能树与二进制是否同版。
+			for _, msg := range []string{updateHint(), skillsHint()} {
+				if msg != "" {
+					cmd.Println(msg)
+				}
+			}
 			return nil
 		},
 	}
+}
+
+// skillsHint 技能树与二进制不同版时提一句。
+//
+// 升级成功后更新器自己会把技能刷到同版，所以这条通常只在"手动换了二进制"（拷了一份
+// 新的 tt.exe、或从别的版本解压）时出现 —— 而那正是 agent 会默默读到旧手册的场景。
+func skillsHint() string {
+	cfgPath, err := common.ResolveConfig(true)
+	if err != nil {
+		return ""
+	}
+	return update.SkillsDriftHint(filepath.Dir(cfgPath), Version)
+}
+
+// updateHint 读检查缓存给一句话提示。
+//
+// “读不到就不提示”是刻意的：tt version 是排查时最先敲的命令，它不能因为缓存坏了、
+// 配置没了、或者检查结果过期（见 update.LoadCachedCheck 的两个作废条件）而失败。
+func updateHint() string {
+	cfgPath, err := common.ResolveConfig(true)
+	if err != nil {
+		return ""
+	}
+	res := update.LoadCachedCheck(filepath.Dir(cfgPath), Version, time.Now())
+	return res.Message()
 }

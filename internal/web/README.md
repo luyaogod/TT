@@ -13,6 +13,7 @@
 | `/api/config/meta` / `/api/config/status` | 配置的元信息与**派生状态** |
 | `/api/cache/clear` | 清缓存 |
 | `/api/install` GET / POST / DELETE | 把 tt 加进 / 移出用户 PATH |
+| `/api/update` / `/api/update/check` / `/api/update/apply` | tt 自身的更新：读状态（不联网）/ 人去点才查一次 / 交棒给更新器 |
 | `/api/shutdown` | 停止服务（仅在有停止回调时挂） |
 | `/debug/api/*` | 调试子系统的接口（挂载时剥掉 `/debug` 前缀） |
 | `/api/*` | 字典子系统的端点（源码镜像拉取、字典同步），**直接挂在共享层** |

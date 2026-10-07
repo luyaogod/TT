@@ -28,6 +28,7 @@ import (
 
 	"tt/internal/cli/common"
 	"tt/internal/pathinstall"
+	"tt/internal/update"
 )
 
 const skillsDirName = "skills"
@@ -119,6 +120,17 @@ tt-erp-read（读 ERP 代码）。
 			copied, err := installSkillsTree(src, dst, force)
 			if err != nil {
 				return err
+			}
+			// 记下"技能装到了哪、装它们的是哪个版本"。升级后靠它把 agent 目录里那份刷成
+			// 与二进制同版 —— 不记的话它会永远停在装它的那个版本（见 update.SkillsStamp）。
+			//
+			// 没有版本号的构建（`make build` / `go test`）**不写**：戳的全部意义是"哪个
+			// 版本装的"，记一个空版本只会让漂移提示说不清话，还会让测试在开发者的真实
+			// 数据目录里留垃圾（它落的是 ResolveConfig 解析出的那个目录）。
+			if Version != "" {
+				if cfgPath, cerr := common.ResolveConfig(true); cerr == nil {
+					_ = update.RecordSkillsTarget(filepath.Dir(cfgPath), dst, Version)
+				}
 			}
 			if common.JSON {
 				return common.PrintJSON(map[string]any{"ok": true, "source": src, "target": dst,

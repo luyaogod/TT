@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"tt/internal/testkit"
+	"tt/internal/update"
 )
 
 // mkSkills 在 dir 下建一个技能源树：每个技能一个目录 + SKILL.md。
@@ -354,5 +355,81 @@ func TestInstallSkillsCmdToAuto(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(cwd, ".claude", "skills", "alpha", "SKILL.md")); err != nil {
 		t.Fatalf("--to auto 没有落到已存在的 .claude/skills: %v", err)
+	}
+}
+
+// 装完要留下"哪一版装的、装到了哪"这份戳 —— 升级后靠它把 agent 目录里那份刷成同版。
+//
+// 测试里 Version 是空的（go test 不注入版本号），而空版本刻意不写戳（见 install.go 的
+// 说明）—— 所以这里显式给一个版本号，并把配置路径指到临时目录：戳落的是
+// ResolveConfig 解析出的那个目录，指不过去就会写到开发者的真实数据目录里。
+func TestInstallSkillsRecordsStamp(t *testing.T) {
+	src := t.TempDir()
+	mkSkills(t, src, "alpha")
+	dataDir := t.TempDir()
+	target := filepath.Join(dataDir, "agent-skills")
+	t.Setenv("TT_CONFIG", filepath.Join(dataDir, "config.json"))
+
+	oldSrc, oldVer := skillsSource, Version
+	skillsSource = func() (string, error) { return src, nil }
+	Version = "9.9.9"
+	defer func() { skillsSource, Version = oldSrc, oldVer }()
+
+	if code := testkit.Silent(t, func() int {
+		cmd := newInstallSkillsCmd()
+		cmd.SetArgs([]string{"--to", target})
+		if err := cmd.Execute(); err != nil {
+			t.Errorf("install skills: %v", err)
+			return 1
+		}
+		return 0
+	}); code != 0 {
+		t.Fatalf("退出码 = %d, want 0", code)
+	}
+
+	stamp := update.LoadSkillsStamp(dataDir)
+	if stamp == nil {
+		t.Fatalf("没留下技能戳：%s 不存在", update.SkillsStampPath(dataDir))
+	}
+	if stamp.Version != "9.9.9" {
+		t.Errorf("戳里的版本 = %q，想要 9.9.9", stamp.Version)
+	}
+	if len(stamp.Targets) != 1 || !filepath.IsAbs(stamp.Targets[0]) {
+		t.Errorf("戳里的目标该是那一个绝对路径: %v", stamp.Targets)
+	}
+	// 同版本不算漂移；换了版本才算。
+	if got := update.StaleSkillsTargets(dataDir, "9.9.9"); len(got) != 0 {
+		t.Errorf("同版本不该算漂移: %v", got)
+	}
+	if got := update.StaleSkillsTargets(dataDir, "10.0.0"); len(got) != 1 {
+		t.Errorf("换版本该算漂移: %v", got)
+	}
+}
+
+// 没有版本号的构建不写戳：`make build` 装技能不该在数据目录里种下一条"空版本"记录。
+func TestInstallSkillsSkipsStampWithoutVersion(t *testing.T) {
+	src := t.TempDir()
+	mkSkills(t, src, "alpha")
+	dataDir := t.TempDir()
+	t.Setenv("TT_CONFIG", filepath.Join(dataDir, "config.json"))
+
+	oldSrc, oldVer := skillsSource, Version
+	skillsSource = func() (string, error) { return src, nil }
+	Version = ""
+	defer func() { skillsSource, Version = oldSrc, oldVer }()
+
+	if code := testkit.Silent(t, func() int {
+		cmd := newInstallSkillsCmd()
+		cmd.SetArgs([]string{"--to", filepath.Join(dataDir, "skills")})
+		if err := cmd.Execute(); err != nil {
+			t.Errorf("install skills: %v", err)
+			return 1
+		}
+		return 0
+	}); code != 0 {
+		t.Fatalf("退出码 = %d, want 0", code)
+	}
+	if st := update.LoadSkillsStamp(dataDir); st != nil {
+		t.Errorf("没有版本号时不该写戳，却写下了 %+v", st)
 	}
 }

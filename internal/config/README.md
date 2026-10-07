@@ -43,7 +43,7 @@ loc := config.LocationsAt(configPath)                        // 已有配置路�
 两个配套约束：
 
 - **缓存子目录名只允许 `CacheSubdirs` 清单里的**（`ents` / `srccache` / `execlog` /
-  `debug-bps` / `spill`）。凡是 `<数据目录>/<名字>` 这种拼接都走 `config.CacheDir`，
+  `debug-bps` / `spill` / `update`）。凡是 `<数据目录>/<名字>` 这种拼接都走 `config.CacheDir`，
   写错名字当场得到空串，而不是悄悄建出一个清单外的新目录。
 - **本地字典库缺省在数据目录下**（便携包的数据目录就是包内，两种形态都成立）。
   读侧（查询命令）要求文件存在，全不存在就报错；写侧（同步）永不报错，由同步过程创建。

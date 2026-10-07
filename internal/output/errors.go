@@ -18,6 +18,13 @@ const (
 	CodeSQLRejected  = "SQL_REJECTED"   // 语句没过白名单
 	CodeQueryFailed  = "QUERY_FAILED"   // 查询本身失败
 	CodeNotFound     = "NOT_FOUND"      // 查到了,但没有这条数据
+
+	// tt update 那条线。它管的是"tt 自己"，与字典无关，所以码也自成一族。
+	CodeUpdateUsage    = "UPDATE_USAGE"    // 参数组合不成立（如非交互环境没给 --yes）
+	CodeUpdateRefused  = "UPDATE_REFUSED"  // 这份 tt 不让自装（源码态、认不出的布局）
+	CodeUpdateChecksum = "UPDATE_CHECKSUM" // 摘要/制品自报版本校验不过
+	CodeUpdateNetwork  = "UPDATE_NETWORK"  // 出网失败（代理、限流、超时）
+	CodeUpdateApply    = "UPDATE_APPLY"    // 落地动作失败（覆盖不进去、msiexec 失败、计划读不出）
 )
 
 // 退出码。0 与 1 **沿用 tt 既有语义**(1 = 用法/参数错),只新增分类码 ——

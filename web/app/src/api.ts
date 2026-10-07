@@ -153,6 +153,43 @@ export interface InstallStatus {
   manual?: string
   note?: string
 }
+// GET /api/update:tt 自身更新的状态。检查结论来自缓存,所以这个端点**不联网**
+export interface UpdateCheck {
+  current: string
+  latest: string
+  newer: boolean
+  prerelease?: boolean
+  publishedAt?: string
+  checkedAt: string
+}
+
+// 上一次升级的记录(.tt-update.json)。阶段见 internal/update 的 Phase 常量
+// (idle/checking/downloading/verifying/handed-off/applying/done/failed)。
+export interface UpdateLast {
+  phase: string
+  from?: string
+  target?: string
+  kind?: string
+  artifact?: string
+  error?: string
+  warnings?: string[]
+  startedAt?: string
+  finishedAt?: string
+}
+
+export interface UpdateState {
+  ok: boolean
+  version: string
+  kind: string
+  canInstall: boolean
+  refusal?: string
+  source: string
+  hint?: string
+  skillsDrift?: string
+  check?: UpdateCheck
+  last?: UpdateLast
+}
+
 // GET /api/config/status:配置里那些路径型取值的派生状态
 export interface ConfigStatus {
   ok: boolean
@@ -309,6 +346,12 @@ export const api = {
   installStatus: () => req<InstallStatus>('/api/install'),
   installAdd: () => req<InstallStatus>('/api/install', { method: 'POST' }),
   installRemove: () => req<InstallStatus>('/api/install', { method: 'DELETE' }),
+  // tt 自身的更新。查是**人去点**才联网(服务不轮询);装由服务端拉一个
+  // `tt update --yes` 子进程完成 —— 本服务几分钟后会被它停掉替换(见 internal/web/update.go)。
+  updateState: () => req<UpdateState>('/api/update'),
+  updateCheck: () => req<{ ok: boolean; check?: UpdateCheck; hint?: string; where?: string; error?: string }>(
+    '/api/update/check', { method: 'POST' }),
+  updateApply: () => req<{ ok: boolean; pid?: number; note?: string }>('/api/update/apply', { method: 'POST' }),
   // 字典类动作(源码镜像拉取、字典同步)。合并前它们在 /dict/api/* 下 —— 那是字典页
   // 私有 API;字典页并进设置页之后升到共享层,设置页因此不必跨子系统调用。
   mirror: () => req<MirrorResp>('/api/mirror'),

@@ -7,7 +7,7 @@ SHELL := sh
 .SHELLFLAGS := -c
 
 .DEFAULT_GOAL := all
-.PHONY: all help build test check-web web-build engine selftest doctor deep-tzc deep-tzs fns e2e skips drawio-lib package msi
+.PHONY: all help build test check-web web-build engine selftest doctor deep-tzc deep-tzs fns e2e skips drawio-lib version-check update-live-check package msi
 
 all: build test
 
@@ -54,11 +54,18 @@ e2e: ## 真引擎 E2E。闸门：需要 TTZS_EXE 与 TTZS_WS
 skips: ## 回读：跑了多少、跳了多少（会真跑一遍全量）
 	go test ./... -count=1 -v 2>&1 | grep -E '^--- (PASS|SKIP)' | sort | uniq -c
 
+update-live-check: ## tt update 的真联网自检（要能访问 GitHub；代理用 TT_PROXY）
+	@go build -ldflags "-X tt/internal/cli.Version=0.0.0" -o "$$TEMP/tt-updcheck.exe" .
+	@$$TEMP/tt-updcheck.exe update check --format table --proxy "$$TT_PROXY" ; code=$$? ; rm -f "$$TEMP/tt-updcheck.exe" ; if [ "$$code" = "0" ] || [ "$$code" = "10" ] ; then echo "live-check OK (exit $$code)" ; else echo "live-check FAILED (exit $$code)" ; exit 1 ; fi
+
 drawio-lib: build ## drawio 形状库 → dist/ 下两个 mxlibrary .xml（File → Open Library from 加载）
 	./tt.exe drawio lib
 
-package: ## 便携包 → dist/tt-portable/ 与 dist/tt-portable.zip
+version-check: ## 版本号只有 VERSION 一个出处：对照 web 的两份 package.json 与 package-lock.json
+	@node -e 'const fs=require("fs");const want=fs.readFileSync("VERSION","utf8").trim();if(!/^[0-9]+\.[0-9]+\.[0-9]+$$/.test(want)){console.error("VERSION is not MAJOR.MINOR.PATCH: "+want);process.exit(1)}const lock=JSON.parse(fs.readFileSync("web/package-lock.json","utf8"));const rows=[["web/package.json",JSON.parse(fs.readFileSync("web/package.json","utf8")).version],["web/app/package.json",JSON.parse(fs.readFileSync("web/app/package.json","utf8")).version],["web/package-lock.json",lock.version],["web/package-lock.json packages[\"\"]",lock.packages[""].version]];const bad=rows.filter(r=>r[1]!==want);if(bad.length){console.error("version mismatch, VERSION = "+want+"\n  "+bad.map(r=>r[0]+" = "+r[1]).join("\n  "));process.exit(1)}console.log("version-check OK: "+want+" (VERSION is the single source)")'
+
+package: version-check ## 便携包 → dist/tt-portable/ 与 dist/tt-portable.zip
 	cmd //c build_portable.bat
 
-msi: ## MSI 安装包（需 WiX v3；复用便携包载荷）
+msi: version-check ## MSI 安装包（需 WiX v3；复用便携包载荷）
 	cmd //c build_msi.bat

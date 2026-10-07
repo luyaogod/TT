@@ -186,7 +186,7 @@ func validateConfig(path string) []string {
 	}
 	if v := intOrZero(root["schemaVersion"]); v < config.SchemaVersion {
 		problems = append(problems, fmt.Sprintf(
-			"schemaVersion = %d，当前结构为 %d；这可能是旧版本的配置（不做自动迁移），请确认 hosts.sshs 是否完整", v, config.SchemaVersion))
+			"schemaVersion = %d，当前结构为 %d：这是更早结构写下的配置。读侧按当前结构解析（缺的节取缺省值），不做自动迁移", v, config.SchemaVersion))
 	}
 
 	r, err := config.Load(path)
