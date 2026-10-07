@@ -26,7 +26,10 @@ set GOPROXY=https://goproxy.cn,direct
 rem Release version, injected into the binary via -ldflags (shown by `tt version`).
 set VERSION=0.2.0
 
-if exist dist rmdir /s /q dist
+rem Only the portable stage is ours to rebuild. dist\ also holds other products
+rem (tt drawio lib writes its .xml there; build_msi.bat keeps its staging and the
+rem MSI there), so never wipe dist\ as a whole.
+if exist "%STAGE%" rmdir /s /q "%STAGE%"
 mkdir "%STAGE%"
 
 echo [1/5] Building frontend (web/dist) ...
@@ -50,7 +53,10 @@ rem main.go embeds web/dist, so the frontend must exist before go build.
 if not exist "web\dist\index.html" (echo MISSING web\dist\index.html & exit /b 1)
 
 echo [2/5] Building tt.exe (v%VERSION%) ...
-call go build -trimpath -ldflags "-X tt/internal/cli.Version=%VERSION%" -o tt.exe .
+rem Built straight into the stage, never into the repo root: packaging must not
+rem leave a tt.exe behind. The exe has to sit next to skills/ (tt install skills
+rem reads <exe dir>\skills), and this stage gets skills/ in the next step.
+call go build -trimpath -ldflags "-X tt/internal/cli.Version=%VERSION%" -o "%STAGE%\tt.exe" .
 if errorlevel 1 (
     echo BUILD FAILED
     exit /b 1
@@ -61,8 +67,7 @@ copy /y config.empty.json "%STAGE%\config.json" >nul || (echo COPY empty config 
 copy /y config.example.json "%STAGE%\" >nul || (echo COPY config.example.json FAILED & exit /b 1)
 copy /y README.md "%STAGE%\" >nul || (echo COPY README.md FAILED & exit /b 1)
 xcopy /e /i /y /q skills "%STAGE%\skills" >nul || (echo COPY skills FAILED & exit /b 1)
-if exist "%STAGE%\tt.exe" del /q "%STAGE%\tt.exe"
-copy /y tt.exe "%STAGE%\" >nul || (echo COPY tt.exe FAILED & exit /b 1)
+if not exist "%STAGE%\tt.exe" (echo MISSING staged tt.exe & exit /b 1)
 rem Portable marker: the CLI keeps its config inside the package instead of
 rem writing to the user directory (see internal/config/paths.go, IsPortable).
 type nul > "%STAGE%\.portable"
