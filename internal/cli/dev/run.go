@@ -42,7 +42,8 @@ func takeRootFlags(args []string) ([]string, error) {
 			return nil, devFormatErr("csv")
 		case a == "--env" || a == "--conn" || strings.HasPrefix(a, "--env=") || strings.HasPrefix(a, "--conn="):
 			return nil, fmt.Errorf("%s 是 tt dict / tt debug 那条线的开关（选哪个库/哪个环境）；"+
-				"`tt dev` 这条线用 --workspace 或配置里的 tzs.workspace 定位", strings.SplitN(a, "=", 2)[0])
+				"`tt dev` 这条线的工作区按环境配（设置页「站点管理 → 环境 → 工作区目录」），"+
+				"临时换用 --workspace", strings.SplitN(a, "=", 2)[0])
 		case a == "--format" && i+1 < len(args):
 			v, err := devFormat(args[i+1])
 			if err != nil {

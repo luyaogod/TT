@@ -98,7 +98,7 @@ config.Edit(path, validate, mutate)   // Open → validate → mutate → Save
 
 ## 路径型取值
 
-配置里那些"这是个路径"的值（`sync.target`、`mirror.dir`、`bdldoc.dir`、`tzs.workspace`…），
+配置里那些"这是个路径"的值（`sync.target`、`mirror.dir`、`bdldoc.dir`、`hosts.sshs[].workspace`…），
 解析规则同样只有一份（绝对化、派生状态、同步目标缺省位置）。
 理由：同一个值在两处各算一遍，会解析成不同结果 —— 那是最难查的一类 bug。
 

@@ -16,8 +16,8 @@
 //     --pipe-name）。管道名含引擎程序集的 MVID，重算一百行且算错了不响。
 //  2. **请求一旦上线，绝不重试。** 协议无幂等键，而这些函数都在改设计器内存里的模型；
 //     守护进程中途死掉时重试是在赌「上一次写进去了没有」。
-//  3. **工作区没有缺省。** 引擎内置的默认工作区是一个真实客户目录，落到它上面会去 Boot
-//     别人的包。解析顺序末端是**拒绝**，不是回落。
+//  3. **工作区没有缺省。** 它按环境配（hosts.sshs[].workspace），引擎内置的默认工作区是一个
+//     真实客户目录，落到它上面会去 Boot 别人的包。解析顺序末端是**拒绝**，不是回落。
 package tzs
 
 import (
@@ -76,27 +76,61 @@ func tzsExecOptions(wsFlag string) (tzs.Options, error) {
 		return tzs.Options{}, err
 	}
 	ws := wsFlag
-	if ws == "" {
-		ws = os.Getenv("TZSCLI_WS")
+	wsSrc := ""
+	if ws != "" {
+		wsSrc = "--workspace"
 	}
 	if ws == "" {
-		ws = tzsSettings().Workspace
+		ws = os.Getenv("TZSCLI_WS")
+		if ws != "" {
+			wsSrc = "环境变量 TZSCLI_WS"
+		}
+	}
+	if ws == "" {
+		ws, wsSrc = activeWorkspace()
 	}
 	workDir := ""
 	if path, err := config.ResolvePath("", true); err == nil && path != "" {
 		workDir = filepath.Dir(path) // 状态文件与守护进程日志落在 config.json 旁边
 	}
 	return tzs.Options{
-		Exe:        exe,
-		InstallDir: os.Getenv("TZSCLI_INSTALL"),
-		Workspace:  ws,
-		WorkDir:    workDir,
+		Exe:          exe,
+		InstallDir:   os.Getenv("TZSCLI_INSTALL"),
+		Workspace:    ws,
+		WorkspaceSrc: wsSrc,
+		WorkDir:      workDir,
 	}, nil
+}
+
+// activeWorkspace 当前环境的工作区与**它的来源**（"环境「主机109」" 这种说法，直接进
+// doctor 的报告）。取工作区只有一份实现（config.Root.ActiveWorkspace），所以设置页显示的
+// 那个路径与引擎真正 Boot 的那个不可能是两个 —— 这正是把工作区从机器级搬到环境级的原因。
+// 读不到配置（首次运行、配置坏了）就是空串，交给上层拒绝。
+func activeWorkspace() (ws, src string) {
+	path, err := config.ResolvePath("", true)
+	if err != nil || path == "" {
+		return "", ""
+	}
+	root, err := config.Load(path)
+	if err != nil {
+		return "", ""
+	}
+	e := root.ActiveEnv()
+	if e == nil {
+		return "", ""
+	}
+	name := e.Name
+	if name == "" {
+		name = "（未命名）"
+	}
+	return e.Workspace, "环境「" + name + "」"
 }
 
 // tzsEngineOptions 是**运行类**动词用的严格版。
 //
-// 工作区的解析顺序：--workspace flag > TZSCLI_WS 环境变量 > config.json 的 tzs.workspace。
+// 工作区的解析顺序：--workspace flag > TZSCLI_WS 环境变量 > **当前环境的 workspace**
+// （hosts.sshs[].workspace；“当前环境” = hosts.activeEnv，也就是设置页里星标那个）。
+// 机器级没有工作区这一层：一台机器对着几个客户就有几个工作区。
 // **末端拒绝**：三层都没有时报错（调用方退 5）并说清该配哪个键，绝不 spawn —— 引擎的缺省
 // 是一个真实客户目录，落上去等于拿别人的表单当草稿纸。
 func tzsEngineOptions(wsFlag string) (tzs.Options, error) {
@@ -106,9 +140,9 @@ func tzsEngineOptions(wsFlag string) (tzs.Options, error) {
 	}
 	if o.Workspace == "" {
 		return tzs.Options{}, fmt.Errorf(
-			"未配置工作区：--workspace、TZSCLI_WS 与配置里的 tzs.workspace 都是空的。\n" +
+			"未配置工作区：--workspace、TZSCLI_WS 与当前环境的 workspace 都是空的。\n" +
 				"  引擎的缺省工作区是一个真实客户目录，所以这里拒绝启动而不是回落。\n" +
-				"  配置：tt config set tzs.workspace \"D:\\\\你的工作区\"")
+				"  在设置页的「站点管理 → 环境 → 工作区目录」里填上它（或设 TZSCLI_WS / 临时用 --workspace）")
 	}
 	return o, nil
 }

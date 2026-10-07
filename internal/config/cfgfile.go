@@ -124,11 +124,10 @@ func NewSkeleton() map[string]any {
 			"sshs":      []any{},
 		},
 		"query": map[string]any{"source": "auto"},
-		// 空值就是诚实的"未配置"：用哪个工作区只有用户知道，填一个猜的路径比留空更糟
-		// （引擎会去 Boot 别人的目录）。设计器目录不在这里 —— 它由发行包自带，
-		// 见 engine/src/Designer/Bootstrap.cs 的 Install。
+		// 骨架里没有环境，所以也没有工作区 —— 工作区按环境配（hosts.sshs[].workspace），
+		// 而它是引擎的必填项：配错等于拿别的客户的表单当草稿纸（见 NamedSsh.Workspace）。
+		// 设计器目录也不在这里 —— 它由发行包自带，见 engine/src/Designer/Bootstrap.cs 的 Install。
 		"tzs": map[string]any{
-			"workspace": "",
 			"serverExe": "",
 		},
 	}

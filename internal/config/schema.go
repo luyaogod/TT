@@ -76,7 +76,13 @@ type NamedSsh struct {
 	Topent          EntValue             `json:"topent,omitempty"`          // 默认企业编号(TOPENT)；连接会话即下发，会话内可覆盖
 	LaunchArgs      string               `json:"launchArgs,omitempty"`      // 该环境的作业启动参数覆盖（空=用 debug.launchArgs）
 	WatchdogSeconds int                  `json:"watchdogSeconds,omitempty"` // 该环境的停站超时覆盖（0=用 debug.watchdogSeconds）
-	DB              *dbconfig.Connection `json:"db,omitempty"`              // 该环境的数据库连接（与 SSH 一对一）
+	// Workspace 这个环境的 .tzs 工作区（含 mta/ 的目录，绝对路径）。
+	//
+	// 与上面两项同类：按环境覆盖机器级的东西 —— 但工作区**没有**机器级那份
+	// （见 TzsSettings）：切了环境就该跟着换工作区，而引擎内置的默认工作区是一个
+	// 真实客户目录，配错就等于拿别人的表单当草稿纸。
+	Workspace string               `json:"workspace,omitempty"`
+	DB        *dbconfig.Connection `json:"db,omitempty"` // 该环境的数据库连接（与 SSH 一对一）
 }
 
 // Hosts 服务器环境清单：config.json 顶层 hosts 节。
@@ -242,16 +248,13 @@ type NetSettings struct {
 // TzsSettings 是 .tzs 表单引擎（engine/，一个 C# 外部 exe）的运行时依赖。
 //
 // 注意这里**没有设计器目录**：设计器的程序集由发行包自带（`tzs\designer\`），引擎默认
-// 就从那儿加载，所以它不再是配置项。这一节剩下的两样都**不能由 flag 取代**：
+// 就从那儿加载，所以它不再是配置项。也**没有工作区** —— 工作区是**按环境**的（见
+// NamedSsh.Workspace）：一台机器上对着几个客户就有几个工作区，放在机器级只会让“切了
+// 环境、引擎还开在别的客户的目录上”这种事有机会发生。
 //
-//   - Workspace 没有合理的缺省 —— 引擎内置的默认工作区是一个**真实客户目录**，落到它上面
-//     会去 Boot 别人的包，然后报一个和用户意图完全无关的错。三层都空时**拒绝启动**。
-//   - ServerExe 只在有人要换掉包内那份引擎时才用；正常部署不写。
-//
-// 与 tdev 节的口径差异也在这里：tdev 放的是「跨调用稳定的默认值」，flag 永远优先；
-// 这一节放的是机器级依赖，命令行 flag 管不着。
+// 与 tdev 节的口径差异：tdev 放的是“跨调用稳定的默认值”，flag 永远优先；这一节放的是
+// 机器级依赖，命令行 flag 管不着。
 type TzsSettings struct {
-	Workspace string `json:"workspace,omitempty"` // 引擎 Boot 的工作区（含 mta/ 的目录）；无缺省
 	ServerExe string `json:"serverExe,omitempty"` // 覆盖 tzs-server.exe；缺省 <exe 目录>\tzs\tzs-server.exe
 }
 
@@ -331,6 +334,27 @@ func LoadHosts(path string) (*Hosts, error) {
 		return nil, fmt.Errorf("尚未配置 SSH 环境:请运行 tt serve 打开配置页添加，或编辑 config.json 的 hosts.sshs")
 	}
 	return &h, nil
+}
+
+// ActiveEnv 当前环境（hosts.activeEnv，缺省摆首条）；一个环境都没配时返回 nil。
+//
+// 与 ActiveWorkspace 同一份实现：后者就建在它上面。
+func (r *Root) ActiveEnv() *NamedSsh {
+	if r == nil {
+		return nil
+	}
+	return r.Hosts.ByName("")
+}
+
+// ActiveWorkspace 当前环境的 .tzs 工作区（没环境、或环境没配时返回空串）。
+//
+// **只此一份实现**：命令层（tt dev tzs 的工作区解析）与 Web 状态页都从这里取。
+// 两边各算一次的话，设置页显示的那个路径与引擎真正 Boot 的那个可能不是同一个。
+func (r *Root) ActiveWorkspace() string {
+	if e := r.ActiveEnv(); e != nil {
+		return e.Workspace
+	}
+	return ""
 }
 
 // ActiveHost 返回生效环境：工具的覆盖优先，其次 hosts.activeEnv，最后首条。

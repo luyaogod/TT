@@ -32,7 +32,8 @@ func TestWorkspaceRefusedWhenUnset(t *testing.T) {
 		t.Errorf("文案该点名「工作区」：%v", err)
 	}
 	// 三种给法都得在文案里（否则用户只知道失败了，不知道去哪配）。
-	for _, want := range []string{"--workspace", "TZSCLI_WS", "tzs.workspace"} {
+	// “当前环境”那一份要能自纠到它的家（按环境配，不是全局键）。
+	for _, want := range []string{"--workspace", "TZSCLI_WS", "当前环境", "工作区目录"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("文案里该有 %q：%v", want, err)
 		}

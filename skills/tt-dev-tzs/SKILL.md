@@ -31,13 +31,17 @@ metadata:
 | 只看结构、字段、开着的表单 | `form_tree` / `find_component` / `get_component` / `list_spec_nodes` / `list_columns` / `list_open` |
 | **还不知道该开哪个文件** | `list_packages`（按程序名筛，见 §1 那段） |
 
-**跑之前要配一样东西**：工作区（`tt config set tzs.workspace "D:\ws"` 或环境变量 `TZSCLI_WS`；
+**跑之前要配一样东西**：工作区（**按环境配** —— 设置页「站点管理 → 环境 → 工作区目录」，就是 `config.json` 的 `hosts.sshs[].workspace`；临时换一个用 `--workspace`
+或环境变量 `TZSCLI_WS`；
 **本文档的 `D:\ws` 一律指工作区**）。**这条没有缺省、也不回落** —— 引擎内置的默认工作区是一个
 **真实客户目录**，落上去等于拿别人的表单当草稿纸；三层都空时运行类动词直接拒绝启动（退 5）。
+**切了环境就换工作区**：它跟着当前环境（设置页里星标那个）走，所以一台机器对着几个客户时
+不会弄错到别人那份。
 工作区还**圈定了你能碰哪些包**：包的目录必须在它之下，`out` 也一样（§4.4）。
 
 **"工作区在哪"从哪问**（`out` 必须是绝对路径，所以这条迟早要用）：`tt dev tzs doctor` 的输出里
-就有当前工作区的**绝对路径**那一行；`list_packages` 的返回里也有一个 `workspace` 字段。
+就有当前工作区的**绝对路径**那一行，**并注明它是从哪来的**（环境 / `--workspace` / `TZSCLI_WS`）；
+`list_packages` 的返回里也有一个 `workspace` 字段。
 （两处都实测过。文档从前只说"工作区配在 config 里"，没说在命令行里怎么看它。）
 
 **包就在工作区里，而"程序名"不是文件名**：`aapt300` 的包叫 `aapt300(c).tzs`
@@ -66,7 +70,8 @@ tt dev tzs list_packages --args '{"query":"aapt300"}' --json
 > （`open` 只收 `path`；`--form` 收的是**程序名**，两个不是一回事。）
 
 配置**文件**的位置可以用环境变量 `TT_CONFIG=<config.json>` 指定（便携版、或"不想动默认配置"
-时用）；`tt config path` 会告诉你当前实际读的是哪一份。工作区写在那个文件的 `tzs.workspace` 里。
+时用）；`tt config path` 会告诉你当前实际读的是哪一份。工作区写在那个文件的
+`hosts.sshs[].workspace` 里（**按环境**，不是全局键）。
 设计器**不用配**（它的程序集随仓库与发行包自带）。开工前先 `tt dev tzs doctor` 自检。
 
 > ⚠️ **`TT_CONFIG` 的值在 bash / Git Bash 下也要写正斜杠（或整个加单引号）。**

@@ -63,6 +63,10 @@ interface SshItem {
   password: string
   zone: string
   topent: string
+  // workspace 该环境的 .tzs 工作区（含 mta/ 的目录，绝对路径）。
+  // 与 launchArgs / watchdogSeconds 不同：它是**必填**的（引擎的默认工作区是真实客户目录），
+  // 而且只有环境级这一份 —— 切环境就该跟着换工作区。
+  workspace: string
   db: SshDb | null
 }
 
@@ -207,7 +211,7 @@ const blankDb = (): SshDb => ({ type: 'oracle', host: '', port: 1521, service: '
 // 新增环境默认带三个常用账号(账号=密码),省去手工录入
 const defaultAccounts = () => ['ds', 'dsdata', 'dsdemo'].map((a) => ({ account: a, password: a }))
 const blankSsh = (): SshItem => ({
-  name: '', host: '', port: 22, user: '', password: '', zone: '36', topent: '',
+  name: '', host: '', port: 22, user: '', password: '', zone: '36', topent: '', workspace: '',
   db: { ...blankDb(), accounts: defaultAccounts() },
 })
 
@@ -218,7 +222,8 @@ const blankSsh = (): SshItem => ({
  *
  * 仍未覆盖的字段:`hosts.sshs[].launchArgs` / `watchdogSeconds`(每环境的调试覆盖项,
  * 本页不暴露)。它们由服务端的保留机制补回(见 internal/web 的 preserveUngovernedDBFields)。
- * 纯客户端没法保住它们 —— 表单模型里根本没有这两个字段。
+ * 而 `workspace` 是这一页管得着的(表单里有输入框) —— 不要把它当成“未覆盖”加进那份保留名单,
+ * 否则用户清空它时会被静默补回。
  */
 function hostsPatchOf(list: SshItem[], prevActiveEnv: string) {
   const sshsOut: HostsSsh[] = list.filter((x) => x.host).map((x) => {
@@ -228,6 +233,8 @@ function hostsPatchOf(list: SshItem[], prevActiveEnv: string) {
     }
     if (x.zone.trim()) o.zone = x.zone.trim()
     if (x.topent.trim()) o.topent = x.topent.trim()
+    // 工作区：留空就是没配（不写这个键），与服务端“环境级没有兜底”一致。
+    if (x.workspace.trim()) o.workspace = x.workspace.trim()
     if (x.db) {
       const db: HostsDb = { type: x.db.type || 'oracle', host: x.db.host.trim(), port: x.db.port || 0 }
       if (x.db.type === 'oracle') { if (x.db.service.trim()) db.service = x.db.service.trim() }
@@ -341,6 +348,7 @@ export function SettingsView() {
         return {
           name: e.name || '', host: e.host || '', port: e.port || 22, user: e.user || '', password: e.password || '',
           zone: e.zone || '', topent: e.topent != null ? String(e.topent) : '',
+          workspace: e.workspace || '',
           db: d ? {
             type: d.type || 'oracle', host: d.host || '', port: d.port || 0,
             service: d.service || '', database: d.database || '',
@@ -862,9 +870,15 @@ ${sync?.target || ''}
                           <Field label="TOPENT(默认企业;连接会话即下发,可数字或文本)" className="col-span-2">
                             <Input className={input} value={cur.topent} onChange={(e) => patchSsh(selSsh, { topent: e.target.value })} />
                           </Field>
+                          <Field label="工作区目录(该环境的 .tzs 工作区;绝对路径)" className="col-span-2">
+                            <Input className={input} value={cur.workspace} placeholder="D:\\t100_wrok_dir\\客户\\prd"
+                              onChange={(e) => patchSsh(selSsh, { workspace: e.target.value })} />
+                          </Field>
                         </div>
                         <p className="mt-2 text-[11px] text-muted-foreground">
                           调试会话按该服务器登录区域(区域 + TOPENT)。该环境的数据库连接在「数据库」Tab 维护,一对一。
+                          工作区目录按环境存（切环境就跟着换），是 tt dev tzs 的必填项：它定位包与 out，留空时运行类动词会拒绍启动
+                          —— 引擎内置的默认工作区是一个真实客户目录，宁可不跑也不能落到别人的表单上。
                         </p>
                       </>
                     )}

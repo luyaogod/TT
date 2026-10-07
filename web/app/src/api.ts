@@ -91,6 +91,8 @@ export interface HostsSsh {
   password: string
   zone?: string
   topent?: string
+  // workspace 该环境的 .tzs 工作区（绝对路径）。机器级没有这一项（见 internal/config 的 TzsSettings）
+  workspace?: string
   db?: HostsDb | null
 }
 // 调试节(debug.*):本机参数,不随环境走

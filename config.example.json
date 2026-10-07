@@ -13,6 +13,7 @@
         "password": "换成真实口令",
         "zone": "31",
         "topent": "10001",
+        "workspace": "D:\\t100_wrok_dir\\某客户\\dev",
         "db": {
           "type": "oracle",
           "host": "10.0.0.2",
@@ -42,6 +43,7 @@
         "password": "换成真实口令",
         "zone": "36",
         "topent": "10002",
+        "workspace": "D:\\t100_wrok_dir\\某客户\\prd",
         "db": {
           "type": "kingbase",
           "host": "10.0.1.2",
@@ -92,7 +94,6 @@
   },
 
   "tzs": {
-    "workspace": "D:\\t100_wrok_dir\\某客户\\prd",
     "serverExe": ""
   }
 }

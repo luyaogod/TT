@@ -149,20 +149,27 @@ func Doctor(ctx context.Context, o Options) *DoctorReport {
 
 	// ③ 工作区：配置了吗 → 是目录吗 → 像不像设计器工作区。
 	ws, werr := o.workspace()
+	// 报出来源：工作区按环境配（设置页「站点管理 → 环境 → 工作区目录」），也可能来自
+	// --workspace 或 TZSCLI_WS —— 引擎开在别的客户的目录上时，报错本身看不出异常。
+	src := ""
+	if o.WorkspaceSrc != "" {
+		src = "（来自 " + o.WorkspaceSrc + "）"
+	}
 	switch {
 	case werr != nil:
-		r.add(LevelFail, "工作区", "未配置（--workspace / TZSCLI_WS / config.json 的 tzs.workspace 三选一）")
+		r.add(LevelFail, "工作区", "未配置（--workspace / TZSCLI_WS / 当前环境的 workspace 三选一；"+
+			"环境那一份在设置页的「站点管理 → 环境 → 工作区目录」）")
 	default:
 		st, err := os.Stat(ws)
 		switch {
 		case err != nil || !st.IsDir():
-			r.add(LevelFail, "工作区", fmt.Sprintf("%s 不是目录：%v", ws, err))
+			r.add(LevelFail, "工作区", fmt.Sprintf("%s%s 不是目录：%v", ws, src, err))
 		default:
 			if mst, merr := os.Stat(filepath.Join(ws, "mta")); merr != nil || !mst.IsDir() {
 				r.add(LevelWarn, "工作区",
-					fmt.Sprintf("%s 里没有 mta/（可能不是设计器工作区；不是的话 open 会在加载阶段失败）", ws))
+					fmt.Sprintf("%s%s 里没有 mta/（可能不是设计器工作区；不是的话 open 会在加载阶段失败）", ws, src))
 			} else {
-				r.add(LevelOK, "工作区", ws)
+				r.add(LevelOK, "工作区", ws+src)
 			}
 		}
 	}

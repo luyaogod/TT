@@ -42,15 +42,17 @@ func (s *Server) hConfigStatus(w http.ResponseWriter, r *http.Request) {
 	st := configStatus{OK: true, Config: path, Sync: config.FileStatusOf("", s.syncDefaultTarget())}
 
 	var tzsCfg config.TzsSettings
+	activeWs := ""
 	root, err := config.Load(path)
 	if err == nil {
 		st.Mirror = config.DirStatusOf(root.Mirror.Dir)
 		st.Bdldoc = config.DirStatusOf(root.Bdldoc.Dir)
 		st.Sync = config.FileStatusOf(root.Sync.Target, s.syncDefaultTarget())
 		tzsCfg = root.Tzs
+		activeWs = root.ActiveWorkspace() // 工作区按环境配，取当前环境那一份
 	}
 	// 引擎 exe 的状态与配置读没读到无关(它随包分发),所以放在分支外。
-	st.Tzs = config.TzsStatusOf(tzsCfg, config.EngineExe(""))
+	st.Tzs = config.TzsStatusOf(tzsCfg, activeWs, config.EngineExe(""))
 	st.Install = pathinstall.Get()
 	// 缓存就在数据目录下,配置读不到也算得出来(缓存与配置文件无关)。
 	st.Cache = config.CacheStatusOf(config.LocationsAt(path).DataDir())

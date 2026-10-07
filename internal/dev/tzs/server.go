@@ -54,8 +54,13 @@ type Options struct {
 	InstallDir string
 	// Workspace 是 .tzs 工作区。**绝不留空**：引擎的缺省是一个真实客户目录
 	// （Rpc.DefaultWorkspace），留空就等于拿客户的表单当草稿纸。解析顺序由命令层定：
-	// --workspace flag > TZSCLI_WS 环境变量 > config.json 的 tzs.workspace，末端**拒绝**。
+	// --workspace flag > TZSCLI_WS 环境变量 > **当前环境的 workspace**
+	//（hosts.sshs[].workspace，见 config.Root.ActiveWorkspace），末端**拒绝**。
 	Workspace string
+	// WorkspaceSrc 工作区是**从哪来的**（"--workspace" / "环境变量 TZSCLI_WS" /
+	// "环境「X」"，只给 doctor 的报告用 —— 三个来源都可能生效时，"这个路径是谁给的"
+	// 是排查的第一步：查的是别的客户的工作区时，报错信息本身看不出任何异常。
+	WorkspaceSrc string
 	// WorkDir 是状态文件与守护进程日志的落点，一般传 config.json 所在目录
 	// （与 .tt-serve.json 同目录）。留空则退回 config 的默认落点。
 	WorkDir string
@@ -366,7 +371,8 @@ func (o Options) workspace() (string, error) {
 		Msg: "未配置工作区（拒绝启动引擎）",
 		Detail: []string{
 			"引擎的默认工作区是一个真实客户目录，工具绝不替你选",
-			"三种给法：--workspace <dir> / 环境变量 TZSCLI_WS / config.json 的 tzs.workspace",
+			"三种给法：--workspace <dir> / 环境变量 TZSCLI_WS / 当前环境的 workspace",
+			"（环境那一份在设置页「站点管理 → 环境 → 工作区目录」，即 hosts.sshs[].workspace）",
 		},
 	}
 }

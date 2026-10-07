@@ -349,3 +349,60 @@ func TestNetSettingsProxy(t *testing.T) {
 		t.Errorf("缺省的 net.proxy 该是空串，得到 %q", r2.Net.Proxy)
 	}
 }
+
+// 工作区按**环境**存：往返不能丢，且 ActiveWorkspace 取的是当前环境那一份。
+//
+// 这条是"切了环境就该换工作区"的地基：机器级那份已经没有了（见 TzsSettings），所以一旦
+// 环境级这份在读-改-写里丢掉一个，切换环境就会退回"未配置工作区"。
+func TestPerEnvWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	seed := `{
+  "schemaVersion": 3,
+  "hosts": {
+    "activeEnv": "乙",
+    "sshs": [
+      {"name": "甲", "host": "h1", "port": 22, "user": "u", "password": "p", "workspace": "D:\\ws\\jia"},
+      {"name": "乙", "host": "h2", "port": 22, "user": "u", "password": "p"}
+    ]
+  }
+}`
+	if err := os.WriteFile(path, []byte(seed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := r.Hosts.SSHs[0].Workspace; got != `D:\ws\jia` {
+		t.Errorf("环境「甲」的工作区 = %q", got)
+	}
+	// activeEnv 是「乙」，乙没配 → 空。**不回落**到别的环境或机器级（后者已不存在）。
+	if got := r.ActiveWorkspace(); got != "" {
+		t.Errorf("当前环境（乙）没配工作区时该是空串，得到 %q", got)
+	}
+	r.Hosts.ActiveEnv = "甲"
+	if got := r.ActiveWorkspace(); got != `D:\ws\jia` {
+		t.Errorf("切到「甲」后该拿到它的工作区，得到 %q", got)
+	}
+
+	// 写回（整节替换）不能丢掉工作区：SaveHosts 走的是同一份类型化结构。
+	if err := SaveHosts(path, r.Hosts); err != nil {
+		t.Fatalf("SaveHosts: %v", err)
+	}
+	r2, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := r2.Hosts.ByName("甲").Workspace; got != `D:\ws\jia` {
+		t.Errorf("往返之后工作区丢了: %q", got)
+	}
+	// 机器级那一份不再存在：配置里不该有 tzs.workspace。
+	root, _ := Open(path)
+	if sec, ok := root["tzs"].(map[string]any); ok {
+		if _, has := sec["workspace"]; has {
+			t.Error("机器级的 tzs.workspace 又回来了 —— 工作区只该按环境配")
+		}
+	}
+}

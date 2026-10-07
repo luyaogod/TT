@@ -409,3 +409,57 @@ func jsonStr(s string) string {
 func contains(s, sub string) bool {
 	return len(sub) == 0 || (len(s) >= len(sub) && bytes.Contains([]byte(s), []byte(sub)))
 }
+
+// 工作区是**表单管得着**的字段：带了就存下，不带就删掉。
+//
+// 它刻意**不在** ungovernedEnvKeys 里（那里放的是 launchArgs / watchdogSeconds）：一旦被
+// 保留机制补回来，用户在页面上清空工作区、保存、再进来看，那个路径又回来了 —— 而引擎会
+// 继续开在它上面。这正是"切了环境就该换工作区"要防的事。
+func TestHostsPutWorkspaceGoverned(t *testing.T) {
+	s, path := newTestServer(t, seededConfig)
+	put := func(extra map[string]any) {
+		t.Helper()
+		env := map[string]any{
+			"name": "开发环境", "host": "10.0.0.1", "port": 22, "user": "u", "password": "p",
+			"launchArgs": "BBDL1 {prog}", // 表单不管这个 → 必须被保留
+		}
+		for k, v := range extra {
+			env[k] = v
+		}
+		rec, _ := doJSON(t, s, http.MethodPut, "/api/hosts", map[string]any{
+			"hosts": map[string]any{"activeEnv": "开发环境", "sshs": []any{env}},
+		})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("PUT 失败 HTTP %d: %s", rec.Code, rec.Body.String())
+		}
+	}
+	envOf := func() map[string]any {
+		t.Helper()
+		root, err := config.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hosts, _ := root["hosts"].(map[string]any)
+		sshs, _ := hosts["sshs"].([]any)
+		if len(sshs) != 1 {
+			t.Fatalf("环境数 = %d", len(sshs))
+		}
+		m, _ := sshs[0].(map[string]any)
+		return m
+	}
+
+	put(map[string]any{"workspace": `D:\ws\客户甲`})
+	if got := envOf()["workspace"]; got != `D:\ws\客户甲` {
+		t.Errorf("提交的工作区没存下: %v", got)
+	}
+
+	// 清空（表单不再带这个键）→ 配置里也必须没有它，不能被保留机制补回来。
+	put(nil)
+	env := envOf()
+	if _, has := env["workspace"]; has {
+		t.Errorf("清空后工作区还在: %v —— 它被当成“表单不管的字段”保留了", env["workspace"])
+	}
+	if env["launchArgs"] != "BBDL1 {prog}" {
+		t.Errorf("表单不管的 launchArgs 该被保留，得到 %v", env["launchArgs"])
+	}
+}
