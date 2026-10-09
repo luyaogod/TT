@@ -61,11 +61,17 @@ update-live-check: ## tt update 的真联网自检（要能访问 GitHub；代�
 drawio-lib: build ## drawio 形状库 → dist/ 下两个 mxlibrary .xml（File → Open Library from 加载）
 	./tt.exe drawio lib
 
+# 调 .bat 为什么长这样（两处都别退回去）：
+#   1) 配方不是从交互式 shell 而是从 make 经 `sh -c` 下来，`cmd //c X` 在这种走法下
+#      **什么也不做**：cmd 收到认不出的 `//c` 就进交互式，读到的 stdin 是空的于是
+#      立刻退出 0 —— 目标报成功，产物一个没动。这比报错坏得多。
+#   2) 换成 `cmd /c X` 也不行：从 Git Bash 直接敲时 MSYS 会把 `/c` 当路径转成 `C:\`。
+#   `MSYS2_ARG_CONV_EXCL="*"` + 显式 `cmd.exe /c` 在两种走法下都对（已实测）。
 version-check: ## 版本号只有 VERSION 一个出处：对照 web 的两份 package.json 与 package-lock.json
 	@node -e 'const fs=require("fs");const want=fs.readFileSync("VERSION","utf8").trim();if(!/^[0-9]+\.[0-9]+\.[0-9]+$$/.test(want)){console.error("VERSION is not MAJOR.MINOR.PATCH: "+want);process.exit(1)}const lock=JSON.parse(fs.readFileSync("web/package-lock.json","utf8"));const rows=[["web/package.json",JSON.parse(fs.readFileSync("web/package.json","utf8")).version],["web/app/package.json",JSON.parse(fs.readFileSync("web/app/package.json","utf8")).version],["web/package-lock.json",lock.version],["web/package-lock.json packages[\"\"]",lock.packages[""].version]];const bad=rows.filter(r=>r[1]!==want);if(bad.length){console.error("version mismatch, VERSION = "+want+"\n  "+bad.map(r=>r[0]+" = "+r[1]).join("\n  "));process.exit(1)}console.log("version-check OK: "+want+" (VERSION is the single source)")'
 
 package: version-check ## 便携包 → dist/tt-portable/ 与 dist/tt-portable.zip
-	cmd //c build_portable.bat
+	MSYS2_ARG_CONV_EXCL="*" cmd.exe /c "build_portable.bat"
 
 msi: version-check ## MSI 安装包（需 WiX v3；复用便携包载荷）
-	cmd //c build_msi.bat
+	MSYS2_ARG_CONV_EXCL="*" cmd.exe /c "build_msi.bat"
