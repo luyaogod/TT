@@ -217,3 +217,19 @@ session close       → GDC 已结束、登记已清、进程 0、端口仅剩 T
 
 计划阶段全是离线的（读录制件），所以 `--dry-run` **不需要有会话** —— 先看清要发什么，
 再决定要不要开会话，这个顺序本来就该如此。实测：真机那轮教学录制件（teach-4）出 50 条计划。
+
+### 真机第 3 条硬知识：输入**只能**发给 `FormField`（`-6327` 的根因）
+
+把 `ConfigureEvent{value}` 发给字段**容器本身**（实测发给了 `Edit#263`），作业进程当场停下：
+
+```
+FORMS statement error number -6327
+Internal error in the run time library file ../ui/indialog.c(10523):0
+Program stopped at 'axm_axmt500_wf.4gl', line number 19839
+```
+
+代码里原来留了一个"找不到 FormField 就用对象自己"的兜底 —— **那个兜底就是凶手**，
+现在删掉了：找不到 FormField 就**拒发**并说明去查 `FormField`。发给 `FormField`（如
+`#271`、`#259`）则一路正常，运行期回 `om {{un 271 {{value …}}}}`。
+
+一句话：**宁可不做，也不做错** —— 这条错的代价是打死作业进程。

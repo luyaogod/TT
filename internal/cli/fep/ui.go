@@ -3,6 +3,7 @@ package fep
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -37,6 +38,11 @@ type uiRow struct {
 	Col        string `json:"col,omitempty"`
 	Value      string `json:"value,omitempty"`
 	Active     string `json:"active,omitempty"`
+	// 几何：协议里的位置与尺寸（单位可能是字符格，也可能是个别对象的像素，见 view/README）
+	PosX   int `json:"posX,omitempty"`
+	PosY   int `json:"posY,omitempty"`
+	Width  int `json:"width,omitempty"`
+	Height int `json:"height,omitempty"`
 }
 
 type uiStep struct {
@@ -172,7 +178,9 @@ var uiFindCmd = &cobra.Command{
 			rows = append(rows, uiRow{ID: o.ID, Type: o.Type, Name: fn.Text, Source: fn.Source,
 				Confidence: string(fn.Confidence), Window: m.WindowName(o.ID),
 				Comment: o.Attr("comment"), Col: o.Attr("col"),
-				Value: o.Attr("value"), Active: o.Attr("active")})
+				Value: o.Attr("value"), Active: o.Attr("active"),
+				PosX: geomInt(o, "posX"), PosY: geomInt(o, "posY"),
+				Width: geomInt(o, "gridWidth", "width"), Height: geomInt(o, "gridHeight", "height")})
 			if uiLimit > 0 && len(rows) >= uiLimit {
 				break
 			}
@@ -189,6 +197,9 @@ var uiFindCmd = &cobra.Command{
 				}
 				if x.Col != "" {
 					fmt.Printf("  col=%s", x.Col)
+				}
+				if x.Width > 0 {
+					fmt.Printf("  geom=%d,%d %dx%d", x.PosX, x.PosY, x.Width, x.Height)
 				}
 				if x.Value != "" {
 					v := x.Value
@@ -261,4 +272,18 @@ var recStepsCmd = &cobra.Command{
 			}
 		})
 	},
+}
+
+// geomInt 读一个几何属性：真实 AUI 里宽高有两种写法（gridWidth/width、
+// gridHeight/height），哪个有用哪个 —— 见 internal/view/README 里的实测。
+func geomInt(o *fep.Object, keys ...string) int {
+	for _, k := range keys {
+		if v := strings.TrimSpace(o.Attr(k)); v != "" {
+			n, err := strconv.Atoi(v)
+			if err == nil && n > 0 {
+				return n
+			}
+		}
+	}
+	return 0
 }

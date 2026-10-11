@@ -151,10 +151,16 @@ func CheckRaw(ev string) error {
 
 // ResolveInputTarget answers "who should the typing go to".
 //
-// A field is usually a container (ButtonEdit/Value) with a FormField child; the
-// measured-working shape is to type at the FormField. When there is no FormField
-// the object itself is used and viaFormField reports false, so the caller can say
-// so instead of pretending it was verified.
+// **只发给 FormField**（或它自己就是可写的 Value）。
+//
+// 这条规则的代价是实测出来的：真机上把 `ConfigureEvent{value}` 发给一个 `Edit`（字段
+// 容器本身）会让**作业进程停下来**：
+//
+//	FORMS statement error number -6327
+//	Internal error in the run time library file ../ui/indialog.c(10523):0
+//	Program stopped at 'axm_axmt500_wf.4gl', line number 19839
+//
+// 所以这里宁可不做也不做错：找不到 FormField 就**拒发**，让调用方去查清对象关系。
 func ResolveInputTarget(m *Model, id int) (target int, viaFormField bool, err error) {
 	o, ok := m.Get(id)
 	if !ok {
@@ -172,7 +178,9 @@ func ResolveInputTarget(m *Model, id int) (target int, viaFormField bool, err er
 			return c.ID, true, nil
 		}
 	}
-	return id, false, nil
+	return 0, false, refuse(output.CodeTargetMissing, 5,
+		"#%d 是 %s，不是可写的 FormField：发给容器本身会让作业停在 -6327（实测）；"+
+			"先 tt fep ui find --text <栏位名> 找到它的 FormField 再发", id, o.Type)
 }
 
 // FindType returns objects of one type sorted by id (small helper for commands

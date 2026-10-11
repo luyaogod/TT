@@ -97,9 +97,9 @@ func TestResolveInputTargetPrefersFormField(t *testing.T) {
 	if err != nil || !via || target != 301 {
 		t.Fatalf("FormField 优先：target=%d via=%v err=%v", target, via, err)
 	}
-	target, via, err = ResolveInputTarget(m, 272)
-	if err != nil || via || target != 272 {
-		t.Fatalf("没有 FormField 时用它自己并如实报告：target=%d via=%v err=%v", target, via, err)
+	// 没有 FormField 的容器**必须拒发**：真机把值发给 Edit 容器直接让作业停在 -6327。
+	if _, _, err = ResolveInputTarget(m, 272); !refusedWith(err, 5) {
+		t.Fatalf("没有 FormField 的容器应拒发：%v", err)
 	}
 	if _, _, err := ResolveInputTarget(m, 99999); !refusedWith(err, 5) {
 		t.Fatalf("不存在的字段：%v", err)
