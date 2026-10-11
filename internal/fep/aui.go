@@ -49,6 +49,9 @@ type Model struct {
 	// 以前只能 "先声明者胜"，结果丢掉真对象（开窗第一列就是这样丢的）。
 	locals     map[ObjKey]*Object
 	localOrder []ObjKey
+	// winTables 记"哪个窗口实例有哪些网格"：实测开窗的窗口与它的网格在同一条定义消息里声明
+	// （an 0 Window 144 … {Table 145 …），而父链不可靠（会把开窗的列爬到主窗的网格上）。
+	winTables map[int][]int
 	// curWindow 是运行期最近一次告知的当前窗口（un 0 {{currentWindow "N"}}）。
 	// 它后面的声明/更新都归到这个窗口下 —— 这是 M1 用来划分作用域的依据。
 	curWindow int
@@ -62,7 +65,7 @@ type ObjKey struct {
 
 // NewModel returns an empty model.
 func NewModel() *Model {
-	return &Model{objs: make(map[int]*Object), locals: make(map[ObjKey]*Object)}
+	return &Model{objs: make(map[int]*Object), locals: make(map[ObjKey]*Object), winTables: make(map[int][]int)}
 }
 
 // Len reports how many objects the model holds.
@@ -83,8 +86,21 @@ func (m *Model) Conflicts() int { return m.conflicts }
 //  2. 作用域优先用运行期推的 currentWindow；拿不到时用声明里的父对象 id。
 //  3. 更新（un/rn）只合属性，不改类型/父 —— 这保证字段名解析稳定。
 func (m *Model) Apply(nodes []Node) int {
+	// 一条定义消息里若声明了顶层 Window，这批对象就属于**那个窗口实例**。
+	// 实测：每个开窗实例拿新的 Window id（119 / 121 / 144），而模板对象（列/格子/动作）
+	// 的 id 在实例间**复用** —— 所以作用域必须是"声明它的那个窗口 id"，
+	// 否则几个实例会被并成一份（我因此一直把事件发到已关闭的旧实例上）。
+	msgScope := 0
 	for _, n := range nodes {
-		// 运行期告知的当前窗口：从此之后的声明/更新都归到它名下。
+		if n.Type == "Window" && n.Parent == 0 && n.ID != 0 {
+			msgScope = n.ID
+		}
+	}
+	if msgScope != 0 {
+		m.curWindow = msgScope
+	}
+	for _, n := range nodes {
+		// 运行期告知的当前窗口（开窗/关窗时推）也能切作用域。
 		if n.ID == 0 {
 			if v := n.Attrs["currentWindow"]; v != "" {
 				if w, err := strconv.Atoi(v); err == nil {
@@ -92,7 +108,10 @@ func (m *Model) Apply(nodes []Node) int {
 				}
 			}
 		}
-		scope := m.curWindow
+		scope := msgScope
+		if scope == 0 {
+			scope = m.curWindow
+		}
 		if scope == 0 {
 			scope = n.Parent
 		}
@@ -121,6 +140,9 @@ func (m *Model) Apply(nodes []Node) int {
 			if n.Type == "Window" && n.Parent == 0 {
 				m.curWindow = n.ID
 				scope = n.ID
+			}
+			if msgScope != 0 && n.Type == "Table" {
+				m.winTables[msgScope] = append(m.winTables[msgScope], n.ID)
 			}
 			o := m.objForDef(n, scope)
 			if o.Scope == 0 {
@@ -292,11 +314,22 @@ func (m *Model) Chain(id int) (chain []*Object, cycle bool, window int) {
 	return chain, !ok && len(chain) > 0, window
 }
 
-// Window returns the nearest enclosing Window id.
-// 优先用运行期标的"当前窗口"（Win）；没有时才回退到父链。
+// Window returns the window instance an object belongs to.
+//
+// 优先级：运行期标的"最后所在窗口"(Win) → 声明作用域(Scope，若它解析为 Window)
+// → 父链上的 Window。第三种实测最不可靠（预载对象的父指向模板语境），所以只做兜底。
 func (m *Model) Window(id int) (int, bool) {
-	if o, ok := m.objs[id]; ok && o.Win != 0 {
-		return o.Win, true
+	// Scope 是静态的"声明它的那个窗口实例"，最准；Win 是动态的"最后被触及时所在窗口"，
+	// 会被跨实例的 un 更新带偏（实测 #94/#95 这种模板对象会漏到别的窗口下）。
+	if o := m.lookup(id, m.curWindow); o != nil {
+		if o.Scope != 0 {
+			if s, ok := m.Get(o.Scope); ok && s.Type == "Window" {
+				return s.ID, true
+			}
+		}
+		if o.Win != 0 {
+			return o.Win, true
+		}
 	}
 	_, _, w := m.Chain(id)
 	return w, w != 0
@@ -343,3 +376,8 @@ func (m *Model) Propagate() int {
 
 // CurrentWindow 返回运行期最近一次告知的当前窗口（un 0 {{currentWindow "N"}}）。
 func (m *Model) CurrentWindow() int { return m.curWindow }
+
+// TablesOfWindow 返回某个窗口实例声明过的网格（同一条定义消息里的 Table）。
+// 用途：写格子前要像前端那样告诉运行期"这个网格现在显示着"，而网格 id 不能猜 ——
+// 指错网格会把运行期带回错误的窗口语境（实测发成主窗的 #644 后，后面的动作全被丢）。
+func (m *Model) TablesOfWindow(w int) []int { return m.winTables[w] }

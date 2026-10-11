@@ -57,8 +57,16 @@ tt fep do cell 'pmdn_t.pmdn010' 10       # 单价
 		if cerr != nil {
 			return fail(exitTarget, "%v", cerr)
 		}
+		// 先按前端的做法告诉运行期"这个网格现在显示着"（且必须是**当前实例**的网格）。
+		// 实测这条例前端在写条件之前就发了；少了它，后面的 reconstruct 会被当成空动作。
+		// 先按前端的做法告诉运行期“这个网格现在显示着”（且必须是**当前实例**的网格）。
+		// 实测前端在写条件之前就发这条；少了它，后面的 reconstruct 会被当成空动作。
+		prefix := ""
+		if grid := fep.GridOfColumn(m, col.ID); grid != 0 && grid != col.ID {
+			prefix = fmt.Sprintf("ConfigureEvent 0{{idRef \"%d\"}{ pageSize \"9\"}{ bufferSize \"10\"}}}{", grid)
+		}
 		// 多个事件在同一条消息里用 }{ 分隔（与前端形态一致）。
-		ev := fep.ConfigureValueText(cell, args[1], nil) + "}{" +
+		ev := prefix + fep.ConfigureValueText(cell, args[1], nil) + "}{" +
 			fep.ConfigureCursorText(col.ID, len([]rune(args[1])))
 		// --accept：把当前可用的 ✓ 一起放进**同一条消息**。
 		// 实测：条件、光标、✓ 三个事件同一条消息发，开窗才“带着条件去查”；

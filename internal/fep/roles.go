@@ -101,6 +101,8 @@ type Control struct {
 	ActionActive string `json:"actionActive,omitempty"`
 	ActionIDRef  string `json:"actionIdRef,omitempty"`
 	Scope        int    `json:"scope,omitempty"`
+	// WindowID 是它所属的**窗口实例**（列/格子的 id 跨实例复用，驱动前要按它收窄）
+	WindowID int `json:"windowId,omitempty"`
 	// Source 是源码里对应的字段（.4fd），有它角色才稳定
 	Source *SrcField `json:"source,omitempty"`
 }
@@ -149,6 +151,10 @@ func Catalog(m *Model, r *Resolver) []Control {
 				role = "列:" + display
 			}
 		}
+		winID := 0
+		if w, ok := m.Window(o.ID); ok {
+			winID = w
+		}
 		if role == "" {
 			role = o.Type
 		}
@@ -157,6 +163,7 @@ func Catalog(m *Model, r *Resolver) []Control {
 			Window: m.WindowName(o.ID), Comment: o.Attr("comment"),
 			Value: o.Attr("value"), Active: o.Attr("active"), Hidden: o.Attr("hidden"),
 			Scope:        o.Scope,
+			WindowID:     winID,
 			Ops:          append([]string(nil), ops...),
 			ActionActive: o.Attr("actionActive"), ActionIDRef: o.Attr("actionIdRef"),
 		})
@@ -328,23 +335,42 @@ func DialogActionIDs(m *Model, dialogID int) map[int]bool {
 //
 // 这就是"按 name 绑定"的落地：不去猜 id，而是问"当前交互指令提供名字为 accept 的动作吗"。
 // 找不到就返回 false —— 调用方据此拒绝发送（宁缺不猜）。
+//
+// 关键（实测）：运行期会**为每个开窗实例新建自己的 Dialog**，并自带一套动作：
+//
+//	om 40 {an 121 Dialog 3504 {active "1"}} {{Action 3505 {name "accept"} {text "确定"} …}}
+//	om 44 {an 121 Dialog 3546 {active "1"}} {{Action 3535 {name "accept"} …}}
+//
+// 而模板里那套旧的（如 #109）虽然也叫 accept，却**不属于当前指令**，发了会被丢（只回 18 字节）。
+// 所以优先选"属于当前窗口实例"的那个 Dialog（父或作用域 = curWindow）。
 func ActionNameInDialog(m *Model, name string) (int, bool) {
-	for _, d := range m.ActiveDialogs() {
-		for _, o := range m.Objects() {
-			if o.Parent != d.ID {
+	cur := m.CurrentWindow()
+	pick := func(matchWindow bool) (int, bool) {
+		for _, d := range m.ActiveDialogs() {
+			inWin := d.Parent == cur || d.Scope == cur
+			if matchWindow != inWin {
 				continue
 			}
-			switch o.Type {
-			case "Action", "MenuAction", "IdleAction":
-			default:
-				continue
-			}
-			if o.Attr("name") == name {
-				return o.ID, true
+			for _, o := range m.Objects() {
+				if o.Parent != d.ID {
+					continue
+				}
+				switch o.Type {
+				case "Action", "MenuAction", "IdleAction":
+				default:
+					continue
+				}
+				if o.Attr("name") == name {
+					return o.ID, true
+				}
 			}
 		}
+		return 0, false
 	}
-	return 0, false
+	if id, ok := pick(true); ok {
+		return id, true
+	}
+	return pick(false)
 }
 
 // FilterKind 只保留某种类型的控件（给"格子操作只在列里选"这类场景用）。
@@ -352,6 +378,58 @@ func FilterKind(cat []Control, kind string) []Control {
 	var out []Control
 	for _, c := range cat {
 		if c.Kind == kind {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// GridOfColumn 找到某一列所属的网格（Table）——用于在写格子前按前端那样告诉运行期
+// "这个网格现在显示着"（实测前端会发 {网格}{pageSize}{bufferSize}，且在**当前实例**的网格上）。
+//
+// 先沿父链找同作用域的 Table；不行就在同一作用域里找第一个 Table。
+func GridOfColumn(m *Model, columnID int) int {
+	col, ok := m.Get(columnID)
+	if !ok {
+		return 0
+	}
+	scope := col.Scope
+	cur := col
+	for hop := 0; hop < 12; hop++ {
+		if cur.Type == "Table" && (scope == 0 || cur.Scope == scope) {
+			return cur.ID
+		}
+		if cur.Parent == 0 {
+			break
+		}
+		next, ok := m.Get(cur.Parent)
+		if !ok {
+			break
+		}
+		// 父链实测会把开窗的列爬到主窗的网格上（#644）；一旦要跨作用域就别再跟。
+		if scope != 0 && next.Scope != 0 && next.Scope != scope {
+			break
+		}
+		cur = next
+	}
+	// 兜底：同一作用域里的第一个 Table（实测开窗的窗口与它的网格在同一条消息里声明）。
+	if scope != 0 {
+		for _, o := range m.Objects() {
+			if o.Type == "Table" && o.Scope == scope {
+				return o.ID
+			}
+		}
+	}
+	// 拿不准就不发 —— 宁可少发一条，也不能把运行期带回错误的窗口语境。
+	return 0
+}
+
+// FilterScope 只保留属于某个窗口实例的控件（Scope 或 Win 命中）。
+// 列与格子的 id 在实例间是复用的，所以驱动前必须按实例收窄。
+func FilterScope(cat []Control, window int) []Control {
+	var out []Control
+	for _, c := range cat {
+		if c.Scope == window || c.WindowID == window {
 			out = append(out, c)
 		}
 	}
