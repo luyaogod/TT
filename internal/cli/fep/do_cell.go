@@ -50,13 +50,23 @@ tt fep do cell 'pmdn_t.pmdn010' 10       # 单价
 				return fail(exitUsage, "列 id 写法应为 #数字，得到 %q", args[0])
 			}
 			if o, ok := m.Get(id); ok {
-				// 同名冲突的教训：m.Get 可能拿到全局那份（实测 #3555 是 Item），
-				// 而目录里那份才是当前实例的 TableColumn。所以优先在目录里按 id 找。
+				// 同名冲突的教训：目录里可能同时存在同 id 的两条（实测 #3555 既是 Item
+				// 又是料件开窗的 TableColumn）。优先 TableColumn，其次当前窗口作用域。
 				kind, role := o.Type, args[0]
+				best := -1
 				for _, c := range cat {
-					if c.ID == id {
-						kind, role = c.Kind, c.Role
-						break
+					if c.ID != id {
+						continue
+					}
+					score := 0
+					if c.Kind == "TableColumn" {
+						score += 2
+					}
+					if w := m.CurrentWindow(); w != 0 && (c.Scope == w || c.WindowID == w) {
+						score++
+					}
+					if score > best {
+						best, kind, role = score, c.Kind, c.Role
 					}
 				}
 				cat = []fep.Control{{ID: id, Kind: kind, Role: role}}
@@ -86,7 +96,7 @@ tt fep do cell 'pmdn_t.pmdn010' 10       # 单价
 		if col.Kind != "TableColumn" {
 			return fail(exitUsage, "%s 是 %s，不是网格列；格子要写在某一列上", col.RolePath(), col.Kind)
 		}
-		cell, cerr := fep.FirstCellOf(m, col.ID)
+		cell, cerr := fep.FirstCellOfIn(m, col.ID, col.Scope)
 		if cerr != nil {
 			return fail(exitTarget, "%v", cerr)
 		}

@@ -246,9 +246,18 @@ func (e *roleError) Error() string { return e.msg }
 //
 // 前端写格子时会**同时**发两条事件：值发给格子、光标落在列上（见 do cell 命令）。
 func FirstCellOf(m *Model, columnID int) (int, error) {
+	return FirstCellOfIn(m, columnID, 0)
+}
+
+// FirstCellOfIn 同上，但只认某个作用域里的孩子。
+//
+// 为什么需要 scope：同一批 id 在不同树里会被重复使用（实测 #3555 既是料件开窗的
+// TableColumn，又在另一棵树里是 Item），不过滤就会把值写到别的树的格子上（实测 #96）。
+func FirstCellOfIn(m *Model, columnID, scope int) (int, error) {
+	inScope := func(o *Object) bool { return scope == 0 || o.Scope == 0 || o.Scope == scope }
 	var listID int
 	for _, o := range m.Objects() {
-		if o.Parent == columnID && o.Type == "ValueList" {
+		if o.Parent == columnID && o.Type == "ValueList" && inScope(o) {
 			listID = o.ID
 			break
 		}
@@ -258,7 +267,7 @@ func FirstCellOf(m *Model, columnID int) (int, error) {
 	}
 	best := 0
 	for _, o := range m.Objects() {
-		if o.Parent == listID && o.Type == "Value" && o.ID > 0 {
+		if o.Parent == listID && o.Type == "Value" && o.ID > 0 && inScope(o) {
 			if best == 0 || o.ID < best {
 				best = o.ID
 			}
