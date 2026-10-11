@@ -370,7 +370,25 @@ func ActionNameInDialog(m *Model, name string) (int, bool) {
 	if id, ok := pick(true); ok {
 		return id, true
 	}
-	return pick(false)
+	// 实战教训：运行期**每换一次状态就替换 Dialog 并重新分配动作 id**
+	// （实测同一个"确定"：模板 #109 → 实例 #3535 → 查询后 #4533）。
+	// 所以当多个候选同名时，取**最新分配的那个（id 最大）**：
+	// 发送旧的那个会被运行期当"不属于当前指令"丢掉（只回 18 字节空 ACK）。
+	best, found := 0, false
+	for _, d := range m.ActiveDialogs() {
+		for _, o := range m.Objects() {
+			if o.Parent != d.ID || o.Type != "Action" && o.Type != "MenuAction" && o.Type != "IdleAction" {
+				continue
+			}
+			if o.Attr("name") != name {
+				continue
+			}
+			if !found || o.ID > best {
+				best, found = o.ID, true
+			}
+		}
+	}
+	return best, found
 }
 
 // FilterKind 只保留某种类型的控件（给"格子操作只在列里选"这类场景用）。
