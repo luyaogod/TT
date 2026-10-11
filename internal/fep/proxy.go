@@ -387,6 +387,11 @@ func (c *conn) write(chunk []byte, fromRuntime bool) {
 		c.trackSeq(chunk)
 	}
 	files := c.files
+	if len(files) > 2 && files[2] != nil {
+		// 时间戳 + 方向 + 可 grep 的文本：两个方向分开录时无法对齐，
+		// 有了这一行就能回答"是哪条前端事件引出运行期的那条推送"（今天卡在这里）。
+		files[2].WriteString(timelineLine(fromRuntime, chunk))
+	}
 	c.mu.Unlock()
 	if len(files) == 0 {
 		return
@@ -435,6 +440,7 @@ func (c *conn) openLogs(dir, tag string) {
 	names := []string{
 		filepath.Join(dir, fmt.Sprintf("%s-%d-rt2gdc.log", tag, c.id)),
 		filepath.Join(dir, fmt.Sprintf("%s-%d-gdc2rt.log", tag, c.id)),
+		filepath.Join(dir, fmt.Sprintf("%s-%d-timeline.log", tag, c.id)),
 	}
 	for _, n := range names {
 		f, err := os.Create(n)
@@ -442,6 +448,45 @@ func (c *conn) openLogs(dir, tag string) {
 			c.files = append(c.files, f)
 		}
 	}
+}
+
+// timelineLine 把一段原始流量写成一行：时间 + 方向 + 可 grep 的文本。
+// 方向从**运行期视角**看：`>>` 是运行期→前端（om 同步），`<<` 是前端→运行期（event _om）。
+//
+// 为什么需要它：两个方向的录制件分开存，只有字节偏移、没有时间，
+// 于是"用户/注入的事件"和"运行期的响应"无法对齐 —— 今天就是卡在这一步
+// （运行期创建实例 Dialog 的那条推送，对应前端哪一条事件，看不出来）。
+func timelineLine(fromRuntime bool, chunk []byte) string {
+	dir := "<<"
+	if fromRuntime {
+		dir = ">>"
+	}
+	var b strings.Builder
+	b.Grow(len(chunk) + 40)
+	b.WriteString(time.Now().Format("15:04:05.000"))
+	b.WriteByte(' ')
+	b.WriteString(dir)
+	b.WriteByte(' ')
+	for i, c := range chunk {
+		if i > 1500 {
+			b.WriteString("…（截断）")
+			break
+		}
+		switch {
+		case c == '\n':
+			b.WriteString("\\n")
+		case c == '\r':
+			b.WriteString("\\r")
+		case c >= 0x20 && c < 0x7f:
+			b.WriteByte(c)
+		case c >= 0x80:
+			b.WriteByte(c) // UTF-8 字节照留，方便直接 grep 中文
+		default:
+			b.WriteByte('.')
+		}
+	}
+	b.WriteByte('\n')
+	return b.String()
 }
 
 func (c *conn) close() {

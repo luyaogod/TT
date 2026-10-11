@@ -14,6 +14,7 @@ import (
 var (
 	doCellIn     string
 	doCellAccept bool
+	doCellRow    int
 )
 
 // doCellCmd：往网格格子里写值。
@@ -57,13 +58,16 @@ tt fep do cell 'pmdn_t.pmdn010' 10       # 单价
 		if cerr != nil {
 			return fail(exitTarget, "%v", cerr)
 		}
-		// 先按前端的做法告诉运行期"这个网格现在显示着"（且必须是**当前实例**的网格）。
-		// 实测这条例前端在写条件之前就发了；少了它，后面的 reconstruct 会被当成空动作。
 		// 先按前端的做法告诉运行期“这个网格现在显示着”（且必须是**当前实例**的网格）。
 		// 实测前端在写条件之前就发这条；少了它，后面的 reconstruct 会被当成空动作。
+		grid := fep.GridOfColumn(m, col.ID)
 		prefix := ""
-		if grid := fep.GridOfColumn(m, col.ID); grid != 0 && grid != col.ID {
+		if grid != 0 && grid != col.ID {
 			prefix = fmt.Sprintf("ConfigureEvent 0{{idRef \"%d\"}{ pageSize \"9\"}{ bufferSize \"10\"}}}{", grid)
+		}
+		// --row：先设网格当前行（源码里 `IF li_ac > 0 THEN` 才回传选中行）。
+		if doCellRow > 0 && grid != 0 {
+			prefix += fmt.Sprintf("ConfigureEvent 0{{idRef \"%d\"}{ currentRow \"%d\"}}}{", grid, doCellRow)
 		}
 		// 多个事件在同一条消息里用 }{ 分隔（与前端形态一致）。
 		ev := prefix + fep.ConfigureValueText(cell, args[1], nil) + "}{" +
@@ -152,6 +156,7 @@ func init() {
 	doCellCmd.Flags().StringVar(&doCellIn, "in", "", "限定窗口（路由用）")
 	doCellCmd.Flags().BoolVar(&doCellAccept, "accept", false,
 		"把当前可用的 ✓ 一起放进同一条消息（写条件 + 回车查的那种形态）")
+	doCellCmd.Flags().IntVar(&doCellRow, "row", 0, "先把网格当前行设成第 N 行（1 起；选行回传时用）")
 	doCmd.AddCommand(doCellCmd)
 }
 
