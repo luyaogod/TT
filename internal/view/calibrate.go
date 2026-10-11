@@ -202,3 +202,72 @@ func LoadCalibration(path string) (Calibration, error) {
 	}
 	return c, nil
 }
+
+// SolveBest fits the mapping from the most consistent pair among the samples.
+//
+// 为什么不能只用前两个样本：两点必过（残差恒为 0），**一条被污染的证据看不出来**。
+// 真机上就遇到过：往「订单单号」写值让相邻栏位一起重绘，差异框跨了两行，于是解出
+// 荒唐的比例。做法改成：样本多取几个，两两拟合，看哪一对能**同时**解释其余样本
+// （留在外面算残差），取总残差最小且比例合理的那个。
+func SolveBest(samples []Sample) (FrameMap, []string, []Sample) {
+	var notes []string
+	usable := make([]Sample, 0, len(samples))
+	for _, s := range samples {
+		if s.Pixels.Empty() {
+			notes = append(notes, fmt.Sprintf("%s：没量到像素变化", s.Box.Label))
+			continue
+		}
+		// 一行文字的变化框不该有两行高：高了就是被邻居的重绘污染了
+		if s.Pixels.Dy() > 40 {
+			notes = append(notes, fmt.Sprintf("%s：差异框高 %dpx（超过一行），判为被邻居重绘污染，弃用",
+				s.Box.Label, s.Pixels.Dy()))
+			continue
+		}
+		usable = append(usable, s)
+	}
+	if len(usable) < 2 {
+		return FrameMap{}, append(notes, "可用样本不足两个"), usable
+	}
+	best := FrameMap{}
+	bestScore := math.Inf(1)
+	var bestPair []Sample
+	for i := 0; i < len(usable); i++ {
+		for j := i + 1; j < len(usable); j++ {
+			fm, problems := SolveMapping([]Sample{usable[i], usable[j]})
+			if len(problems) > 0 || !Plausible(fm) {
+				continue
+			}
+			score := 0.0
+			for k, s := range usable {
+				if k == i || k == j {
+					continue
+				}
+				score += residual(fm, s)
+			}
+			if score < bestScore {
+				bestScore, best, bestPair = score, fm, []Sample{usable[i], usable[j]}
+			}
+		}
+	}
+	if bestScore == math.Inf(1) {
+		return FrameMap{}, append(notes, "任何两个样本都推不出合理比例（多半都被重绘污染了）"), usable
+	}
+	if bestScore > 12 {
+		notes = append(notes, fmt.Sprintf("外面样本的总残差 %.1fpx 偏大：这一对可能也有污染", bestScore))
+	}
+	return best, notes, bestPair
+}
+
+// Plausible reports whether a mapping looks like the same coordinate system at all.
+//
+// 范围来自真机实测（格宽 7.0、格高 32）：给得宽松（2–40 / 8–64），
+// 但足以挡住"解出 132px/格"这种荒唐结果。
+func Plausible(fm FrameMap) bool {
+	return fm.ScaleX >= 2 && fm.ScaleX <= 40 && fm.ScaleY >= 8 && fm.ScaleY <= 64
+}
+
+func residual(fm FrameMap, s Sample) float64 {
+	dx := math.Abs(float64(fm.OriginX+int(float64(s.Box.X)*fm.ScaleX)) - float64(s.Pixels.Min.X))
+	dy := math.Abs(float64(fm.OriginY+int(float64(s.Box.Y)*fm.ScaleY)) - float64(s.Pixels.Min.Y))
+	return dx + dy
+}

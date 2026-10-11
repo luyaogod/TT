@@ -124,11 +124,12 @@ Window 的 width 是"像素"），静态推不出全局映射；而注一次输�
 			fmt.Fprintf(cmd.ErrOrStderr(), "· 样本 %s：协议 (%d,%d) → 像素 %v（%d 像素变化）\n",
 				cd.Name, cd.Box.X, cd.Box.Y, box, changed)
 		}
-		fm, problems := view.SolveMapping(samples)
+		fm, problems, used := view.SolveBest(samples)
 		if len(problems) > 0 {
 			return fail(exitQuality, "解不出可用的映射：%s（跳过：%s）",
 				strings.Join(problems, "；"), strings.Join(skipped, "；"))
 		}
+		samples = used
 		out := calOut
 		if out == "" {
 			dir, derr := cacheDir()
@@ -203,7 +204,8 @@ func pickCandidates(m *fep.Model, r *fep.Resolver, want []string, limit int) []c
 		if !ok {
 			continue
 		}
-		// 坐标必须与已有的不同（同格解不出比例）
+		// 行列都要能拉开：两个样本必须既有不同的列、也有不同的行，否则解不出格宽/格高。
+		// 同格直接丢；同列/同行先留着，最后按"列数+行数最多"挑一组。
 		dup := false
 		for _, e := range out {
 			if e.Box.X == cd.Box.X && e.Box.Y == cd.Box.Y {
@@ -226,9 +228,12 @@ func pickCandidates(m *fep.Model, r *fep.Resolver, want []string, limit int) []c
 }
 
 // candidateFor 找一个栏位：能写的 FormField + 带几何的容器。
+//
+// 同一屏会累积多个画面的同名对象（查询画面那份常常停在 (0,0)，是"没定位"的副本），
+// 所以：**只认真正有坐标的**，并在其中优先可写对象 —— 与 marks 用同一套判断。
 func candidateFor(m *fep.Model, r *fep.Resolver, name string) (candidate, bool) {
 	ff := 0
-	var boxObj *fep.Object
+	var positioned, writable []*fep.Object
 	for _, o := range m.Objects() {
 		fn, ok := r.Resolve(o.ID)
 		if !ok || fn.Text != name || fn.Confidence != fep.ConfHigh {
@@ -237,7 +242,25 @@ func candidateFor(m *fep.Model, r *fep.Resolver, name string) (candidate, bool) 
 		if o.Type == "FormField" && ff == 0 {
 			ff = o.ID
 		}
-		if b := boxOf(o); b.W > 0 && b.H >= 0 && (boxObj == nil || area(b) > area(boxOf(boxObj))) {
+		b := boxOf(o)
+		if b.W <= 0 {
+			continue
+		}
+		if b.X <= 0 && b.Y <= 0 {
+			continue // 没定位的副本
+		}
+		positioned = append(positioned, o)
+		if fep.IsWritableType(o.Type) {
+			writable = append(writable, o)
+		}
+	}
+	hits := positioned
+	if len(writable) > 0 {
+		hits = writable
+	}
+	var boxObj *fep.Object
+	for _, o := range hits {
+		if boxObj == nil || area(boxOf(o)) > area(boxOf(boxObj)) {
 			boxObj = o
 		}
 	}
@@ -310,6 +333,6 @@ func init() {
 	calibrateCmd.Flags().IntVar(&calMaxDiff, "max-diff", 600, "差异框宽度上限")
 	calibrateCmd.Flags().DurationVar(&calSettle, "wait", 5*time.Second, "每次注入后等运行期多久")
 	calibrateCmd.Flags().BoolVar(&calDryRun, "dry-run", false, "只列候选，不注入")
-	calibrateCmd.Flags().IntVar(&calCands, "candidates", 3, "自动挑几个候选栏位")
+	calibrateCmd.Flags().IntVar(&calCands, "candidates", 5, "自动挑几个候选栏位（多取几个便于交叉验证）")
 	Group.AddCommand(calibrateCmd)
 }
