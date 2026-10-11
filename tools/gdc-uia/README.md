@@ -64,3 +64,27 @@ powershell -NoProfile -File setvalue.ps1 -TargetPid <gdcPid> -AutoIdSuffix "cmt_
 GDC 的 pid 用 `tt fep session ps` 拿。
 
 脚本一律 **纯 ASCII**（PowerShell 5.1 读无 BOM UTF-8 会乱码，中文只在数据里出现）。
+
+## 实测结论：**能不能控、好不好控**（2026-10-11 普查，250 个元素）
+
+| 控件类型 | 数量 | 可寻址 | 可操控 | 便利度 | 实测备注 |
+|---|---|---|---|---|---|
+| `Button`（工具条动作） | 42 | ✔ `AutomationId` 后缀 | ✔ **Invoke** | **高** | **已验**：Invoke `ToolBarItem_insert` 与 `tt fep do act '#3435'`（录入）协议效果逐项一致 |
+| `MenuItem` | 8 | ✔ | ✔ Invoke | 高 | 同 Button |
+| `CheckBox` | 2 | ✔ `name`（中文标签） | ⚠ Toggle **不产生 FEP 事件** | 中 | Qt 的 `TogglePattern` 走 `setChecked()`，而 GDC 监听的是 `click()`；**用 Invoke**（= `click()`） |
+| `Edit`（栏位） | 16 | ✔ `name` = `cmt_*` | ✗ **SetValue 报告成功但不落地**（UIA 侧读回为空、协议侧也没动） | 低 | 写值仍走 FEP 协议（已验证可行） |
+| `ComboBox` | 3 | ✔ `name` = `cmt_*` | ✗ 只有 Value，没有 Expand/Selection | 低 | 选项走 FEP 协议 |
+| `Table` + `DataItem`（表格格子） | 1 + 12 | ⚠ **无 name/id**，只有 rect；但 `Table` 带 Grid/TableItemPattern（可按 (row,col) 取项） | ✗ 未见 Value/Toggle | 中 | 写格子/勾选行走 FEP 协议 |
+| `Header`（表头） | 52 | ✔ | 只读（合理） | — | 带 rect，手册标注可用 |
+| `Text`/`Group`/`Custom` | 94 | ✔ | Invoke | 中 | 容器与标签 |
+
+**结论（分工，不是替代）**：
+
+- **UIA 负责**：动作调用（形状天然正确、不抢焦点）、读数、**精确矩形**（手册标注直接用）；
+- **FEP 协议负责**：写栏位值、选下拉、表格里的一切（格子值/勾选/光标定位）。
+
+两个坑（脚本已处理）：
+
+1. **按名字寻址会撞容器**：`FormField` 与 `Edit` 共享 `name=cmt_xxx` —— 必须加类型过滤
+   （脚本的 `-Type`），否则 `SetValue` 会打到 FormField 上：**报告成功、值不落地**。
+2. **勾选框不能用 Toggle**：要 `Invoke`（见上表）。
