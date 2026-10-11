@@ -102,6 +102,9 @@ type Control struct {
 	ActionActive string `json:"actionActive,omitempty"`
 	ActionIDRef  string `json:"actionIdRef,omitempty"`
 	Scope        int    `json:"scope,omitempty"`
+	// Seq 是它"最后被声明/触碰"的序号 —— 同名多份（模板 vs 活实例）时按它决胜：
+	// 最新的那份才是运行期在用的那个（与 Get(id) 同一口径）。
+	Seq int `json:"seq"`
 	// WindowID 是它所属的**窗口实例**（列/格子的 id 跨实例复用，驱动前要按它收窄）
 	WindowID int `json:"windowId,omitempty"`
 	// Source 是源码里对应的字段（.4fd），有它角色才稳定
@@ -162,6 +165,7 @@ func Catalog(m *Model, r *Resolver) []Control {
 			Value: o.Attr("value"), Active: o.Attr("active"), Hidden: o.Attr("hidden"),
 			NoEntry:      o.Attr("noEntry"),
 			Scope:        o.Scope,
+			Seq:          o.Seq,
 			WindowID:     winID,
 			Ops:          append([]string(nil), ops...),
 			ActionActive: o.Attr("actionActive"), ActionIDRef: o.Attr("actionIdRef"),
@@ -204,8 +208,54 @@ func ResolveRole(cat []Control, want string) (Control, []Control, error) {
 	case 0:
 		return Control{}, nil, &roleError{msg: "找不到这个角色：" + want}
 	default:
+		// 同名多份的常见情形：**模板对象与活实例**（实测同一列/同一栏位会有两份，
+		// 模板那份先声明、活实例后声明）。按与 Get(id) 同一条规则决胜：
+		// **最后声明/触碰的那份才是运行期在用的那个**。
+		//
+		// 这样就不需要调用方每次写全「窗口/角色」或查 id 了 —— 而写 id恰恰是脆弱做法
+		// （id 每次换状态都会重新分配）。如果"最新"这份不唯一，仍然回到"不猜"。
+		if best, ok := newestOne(hits); ok {
+			return best, nil, nil
+		}
 		return Control{}, hits, &roleError{msg: "这个角色有多个命中，不猜 —— 请用「窗口/角色」写全，或加 --in 限定"}
 	}
+}
+
+// newestOne 在一组同名候选里挑出**最新声明**的那一个。
+//
+// 只有在"最新那份比其余都新"时才认（否则不猜）。窗口实例内的对象与模板对象
+// 的窗口归属不同，所以不拿窗口比，只拿声明序号比 —— 这也是 Get(id) 的口径。
+func newestOne(hits []Control) (Control, bool) {
+	if len(hits) < 2 {
+		return Control{}, false
+	}
+	best := hits[0]
+	same := 0
+	for _, c := range hits[1:] {
+		if c.Seq > best.Seq {
+			best = c
+		}
+	}
+	for _, c := range hits {
+		if c.Seq == best.Seq {
+			same++
+		}
+	}
+	// 最新的份必须唯一（两份同 Seq 说明拿不到先后，交给调用方）
+	if same != 1 {
+		return Control{}, false
+	}
+	// 而且必须**确实比第二新的更靠后**（都相同则无从判断）
+	second := -1
+	for _, c := range hits {
+		if c.Seq != best.Seq && c.Seq > second {
+			second = c.Seq
+		}
+	}
+	if second < 0 || best.Seq <= second {
+		return Control{}, false
+	}
+	return best, true
 }
 
 type roleError struct{ msg string }

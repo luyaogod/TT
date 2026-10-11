@@ -226,3 +226,37 @@ func head(ss []string, n int) []string {
 	}
 	return ss[:n]
 }
+
+// ValuesBetween 列出两次模型之间**值变了**的字段（lookup 这类自己发事件的驱动用）。
+//
+// 不做"我写的 vs 自动带值"的归属（那种驱动一条消息里会同时写几个对象，
+// 归属不可靠 —— 宁可不标，也不猜）。调用方拿到后按 Kind="" 处理。
+func ValuesBetween(before, after *Model, r *Resolver) []ValueChange {
+	var out []ValueChange
+	if before == nil || after == nil {
+		return out
+	}
+	old := map[int]string{}
+	for _, o := range before.Objects() {
+		if v := o.Attr("value"); v != "" {
+			old[o.ID] = v
+		}
+	}
+	for _, o := range after.Objects() {
+		v := o.Attr("value")
+		if v == "" || old[o.ID] == v {
+			continue
+		}
+		name := ""
+		if r != nil {
+			if fn, ok := r.Resolve(o.ID); ok {
+				name = fn.Text
+			}
+		}
+		out = append(out, ValueChange{
+			ID: o.ID, Name: name, Label: name, Role: o.Attr("name"),
+			Comment: o.Attr("comment"), From: old[o.ID], To: v,
+		})
+	}
+	return out
+}

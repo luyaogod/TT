@@ -87,6 +87,9 @@ var doLookupCmd = &cobra.Command{
 		// 注入口要求显式连接号（实测：传 0 会被拒 "no such connection: 0"）。
 		// 选"最后活着的那条"：一个作业实例一条连接，开窗不新开连接。
 		connID := 0
+		// 开窗整条流程结束后要交一份"这一步之后"的报告（树/焦点/值），
+		// 所以先把**开窗之前**的现场记下来 —— 整条开窗在用户眼里只是"一步"。
+		beforeModel, _, _, _ := loadModel("")
 		if conns, cerr := c.Status(); cerr == nil {
 			for _, cc := range conns {
 				if cc.Alive && cc.ID > connID {
@@ -343,6 +346,17 @@ var doLookupCmd = &cobra.Command{
 				fmt.Printf("  勾选：%s ← %s（格子 #%d）\n", pl.CheckCol, pl.CheckVal, pl.Cell)
 			}
 			fmt.Printf("  结果：%s\n", pl.Result)
+			// 与 do 的命令一致：把"树变了什么 / 值变了什么 / 现在焦点在哪"一起交出来。
+			if afterM, rr, _, err := loadModel(""); err == nil {
+				imp := &fep.Changes{
+					Tree:   fep.DiffModels(beforeModel, afterM),
+					Values: fep.ValuesBetween(beforeModel, afterM, rr),
+				}
+				if f := afterM.FocusNow(); f.FocusID != 0 || f.CursorID != 0 {
+					imp.Focus = &f
+				}
+				printImpact(imp, lookupWait.String())
+			}
 		})
 	},
 }

@@ -25,9 +25,7 @@ func printImpact(ch *fep.Changes, wait string) {
 	switch {
 	case ch.TimedOut:
 		fmt.Printf("  运行期在 %s 内没有回包（事件发出去了，作业没显式变化）\n", wait)
-	case ch.RuntimeBytes == 0:
-		fmt.Println("  运行期没有新数据")
-	default:
+	case ch.RuntimeBytes > 0:
 		fmt.Printf("  运行期 +%d 字节 / 新消息 %d 条\n", ch.RuntimeBytes, ch.NewMessages)
 	}
 
@@ -42,29 +40,21 @@ func printImpact(ch *fep.Changes, wait string) {
 		}
 	}
 
-	// ② 值：哪个是我写的、哪个是系统自动带出来的
-	var sent, auto []fep.ValueChange
+	// ② 值：哪个是我写的、哪个是系统自动带出来的、哪个归属不明（不猜）
+	var sent, auto, plain []fep.ValueChange
 	for _, v := range ch.Values {
-		if v.Kind == "sent" {
+		switch v.Kind {
+		case "sent":
 			sent = append(sent, v)
-		} else {
+		case "auto":
 			auto = append(auto, v)
+		default:
+			plain = append(plain, v)
 		}
 	}
-	for _, v := range sent {
-		fmt.Printf("      · 我写的：%s %q → %q", valueLabel(v), v.From, v.To)
-		if v.Comment != "" {
-			fmt.Printf("  (%s)", v.Comment)
-		}
-		fmt.Println()
-	}
-	for _, v := range auto {
-		fmt.Printf("      · 自动带值：%s → %q", valueLabel(v), v.To)
-		if v.Comment != "" {
-			fmt.Printf("  (%s)", v.Comment)
-		}
-		fmt.Println()
-	}
+	printValueGroup("我写的", sent)
+	printValueGroup("自动带值", auto)
+	printValueGroup("值变化", plain)
 
 	// ③ 焦点：现在在哪（下一步能不能动手的前置条件）
 	if f := ch.Focus; f != nil {
@@ -87,6 +77,38 @@ func printImpact(ch *fep.Changes, wait string) {
 	}
 }
 
+// maxValuePrint 是每类值变化最多打几行。
+//
+// 为什么要有上限：开窗一取数就是整屏格子从空变有值（实测一次 374 行），
+// 全列出来会把真正要看的那两行（供应商编号 / 供应商名称）淹掉。
+// 报告是给人看的"这一步发生了什么"，不是把树倒出来；要看全部走 --format json。
+const maxValuePrint = 8
+
+func printValueGroup(title string, vs []fep.ValueChange) {
+	if len(vs) == 0 {
+		return
+	}
+	for i, v := range vs {
+		if i >= maxValuePrint {
+			fmt.Printf("      · %s：…还有 %d 处（--format json 看全部）\n", title, len(vs)-maxValuePrint)
+			break
+		}
+		switch v.Kind {
+		case "sent":
+			fmt.Printf("      · %s：%s %q → %q", title, valueLabel(v), v.From, v.To)
+		case "auto":
+			fmt.Printf("      · %s：%s → %q", title, valueLabel(v), v.To)
+		default:
+			fmt.Printf("      · %s：%s %q → %q", title, valueLabel(v), v.From, v.To)
+		}
+		if v.Comment != "" {
+			fmt.Printf("  (%s)", v.Comment)
+		}
+		fmt.Println()
+	}
+}
+
+// valueLabel 给人看的字段名（中文名优先，其次协议名，最后 #id）。
 func valueLabel(v fep.ValueChange) string {
 	switch {
 	case v.Role != "" && v.Label != "" && v.Role != v.Label:
