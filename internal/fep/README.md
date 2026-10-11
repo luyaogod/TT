@@ -97,3 +97,23 @@ tt fep rec steps --from teach-4-gdc2rt.log  → 原始事件 52 → 语义动作
 - 等隔离实例就绪用**轮询端口**（不是固定 sleep），就绪后再加 0.7s 余量：
   渲染中途取帧会得到一张看起来很像真的半成品图。
 - 登录序列与调试线一致：等区域菜单 → 写 zone → 等 shell 提示符。
+
+### 事件构造与发前校验（`event.go`，M2 第一块）
+
+构造器逐字节对着**录制件里客户端自己发出的**事件写：
+
+```
+ActionEvent 0{{idRef "5160"}}
+KeyEvent 0{{keyName "Tab"}}
+ConfigureEvent 0{{idRef "60"}{ value "LUYAO"}}
+ConfigureEvent 0{{idRef "6543"}{ cursor "5"}{ cursor2 "5"}}
+```
+
+两个必须照抄的细节：第一个属性紧贴 `{{`、后续属性前**有一个空格**；
+**值输入不带光标对**（早期探针的"必须带 cursor/cursor2"与录制件不符 ——
+真人打字产生的是 value-only，光标对是客户端自己另发的一条）。
+
+发前校验（只判断、**不发包**）：目标存在 → 类型白名单（含 `controlp` 的 ButtonEdit）→
+`actionActive` → `_om` 序号等于该连接的下一个 → `KeyEvent` 禁带 idRef。
+打字目标优先取字段的 `FormField` 子对象（`ResolveInputTarget` 会把"有没有拿它"如实报告出来，
+不假装验证过）。
