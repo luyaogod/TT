@@ -22,18 +22,22 @@ import (
 
 // SrcField 是源码里的一个控件（.4fd 一条元素）。
 type SrcField struct {
-	Form       string `json:"form"`
-	Name       string `json:"name"`              // 协议名（如 formonly.pmdl004 / pmdl_t.pmdl004）
-	ColName    string `json:"colName,omitempty"` // 数据库栏位（如 pmdl004）
-	Widget     string `json:"widget,omitempty"`
-	FieldType  string `json:"fieldType,omitempty"` // TABLE_COLUMN / NON_DATABASE / COLUMN_LIKE …
-	Comment    string `json:"comment,omitempty"`   // cmt_pmdl004（运行期对象上也带这个）
-	Title      string `json:"title,omitempty"`     // 中文标题（lbl_* 或直接文字）
-	Required   bool   `json:"required,omitempty"`
-	NoEntry    bool   `json:"noEntry,omitempty"`
-	Opener     string `json:"opener,omitempty"` // 开窗程序（来自 .4gl 的 controlp 段）
-	PosX, PosY int    `json:"posX,omitempty"`
-	TabIndex   int    `json:"tabIndex,omitempty"`
+	Form      string `json:"form"`
+	Name      string `json:"name"`              // 协议名（如 formonly.pmdl004 / pmdl_t.pmdl004）
+	ColName   string `json:"colName,omitempty"` // 数据库栏位（如 pmdl004）
+	Widget    string `json:"widget,omitempty"`
+	FieldType string `json:"fieldType,omitempty"` // TABLE_COLUMN / NON_DATABASE / COLUMN_LIKE …
+	Comment   string `json:"comment,omitempty"`   // cmt_pmdl004（运行期对象上也带这个）
+	Title     string `json:"title,omitempty"`     // 中文标题（lbl_* 或直接文字）
+	Required  bool   `json:"required,omitempty"`
+	NoEntry   bool   `json:"noEntry,omitempty"`
+	Opener    string `json:"opener,omitempty"` // 开窗程序（来自 .4gl 的 controlp 段）
+	// 复选框的两个字面值：`<CheckBox … valueChecked="Y" valueUnchecked="N"/>`（实测原样）。
+	// 没有它，"勾上/取消"到底该写什么就只能猜 —— 而猜错就是空 ACK。
+	ValueChecked   string `json:"valueChecked,omitempty"`
+	ValueUnchecked string `json:"valueUnchecked,omitempty"`
+	PosX, PosY     int    `json:"posX,omitempty"`
+	TabIndex       int    `json:"tabIndex,omitempty"`
 }
 
 var (
@@ -63,6 +67,9 @@ func ParseForm4fd(form, text string) []SrcField {
 			Title:     attrs["title"],
 			Required:  attrs["required"] == "true" || attrs["notNull"] == "true",
 			NoEntry:   attrs["noEntry"] == "true",
+			// CheckBox 的取值字面值（实测：valueChecked="Y" / valueUnchecked="N"）
+			ValueChecked:   attrs["valueChecked"],
+			ValueUnchecked: attrs["valueUnchecked"],
 		}
 		if f.Widget == "" {
 			f.Widget = tag

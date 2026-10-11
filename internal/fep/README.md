@@ -234,27 +234,29 @@ Program stopped at 'axm_axmt500_wf.4gl', line number 19839
 
 一句话：**宁可不做，也不做错** —— 这条错的代价是打死作业进程。
 
-## 未解：合成"点开窗"（记录证据，不猜）
+## 【已解】开窗怎么点：先纠正一个错判据（本节的"未解"结论是错的）
 
-真机上试过四种，**都不开窗**（判据是连接数不增加：弹窗会新开一条连接）：
+早期结论是"合成点开窗都不开窗，判据是连接数不增加" —— **判据本身就错了**：
+开窗**不开新连接**，它是在同一条连接里推一个新的 `Window` 对象（`an <conn> Window <id> {name "w_qry_<开窗程序>"}`），
+并伴随一次 `currentWindow` 切换。按"连接数"看，永远看不到开窗。
+正确的是：
 
-| 试法 | 结果 |
+- 判据 = **AUI 多一个 `Window` 对象**（`tt fep ui tree --window w_qry_` 一看就知道），加上进程窗口列表里多一个窗口；
+- 触发 = 单击字段的**开窗按钮**（`ButtonEdit` 且 `action=controlp`，如供应商 `#273`；
+  明细列的开窗按钮要求**光标先落在那一行的那一列**，否则 `actionActive=0` 会被拒）；
+- 之后的取数序列见下一节与 `openwin.go`（`tt fep src openwin <程序>`）。
+
+下表保留当时的事实（都是真的），错的是从它们推出的结论：
+
+| 试法 | 当时看到的结果 |
 |---|---|
-| 单击 `ButtonEdit{controlp}`（客户编号 #272） | 只回 ACK（+79 字节） |
+| 单击 `ButtonEdit{controlp}`（客户编号 #272） | 只回 ACK（+79 字节）—— 其实**开了**，只是判据看连接数 |
 | 先发焦点 `ConfigureEvent{tabIndex}` 再单击 | 同上 |
 | 直接单击 `FormField`（#271） | 同上 |
 | 双击（两次 `ActionEvent` 相隔 150ms） | 只回 ACK（+36 字节），连接数仍为 1 |
 | 裸 `KeyEvent F4` | 只回 ACK（+17 字节） |
 
-历史录制（teach-4，真人自己开的窗）里也找不到可照抄的开窗序列：那一段只有 19 次
-`KeyEvent Tab`、若干 `ActionEvent`（5160/260/814/6539…）与 `ConfigureEvent`。
-
-**所以这一条留给下一轮，按"不猜"的规矩办**：在真人开窗的那一轮精确录一次
-（含 `--from` 归档），把开窗前后的事件序列逐字节摊开对照；在那之前，手册里涉及"点开窗"
-的步骤要么由人亲手做，要么标注为未自动化。**不要**凭"应该是双击吧"去合成事件 ——
-真机已经证明：错的事件最轻是白费，最重是让作业停在 -6327。
-
-## 开窗：不是"协议做不到"，而是**列表是前端本地渲染的**（真人录制对照出来的）
+## 开窗：列表是前端本地渲染的（真人录制对照出来的）
 
 一轮真人示范（`fep-20261011-123139` 的录制件）把整条序列录下来了：
 
@@ -335,3 +337,49 @@ om 22 {{an 4811 Menu 39 {{text "ERROR"} {posY "0"} {style "winmsg"}
 夹具：`testdata/fep-recordings/program-stop.txt`（现场 `20261011-170312` 剪出来的，就是那次停摆）。
 `TestHealthyFixturesHaveNoProgramStop` 是反向对照：正常会话绝不能被误判成停摆，
 否则这条检查会变成噪声、人会开始忽略它。
+
+## W3：从源码读开窗语义（`openwin.go` + `tt fep src openwin`）
+
+**同一个"确定"按钮，两个开窗的"选中"含义完全不同** —— 这是"绝不猜、回源码读"最硬的例子：
+
+| 开窗 | `ON ACTION accept` 段 | 所以"选中"= |
+|---|---|---|
+| 供应商 `q_pmaa001_3`（`DISPLAY ARRAY` 那个对话框） | `IF li_ac > 0 THEN return1 = gr_qry[li_ac].pmaa001_1` | **当前行** |
+| 料件 `q_imaf001_15`（`INPUT ARRAY` 那个对话框） | `CALL …_get_multiret()` → `IF …[i].check = "Y"` | **勾选** |
+
+后者靠试是试不出来的：不勾选直接点确定，运行期**只回一个空 ACK**、界面什么都不返回 ——
+看起来像"形态不对"，真实原因是"你没勾选"。我为这个判断浪费了一整天。
+
+而且**一个开窗可以有两个对话框**（实测 `q_pmaa001_3` 与 `q_imaf001_15` 都有一个
+`INPUT ARRAY … FROM s_qry.*` 与一个 `DISPLAY ARRAY … TO s_qry.*`），语义各不同，所以结论要**按对话框**给。
+
+### 运行期怎么告诉你在哪个对话框
+
+`dialogType`（现场语料 94 个连接的取值分布）：`DisplayArray` 21817 / `InputArray` 11328 /
+`Input` 1697 / `Construct` 965。映射关系（两侧都是实测）：
+
+| `dialogType` | 源码里对应 | "选中"语义 |
+|---|---|---|
+| `Construct` | `CONSTRUCT … ON <列,列,列>` | 没有"选中"：往条件列写值 → 确定执行查询 |
+| `InputArray` | `INPUT ARRAY … FROM s_qry.*` | 按该对话框的 accept 读出来的（实测是勾选） |
+| `DisplayArray` | `DISPLAY ARRAY … TO s_qry.*` | 按该对话框的 accept 读出来的（实测是当前行） |
+
+`SelectModeFor(ow, dialogType)` 就是这张表；**对不上时回 `unknown`**（宁可不判，不猜）。
+
+### 勾选要写什么值
+
+从 `.4fd` 读：`<CheckBox name="check" valueChecked="Y" valueUnchecked="N" widget="CheckBox"/>`
+（`q_imaf001_15.4fd:59` 原样）。没有它就只能猜"勾是用 Y 还是 1 还是 true"——猜错就是空 ACK。
+
+### 命令
+
+```bash
+tt fep src openwin q_imaf001_15 --source D:/T100/源代码/主机109
+```
+
+输出：查询条件列 / 每个对话框的 accept 调用链 / 选中语义 / 回传字段 / 勾选栏字面值，
+**每条结论都带出处**（`文件:行 + 原文`）。镜像根取自配置 `mirror.dir`（`tt dict mirror dir`），
+可用 `--source` 或 `TT_SOURCE_ROOT` 覆盖。
+
+回归：`openwin_test.go` 用的是两个开窗的**真实结构**（删掉注释与无关行），
+断言"InputArray → 勾选 / DisplayArray → 当前行 / Construct → 没有选中 / 未知类型 → unknown"。
