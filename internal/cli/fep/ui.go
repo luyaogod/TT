@@ -16,6 +16,8 @@ var (
 	uiText      string
 	uiValue     string
 	uiType      string
+	uiComment   string
+	uiParent    int
 	uiLimit     int
 	uiOnlyNamed bool
 	recAll      bool
@@ -72,6 +74,9 @@ func init() {
 	uiFindCmd.Flags().StringVar(&uiText, "text", "", "按名字/文本筛（大小写不敏感）")
 	uiFindCmd.Flags().StringVar(&uiValue, "value", "", "按**值**筛（网格格子没有名字也没有坐标，只能靠值找：如 1,000.000）")
 	uiFindCmd.Flags().StringVar(&uiType, "type", "", "只保留该类型的对象（如 Window / Table）")
+	uiFindCmd.Flags().StringVar(&uiComment, "comment", "",
+		"按对象的 comment 筛 —— 明细格子没有名字，但带 comment=cmt_<表格><栏位>（如 cmt_pmdn007），\n靠它能把「一格」和数据库栏位对上")
+	uiFindCmd.Flags().IntVar(&uiParent, "parent", 0, "按父对象编号筛（如 --parent 219 看某张表下的所有格子）")
 	uiFindCmd.Flags().IntVar(&uiLimit, "limit", 0, "最多输出多少条（0 = 不限）")
 	uiFindCmd.Flags().BoolVar(&uiOnlyNamed, "named", false, "只要解析出名字的")
 }
@@ -172,6 +177,12 @@ var uiFindCmd = &cobra.Command{
 				continue
 			}
 			if uiValue != "" && !strings.Contains(o.Attr("value"), uiValue) {
+				continue
+			}
+			if uiComment != "" && !strings.Contains(strings.ToLower(o.Attr("comment")), strings.ToLower(uiComment)) {
+				continue
+			}
+			if uiParent > 0 && o.Parent != uiParent {
 				continue
 			}
 			if uiText != "" {
