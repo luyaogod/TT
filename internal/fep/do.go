@@ -96,6 +96,18 @@ type DoConfig struct {
 	// RawEvent 直接指定要发的**事件体**（可含多个事件），用于像前端那样把
 	// 多个事件放进同一条消息（实测：写格子 = 值 + 光标 同一条，拆开发不生效）
 	RawEvent string
+	// Commit 是"写完这个栏位后，主动离开它"要发的键（空 = 不离开）。
+	//
+	// 为什么必须离开（真机语料）：写值本身**只改显示值**，AFTER FIELD（校验、
+	// 自动带值、下一栏位的联动）只在**光标离开那一刻**才跑。实测的真实序列：
+	//
+	//	_om 4  ConfigureEvent{idRef "271"}{ value "CNJ-A50-261000000099"}
+	//	_om 5  ActionEvent{idRef "239"}          ← 立刻离开栏位
+	//
+	// 键盘离开栏位就是 `KeyEvent "Tab"`（语料里大量出现）。不离开的后果是：
+	// 报告里只看得到"我写的那个值"，看不到系统自动带出来的值 —— 而那正是
+	// "这个栏位填完之后系统自己做了什么"，是手册里最该写的东西。
+	CommitKey string
 }
 
 // ValueChange is one field whose value changed while waiting.
@@ -136,18 +148,20 @@ type Changes struct {
 
 // DoResult is what happened (or would happen).
 type DoResult struct {
-	Event    string   `json:"event"`
-	Conn     int      `json:"connection"`
-	Seq      int      `json:"seq"`
-	Target   string   `json:"target"`
-	Name     string   `json:"name,omitempty"`
-	Sent     bool     `json:"sent"`
-	Reply    string   `json:"reply,omitempty"`
-	Refused  string   `json:"refused,omitempty"`
-	NotSent  string   `json:"notSentReason,omitempty"`
-	Suggest  string   `json:"suggestion,omitempty"`
-	Changes  *Changes `json:"changes,omitempty"`
-	Warnings []string `json:"warnings,omitempty"`
+	Event   string `json:"event"`
+	Conn    int    `json:"connection"`
+	Seq     int    `json:"seq"`
+	Target  string `json:"target"`
+	Name    string `json:"name,omitempty"`
+	Sent    bool   `json:"sent"`
+	Reply   string `json:"reply,omitempty"`
+	Refused string `json:"refused,omitempty"`
+	// Committed 是"这一步之后主动离开栏位"用的键（空 = 没离开）—— 有它才有 AFTER FIELD。
+	Committed string   `json:"committed,omitempty"`
+	NotSent   string   `json:"notSentReason,omitempty"`
+	Suggest   string   `json:"suggestion,omitempty"`
+	Changes   *Changes `json:"changes,omitempty"`
+	Warnings  []string `json:"warnings,omitempty"`
 }
 
 // Do runs the pre-flight checks and, unless it is a dry run, sends the event.
@@ -259,6 +273,15 @@ func Do(c *Client, cfg DoConfig) (*DoResult, error) {
 	if err != nil {
 		return res, err
 	}
+	// 写完栏位后主动离开（否则 AFTER FIELD 不跑，自动带值看不见）
+	if cfg.CommitKey != "" {
+		time.Sleep(400 * time.Millisecond) // 让运行期先把这次写入吃掉，再谈离开
+		if _, cerr := c.Send(conn.ID, KeyEventText(cfg.CommitKey)); cerr != nil {
+			res.Warnings = append(res.Warnings, "离开栏位失败："+cerr.Error())
+		} else {
+			res.Committed = cfg.CommitKey
+		}
+	}
 	if cfg.Wait >= 0 {
 		res.Changes = waitChanges(c, conn.ID, before, cfg.Wait, sentID, sentValue)
 		// 发送后验证：作业要是被这一步搞停了，就**不要**让调用方把它当成功。
@@ -282,14 +305,16 @@ type snapshot struct {
 	bytesRT int64
 	msgs    int
 	windows map[string]bool
-	values  map[int]string
+	// values 按 **(id, 作用域)** 归键：同一个裸 id 在不同作用域各有一份（项目早已知），
+	// 只按 id 归键会把别的窗口的值当成"这一步变了"（实测：每一步都误报同一批自动带值）。
+	values map[ObjKey]string
 	// model 是发送**之前**的整个模型：有了它才能回答"树变了什么"（差分），
 	// 而不是只能报"运行期多了几个字节"。
 	model *Model
 }
 
 func snapshotOf(c *Client, connID int) snapshot {
-	s := snapshot{windows: map[string]bool{}, values: map[int]string{}}
+	s := snapshot{windows: map[string]bool{}, values: map[ObjKey]string{}}
 	if conns, err := c.Status(); err == nil {
 		for _, cc := range conns {
 			if cc.ID == connID {
@@ -308,7 +333,7 @@ func snapshotOf(c *Client, connID int) snapshot {
 	}
 	for _, o := range m.Objects() {
 		if v := o.Attr("value"); v != "" {
-			s.values[o.ID] = v
+			s.values[ObjKey{o.ID, o.Scope}] = v
 		}
 	}
 	return s
@@ -366,7 +391,8 @@ func waitChanges(c *Client, connID int, before snapshot, wait time.Duration, sen
 		if v == "" {
 			continue
 		}
-		if old, had := before.values[o.ID]; had && old == v {
+		key := ObjKey{o.ID, o.Scope}
+		if old, had := before.values[key]; had && old == v {
 			continue
 		}
 		name := ""
@@ -388,7 +414,7 @@ func waitChanges(c *Client, connID int, before snapshot, wait time.Duration, sen
 		}
 		ch.Values = append(ch.Values, ValueChange{
 			ID: o.ID, Name: name, Label: name, Role: role, Comment: o.Attr("comment"),
-			From: before.values[o.ID], To: v, Kind: kind,
+			From: before.values[key], To: v, Kind: kind,
 		})
 	}
 	// 最关键的一条：运行期有没有报错把程序停下。

@@ -65,7 +65,7 @@ var doTypeCmd = &cobra.Command{
 	Short: "往一个栏位输入值（优先发给该字段的 FormField）",
 	Args:  exactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runDo(cmd, fep.DoConfig{Kind: "input", Target: args[0], Value: args[1]})
+		return runDo(cmd, fep.DoConfig{Kind: "input", Target: args[0], Value: args[1], CommitKey: commitKeyFor("input")})
 	},
 }
 
@@ -167,4 +167,28 @@ func init() {
 		c.Flags().DurationVar(&doWait, "wait", 10*time.Second, "发完等运行期回包多久（负数=不等）")
 	}
 	Group.AddCommand(doCmd)
+}
+
+// doCommitOff 关掉"写完栏位后主动离开"（默认开）。
+var doCommitOff bool
+
+// commitKeyFor 返回"写完这个栏位后用什么键离开它"。
+//
+// 默认 Tab —— 依据是真机语料：键盘离开栏位时前端发的就是 `KeyEvent "Tab"`（大量出现）。
+// 不离开的后果：AFTER FIELD 不跑，自动带值（如供应商编号 → 供应商名称）看不见。
+// 用户明确要求："填写一个字段后，应该主动离开这个字段，不然怎么触发 AFTER FIELD"。
+func commitKeyFor(kind string) string {
+	if doCommitOff {
+		return ""
+	}
+	switch kind {
+	case "input", "pick":
+		return "Tab"
+	}
+	return ""
+}
+
+func init() {
+	doCmd.PersistentFlags().BoolVar(&doCommitOff, "no-commit", false,
+		"写完栏位后**不**主动离开（默认会发 KeyEvent Tab 离开：只有离开才触发 AFTER FIELD 与自动带值）")
 }

@@ -20,7 +20,7 @@ var doPickCmd = &cobra.Command{
 选项文本可以只写一部分（如 "L88" 或 "签收"）；命中多个会列出来让你写全。`,
 	Args: exactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runDo(cmd, fep.DoConfig{Kind: "pick", Target: args[0], Value: args[1]})
+		return runDo(cmd, fep.DoConfig{Kind: "pick", Target: args[0], Value: args[1], CommitKey: commitKeyFor("pick")})
 	},
 }
 

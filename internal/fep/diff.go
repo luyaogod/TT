@@ -236,15 +236,15 @@ func ValuesBetween(before, after *Model, r *Resolver) []ValueChange {
 	if before == nil || after == nil {
 		return out
 	}
-	old := map[int]string{}
+	old := map[ObjKey]string{}
 	for _, o := range before.Objects() {
 		if v := o.Attr("value"); v != "" {
-			old[o.ID] = v
+			old[ObjKey{o.ID, o.Scope}] = v
 		}
 	}
 	for _, o := range after.Objects() {
 		v := o.Attr("value")
-		if v == "" || old[o.ID] == v {
+		if v == "" || old[ObjKey{o.ID, o.Scope}] == v {
 			continue
 		}
 		name := ""
@@ -255,7 +255,7 @@ func ValuesBetween(before, after *Model, r *Resolver) []ValueChange {
 		}
 		out = append(out, ValueChange{
 			ID: o.ID, Name: name, Label: name, Role: o.Attr("name"),
-			Comment: o.Attr("comment"), From: old[o.ID], To: v,
+			Comment: o.Attr("comment"), From: old[ObjKey{o.ID, o.Scope}], To: v,
 		})
 	}
 	return out
