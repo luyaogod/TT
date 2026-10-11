@@ -29,6 +29,7 @@ type SrcField struct {
 	FieldType string `json:"fieldType,omitempty"` // TABLE_COLUMN / NON_DATABASE / COLUMN_LIKE …
 	Comment   string `json:"comment,omitempty"`   // cmt_pmdl004（运行期对象上也带这个）
 	Title     string `json:"title,omitempty"`     // 中文标题（lbl_* 或直接文字）
+	Table     string `json:"table,omitempty"`     // sqlTabName（pmdl_t/pmdn_t…）—— 用来分组单头/单身
 	Required  bool   `json:"required,omitempty"`
 	NoEntry   bool   `json:"noEntry,omitempty"`
 	Opener    string `json:"opener,omitempty"` // 开窗程序（来自 .4gl 的 controlp 段）
@@ -36,7 +37,8 @@ type SrcField struct {
 	// 没有它，"勾上/取消"到底该写什么就只能猜 —— 而猜错就是空 ACK。
 	ValueChecked   string `json:"valueChecked,omitempty"`
 	ValueUnchecked string `json:"valueUnchecked,omitempty"`
-	PosX, PosY     int    `json:"posX,omitempty"`
+	PosX           int    `json:"posX,omitempty"`
+	PosY           int    `json:"posY,omitempty"`
 	TabIndex       int    `json:"tabIndex,omitempty"`
 }
 
@@ -65,6 +67,7 @@ func ParseForm4fd(form, text string) []SrcField {
 			FieldType: attrs["fieldType"],
 			Comment:   attrs["comment"],
 			Title:     attrs["title"],
+			Table:     attrs["sqlTabName"],
 			Required:  attrs["required"] == "true" || attrs["notNull"] == "true",
 			NoEntry:   attrs["noEntry"] == "true",
 			// CheckBox 的取值字面值（实测：valueChecked="Y" / valueUnchecked="N"）

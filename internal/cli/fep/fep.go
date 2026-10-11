@@ -71,7 +71,7 @@ func init() {
 		return fail(exitUsage, "%v", err)
 	})
 
-	Group.AddCommand(sessionCmd, uiCmd, recCmd, doCmd, waitCmd, srcCmd)
+	Group.AddCommand(sessionCmd, uiCmd, recCmd, doCmd, waitCmd, srcCmd, jobCmd)
 	sessionCmd.AddCommand(sessionPsCmd, sessionCloseCmd)
 	uiCmd.AddCommand(uiSnapshotCmd, uiFindCmd, uiTreeCmd, uiRolesCmd, uiStateCmd)
 	recCmd.AddCommand(recStepsCmd)

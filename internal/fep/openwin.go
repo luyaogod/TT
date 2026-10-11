@@ -105,6 +105,22 @@ func (ow *OpenWinModel) SelectDialog() *OpenWinDialog {
 	return nil
 }
 
+// SelectSource 给出"为什么判成这种选中语义"的出处（取被选中那个对话框的第一条证据）。
+// 计划/手册里要展示依据，不能只给结论。
+func (ow *OpenWinModel) SelectSource() string {
+	if ow == nil {
+		return ""
+	}
+	d := ow.SelectDialog()
+	if d == nil {
+		return ow.Program + "：没有结果对话框"
+	}
+	if len(d.Evidence) > 0 {
+		return d.Evidence[0]
+	}
+	return d.Dialog
+}
+
 var (
 	reConstruct = regexp.MustCompile(`(?m)^[ \t]*CONSTRUCT\s+[A-Za-z_][A-Za-z0-9_]*\s+ON\s+([^\n]+)`)
 	reDialogBeg = regexp.MustCompile(`(?m)^[ \t]*DIALOG\b`)

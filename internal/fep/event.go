@@ -38,6 +38,12 @@ var ClickableTypes = map[string]bool{
 	"Item":           true,
 	"Value":          true,
 	"FormField":      true,
+	// MenuAction：菜单里的可执行项。为什么它必须可点（实测依据）：
+	// 运行期在**等一次确认**时会自己把焦点指到它身上 —— 实测错误窗（cl_err_s01）
+	// 弹出来时运行期推 `un 0 {{focus "690"}}`，而 #690 就是 MenuAction{name "OK"}。
+	// 也就是说"运行期正在等你去按它"。旧白名单漏了它，导致错误窗只能靠瞎按键去猜（还猜错）。
+	"MenuAction": true,
+	"Menu":       true,
 }
 
 // writableTypes 是"能把值发过去"的对象类型：字段值本身与它的编辑控件。

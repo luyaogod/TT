@@ -96,6 +96,7 @@ type Control struct {
 	Value    string   `json:"value,omitempty"`
 	Active   string   `json:"active,omitempty"`
 	Hidden   string   `json:"hidden,omitempty"`
+	NoEntry  string   `json:"noEntry,omitempty"` // 运行期广播的"不允许进入/录入"
 	Ops      []string `json:"ops"`
 	// 下面三个用于"能不能按"：运行期自己标的可用状态与真正的动作对象
 	ActionActive string `json:"actionActive,omitempty"`
@@ -159,6 +160,7 @@ func Catalog(m *Model, r *Resolver) []Control {
 			ID: o.ID, Kind: o.Type, Role: role, RoleName: display,
 			Window: m.WindowName(o.ID), Comment: o.Attr("comment"),
 			Value: o.Attr("value"), Active: o.Attr("active"), Hidden: o.Attr("hidden"),
+			NoEntry:      o.Attr("noEntry"),
 			Scope:        o.Scope,
 			WindowID:     winID,
 			Ops:          append([]string(nil), ops...),
@@ -262,11 +264,18 @@ func FirstCellOfIn(m *Model, columnID, scope int) (int, error) {
 	if listID == 0 {
 		return 0, &roleError{msg: fmt.Sprintf("列 #%d 下没有 ValueList（这列可能不是可写网格列）", columnID)}
 	}
-	best := 0
+	// 取**最近被触碰**的那一格（Seq 最大），不是 id 最小那一格。
+	//
+	// 依据是真机语料（不是推断）：`{ value "Y"}` 这类写格子的事件，其目标节点
+	// 总是**紧跟在**运行期 `currentRow` 变更之后被 `un` 触碰的那个 Value；
+	// 而同一个裸 id 会被复用（旧实例的格子还在模型里），按 id 最小去挑必然挑到
+	// 旧实例 —— 实测症状就是空 ACK，严重时 -6327 把作业打停。
+	// 见 tools/gdc-uia/README.md「真机语料里"勾选"的原始字节」。
+	best, bestSeq := 0, -1
 	for _, o := range m.Objects() {
 		if o.Parent == listID && o.Type == "Value" && o.ID > 0 && inScope(o) {
-			if best == 0 || o.ID < best {
-				best = o.ID
+			if o.Seq > bestSeq {
+				best, bestSeq = o.ID, o.Seq
 			}
 		}
 	}
@@ -274,6 +283,33 @@ func FirstCellOfIn(m *Model, columnID, scope int) (int, error) {
 		return 0, &roleError{msg: fmt.Sprintf("列 #%d 的 ValueList(#%d) 里没有格子（这一行可能还不存在）", columnID, listID)}
 	}
 	return best, nil
+}
+
+// CellsIn 返回某个网格列下**按 Seq 升序**排列的格子（= 行序）。
+//
+// 行序只能按"声明/触碰顺序"，不能按 id：实测料件开窗的勾选格按 id 是
+// #59/#105/#106…（旧实例残留），按 Seq 才是当前页的第 1/2/3 行。
+func CellsIn(m *Model, columnID, scope int) []*Object {
+	inScope := func(o *Object) bool { return scope == 0 || o.Scope == 0 || o.Scope == scope }
+	listIDs := map[int]bool{}
+	for _, o := range m.Objects() {
+		if o.Parent == columnID && o.Type == "ValueList" && inScope(o) {
+			listIDs[o.ID] = true
+		}
+	}
+	var out []*Object
+	for _, o := range m.Objects() {
+		if o.Type == "Value" && o.ID > 0 && listIDs[o.Parent] && inScope(o) {
+			out = append(out, o)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Seq != out[j].Seq {
+			return out[i].Seq < out[j].Seq
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out
 }
 
 // NearestAncestor 往上找最近的某个类型的祖先（防环）。
