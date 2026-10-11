@@ -151,10 +151,7 @@ func Catalog(m *Model, r *Resolver) []Control {
 				role = "列:" + display
 			}
 		}
-		winID := 0
-		if w, ok := m.Window(o.ID); ok {
-			winID = w
-		}
+		winID := m.WindowOf(o.ID)
 		if role == "" {
 			role = o.Type
 		}
@@ -451,12 +448,15 @@ func GridOfColumn(m *Model, columnID int) int {
 	return 0
 }
 
-// FilterScope 只保留属于某个窗口实例的控件（Scope 或 Win 命中）。
-// 列与格子的 id 在实例间是复用的，所以驱动前必须按实例收窄。
+// FilterScope 只保留属于某个窗口实例的控件。
+//
+// 判据是 WindowOf（见它的注释）：**不再**拿 `Scope` 兑底 —— 实测模板对象的 Scope
+// 停在旧实例上（新实例只是重新触及它们），拿 Scope 或它就会把旧实例的列当成当前实例的，
+// 症状是 `ui roles --scope <料件窗口>` 里冒出供应商的列。
 func FilterScope(cat []Control, window int) []Control {
 	var out []Control
 	for _, c := range cat {
-		if c.Scope == window || c.WindowID == window {
+		if c.WindowID == window {
 			out = append(out, c)
 		}
 	}

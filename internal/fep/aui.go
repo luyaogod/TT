@@ -19,7 +19,24 @@ type Object struct {
 	// 一个 "交易对象编号" 列的父链会一路挂到别的窗口的 ComboBox 上），
 	// 而运行期在开窗时会用 un 重新触及这些对象 —— 所以 "最后所在的窗口"才是
 	// "哪个窗口在显示它"。这是 M1 的核心证据，见提交说明。
+	//
+	// **改写规则在 2026-10-11 收窄过一次**（原来无条件写）：只在
+	//   (a) 本条消息**自己声明了**当前窗口（= 新实例构造，模板对象被重新触及），或
+	//   (b) 它本来就属于那个窗口（Win/Scope 已经是它）
+	// 时才改写。否则一条"在开窗的同时顺手更新主窗字段"的消息会把不相干的对象
+	// 也记到新窗口名下 —— 实测症状：`ui roles --scope <料件窗口>` 里冒出供应商的列。
 	Win int
+	// DeclWindow 是**最近一次声明它的那条消息**所属的窗口。
+	//
+	// 它是归属的第一手证据：实测它对三种情形都准 ——
+	//   · 主窗的明细网格 #644（声明于主窗的消息 → 178，即使它后来在同一条开窗消息里
+	//     被顺手更新过）；
+	//   · 开窗实例自己的网格（#122 → 119，#690/#3539/#3630 → 各自的实例）；
+	//   · 两个开窗**共享**的模板列（formonly.oobxl003_2 → 声明它的那个开窗 687）。
+	// 而父链对第三种会把它们指到别的实例（实测 #586 的链指向 155，而它属于 687）。
+	//
+	// 所以在**每次（重）声明**时更新："最近一次被运行期声明进哪个窗口"就是"它现在是谁的"。
+	DeclWindow int
 	// Seq 是这条对象"最后被声明或更新"的序号（模型内部单调自增）。
 	//
 	// 为什么需要它：实测运行期**会复用裸 id**，而且是在同一连接、同一窗口里：
@@ -197,8 +214,12 @@ func (m *Model) Apply(nodes []Node) int {
 			}
 			// 被运行期触及 = 它就是当前那份（见 Object.Seq）。
 			o.Seq = m.nextSeq()
+			// 归属只在两种情况下跟着走（见 Object.Win 的注释）：本条消息自己声明了
+			// 当前窗口（新实例构造），或它本来就属于那个窗口。否则不动。
 			if m.curWindow != 0 && n.ID != 0 && o.Type != "Window" {
-				o.Win = m.curWindow
+				if msgScope != 0 || o.Win == m.curWindow || o.Scope == m.curWindow {
+					o.Win = m.curWindow
+				}
 			}
 		default:
 			if n.ID == 0 {
@@ -228,6 +249,9 @@ func (m *Model) Apply(nodes []Node) int {
 			o.Seq = m.nextSeq()
 			if m.curWindow != 0 && n.Type != "Window" {
 				o.Win = m.curWindow
+			}
+			if m.curWindow != 0 {
+				o.DeclWindow = m.curWindow
 			}
 			if n.Parent != 0 {
 				switch {
@@ -503,12 +527,62 @@ func (m *Model) CurrentWindow() int { return m.curWindow }
 // TablesOfWindow 返回某个窗口实例声明过的网格（同一条定义消息里的 Table）。
 // 用途：写格子前要像前端那样告诉运行期"这个网格现在显示着"，而网格 id 不能猜 ——
 // 指错网格会把运行期带回错误的窗口语境（实测发成主窗的 #644 后，后面的动作全被丢）。
-func (m *Model) TablesOfWindow(w int) []int {
-	var out []int
-	for _, g := range m.winTables[w] {
-		if _, ok := m.Get(g); ok {
-			out = append(out, g)
+// WindowOf 回答"这个对象属于哪个窗口实例"—— 驱动按窗口收窄控件时用这一句。
+//
+// 三步，优先级**按实测数据**定（2026-10-11 在一份真会话上把三套证据逐条对过）：
+//
+//  1. `DeclWindow`（最近一次声明它的那条消息属于哪个窗口）—— 三种情形都准：
+//     主窗的明细网格 #644 → 178（即使它后来在同一条开窗消息里被顺手更新过）、
+//     开窗实例自己的网格 → 各自的实例、两个开窗共享的模板列 → 声明它的那个开窗；
+//  2. 父链上最近的 `Window` 祖先（结构对象生来如此）；
+//  3. `Win`（运行期最后一次把它当"某窗口的东西"触及）。
+//
+// 为什么不是父链优先：实测两个开窗共享的模板列（formonly.oobxl003_2）父链指向
+// **另一个**开窗实例（#586 的链到 155，而它属于 687），父链优先会把它们算错。
+// 三步都拿不到就回 0（不知道）—— 调用方照实降级，不许猜。
+func (m *Model) WindowOf(id int) int {
+	o, ok := m.Get(id)
+	if !ok {
+		return 0
+	}
+	if o.DeclWindow != 0 {
+		// "还活着"必须是"那个 id 现在还是个 **Window**" —— 裸 id 会被复用
+		// （实测 #60 被当成过 Item），只看"取得到"会把归属指向幽灵。
+		if w, ok := m.Get(o.DeclWindow); ok && w.Type == "Window" {
+			return o.DeclWindow
 		}
 	}
+	cur := o
+	for hop := 0; hop < 12; hop++ {
+		if cur.Type == "Window" {
+			return cur.ID
+		}
+		if cur.Parent == 0 {
+			break
+		}
+		next, ok := m.Get(cur.Parent)
+		if !ok {
+			break
+		}
+		cur = next
+	}
+	if o.Win != 0 {
+		if w, ok := m.Get(o.Win); ok && w.Type == "Window" {
+			return o.Win
+		}
+	}
+	return 0
+}
+
+func (m *Model) TablesOfWindow(w int) []int {
+	var out []int
+	seen := map[int]bool{}
+	for _, o := range m.ByType("Table") {
+		if m.WindowOf(o.ID) == w && !seen[o.ID] {
+			seen[o.ID] = true
+			out = append(out, o.ID)
+		}
+	}
+	sort.Ints(out)
 	return out
 }

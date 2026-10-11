@@ -20,20 +20,23 @@ import (
 //
 // 夹具 `testdata/fep-recordings/program-stop.txt` 就是那次停摆的现场录制剪出来的。
 
-// foldFixture 折叠一份仓库夹具。
+// foldFixture 折叠一份语料：name 可以是 testdata 下的夹具名，也可以是一个已存在的路径。
 func foldFixture(t *testing.T, name string) *Model {
 	t.Helper()
-	path := filepath.Join(testkit.RepoRoot(t), "testdata", "fep-recordings", name)
+	path := name
+	if _, err := os.Stat(path); err != nil {
+		path = filepath.Join(testkit.RepoRoot(t), "testdata", "fep-recordings", name)
+	}
 	bodies, err := ReadRecording(path)
 	if err != nil {
-		t.Fatalf("读夹具 %s: %v", name, err)
+		t.Fatalf("读语料 %s: %v", name, err)
 	}
 	m := NewModel()
 	for _, b := range bodies {
 		m.ApplyMessage(b)
 	}
 	if m.Len() == 0 {
-		t.Fatalf("夹具 %s 折叠后是空的", name)
+		return nil // 空壳录制（会话刚起来就死）：交调用方跳过，不当作错误
 	}
 	return m
 }

@@ -178,3 +178,69 @@ func TestApplyCheckBox4fdFillsTheLiteralValue(t *testing.T) {
 		t.Error("补全字面值也该留下出处")
 	}
 }
+
+// TestOpenWinProgramFromWindow：**驱动不该需要人告诉它"我刚开的是哪个开窗"**——
+// 运行期在窗口名里写着了（实测三个开窗都对得上）。
+func TestOpenWinProgramFromWindow(t *testing.T) {
+	cases := map[string]string{
+		"w_qry_q_pmaa001_3":  "q_pmaa001_3",
+		"w_qry_q_imaf001_15": "q_imaf001_15",
+		"w_qry_q_ooba002_1":  "q_ooba002_1",
+		"w_apmt500":          "", // 主窗：不是开窗
+		"w_qry_":             "",
+		"w_qry_notaq":        "", // 开窗程序一定以 q_ 开头
+		"":                   "",
+	}
+	for in, want := range cases {
+		if got := OpenWinProgramFromWindow(in); got != want {
+			t.Errorf("OpenWinProgramFromWindow(%q) = %q，想要 %q", in, got, want)
+		}
+	}
+}
+
+// TestReconcileSelectRefusesToGuess 是 R2 的落点：
+// 没有源码、或源码里对不上时，必须回 unknown —— **不许**拿"InputArray 就一定是勾选"顶替。
+//
+// 那个推断在今天这两个开窗上恰好成立，但它是观察不是规矩；一旦哪个开窗反着来，
+// 猜错的代价是"运行期只回空 ACK"，看起来像"没生效"（今天为此耗掉一整天）。
+func TestReconcileSelectRefusesToGuess(t *testing.T) {
+	ow := ParseOpenWin4gl("q_pmaa001_3", supplierSnippet, nil)
+	// 有源码：对得上 → 用源码的（带出处）
+	if got, why := ReconcileSelect(ow, "InputArray"); got != SelectChecked || why == "" {
+		t.Errorf("InputArray → %q（%s），想要 %q", got, why, SelectChecked)
+	}
+	if got, _ := ReconcileSelect(ow, "DisplayArray"); got != SelectCurrentRow {
+		t.Errorf("DisplayArray → %q，想要 %q", got, SelectCurrentRow)
+	}
+	// 没有源码 → unknown（并且说明原因）
+	if got, why := ReconcileSelect(nil, "InputArray"); got != SelectUnknown || !strings.Contains(why, "没有源码") {
+		t.Errorf("没有源码时 = %q（%s），想要 unknown + 说明", got, why)
+	}
+	// 源码里没有这个对话框 → unknown
+	only := ParseOpenWin4gl("q_x", `
+   DIALOG ATTRIBUTES(UNBUFFERED)
+      INPUT ARRAY gr_qry FROM s_qry.*
+      ON ACTION accept
+         CALL q_x_get()
+         EXIT DIALOG
+   END DIALOG
+`, nil)
+	if got, why := ReconcileSelect(only, "DisplayArray"); got != SelectUnknown || !strings.Contains(why, "没有") {
+		t.Errorf("源码没有 DISPLAY ARRAY 时 = %q（%s），想要 unknown + 说明", got, why)
+	}
+	// Construct 阶段没有"选中"
+	if got, _ := ReconcileSelect(ow, "Construct"); got != SelectUnknown {
+		t.Errorf("Construct → %q，想要 unknown", got)
+	}
+	// 阶段不认识 → unknown
+	if got, _ := ReconcileSelect(ow, "Whatever"); got != SelectUnknown {
+		t.Errorf("未知阶段 → %q，想要 unknown", got)
+	}
+	// 显式接受的"按阶段推断"：能用，但要能看出它不是源码结论
+	if got := StageDefaultSelect("InputArray"); got != SelectChecked {
+		t.Errorf("StageDefaultSelect(InputArray) = %q", got)
+	}
+	if got := StageDefaultSelect("Construct"); got != SelectUnknown {
+		t.Errorf("StageDefaultSelect(Construct) = %q，想要 unknown", got)
+	}
+}

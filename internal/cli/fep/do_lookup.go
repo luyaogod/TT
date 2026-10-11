@@ -32,20 +32,25 @@ import (
 // `valueChecked="Y"`），再把光标移到那一行，最后点确定。
 
 var (
-	lookupQuery string
-	lookupRow   int
-	lookupWait  time.Duration
-	lookupCheck string
+	lookupQuery  string
+	lookupRow    int
+	lookupWait   time.Duration
+	lookupCheck  string
+	lookupSource string
+	lookupAssume bool
 )
 
 // lookupPlan 是这个命令每一步要做的事（先算出计划、再逐步执行、每步验证）。
 type lookupPlan struct {
 	Opener   string `json:"opener"` // 开窗按钮（角色或 #id）
 	Window   int    `json:"window"` // 开窗实例的窗口 id
-	Grid     int    `json:"grid"`   // 它的结果网格
-	Stage    string `json:"stage"`  // 运行期当前阶段（dialogType）
-	Select   string `json:"select"` // 源码说的选中语义
-	Row      int    `json:"row"`    // 目标行（1 起）
+	WindowNm string `json:"windowName,omitempty"`
+	Program  string `json:"openwinProgram,omitempty"` // 从窗口名推出的开窗程序
+	Grid     int    `json:"grid"`                     // 它的结果网格
+	Stage    string `json:"stage"`                    // 运行期当前阶段（dialogType）
+	Select   string `json:"select"`                   // 选中语义（源码说的，或显式接受推断时用的）
+	Why      string `json:"selectWhy,omitempty"`      // 这个结论的出处 / 或"判不出来"的原因
+	Row      int    `json:"row"`                      // 目标行（1 起）
 	CheckCol string `json:"checkCol,omitempty"`
 	CheckVal string `json:"checkVal,omitempty"`
 	Cell     int    `json:"cell,omitempty"` // 要写值的那一格
@@ -167,7 +172,9 @@ var doLookupCmd = &cobra.Command{
 			return fail(exitTarget, "点开窗后没有新窗口：%v", strings.Join(windowNames(m), ", "))
 		}
 		pl.Window = win
-		step("开窗已出现：窗口 #%d %s", win, m.WindowName(win))
+		pl.WindowNm = m.WindowName(win)
+		pl.Program = fep.OpenWinProgramFromWindow(pl.WindowNm)
+		step("开窗已出现：窗口 #%d %s（开窗程序：%s）", win, pl.WindowNm, orDash(pl.Program))
 
 		// ③ 循环推进：查询 → 选中 → 回传。每轮都**重新读状态**再决定。
 		for round := 0; round < 6; round++ {
@@ -181,6 +188,26 @@ var doLookupCmd = &cobra.Command{
 			}
 			grid, stage := gridOfWindow(m, win)
 			pl.Grid, pl.Stage = grid, stage
+			// 选中语义：**先看源码，再看运行期阶段**，两边对不上就停手（R2）。
+			// 没有源码时不用"InputArray 就是勾选"这种推断顶替 —— 除非调用方显式接受。
+			mode, why := fep.ReconcileSelect(lookupOpenWin(pl.Program), stage)
+			if mode == fep.SelectUnknown && lookupAssume {
+				if alt := fep.StageDefaultSelect(stage); alt != fep.SelectUnknown {
+					mode = alt
+					why = "【推断·非源码】" + why + " → 按阶段默认取 " + string(alt)
+				}
+			}
+			pl.Select, pl.Why = string(mode), why
+			step("%s", why)
+			if stage == "InputArray" || stage == "DisplayArray" {
+				if mode == fep.SelectUnknown {
+					return fail(exitState, "选中语义判不出来（%s）—— 不猜：给 --source 指到源码镜像，"+
+						"或用 --assume 显式接受按阶段的默认推断", why)
+				}
+				if want := fep.StageDefaultSelect(stage); want != mode {
+					step("⚠ 注意：这个阶段的常见语义是 %s，而源码说的是 %s —— 按**源码**走", want, mode)
+				}
+			}
 			acc, ok := fep.ActionNameInDialog(m, "accept")
 			pl.Accept = acc
 			if !ok {
@@ -256,8 +283,11 @@ var doLookupCmd = &cobra.Command{
 		appendLookupAudit(pl)
 		return printJSONOrText(pl, func() {
 			fmt.Printf("开窗取数：%s\n", pl.Opener)
-			fmt.Printf("  窗口 #%d  网格 #%d  阶段 %s  选中语义 %s  行 %d\n",
-				pl.Window, pl.Grid, pl.Stage, pl.Select, pl.Row)
+			fmt.Printf("  窗口 #%d %s  开窗程序 %s\n", pl.Window, pl.WindowNm, orDash(pl.Program))
+			fmt.Printf("  网格 #%d  阶段 %s  选中语义 %s  行 %d\n", pl.Grid, pl.Stage, pl.Select, pl.Row)
+			if pl.Why != "" {
+				fmt.Printf("  依据：%s\n", pl.Why)
+			}
 			if pl.Cell != 0 {
 				fmt.Printf("  勾选：%s ← %s（格子 #%d）\n", pl.CheckCol, pl.CheckVal, pl.Cell)
 			}
@@ -273,6 +303,32 @@ func maxi(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "（从窗口名推不出）"
+	}
+	return s
+}
+
+// lookupOpenWin 读开窗程序源码（读不到就回 nil —— 上层据此说"没有源码可对"）。
+func lookupOpenWin(program string) *fep.OpenWinModel {
+	if program == "" {
+		return nil
+	}
+	root := lookupSource
+	if root == "" {
+		root = srcOpenWinSource()
+	}
+	if root == "" {
+		return nil
+	}
+	ow, err := fep.LoadOpenWin(root, program)
+	if err != nil {
+		return nil
+	}
+	return ow
 }
 
 func mustCatalog(m *fep.Model) []fep.Control { return fep.Catalog(m, fep.NewResolver(m)) }
@@ -429,6 +485,10 @@ func init() {
 	doLookupCmd.Flags().StringVar(&lookupQuery, "query", "", "查询条件（写到构造阶段的第一列）")
 	doLookupCmd.Flags().IntVar(&lookupRow, "row", 1, "目标行（1 起；0 = 只查询不选行）")
 	doLookupCmd.Flags().StringVar(&lookupCheck, "check", "", "勾选写什么值（缺省取 .4fd 的 valueChecked，通常是 Y）")
+	doLookupCmd.Flags().StringVar(&lookupSource, "source", "", "源码镜像根（读选中语义用；缺省取配置的 mirror.dir）")
+	doLookupCmd.Flags().BoolVar(&lookupAssume, "assume", false,
+		"允许在**没有源码**时按阶段的常见语义推断（InputArray→勾选 / DisplayArray→当前行）。"+
+			"默认关：推断是观察不是规矩，输出里会标【推断·非源码】")
 	doLookupCmd.Flags().DurationVar(&lookupWait, "wait", 8*time.Second, "每一步等运行期回包多久")
 	doCmd.AddCommand(doLookupCmd)
 }

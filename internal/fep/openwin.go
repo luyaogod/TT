@@ -466,3 +466,91 @@ func SelectModeFor(ow *OpenWinModel, dialogType string) (SelectMode, *OpenWinDia
 	}
 	return SelectUnknown, nil
 }
+
+// OpenWinProgramFromWindow 从窗口名推出开窗程序名。
+//
+// 依据（实测，三种开窗都对得上）：
+//
+//	窗口 name              → 开窗程序
+//	w_qry_q_pmaa001_3      → q_pmaa001_3
+//	w_qry_q_imaf001_15     → q_imaf001_15
+//	w_qry_q_ooba002_1      → q_ooba002_1
+//
+// 这样驱动就不需要人告诉它"我刚开的是哪个开窗"：运行期在 AUI 里写着了。
+// 对不上（比如主窗 w_apmt500）就回空串 —— 调用方照实降级。
+func OpenWinProgramFromWindow(name string) string {
+	name = strings.TrimSpace(name)
+	if !strings.HasPrefix(name, "w_qry_") {
+		return ""
+	}
+	prog := strings.TrimPrefix(name, "w_qry_")
+	if prog == "" {
+		return ""
+	}
+	// 再保险一层：开窗程序一定以 q_ 开头（实测 T100 的命名约定）
+	if !strings.HasPrefix(prog, "q_") {
+		return ""
+	}
+	return prog
+}
+
+// ReconcileSelect 把"运行期现在在哪个阶段"与"源码里那个对话框怎么选中"对起来。
+//
+// 返回值：判定出的选中语义、以及**为什么**（给人/给日志看的出处或分歧说明）。
+//
+// 规则（宁可不判，不猜）：
+//   - 运行期说 InputArray/DisplayArray，源码里有对应对话框且读出了语义 → 用源码的（带出处）；
+//   - 源码里没有对应对话框，或那份源码读不出语义 → unknown（如实说"判不出来"）；
+//   - 没有源码（镜像不在）→ unknown（**不**用"InputArray 就一定是勾选"这种推断顶替 ——
+//     这个推断在 2026-10-11 的两个开窗上恰好成立，但它是巧合，不是规矩）。
+//
+// 只有调用方显式说"我可以接受按阶段的默认语义"时，才用 StageDefaultSelect。
+func ReconcileSelect(ow *OpenWinModel, dialogType string) (SelectMode, string) {
+	stage := strings.ToLower(strings.TrimSpace(dialogType))
+	switch stage {
+	case "construct":
+		return SelectUnknown, "阶段 Construct：这一步是写查询条件 → 确定执行查询，没有'选中'这回事"
+	case "inputarray", "displayarray":
+	default:
+		return SelectUnknown, fmt.Sprintf("阶段 %q 不认识（只认 Construct / InputArray / DisplayArray）", dialogType)
+	}
+	if ow == nil {
+		return SelectUnknown, fmt.Sprintf("阶段 %s：没有源码可对（给 --source 或在配置里配 mirror.dir）", stage)
+	}
+	want := "INPUT ARRAY"
+	if stage == "displayarray" {
+		want = "DISPLAY ARRAY"
+	}
+	for i := range ow.Dialogs {
+		d := &ow.Dialogs[i]
+		if d.Dialog != want {
+			continue
+		}
+		if d.Select == SelectUnknown {
+			return SelectUnknown, fmt.Sprintf("阶段 %s：源码里的 %s 对话框读不出选中判据（看 %s 的 ON ACTION accept 段）",
+				stage, want, ow.Program)
+		}
+		ev := ""
+		if len(d.Evidence) > 0 {
+			ev = "；出处 " + d.Evidence[0]
+		}
+		return d.Select, fmt.Sprintf("阶段 %s ↔ 源码 %s 对话框 → %s（%s）%s",
+			stage, want, d.Select, ow.Program, ev)
+	}
+	return SelectUnknown, fmt.Sprintf("阶段 %s：源码 %s 里没有 %s 对话框 —— 两边对不上，不猜",
+		stage, ow.Program, want)
+}
+
+// StageDefaultSelect 是"没有源码时按阶段猜"的默认映射。
+//
+// **明确标注这是推断**：它来自 2026-10-11 对四个 T100 开窗的观察（INPUT ARRAY 用 check 勾选、
+// DISPLAY ARRAY 用 li_ac 当前行），但那是观察，不是规矩 —— 所以只在调用方显式接受时才用。
+func StageDefaultSelect(dialogType string) SelectMode {
+	switch strings.ToLower(strings.TrimSpace(dialogType)) {
+	case "inputarray":
+		return SelectChecked
+	case "displayarray":
+		return SelectCurrentRow
+	}
+	return SelectUnknown
+}
