@@ -25,7 +25,7 @@ func freePort(t *testing.T) int {
 
 func TestOpenRejectsBusyPortWithoutResidue(t *testing.T) {
 	if runtime.GOOS != "windows" {
-		t.Skip("隔离实例的可执行文件只在 Windows 上有意义")
+		t.Skip("隔离实例只在 Windows 上有意义：这条测的是端口被占时不留残余")
 	}
 	busy, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -55,7 +55,7 @@ func TestOpenRejectsBusyPortWithoutResidue(t *testing.T) {
 
 func TestOpenReportsMissingInstanceAndKeepsNothingBehind(t *testing.T) {
 	if runtime.GOOS != "windows" {
-		t.Skip("隔离实例的可执行文件只在 Windows 上有意义")
+		t.Skip("隔离实例只在 Windows 上有意义：这条测的是实例 exe 不存在时不留残余")
 	}
 	dir := t.TempDir()
 	gdcPort, proxyPort, injectPort := freePort(t), freePort(t), freePort(t)
@@ -84,7 +84,7 @@ func TestOpenReportsMissingInstanceAndKeepsNothingBehind(t *testing.T) {
 
 func TestCheckElevationWithZeroPidIsSelfComparison(t *testing.T) {
 	if runtime.GOOS != "windows" {
-		t.Skip("TokenElevation 只在 Windows 上有意义")
+		t.Skip("TokenElevation（提权检查）只在 Windows 上有意义")
 	}
 	e, err := CheckElevation(0)
 	if err != nil {

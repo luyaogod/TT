@@ -22,3 +22,17 @@
 
 - 夹具的来源、判据与改动约定 → [fgl-fixtures/README.md](./fgl-fixtures/README.md)、
   [tzs-mini/README.md](./tzs-mini/README.md)
+
+## fep-recordings — FEP 会话语料的**夹具**（剪过的那一份）
+
+| | 是什么 |
+|---|---|
+| [fep-recordings](./fep-recordings/README.md) | 从现场录制剪出来的 AUI 增量子流，**文本形态（一条消息一行）** |
+
+它们服务的不是解析器对拍，而是 `internal/fep` 的**不变量回归**（`corpus_test.go`）：
+AUI 同步只有 `an`/`un`/`rn` 三种操作，而 `rn`（删节点）曾经被当成 `un` 处理 ——
+被删的 Dialog / 工具栏项永远不死，"同一个 id 既是 Item 又是 TableColumn""accept 有三个候选"
+全是那一个 bug 的表现。现场语料（活体作业录的，含真实业务数据）不随仓库走，
+所以这里放一份**剪过的**：任何机器上都会真的跑，而不是静默跳过。
+
+来源、剪法与"什么可以剪掉"见 [fep-recordings/README.md](./fep-recordings/README.md)。

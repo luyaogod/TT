@@ -1,6 +1,9 @@
 package fep
 
-import "strconv"
+import (
+	"sort"
+	"strconv"
+)
 
 // Object is one merged AUI object.
 type Object struct {
@@ -16,7 +19,18 @@ type Object struct {
 	// 一个 "交易对象编号" 列的父链会一路挂到别的窗口的 ComboBox 上），
 	// 而运行期在开窗时会用 un 重新触及这些对象 —— 所以 "最后所在的窗口"才是
 	// "哪个窗口在显示它"。这是 M1 的核心证据，见提交说明。
-	Win   int
+	Win int
+	// Seq 是这条对象"最后被声明或更新"的序号（模型内部单调自增）。
+	//
+	// 为什么需要它：实测运行期**会复用裸 id**，而且是在同一连接、同一窗口里：
+	//
+	//	{Action 4937 {{name "s_detail2.find"}}}   ← Dialog 的动作
+	//	{an 376 Item 4937 {{name "7"}}}          ← 某下拉的第 7 项
+	//
+	// （同一个 4937，同一窗口，两种类型。）事件在线上只能给裸 id，所以驱动必须能回答
+	// "#4937 **现在**是什么" —— 答案不是"先声明的那个"，而是"运行期**最后**声明/触碰的那个"，
+	// 因为后来的声明就是运行期在用新对象覆盖这个 id。
+	Seq   int
 	Attrs map[string]string
 }
 
@@ -54,6 +68,8 @@ type Model struct {
 	// winTables 记"哪个窗口实例有哪些网格"：实测开窗的窗口与它的网格在同一条定义消息里声明
 	// （an 0 Window 144 … {Table 145 …），而父链不可靠（会把开窗的列爬到主窗的网格上）。
 	winTables map[int][]int
+	// seq 是声明/更新的单调计数（配合 Object.Seq 决定"同一个裸 id 现在是谁"）。
+	seq int
 	// curWindow 是运行期最近一次告知的当前窗口（un 0 {{currentWindow "N"}}）。
 	// 它后面的声明/更新都归到这个窗口下 —— 这是 M1 用来划分作用域的依据。
 	curWindow int
@@ -77,6 +93,41 @@ func (m *Model) Len() int { return len(m.objs) + len(m.locals) }
 // object. Non-zero means the stream contained partial messages; the model keeps
 // the first parent, so this is a diagnostic, not an error.
 func (m *Model) Conflicts() int { return m.conflicts }
+
+// nextSeq 推进声明/更新序号。
+func (m *Model) nextSeq() int {
+	m.seq++
+	return m.seq
+}
+
+// Candidates 返回**所有**裸 id 等于 id 的对象（全局表 + 作用域表），按 Seq 降序（最新在前）。
+//
+// 存在的理由：运行期会复用裸 id（见 Object.Seq 的注释），所以"同一个 id"在模型里
+// 可能有多份。想知道"现在是谁"用 Get；想知道"这个 id 被谁用过"用 Candidates（诊断/审计）。
+func (m *Model) Candidates(id int) []*Object {
+	var out []*Object
+	if o, ok := m.objs[id]; ok {
+		out = append(out, o)
+	}
+	for _, o := range m.locals {
+		if o.ID == id {
+			out = append(out, o)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Seq > out[j].Seq })
+	return out
+}
+
+// newest 返回一批候选里 Seq 最大的那个（nil 表示空）。
+func newest(objs []*Object) *Object {
+	var best *Object
+	for _, o := range objs {
+		if best == nil || o.Seq > best.Seq {
+			best = o
+		}
+	}
+	return best
+}
 
 // Apply merges parsed nodes into the model and returns how many nodes were
 // consumed.
@@ -117,6 +168,17 @@ func (m *Model) Apply(nodes []Node) int {
 		if scope == 0 {
 			scope = n.Parent
 		}
+		// 父=0 的声明（除顶层 Window 自己）是**连接级全局对象**：实测
+		//
+		//	{an 0 ActionDefaultList 93 {} {{ActionDefault 159 {{name "nextfield"} …}}}
+		//	… {an 1986 Value 159 {{value ""}}}
+		//
+		// 同一个 159：一个是全局的 nextfield 动作默认值，一个是网格里第 159 号格子。
+		// 以前给它们安上同一个 currentWindow 作用域，于是它们被当成"冲突" ——
+		// 实际上它们从来不是一个东西。
+		if n.Parent == 0 && n.Type != "Window" {
+			scope = 0
+		}
 		switch n.Type {
 		case "rn":
 			// 官方 1522：AUI 同步只有三种操作，an = 加、un = 改、rn = **删**。
@@ -133,6 +195,8 @@ func (m *Model) Apply(nodes []Node) int {
 			for k, v := range n.Attrs {
 				o.Attrs[k] = v
 			}
+			// 被运行期触及 = 它就是当前那份（见 Object.Seq）。
+			o.Seq = m.nextSeq()
 			if m.curWindow != 0 && n.ID != 0 && o.Type != "Window" {
 				o.Win = m.curWindow
 			}
@@ -160,6 +224,8 @@ func (m *Model) Apply(nodes []Node) int {
 			if o.Type == "" || o.Type == "?" {
 				o.Type = n.Type
 			}
+			// 声明顺序 = 身份判据（后声明的就是"现在这个"）。
+			o.Seq = m.nextSeq()
 			if m.curWindow != 0 && n.Type != "Window" {
 				o.Win = m.curWindow
 			}
@@ -193,20 +259,39 @@ func (m *Model) ApplyFrame(f Frame) int {
 	return m.ApplyMessage(string(f.Payload))
 }
 
-// remove 执行 AUI 同步的 `rn`（删节点）：全局表与作用域表里都清掉。
+// remove 执行 AUI 同步的 `rn`（删节点）：**该裸 id 的所有候选**都清掉。
+//
 // 实测证据：运行期换 Dialog / 换工具栏 / 重建模板条目时都是"先 rn 再 an"。
+//
+// 为什么不管作用域：rn 说的是"运行期把这个 id 删了"。我算出来的作用域只是**我**的归属结论，
+// 它可能是错的（模板对象的归属实测就经常错），而"这个 id 没了"是运行期说的硬事实。
+// 早先只删作用域匹配的那一份，于是算错作用域时对象永远不死 —— 这正是
+// "同一个 id 既是 Item 又是 Action""accept 三个候选""focus 乱跳"的来源。
 func (m *Model) remove(id, scope int) {
 	if id == 0 {
 		return
 	}
-	if o, ok := m.objs[id]; ok {
+	_ = scope
+	if _, ok := m.objs[id]; ok {
 		delete(m.objs, id)
 		m.gone[id] = true
-		_ = o
 	}
-	if o, ok := m.locals[ObjKey{scope, id}]; ok {
-		delete(m.locals, ObjKey{scope, id})
-		_ = o
+	for k := range m.locals {
+		if k.ID == id {
+			delete(m.locals, k)
+			m.gone[id] = true
+		}
+	}
+	// winTables 是"窗口↔它的网格"的账本；网格被删了账本也得跟着变，
+	// 否则会拿着已删的网格 id 去发事件（实测踩过：发到已关闭实例的网格 #156 上）。
+	for w, grids := range m.winTables {
+		kept := grids[:0]
+		for _, g := range grids {
+			if g != id {
+				kept = append(kept, g)
+			}
+		}
+		m.winTables[w] = kept
 	}
 	m.conflicts++ // 删除是诊断信号（今天正是它被漏掉）
 }
@@ -232,28 +317,33 @@ func (m *Model) ensureLocal(key ObjKey, typ string) *Object {
 	return o
 }
 
-// lookup 按裸 id 找一个对象：先当前作用域那份，再次当前窗口那份，最后全局那份。
+// lookup 按裸 id 找一个对象：先当前作用域那份，再当前窗口那份，最后全局/任意那份。
 // （事件在线上只能给裸 id，所以更新要尽量落到"当前正在用的那一份"上。）
+//
+// 返回候选里**最新**的那一份（见 Object.Seq）：同一裸 id 被运行期复用时，
+// 更新的应该是它此刻正在用的对象。
 func (m *Model) lookup(id, scope int) *Object {
-	if o, ok := m.locals[ObjKey{scope, id}]; ok {
-		return o
+	var cand []*Object
+	add := func(o *Object) {
+		if o != nil {
+			cand = append(cand, o)
+		}
 	}
+	add(m.locals[ObjKey{scope, id}])
 	if m.curWindow != 0 {
 		for k, o := range m.locals {
 			if k.ID == id && (k.Scope == m.curWindow || o.Win == m.curWindow) {
-				return o
+				add(o)
 			}
 		}
 	}
-	if o, ok := m.objs[id]; ok {
-		return o
-	}
+	add(m.objs[id])
 	for k, o := range m.locals {
 		if k.ID == id {
-			return o
+			add(o)
 		}
 	}
-	return nil
+	return newest(cand)
 }
 
 // objForDef 选一个可写的对象：
@@ -284,12 +374,13 @@ func (m *Model) objForDef(n Node, scope int) *Object {
 	return m.ensure(n.ID)
 }
 
-// Get returns an object by id (global table first, then any scoped one).
+// Get returns an object by id：**最后声明/触碰的那一份**（见 Object.Seq）。
+//
+// 为什么不是"先声明者胜"：运行期会复用裸 id（同一个 4937 既做过下拉的 Item
+// 又做过 Dialog 的 Action）。驱动问的是"#4937 现在是什么"，所以答案必须是
+// 运行期最后一次给出的那个定义。
 func (m *Model) Get(id int) (*Object, bool) {
-	if o, ok := m.objs[id]; ok {
-		return o, true
-	}
-	if o := m.lookup(id, m.curWindow); o != nil {
+	if o := newest(m.Candidates(id)); o != nil {
 		return o, true
 	}
 	return nil, false
@@ -412,4 +503,12 @@ func (m *Model) CurrentWindow() int { return m.curWindow }
 // TablesOfWindow 返回某个窗口实例声明过的网格（同一条定义消息里的 Table）。
 // 用途：写格子前要像前端那样告诉运行期"这个网格现在显示着"，而网格 id 不能猜 ——
 // 指错网格会把运行期带回错误的窗口语境（实测发成主窗的 #644 后，后面的动作全被丢）。
-func (m *Model) TablesOfWindow(w int) []int { return m.winTables[w] }
+func (m *Model) TablesOfWindow(w int) []int {
+	var out []int
+	for _, g := range m.winTables[w] {
+		if _, ok := m.Get(g); ok {
+			out = append(out, g)
+		}
+	}
+	return out
+}

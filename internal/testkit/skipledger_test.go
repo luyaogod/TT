@@ -111,6 +111,11 @@ var skipLedger = []skipSite{
 	{file: "internal/dev/tzs/e2e_test.go", msg: "没给 TTZS_PKG（本工作区内的真 .tzs 路径）：任务级动词要用真包验", layer: layL4, why: "需真包：开关 TTZS_PKG（任务级动词要用真包验）"},
 	{file: "internal/dev/tzs/oplog_test.go", msg: "工作区 %s 里没有包，这条用例没法跑", layer: layL3, why: "需真工作区且里面有包：开关 TTZS_WS"},
 	{file: "internal/dev/verify/verify_test.go", msg: "fence.Parse 自己就拦住了（%v）—— 这条测的是 gate1，不是解析层", layer: layPremise, why: "解析层先拦住了（那更好）—— 这条测试的对象就不存在了，如实说明而不是假装通过"},
+	{file: "internal/fep/corpus_test.go", msg: "没有现场录制语料（TT_FEP_RECORD_DIR 或数据目录 fep 都没有）", layer: layEnv, why: "本机现场语料是活体作业录的会话语料（含真实业务数据），不随仓库走。**不影响「全绿」这个结论**：仓库夹具 testdata/fep-recordings/*.txt 在任何机器上都会真的跑（TestFixtureRecordingsKeepInvariants），现场语料只是额外多覆盖一份。用 TT_FEP_RECORD_DIR 指到一份现场录制即可打开"},
+	{file: "internal/fep/corpus_test.go", msg: "没有录制件：跳过", layer: layPremise, why: "要求调用方已经交出非空语料列表；走到这里说明上游筛选把语料清空了（正常路径不会发生）"},
+	{file: "internal/fep/open_test.go", msg: "隔离实例只在 Windows 上有意义：这条测的是端口被占时不留残余", layer: layEnv, why: "隔离实例（gdc.exe + 端口体检）只在 Windows 上有；**不影响「全绿」这个结论**：这条测的正是「起不来时不留残余」这个 Windows 行为"},
+	{file: "internal/fep/open_test.go", msg: "隔离实例只在 Windows 上有意义：这条测的是实例 exe 不存在时不留残余", layer: layEnv, why: "同上（另一条同样只在 Windows 上有意义的失败路径）"},
+	{file: "internal/fep/open_test.go", msg: "TokenElevation（提权检查）只在 Windows 上有意义", layer: layEnv, why: "提权检查用的是 Windows TokenElevation API；**不影响「全绿」这个结论**，但它正是 TT 永不提权的那个断言"},
 	{file: "internal/testkit/corpus.go", msg: "没有真实语料：设 TDEV_CORPUS 或 TTZS_CORPUS 指到一份，或准备 %s", layer: layL3, why: "需真实语料：开关 TDEV_CORPUS / TTZS_CORPUS"},
 	{file: "internal/testkit/corpus.go", msg: "%s 下没有 %s", layer: layL3Missing, why: "语料在，但里面没有该扩展名的文件"},
 }
