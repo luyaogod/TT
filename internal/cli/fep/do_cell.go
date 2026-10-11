@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -41,10 +42,41 @@ tt fep do cell 'pmdn_t.pmdn010' 10       # 单价
 			return fail(exitFailed, "%v", err)
 		}
 		cat := fep.Catalog(m, r)
-		// 格子操作只在 TableColumn 里选：带源码时角色是按字段名改写的，同名字段
-		// 会同时落到"列"和某个工具栏项上（实测 formonly.pmaa001_1 就是），必须按类型收窄。
-		cat = fep.FilterKind(cat, "TableColumn")
-		col, cands, rerr := fep.ResolveRole(cat, args[0])
+		// 允许直接给活实例里的列 id（形如 #3555）：跨实例同名角色太多，
+		// 实测按角色会写到别的实例的格子上（#96）；用 id 最确定。
+		if strings.HasPrefix(args[0], "#") {
+			id, cerr := strconv.Atoi(strings.TrimPrefix(args[0], "#"))
+			if cerr != nil {
+				return fail(exitUsage, "列 id 写法应为 #数字，得到 %q", args[0])
+			}
+			if o, ok := m.Get(id); ok {
+				// 同名冲突的教训：m.Get 可能拿到全局那份（实测 #3555 是 Item），
+				// 而目录里那份才是当前实例的 TableColumn。所以优先在目录里按 id 找。
+				kind, role := o.Type, args[0]
+				for _, c := range cat {
+					if c.ID == id {
+						kind, role = c.Kind, c.Role
+						break
+					}
+				}
+				cat = []fep.Control{{ID: id, Kind: kind, Role: role}}
+			} else {
+				return fail(exitTarget, "模型里没有 #%d", id)
+			}
+		}
+		if !strings.HasPrefix(args[0], "#") {
+			// 格子操作只在 TableColumn 里选：带源码时角色是按字段名改写的，同名字段
+			// 会同时落到"列"和某个工具栏项上（实测 formonly.pmaa001_1 就是），必须按类型收窄。
+			cat = fep.FilterKind(cat, "TableColumn")
+		}
+		var col fep.Control
+		var cands []fep.Control
+		var rerr error
+		if strings.HasPrefix(args[0], "#") {
+			col = cat[0] // 已直接给 id，不再按名字解析
+		} else {
+			col, cands, rerr = fep.ResolveRole(cat, args[0])
+		}
 		if rerr != nil {
 			for _, c := range cands {
 				fmt.Fprintf(cmd.ErrOrStderr(), "  候选 %-44s %s #%d\n", c.RolePath(), c.Kind, c.ID)
