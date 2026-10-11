@@ -23,12 +23,13 @@ func TestReplayWhitelistBoundary(t *testing.T) {
 		}
 	}
 	deny := []string{
-		`ConfigureEvent 0{{idRef "1065"}{ tabIndex "260"}}`,
-		`ConfigureEvent 0{{idRef "797"}{ bufferSize "10"}{ pageSize "9"}}`,
-		`ConfigureEvent 0{{idRef "260"}{ cursor "0"}}`,
 		"",
+		`om 3 {{an 0 Window 1 {}}}`, // 运行期方向的消息不是前端事件
+		`meta Connection {{encoding "UTF-8"}}`,
 	}
 	for _, ev := range deny {
+		// 只挡“不是事件”的东西；ConfigureEvent 的各类属性一律放行
+		//（回放求保真：前端当时发过的，就按当时的样子再发一遍）。
 		if AllowedForReplay(ev) {
 			t.Fatalf("不该回放: %s", ev)
 		}
@@ -37,25 +38,22 @@ func TestReplayWhitelistBoundary(t *testing.T) {
 
 func TestPlanReplaySkipsAndStops(t *testing.T) {
 	events := []string{
-		`ConfigureEvent 0{{idRef "1065"}{ tabIndex "1"}}`, // 噪声
+		`ConfigureEvent 0{{idRef "1065"}{ tabIndex "1"}}`,
 		`ActionEvent 0{{idRef "5160"}}`,
 		`ActionEvent 0{{idRef "5170"}}`,
-		`ActionEvent 0{{idRef "999999"}}`, // 界面里没有
+		`ActionEvent 0{{idRef "999999"}}`, // 界面里没有 —— 现在由“发之前那一刻”拦，计划阶段不管
 		`KeyEvent 0{{keyName "Tab"}}`,
 	}
-	m := NewModel()
-	m.ApplyMessage(`om 1 {{an 0 Window 4097 {{name "w"}} {{an 4097 ToolBarItem 5160 {{text "录入"}} {}} {an 4097 ToolBarItem 5170 {{text "查询"}} {}}}}}`)
-	plan := PlanReplay(events, ReplayOptions{Model: m, Skip: []string{"5170"}})
-	if len(plan.Events) != 2 {
-		t.Fatalf("应剩 2 条（5160 + Tab）：%+v", plan.Events)
+	// 计划阶段只做白名单与 --skip／--stop-at；AUI 判断在 RunReplay 里逐条做。
+	// （早前在计划阶段就拦，会把“后面才出现的按钮”提前剔掉 —— 实测保存/审核 4 步没发出去。）
+	plan := PlanReplay(events, ReplayOptions{Skip: []string{"5170"}})
+	if len(plan.Events) != 4 {
+		t.Fatalf("应剩 4 条（除掉被 --skip 的那条）：%+v", plan.Events)
 	}
-	if len(plan.Skips) != 3 {
-		t.Fatalf("应跳 3 条：%+v", plan.Skips)
+	if len(plan.Skips) != 1 || !strings.Contains(plan.Skips[0].Reason, "跳过") {
+		t.Fatalf("只该跳 1 条且写清原因：%+v", plan.Skips)
 	}
-	if plan.Skips[1].Reason == "" || !strings.Contains(plan.Skips[2].Reason, "AUI 安全闸") {
-		t.Fatalf("跳过原因要写清楚：%+v", plan.Skips)
-	}
-	if got := PlanReplay(events, ReplayOptions{Model: m, StopAt: 1}); len(got.Events) != 1 {
+	if got := PlanReplay(events, ReplayOptions{StopAt: 1}); len(got.Events) != 1 {
 		t.Fatalf("StopAt 没生效: %+v", got.Events)
 	}
 }

@@ -30,6 +30,7 @@ type uiWindow struct {
 
 type uiRow struct {
 	ID         int    `json:"id"`
+	Parent     int    `json:"parent,omitempty"`
 	Type       string `json:"type"`
 	Name       string `json:"name"`
 	Source     string `json:"source"`
@@ -184,7 +185,7 @@ var uiFindCmd = &cobra.Command{
 				Confidence: string(fn.Confidence), Window: m.WindowName(o.ID),
 				Comment: o.Attr("comment"), Col: o.Attr("col"),
 				Value: o.Attr("value"), Active: o.Attr("active"),
-				PosX: geomInt(o, "posX"), PosY: geomInt(o, "posY"),
+				Parent: o.Parent, PosX: geomInt(o, "posX"), PosY: geomInt(o, "posY"),
 				Width: geomInt(o, "gridWidth", "width"), Height: geomInt(o, "gridHeight", "height")})
 			if uiLimit > 0 && len(rows) >= uiLimit {
 				break

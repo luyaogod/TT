@@ -46,12 +46,9 @@ var recReplayCmd = &cobra.Command{
 		if cerr != nil && !replayDryRun {
 			return cerr
 		}
-		// 计划阶段用当前界面做一次安全闸；执行阶段每条还会再查一次
-		m, _, _, merr := loadModel(pairedRecording(uiFrom, "-rt2gdc.log", "-gdc2rt.log"))
+		// 计划阶段**不做** AUI 判断：那会把“后面才出现的按钮”（确定/审核/是）提前剔掉，
+		// 实测导致保存与审核那几步根本没发。AUI 安全闸只放在发之前那一刻（RunReplay 里逐条判）。
 		opt := fep.ReplayOptions{StopAt: replayStopAt, Skip: replaySkip}
-		if merr == nil {
-			opt.Model = m
-		}
 		plan := fep.PlanReplay(events, opt)
 		fmt.Fprintf(cmd.ErrOrStderr(), "· 扫到 %d 条事件 → 计划回放 %d 条，跳过 %d 条\n",
 			plan.Scanned, len(plan.Events), len(plan.Skips))

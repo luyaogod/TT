@@ -172,6 +172,17 @@ func Do(c *Client, cfg DoConfig) (*DoResult, error) {
 			return nil, err
 		}
 		res.Event = KeyEventText(cfg.KeyName)
+	case "pick":
+		id, name, err := resolveTarget(m, r, cfg.Target, c.Window, "input")
+		if err != nil {
+			return nil, err
+		}
+		itemID, itemText, perr := PickOption(m, id, cfg.Value)
+		if perr != nil {
+			return nil, perr
+		}
+		res.Target, res.Name = fmt.Sprintf("#%d", itemID), name+" ← "+itemText
+		res.Event = ActionEventText(itemID)
 	case "input":
 		id, name, err := resolveTarget(m, r, cfg.Target, c.Window, "input")
 		if err != nil {
@@ -517,4 +528,88 @@ func writesData(cfg DoConfig, res *DoResult) bool {
 		return true
 	}
 	return false
+}
+
+// PickOption finds the item of a field's combo box whose text matches.
+//
+// 真机上用 GDC 自带的 **AUI Debug Tree**（Ctrl+右键）看到的结构是：
+//
+//	FormField 352 → ComboBox 353 → Item 47 / 6297 / 6298 / 6299（每个 Item 带 text）
+//
+// 所以"下拉的候选项"是**协议对象**，可以枚举、也可以点（点中的就是"选择"这一语义动作）。
+// 弹出来的那一下仍然是前端本地渲染（协议看不见），但**选择结果在协议里**。
+func PickOption(m *Model, fieldID int, text string) (itemID int, itemText string, err error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return 0, "", fmt.Errorf("fep: 没给选项文本")
+	}
+	// 收集该栏位（或它的后代）下面的 ComboBox
+	var combos []int
+	for _, o := range m.Objects() {
+		if o.Type != "ComboBox" {
+			continue
+		}
+		if o.ID == fieldID || o.Parent == fieldID {
+			combos = append(combos, o.ID)
+			continue
+		}
+		if _, _, win := m.Chain(o.ID); win != 0 {
+			// 沿父链找 fieldID
+			cur := o.Parent
+			for i := 0; i < 64 && cur != 0; i++ {
+				if cur == fieldID {
+					combos = append(combos, o.ID)
+					break
+				}
+				p, ok := m.Get(cur)
+				if !ok {
+					break
+				}
+				cur = p.Parent
+			}
+		}
+	}
+	if len(combos) == 0 {
+		return 0, "", &Refusal{Code: "TARGET_MISSING", Exit: 5,
+			Message: fmt.Sprintf("#%d 下面没有 ComboBox（这个栏位不是下拉）", fieldID)}
+	}
+	type hit struct {
+		id    int
+		text  string
+		exact bool
+	}
+	var hits []hit
+	for _, cid := range combos {
+		for _, o := range m.Objects() {
+			if o.Type != "Item" || o.Parent != cid {
+				continue
+			}
+			t := o.Attr("text")
+			if t == "" {
+				t = o.Attr("name")
+			}
+			if strings.Contains(t, text) {
+				hits = append(hits, hit{id: o.ID, text: t, exact: t == text})
+			}
+		}
+	}
+	if len(hits) == 0 {
+		return 0, "", &Refusal{Code: "TARGET_MISSING", Exit: 5,
+			Message: fmt.Sprintf("这个下拉里没有含 %q 的选项", text)}
+	}
+	// 精确匹配优先；否则若只剩一个就它
+	for _, h := range hits {
+		if h.exact {
+			return h.id, h.text, nil
+		}
+	}
+	if len(hits) == 1 {
+		return hits[0].id, hits[0].text, nil
+	}
+	var names []string
+	for _, h := range hits {
+		names = append(names, h.text)
+	}
+	return 0, "", &Refusal{Code: "TARGET_MISSING", Exit: 5,
+		Message: fmt.Sprintf("%q 命中 %d 个选项（%s）：写出更完整的选项文本", text, len(hits), strings.Join(names, " / "))}
 }

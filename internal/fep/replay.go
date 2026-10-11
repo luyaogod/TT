@@ -1,7 +1,6 @@
 package fep
 
 import (
-	"fmt"
 	"strings"
 	"time"
 )
@@ -17,27 +16,20 @@ import (
 // 仍然排除的：tabIndex / bufferSize / pageSize 这类纯状态噪声。
 
 // AllowedForReplay reports whether one event should be re-sent.
+//
+// 回放求的是**保真**：前端当时发出去的东西，就按当时的顺序再发一遍。
+// 早前我把 ConfigureEvent{cursor…}（焦点）当"导航噪声"滤掉，结果回放跑不动 ——
+// 今天查清楚了：**active/focus 是运行期的前置条件**（运行期自己都在推 un 0 {{focus "…"}}），
+// 前端恰是先用 cursor 事件告诉它"现在光标在这个栏位"，运行期才认后面的动作。
+// 所以回放白名单 = 全都放行（给"看得懂的步骤清单"用的过滤在 SemanticActions，不在这里）。
 func AllowedForReplay(ev string) bool {
 	ev = strings.TrimSpace(ev)
 	if ev == "" {
 		return false
 	}
-	switch {
-	case strings.HasPrefix(ev, "ActionEvent"):
-		return true
-	case strings.HasPrefix(ev, "KeyEvent"):
-		return true
-	case strings.HasPrefix(ev, "ConfigureEvent"):
-		switch {
-		case strings.Contains(ev, "value "):
-			return true
-		case strings.Contains(ev, "currentRow"), strings.Contains(ev, "currentColumn"):
-			return true
-		default:
-			return false // tabIndex / bufferSize / pageSize 之类
-		}
-	}
-	return false
+	return strings.HasPrefix(ev, "ActionEvent") ||
+		strings.HasPrefix(ev, "KeyEvent") ||
+		strings.HasPrefix(ev, "ConfigureEvent")
 }
 
 // ReplayEvent is one event scheduled for replay.
@@ -61,10 +53,13 @@ type ReplayPlan struct {
 }
 
 // ReplayOptions narrows a replay.
+//
+// 注意这里**没有** Model：计划阶段不该做 AUI 判断 —— 那会把“后面才出现的按钮”
+// （确定/审核/是）提前剔掉（实测踩过：保存与审核那 4 步根本没发）。
+// AUI 安全闸只放在“发之前那一刻”，逐条判、逐条记原因。
 type ReplayOptions struct {
 	StopAt int      // >0：只回放到第 N 条（含），用于“跑一半看效果”
 	Skip   []string // 命中（子串）就跳过，便于绕开某一两步
-	Model  *Model   // AUI 安全闸：对象不在界面里就跳过（nil = 不校验）
 }
 
 // PlanReplay turns recorded events into a replay plan.
@@ -80,16 +75,6 @@ func PlanReplay(events []string, opt ReplayOptions) ReplayPlan {
 		if hit := skippedBy(ev, opt.Skip); hit != "" {
 			plan.Skips = append(plan.Skips, ReplaySkip{Raw: ev, Reason: "按要求跳过：" + hit})
 			continue
-		}
-		// AUI 安全闸：对象不在**当次界面**里，就绝不发（发了最轻是白费，最重是打断连接）
-		if opt.Model != nil {
-			if id, ok := idRefOf(ev); ok {
-				if _, exists := opt.Model.Get(id); !exists {
-					plan.Skips = append(plan.Skips, ReplaySkip{Raw: ev,
-						Reason: fmt.Sprintf("对象 #%d 不在当前界面（AUI 安全闸）", id)})
-					continue
-				}
-			}
 		}
 		plan.Events = append(plan.Events, ReplayEvent{N: len(plan.Events) + 1, Event: ev})
 		if opt.StopAt > 0 && len(plan.Events) >= opt.StopAt {
@@ -170,6 +155,11 @@ func (c *Client) RunReplay(plan ReplayPlan, conn int, settle time.Duration, dryR
 			continue
 		}
 		res.Sent++
+		// 每一步都**等运行期回包**再发下一步：一屏查询要几秒，
+		// 固定睡一小会儿根本不够（实测：不等回包就发，后面的步骤全都打在空气上）。
+		if !waitResponse(c, conn, 8*time.Second) {
+			logf("第 %d 步运行期在 8s 内没有回包（继续）", ev.N)
+		}
 		time.Sleep(settle)
 	}
 	if conns, err := c.Status(); err == nil {
@@ -180,4 +170,30 @@ func (c *Client) RunReplay(plan ReplayPlan, conn int, settle time.Duration, dryR
 		}
 	}
 	return res, nil
+}
+
+// waitResponse waits until the runtime pushes something on this connection.
+// 返回是否等到了。等不到不算失败（有些事件本来就没有应答，比如光标移动），
+// 但要记下来 —— 后面的步骤是否可信，取决于这个信号。
+func waitResponse(c *Client, conn int, timeout time.Duration) bool {
+	var before int64
+	if conns, err := c.Status(); err == nil {
+		for _, cc := range conns {
+			if cc.ID == conn {
+				before = cc.BytesRT
+			}
+		}
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if conns, err := c.Status(); err == nil {
+			for _, cc := range conns {
+				if cc.ID == conn && cc.BytesRT != before {
+					return true
+				}
+			}
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	return false
 }
