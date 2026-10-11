@@ -103,3 +103,10 @@ func (rs RegionSet) Get(name string) (Region, bool) {
 	}
 	return Region{}, false
 }
+
+// RectLabel pairs a pixel rectangle with a human label: 实测区域已经是像素坐标，
+// 走的是与"协议坐标推导的框"完全不同的一条路（不能再套坐标映射）。
+type RectLabel struct {
+	Rect  image.Rectangle
+	Label string
+}

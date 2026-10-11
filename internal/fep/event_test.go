@@ -110,3 +110,14 @@ func refusedWith(err error, exit int) bool {
 	var r *Refusal
 	return errors.As(err, &r) && r.Exit == exit
 }
+
+// 真机布局：FormField 是容器的**父对象**（FormField 271 包着 ButtonEdit 272）。
+// 输入时必须认到它，否则会去点容器（-6327 实测代价）。
+func TestResolveInputTargetFindsFormFieldParent(t *testing.T) {
+	m := NewModel()
+	m.ApplyMessage(`om 1 {{an 0 Window 4097 {{name "w"}} {{an 4097 FormField 271 {{name "xmda_t.xmda004"}} {{ButtonEdit 272 {{action "controlp"}{posX "15"}{posY "2"}} {}}} {}}}}`)
+	target, via, err := ResolveInputTarget(m, 272)
+	if err != nil || !via || target != 271 {
+		t.Fatalf("应认到父对象 FormField 271：target=%d via=%v err=%v", target, via, err)
+	}
+}

@@ -268,7 +268,7 @@ func Compose(base *image.RGBA, marks []Overlay) *image.RGBA {
 		}
 		drawRect(out, m.Rect, col, thick)
 		if m.Number > 0 {
-			drawBadge(out, m.Rect.Min, m.Number, col)
+			drawBadge(out, m.Rect, m.Number, col)
 		}
 	}
 	return out
@@ -288,9 +288,18 @@ func drawRect(img *image.RGBA, r image.Rectangle, col color.RGBA, thick int) {
 }
 
 // drawBadge draws a small filled square with a digit inside, at p.
-func drawBadge(img *image.RGBA, p image.Point, n int, col color.RGBA) {
+func drawBadge(img *image.RGBA, box image.Rectangle, n int, col color.RGBA) {
 	const size = 22
-	x0, y0 := p.X, p.Y
+	// 徽标画在框**外面**（左侧、垂直居中），别压住框里的内容 —— 实测反馈：
+	// 画在框内左上角会盖住第一个字符（那正是手册要让人看清的东西）。
+	x0 := box.Min.X - size - 4
+	if x0 < 0 {
+		x0 = box.Min.X + 2
+	}
+	y0 := box.Min.Y + (box.Dy()-size)/2
+	if y0 < 0 {
+		y0 = 0
+	}
 	for y := y0; y < y0+size; y++ {
 		for x := x0; x < x0+size; x++ {
 			setPx(img, x, y, col)

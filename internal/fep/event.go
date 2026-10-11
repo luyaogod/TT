@@ -173,6 +173,10 @@ func ResolveInputTarget(m *Model, id int) (target int, viaFormField bool, err er
 		// 实测里字段当前值就写作 Value，它自己就是可写的目标。
 		return id, false, nil
 	}
+	if p, ok := m.Get(o.Parent); ok && p.Type == "FormField" {
+		// 真机布局里 FormField 常常是容器的**父对象**（FormField 271 包着 ButtonEdit 272）。
+		return p.ID, true, nil
+	}
 	for _, c := range m.Objects() {
 		if c.Parent == id && c.Type == "FormField" {
 			return c.ID, true, nil

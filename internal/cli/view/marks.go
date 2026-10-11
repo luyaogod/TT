@@ -99,9 +99,10 @@ var marksCmd = &cobra.Command{
 			refNote = refNote + "；" + strings.Join(reProblems, "；")
 		}
 
-		// 实测区域优先：协议里没有坐标的东西（明细格子）只能靠量出来的矩形
-		var regionMarks []view.Overlay
-		var regionBoxes []view.Box
+		// 实测区域：协议里没有坐标的东西（明细格子）只能靠量出来的矩形。
+		// **它们已经是像素坐标，绝不能再套一遍坐标映射**（套了就得到 4096,7031 这种荒唐值 ——
+		// 踩过），所以与"协议坐标推导的框"分开存、分开画。
+		var regionRects []view.RectLabel
 		if len(marksRegion) > 0 {
 			rsPath := filepath.Join(filepath.Dir(markCalOrDefault(marksCal)), "regions.json")
 			if marksCal != "" {
@@ -116,13 +117,11 @@ var marksCmd = &cobra.Command{
 				if !ok {
 					return fail(exitTarget, "区域文件里没有 %q（先 tt view measure --target <栏位>）", nm)
 				}
-				regionMarks = append(regionMarks, view.Overlay{Rect: reg.Rect, Number: len(regionMarks) + 1, Color: view.HighlightColor})
-				regionBoxes = append(regionBoxes, view.Box{X: reg.Rect.Min.X, Y: reg.Rect.Min.Y, W: reg.Rect.Dx(), H: reg.Rect.Dy(), Label: nm + "（实测区域）"})
+				regionRects = append(regionRects, view.RectLabel{Rect: reg.Rect, Label: nm + "（实测区域）"})
 			}
 		}
 
 		var boxes []view.Box
-		boxes = append(boxes, regionBoxes...)
 		for _, name := range marksFields {
 			b, berr := boxForField(m, r, name)
 			if berr != nil {
@@ -130,42 +129,50 @@ var marksCmd = &cobra.Command{
 			}
 			boxes = append(boxes, b)
 		}
-		frame := view.Frame{Image: img, Map: fm, Fields: boxes}
 		type out struct {
 			Reference string         `json:"reference"`
 			Scale     float64        `json:"scale"`
 			OriginY   int            `json:"originY"`
 			Marks     []view.Box     `json:"marks"`
+			Regions   []string       `json:"regions,omitempty"`
 			Verdicts  []view.Verdict `json:"verdicts,omitempty"`
 			Image     string         `json:"image,omitempty"`
 		}
 		res := out{Reference: refNote, Scale: fm.ScaleX, OriginY: fm.OriginY, Marks: boxes}
+		for _, rl := range regionRects {
+			res.Regions = append(res.Regions, fmt.Sprintf("%s %dx%d+%d+%d", rl.Label, rl.Rect.Dx(), rl.Rect.Dy(), rl.Rect.Min.X, rl.Rect.Min.Y))
+		}
+		// 门分两路：协议坐标的框按校准映射后查，实测区域直接查（它们已经是像素）。
+		var bad []view.Verdict
 		if img != nil {
 			res.Verdicts = view.GateFields(img, boxes, fm)
-			res.Image = marksPNG
+			for _, rl := range regionRects {
+				v := view.Verdict{Label: rl.Label, Rect: rl.Rect, RectTxt: fmt.Sprintf("%dx%d+%d+%d", rl.Rect.Dx(), rl.Rect.Dy(), rl.Rect.Min.X, rl.Rect.Min.Y)}
+				v.Problem = view.RegionVerdict(img, rl.Rect, rl.Label)
+				res.Verdicts = append(res.Verdicts, v)
+			}
+			for _, v := range res.Verdicts {
+				if v.Problem != "" {
+					bad = append(bad, v)
+				}
+			}
 		}
 		if marksOut != "" {
 			if img == nil {
 				return fail(exitUsage, "--out 需要同时给 --png（要往哪张图上画）")
 			}
-			overlays := append([]view.Overlay{}, regionMarks...)
-			offset := len(overlays)
-			for i, b := range boxes {
-				if i < offset {
-					continue // 实测区域已经加过
-				}
-				overlays = append(overlays, view.Overlay{Rect: fm.Map(b), Number: i + 1, Color: view.HighlightColor})
+			var overlays []view.Overlay
+			for _, rl := range regionRects { // 实测区域：直接画，不套映射
+				overlays = append(overlays, view.Overlay{Rect: rl.Rect, Color: view.HighlightColor})
+			}
+			for _, b := range boxes {
+				overlays = append(overlays, view.Overlay{Rect: fm.Map(b), Color: view.HighlightColor})
 			}
 			composed := view.Compose(img, overlays)
 			if serr := view.SavePNG(marksOut, composed); serr != nil {
 				return fail(exitFailed, "写图失败: %v", serr)
 			}
 			res.Image = marksOut
-		}
-		// 只给了图尺寸（--image）时没有像素可查：像素门只在真有图时跑。
-		var bad []view.Verdict
-		if img != nil {
-			bad = frame.Gate()
 		}
 		if perr := printJSONOrText(res, func() {
 			fmt.Printf("参照物 %s → 比例 %.3f，客户区上沿 %dpx\n", res.Reference, res.Scale, res.OriginY)

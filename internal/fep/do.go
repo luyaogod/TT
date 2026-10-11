@@ -376,7 +376,10 @@ func resolveTarget(m *Model, r *Resolver, target, window, kind string) (int, str
 			}
 		}
 	}
-	if len(positioned) > 0 {
+	// 只有**点击**才优先有坐标的对象：按钮要点在它所在的位置。
+	// 输入不能这么挑 —— 可写的 FormField 本来就没有坐标，照坐标挑会挑到容器（实测踩过，
+	// 结果就是"输入目标变成 ButtonEdit 容器"并被规则拦下）。
+	if kind == "click" && len(positioned) > 0 {
 		hits = positioned
 	}
 	if len(hits) == 0 {
