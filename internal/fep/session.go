@@ -124,12 +124,14 @@ type Elevation struct {
 }
 
 // CheckElevation compares our token elevation with the GDC instance's.
+// A zero pid means "this process", so the comparison is trivially OK — it exists
+// so callers can ask "am I elevated?" through the same door.
 func CheckElevation(gdcPID int) (Elevation, error) {
 	self, err := winproc.TokenElevated(0)
 	if err != nil {
 		return Elevation{}, err
 	}
-	target := false
+	target := self
 	if gdcPID != 0 {
 		target, err = winproc.TokenElevated(gdcPID)
 		if err != nil {

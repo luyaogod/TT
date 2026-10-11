@@ -15,3 +15,9 @@ var (
 
 // currentProcess returns the pseudo handle of the calling process.
 func currentProcess() uintptr { return ^uintptr(0) } // (HANDLE)-1 == GetCurrentProcess()
+
+var (
+	procCreateToolhelp32Snapshot = modKernel32.NewProc("CreateToolhelp32Snapshot")
+	procProcess32First           = modKernel32.NewProc("Process32FirstW")
+	procProcess32Next            = modKernel32.NewProc("Process32NextW")
+)

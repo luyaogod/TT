@@ -54,6 +54,8 @@ type Proxy struct {
 	listener net.Listener
 	control  net.Listener
 	closed   bool
+	quitOnce sync.Once
+	quit     chan struct{}
 }
 
 type conn struct {
@@ -72,8 +74,13 @@ type conn struct {
 
 // NewProxy prepares a proxy; call Start to bind the sockets.
 func NewProxy(cfg ProxyConfig) *Proxy {
-	return &Proxy{cfg: cfg, conns: make(map[int]*conn)}
+	return &Proxy{cfg: cfg, conns: make(map[int]*conn), quit: make(chan struct{})}
 }
+
+// Quit is closed when a control client asked the proxy to stop
+// (`quit` on the control endpoint). The resident process waits on it, which is
+// how `tt fep session close` stops a session that lives in another process.
+func (p *Proxy) Quit() <-chan struct{} { return p.quit }
 
 // Start binds the listen and control sockets.
 func (p *Proxy) Start() error {
@@ -308,6 +315,11 @@ func (p *Proxy) handleControlLine(w io.Writer, line string) {
 			b.WriteString("(no connections)\n")
 		}
 		io.WriteString(w, b.String())
+		return
+	}
+	if line == "quit" || line == "stop" {
+		io.WriteString(w, "OK quitting\n")
+		p.quitOnce.Do(func() { close(p.quit) })
 		return
 	}
 	target := 0
