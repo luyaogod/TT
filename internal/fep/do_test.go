@@ -113,7 +113,7 @@ func waitRecording(t *testing.T, dir, suffix string) {
 }
 
 func TestDoClickByNameReachesTheFrontEnd(t *testing.T) {
-	c, p, _, gdcGot, _ := sessionFixture(t)
+	c, p, rt, _, _ := sessionFixture(t)
 
 	res, err := Do(c, DoConfig{Kind: "click", Target: "录入"})
 	if err != nil {
@@ -128,13 +128,13 @@ func TestDoClickByNameReachesTheFrontEnd(t *testing.T) {
 	if res.Target != "#5160" || res.Name != "录入" {
 		t.Fatalf("目标解析 = %+v", res)
 	}
-	expectChunk(t, gdcGot, `event _om 1{}{{ActionEvent 0{{idRef "5160"}}}}`)
+	expectOnConn(t, rt, `event _om 1{}{{ActionEvent 0{{idRef "5160"}}}}`)
 	// 序号必须由注入方推进，且下一发要用 2
 	waitSeq(t, p, 1, 2)
 }
 
 func TestDoInputPrefersTheFormFieldAndDryRunSendsNothing(t *testing.T) {
-	c, _, _, gdcGot, _ := sessionFixture(t)
+	c, _, rt, _, _ := sessionFixture(t)
 
 	// dry-run：事件照构造、照校验，但一个字节都不发
 	res, err := Do(c, DoConfig{Kind: "input", Target: "客户编号", Value: "CNJ-A50", DryRun: true})
@@ -147,11 +147,13 @@ func TestDoInputPrefersTheFormFieldAndDryRunSendsNothing(t *testing.T) {
 	if res.Target != "#271" || !strings.HasPrefix(res.Event, `ConfigureEvent 0{{idRef "271"}{ value "CNJ-A50"}`) {
 		t.Fatalf("应发到字段的 FormField（#271）：%+v", res)
 	}
-	select {
-	case b := <-gdcGot:
-		t.Fatalf("dry-run 竟然发了字节: %q", b)
-	case <-time.After(300 * time.Millisecond):
+	// dry-run：运行期这一侧一个字节都不该收到
+	rt.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+	scratch := make([]byte, 512)
+	if n, rerr := rt.Read(scratch); rerr == nil && n > 0 {
+		t.Fatalf("dry-run 竟然发了字节: %q", scratch[:n])
 	}
+	rt.SetReadDeadline(time.Time{})
 
 	// 真发一次
 	res2, err := Do(c, DoConfig{Kind: "input", Target: "客户编号", Value: "CNJ-A50"})
@@ -161,7 +163,7 @@ func TestDoInputPrefersTheFormFieldAndDryRunSendsNothing(t *testing.T) {
 	if !res2.Sent {
 		t.Fatalf("没发出去：%+v", res2)
 	}
-	expectChunk(t, gdcGot, `{ value "CNJ-A50"}`)
+	expectOnConn(t, rt, `{ value "CNJ-A50"}`)
 }
 
 func TestDoRefusesUnavailableAction(t *testing.T) {

@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"tt/internal/winproc"
@@ -96,21 +99,51 @@ func (r *Registry) Clear() error {
 	return nil
 }
 
-// Stop kills the processes the session registered and clears the registry.
-// Processes that are already gone are not an error.
+// Stop quits the session and cleans up after it.
+//
+// 顺序很重要：先请**常驻进程**自己收工（它知道怎么关远端作业、停代理、收实例），
+// 再它没退干净时兵底杀登记的 pid。反过来的话，远端 `r.r` 作业会被留在服务器上。
 func (r *Registry) Stop() (*Session, error) {
 	s, err := r.Load()
 	if err != nil {
 		return nil, err
 	}
-	for _, pid := range s.PIDs() {
-		if winproc.Alive(pid) {
-			if err := winproc.Kill(pid); err != nil {
-				return s, fmt.Errorf("fep: kill %d: %w", pid, err)
+	self := os.Getpid()
+	// 1) 请常驻进程自己退（走完整收尾）
+	if s.InjectPort != 0 {
+		c := &Client{InjectAddr: net.JoinHostPort("127.0.0.1", strconv.Itoa(s.InjectPort))}
+		if qerr := c.Quit(); qerr == nil {
+			deadline := time.Now().Add(8 * time.Second)
+			for time.Now().Before(deadline) {
+				if s.OwnerPID == 0 || !winproc.Alive(s.OwnerPID) {
+					break
+				}
+				time.Sleep(200 * time.Millisecond)
 			}
 		}
 	}
-	return s, r.Clear()
+	// 2) 还活着的：只杀登记的 pid
+	var errs []string
+	for _, pid := range s.PIDs() {
+		if winproc.Alive(pid) {
+			if kerr := winproc.Kill(pid); kerr != nil {
+				errs = append(errs, kerr.Error())
+			}
+		}
+	}
+	// 3) 常驻进程自己（如果它没退干净）：它也是本会话登记的进程
+	if s.OwnerPID != 0 && s.OwnerPID != self && winproc.Alive(s.OwnerPID) {
+		if kerr := winproc.Kill(s.OwnerPID); kerr != nil {
+			errs = append(errs, kerr.Error())
+		}
+	}
+	if cerr := r.Clear(); cerr != nil {
+		errs = append(errs, cerr.Error())
+	}
+	if len(errs) > 0 {
+		return s, fmt.Errorf("fep: 收尾有失败: %s", strings.Join(errs, "; "))
+	}
+	return s, nil
 }
 
 // Elevation is the privilege relationship the whole approach depends on: an

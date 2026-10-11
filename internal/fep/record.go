@@ -17,9 +17,9 @@ import (
 // 会话里的 AUI 状态**全部**来自录制件 —— 运行期没有"查询当前界面"的请求，
 // 只有它主动推来的 om 消息。所以谁想知道界面是什么样，就得读这里。
 
-// TextRecording reports whether a recording is the text form: a frame header is a
-// big-endian length, so its first byte is almost never a lowercase letter, while
-// the verbs (meta/om/event) always are.
+// TextRecording reports whether a recording *looks* like the text form. Only a hint:
+// the reliable decision is made by trying the frame decoder first (see ReadRecording),
+// because a real recording opens with an unframed handshake that starts with a letter.
 func TextRecording(b []byte) bool {
 	return len(b) > 0 && b[0] >= 'a' && b[0] <= 'z'
 }
@@ -30,27 +30,44 @@ func ReadRecording(path string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if TextRecording(b) {
-		var out []string
-		for _, line := range strings.Split(string(b), "\n") {
-			if msg, ok := TrimNoise(line); ok {
-				out = append(out, msg)
-			}
-		}
-		return out, nil
+	// 先按**帧**试：真实原始录制件的第一条消息往往是握手 `meta Connection …`，
+	// 它是整个会话里唯一**不带帧头**的一条 —— 拿“首字节是不是字母”判定形态会被它骗过去，
+	// 把二进制帧流当文本读，结果是一个安静的错答案（整屏解析成垃圾、字段值一个都不见）。
+	if msgs := decodeFrames(b); len(msgs) > 0 {
+		return msgs, nil
 	}
-	d := NewDecoder()
-	frames, err := d.Feed(b)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", filepath.Base(path), err)
-	}
+	// 退回文本形态（早期原型的落盘：一条消息一行，行首可能带帧头噪声）
 	var out []string
-	for _, fr := range frames {
-		if fr.Type == FrameTypeAUI {
-			out = append(out, string(fr.Payload))
+	for _, line := range strings.Split(string(b), "\n") {
+		if msg, ok := TrimNoise(line); ok {
+			out = append(out, msg)
 		}
 	}
 	return out, nil
+}
+
+// decodeFrames 按帧解码，并只保留“看起来像一条消息”的载荷。
+func decodeFrames(b []byte) []string {
+	d := NewDecoder()
+	frames, err := d.Feed(b)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, fr := range frames {
+		if fr.Type != FrameTypeAUI {
+			continue
+		}
+		msg := strings.TrimSpace(string(fr.Payload))
+		if msg == "" {
+			continue
+		}
+		if _, ok := TrimNoise(msg); !ok && !strings.HasPrefix(msg, "{") {
+			continue // 既不是动词开头也不是对象组：不是消息
+		}
+		out = append(out, msg)
+	}
+	return out
 }
 
 // RecordingFiles lists recordings with the given suffix, newest first.

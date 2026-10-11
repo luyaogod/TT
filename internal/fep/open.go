@@ -118,6 +118,9 @@ func Open(ctx context.Context, cfg OpenConfig, logf func(string, ...any)) (*Runt
 	if cfg.Prog == "" && !cfg.NoJob {
 		return nil, errors.New("fep: 没给作业程序（--prog）")
 	}
+	if !cfg.NoJob && cfg.SSH.Host == "" {
+		return nil, fmt.Errorf("%w: 没给 SSH host（环境没应用或没配）", ErrPreflight)
+	}
 	if cfg.DataDir == "" {
 		return nil, errors.New("fep: 没有数据目录（配置路径没解析出来）")
 	}
@@ -264,17 +267,22 @@ func (r *Runtime) openJob(ip string) error {
 	}
 	r.pty = pty
 
-	if err := waitRegexp(pty, host.ReLoginMenu, 25*time.Second, "区域菜单"); err != nil {
+	// 登录后可能先出区域菜单，也可能直接给 shell 提示符（两台机器就不一样）：
+	// 两种都等，再按实际情况决定要不要选区域。
+	which, err := waitAny(pty, 25*time.Second, host.ReLoginMenu, host.ReShellPrompt)
+	if err != nil {
 		return err
 	}
-	if r.cfg.Zone == "" {
-		return errors.New("fep: 这个环境没配 zone（区域菜单没法选）")
-	}
-	if err := pty.Write(r.cfg.Zone + "\r"); err != nil {
-		return err
-	}
-	if err := waitRegexp(pty, host.ReShellPrompt, 25*time.Second, "shell 提示符"); err != nil {
-		return err
+	if which == 0 {
+		if r.cfg.Zone == "" {
+			return errors.New("fep: 这个环境没配 zone（区域菜单没法选）")
+		}
+		if err := pty.Write(r.cfg.Zone + "\r"); err != nil {
+			return err
+		}
+		if err := waitRegexp(pty, host.ReShellPrompt, 25*time.Second, "shell 提示符"); err != nil {
+			return err
+		}
 	}
 
 	port := r.cfg.ProxyPort - FGLSERVEROffset
@@ -317,6 +325,48 @@ func firstLine(s string) string {
 		s = s[:160] + "…"
 	}
 	return s
+}
+
+// waitAny waits until any of the patterns appears, returning its index.
+// One reader only: the goroutine stops as soon as one matches.
+func waitAny(pty *host.PTYSession, timeout time.Duration, res ...*regexp.Regexp) (int, error) {
+	type outcome struct {
+		idx int
+		err error
+	}
+	ch := make(chan outcome, 1)
+	go func() {
+		buf := make([]byte, 4096)
+		var acc []byte
+		for {
+			n, err := pty.Read(buf)
+			if n > 0 {
+				acc = append(acc, buf[:n]...)
+				for i, re := range res {
+					if re.Match(acc) {
+						ch <- outcome{idx: i}
+						return
+					}
+				}
+				if len(acc) > 1<<20 {
+					acc = acc[len(acc)-1<<16:]
+				}
+			}
+			if err != nil {
+				ch <- outcome{err: err}
+				return
+			}
+		}
+	}()
+	select {
+	case o := <-ch:
+		if o.err != nil {
+			return -1, fmt.Errorf("fep: 等登录提示时连接断了: %w", o.err)
+		}
+		return o.idx, nil
+	case <-time.After(timeout):
+		return -1, fmt.Errorf("fep: 等登录提示超时（%s）", timeout)
+	}
 }
 
 // waitRegexp waits for a pattern in the PTY stream.
@@ -408,6 +458,9 @@ func waitPort(port int, timeout time.Duration) error {
 // source address the route picks, which is what the job client on the server
 // side will dial back to.
 func localAddrFor(ssh host.SSHConfig) (string, error) {
+	if ssh.Host == "" {
+		return "", fmt.Errorf("%w: 环境没配 SSH host，本机地址无从探测", ErrPreflight)
+	}
 	port := ssh.Port
 	if port == 0 {
 		port = 22
@@ -417,10 +470,17 @@ func localAddrFor(ssh host.SSHConfig) (string, error) {
 		return "", fmt.Errorf("fep: 探测本机地址失败: %w", err)
 	}
 	defer c.Close()
-	if la, ok := c.LocalAddr().(*net.UDPAddr); ok && la.IP != nil && !la.IP.IsUnspecified() {
-		return la.IP.String(), nil
+	la, ok := c.LocalAddr().(*net.UDPAddr)
+	if !ok || la.IP == nil || la.IP.IsUnspecified() {
+		return "", errors.New("fep: 探测本机地址失败（路由没给出源地址）")
 	}
-	return "", errors.New("fep: 探测本机地址失败（路由没给出源地址）")
+	ip := la.IP.String()
+	// 回环地址在这里一定是错的：服务器不可能连回本机的 loopback（实测到过：
+	// SSH host 为空时探测出 127.0.0.1，会话看起来起来了，作业却永远连不回来）。
+	if la.IP.IsLoopback() {
+		return "", fmt.Errorf("%w: 探测到的是回环地址 %s，服务器连不回来（用 --fgserver-ip 明确指定可达地址）", ErrPreflight, ip)
+	}
+	return ip, nil
 }
 
 // RegistryPath reports the session registry file (for diagnostics).

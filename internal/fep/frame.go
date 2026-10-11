@@ -8,6 +8,7 @@
 package fep
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 )
@@ -31,14 +32,19 @@ type Frame struct {
 }
 
 // Encode renders f as wire bytes.
+//
+// 长度字段**包含结尾换行**：真机录制件里，GDC 自己发的事件帧声明 len = 文本长 + 1
+// （末尾那个 0x0a 计入长度）。少算这一个字节，运行期按声明长度切完就再也对不上下一条
+// 消息 —— 表现为**静默丢包**：连接是好的、字节也发出去了、作业一动不动，而且之后连
+// 真人的事件也一起被错位吃掉。这是在真机上逐字节对比才捉到的。
 func Encode(f Frame) []byte {
-	n := len(f.Payload)
-	out := make([]byte, 9+n+1)
+	n := len(f.Payload) + 1 // +1：结尾 \n 计入长度（GDC 的约定）
+	out := make([]byte, 9+n)
 	binary.BigEndian.PutUint32(out[0:4], uint32(n))
 	binary.BigEndian.PutUint32(out[4:8], uint32(n))
 	out[8] = f.Type
 	copy(out[9:], f.Payload)
-	out[9+n] = '\n'
+	out[9+len(f.Payload)] = '\n'
 	return out
 }
 
@@ -75,8 +81,12 @@ func (d *Decoder) Feed(p []byte) ([]Frame, error) {
 		}
 		payload := make([]byte, n)
 		copy(payload, d.buf[9:9+n])
+		// 长度字段包含结尾换行（GDC 的约定），所以载荷末尾那一个 0x0a 是帧的一部分、
+		// 不属于消息文本：读出来就切掉。旧录制（长度不含换行）切了也没副作用。
+		payload = bytes.TrimRight(payload, "\r\n")
 		out = append(out, Frame{Type: d.buf[8], Payload: payload})
 		d.buf = d.buf[9+n:]
+		// 兼容“长度不含换行”的写法：换行落在帧外时照样吃掉。
 		if len(d.buf) > 0 && d.buf[0] == '\n' {
 			d.buf = d.buf[1:]
 		}

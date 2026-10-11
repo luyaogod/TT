@@ -60,3 +60,39 @@ func TestTrimNoiseHandlesPrototypeRecordings(t *testing.T) {
 		t.Fatal("meta must be recognized")
 	}
 }
+
+// 真机上运行期的更新消息是这样发的：`om 7 {{un 271 {{value "X"}}}}` —— 属性组外面
+// 还多一层花括号。少了这层，字段值就永远合并不进模型（而这是我们判断"输入生效了没有"
+// 的唯一依据）。
+func TestUnUpdateWithExtraBraceLevel(t *testing.T) {
+	m := NewModel()
+	m.ApplyMessage(`om 7 {{un 271 {{value "X"}}}}`)
+	o, ok := m.Get(271)
+	if !ok {
+		t.Fatal("对象没建出来")
+	}
+	if got := o.Attr("value"); got != "X" {
+		t.Fatalf("value = %q，期望 X", got)
+	}
+}
+
+// 真机序列：先定义字段，随后运行期用 un 回填值（`om 7 {{un 271 {{value "X"}}}}`）。
+// 我们判断"输入生效了没有"就靠这个值。
+func TestUnMergesIntoExistingDefinition(t *testing.T) {
+	m := NewModel()
+	m.ApplyMessage(`om 4 {{an 2858 FormField 271 {{name "xmda_t.xmda004"} {comment "cmt_xmda004"}} {}}}`)
+	if o, ok := m.Get(271); !ok || o.Attr("comment") != "cmt_xmda004" {
+		t.Fatalf("定义没建起来: %+v", o)
+	}
+	m.ApplyMessage(`om 7 {{un 271 {{value "CNJ-A50"}}}}`)
+	o, _ := m.Get(271)
+	if o.Attr("value") != "CNJ-A50" {
+		t.Fatalf("un 没把值合进来: attrs=%v", o.Attrs)
+	}
+	if o.Attr("comment") != "cmt_xmda004" {
+		t.Fatalf("un 把已有属性弄丢了: attrs=%v", o.Attrs)
+	}
+	if o.Parent != 2858 {
+		t.Fatalf("un 改掉了父链: parent=%d", o.Parent)
+	}
+}

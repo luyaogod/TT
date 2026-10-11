@@ -35,6 +35,8 @@ type uiRow struct {
 	Window     string `json:"window"`
 	Comment    string `json:"comment,omitempty"`
 	Col        string `json:"col,omitempty"`
+	Value      string `json:"value,omitempty"`
+	Active     string `json:"active,omitempty"`
 }
 
 type uiStep struct {
@@ -162,14 +164,15 @@ var uiFindCmd = &cobra.Command{
 			}
 			if uiText != "" {
 				hay := strings.Join([]string{o.Attr("text"), o.Attr("label"), o.Attr("comment"),
-					o.Attr("name"), o.Attr("col"), fn.Text}, "\x00")
+					o.Attr("name"), o.Attr("col"), o.Attr("value"), fn.Text}, "\x00")
 				if !strings.Contains(strings.ToLower(hay), strings.ToLower(uiText)) {
 					continue
 				}
 			}
 			rows = append(rows, uiRow{ID: o.ID, Type: o.Type, Name: fn.Text, Source: fn.Source,
 				Confidence: string(fn.Confidence), Window: m.WindowName(o.ID),
-				Comment: o.Attr("comment"), Col: o.Attr("col")})
+				Comment: o.Attr("comment"), Col: o.Attr("col"),
+				Value: o.Attr("value"), Active: o.Attr("active")})
 			if uiLimit > 0 && len(rows) >= uiLimit {
 				break
 			}
@@ -186,6 +189,16 @@ var uiFindCmd = &cobra.Command{
 				}
 				if x.Col != "" {
 					fmt.Printf("  col=%s", x.Col)
+				}
+				if x.Value != "" {
+					v := x.Value
+					if len(v) > 40 {
+						v = v[:40] + "…"
+					}
+					fmt.Printf("  value=%q", v)
+				}
+				if x.Active == "0" || strings.EqualFold(x.Active, "false") {
+					fmt.Printf("  [inactive]")
 				}
 				fmt.Println()
 			}

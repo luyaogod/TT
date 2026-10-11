@@ -256,10 +256,14 @@ func (p *Proxy) Inject(connID int, eventText string) error {
 	c.seq++
 	c.mu.Unlock()
 
-	text := fmt.Sprintf("event _om %d{}{{%s}}\n", seq, strings.TrimSpace(eventText))
-	frame := Encode(Frame{Type: FrameTypeAUI, Payload: []byte(strings.TrimRight(text, "\n"))})
-	c.write(frame, false) // injected frames belong on the "front end" side of the recording
-	_, err := c.toGDC.Write(frame)
+	text := fmt.Sprintf("event _om %d{}{{%s}}", seq, strings.TrimSpace(eventText))
+	frame := Encode(Frame{Type: FrameTypeAUI, Payload: []byte(text)})
+	// 注入的事件必须**送到运行期**，就像前端自己发的一样 —— 那是"前端→运行期"方向，
+	// 所以要写运行期连进来的那条 socket（toRT），不是我们连向 GDC 的那条。
+	// 写反了是**安静**的失败：连接照旧健康、字节照旧出去、作业就是没反应
+	// （真机联调实测：点击"录入"后 seq 推进了、作业一动不动）。
+	c.write(frame, false) // 录制上它属于"前端→运行期"那一侧
+	_, err := c.toRT.Write(frame)
 	return err
 }
 

@@ -264,6 +264,19 @@ func resolveTarget(m *Model, r *Resolver, target, window, kind string) (int, str
 			return forms[0].ID, target, nil
 		}
 	}
+	// 点击优先 ToolBarItem：工具栏项与它的 Action 对象同名（如 5160 与 5365），
+	// 而客户端点击时发的就是 ToolBarItem 的 id（录制件里 ActionEvent 写的就是 5160）。
+	if kind == "click" {
+		var bars []*Object
+		for _, o := range hits {
+			if o.Type == "ToolBarItem" {
+				bars = append(bars, o)
+			}
+		}
+		if len(bars) == 1 {
+			return bars[0].ID, target, nil
+		}
+	}
 	ids := make([]int, 0, len(hits))
 	for _, o := range hits {
 		ids = append(ids, o.ID)
@@ -327,4 +340,18 @@ func AppendAudit(path string, e AuditEntry) error {
 	}
 	_, err = f.Write(append(b, '\n'))
 	return err
+}
+
+// Quit asks the resident process to stop (`tt fep session close` runs in another
+// process, so it needs a way to say "you may go now" — the resident then runs its
+// own full clean-up: remote job, proxy, instance, registry).
+func (c *Client) Quit() error {
+	reply, err := c.roundTrip("quit")
+	if err != nil {
+		return err
+	}
+	if !strings.HasPrefix(reply, "OK") {
+		return fmt.Errorf("fep: 常驻进程拒绝退出: %s", reply)
+	}
+	return nil
 }

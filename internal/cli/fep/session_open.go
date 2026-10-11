@@ -60,12 +60,23 @@ var sessionOpenCmd = &cobra.Command{
 		if err != nil {
 			return fail(exitFailed, "%v", err)
 		}
-		if openEnv != "" {
-			c := dcfg.CloneEnv(openEnv)
-			if c == nil {
-				return fail(exitUsage, "环境 %q 不存在（见 tt env ls）", openEnv)
-			}
-			dcfg = c
+		// LoadConfig 只把环境清单读进来，运行时的 SSH/zone 要**应用一次**才生效
+		// （debug 线自己会在起会话时做；这里必须显式做，否则 SSH.Host 是空的，
+		// 症状是「dial tcp :22 ... refused」这种看不出根因的错）。
+		name := openEnv
+		if name == "" {
+			name = dcfg.EnvName()
+		}
+		if name == "" {
+			return fail(exitPreflight, "配置里没有任何环境（先跑 tt env add）")
+		}
+		clone := dcfg.CloneEnv(name)
+		if clone == nil {
+			return fail(exitUsage, "环境 %q 不存在（见 tt env list）", name)
+		}
+		dcfg = clone
+		if dcfg.SSH.Host == "" {
+			return fail(exitPreflight, "环境 %q 没配 SSH host", name)
 		}
 		loc := config.LocationsAt(cfgPath)
 		recDir := loc.CacheDir("fep")

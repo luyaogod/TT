@@ -131,7 +131,7 @@ func TestProxyForwardsBothWaysAndRecords(t *testing.T) {
 }
 
 func TestProxyInjectionIsNumberedAndAddressed(t *testing.T) {
-	gdc, gdcGot := fakeGDC(t)
+	gdc, _ := fakeGDC(t)
 	defer gdc.Close()
 	p := NewProxy(ProxyConfig{Listen: "127.0.0.1:0", Target: gdc.Addr().String(), Control: "127.0.0.1:0"})
 	if err := p.Start(); err != nil {
@@ -150,7 +150,7 @@ func TestProxyInjectionIsNumberedAndAddressed(t *testing.T) {
 	if err := p.Inject(1, `ActionEvent 0{{idRef "5160"}}`); err != nil {
 		t.Fatalf("inject: %v", err)
 	}
-	expectChunk(t, gdcGot, `event _om 4{}{{ActionEvent 0{{idRef "5160"}}}}`)
+	expectOnConn(t, rt, `event _om 4{}{{ActionEvent 0{{idRef "5160"}}}}`)
 
 	if err := p.Inject(99, `ActionEvent 0{{idRef "1"}}`); err == nil {
 		t.Fatal("injecting into a missing connection must fail")
@@ -158,7 +158,7 @@ func TestProxyInjectionIsNumberedAndAddressed(t *testing.T) {
 }
 
 func TestProxyControlEndpointAddressesConnections(t *testing.T) {
-	gdc, gdcGot := fakeGDC(t)
+	gdc, _ := fakeGDC(t)
 	defer gdc.Close()
 	p := NewProxy(ProxyConfig{Listen: "127.0.0.1:0", Target: gdc.Addr().String(), Control: "127.0.0.1:0"})
 	if err := p.Start(); err != nil {
@@ -195,7 +195,7 @@ func TestProxyControlEndpointAddressesConnections(t *testing.T) {
 	if _, err := ctl.Write([]byte("@1 " + `KeyEvent 0{{keyName "Tab"}}` + "\n")); err != nil {
 		t.Fatal(err)
 	}
-	expectChunk(t, gdcGot, `event _om 4{}{{KeyEvent 0{{keyName "Tab"}}}}`)
+	expectOnConn(t, rt, `event _om 4{}{{KeyEvent 0{{keyName "Tab"}}}}`)
 }
 
 func TestProxySurvivesAClientReset(t *testing.T) {
@@ -250,4 +250,25 @@ func waitSeq(t *testing.T, p *Proxy, id, want int) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("connection %d never reached next-sequence %d: %+v", id, want, p.Conns())
+}
+
+// expectOnConn waits for bytes containing want on a specific connection.
+func expectOnConn(t *testing.T, conn net.Conn, want string) {
+	t.Helper()
+	buf := make([]byte, 4096)
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		n, err := conn.Read(buf)
+		if n > 0 && strings.Contains(string(buf[:n]), want) {
+			return
+		}
+		if err != nil {
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				continue
+			}
+			t.Fatalf("连接断了，且没看到 %q", want)
+		}
+	}
+	t.Fatalf("没等到 %q", want)
 }
