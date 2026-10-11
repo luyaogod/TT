@@ -13,6 +13,7 @@ import (
 
 var (
 	uiFrom      string
+	uiSort      string
 	uiText      string
 	uiValue     string
 	uiType      string
@@ -53,6 +54,13 @@ type uiRow struct {
 	PosY   int `json:"posY,omitempty"`
 	Width  int `json:"width,omitempty"`
 	Height int `json:"height,omitempty"`
+	// Seq 是它"最后一次被声明/更新"的序号。
+	//
+	// 为什么要把它露出来：运行期**复用裸 id**，而同一个实例里那些"按行"的对象
+	// （如表格里每行的格子）**只有按 Seq 排才能还原行序** —— 实测：勾选栏的格子
+	// #59/#105/#106… 按 id 看是乱的，按声明顺序才是第 1 行、第 2 行…
+	// （我按 id 取"第一个"，结果发到旧实例的格子上，运行期只回一个空 ACK）。
+	Seq int `json:"seq,omitempty"`
 }
 
 type uiStep struct {
@@ -87,6 +95,8 @@ func init() {
 	uiFindCmd.Flags().StringArrayVar(&uiAttr, "attr", nil,
 		"按任意协议属性筛，形如 --attr image=tb/accept.png（可重复）；名字解析看不到的属性靠它找")
 	uiFindCmd.Flags().IntVar(&uiParent, "parent", 0, "按父对象编号筛（如 --parent 219 看某张表下的所有格子）")
+	uiFindCmd.Flags().StringVar(&uiSort, "sort", "id",
+		"排序：id（缺省）/ seq（按运行期声明顺序 —— 表格里那些「按行」的对象只有按 seq 才是行序）/ seq-desc")
 	uiFindCmd.Flags().IntVar(&uiLimit, "limit", 0, "最多输出多少条（0 = 不限）")
 	uiFindCmd.Flags().BoolVar(&uiOnlyNamed, "named", false, "只要解析出名字的")
 }
@@ -176,7 +186,15 @@ var uiFindCmd = &cobra.Command{
 			return err
 		}
 		objs := m.Objects()
-		sort.Slice(objs, func(i, j int) bool { return objs[i].ID < objs[j].ID })
+		switch uiSort {
+		case "seq":
+			// 行序要看声明顺序（见 uiRow.Seq 的注释）
+			sort.Slice(objs, func(i, j int) bool { return objs[i].Seq < objs[j].Seq })
+		case "seq-desc":
+			sort.Slice(objs, func(i, j int) bool { return objs[i].Seq > objs[j].Seq })
+		default:
+			sort.Slice(objs, func(i, j int) bool { return objs[i].ID < objs[j].ID })
+		}
 		var rows []uiRow
 		for _, o := range objs {
 			if uiType != "" && o.Type != uiType {
@@ -211,7 +229,7 @@ var uiFindCmd = &cobra.Command{
 			rows = append(rows, uiRow{ID: o.ID, Type: o.Type, Name: fn.Text, Source: fn.Source,
 				Confidence: string(fn.Confidence), Window: m.WindowName(o.ID),
 				Comment: o.Attr("comment"), Col: o.Attr("col"),
-				Scope: o.Scope,
+				Scope: o.Scope, Seq: o.Seq,
 				Value: o.Attr("value"), Active: o.Attr("active"),
 				ActionActive: o.Attr("actionActive"), ActionIDRef: o.Attr("actionIdRef"),
 				Parent: o.Parent, PosX: geomInt(o, "posX"), PosY: geomInt(o, "posY"),
