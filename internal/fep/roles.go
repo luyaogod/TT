@@ -136,8 +136,17 @@ func Catalog(m *Model, r *Resolver) []Control {
 				role = fn.Text
 			}
 		}
+		// 列（TableColumn）是"定位用"的，不是值持有者：用它的协议名（如 pmdm_t.pmdm002）
+		// 当角色，避免和同名的字段抢中文名（实测 付款条件 的列和字段撞在一起）。
+		if o.Type == "TableColumn" {
+			if n := o.Attr("name"); n != "" {
+				role = n
+			} else {
+				role = "列:" + display
+			}
+		}
 		if role == "" {
-			role = o.Type // 兜底：显式标注为类型名，便于调用方发现"没有稳定角色"
+			role = o.Type
 		}
 		out = append(out, Control{
 			ID: o.ID, Kind: o.Type, Role: role, RoleName: display,
@@ -158,18 +167,25 @@ func Catalog(m *Model, r *Resolver) []Control {
 
 // ResolveRole 把一个角色寻址串解析成**唯一**控件。
 //
-// 命中多个时**不猜**：把候选原样返回，由调用方限定（--in <窗口> 或写全 RolePath）。
+// 两轮匹配：先精确比 Role / RolePath；只有在**没有任何精确命中**时才用中文名（RoleName）兜底。
+// 为什么分两轮：实测 付款条件 的字段（ButtonEdit）和列（TableColumn）中文名相同，
+// 一轮混着比就会变成"多个命中"，而调用方其实说的是那个字段。
+//
+// 命中多个时**不猜**：把候选原样返回，由调用方限定（写全「窗口/角色」或用 --in）。
 func ResolveRole(cat []Control, want string) (Control, []Control, error) {
 	want = strings.TrimSpace(want)
-	var hits []Control
+	var exact, byName []Control
 	for _, c := range cat {
-		if c.RolePath() == want || (c.Window == "" && c.Role == want) {
-			hits = append(hits, c)
-			continue
+		switch {
+		case c.RolePath() == want, c.Window == "" && c.Role == want, c.Role == want:
+			exact = append(exact, c)
+		case c.RoleName == want:
+			byName = append(byName, c)
 		}
-		if c.Role == want || c.RoleName == want {
-			hits = append(hits, c)
-		}
+	}
+	hits := exact
+	if len(hits) == 0 {
+		hits = byName
 	}
 	switch len(hits) {
 	case 1:

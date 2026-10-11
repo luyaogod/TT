@@ -199,6 +199,8 @@ func loadModel(from string) (*fep.Model, *fep.Resolver, int, error) {
 			msgs++
 		}
 	}
+	// 窗口归属只向下传播一层：运行期标定过的父对象，其子对象也属于同一个窗口。
+	m.Propagate()
 	return m, fep.NewResolver(m), msgs, nil
 }
 

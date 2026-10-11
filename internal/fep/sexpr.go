@@ -8,10 +8,21 @@ import "strings"
 // pseudo types "un"/"rn" for the two update forms. Parent is the declared
 // parent id (0 for roots); updates carry Parent = 0 and are merged by the model
 // instead of being inserted.
+// Node 是 AUI 消息里的一个对象声明。
+//
+// Bare 表示它**没有 `an <父>` 前缀**。实测（本会话原始流）：
+//
+//	Value  110 {…}
+//	Dialog 110 {…}
+//
+// 同一个 id 在顶层被声明成两个不同对象 —— 说明这类**无 an 的顶层声明**是
+// “局部节点”（id 只在它自己的局部语境里有意义），不是全局对象身份。
+// 而 `an 4097 ToolBarItem 5160 …` 这种带父的声明才是全局对象。
 type Node struct {
 	Parent int
 	Type   string
 	ID     int
+	Bare   bool // 顶层无 an 前缀：不进全局模型
 	Attrs  map[string]string
 }
 
@@ -233,6 +244,7 @@ func parseSeq(s string, parent, depth int, out *[]Node) {
 // It returns the index just past the object and whether a header was found.
 func parseObj(s string, i, parent, depth int, out *[]Node) (int, bool) {
 	pid := parent
+	hadAn := false
 	if strings.HasPrefix(s[i:], "an ") {
 		j := skipWS(s, i+3)
 		p, j2, ok := numAt(s, j)
@@ -240,6 +252,7 @@ func parseObj(s string, i, parent, depth int, out *[]Node) (int, bool) {
 			return i, false
 		}
 		pid = p
+		hadAn = true
 		i = skipWS(s, j2)
 	}
 	typ, j := identAt(s, i)
@@ -268,7 +281,7 @@ func parseObj(s string, i, parent, depth int, out *[]Node) (int, bool) {
 	if !ok {
 		return i, false
 	}
-	n := Node{Parent: pid, Type: typ, ID: id}
+	n := Node{Parent: pid, Type: typ, ID: id, Bare: !hadAn}
 	k = skipWS(s, k)
 	if k < len(s) && s[k] == '{' { // attribute group (may be empty)
 		body, next := groupAt(s, k)

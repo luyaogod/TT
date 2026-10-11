@@ -1,11 +1,19 @@
 package fep
 
+import "strconv"
+
 // Object is one merged AUI object.
 type Object struct {
 	ID     int
 	Type   string
 	Parent int
-	Attrs  map[string]string
+	// Win 是它**最后一次被运行期触及时所处的当前窗口**（由 un 0 {{currentWindow "N"}} 得到）。
+	// 为什么不用父链：实测开窗里的对象是运行期预载的，父链指向模板语境（
+	// 一个 "交易对象编号" 列的父链会一路挂到别的窗口的 ComboBox 上），
+	// 而运行期在开窗时会用 un 重新触及这些对象 —— 所以 "最后所在的窗口"才是
+	// "哪个窗口在显示它"。这是 M1 的核心证据，见提交说明。
+	Win   int
+	Attrs map[string]string
 }
 
 // Attr returns the attribute value or "".
@@ -32,6 +40,9 @@ type Model struct {
 	objs      map[int]*Object
 	order     []int
 	conflicts int
+	// curWindow 是运行期最近一次告知的当前窗口（un 0 {{currentWindow "N"}}）。
+	// 它后面的声明/更新都归到这个窗口下 —— 这是 M1 用来划分作用域的依据。
+	curWindow int
 }
 
 // NewModel returns an empty model.
@@ -49,17 +60,50 @@ func (m *Model) Conflicts() int { return m.conflicts }
 
 // Apply merges parsed nodes into the model and returns how many nodes were
 // consumed.
+//
+// 实测得来的两条规则：
+//  1. 顶层**无 an 前缀**的声明（Value 110 / Dialog 110 同时出现）是局部节点，
+//     id 不是全局身份 —— 不进全局模型，连它的子节点一并跳过（否则父链会被揉到一起，
+//     实测就是这么把一个组合框候选项当成了"交易对象编号"列）。
+//  2. 只认带 an 的声明与 un/rn 更新；同一个 id 被不同父重复声明时保留第一个，
+//     并计一次 conflicts（作为诊断保留）。
 func (m *Model) Apply(nodes []Node) int {
+	skipped := map[int]bool{}
 	for _, n := range nodes {
+		if skipped[n.Parent] {
+			skipped[n.ID] = true
+			continue
+		}
+		if n.Bare && n.Parent == 0 {
+			skipped[n.ID] = true
+			continue
+		}
+		// 运行期告知的当前窗口：从此之后的声明/更新都归到它名下。
+		if n.ID == 0 {
+			if v := n.Attrs["currentWindow"]; v != "" {
+				if w, err := strconv.Atoi(v); err == nil {
+					m.curWindow = w
+				}
+			}
+		}
 		switch n.Type {
 		case "un", "rn":
 			o := m.ensure(n.ID)
 			for k, v := range n.Attrs {
 				o.Attrs[k] = v
 			}
+			if m.curWindow != 0 && n.ID != 0 && o.Type != "Window" {
+				o.Win = m.curWindow
+			}
 		default:
 			o := m.ensure(n.ID)
 			o.Type = n.Type
+			if m.curWindow != 0 && n.ID != 0 && n.Type != "Window" {
+				o.Win = m.curWindow
+			}
+			if n.ID == 0 {
+				continue // 已当作全局状态处理（当前窗口）
+			}
 			if n.Parent != 0 {
 				switch {
 				case o.Parent == 0:
@@ -149,7 +193,11 @@ func (m *Model) Chain(id int) (chain []*Object, cycle bool, window int) {
 }
 
 // Window returns the nearest enclosing Window id.
+// 优先用运行期标的"当前窗口"（Win）；没有时才回退到父链。
 func (m *Model) Window(id int) (int, bool) {
+	if o, ok := m.objs[id]; ok && o.Win != 0 {
+		return o.Win, true
+	}
 	_, _, w := m.Chain(id)
 	return w, w != 0
 }
@@ -164,3 +212,31 @@ func (m *Model) WindowName(id int) string {
 
 // Windows returns every Window object in first-seen order.
 func (m *Model) Windows() []*Object { return m.ByType("Window") }
+
+// Propagate 把运行期已标定的窗口归属**沿父子关系向下**传（父已定、子未定才传）。
+//
+// 为什么只向下：实测破的正是父链向上继承（预载对象的父指向模板语境），
+// 所以不能拿父链去**推断**窗口；但"已确定属于某窗口的父对象，它的子对象也属于它"
+// 是安全的 —— 实测这样开窗的列才会归到开窗名下。
+func (m *Model) Propagate() int {
+	total := 0
+	for hop := 0; hop < 8; hop++ {
+		n := 0
+		for _, o := range m.Objects() {
+			if o.Win != 0 || o.Parent == 0 || o.Type == "Window" {
+				continue
+			}
+			p, ok := m.objs[o.Parent]
+			if !ok || p.Win == 0 {
+				continue
+			}
+			o.Win = p.Win
+			n++
+		}
+		total += n
+		if n == 0 {
+			break
+		}
+	}
+	return total
+}

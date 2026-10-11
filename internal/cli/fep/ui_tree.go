@@ -72,6 +72,33 @@ var uiTreeCmd = &cobra.Command{
 				title = w.Attr("title")
 			}
 			fmt.Printf("窗口 #%d  %s\n", w.ID, title)
+			// 先列"归到这个窗口名下的对象"—— 依据运行期标的 currentWindow（Win），
+			// 而不是父链：实测开窗里的对象是预载的，父链指向模板语境。
+			var mine []*fep.Object
+			for _, o := range m.Objects() {
+				if wid, ok := m.Window(o.ID); ok && wid == w.ID && o.ID != w.ID {
+					mine = append(mine, o)
+				}
+			}
+			sort.Slice(mine, func(i, j int) bool { return mine[i].ID < mine[j].ID })
+			for _, o := range mine {
+				name := o.Attr("name")
+				if fn, ok := r.Resolve(o.ID); ok && fn.Text != "" && fn.Text != name {
+					name = fn.Text + " (`" + o.Attr("name") + "`)"
+				}
+				extra := ""
+				if cm := o.Attr("comment"); cm != "" {
+					extra = "  comment=" + cm
+				}
+				if v := o.Attr("value"); v != "" {
+					extra += fmt.Sprintf("  value=%q", v)
+				}
+				fmt.Printf("  #%-6d %-16s %s%s\n", o.ID, o.Type, name, extra)
+			}
+			if len(mine) == 0 {
+				fmt.Printf("  （运行期还没把任何对象归到这个窗口下）\n")
+			}
+			// 再用父链补一遍（两者不一致时都列出来，便于暴露作用域问题）
 			printSubtree(kids, r, w.ID, 1, depth, map[int]bool{})
 		}
 		return nil
