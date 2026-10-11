@@ -96,7 +96,7 @@ var uiStateCmd = &cobra.Command{
 		// 三种阶段的"选中"语义完全不同（见 openwin.go）。
 		type gridView struct {
 			ID          int    `json:"id"`
-			DialogType  string `json:"dialogType,omitempty"`
+			Seq         int    `json:"seq,omitempty"`
 			CurrentRow  string `json:"currentRow,omitempty"`
 			CurrentCol  string `json:"currentColumn,omitempty"`
 			PageSize    string `json:"pageSize,omitempty"`
@@ -110,13 +110,19 @@ var uiStateCmd = &cobra.Command{
 				continue
 			}
 			grids = append(grids, gridView{
-				ID: g, DialogType: o.Attr("dialogType"), CurrentRow: o.Attr("currentRow"),
+				ID: g, Seq: o.Seq, CurrentRow: o.Attr("currentRow"),
 				CurrentCol: o.Attr("currentColumn"), PageSize: o.Attr("pageSize"),
 				ArrayName: o.Attr("name"), ScreenArray: o.Attr("screenArray"),
 			})
 		}
 		if len(grids) > 0 {
 			view["grids"] = grids
+		}
+		// 当前对话框阶段是**连接级**的（实测运行期同一时刻把它推给一大堆网格），
+		// 而且**粘滞**（开窗关掉后不复位）—— 所以只对"推它时那个窗口"有效，
+		// 换了窗口就问不出来（回空串），只报一次、不按网格重复报。
+		if dt := m.DialogTypeFor(m.CurrentWindow()); dt != "" {
+			view["dialogType"] = dt
 		}
 		// 作业停摆要先说：它一出现，下面所有"当前指令 / 可发动作"都是废的
 		// （实测停摆后窗口对任何事件只回空 ACK，看起来像"没反应"）。
@@ -163,17 +169,20 @@ var uiStateCmd = &cobra.Command{
 				fmt.Println("→ 当前指令里没有名为 accept 的动作（那就别发 —— 宁缺不猜）")
 			}
 			for _, g := range grids {
-				s := fmt.Sprintf("网格 #%d", g.ID)
-				if g.DialogType != "" {
-					s += "  dialogType=" + g.DialogType
-				}
+				s := fmt.Sprintf("网格 #%d seq=%d", g.ID, g.Seq)
 				if g.CurrentRow != "" {
 					s += "  currentRow=" + g.CurrentRow
 				}
 				if g.CurrentCol != "" {
 					s += "  currentColumn=" + g.CurrentCol
 				}
+				if g.ArrayName != "" {
+					s += "  数组=" + g.ArrayName
+				}
 				fmt.Println("  " + s)
+			}
+			if dt, _ := view["dialogType"].(string); dt != "" {
+				fmt.Printf("  当前对话框阶段：%s（连接级；Construct=写条件 / InputArray=勾选 / DisplayArray=当前行）\n", dt)
 			}
 		})
 	},

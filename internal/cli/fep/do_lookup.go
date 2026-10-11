@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -148,14 +149,24 @@ var doLookupCmd = &cobra.Command{
 			id, name = ctrl.ID, ctrl.Role
 		}
 		pl.Opener = fmt.Sprintf("#%d(%s)", id, name)
+		// 明细列的开窗按钮要求**光标先落在那一行那一列** —— 运行期才把它置为可用
+		// （实测：先发 {网格}{currentRow}{currentColumn}，运行期回 un {currentRow …}
+		// 并让相关动作 active=1）。所以顺序是：定位 → 重读 → 校验 → 点。
+		// 先校验再定位会把一个"马上就能用"的按钮当成不可用（今天就这么卡了一次）。
+		if grid := fep.GridOfColumn(m, id); grid != 0 {
+			row := maxi(pl.Row, 1)
+			step("先把光标放进网格 #%d 第 %d 行（第 2 列）再点开窗", grid, row)
+			if err := send(fep.ConfigureGridCursorText(grid, row, 2)); err != nil {
+				return fail(exitFailed, "定位光标：%v", err)
+			}
+			time.Sleep(1 * time.Second)
+			if m2, rerr := reload(); rerr == nil {
+				m = m2
+			}
+		}
 		// 发前校验（R1）：不在当前交互指令里的动作、actionActive=0 的按钮，**发了也是空 ACK**。
-		// 先在这里说清楚为什么不行，比发出去再看"没反应"好得多。
 		if cerr := fep.CheckClick(m, id); cerr != nil {
 			return fail(exitState, "开窗按钮 #%d 现在不能点：%v", id, cerr)
-		}
-		if grid := fep.GridOfColumn(m, id); grid != 0 {
-			step("先把光标放进网格 #%d 第 %d 行再点开窗", grid, maxi(pl.Row, 1))
-			_ = send(fep.ConfigureGridCursorText(grid, maxi(pl.Row, 1), 2))
 		}
 		if err := send(fep.ActionEventText(id)); err != nil {
 			return fail(exitFailed, "点开窗：%v", err)
@@ -172,9 +183,9 @@ var doLookupCmd = &cobra.Command{
 			return fail(exitTarget, "点开窗后没有新窗口：%v", strings.Join(windowNames(m), ", "))
 		}
 		pl.Window = win
-		pl.WindowNm = m.WindowName(win)
+		pl.WindowNm = rawWindowName(m, win)
 		pl.Program = fep.OpenWinProgramFromWindow(pl.WindowNm)
-		step("开窗已出现：窗口 #%d %s（开窗程序：%s）", win, pl.WindowNm, orDash(pl.Program))
+		step("开窗已出现：窗口 #%d %s（开窗程序：%s）", win, displayName(m, win), orDash(pl.Program))
 
 		// ③ 循环推进：查询 → 选中 → 回传。每轮都**重新读状态**再决定。
 		for round := 0; round < 6; round++ {
@@ -187,6 +198,17 @@ var doLookupCmd = &cobra.Command{
 				break
 			}
 			grid, stage := gridOfWindow(m, win)
+			// 窗口刚出来的那一刻运行期常还没推 dialogType（实测：窗口声明与 dialogType
+			// 不在同一条消息里）—— 等一下再问，而不是拿旧值顶替。
+			for i := 0; stage == "" && i < 8; i++ {
+				time.Sleep(900 * time.Millisecond)
+				m2, rerr := reload()
+				if rerr != nil {
+					return fail(exitFailed, "%v", rerr)
+				}
+				m = m2
+				grid, stage = gridOfWindow(m, win)
+			}
 			pl.Grid, pl.Stage = grid, stage
 			// 选中语义：**先看源码，再看运行期阶段**，两边对不上就停手（R2）。
 			// 没有源码时不用"InputArray 就是勾选"这种推断顶替 —— 除非调用方显式接受。
@@ -235,15 +257,44 @@ var doLookupCmd = &cobra.Command{
 					pl.Result = "只要查询，不选行（--row 0）"
 					break
 				}
-				cell, col, val, err := checkTarget(m, win, grid, pl.Row)
-				if err != nil {
-					return fail(exitTarget, "勾选格：%v", err)
-				}
-				pl.Cell, pl.CheckCol, pl.CheckVal = cell, fmt.Sprintf("#%d", col), val
-				step("阶段=InputArray（源码：勾选式）→ 光标到第 %d 行、第 1 列，给勾选格 #%d 写 %q", pl.Row, cell, val)
+				// 顺序：先把光标放进目标行（INPUT ARRAY 的 ON CHANGE 只认当前行）→ 写勾选值
+				// → **验证**（没被运行期确认就不往下走，R1）。为什么是"候选 + 验证"而不是算一个：
+				// 运行期复用裸 id，同一窗口下同时挂着旧实例与本实例的格子，"哪一批是本页"
+				// 只有运行期知道 —— 所以按声明顺序列一串、逐个写、逐个认（每个都是一次叶子写值，安全）。
 				_ = send(fep.ConfigureGridCursorText(grid, pl.Row, 1))
-				_ = send(fep.ConfigureValueText(cell, val, nil))
-				time.Sleep(1 * time.Second)
+				time.Sleep(900 * time.Millisecond)
+				cands := checkCellCandidates(m, grid, pl.Row)
+				if len(cands) == 0 {
+					return fail(exitTarget, "网格 #%d 上找不到可写的勾选格（本实例）", grid)
+				}
+				val := lookupCheck
+				if val == "" {
+					val = "Y" // .4fd 的 valueChecked；源码里 q_imaf001_15 就是 Y
+				}
+				pl.CheckVal = val
+				confirmed := false
+				for _, c := range cands {
+					before := runtimeBytes()
+					_ = send(fep.ConfigureValueText(c, val, nil))
+					time.Sleep(900 * time.Millisecond)
+					m3, rerr := reload()
+					if rerr != nil {
+						// 运行期把程序打停了：**立刻停手**（再发就是白费），并说清楚是哪一格
+						return fail(exitFailed,
+							"写勾选格 #%d 把开窗程序打停了：%v\n  这一格看着像勾选格但不是"+
+								"（-6327 = 值发给了容器）—— 回源码/回 ui find 确认勾选列再试", c, rerr)
+					}
+					if valueOf(m3, c) == val && runtimeBytes() != before {
+						pl.Cell = c
+						step("勾上第 %d 行：格子 #%d ← %q（运行期已确认）", pl.Row, c, val)
+						confirmed = true
+						break
+					}
+				}
+				if !confirmed {
+					return fail(exitState, "勾选没被运行期确认（试了 %d 个候选格）—— 不猜："+
+						"先 tt fep ui find --value N --sort seq-desc 看当前页的勾选格", len(cands))
+				}
 				m2, err := reload()
 				if err != nil {
 					return fail(exitFailed, "%v", err)
@@ -312,6 +363,24 @@ func orDash(s string) string {
 	return s
 }
 
+// rawWindowName 取窗口的**原始 name 属性**（如 w_qry_q_imaf001_15）。
+//
+// 注意别用 m.WindowName()：那是"给人看的显示名"（中文标题，实测
+// "据点料件编号查询(排除料件类别为范本或虚拟品)(q_imaf001_15)"），推不出开窗程序。
+func rawWindowName(m *fep.Model, win int) string {
+	if o, ok := m.Get(win); ok {
+		return o.Attr("name")
+	}
+	return ""
+}
+
+func displayName(m *fep.Model, win int) string {
+	if o, ok := m.Get(win); ok {
+		return o.Attr("text")
+	}
+	return ""
+}
+
 // lookupOpenWin 读开窗程序源码（读不到就回 nil —— 上层据此说"没有源码可对"）。
 func lookupOpenWin(program string) *fep.OpenWinModel {
 	if program == "" {
@@ -368,14 +437,18 @@ func windowNames(m *fep.Model) []string {
 }
 
 // gridOfWindow 返回窗口自己的那个结果网格（实测：网格与窗口在同一条消息里声明）
-// 以及它的 dialogType（运行期说的"这一步在哪个阶段"）。
+// 以及它的对话框阶段（运行期说的"这一步在哪个阶段"）。
+//
+// 阶段取自 `DialogTypeFor(win)` 而不是网格自己的 dialogType 属性：后者是**连接级**且**粘滞**的
+// （实测运行期同一时刻把同一个值推给一大堆网格，且开窗关掉后不复位）——
+// 按网格读会把上一个开窗的阶段当成现在这个网格的（今天就这么误判过）。
 func gridOfWindow(m *fep.Model, win int) (int, string) {
 	for _, g := range m.TablesOfWindow(win) {
-		if o, ok := m.Get(g); ok {
-			return g, o.Attr("dialogType")
+		if _, ok := m.Get(g); ok {
+			return g, m.DialogTypeFor(win)
 		}
 	}
-	return 0, ""
+	return 0, m.DialogTypeFor(win)
 }
 
 // constructTarget 找 CONSTRUCT 阶段该往哪个格子写条件：该窗口网格里第一列真实列的第一个格子。
@@ -398,75 +471,107 @@ func constructTarget(m *fep.Model, win int) (col, cell int, err error) {
 	return 0, 0, fmt.Errorf("窗口 #%d 的网格 #%d 下没找到可写条件列", win, grid)
 }
 
-// checkTarget 找"目标行的勾选格"。
+// checkCellCandidates 列出"目标行可能对应的勾选格"，按**声明顺序**（行序）排。
 //
-// 两条实测规则：
-//  1. **按声明顺序（Seq）**数行 —— 运行期复用裸 id，按 id 取到的往往是**旧实例**的格子
-//     （实测 #59/#105 属于上一个实例；当前实例是 #168/#3549/#3548…）；
-//  2. 勾选格的当前值是 `valueUnchecked`（.4fd 的 `valueUnchecked="N"`），
-//     所以"值是 N 的格子"就是本页未勾选的那些。
-func checkTarget(m *fep.Model, win, grid, row int) (cell, col int, val string, err error) {
-	// 勾选列：本实例网格下名字以 check 结尾的那一列
-	var checkCol *fep.Object
-	for _, o := range m.Objects() {
-		if o.Type == "TableColumn" && o.Parent == grid && strings.HasSuffix(o.Attr("name"), "check") {
-			checkCol = o
-		}
-	}
-	if checkCol == nil {
-		return 0, 0, "", fmt.Errorf("网格 #%d 下没有 check 列", grid)
-	}
-	val = lookupCheck
-	if val == "" {
-		val = "Y" // .4fd 的 valueChecked；源码里 q_imaf001_15 就是 Y
-	}
-	// 该列 ValueList 下的格子，按 Seq（声明顺序）= 行序
+// 勾选格的判据来自 .4fd：`valueUnchecked="N"` —— 所以当前值是 N 的那些 Value 就是
+// 本页未勾选的勾选格。为什么要列一串而不是算一个：运行期复用裸 id，同一个窗口下
+// 同时挂着旧实例与本实例的格子（实测按 id 看是 #59/#105…，按声明顺序才是 #168/#3549…），
+// 而"哪一批是本页"只有运行期知道 —— 调用方逐个写、逐个验（每个都是一次叶子写值）。
+func checkCellCandidates(m *fep.Model, grid, row int) []int {
 	type cand struct {
 		id  int
 		seq int
 	}
-	var cands []cand
+	gridWin := m.WindowOf(grid)
+	// 严格一点：先找"勾选列的 ValueList"（列名以 check 结尾的 TableColumn 的 ValueList 孩子），
+	// 只收它下面的格子。
+	//
+	// 为什么要严：上一版按"值是 N 的 Value"筛，结果把一个**容器型 Value** 也收进来，
+	// 写下去直接 **-6327** 把开窗程序打停（实测：qry_q_imaf001_15.4gl:345）。
+	valueLists := map[int]bool{}
+	for _, col := range m.Objects() {
+		if col.Type != "TableColumn" || !strings.HasSuffix(strings.ToLower(col.Attr("name")), "check") {
+			continue
+		}
+		if w := m.WindowOf(col.ID); w == 0 || (gridWin != 0 && w != gridWin) {
+			continue
+		}
+		for _, vl := range m.Objects() {
+			if vl.Type == "ValueList" && vl.Parent == col.ID {
+				valueLists[vl.ID] = true
+			}
+		}
+	}
+	var all []cand
 	for _, o := range m.Objects() {
-		if o.Type != "Value" || o.Parent != 0 {
+		if o.Type != "Value" || !valueLists[o.Parent] {
 			continue
 		}
-		// 只收本实例的：父链指向 check 列的 ValueList，或值就是"未勾选"字面值
-		if !inSubtree(m, o.ID, checkCol.ID) && !isUncheckedValue(o) {
-			continue
+		all = append(all, cand{o.ID, o.Seq})
+	}
+	if len(all) == 0 {
+		// 退化（找不到列定义时）：仍限定在"值就是未勾选字面值"的 Value 上
+		for _, o := range m.Objects() {
+			if o.Type != "Value" {
+				continue
+			}
+			v := o.Attr("value")
+			if v != "N" && v != "n" && v != "0" {
+				continue
+			}
+			if w := m.WindowOf(o.ID); w == 0 || (gridWin != 0 && w != gridWin) {
+				continue
+			}
+			all = append(all, cand{o.ID, o.Seq})
 		}
-		cands = append(cands, cand{o.ID, o.Seq})
 	}
-	if len(cands) == 0 {
-		return 0, 0, "", fmt.Errorf("本实例里没有勾选格")
+	sort.Slice(all, func(i, j int) bool { return all[i].seq < all[j].seq })
+	n := len(all)
+	if n == 0 {
+		return nil
 	}
-	for i := 1; i < len(cands); i++ {
-		for j := i; j > 0 && cands[j-1].seq > cands[j].seq; j-- {
-			cands[j-1], cands[j] = cands[j], cands[j-1]
-		}
+	const batchMargin = 14 // 当前页 + 余量（实测 pageSize=12）
+	start := n - batchMargin
+	if start < 0 {
+		start = 0
 	}
-	if row > len(cands) {
-		return 0, 0, "", fmt.Errorf("只有 %d 个勾选格，要第 %d 行", len(cands), row)
+	var out []int
+	for i := start; i < n; i++ {
+		out = append(out, all[i].id)
 	}
-	return cands[row-1].id, checkCol.ID, val, nil
+	if row > 0 && row <= len(out) {
+		rot := append([]int(nil), out[row-1:]...)
+		rot = append(rot, out[:row-1]...)
+		return rot
+	}
+	return out
 }
 
-func isUncheckedValue(o *fep.Object) bool {
-	v := o.Attr("value")
-	return v == "N" || v == "n" || v == "0"
+func valueOf(m *fep.Model, id int) string {
+	if o, ok := m.Get(id); ok {
+		return o.Attr("value")
+	}
+	return ""
 }
 
-func inSubtree(m *fep.Model, id, root int) bool {
-	for hop := 0; hop < 8; hop++ {
-		o, ok := m.Get(id)
-		if !ok || o.Parent == 0 {
-			return false
-		}
-		if o.Parent == root {
-			return true
-		}
-		id = o.Parent
+// runtimeBytes 给"这次写有没有被运行期确认"一个可比较的量：
+// 取所有活连接里累计接收字节的最大值（单调增），变了就说明运行期确实回了东西。
+func runtimeBytes() int64 {
+	c, err := newClient()
+	if err != nil {
+		return 0
 	}
-	return false
+	conns, err := c.Status()
+	if err != nil {
+		return 0
+	}
+	var best int64
+	for _, cc := range conns {
+		if cc.BytesRT > best {
+			best = cc.BytesRT
+		}
+	}
+	return best
 }
 
 func appendLookupAudit(pl *lookupPlan) {

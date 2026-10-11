@@ -121,3 +121,29 @@ func TestResolveInputTargetFindsFormFieldParent(t *testing.T) {
 		t.Fatalf("应认到父对象 FormField 271：target=%d via=%v err=%v", target, via, err)
 	}
 }
+
+// 空 idRef 挡在发前：实测它**能打断连接**（`conns: []`，整个作业要重开），
+// 而形状看起来无害 —— 所以必须由代码挡，不能靠人记得。
+func TestPreflightRefusesEmptyIdRef(t *testing.T) {
+	bad := []string{
+		`ConfigureEvent 0{{idRef ""}{ value "Y"}}`,
+		`ActionEvent 0{{idRef ""}}`,
+	}
+	for _, ev := range bad {
+		if err := CheckRaw(ev); err == nil {
+			t.Errorf("空 idRef 被放行：%s", ev)
+		} else if ref, ok := err.(*Refusal); !ok || ref.Exit != 2 {
+			t.Errorf("%s → %v（想要退出码 2 的 *Refusal）", ev, err)
+		}
+	}
+	// 合法的不能被误伤
+	for _, ev := range []string{
+		`ConfigureEvent 0{{idRef "105"}{ value "Y"}}`,
+		`ActionEvent 0{{idRef "4538"}}`,
+		`KeyEvent 0{{keyName "Tab"}}`,
+	} {
+		if err := CheckRaw(ev); err != nil {
+			t.Errorf("合法事件被拒：%s → %v", ev, err)
+		}
+	}
+}

@@ -151,6 +151,13 @@ func CheckRaw(ev string) error {
 	if strings.Contains(ev, "ConfigureEvent") && !strings.Contains(ev, "idRef") {
 		return refuse(output.CodeUsage, 2, "ConfigureEvent 必须带 idRef（发给谁）：%s", ev)
 	}
+	// 空 idRef 是**能打断连接**的：实测手滑把格子 id 取成空串（`{idRef ""}{value "Y"}`）之后，
+	// 那条连接直接消失（`conns: []`），整个作业要重开。它的形状看起来"无害" ——
+	// 正因为看起来无害，才会有人（我）发出去。所以在这里挡掉。
+	if strings.Contains(ev, `idRef ""`) {
+		return refuse(output.CodeUsage, 2,
+			"事件里的 idRef 是空的：这会打断连接（实测把作业整条连接打死）—— %s", ev)
+	}
 	return nil
 }
 
@@ -233,3 +240,5 @@ func ConfigureGridRowText(grid int, row int) string {
 	return fmt.Sprintf(`ConfigureEvent 0{{idRef %q}{ currentRow %q}}`,
 		strconv.Itoa(grid), strconv.Itoa(row))
 }
+
+// （空 idRef 的检查已并入 CheckRaw —— 那条铁律在那里。）

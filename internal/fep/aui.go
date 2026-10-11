@@ -90,6 +90,11 @@ type Model struct {
 	// curWindow 是运行期最近一次告知的当前窗口（un 0 {{currentWindow "N"}}）。
 	// 它后面的声明/更新都归到这个窗口下 —— 这是 M1 用来划分作用域的依据。
 	curWindow int
+	// dialogType 是**连接级**的"当前对话框阶段"（运行期最近一次推的值；见 DialogType）。
+	// dialogTypeWin 是**推它的时候当前是哪个窗口** —— 这个值还会粘（实测开窗关掉后
+	// 运行期不再复位它），所以它只能对"当时那个窗口"有效。
+	dialogType    string
+	dialogTypeWin int
 }
 
 // ObjKey 是对象的**作用域内身份**。
@@ -211,6 +216,12 @@ func (m *Model) Apply(nodes []Node) int {
 			}
 			for k, v := range n.Attrs {
 				o.Attrs[k] = v
+			}
+			// dialogType 是**连接级**状态（实测运行期同一时刻把它推给一大堆网格），
+			// 所以还要在模型上记一份"当前阶段"，供驱动问"这一步在哪个阶段"。
+			if v := n.Attrs["dialogType"]; v != "" {
+				m.dialogType = v
+				m.dialogTypeWin = m.curWindow
 			}
 			// 被运行期触及 = 它就是当前那份（见 Object.Seq）。
 			o.Seq = m.nextSeq()
@@ -585,4 +596,29 @@ func (m *Model) TablesOfWindow(w int) []int {
 	}
 	sort.Ints(out)
 	return out
+}
+
+// DialogTypeFor 返回**窗口 win 此刻的对话框阶段**；不知道就回空串。
+//
+// 两条实测性质决定了这个形状：
+//  1. **连接级**：运行期同一时刻把同一个值推给一大堆网格（un 164/un 166/un 803…
+//     都是 {dialogType "DisplayArray"}），所以它是"当前阶段"，不是"某网格的属性"；
+//  2. **会粘**：上一个对话框的阶段不会自动被清掉 —— 所以它只对"推它时那个窗口"有效。
+//
+// 但窗口**刚开出来**的那一刻它常常还没推（实测：窗口声明与 dialogType 不在同一条消息里）——
+// 那种情况回空串（不知道），调用方应该**等一下再问**（tt fep do lookup 就是轮询），
+// 而不是拿一个旧值顶替。
+func (m *Model) DialogTypeFor(win int) string {
+	if m.dialogType != "" && (m.dialogTypeWin == 0 || m.dialogTypeWin == win) {
+		return m.dialogType
+	}
+	// 退化路径：直接看这个窗口的网格自己有没有被推过 dialogType
+	for _, g := range m.TablesOfWindow(win) {
+		if o, ok := m.Get(g); ok {
+			if v := o.Attr("dialogType"); v != "" {
+				return v
+			}
+		}
+	}
+	return ""
 }
