@@ -127,7 +127,10 @@ func (s *FEServer) readLoop(c net.Conn) {
 				host, _ := os.Hostname()
 				reply := fmt.Sprintf(`meta Client{{name "tt-fe"}{version "0.1"}{host %q}{connections "1"}{port %q}{frontEndID2 "{%s}"}{encapsulation "1"}{filetransfer "1"}}`,
 					host, s.portStr(), newFEID())
-				if _, werr := c.Write(Encode(Frame{Type: FrameTypeAUI, Payload: []byte(reply)})); werr != nil {
+				// **握手帧是裸文本，不带 9 字节帧头**（实测：运行期发来的首个字节就是 'm' of "meta"）。
+				// 之前用 Encode() 包了一层长度头 → 运行期立刻 EOF（它期待的是 meta 文本）。
+				// 长度头只用于之后的 AUI/事件帧。
+				if _, werr := c.Write([]byte(reply + "\n")); werr != nil {
 					s.err = werr
 				}
 			}
