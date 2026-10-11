@@ -214,3 +214,22 @@ func ConfigureCursorText(id, caret int) string {
 // IsWritableType reports whether a type can take a value (the same list the
 // pre-flight uses). 标注该画在**栏位**上而不是它旁边的标签上，所以要能问这一句。
 func IsWritableType(t string) bool { return writableTypes[t] }
+
+// ConfigureGridCursorText 渲染"把光标放进网格第 row 行第 col 列"的事件。
+//
+// 实测形态（真人录制里就有）：`ConfigureEvent 0{{idRef "644"}{ currentRow "1"}{ currentColumn "2"}}`
+// —— 明细列的开窗按钮要求光标先落在那一行那一列，否则 actionActive=0（点了没反应）；
+// 而 INPUT ARRAY 的 `ON CHANGE` 也只认**当前行**的改动，所以写勾选前必须先把光标放进去。
+func ConfigureGridCursorText(grid int, row, col int) string {
+	return fmt.Sprintf(`ConfigureEvent 0{{idRef %q}{ currentRow %q}{ currentColumn %q}}`,
+		strconv.Itoa(grid), strconv.Itoa(row), strconv.Itoa(col))
+}
+
+// ConfigureGridRowText 渲染"把当前行移到第 row 行"的事件（不碰列）。
+//
+// 实测形态：`ConfigureEvent 0{{idRef "122"}{ currentRow "1"}}`
+// —— 运行期会回 `un 122 {{currentRow "1"}}`，这是 DISPLAY ARRAY 的"当前行式"选中要的前置。
+func ConfigureGridRowText(grid int, row int) string {
+	return fmt.Sprintf(`ConfigureEvent 0{{idRef %q}{ currentRow %q}}`,
+		strconv.Itoa(grid), strconv.Itoa(row))
+}

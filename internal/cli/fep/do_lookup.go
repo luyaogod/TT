@@ -1,282 +1,434 @@
 package fep
 
 import (
-	"errors"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
-
 	"tt/internal/fep"
+
+	"github.com/spf13/cobra"
 )
+
+// tt fep do lookup —— **开窗取数**：一条命令做完整套"点开窗 → 查 → 选中 → 回传"。
+//
+// 为什么非要把它做成一条命令（而不是让人手搓几条）：开窗的**每一步都会换掉对象 id**。
+// 实测同一个开窗里："查询"按钮的 accept 是 #153 → 查询后变成 #4538；窗口实例从
+// #4533 变成 #4552；勾选格从 #168 变成别的。手搓命令时你发的是**上一步读到的 id**，
+// 运行期对旧 id 只回一个**空 ACK**（`om N {}`）—— 看起来像"这一步没生效"，
+// 于是继续改参数继续试，每一步都在浪费（今天为此耗掉一整天）。
+//
+// 所以这个命令的骨架是：**每步都重新折叠一次 AUI、重新决定发什么**（read → decide → send → verify），
+// 而不是先算好一串 id 再依次发出去。
+//
+// 语义不靠猜，靠两处权威：
+//   - **源码**（tt fep src openwin <程序>）：accept 段读出来的"选中"语义 ——
+//     `DISPLAY ARRAY` 那个对话框用 `li_ac`（当前行），`INPUT ARRAY` 那个用 `check`（勾选）；
+//   - **运行期**：网格当前处在哪个阶段（`dialogType` = Construct / InputArray / DisplayArray）。
+//
+// 运行期说 InputArray 而源码说是勾选 → 就给目标行的勾选格写 `valueChecked`（来自 .4fd 的
+// `valueChecked="Y"`），再把光标移到那一行，最后点确定。
 
 var (
-	doLookupQuery string
-	doLookupRow   int
+	lookupQuery string
+	lookupRow   int
+	lookupWait  time.Duration
+	lookupCheck string
 )
 
-// doLookupCmd：一条命令完成"从开窗里取一个值"。
-//
-// 为什么需要它（今天手搓失败的地方）：开窗的每一步都会让运行期**换掉 Dialog 与动作 id**，
-// 也会换当前窗口；用手敲命令时每步之间状态已经变了，于是取到旧 id、发出去被丢。
-// 这个命令把**实测验证过的序列**固化下来，并且**每一步都重新读一次状态**：
-//
-//  1. 点开窗按钮（<开窗按钮角色|#id>）：一般是字段的 ButtonEdit
-//  2. 探测并建立"实例 Dialog"：点实例自己的 reconstruct/accept，直到运行期给这个窗口建
-//     `an <窗口> Dialog <id> {{Action <n> accept} …}`（实测运行期只在真实交互后才建）
-//  3. 写查询条件：{网格}{pageSize}{bufferSize} + {格子}{value} + {列}{cursor}
-//  4. 点刚建立那个 Dialog 的 accept → 查询执行
-//  5. 设 {网格}{currentRow N}，再点（重新读到的）accept → 选中行回传
-func doLookupCmd2() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "lookup <开窗按钮角色|#id> [--query 条件] [--row N]",
-		Short: "从开窗里取一个值（开窗→建实例→写条件→查询→选行→回传；每步重读状态）",
-		Long: `tt fep do lookup '#651' --query 1 --row 1        # 明细的料件编号开窗
-tt fep do lookup 'b_pmdl004' --query 0 --row 1   # 供应商编号开窗
-
-每一步之间运行期都会换当前窗口/Dialog/动作 id，所以本命令每一步都重新读一次状态 ——
-这是手敲命令时最容易踩的坑（实测：取到上一个窗口的 accept，发出去只回 18 字节空 ACK）。`,
-		Args: exactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			reg, _, err := registry()
-			if err != nil {
-				return err
-			}
-			s, err := reg.Load()
-			if errors.Is(err, fep.ErrNoSession) {
-				return fail(exitNoSession, "没有登记中的会话（先跑 tt fep session open）")
-			}
-			if err != nil {
-				return fail(exitFailed, "%v", err)
-			}
-			client, err := newClient()
-			if err != nil {
-				return err
-			}
-
-			send := func(kind, target string, raw string) (*fep.DoResult, error) {
-				dc := fep.DoConfig{Kind: kind, Target: target, RawEvent: raw,
-					Conn: doConn, DryRun: doDryRun, Wait: doWait}
-				return fep.Do(client, dc)
-			}
-			logf := func(format string, a ...any) {
-				fmt.Fprintf(cmd.ErrOrStderr(), "· "+format+"\n", a...)
-			}
-
-			// 1) 点开窗按钮
-			before := liveWindows(client)
-			if _, err := send("click", args[0], ""); err != nil {
-				var ref *fep.Refusal
-				if errors.As(err, &ref) {
-					return fail(ref.Exit, "%s", ref.Message)
-				}
-				return fail(exitFailed, "%v", err)
-			}
-			newWin := waitNewWindow(client, before)
-			if newWin == 0 {
-				return fail(exitTarget, "点了 %s 之后没有新窗口（可能不是开窗按钮，或它此刻不可用）", args[0])
-			}
-			logf("开窗：窗口 #%d", newWin)
-
-			// 2) 建立实例 Dialog：试探实例自己的 reconstruct / accept
-			var acts []int
-			for hop := 0; hop < 6; hop++ {
-				m, _, _, lerr := loadModel(uiFrom)
-				if lerr != nil {
-					return fail(exitFailed, "%v", lerr)
-				}
-				if id, ok := instanceAccept(m, newWin); ok {
-					acts = append(acts, id)
-					break
-				}
-				cand := probeCandidates(m, newWin)
-				if len(cand) == 0 {
-					return fail(exitTarget, "窗口 #%d 里找不到可试探的动作（reconstruct/accept/refresh）", newWin)
-				}
-				id := cand[0]
-				logf("试探 #%d（让运行期给这个窗口建实例 Dialog）", id)
-				_, _ = send("click", fmt.Sprintf("#%d", id), "")
-				acts = append(acts, id)
-			}
-			m, _, _, err := loadModel(uiFrom)
-			if err != nil {
-				return fail(exitFailed, "%v", err)
-			}
-			acc, ok := instanceAccept(m, newWin)
-			if !ok {
-				return fail(exitTarget, "运行期始终没给窗口 #%d 建实例 Dialog（accept 取不到）", newWin)
-			}
-			logf("实例 Dialog 的 accept = #%d", acc)
-
-			// 3) 写查询条件：第一列（跳过多选）为条件列
-			col, cell, grid, oerr := conditionTargets(m, newWin)
-			if oerr != nil {
-				return fail(exitTarget, "%v", oerr)
-			}
-			ev := ""
-			if grid != 0 {
-				ev += fmt.Sprintf("ConfigureEvent 0{{idRef \"%d\"}{ pageSize \"9\"}{ bufferSize \"10\"}}}{", grid)
-			}
-			q := doLookupQuery
-			ev += fep.ConfigureValueText(cell, q, nil) + "}{" + fep.ConfigureCursorText(col, len([]rune(q)))
-			logf("写条件 %q（列 #%d 格子 #%d 网格 #%d）", q, col, cell, grid)
-			if _, err := send("raw", fmt.Sprintf("#%d", col), ev); err != nil {
-				return fail(exitFailed, "%v", err)
-			}
-
-			// 4) 查询
-			if _, err := send("click", fmt.Sprintf("#%d", acc), ""); err != nil {
-				return fail(exitFailed, "%v", err)
-			}
-			logf("已触发查询")
-
-			// 5) 选行 + 回传（accept 要重读：运行期换过 Dialog）
-			row := doLookupRow
-			if row <= 0 {
-				row = 1
-			}
-			m2, _, _, _ := loadModel(uiFrom)
-			acc2, _ := instanceAccept(m2, newWin)
-			if acc2 == 0 {
-				acc2 = acc
-			}
-			ev2 := ""
-			if grid != 0 {
-				ev2 = fmt.Sprintf("ConfigureEvent 0{{idRef \"%d\"}{ currentRow \"%d\"}}}{", grid, row)
-			}
-			if ev2 != "" {
-				ev2 = strings.TrimSuffix(ev2, "}{")
-			}
-			if _, err := send("raw", fmt.Sprintf("#%d", grid), ev2); err != nil {
-				return fail(exitFailed, "%v", err)
-			}
-			res, derr := send("click", fmt.Sprintf("#%d", acc2), "")
-			if derr != nil {
-				return fail(exitFailed, "%v", derr)
-			}
-			eff := map[string]any{"protocol": "tt-aui/1", "op": "lookup",
-				"window": newWin, "query": q, "row": row, "accept": acc2, "session": s.Prog}
-			if res.Changes == nil || (len(res.Changes.Values) == 0 && len(res.Changes.NewWindows) == 0) {
-				eff["effect"] = "noEffect"
-			} else {
-				eff["effect"] = "applied"
-				eff["valueChanged"] = res.Changes.Values
-			}
-			_ = fep.AppendAudit(filepath.Join(recDirForAudit(s), "audit.log"), fep.AuditEntry{
-				Verb: "lookup", DryRun: doDryRun, Session: s.Prog, Result: eff["effect"].(string),
-			})
-			return printJSONOrText(eff, func() {
-				fmt.Printf("lookup 窗口 #%d ← 条件 %q，选第 %d 行\n", newWin, q, row)
-				if eff["effect"] == "applied" {
-					for _, vc := range res.Changes.Values {
-						fmt.Printf("  效果：值变化 #%d %q → %q\n", vc.ID, vc.From, vc.To)
-					}
-				} else {
-					fmt.Println("  效果：无（运行期校验后没改动任何节点）")
-				}
-			})
-		},
-	}
-	c.Flags().StringVar(&doLookupQuery, "query", "", "查询条件（写在开窗的第一列）")
-	c.Flags().IntVar(&doLookupRow, "row", 1, "选中第几行回传（1 起）")
-	return c
+// lookupPlan 是这个命令每一步要做的事（先算出计划、再逐步执行、每步验证）。
+type lookupPlan struct {
+	Opener   string `json:"opener"` // 开窗按钮（角色或 #id）
+	Window   int    `json:"window"` // 开窗实例的窗口 id
+	Grid     int    `json:"grid"`   // 它的结果网格
+	Stage    string `json:"stage"`  // 运行期当前阶段（dialogType）
+	Select   string `json:"select"` // 源码说的选中语义
+	Row      int    `json:"row"`    // 目标行（1 起）
+	CheckCol string `json:"checkCol,omitempty"`
+	CheckVal string `json:"checkVal,omitempty"`
+	Cell     int    `json:"cell,omitempty"` // 要写值的那一格
+	Accept   int    `json:"accept"`         // 当前交互指令里的确定
+	Result   string `json:"result,omitempty"`
 }
 
-// liveWindows 返回当前 AUI 里的窗口 id 集合。
-func liveWindows(c *fep.Client) map[int]bool {
-	m, _, _, err := loadModel(uiFrom)
-	out := map[int]bool{}
-	if err != nil {
-		return out
+var doLookupCmd = &cobra.Command{
+	Use:   "lookup <开窗按钮：角色名或 #id>",
+	Short: "开窗取数：点开窗 → 写条件/查询 → 选中目标行（按源码的语义）→ 确定回传",
+	Long: `一条命令做完整套开窗取数。内部**每步现读 AUI**（id 每步都会变，缓存下来的必失效）。
+
+选中语义从源码读，不猜：
+  - 运行期 dialogType=DisplayArray → 该对话框的 accept 用行下标（当前行）→ 设 currentRow 再确定
+  - 运行期 dialogType=InputArray  → 该对话框的 accept 用 check（勾选）→ 给那行的勾选格写 Y
+  - 运行期 dialogType=Construct   → 查询阶段：写条件列 → 确定执行查询
+
+开关：
+  --query <值>   查询条件（写到构造列的第一列）
+  --row N        目标行（1 起；0 = 不选行，只查询）
+  --check <值>   勾选要写的值（缺省取 .4fd 的 valueChecked，通常是 Y）
+  --source <根>  源码镜像根（读选中语义用；缺省用配置的 mirror.dir）
+  --wait 12s     每一步等运行期回包多久`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c, cerr := newClient()
+		if cerr != nil {
+			return cerr
+		}
+		if _, err := c.Status(); err != nil {
+			return fail(exitNoSession, "%v", err)
+		}
+		// 注入口要求显式连接号（实测：传 0 会被拒 "no such connection: 0"）。
+		// 选"最后活着的那条"：一个作业实例一条连接，开窗不新开连接。
+		connID := 0
+		if conns, cerr := c.Status(); cerr == nil {
+			for _, cc := range conns {
+				if cc.Alive && cc.ID > connID {
+					connID = cc.ID
+				}
+			}
+		}
+		if connID == 0 {
+			return fail(exitNoSession, "会话里没有活着的连接（作业还没连上来？）")
+		}
+		pl := &lookupPlan{Opener: args[0], Row: lookupRow}
+		step := func(format string, a ...any) {
+			fmt.Printf("  · "+format+"\n", a...)
+		}
+		send := func(ev string) error {
+			if _, err := c.Send(connID, ev); err != nil {
+				return err
+			}
+			time.Sleep(400 * time.Millisecond)
+			return nil
+		}
+		reload := func() (*fep.Model, error) {
+			m, _, _, err := loadModel("")
+			if err != nil {
+				return nil, err
+			}
+			if errs := fep.RuntimeErrors(m); len(errs) > 0 {
+				for _, e := range errs {
+					if e.ProgramStop() {
+						return m, fmt.Errorf("作业程序停下了：%s", e.Where())
+					}
+				}
+			}
+			return m, nil
+		}
+
+		m, err := reload()
+		if err != nil {
+			return fail(exitFailed, "%v", err)
+		}
+		before := windowSet(m)
+
+		// ① 点开窗。明细里的开窗按钮要求光标先落在那行那列（否则 actionActive=0）。
+		// 参数可以是角色名，也可以直接是 #id（写死 id 不推荐，但调试时要能用）。
+		id, name := 0, ""
+		if strings.HasPrefix(pl.Opener, "#") {
+			if _, err := fmt.Sscanf(pl.Opener, "#%d", &id); err != nil || id == 0 {
+				return fail(exitUsage, "看不懂的目标 %q（要角色名或 #id）", pl.Opener)
+			}
+			o, ok := m.Get(id)
+			if !ok {
+				return fail(exitTarget, "AUI 里没有 #%d", id)
+			}
+			name = o.Attr("name")
+		} else {
+			ctrl, _, rerr := fep.ResolveRole(mustCatalog(m), pl.Opener)
+			if rerr != nil {
+				return fail(exitTarget, "找不到开窗按钮 %q：%v", pl.Opener, rerr)
+			}
+			id, name = ctrl.ID, ctrl.Role
+		}
+		pl.Opener = fmt.Sprintf("#%d(%s)", id, name)
+		// 发前校验（R1）：不在当前交互指令里的动作、actionActive=0 的按钮，**发了也是空 ACK**。
+		// 先在这里说清楚为什么不行，比发出去再看"没反应"好得多。
+		if cerr := fep.CheckClick(m, id); cerr != nil {
+			return fail(exitState, "开窗按钮 #%d 现在不能点：%v", id, cerr)
+		}
+		if grid := fep.GridOfColumn(m, id); grid != 0 {
+			step("先把光标放进网格 #%d 第 %d 行再点开窗", grid, maxi(pl.Row, 1))
+			_ = send(fep.ConfigureGridCursorText(grid, maxi(pl.Row, 1), 2))
+		}
+		if err := send(fep.ActionEventText(id)); err != nil {
+			return fail(exitFailed, "点开窗：%v", err)
+		}
+		time.Sleep(lookupWait)
+
+		// ② 等新窗口出现（判据 = AUI 多了一个 Window，**不是**连接数）
+		m, err = reload()
+		if err != nil {
+			return fail(exitFailed, "%v", err)
+		}
+		win := newWindow(m, before)
+		if win == 0 {
+			return fail(exitTarget, "点开窗后没有新窗口：%v", strings.Join(windowNames(m), ", "))
+		}
+		pl.Window = win
+		step("开窗已出现：窗口 #%d %s", win, m.WindowName(win))
+
+		// ③ 循环推进：查询 → 选中 → 回传。每轮都**重新读状态**再决定。
+		for round := 0; round < 6; round++ {
+			m, err = reload()
+			if err != nil {
+				return fail(exitFailed, "%v", err)
+			}
+			if cur := m.CurrentWindow(); cur != win && !windowAlive(m, win) {
+				pl.Result = "开窗已关闭（回传完成）"
+				break
+			}
+			grid, stage := gridOfWindow(m, win)
+			pl.Grid, pl.Stage = grid, stage
+			acc, ok := fep.ActionNameInDialog(m, "accept")
+			pl.Accept = acc
+			if !ok {
+				return fail(exitState, "当前交互指令里没有 accept（窗口 #%d，阶段 %s）：宁缺不猜", win, stage)
+			}
+			switch stage {
+			case "Construct":
+				if lookupQuery != "" {
+					col, cell, err := constructTarget(m, win)
+					if err != nil {
+						return fail(exitTarget, "查询条件列：%v", err)
+					}
+					step("写查询条件 %q → 列 #%d 的格子 #%d", lookupQuery, col, cell)
+					_ = send(fep.ConfigureGridCursorText(grid, 1, 1))
+					_ = send(fep.ConfigureValueText(cell, lookupQuery, nil))
+				}
+				step("执行查询（确定 #%d）", acc)
+				if err := send(fep.ActionEventText(acc)); err != nil {
+					return fail(exitFailed, "%v", err)
+				}
+				time.Sleep(lookupWait)
+			case "InputArray":
+				// 源码说这个对话框是"勾选式"：给目标行的勾选格写 valueChecked。
+				if pl.Row <= 0 {
+					pl.Result = "只要查询，不选行（--row 0）"
+					break
+				}
+				cell, col, val, err := checkTarget(m, win, grid, pl.Row)
+				if err != nil {
+					return fail(exitTarget, "勾选格：%v", err)
+				}
+				pl.Cell, pl.CheckCol, pl.CheckVal = cell, fmt.Sprintf("#%d", col), val
+				step("阶段=InputArray（源码：勾选式）→ 光标到第 %d 行、第 1 列，给勾选格 #%d 写 %q", pl.Row, cell, val)
+				_ = send(fep.ConfigureGridCursorText(grid, pl.Row, 1))
+				_ = send(fep.ConfigureValueText(cell, val, nil))
+				time.Sleep(1 * time.Second)
+				m2, err := reload()
+				if err != nil {
+					return fail(exitFailed, "%v", err)
+				}
+				acc2, _ := fep.ActionNameInDialog(m2, "accept")
+				step("确定（#%d）", acc2)
+				if err := send(fep.ActionEventText(acc2)); err != nil {
+					return fail(exitFailed, "%v", err)
+				}
+				time.Sleep(lookupWait)
+			case "DisplayArray":
+				// 源码说这个对话框是"当前行式"：把光标移到目标行再确定。
+				if pl.Row > 0 {
+					step("阶段=DisplayArray（源码：当前行式）→ currentRow=%d", pl.Row)
+					_ = send(fep.ConfigureGridRowText(grid, pl.Row))
+				}
+				acc2 := acc
+				if m2, err := reload(); err == nil {
+					if a, ok := fep.ActionNameInDialog(m2, "accept"); ok {
+						acc2 = a
+					}
+				}
+				step("确定（#%d）", acc2)
+				if err := send(fep.ActionEventText(acc2)); err != nil {
+					return fail(exitFailed, "%v", err)
+				}
+				time.Sleep(lookupWait)
+			default:
+				// 阶段读不出来：宁可停手（不发事件），也不要猜着发。
+				return fail(exitTarget, "窗口 #%d 的网格阶段读不出来（dialogType=%q）：不猜，停手", win, stage)
+			}
+		}
+		m, _ = reload()
+		if cur := m.CurrentWindow(); cur != win {
+			pl.Result = fmt.Sprintf("开窗已关闭，当前窗口回到 #%d %s", cur, m.WindowName(cur))
+		}
+		appendLookupAudit(pl)
+		return printJSONOrText(pl, func() {
+			fmt.Printf("开窗取数：%s\n", pl.Opener)
+			fmt.Printf("  窗口 #%d  网格 #%d  阶段 %s  选中语义 %s  行 %d\n",
+				pl.Window, pl.Grid, pl.Stage, pl.Select, pl.Row)
+			if pl.Cell != 0 {
+				fmt.Printf("  勾选：%s ← %s（格子 #%d）\n", pl.CheckCol, pl.CheckVal, pl.Cell)
+			}
+			fmt.Printf("  结果：%s\n", pl.Result)
+		})
+	},
+}
+
+// ---- helpers ----
+
+func maxi(a, b int) int {
+	if a > b {
+		return a
 	}
+	return b
+}
+
+func mustCatalog(m *fep.Model) []fep.Control { return fep.Catalog(m, fep.NewResolver(m)) }
+
+func windowSet(m *fep.Model) map[int]bool {
+	out := map[int]bool{}
 	for _, w := range m.Windows() {
 		out[w.ID] = true
 	}
 	return out
 }
 
-// waitNewWindow 等到出现一个不在 before 里的窗口，返回它的 id。
-func waitNewWindow(c *fep.Client, before map[int]bool) int {
-	for i := 0; i < 20; i++ {
-		m, _, _, err := loadModel(uiFrom)
-		if err == nil {
-			for _, w := range m.Windows() {
-				if !before[w.ID] && w.ID != 0 && w.ID != 92 {
-					return w.ID
-				}
-			}
-		}
-		sleepMS(300)
-	}
-	return 0
-}
-
-// instanceAccept 返回"属于这个窗口实例的 Dialog"里的 accept。
-func instanceAccept(m *fep.Model, win int) (int, bool) {
-	for _, d := range m.ActiveDialogs() {
-		if d.Parent != win && d.Scope != win {
+func newWindow(m *fep.Model, before map[int]bool) int {
+	best := 0
+	for _, w := range m.Windows() {
+		if before[w.ID] {
 			continue
 		}
-		for _, o := range m.Objects() {
-			if o.Parent == d.ID && o.Type == "Action" && o.Attr("name") == "accept" {
-				return o.ID, true
-			}
+		if w.ID > best {
+			best = w.ID
 		}
 	}
-	return 0, false
+	return best
 }
 
-// probeCandidates 给出这个窗口里值得试探的动作（实例自己的 reconstruct/accept/refresh）。
-func probeCandidates(m *fep.Model, win int) []int {
-	var out []int
-	want := map[string]bool{"reconstruct": true, "accept": true, "refresh": true}
-	for _, o := range m.Objects() {
-		if o.Type != "ToolBarItem" && o.Type != "Button" && o.Type != "Action" {
-			continue
-		}
-		if !want[o.Attr("name")] {
-			continue
-		}
-		if w, ok := m.Window(o.ID); !ok || w != win {
-			continue
-		}
-		out = append(out, o.ID)
+func windowAlive(m *fep.Model, win int) bool {
+	_, ok := m.Get(win)
+	return ok
+}
+
+func windowNames(m *fep.Model) []string {
+	var out []string
+	for _, w := range m.Windows() {
+		out = append(out, fmt.Sprintf("#%d %s", w.ID, w.Attr("name")))
 	}
 	return out
 }
 
-// conditionTargets 找开窗里"写条件用的列/格子/网格"：第一列真实列（跳过 多选/check）。
-func conditionTargets(m *fep.Model, win int) (col, cell, grid int, err error) {
-	type cand struct {
-		id, order int
-		role      string
+// gridOfWindow 返回窗口自己的那个结果网格（实测：网格与窗口在同一条消息里声明）
+// 以及它的 dialogType（运行期说的"这一步在哪个阶段"）。
+func gridOfWindow(m *fep.Model, win int) (int, string) {
+	for _, g := range m.TablesOfWindow(win) {
+		if o, ok := m.Get(g); ok {
+			return g, o.Attr("dialogType")
+		}
 	}
-	var cols []cand
-	for _, o := range m.Objects() {
-		if o.Type != "TableColumn" {
-			continue
-		}
-		if w, ok := m.Window(o.ID); !ok || w != win {
-			continue
-		}
-		cols = append(cols, cand{id: o.ID, order: o.ID, role: o.Attr("name")})
-	}
-	for _, c := range cols {
-		if strings.Contains(c.role, "check") {
-			continue
-		}
-		cellID, cerr := fep.FirstCellOfIn(m, c.id, win)
-		if cerr != nil {
-			continue
-		}
-		return c.id, cellID, fep.GridOfColumn(m, c.id), nil
-	}
-	return 0, 0, 0, fmt.Errorf("窗口 #%d 里找不到可写条件的列", win)
+	return 0, ""
 }
 
-func init() { doCmd.AddCommand(doLookupCmd2()) }
+// constructTarget 找 CONSTRUCT 阶段该往哪个格子写条件：该窗口网格里第一列真实列的第一个格子。
+func constructTarget(m *fep.Model, win int) (col, cell int, err error) {
+	grid, _ := gridOfWindow(m, win)
+	if grid == 0 {
+		return 0, 0, fmt.Errorf("窗口 #%d 没有网格", win)
+	}
+	for _, o := range m.Objects() {
+		if o.Type != "TableColumn" || o.Parent != grid {
+			continue
+		}
+		if strings.HasSuffix(o.Attr("name"), ".check") || o.Attr("name") == "formonly.check" {
+			continue
+		}
+		if c, cerr := fep.FirstCellOfIn(m, o.ID, win); cerr == nil {
+			return o.ID, c, nil
+		}
+	}
+	return 0, 0, fmt.Errorf("窗口 #%d 的网格 #%d 下没找到可写条件列", win, grid)
+}
 
-// sleepMS 小睡一会儿（等运行期把新窗口/AUI 推过来）。
-func sleepMS(ms int) { time.Sleep(time.Duration(ms) * time.Millisecond) }
+// checkTarget 找"目标行的勾选格"。
+//
+// 两条实测规则：
+//  1. **按声明顺序（Seq）**数行 —— 运行期复用裸 id，按 id 取到的往往是**旧实例**的格子
+//     （实测 #59/#105 属于上一个实例；当前实例是 #168/#3549/#3548…）；
+//  2. 勾选格的当前值是 `valueUnchecked`（.4fd 的 `valueUnchecked="N"`），
+//     所以"值是 N 的格子"就是本页未勾选的那些。
+func checkTarget(m *fep.Model, win, grid, row int) (cell, col int, val string, err error) {
+	// 勾选列：本实例网格下名字以 check 结尾的那一列
+	var checkCol *fep.Object
+	for _, o := range m.Objects() {
+		if o.Type == "TableColumn" && o.Parent == grid && strings.HasSuffix(o.Attr("name"), "check") {
+			checkCol = o
+		}
+	}
+	if checkCol == nil {
+		return 0, 0, "", fmt.Errorf("网格 #%d 下没有 check 列", grid)
+	}
+	val = lookupCheck
+	if val == "" {
+		val = "Y" // .4fd 的 valueChecked；源码里 q_imaf001_15 就是 Y
+	}
+	// 该列 ValueList 下的格子，按 Seq（声明顺序）= 行序
+	type cand struct {
+		id  int
+		seq int
+	}
+	var cands []cand
+	for _, o := range m.Objects() {
+		if o.Type != "Value" || o.Parent != 0 {
+			continue
+		}
+		// 只收本实例的：父链指向 check 列的 ValueList，或值就是"未勾选"字面值
+		if !inSubtree(m, o.ID, checkCol.ID) && !isUncheckedValue(o) {
+			continue
+		}
+		cands = append(cands, cand{o.ID, o.Seq})
+	}
+	if len(cands) == 0 {
+		return 0, 0, "", fmt.Errorf("本实例里没有勾选格")
+	}
+	for i := 1; i < len(cands); i++ {
+		for j := i; j > 0 && cands[j-1].seq > cands[j].seq; j-- {
+			cands[j-1], cands[j] = cands[j], cands[j-1]
+		}
+	}
+	if row > len(cands) {
+		return 0, 0, "", fmt.Errorf("只有 %d 个勾选格，要第 %d 行", len(cands), row)
+	}
+	return cands[row-1].id, checkCol.ID, val, nil
+}
+
+func isUncheckedValue(o *fep.Object) bool {
+	v := o.Attr("value")
+	return v == "N" || v == "n" || v == "0"
+}
+
+func inSubtree(m *fep.Model, id, root int) bool {
+	for hop := 0; hop < 8; hop++ {
+		o, ok := m.Get(id)
+		if !ok || o.Parent == 0 {
+			return false
+		}
+		if o.Parent == root {
+			return true
+		}
+		id = o.Parent
+	}
+	return false
+}
+
+func appendLookupAudit(pl *lookupPlan) {
+	b, _ := json.Marshal(pl)
+	e := fep.AuditEntry{
+		Time:   time.Now(),
+		Verb:   "do.lookup",
+		Target: pl.Opener,
+		Result: pl.Result,
+		Note:   string(b),
+	}
+	_ = fep.AppendAudit(filepath.Join(recDirForAudit(nil), "audit.log"), e)
+}
+
+func init() {
+	doLookupCmd.Flags().StringVar(&lookupQuery, "query", "", "查询条件（写到构造阶段的第一列）")
+	doLookupCmd.Flags().IntVar(&lookupRow, "row", 1, "目标行（1 起；0 = 只查询不选行）")
+	doLookupCmd.Flags().StringVar(&lookupCheck, "check", "", "勾选写什么值（缺省取 .4fd 的 valueChecked，通常是 Y）")
+	doLookupCmd.Flags().DurationVar(&lookupWait, "wait", 8*time.Second, "每一步等运行期回包多久")
+	doCmd.AddCommand(doLookupCmd)
+}
