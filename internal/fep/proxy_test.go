@@ -103,30 +103,35 @@ func TestProxyForwardsBothWaysAndRecords(t *testing.T) {
 		t.Fatalf("next sequence = %d, want 4 (the front end numbered its event 3)", infos[0].Seq)
 	}
 
-	// recordings: raw bytes, both directions, one file each
+	// recordings: raw bytes (both directions, one file each) + a timestamped timeline.
 	deadline := time.Now().Add(2 * time.Second)
 	var entries []os.DirEntry
 	for time.Now().Before(deadline) {
-		if entries, _ = os.ReadDir(dir); len(entries) == 2 {
+		if entries, _ = os.ReadDir(dir); len(entries) == 3 {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if len(entries) != 2 {
-		t.Fatalf("expected two recording files, got %d", len(entries))
+	if len(entries) != 3 {
+		t.Fatalf("expected three files (rt2gdc / gdc2rt / timeline), got %d", len(entries))
 	}
-	var sawHello, sawEvent bool
+	var sawHello, sawEvent, sawTimeline bool
 	for _, e := range entries {
 		b, _ := os.ReadFile(filepath.Join(dir, e.Name()))
-		if strings.Contains(string(b), hello) {
+		s := string(b)
+		if strings.Contains(s, hello) {
 			sawHello = true
 		}
-		if strings.Contains(string(b), "event _om 3") {
+		if strings.Contains(s, "event _om 3") {
 			sawEvent = true
 		}
+		// 时间线里两个方向都要有：>> 运行期→前端，<< 前端→运行期
+		if strings.Contains(s, " >> ") && strings.Contains(s, " << ") {
+			sawTimeline = true
+		}
 	}
-	if !sawHello || !sawEvent {
-		t.Fatalf("recordings incomplete: runtime bytes=%v front-end bytes=%v", sawHello, sawEvent)
+	if !sawHello || !sawEvent || !sawTimeline {
+		t.Fatalf("recordings incomplete: runtime=%v front-end=%v timeline=%v", sawHello, sawEvent, sawTimeline)
 	}
 }
 
