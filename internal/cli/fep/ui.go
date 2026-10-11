@@ -14,6 +14,7 @@ import (
 var (
 	uiFrom      string
 	uiText      string
+	uiValue     string
 	uiType      string
 	uiLimit     int
 	uiOnlyNamed bool
@@ -68,6 +69,7 @@ func init() {
 		c.Flags().BoolVar(&recAll, "all", false, "目录里有多份录制件时全部合并读（默认只读最新一份）")
 	}
 	uiFindCmd.Flags().StringVar(&uiText, "text", "", "按名字/文本筛（大小写不敏感）")
+	uiFindCmd.Flags().StringVar(&uiValue, "value", "", "按**值**筛（网格格子没有名字也没有坐标，只能靠值找：如 1,000.000）")
 	uiFindCmd.Flags().StringVar(&uiType, "type", "", "只保留该类型的对象（如 Window / Table）")
 	uiFindCmd.Flags().IntVar(&uiLimit, "limit", 0, "最多输出多少条（0 = 不限）")
 	uiFindCmd.Flags().BoolVar(&uiOnlyNamed, "named", false, "只要解析出名字的")
@@ -166,6 +168,9 @@ var uiFindCmd = &cobra.Command{
 			}
 			fn, ok := r.Resolve(o.ID)
 			if uiOnlyNamed && (!ok || fn.Text == "") {
+				continue
+			}
+			if uiValue != "" && !strings.Contains(o.Attr("value"), uiValue) {
 				continue
 			}
 			if uiText != "" {
