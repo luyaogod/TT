@@ -17,6 +17,8 @@ var (
 	uiValue     string
 	uiType      string
 	uiComment   string
+	uiName      string
+	uiAttr      []string
 	uiParent    int
 	uiLimit     int
 	uiOnlyNamed bool
@@ -42,6 +44,9 @@ type uiRow struct {
 	Col        string `json:"col,omitempty"`
 	Value      string `json:"value,omitempty"`
 	Active     string `json:"active,omitempty"`
+	// actionActive/actionIdRef：运行期自己标的"这个动作现在能不能按"／它真正的动作对象
+	ActionActive string `json:"actionActive,omitempty"`
+	ActionIDRef  string `json:"actionIdRef,omitempty"`
 	// 几何：协议里的位置与尺寸（单位可能是字符格，也可能是个别对象的像素，见 view/README）
 	PosX   int `json:"posX,omitempty"`
 	PosY   int `json:"posY,omitempty"`
@@ -67,7 +72,7 @@ func (s uiStep) targetLabel() string {
 }
 
 func init() {
-	for _, c := range []*cobra.Command{uiSnapshotCmd, uiFindCmd, recStepsCmd} {
+	for _, c := range []*cobra.Command{uiSnapshotCmd, uiFindCmd, uiTreeCmd, recStepsCmd} {
 		c.Flags().StringVar(&uiFrom, "from", "", "录制件：单个 .log 或存放它的目录（默认 fep 缓存目录）")
 		c.Flags().BoolVar(&recAll, "all", false, "目录里有多份录制件时全部合并读（默认只读最新一份）")
 	}
@@ -76,6 +81,10 @@ func init() {
 	uiFindCmd.Flags().StringVar(&uiType, "type", "", "只保留该类型的对象（如 Window / Table）")
 	uiFindCmd.Flags().StringVar(&uiComment, "comment", "",
 		"按对象的 comment 筛 —— 明细格子没有名字，但带 comment=cmt_<表格><栏位>（如 cmt_pmdn007），\n靠它能把「一格」和数据库栏位对上")
+	uiFindCmd.Flags().StringVar(&uiName, "name", "",
+		"按对象的 name 属性筛 —— 源码里的动件名（accept/insert/query/statechange…）；\n名字解析会把 name 盖成中文，所以想按源码名找必须用这个开关")
+	uiFindCmd.Flags().StringArrayVar(&uiAttr, "attr", nil,
+		"按任意协议属性筛，形如 --attr image=tb/accept.png（可重复）；名字解析看不到的属性靠它找")
 	uiFindCmd.Flags().IntVar(&uiParent, "parent", 0, "按父对象编号筛（如 --parent 219 看某张表下的所有格子）")
 	uiFindCmd.Flags().IntVar(&uiLimit, "limit", 0, "最多输出多少条（0 = 不限）")
 	uiFindCmd.Flags().BoolVar(&uiOnlyNamed, "named", false, "只要解析出名字的")
@@ -182,6 +191,12 @@ var uiFindCmd = &cobra.Command{
 			if uiComment != "" && !strings.Contains(strings.ToLower(o.Attr("comment")), strings.ToLower(uiComment)) {
 				continue
 			}
+			if uiName != "" && !strings.Contains(strings.ToLower(o.Attr("name")), strings.ToLower(uiName)) {
+				continue
+			}
+			if !uiAttrsMatch(o, uiAttr) {
+				continue
+			}
 			if uiParent > 0 && o.Parent != uiParent {
 				continue
 			}
@@ -196,6 +211,7 @@ var uiFindCmd = &cobra.Command{
 				Confidence: string(fn.Confidence), Window: m.WindowName(o.ID),
 				Comment: o.Attr("comment"), Col: o.Attr("col"),
 				Value: o.Attr("value"), Active: o.Attr("active"),
+				ActionActive: o.Attr("actionActive"), ActionIDRef: o.Attr("actionIdRef"),
 				Parent: o.Parent, PosX: geomInt(o, "posX"), PosY: geomInt(o, "posY"),
 				Width: geomInt(o, "gridWidth", "width"), Height: geomInt(o, "gridHeight", "height")})
 			if uiLimit > 0 && len(rows) >= uiLimit {
@@ -303,4 +319,20 @@ func geomInt(o *fep.Object, keys ...string) int {
 		}
 	}
 	return 0
+}
+
+// uiAttrsMatch 检查对象的协议属性是否满足所有 --attr k=v（值按子串、不区分大小写）。
+// 为什么要有它：名字解析会把 name 盖成中文，也看不到 image/acceleratorName1 这类属性，
+// 而"找开窗的确定按钮"恰恰只能靠 image=tb/accept.png（GDC 调试树实证）。
+func uiAttrsMatch(o *fep.Object, attrs []string) bool {
+	for _, kv := range attrs {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		if !strings.Contains(strings.ToLower(o.Attr(strings.TrimSpace(k))), strings.ToLower(strings.TrimSpace(v))) {
+			return false
+		}
+	}
+	return true
 }
