@@ -168,7 +168,21 @@ var doLookupCmd = &cobra.Command{
 			}
 		}
 		// 发前校验（R1）：不在当前交互指令里的动作、actionActive=0 的按钮，**发了也是空 ACK**。
-		if cerr := fep.CheckClick(m, id); cerr != nil {
+		//
+		// 但"刚把光标放进明细格"时运行期往往还没来得及把这个栏位的开窗动作打开
+		// （实测：立刻校验会报 "#651 的 actionActive 为假"）—— 用户手工之所以一下就行，
+		// 是因为他已经 Tab 过去、运行期早把动作开了。所以这里**轮询等它开**（有界 3 秒）。
+		cerr = nil
+		for try := 0; try < 6; try++ {
+			if cerr = fep.CheckClick(m, id); cerr == nil {
+				break
+			}
+			time.Sleep(500 * time.Millisecond)
+			if m2, rerr := reload(); rerr == nil {
+				m = m2
+			}
+		}
+		if cerr != nil {
 			return fail(exitState, "开窗按钮 #%d 现在不能点：%v", id, cerr)
 		}
 		if err := send(fep.ActionEventText(id)); err != nil {
@@ -240,31 +254,41 @@ var doLookupCmd = &cobra.Command{
 			}
 			switch stage {
 			case "Construct":
+				// **先进查询模式**（用户原话，也是实测）：按该对话框里的"查询"(find) 动作 →
+				// 弹出一个条件框（实测开窗 q_imaf001_15：窗口 fglfind，字段 formonly.pattern）→
+				// 把条件写进**那个字段** → 回车执行 → 列表才过滤。
+				//
+				// 以前的做法（往结果网格的某一列写条件）是错的：结果网格只是"清单"，
+				// 条件写上去列表照样是全量（实测回显 `value "1 - 500"`，1217 条没过滤）。
 				if lookupQuery != "" {
-					col, cell, err := constructTargetFor(m, win, lookupOpenWin(pl.Program)) // 按源码的查询条件列挑
-					if err != nil {
-						return fail(exitTarget, "查询条件列：%v", err)
+					if a, ok := fep.ActionNameInDialog(m, "find"); ok {
+						step("进查询模式（find #%d）", a)
+						if err := send(fep.ActionEventText(a)); err != nil {
+							return fail(exitFailed, "%v", err)
+						}
+						time.Sleep(lookupWait)
+						if m2, rerr := reload(); rerr == nil {
+							m = m2
+						}
 					}
-					step("写查询条件 %q → 列 #%d 的格子 #%d", lookupQuery, col, cell)
-					// 条件、光标、✓ 必须**同一条消息**（照用户真实录制：fep-20261011-132748 的 _om 22）：
-					//
-					//	{ConfigureEvent{idRef "60"}{ value "LUYAOWF"}}{ConfigureEvent{idRef "6543"}{cursor}{cursor2}}{ActionEvent{idRef "6673"}}
-					//
-					// 分开发运行期只当"选中已有行"：网格空时什么都不发生（实测）。
-					ev := fep.ConfigureValueText(cell, lookupQuery, nil) + "}{" +
-						fep.ConfigureCursorText(col, len([]rune(lookupQuery))) + "}{" + fep.ActionEventText(acc)
-					if err := send(ev); err != nil {
+					fld := 0
+					for _, c := range fep.Catalog(m, fep.NewResolver(m)) {
+						if c.Role == "formonly.pattern" {
+							fld = c.ID
+							break
+						}
+					}
+					if fld == 0 {
+						return fail(exitTarget, "进了查询模式却没找到条件字段 formonly.pattern：不猜，停手")
+					}
+					step("写查询条件 %q → 条件字段 #%d", lookupQuery, fld)
+					evq := fep.ConfigureValueText(fld, lookupQuery, nil) + "}{" + fep.KeyEventText("Return")
+					if err := send(evq); err != nil {
 						return fail(exitFailed, "%v", err)
 					}
 					time.Sleep(lookupWait)
 					m, _ = reload()
 				}
-				step("执行查询（确定 #%d）", acc)
-				if err := send(fep.ActionEventText(acc)); err != nil {
-					return fail(exitFailed, "%v", err)
-				}
-				time.Sleep(lookupWait)
-			case "InputArray":
 				// 源码说这个对话框是"勾选式"：给目标行的勾选格写 valueChecked。
 				if pl.Row <= 0 {
 					pl.Result = "只要查询，不选行（--row 0）"
