@@ -1,6 +1,7 @@
 package fep
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -201,5 +202,25 @@ func TestAuditTrailIsAppendableJSONLines(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
 	if len(lines) != 2 || !strings.HasPrefix(lines[0], "{") || !strings.Contains(lines[1], "KeyEvent") {
 		t.Fatalf("审计日志形状不对: %q", string(b))
+	}
+}
+
+// 审计的每一行都要有时间：事后追"这一步是什么时候做的"是审计存在的理由。
+func TestAuditEntryGetsATimestamp(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.log")
+	if err := AppendAudit(path, AuditEntry{Verb: "click", Sent: true}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var e AuditEntry
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(b))), &e); err != nil {
+		t.Fatal(err)
+	}
+	if e.Time.IsZero() || time.Since(e.Time) > time.Minute {
+		t.Fatalf("时间戳不对: %v", e.Time)
 	}
 }

@@ -326,6 +326,9 @@ func AppendAudit(path string, e AuditEntry) error {
 	if path == "" {
 		return nil
 	}
+	if e.Time.IsZero() {
+		e.Time = time.Now()
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
