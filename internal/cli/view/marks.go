@@ -1,0 +1,273 @@
+package view
+
+import (
+	"fmt"
+	"image"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"tt/internal/fep"
+	"tt/internal/view"
+)
+
+// 这一层是**胶水**：把 AUI 的几何属性翻成 view 的 Box，再把几张东西串起来。
+// internal/fep 与 internal/view 谁都不 import 谁 —— 两条线的交界就落在这里。
+
+var (
+	marksFrom   string
+	marksFields []string
+	marksImage  string
+	marksPNG    string
+	marksOut    string
+	marksRef    string
+)
+
+var marksCmd = &cobra.Command{
+	Use:   "marks",
+	Short: "按协议坐标算标注框（并可顺带过一遍“栏位在这一帧里看得见吗”）",
+	Long: `把协议里的几何（posX/posY/gridWidth/gridHeight）换算成图上的框。
+
+**坐标不是猜的**：比例与偏移从参照物（AUI 里的顶层窗口）与抓到的图派生出来；
+推出来的东西离谱就报错，而不是接着画一个"看着像"的框。
+
+给了 --png 就顺手过一遍可见性门（计划 §2.12）：说明里点名的每个栏位，必须在那一帧里
+真的画出来了 —— 这一条直接防住"标题写在这里输入，而画面根本没走到那个栏位"那类错。
+
+--out 会把框画到图上另存一张（合成用 Go 的 image/draw，逐像素、绝不缩放）。`,
+	Args: noArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(marksFields) == 0 {
+			return fail(exitUsage, "至少给一个 --field <栏位名>")
+		}
+		events, err := loadEventsFile(marksFrom)
+		if err != nil {
+			return err
+		}
+		_ = events // 目前只用 AUI；留着是为了将来按步骤筛框
+		m, r, _, merr := loadModelFile(marksFrom)
+		if merr != nil {
+			return merr
+		}
+		var imgSize image.Rectangle
+		var img *image.RGBA
+		if marksPNG != "" {
+			loaded, lerr := view.LoadPNG(marksPNG)
+			if lerr != nil {
+				return fail(exitFailed, "读图失败: %v", lerr)
+			}
+			img = loaded
+			imgSize = loaded.Bounds()
+		} else if marksImage != "" {
+			w, h, perr := parseSize(marksImage)
+			if perr != nil {
+				return perr
+			}
+			imgSize = image.Rect(0, 0, w, h)
+		} else {
+			return fail(exitUsage, "要知道图有多大：给 --png <path> 或 --image WxH")
+		}
+
+		ref, refObjs, refNote := contentExtent(m, marksRef)
+		refNote = fmt.Sprintf("%s（%d 个对象，%dx%d 协议单位）", refNote, refObjs, ref.W, ref.H)
+		fm, problems := view.Derive(ref, imgSize)
+		if len(problems) > 0 {
+			return fail(exitQuality, "坐标映射推不出来：%s（参照物 %s）", strings.Join(problems, "；"), refNote)
+		}
+
+		var boxes []view.Box
+		for _, name := range marksFields {
+			b, berr := boxForField(m, r, name)
+			if berr != nil {
+				return berr
+			}
+			boxes = append(boxes, b)
+		}
+		frame := view.Frame{Image: img, Map: fm, Fields: boxes}
+		type out struct {
+			Reference string         `json:"reference"`
+			Scale     float64        `json:"scale"`
+			OriginY   int            `json:"originY"`
+			Marks     []view.Box     `json:"marks"`
+			Verdicts  []view.Verdict `json:"verdicts,omitempty"`
+			Image     string         `json:"image,omitempty"`
+		}
+		res := out{Reference: refNote, Scale: fm.ScaleX, OriginY: fm.OriginY, Marks: boxes}
+		if img != nil {
+			res.Verdicts = view.GateFields(img, boxes, fm)
+			res.Image = marksPNG
+		}
+		if marksOut != "" {
+			if img == nil {
+				return fail(exitUsage, "--out 需要同时给 --png（要往哪张图上画）")
+			}
+			var overlays []view.Overlay
+			for i, b := range boxes {
+				overlays = append(overlays, view.Overlay{Rect: fm.Map(b), Number: i + 1, Color: view.HighlightColor})
+			}
+			composed := view.Compose(img, overlays)
+			if serr := view.SavePNG(marksOut, composed); serr != nil {
+				return fail(exitFailed, "写图失败: %v", serr)
+			}
+			res.Image = marksOut
+		}
+		bad := frame.Gate()
+		if perr := printJSONOrText(res, func() {
+			fmt.Printf("参照物 %s → 比例 %.3f，客户区上沿 %dpx\n", res.Reference, res.Scale, res.OriginY)
+			for i, b := range boxes {
+				r := fm.Map(b)
+				fmt.Printf("%2d. %-22s 图内 %dx%d+%d+%d\n", i+1, b.Label, r.Dx(), r.Dy(), r.Min.X, r.Min.Y)
+			}
+			if len(res.Verdicts) > 0 {
+				fmt.Printf("可见性门：%s\n", view.Describe(bad))
+			}
+			if marksOut != "" {
+				fmt.Printf("已出图：%s\n", marksOut)
+			}
+		}); perr != nil {
+			return perr
+		}
+		if len(bad) > 0 {
+			return fail(exitQuality, "可见性门未通过：%s", view.Describe(bad))
+		}
+		return nil
+	},
+}
+
+// contentExtent 取“参照物”：**所有对象几何的并集**。
+//
+// 为什么不是拿某个对象当参照物：真实 AUI 里几何属性的单位并不统一 —— 栏位的位置是
+// **字符格**（实测 posY "2"、width "8"），而窗口对象自己的尺寸是**像素**（1912）。
+// 拿窗口当参照物会推出一个荒唐的比例（纵向下移 1038px）。用并集则不依赖“哪个对象是
+// 客户区”这个说不准的判断：整屏内容的包围盒，就该铺满客户区。
+func contentExtent(m *fep.Model, windowName string) (view.Box, int, string) {
+	winID := 0
+	note := "全部对象"
+	if windowName != "" {
+		for _, w := range m.Windows() {
+			if w.Attr("name") == windowName {
+				winID = w.ID
+				note = "窗口 " + windowName
+			}
+		}
+		if winID == 0 {
+			return view.Box{}, 0, "没找到窗口 " + windowName
+		}
+	}
+	minX, minY := 1<<30, 1<<30
+	maxX, maxY := -(1 << 30), -(1 << 30)
+	n := 0
+	for _, o := range m.Objects() {
+		if o.Attr("posX") == "" && o.Attr("posY") == "" {
+			continue
+		}
+		if winID != 0 {
+			if w, ok := m.Window(o.ID); !ok || w != winID {
+				continue
+			}
+		}
+		b := geomOf(o)
+		if b.W <= 0 || b.H <= 0 {
+			continue
+		}
+		if b.X < minX {
+			minX = b.X
+		}
+		if b.Y < minY {
+			minY = b.Y
+		}
+		if b.X+b.W > maxX {
+			maxX = b.X + b.W
+		}
+		if b.Y+b.H > maxY {
+			maxY = b.Y + b.H
+		}
+		n++
+	}
+	if n == 0 {
+		return view.Box{}, 0, "没有任何对象带几何属性"
+	}
+	return view.Box{X: minX, Y: minY, W: maxX - minX, H: maxY - minY}, n, note
+}
+
+// geomOf 读一个对象的几何。
+//
+// 真实 AUI 里几何属性是混着用的（实测）：posX/posY 必有，宽高可能写作
+// gridWidth/gridHeight，也可能只写作 width/height（gridHeight 尤其罕见）。
+// 所以哪个有用哪个，两个都没有才当“没有几何”。
+func geomOf(o *fep.Object) view.Box {
+	w, h := num(o, "gridWidth"), num(o, "gridHeight")
+	if w <= 0 {
+		w = num(o, "width")
+	}
+	if h <= 0 {
+		h = num(o, "height")
+	}
+	return view.Box{X: num(o, "posX"), Y: num(o, "posY"), W: w, H: h}
+}
+
+func areaOf(o *fep.Object) int { b := geomOf(o); return b.W * b.H }
+
+// boxForField 找一个栏位的几何：先按名字解析（只认高置信度），再取它的几何。
+func boxForField(m *fep.Model, r *fep.Resolver, name string) (view.Box, error) {
+	var hits []*fep.Object
+	for _, o := range m.Objects() {
+		fn, ok := r.Resolve(o.ID)
+		if !ok || fn.Text != name || fn.Confidence != fep.ConfHigh {
+			continue
+		}
+		if b := geomOf(o); b.W <= 0 || b.H <= 0 {
+			continue // 没有几何的对象不能当落点
+		}
+		hits = append(hits, o)
+	}
+	if len(hits) == 0 {
+		return view.Box{}, fail(exitTarget, "界面里没有叫 %q 且有几何的栏位（只认高置信度的名字）", name)
+	}
+	// 同名的多个对象里取面积最大的那个（可点的容器通常比它内部的 Label 大）
+	best := hits[0]
+	for _, o := range hits[1:] {
+		if areaOf(o) > areaOf(best) {
+			best = o
+		}
+	}
+	b := geomOf(best)
+	b.Label = fmt.Sprintf("%s %s#%d", name, best.Type, best.ID)
+	return b, nil
+}
+
+func num(o *fep.Object, key string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(o.Attr(key)))
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
+}
+
+func parseSize(s string) (int, int, error) {
+	parts := strings.Split(strings.ToLower(strings.TrimSpace(s)), "x")
+	if len(parts) != 2 {
+		return 0, 0, fail(exitUsage, "--image 要写成 WxH：%q", s)
+	}
+	w, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
+	h, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err1 != nil || err2 != nil || w <= 0 || h <= 0 {
+		return 0, 0, fail(exitUsage, "--image 里的数字读不出来：%q", s)
+	}
+	return w, h, nil
+}
+
+func init() {
+	marksCmd.Flags().StringVar(&marksFrom, "from", "", "录制件：单个 .log 或目录（默认 fep 缓存目录最新一份）")
+	marksCmd.Flags().StringArrayVar(&marksFields, "field", nil, "要标注的栏位名（可重复）")
+	marksCmd.Flags().StringVar(&marksRef, "ref", "", "参照窗口名（默认 AUI 里最大的 Window）")
+	marksCmd.Flags().StringVar(&marksImage, "image", "", "图尺寸 WxH（没有图时也要知道多大）")
+	marksCmd.Flags().StringVar(&marksPNG, "png", "", "抓好的图：给了就过可见性门")
+	marksCmd.Flags().StringVar(&marksOut, "out", "", "把框画到图上另存（需要 --png）")
+	Group.AddCommand(marksCmd)
+	_ = os.MkdirAll
+	_ = time.Now
+}

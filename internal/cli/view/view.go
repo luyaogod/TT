@@ -121,3 +121,13 @@ var noArgs = func(cmd *cobra.Command, args []string) error {
 	}
 	return nil
 }
+
+// loadEventsFile / loadModelFile 是给 view 那条线读 AUI 用的小入口：
+// 解析录制件的事在 internal/fep 里，这里只负责挑文件与报错。
+func loadEventsFile(from string) ([]string, error) {
+	return nil, nil // 目前不需要事件：标注框只看 AUI
+}
+
+func loadModelFile(from string) (*fep.Model, *fep.Resolver, int, error) {
+	return fep.ReadModelFrom(from)
+}

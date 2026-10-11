@@ -135,3 +135,53 @@ func LoadModelFrom(recordDir, tag string) (*Model, *Resolver, int, error) {
 	}
 	return m, NewResolver(m), msgs, nil
 }
+
+// ReadModelFrom rebuilds the AUI model from "a file or a directory".
+//
+//   - 单文件：自动配**同一连接**的另一侧（*-gdc2rt.log ↔ *-rt2gdc.log）——
+//     拿事件文件去配别的连接的 AUI，对象编号对不上，动作会全变"名字未解析"；
+//   - 目录：只取最新一份（一个目录里往往躺着好几轮录制，混着读会把不同会话的对象
+//     堆进同一个模型，实测动作数将近翻倍、名字全对不上）。
+func ReadModelFrom(from string) (*Model, *Resolver, int, error) {
+	if from != "" {
+		if st, err := os.Stat(from); err == nil && !st.IsDir() {
+			if strings.HasSuffix(from, "-gdc2rt.log") {
+				paired := strings.TrimSuffix(from, "-gdc2rt.log") + "-rt2gdc.log"
+				if _, perr := os.Stat(paired); perr == nil {
+					from = paired
+				}
+			}
+			return loadModelFiles([]string{from})
+		}
+	}
+	files, err := RecordingFiles(from, "-rt2gdc.log")
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	if from == "" {
+		return nil, nil, 0, fmt.Errorf("fep: 没给录制件")
+	}
+	if len(files) == 0 {
+		return nil, nil, 0, fmt.Errorf("fep: %s 下没有 *-rt2gdc.log", from)
+	}
+	return loadModelFiles(files[:1])
+}
+
+func loadModelFiles(files []string) (*Model, *Resolver, int, error) {
+	m := NewModel()
+	msgs := 0
+	for _, f := range files {
+		bodies, err := ReadRecording(f)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+		for _, body := range bodies {
+			m.ApplyMessage(body)
+			msgs++
+		}
+	}
+	if msgs == 0 {
+		return nil, nil, 0, fmt.Errorf("fep: 录制件里没有可用消息")
+	}
+	return m, NewResolver(m), msgs, nil
+}
