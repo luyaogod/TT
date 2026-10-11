@@ -241,13 +241,23 @@ var doLookupCmd = &cobra.Command{
 			switch stage {
 			case "Construct":
 				if lookupQuery != "" {
-					col, cell, err := constructTarget(m, win)
+					col, cell, err := constructTargetFor(m, win, lookupOpenWin(pl.Program)) // 按源码的查询条件列挑
 					if err != nil {
 						return fail(exitTarget, "查询条件列：%v", err)
 					}
 					step("写查询条件 %q → 列 #%d 的格子 #%d", lookupQuery, col, cell)
-					_ = send(fep.ConfigureGridCursorText(grid, 1, 1))
-					_ = send(fep.ConfigureValueText(cell, lookupQuery, nil))
+					// 条件、光标、✓ 必须**同一条消息**（照用户真实录制：fep-20261011-132748 的 _om 22）：
+					//
+					//	{ConfigureEvent{idRef "60"}{ value "LUYAOWF"}}{ConfigureEvent{idRef "6543"}{cursor}{cursor2}}{ActionEvent{idRef "6673"}}
+					//
+					// 分开发运行期只当"选中已有行"：网格空时什么都不发生（实测）。
+					ev := fep.ConfigureValueText(cell, lookupQuery, nil) + "}{" +
+						fep.ConfigureCursorText(col, len([]rune(lookupQuery))) + "}{" + fep.ActionEventText(acc)
+					if err := send(ev); err != nil {
+						return fail(exitFailed, "%v", err)
+					}
+					time.Sleep(lookupWait)
+					m, _ = reload()
 				}
 				step("执行查询（确定 #%d）", acc)
 				if err := send(fep.ActionEventText(acc)); err != nil {
@@ -264,7 +274,7 @@ var doLookupCmd = &cobra.Command{
 				// → **验证**（没被运行期确认就不往下走，R1）。为什么是"候选 + 验证"而不是算一个：
 				// 运行期复用裸 id，同一窗口下同时挂着旧实例与本实例的格子，"哪一批是本页"
 				// 只有运行期知道 —— 所以按声明顺序列一串、逐个写、逐个认（每个都是一次叶子写值，安全）。
-				_ = send(fep.ConfigureGridCursorText(grid, pl.Row, 1))
+				_ = send(fep.ConfigureGridCursorText(grid, pl.Row, 0)) // 真语料：勾选列 = 第 0 列
 				time.Sleep(900 * time.Millisecond)
 				cands := checkCellCandidates(m, grid, pl.Row)
 				if len(cands) == 0 {
@@ -278,6 +288,19 @@ var doLookupCmd = &cobra.Command{
 				confirmed := false
 				for _, c := range cands {
 					before := runtimeBytes()
+					// **先把光标移进这一格，再写值** —— 顺序照真语料：
+					//
+					//	_om 21  {{ConfigureEvent{idRef "<网格>"}{currentColumn "0"}{currentRow "4"}}
+					//	         {ConfigureEvent{idRef "<该格>"}{cursor "0"}{cursor2 "0"}}}
+					//	_om 22  {{ConfigureEvent{idRef "<该格>"}{ value "Y" }}}
+					//
+					// 少了"移光标"这一步，运行期不认这个值（实测：14 个候选格全写不进）。
+					// 光标先发给「多选」节点（真语料的形态），再写值给勾选格。
+					if ms := multiSelectNode(m, grid); ms != 0 {
+						_ = send(fep.ConfigureCursorText(ms, 0))
+						time.Sleep(300 * time.Millisecond)
+					}
+					time.Sleep(400 * time.Millisecond)
 					_ = send(fep.ConfigureValueText(c, val, nil))
 					time.Sleep(900 * time.Millisecond)
 					m3, rerr := reload()
@@ -287,7 +310,7 @@ var doLookupCmd = &cobra.Command{
 							"写勾选格 #%d 把开窗程序打停了：%v\n  这一格看着像勾选格但不是"+
 								"（-6327 = 值发给了容器）—— 回源码/回 ui find 确认勾选列再试", c, rerr)
 					}
-					if valueOf(m3, c) == val && runtimeBytes() != before {
+					if anyValueIs(m3, c, val) && runtimeBytes() != before {
 						pl.Cell = c
 						step("勾上第 %d 行：格子 #%d ← %q（运行期已确认）", pl.Row, c, val)
 						confirmed = true
@@ -491,18 +514,59 @@ func constructTarget(m *fep.Model, win int) (col, cell int, err error) {
 // 本页未勾选的勾选格。为什么要列一串而不是算一个：运行期复用裸 id，同一个窗口下
 // 同时挂着旧实例与本实例的格子（实测按 id 看是 #59/#105…，按声明顺序才是 #168/#3549…），
 // 而"哪一批是本页"只有运行期知道 —— 调用方逐个写、逐个验（每个都是一次叶子写值）。
+// checkCellCandidates 列出"目标行可能对应的勾选格"，按**声明顺序**（= 行序）排。
+//
+// **主判据照用户的真实录制抄**（fep-20261011-211940，用户亲手勾选那一瞬间）：
+//
+//	_om 17  {ConfigureEvent{idRef "101"}{ currentRow "1"}{ currentColumn "0"}}
+//	        {ConfigureEvent{idRef "100"}{ cursor2 "0"}{ cursor "0"}}
+//	_om 18  {ConfigureEvent{idRef "586"}{ value "Y" }}     ← 勾选 = 给 #586 写 "Y"
+//	_om 19  {ActionEvent{idRef "3552"}}                     ← 确定回传
+//
+// 而 #586 在运行期侧的标志就是：`un 586 {{value "N"}}` → `{{value "Y"}}`。
+// 也就是说 —— **勾选格 = 值是「未勾选字面值」的 Value**（在同一个开窗窗口里）。
+//
+// 前两版都错在"按结构猜"：一版只认"列名以 check 结尾的 TableColumn 下的 ValueList"
+// （本作业根本没有这种列）；一版只认"「多选」按钮的子 Value"（#586 也不在「多选」下面）。
+// 通用判据只有一条：**值就是未勾选字面值**。行序 = 声明顺序（Seq）。
+// 仍然"逐个写、逐个验"：单元格写值是叶子操作，失败也不伤作业；确认靠运行期回显。
 func checkCellCandidates(m *fep.Model, grid, row int) []int {
 	type cand struct {
 		id  int
 		seq int
 	}
 	gridWin := m.WindowOf(grid)
-	// 严格一点：先找"勾选列的 ValueList"（列名以 check 结尾的 TableColumn 的 ValueList 孩子），
-	// 只收它下面的格子。
-	//
-	// 为什么要严：上一版按"值是 N 的 Value"筛，结果把一个**容器型 Value** 也收进来，
-	// 写下去直接 **-6327** 把开窗程序打停（实测：qry_q_imaf001_15.4gl:345）。
-	valueLists := map[int]bool{}
+	var all []cand
+	seen := map[int]bool{}
+	add := func(o *fep.Object) {
+		if o == nil || seen[o.ID] {
+			return
+		}
+		seen[o.ID] = true
+		all = append(all, cand{o.ID, o.Seq})
+	}
+	// ① 主判据：值是未勾选字面值的 Value（同窗口）
+	for _, o := range m.Objects() {
+		if o.Type != "Value" {
+			continue
+		}
+		v := o.Attr("value")
+		if v != "N" && v != "n" && v != "0" {
+			continue
+		}
+		if w := m.WindowOf(o.ID); w == 0 || (gridWin != 0 && w != gridWin) {
+			continue
+		}
+		add(o)
+	}
+	// ② 补齐来源：「多选」节点的子 Value；③ 勾选列（列名以 check 结尾）下的 Value
+	if ms := multiSelectNode(m, grid); ms != 0 {
+		for _, o := range m.Objects() {
+			if o.Type == "Value" && o.Parent == ms {
+				add(o)
+			}
+		}
+	}
 	for _, col := range m.Objects() {
 		if col.Type != "TableColumn" || !strings.HasSuffix(strings.ToLower(col.Attr("name")), "check") {
 			continue
@@ -511,32 +575,14 @@ func checkCellCandidates(m *fep.Model, grid, row int) []int {
 			continue
 		}
 		for _, vl := range m.Objects() {
-			if vl.Type == "ValueList" && vl.Parent == col.ID {
-				valueLists[vl.ID] = true
-			}
-		}
-	}
-	var all []cand
-	for _, o := range m.Objects() {
-		if o.Type != "Value" || !valueLists[o.Parent] {
-			continue
-		}
-		all = append(all, cand{o.ID, o.Seq})
-	}
-	if len(all) == 0 {
-		// 退化（找不到列定义时）：仍限定在"值就是未勾选字面值"的 Value 上
-		for _, o := range m.Objects() {
-			if o.Type != "Value" {
+			if vl.Type != "ValueList" || vl.Parent != col.ID {
 				continue
 			}
-			v := o.Attr("value")
-			if v != "N" && v != "n" && v != "0" {
-				continue
+			for _, o := range m.Objects() {
+				if o.Type == "Value" && o.Parent == vl.ID {
+					add(o)
+				}
 			}
-			if w := m.WindowOf(o.ID); w == 0 || (gridWin != 0 && w != gridWin) {
-				continue
-			}
-			all = append(all, cand{o.ID, o.Seq})
 		}
 	}
 	sort.Slice(all, func(i, j int) bool { return all[i].seq < all[j].seq })
@@ -544,14 +590,10 @@ func checkCellCandidates(m *fep.Model, grid, row int) []int {
 	if n == 0 {
 		return nil
 	}
-	const batchMargin = 14 // 当前页 + 余量（实测 pageSize=12）
-	start := n - batchMargin
-	if start < 0 {
-		start = 0
-	}
+	// 行序 = 声明顺序；row 为 1 起（用户录制里 currentRow "1" 就是第一行）
 	var out []int
-	for i := start; i < n; i++ {
-		out = append(out, all[i].id)
+	for _, c := range all {
+		out = append(out, c.id)
 	}
 	if row > 0 && row <= len(out) {
 		rot := append([]int(nil), out[row-1:]...)
@@ -610,4 +652,76 @@ func init() {
 			"默认关：推断是观察不是规矩，输出里会标【推断·非源码】")
 	doLookupCmd.Flags().DurationVar(&lookupWait, "wait", 8*time.Second, "每一步等运行期回包多久")
 	doCmd.AddCommand(doLookupCmd)
+}
+
+// mustSeq 取某个对象的声明序号（找不到返回 -1）。
+func mustSeq(m *fep.Model, id int) int {
+	if o, ok := m.Get(id); ok {
+		return o.Seq
+	}
+	return -1
+}
+
+// multiSelectNode 找「多选」节点（勾选格挂在它下面），取同窗口里最新的那一份。
+func multiSelectNode(m *fep.Model, grid int) int {
+	win := m.WindowOf(grid)
+	best, bestSeq := 0, -1
+	for _, o := range m.Objects() {
+		if o.Attr("name") != "多选" {
+			continue
+		}
+		if w := m.WindowOf(o.ID); win != 0 && w != 0 && w != win {
+			continue
+		}
+		if o.Seq > bestSeq {
+			best, bestSeq = o.ID, o.Seq
+		}
+	}
+	return best
+}
+
+// anyValueIs 判"这个 id 的**任意一份**（任意作用域）的值是不是想要的那个。
+//
+// 为什么不能按裸 id 取：运行期复用 id，同一个 id 在不同作用域各有一份，
+// m.Get(id) 只给"最后声明的那一份"——那一份可能正是另一个窗口的同名节点，
+// 于是"运行期明明写进去了"却被判成没确认（实测：勾选格就是这样）。
+func anyValueIs(m *fep.Model, id int, want string) bool {
+	for _, o := range m.Objects() {
+		if o.ID == id && o.Attr("value") == want {
+			return true
+		}
+	}
+	return false
+}
+
+// constructTargetFor 挑"该往哪一列写查询条件"。
+//
+// **必须按源码的 ConstructCols 挑**（实测教训）：旧写法取"网格下第一个 TableColumn"，
+// 结果写到了「特征三值」列（comment cmt_inam016）—— 条件等于没写，开窗返回的还是全量清单
+// （用户当场指出："你根本没输入查询条件"）。
+//
+// 源码里 q_imaf001_15 的查询条件列是 `imaf001, imaal003, imaal004` —— 第一个就是料件编号。
+// 所以：优先挑名字/comment 能对上 ConstructCols[0] 的那一列；对不上再退回旧行为。
+func constructTargetFor(m *fep.Model, win int, ow *fep.OpenWinModel) (col, cell int, err error) {
+	if ow != nil && len(ow.ConstructCols) > 0 {
+		want := strings.ToLower(ow.ConstructCols[0])
+		grid, _ := gridOfWindow(m, win)
+		var fallbackCol, fallbackCell int
+		for _, o := range m.Objects() {
+			if o.Type != "TableColumn" || o.Parent != grid {
+				continue
+			}
+			n := strings.ToLower(o.Attr("name"))
+			cm := strings.ToLower(o.Attr("comment"))
+			if !strings.HasSuffix(n, "."+want) && cm != "cmt_"+want && n != want {
+				continue
+			}
+			if c, cerr := fep.FirstCellOfIn(m, o.ID, win); cerr == nil {
+				return o.ID, c, nil
+			}
+		}
+		_ = fallbackCol
+		_ = fallbackCell
+	}
+	return constructTarget(m, win)
 }

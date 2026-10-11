@@ -38,7 +38,16 @@ type Config struct {
 	TermHeight      int             `json:"termHeight"`
 	PrintElements   int             `json:"printElements"`      // fgldb 单次 print 的数组元素上限;0=默认 1000
 	PersistBPs      *bool           `json:"persistBreakpoints"` // 断点持久化开关(nil 视为 true)
-	DataDir         string          `json:"-"`                  // 数据目录(断点持久化等);serve 注入,空=禁用
+	// AITakeover 是**业主显式授权**：打开后，新建的调试会话直接以「协作模式」启动
+	// （AI 可写：能启动作业、下断点、步进、求值）。
+	//
+	// 为什么要有这个开关，而不是让 AI 自己切模式：
+	// 纯人工（solo）模式下 AI 只能读不能写，这是**故意设的边界** ——
+	// "若 AI 能自己把 solo 切成 collab，那'AI 只能读不能写'就是摆设，它一秒钟就能
+	// 把自己放出来"（api.go hMode 的原话）。所以放开的口子必须是
+	// **业主在配置里显式打开** ✔、默认 false ✔、且会话日志会记下当时的模式 ✔。
+	AITakeover bool   `json:"aiTakeover"`
+	DataDir    string `json:"-"` // 数据目录(断点持久化等);serve 注入,空=禁用
 
 	// ---- 运行时(合并结果,json:"-" 不持久化) ----
 	envName string               // 当前环境名(会话选择/切换时写入;空=取 sshs 首条)
@@ -287,6 +296,7 @@ func debugSettingsOf(c *Config) config.DebugSettings {
 		TermHeight:      c.TermHeight,
 		PrintElements:   c.PrintElements,
 		PersistBPs:      c.PersistBPs,
+		AITakeover:      c.AITakeover,
 	}
 }
 
@@ -309,6 +319,7 @@ func loadConfig(path string, requireEnv bool) (*Config, error) {
 		TermHeight:      root.Debug.TermHeight,
 		PrintElements:   root.Debug.PrintElements,
 		PersistBPs:      root.Debug.PersistBPs,
+		AITakeover:      root.Debug.AITakeover,
 	}
 	// 默认环境:hosts.activeEnv,被 debug.activeEnv 覆盖(未命中则回落到首条)。
 	// 写进 envName 后,ApplyDefaultEnv 会把它的连接/参数合并到运行时字段。

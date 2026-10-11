@@ -70,12 +70,12 @@ func (e EntValue) Int() (int, bool) {
 // 这是三个工具共用的唯一环境登记处：原来 tdebug 放在 debug.sshs、
 // tdict 放在 hosts.sshs，schema 完全一致，合并后只留 hosts.sshs。
 type NamedSsh struct {
-	Name            string               `json:"name"`
-	SSHConfig                            // 匿名嵌入：host/port/user/password 提升到 ssh 层
-	Zone            string               `json:"zone,omitempty"`            // 登录后区域菜单代码：31开发 35测试 36正式 39PATCH t出货
-	Topent          EntValue             `json:"topent,omitempty"`          // 默认企业编号(TOPENT)；连接会话即下发，会话内可覆盖
-	LaunchArgs      string               `json:"launchArgs,omitempty"`      // 该环境的作业启动参数覆盖（空=用 debug.launchArgs）
-	WatchdogSeconds int                  `json:"watchdogSeconds,omitempty"` // 该环境的停站超时覆盖（0=用 debug.watchdogSeconds）
+	Name            string   `json:"name"`
+	SSHConfig                // 匿名嵌入：host/port/user/password 提升到 ssh 层
+	Zone            string   `json:"zone,omitempty"`            // 登录后区域菜单代码：31开发 35测试 36正式 39PATCH t出货
+	Topent          EntValue `json:"topent,omitempty"`          // 默认企业编号(TOPENT)；连接会话即下发，会话内可覆盖
+	LaunchArgs      string   `json:"launchArgs,omitempty"`      // 该环境的作业启动参数覆盖（空=用 debug.launchArgs）
+	WatchdogSeconds int      `json:"watchdogSeconds,omitempty"` // 该环境的停站超时覆盖（0=用 debug.watchdogSeconds）
 	// Workspace 这个环境的 .tzs 工作区（含 mta/ 的目录，绝对路径）。
 	//
 	// 与上面两项同类：按环境覆盖机器级的东西 —— 但工作区**没有**机器级那份
@@ -142,6 +142,9 @@ type DebugSettings struct {
 	TermHeight      int    `json:"termHeight,omitempty"`
 	PrintElements   int    `json:"printElements,omitempty"`      // fgldb 单次 print 的数组元素上限；0=默认 1000
 	PersistBPs      *bool  `json:"persistBreakpoints,omitempty"` // 断点持久化开关（nil 视为 true）
+	// AITakeover 业主显式授权：true 时新建调试会话直接以协作模式起（AI 可写：启动作业/下断点/步进/求值）。
+	// 默认 false —— 纯人工模式下 AI 只能读不能写是**故意设的边界**，放开必须由业主在配置里显式打开。
+	AITakeover bool `json:"aiTakeover,omitempty"`
 }
 
 // FillDefaults 补全调试设置缺省值（不写盘，仅在内存里生效）。

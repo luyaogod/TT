@@ -332,7 +332,28 @@ func FirstCellOfIn(m *Model, columnID, scope int) (int, error) {
 	if best == 0 {
 		return 0, &roleError{msg: fmt.Sprintf("列 #%d 的 ValueList(#%d) 里没有格子（这一行可能还不存在）", columnID, listID)}
 	}
+	// 取**最近被触碰**的那一格（Seq 最大），不是 id 最小那一格，也不是"第 N 个"。
+	//
+	// 两种错法的实测教训：
+	//   · 按 id 最小：挑到模板/旧实例（实测 #34）；
+	//   · 按 currentRow 取第 N 个：列表里混着旧实例的格子（实测同一列下有 #2096 seq=805 与
+	//     #2095 seq=6316 两份），按下标会挑到旧的那份 —— 写下去运行期"效果：无"。
+	//
+	// 真正对齐的是：**运行期刚碰过的那一份就是当前行的活格子**
+	//（换行/改值都会 un 它，所以它的 Seq 最新）。
 	return best, nil
+}
+
+// currentRowOfGrid 读网格的运行期当前行（运行期推的属性；读不到返回 0）。
+func (m *Model) currentRowOfGrid(grid int) int {
+	if grid == 0 {
+		return 0
+	}
+	o, ok := m.Get(grid)
+	if !ok {
+		return 0
+	}
+	return atoiOr(o.Attr("currentRow"), -1)
 }
 
 // CellsIn 返回某个网格列下**按 Seq 升序**排列的格子（= 行序）。
@@ -547,4 +568,49 @@ func FilterScope(cat []Control, window int) []Control {
 		}
 	}
 	return out
+}
+
+// ColumnIndexOf 返回某一列在它所属网格里的**列下标**（0 起，按声明顺序 = 显示顺序）。
+//
+// 为什么必须有它：真语料里前端写/勾一个格子之前，一定先发
+// `{ConfigureEvent{idRef <网格>}{ currentColumn "c"}{ currentRow "r" }}` ——
+// 运行期靠这两个属性知道"现在动的是哪一格"。少了 currentColumn，
+// 值发过去运行期不改任何节点（实测：写明细格子与写开窗勾选格都"无效果"）。
+func ColumnIndexOf(m *Model, columnID int) int {
+	grid := GridOfColumn(m, columnID)
+	if grid == 0 {
+		return -1
+	}
+	var cols []*Object
+	for _, o := range m.Objects() {
+		if o.Parent == grid && o.Type == "TableColumn" {
+			cols = append(cols, o)
+		}
+	}
+	sort.Slice(cols, func(i, j int) bool {
+		if cols[i].Seq != cols[j].Seq {
+			return cols[i].Seq < cols[j].Seq
+		}
+		return cols[i].ID < cols[j].ID
+	})
+	for i, c := range cols {
+		if c.ID == columnID {
+			return i
+		}
+	}
+	return -1
+}
+
+// AtoiOr 是 atoiOr 的导出版本（CLI 侧读运行期属性时要用同一个口径）。
+func AtoiOr(s string, def int) int { return atoiOr(s, def) }
+
+// GridColumnCount 返回网格下 TableColumn 的个数（算"Tab 几次能走到某列"要用）。
+func GridColumnCount(m *Model, grid int) int {
+	n := 0
+	for _, o := range m.Objects() {
+		if o.Parent == grid && o.Type == "TableColumn" {
+			n++
+		}
+	}
+	return n
 }

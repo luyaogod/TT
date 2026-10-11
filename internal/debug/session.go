@@ -311,12 +311,20 @@ func NewSession(cfg *Config, module, prog, runProg, launchRef, extraArgs string,
 		cfg:       &cc,
 		conn:      conn,
 		state:     StateLoading,
-		envName:   cfg.EnvName(),
-		bps:       map[int]*Breakpoint{},
-		srcCache:  map[string]srcCacheEntry{},
-		emit:      emit,
-		lines:     make(chan string, 1024),
-		done:      make(chan struct{}),
+		// 业主显式授权（config.aiTakeover=true）时，会话直接以协作模式起：
+		// 这时 AI 可写（启动作业/下断点/步进/求值）。默认仍是纯人工（solo）。
+		mode: func() string {
+			if cfg != nil && cfg.AITakeover {
+				return ModeCollab
+			}
+			return ModeSolo
+		}(),
+		envName:  cfg.EnvName(),
+		bps:      map[int]*Breakpoint{},
+		srcCache: map[string]srcCacheEntry{},
+		emit:     emit,
+		lines:    make(chan string, 1024),
+		done:     make(chan struct{}),
 	}
 	s.kaStop = conn.StartKeepalive(func(err error) {
 		s.emitEvent(Event{Type: "dead", Text: "SSH 连接断开: " + err.Error()})

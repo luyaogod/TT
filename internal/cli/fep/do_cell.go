@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -103,17 +104,33 @@ tt fep do cell 'pmdn_t.pmdn010' 10       # 单价
 		// 先按前端的做法告诉运行期“这个网格现在显示着”（且必须是**当前实例**的网格）。
 		// 实测前端在写条件之前就发这条；少了它，后面的 reconstruct 会被当成空动作。
 		grid := fep.GridOfColumn(m, col.ID)
-		prefix := ""
-		if grid != 0 && grid != col.ID {
-			prefix = fmt.Sprintf("ConfigureEvent 0{{idRef \"%d\"}{ pageSize \"9\"}{ bufferSize \"10\"}}}{", grid)
+		_ = "" // prefix 已由"定位消息 posEv"取代（分两条消息）
+		if false {
+			_ = fmt.Sprintf("ConfigureEvent 0{{idRef \"%d\"}{ pageSize \"9\"}{ bufferSize \"10\"}}}{", grid)
 		}
 		// --row：先设网格当前行（源码里 `IF li_ac > 0 THEN` 才回传选中行）。
-		if doCellRow > 0 && grid != 0 {
-			prefix += fmt.Sprintf("ConfigureEvent 0{{idRef \"%d\"}{ currentRow \"%d\"}}}{", grid, doCellRow)
+		// 行号 / 列号（照用户真实录制：`{currentColumn "21"}{currentRow "0"}` 里，currentRow 是 **0 起算**、
+		// currentColumn 是**该网格的列序**（采购数量 = 21、单价 = 33）。
+		gridRow, colIdx := doCellRow, fep.ColumnIndexOf(m, col.ID)
+		if gridRow < 0 {
+			gridRow = 0
 		}
-		// 多个事件在同一条消息里用 }{ 分隔（与前端形态一致）。
-		ev := prefix + fep.ConfigureValueText(cell, args[1], nil) + "}{" +
-			fep.ConfigureCursorText(col.ID, len([]rune(args[1])))
+		if doCellRow == 0 {
+			if o, ok := m.Get(grid); ok {
+				gridRow = fep.AtoiOr(o.Attr("currentRow"), 0)
+			}
+		}
+		//
+		//	{ConfigureEvent{idRef "644"}{ currentColumn "21"}{ currentRow "0"}}{ConfigureEvent{idRef "701"}{cursor "0"}{cursor2 "0"}}
+		//
+		// 运行期只认"光标确实在这一格"时的写入。以前把定位与写值塞进**同一条**消息，
+		// 运行期当成无效组合，值被丢弃（实测：`un <格子> {{value ""}}` + "效果：无"）。
+		posEv := ""
+		if grid != 0 {
+			posEv = fep.ConfigureGridCursorText(grid, gridRow, colIdx) + "}{" + fep.ConfigureCursorText(col.ID, 0)
+		}
+		ev := fep.ConfigureValueText(cell, args[1], nil) + "}{" +
+			fep.ConfigureCursorText(col.ID, len([]rune(args[1]))) + "}{" + fep.KeyEventText("Tab")
 		// --accept：把当前可用的 ✓ 一起放进**同一条消息**。
 		// 实测：条件、光标、✓ 三个事件同一条消息发，开窗才“带着条件去查”；
 		// 分开发只会选中已有行（网格空时什么都不发生）。
@@ -149,6 +166,13 @@ tt fep do cell 'pmdn_t.pmdn010' 10       # 单价
 			client.Window = doCellIn
 		}
 		res, derr := fep.Do(client, fep.DoConfig{
+			Kind: "raw", RawEvent: posEv, Target: fmt.Sprintf("#%d", col.ID),
+			Conn: doConn, DryRun: doDryRun, Wait: 1200 * time.Millisecond,
+		})
+		if derr != nil {
+			return fail(exitFailed, "定位格子失败：%v", derr)
+		}
+		res, derr = fep.Do(client, fep.DoConfig{
 			Kind: "raw", RawEvent: ev, Target: fmt.Sprintf("#%d", col.ID),
 			Conn: doConn, DryRun: doDryRun, Wait: doWait,
 		})
