@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"tt/internal/output"
 )
 
 // 动作面：把"点一下/打个字"变成一条事件，先校验再发。
@@ -113,6 +115,9 @@ type Changes struct {
 	NewWindows   []string      `json:"newWindows,omitempty"`
 	Values       []ValueChange `json:"values,omitempty"`
 	TimedOut     bool          `json:"timedOut,omitempty"`
+	// RuntimeError 是运行期推上来的报错（实测形态：Menu{text "ERROR"}{comment "Program stopped at …"}）。
+	// 它一出现，"这一步没变化"就不是"没生效"而是"作业已经停了、后面全是空 ACK"。
+	RuntimeError string `json:"runtimeError,omitempty"`
 }
 
 // DoResult is what happened (or would happen).
@@ -233,6 +238,18 @@ func Do(c *Client, cfg DoConfig) (*DoResult, error) {
 	}
 	if cfg.Wait >= 0 {
 		res.Changes = waitChanges(c, conn.ID, before, cfg.Wait)
+		// 发送后验证：作业要是被这一步搞停了，就**不要**让调用方把它当成功。
+		// 实测教训：停掉之后窗口对任何事件都只回空 ACK，看起来像"这一步没生效"，
+		// 于是接着改参数接着试 —— 每一步都在浪费，而且看不出错在哪。
+		if res.Changes != nil && res.Changes.RuntimeError != "" {
+			return res, &Refusal{
+				Code:    output.CodeQueryFailed,
+				Exit:    1,
+				Message: fmt.Sprintf("作业程序停下了：%s", res.Changes.RuntimeError),
+				Hint: "重开会话再继续（tt fep session close && tt fep session open --prog <作业>）；" +
+					"并把这一步从重放/计划里去掉：它把值发给了容器，或发给了不属于当前交互指令的动作",
+			}
+		}
 	}
 	return res, nil
 }
@@ -323,6 +340,19 @@ func waitChanges(c *Client, connID int, before snapshot, wait time.Duration) *Ch
 			name = fn.Text
 		}
 		ch.Values = append(ch.Values, ValueChange{ID: o.ID, Name: name, From: before.values[o.ID], To: v})
+	}
+	// 最关键的一条：运行期有没有报错把程序停下。
+	// 它出现在这里，所有的"无变化"都该读成"作业已停"，而不是"这一步没生效"。
+	for _, e := range RuntimeErrors(m) {
+		if !e.ProgramStop() {
+			continue
+		}
+		where := e.Where()
+		if where == "" {
+			where = "（运行期没给位置）"
+		}
+		ch.RuntimeError = where + "：" + firstLine(e.Comment)
+		break
 	}
 	ch.Acked = ch.NewMessages > 0 || ch.RuntimeBytes > 0
 	return ch

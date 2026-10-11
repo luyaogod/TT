@@ -14,6 +14,7 @@ var (
 	uiRolesWindow string
 	uiRolesKind   string
 	uiRolesSource string
+	uiRolesScope  int
 )
 
 // uiRolesCmd 输出"稳定目录"：可操作控件 → 角色 / 类型 / 状态 / 支持的操作。
@@ -60,6 +61,9 @@ ComboBox/Item=choose、CheckBox=toggle、Action/ToolBarItem/MenuAction=invoke…
 				srcNote = fmt.Sprintf("源码：%s（表单 %d 个 / 字段 %d 条 / 动作 %d 个）—— 角色已改用源码字段名，匹配上 %d 个控件",
 					prog, len(src.Forms), len(src.Fields), len(src.Actions), n)
 			}
+		}
+		if uiRolesScope != 0 {
+			cat = fep.FilterScope(cat, uiRolesScope)
 		}
 		if uiRolesKind != "" {
 			cat = filterKind(cat, uiRolesKind)
@@ -162,6 +166,8 @@ func filterWindow(cat []fep.Control, want string) []fep.Control {
 func init() {
 	uiRolesCmd.Flags().StringVar(&uiRolesWindow, "window", "", "只看某个窗口（名字片段）")
 	uiRolesCmd.Flags().StringVar(&uiRolesKind, "kind", "", "只看某种控件类型（Edit/ButtonEdit/Action…）")
+	uiRolesCmd.Flags().IntVar(&uiRolesScope, "scope", 0,
+		"只看属于某个窗口实例的控件（传 currentWindow 的 id）：\n跨实例同名太多，驱动前务必限定")
 	uiRolesCmd.Flags().StringVar(&uiRolesSource, "source", "",
 		"源码镜像根目录（如 D:/T100/4gl文档 的同级……用 tt dict mirror path 拿到的那个）：\n带上它，角色改用源码字段名并显示 required/opener")
 }

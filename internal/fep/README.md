@@ -298,3 +298,40 @@ AUI 同步只有三种操作（官方 1522）：`an` 加、`un` 改、`rn` **删
 - **仓库夹具** `testdata/fep-recordings/*.txt`（必跑，剪法见 `tools/fepfix` 与该目录 README）；
 - **现场语料** `%APPDATA%\tt\fep\*-rt2gdc.log`（可选，含真实业务数据，`TT_FEP_RECORD_DIR` 可改）。
   实测 94 个连接 / 910 条 AUI 消息，其中 49 个是空壳连接，最大一份 1.19MB / 80 条消息。
+
+## 动作层：两道防线（`errors.go`）
+
+发一个事件只有两种结果值得区分：**真的生效了**、或**作业已经停了**。
+"发了但没反应"是最坏的一种 —— 它看起来像"形态不对"，会让人接着改参数接着试（今天就这样白试了十几步）。
+所以这一层有两条必须过的闸：
+
+### 发送前：动作必须属于**当前交互指令**
+
+官方 1514：动作由 Dialog 节点持有，交互元素按 name 绑定到 Action 节点。
+实测更狠 —— 运行期**每次状态变化都重新分配动作 id**（同一个"确定"：模板 `#109` →
+实例 `#3535` → 查询后 `#4533` → `#4538`），所以"名字对了"不够，**这一份**也要对。
+`CheckClick` 因此在 `actionActive` 之外再要一条：动作的 Dialog 必须是当前 active 的那个
+（判据不足时 —— 模型里一个 active Dialog 都没有 —— **不拦**，因为那时任何判断都是猜）。
+
+### 发送后：认得出"作业停下了"
+
+运行期把程序停掉时会推一条界面消息（2026-10-11 实测原样）：
+
+```
+om 22 {{an 4811 Menu 39 {{text "ERROR"} {posY "0"} {style "winmsg"}
+        {comment "Program stopped at 'qry_q_pmaa001_3.4gl', line number 278.\n
+                  FORMS statement error number -6327.\n
+                  Internal error in the run time library file ../ui/ndialog.c(10523):0.\n"}}}
+```
+
+`RuntimeErrors` 认它（`Menu{text "ERROR"}` 或 comment 里含 `Program stopped at`），
+`waitChanges` 把它写进 `Changes.RuntimeError`，`Do` 于是返回**运行失败**而不是"没生效"，
+`tt fep ui state` 也会在最前面打一条 `⚠ 作业程序已经停下了：<程序>:<行> (<错误号>)`。
+
+触发它的实测原因只有一类：**把值/事件发给了容器**（`Edit`、`ValueList`、`ToolBar` 本身），
+或发给不属于当前指令的动作。这正是 `writableTypes` / `ClickableTypes` 白名单与
+"绝不试探"那条纪律的理由。
+
+夹具：`testdata/fep-recordings/program-stop.txt`（现场 `20261011-170312` 剪出来的，就是那次停摆）。
+`TestHealthyFixturesHaveNoProgramStop` 是反向对照：正常会话绝不能被误判成停摆，
+否则这条检查会变成噪声、人会开始忽略它。

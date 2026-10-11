@@ -91,7 +91,27 @@ var uiStateCmd = &cobra.Command{
 			"focusName":     focusName,
 			"activeDialogs": dlgs,
 		}
+		// 作业停摆要先说：它一出现，下面所有"当前指令 / 可发动作"都是废的
+		// （实测停摆后窗口对任何事件只回空 ACK，看起来像"没反应"）。
+		if errs := fep.RuntimeErrors(m); len(errs) > 0 {
+			for _, e := range errs {
+				if !e.ProgramStop() {
+					continue
+				}
+				where := e.Where()
+				if where == "" {
+					where = "（运行期没给位置）"
+				}
+				view["runtimeError"] = where + "：" + e.Comment
+				view["runtimeStopped"] = true
+				break
+			}
+		}
 		return printJSONOrText(view, func() {
+			if v, ok := view["runtimeError"].(string); ok {
+				fmt.Println("⚠ 作业程序已经停下了：" + v)
+				fmt.Println("  之后这个窗口对任何事件只会回空 ACK —— 先重开会话，别再往下发")
+			}
 			fmt.Printf("当前窗口：#%d %s\n", m.CurrentWindow(), m.WindowName(m.CurrentWindow()))
 			if focus != "" {
 				fmt.Printf("焦点：#%s  %s\n", focus, focusName)

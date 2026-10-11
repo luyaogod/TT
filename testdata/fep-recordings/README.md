@@ -30,9 +30,12 @@ go run ./tools/fepfix <录制件.log> <夹具.txt> --max 16384
 |---|---|---|---|
 | `openwin-with-dialogs.txt` | `20261011-161943`（连接 2） | 26 / 1 | 开窗 + 消息框 + 工具栏切换：`Dialog` 反复被 `rn` 掉再新建，正是驱动最容易发错对象的那种状态 |
 | `id-reuse.txt` | `20261011-142206`（连接 2） | 20 / 1 | 裸 id 复用最重的一份（同作用域多类型 ~50 处）：`Get(id)` 必须能判出"现在是谁" |
+| `program-stop.txt` | `20261011-170312`（连接 2） | 23 / 1 | **作业被搞停**那一次：里面有 `Menu{text "ERROR"}{comment "Program stopped at 'qry_q_pmaa001_3.4gl', line number 278 … -6327"}`，`RuntimeErrors` 必须认出来 |
 
-两份都**必须**让 `TestTheRnInvariantHasTeeth` 成立（把 `rn` 退化回 `un` 就得红）——
+三份都**必须**让 `TestTheRnInvariantHasTeeth` 成立（把 `rn` 退化回 `un` 就得红）——
 否则说明剪掉的东西把牙也剪掉了，得换一份录制或调 `--max`。
+`program-stop.txt` 另外背负 `TestProgramStopIsDetectedOnThePinnedFixture`（出错位置必须报成
+`qry_q_pmaa001_3.4gl:278 (-6327)`）。
 
 ## 改动约定
 

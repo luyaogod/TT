@@ -116,6 +116,11 @@ func CheckClick(m *Model, idRef int) error {
 	if v := strings.ToLower(o.Attr("actionActive")); v == "0" || v == "false" {
 		return refuse(output.CodeSessionState, 4, "目标 #%d 的 actionActive 为假：当前不可用（第 3 条）", idRef)
 	}
+	// 动作必须属于**当前交互指令**（官方 1514 + 实测：运行期每次状态变化都重分配动作 id）。
+	// 这一条在发前就拦：发出去只会回空 ACK（看起来像"没反应"，实际是发错了对象）。
+	if err := CheckActionInCurrentDialog(m, idRef); err != nil {
+		return err
+	}
 	return nil
 }
 
