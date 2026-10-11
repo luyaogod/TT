@@ -355,7 +355,7 @@ func resolveTarget(m *Model, r *Resolver, target, window, kind string) (int, str
 		return id, "", nil
 	}
 	// 按名字找：只认高置信度的名字，低置信一律不当依据
-	var hits []*Object
+	var hits, positioned []*Object
 	for _, o := range m.Objects() {
 		if window != "" && m.WindowName(o.ID) != window {
 			continue
@@ -368,6 +368,16 @@ func resolveTarget(m *Model, r *Resolver, target, window, kind string) (int, str
 			continue
 		}
 		hits = append(hits, o)
+		// 同一屏会累积多个画面的同名对象：查询画面那份常常停在 (0,0)，是"没定位"的副本，
+		// 点它等于点了空气（实测：点开窗按钮没反应）。优先挑真正有坐标的。
+		if o.Attr("posX") != "" || o.Attr("posY") != "" {
+			if o.Attr("posX") != "0" || o.Attr("posY") != "0" {
+				positioned = append(positioned, o)
+			}
+		}
+	}
+	if len(positioned) > 0 {
+		hits = positioned
 	}
 	if len(hits) == 0 {
 		return 0, "", &Refusal{Code: "TARGET_MISSING", Exit: 5,
