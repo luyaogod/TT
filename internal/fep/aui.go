@@ -49,6 +49,8 @@ type Model struct {
 	// 以前只能 "先声明者胜"，结果丢掉真对象（开窗第一列就是这样丢的）。
 	locals     map[ObjKey]*Object
 	localOrder []ObjKey
+	// gone 记录被 rn 删掉的 id（诊断用；模型重建时会再声明回来）。
+	gone map[int]bool
 	// winTables 记"哪个窗口实例有哪些网格"：实测开窗的窗口与它的网格在同一条定义消息里声明
 	// （an 0 Window 144 … {Table 145 …），而父链不可靠（会把开窗的列爬到主窗的网格上）。
 	winTables map[int][]int
@@ -65,7 +67,7 @@ type ObjKey struct {
 
 // NewModel returns an empty model.
 func NewModel() *Model {
-	return &Model{objs: make(map[int]*Object), locals: make(map[ObjKey]*Object), winTables: make(map[int][]int)}
+	return &Model{objs: make(map[int]*Object), locals: make(map[ObjKey]*Object), winTables: make(map[int][]int), gone: make(map[int]bool)}
 }
 
 // Len reports how many objects the model holds.
@@ -116,7 +118,14 @@ func (m *Model) Apply(nodes []Node) int {
 			scope = n.Parent
 		}
 		switch n.Type {
-		case "un", "rn":
+		case "rn":
+			// 官方 1522：AUI 同步只有三种操作，an = 加、un = 改、rn = **删**。
+			// 实测流里就是"先删再加"：om 14 {{rn 4533} {an 119 Dialog 3533 …}} /
+			// om 40 {{rn 3546} {an 121 Message 3551 …} {an 121 Dialog 3504 …}}。
+			// 我以前把 rn 当 un 处理，被删的节点永远不死 —— 于是同一 id 残留多份，
+			// 才有"#3555 既是 Item 又是 TableColumn"、accept 多个候选、focus 乱跳。
+			m.remove(n.ID, scope)
+		case "un":
 			o := m.lookup(n.ID, scope)
 			if o == nil {
 				o = m.ensure(n.ID)
@@ -182,6 +191,24 @@ func (m *Model) ApplyFrame(f Frame) int {
 		return 0
 	}
 	return m.ApplyMessage(string(f.Payload))
+}
+
+// remove 执行 AUI 同步的 `rn`（删节点）：全局表与作用域表里都清掉。
+// 实测证据：运行期换 Dialog / 换工具栏 / 重建模板条目时都是"先 rn 再 an"。
+func (m *Model) remove(id, scope int) {
+	if id == 0 {
+		return
+	}
+	if o, ok := m.objs[id]; ok {
+		delete(m.objs, id)
+		m.gone[id] = true
+		_ = o
+	}
+	if o, ok := m.locals[ObjKey{scope, id}]; ok {
+		delete(m.locals, ObjKey{scope, id})
+		_ = o
+	}
+	m.conflicts++ // 删除是诊断信号（今天正是它被漏掉）
 }
 
 func (m *Model) ensure(id int) *Object {
@@ -269,13 +296,18 @@ func (m *Model) Get(id int) (*Object, bool) {
 }
 
 // Objects returns every object in first-seen order (global + scoped).
+// 注意：`rn` 会删对象，order 里会留下已删 id —— 这里跳过它们（否则会 panic）。
 func (m *Model) Objects() []*Object {
 	out := make([]*Object, 0, m.Len())
 	for _, id := range m.order {
-		out = append(out, m.objs[id])
+		if o := m.objs[id]; o != nil {
+			out = append(out, o)
+		}
 	}
 	for _, k := range m.localOrder {
-		out = append(out, m.locals[k])
+		if o := m.locals[k]; o != nil {
+			out = append(out, o)
+		}
 	}
 	return out
 }
