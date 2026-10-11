@@ -1,6 +1,7 @@
 package fep
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 )
@@ -99,6 +100,8 @@ type Control struct {
 	// 下面三个用于"能不能按"：运行期自己标的可用状态与真正的动作对象
 	ActionActive string `json:"actionActive,omitempty"`
 	ActionIDRef  string `json:"actionIdRef,omitempty"`
+	// Source 是源码里对应的字段（.4fd），有它角色才稳定
+	Source *SrcField `json:"source,omitempty"`
 }
 
 // RolePath 是脚本里该用的寻址串：窗口/角色。
@@ -224,3 +227,36 @@ func inStyleTree(m *Model, o *Object) bool {
 }
 
 func (e *roleError) Error() string { return e.msg }
+
+// FirstCellOf 返回某一列（TableColumn）当前可用于写值的**格子**。
+//
+// 实测结构：列下面挂一个 ValueList，它的子 Value 才是格子
+// （开窗网格：TableColumn #172 → ValueList #127 → Value 126；
+//
+//	明细网格：TableColumn → ValueList #1980 → Value 1981…）。
+//
+// 前端写格子时会**同时**发两条事件：值发给格子、光标落在列上（见 do cell 命令）。
+func FirstCellOf(m *Model, columnID int) (int, error) {
+	var listID int
+	for _, o := range m.Objects() {
+		if o.Parent == columnID && o.Type == "ValueList" {
+			listID = o.ID
+			break
+		}
+	}
+	if listID == 0 {
+		return 0, &roleError{msg: fmt.Sprintf("列 #%d 下没有 ValueList（这列可能不是可写网格列）", columnID)}
+	}
+	best := 0
+	for _, o := range m.Objects() {
+		if o.Parent == listID && o.Type == "Value" && o.ID > 0 {
+			if best == 0 || o.ID < best {
+				best = o.ID
+			}
+		}
+	}
+	if best == 0 {
+		return 0, &roleError{msg: fmt.Sprintf("列 #%d 的 ValueList(#%d) 里没有格子（这一行可能还不存在）", columnID, listID)}
+	}
+	return best, nil
+}

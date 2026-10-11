@@ -91,6 +91,9 @@ type DoConfig struct {
 	Conn    int    // 0 = 自动（给了 --window 就按窗口路由；只有一条连接时用它）
 	DryRun  bool
 	Wait    time.Duration // 发完等运行期回包多久（0 = 默认 10s；负数 = 不等）
+	// RawEvent 直接指定要发的**事件体**（可含多个事件），用于像前端那样把
+	// 多个事件放进同一条消息（实测：写格子 = 值 + 光标 同一条，拆开发不生效）
+	RawEvent string
 }
 
 // ValueChange is one field whose value changed while waiting.
@@ -198,6 +201,13 @@ func Do(c *Client, cfg DoConfig) (*DoResult, error) {
 			res.Suggest = "这个字段没有 FormField 子对象，直接发给它自己；真机上若回 -6327，请改发字段的 FormField"
 		}
 		res.Event = ConfigureValueText(target, cfg.Value, nil)
+	case "raw":
+		// 直接给事件体（可含多个事件）—— 像前端那样把"写值 + 光标"放进同一条消息。
+		res.Event = strings.TrimSpace(cfg.RawEvent)
+		res.Target = cfg.Target
+		if res.Event == "" {
+			return nil, fmt.Errorf("fep: raw 事件体为空")
+		}
 	default:
 		return nil, fmt.Errorf("fep: 不认识的动作 %q（click/key/input）", cfg.Kind)
 	}

@@ -75,8 +75,13 @@ func (m *Model) Apply(nodes []Node) int {
 			continue
 		}
 		if n.Bare && n.Parent == 0 {
-			skipped[n.ID] = true
-			continue
+			// 无 an 的顶层声明是**模板子树**：它们是真对象（实测开窗第一列就是它，
+			// 前端写格子时也写向它的子节点），只是 id 不唯一（同一个 110 会同时是
+			// Value 与 Dialog）。这里的取舍：**先声明者胜**（保留第一个），后来的
+			// 同名声明只当冲突计数 —— 冲突数是诊断。
+			//
+			// 真正的解法是 (作用域, id) 双键（待重构，见提交说明）：现在靠
+			// 运行期的 currentWindow 归属 + 角色的协议 name 把影响限制住。
 		}
 		// 运行期告知的当前窗口：从此之后的声明/更新都归到它名下。
 		if n.ID == 0 {
@@ -97,7 +102,12 @@ func (m *Model) Apply(nodes []Node) int {
 			}
 		default:
 			o := m.ensure(n.ID)
-			o.Type = n.Type
+			if o.Type != "" && o.Type != "?" && o.Type != n.Type {
+				m.conflicts++ // 同一 id 的异型声明：先声明者胜（诊断保留）
+			}
+			if o.Type == "" || o.Type == "?" {
+				o.Type = n.Type
+			}
 			if m.curWindow != 0 && n.ID != 0 && n.Type != "Window" {
 				o.Win = m.curWindow
 			}

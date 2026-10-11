@@ -13,6 +13,7 @@ import (
 var (
 	uiRolesWindow string
 	uiRolesKind   string
+	uiRolesSource string
 )
 
 // uiRolesCmd 输出"稳定目录"：可操作控件 → 角色 / 类型 / 状态 / 支持的操作。
@@ -41,6 +42,25 @@ ComboBox/Item=choose、CheckBox=toggle、Action/ToolBarItem/MenuAction=invoke…
 			return err
 		}
 		cat := fep.Catalog(m, r)
+		// M5：带上源码骨架 —— 角色改用源码字段名（稳定），并挂上 required/opener。
+		srcNote := ""
+		if uiRolesSource != "" {
+			prog := ""
+			if reg, _, rerr := registry(); rerr == nil {
+				if s, lerr := reg.Load(); lerr == nil {
+					prog = s.Prog
+				}
+			}
+			if prog == "" {
+				srcNote = "没能从会话登记里拿到作业编号（--source 需要它）"
+			} else if src, serr := fep.LoadSource(uiRolesSource, prog); serr != nil {
+				srcNote = serr.Error()
+			} else {
+				n := fep.ApplySource(cat, src)
+				srcNote = fmt.Sprintf("源码：%s（表单 %d 个 / 字段 %d 条 / 动作 %d 个）—— 角色已改用源码字段名，匹配上 %d 个控件",
+					prog, len(src.Forms), len(src.Fields), len(src.Actions), n)
+			}
+		}
 		if uiRolesKind != "" {
 			cat = filterKind(cat, uiRolesKind)
 		}
@@ -68,9 +88,13 @@ ComboBox/Item=choose、CheckBox=toggle、Action/ToolBarItem/MenuAction=invoke…
 			"note":           "寻址用 窗口/角色；id 仅作落点提示，不要写进脚本",
 			"controls":       cat,
 			"ambiguousRoles": dup,
+			"source":         srcNote,
 		}
 		return printJSONOrText(view, func() {
 			fmt.Printf("协议 tt-aui/1 —— 可操作控件 %d 个（按窗口/角色寻址，id 仅供落点参考）\n", len(cat))
+			if srcNote != "" {
+				fmt.Printf("%s\n", srcNote)
+			}
 			cur := ""
 			for _, c := range cat {
 				if c.Window != cur {
@@ -78,6 +102,12 @@ ComboBox/Item=choose、CheckBox=toggle、Action/ToolBarItem/MenuAction=invoke…
 					fmt.Printf("\n窗口 %s\n", cur)
 				}
 				state := []string{}
+				if c.Source != nil && c.Source.Required {
+					state = append(state, "required")
+				}
+				if c.Source != nil && c.Source.Opener != "" {
+					state = append(state, "opener="+c.Source.Opener)
+				}
 				if c.Value != "" {
 					state = append(state, fmt.Sprintf("value=%q", c.Value))
 				}
@@ -132,4 +162,6 @@ func filterWindow(cat []fep.Control, want string) []fep.Control {
 func init() {
 	uiRolesCmd.Flags().StringVar(&uiRolesWindow, "window", "", "只看某个窗口（名字片段）")
 	uiRolesCmd.Flags().StringVar(&uiRolesKind, "kind", "", "只看某种控件类型（Edit/ButtonEdit/Action…）")
+	uiRolesCmd.Flags().StringVar(&uiRolesSource, "source", "",
+		"源码镜像根目录（如 D:/T100/4gl文档 的同级……用 tt dict mirror path 拿到的那个）：\n带上它，角色改用源码字段名并显示 required/opener")
 }
