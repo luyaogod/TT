@@ -7,6 +7,10 @@ type Object struct {
 	ID     int
 	Type   string
 	Parent int
+	// Scope 是它的**声明作用域**（声明时运行期告知的 currentWindow，
+	// 拿不到时用父对象 id）。实测 FEP 的数字 id 不是全局身份，
+	// 所以 "同一个 id 的两份不同对象" 要靠 Scope 区分。
+	Scope int
 	// Win 是它**最后一次被运行期触及时所处的当前窗口**（由 un 0 {{currentWindow "N"}} 得到）。
 	// 为什么不用父链：实测开窗里的对象是运行期预载的，父链指向模板语境（
 	// 一个 "交易对象编号" 列的父链会一路挂到别的窗口的 ComboBox 上），
@@ -40,18 +44,29 @@ type Model struct {
 	objs      map[int]*Object
 	order     []int
 	conflicts int
+	// locals 保存**同 id 但不同作用域**的声明（实测：同一个 110 既被声明成
+	// Value 又被声明成 Dialog；#159 先 ActionDefault、后开窗第一列 TableColumn）。
+	// 以前只能 "先声明者胜"，结果丢掉真对象（开窗第一列就是这样丢的）。
+	locals     map[ObjKey]*Object
+	localOrder []ObjKey
 	// curWindow 是运行期最近一次告知的当前窗口（un 0 {{currentWindow "N"}}）。
 	// 它后面的声明/更新都归到这个窗口下 —— 这是 M1 用来划分作用域的依据。
 	curWindow int
 }
 
+// ObjKey 是对象的**作用域内身份**。
+type ObjKey struct {
+	Scope int
+	ID    int
+}
+
 // NewModel returns an empty model.
 func NewModel() *Model {
-	return &Model{objs: make(map[int]*Object)}
+	return &Model{objs: make(map[int]*Object), locals: make(map[ObjKey]*Object)}
 }
 
 // Len reports how many objects the model holds.
-func (m *Model) Len() int { return len(m.objs) }
+func (m *Model) Len() int { return len(m.objs) + len(m.locals) }
 
 // Conflicts reports how often a definition tried to re-parent an existing
 // object. Non-zero means the stream contained partial messages; the model keeps
@@ -61,28 +76,14 @@ func (m *Model) Conflicts() int { return m.conflicts }
 // Apply merges parsed nodes into the model and returns how many nodes were
 // consumed.
 //
-// 实测得来的两条规则：
-//  1. 顶层**无 an 前缀**的声明（Value 110 / Dialog 110 同时出现）是局部节点，
-//     id 不是全局身份 —— 不进全局模型，连它的子节点一并跳过（否则父链会被揉到一起，
-//     实测就是这么把一个组合框候选项当成了"交易对象编号"列）。
-//  2. 只认带 an 的声明与 un/rn 更新；同一个 id 被不同父重复声明时保留第一个，
-//     并计一次 conflicts（作为诊断保留）。
+// 三条规则都来自实测：
+//  1. 对象身份 = **(作用域, id)**，不是裸 id：同一个 110 会同时是 Value 与 Dialog，
+//     #159 先被声明为 ActionDefault、后又被声明为开窗第一列 TableColumn。
+//     没有冲突时进全局表（事件就是按裸 id 寻址的），有冲突时按作用域进局部表。
+//  2. 作用域优先用运行期推的 currentWindow；拿不到时用声明里的父对象 id。
+//  3. 更新（un/rn）只合属性，不改类型/父 —— 这保证字段名解析稳定。
 func (m *Model) Apply(nodes []Node) int {
-	skipped := map[int]bool{}
 	for _, n := range nodes {
-		if skipped[n.Parent] {
-			skipped[n.ID] = true
-			continue
-		}
-		if n.Bare && n.Parent == 0 {
-			// 无 an 的顶层声明是**模板子树**：它们是真对象（实测开窗第一列就是它，
-			// 前端写格子时也写向它的子节点），只是 id 不唯一（同一个 110 会同时是
-			// Value 与 Dialog）。这里的取舍：**先声明者胜**（保留第一个），后来的
-			// 同名声明只当冲突计数 —— 冲突数是诊断。
-			//
-			// 真正的解法是 (作用域, id) 双键（待重构，见提交说明）：现在靠
-			// 运行期的 currentWindow 归属 + 角色的协议 name 把影响限制住。
-		}
 		// 运行期告知的当前窗口：从此之后的声明/更新都归到它名下。
 		if n.ID == 0 {
 			if v := n.Attrs["currentWindow"]; v != "" {
@@ -91,9 +92,16 @@ func (m *Model) Apply(nodes []Node) int {
 				}
 			}
 		}
+		scope := m.curWindow
+		if scope == 0 {
+			scope = n.Parent
+		}
 		switch n.Type {
 		case "un", "rn":
-			o := m.ensure(n.ID)
+			o := m.lookup(n.ID, scope)
+			if o == nil {
+				o = m.ensure(n.ID)
+			}
 			for k, v := range n.Attrs {
 				o.Attrs[k] = v
 			}
@@ -101,24 +109,25 @@ func (m *Model) Apply(nodes []Node) int {
 				o.Win = m.curWindow
 			}
 		default:
-			o := m.ensure(n.ID)
-			if o.Type != "" && o.Type != "?" && o.Type != n.Type {
-				m.conflicts++ // 同一 id 的异型声明：先声明者胜（诊断保留）
+			if n.ID == 0 {
+				continue // 已当作全局状态处理（当前窗口）
+			}
+			o := m.objForDef(n, scope)
+			if o.Scope == 0 {
+				o.Scope = scope
 			}
 			if o.Type == "" || o.Type == "?" {
 				o.Type = n.Type
 			}
-			if m.curWindow != 0 && n.ID != 0 && n.Type != "Window" {
+			if m.curWindow != 0 && n.Type != "Window" {
 				o.Win = m.curWindow
-			}
-			if n.ID == 0 {
-				continue // 已当作全局状态处理（当前窗口）
 			}
 			if n.Parent != 0 {
 				switch {
 				case o.Parent == 0:
 					o.Parent = n.Parent
 				case o.Parent != n.Parent:
+					// 父链冲突：模板对象的父指向模板语境，不动它；只计数。
 					m.conflicts++
 				}
 			}
@@ -153,17 +162,88 @@ func (m *Model) ensure(id int) *Object {
 	return o
 }
 
-// Get returns an object by id.
-func (m *Model) Get(id int) (*Object, bool) {
-	o, ok := m.objs[id]
-	return o, ok
+// ensureLocal 取一个作用域内的局部对象（同 id 不同作用域的声明共存）。
+func (m *Model) ensureLocal(key ObjKey, typ string) *Object {
+	if o, ok := m.locals[key]; ok {
+		return o
+	}
+	o := &Object{ID: key.ID, Scope: key.Scope, Type: typ, Attrs: make(map[string]string)}
+	m.locals[key] = o
+	m.localOrder = append(m.localOrder, key)
+	return o
 }
 
-// Objects returns every object in first-seen order.
+// lookup 按裸 id 找一个对象：先当前作用域那份，再次当前窗口那份，最后全局那份。
+// （事件在线上只能给裸 id，所以更新要尽量落到"当前正在用的那一份"上。）
+func (m *Model) lookup(id, scope int) *Object {
+	if o, ok := m.locals[ObjKey{scope, id}]; ok {
+		return o
+	}
+	if m.curWindow != 0 {
+		for k, o := range m.locals {
+			if k.ID == id && (k.Scope == m.curWindow || o.Win == m.curWindow) {
+				return o
+			}
+		}
+	}
+	if o, ok := m.objs[id]; ok {
+		return o
+	}
+	for k, o := range m.locals {
+		if k.ID == id {
+			return o
+		}
+	}
+	return nil
+}
+
+// objForDef 选一个可写的对象：
+//
+//   - 同名同作用域 → 合并到已有的；
+//   - 其它情况（类型不同**或作用域不同**）→ 按 (作用域, id) 单独存一份。
+//
+// 为什么要看作用域而不只看类型：实测
+//
+//	… {Message 111 {{text "Verify OK!"}} {}} {Dialog 110 {{active "1"}} {{Action 109 {{name "accept"}}…}}
+//	… {Value 107 {}} {Value 108 {}} {Value 109 {}} {Value 110 {{value ""}}} …
+//
+// 同一个 110 同时是"消息框的 Dialog"又在另一串 Value 里 —— 两棵树，不能并。
+// 合并的后果实测过：Dialog 身上出现 value "电子零件类"，actionIdRef 还指到别的树的 accept。
+func (m *Model) objForDef(n Node, scope int) *Object {
+	if o, ok := m.objs[n.ID]; ok {
+		sameType := o.Type == "" || o.Type == "?" || o.Type == n.Type
+		sameScope := o.Scope == 0 || scope == 0 || o.Scope == scope
+		if sameType && sameScope {
+			return o
+		}
+		m.conflicts++
+		return m.ensureLocal(ObjKey{scope, n.ID}, n.Type)
+	}
+	if o, ok := m.locals[ObjKey{scope, n.ID}]; ok {
+		return o
+	}
+	return m.ensure(n.ID)
+}
+
+// Get returns an object by id (global table first, then any scoped one).
+func (m *Model) Get(id int) (*Object, bool) {
+	if o, ok := m.objs[id]; ok {
+		return o, true
+	}
+	if o := m.lookup(id, m.curWindow); o != nil {
+		return o, true
+	}
+	return nil, false
+}
+
+// Objects returns every object in first-seen order (global + scoped).
 func (m *Model) Objects() []*Object {
-	out := make([]*Object, 0, len(m.order))
+	out := make([]*Object, 0, m.Len())
 	for _, id := range m.order {
 		out = append(out, m.objs[id])
+	}
+	for _, k := range m.localOrder {
+		out = append(out, m.locals[k])
 	}
 	return out
 }
@@ -171,9 +251,9 @@ func (m *Model) Objects() []*Object {
 // ByType returns every object of one AUI type.
 func (m *Model) ByType(t string) []*Object {
 	var out []*Object
-	for _, id := range m.order {
-		if m.objs[id].Type == t {
-			out = append(out, m.objs[id])
+	for _, o := range m.Objects() {
+		if o.Type == t {
+			out = append(out, o)
 		}
 	}
 	return out
@@ -184,7 +264,7 @@ func (m *Model) ByType(t string) []*Object {
 // nearest Window id on the way, if any.
 func (m *Model) Chain(id int) (chain []*Object, cycle bool, window int) {
 	seen := make(map[int]bool)
-	cur, ok := m.objs[id]
+	cur, ok := m.Get(id)
 	for hops := 0; ok && hops < 64; hops++ {
 		if seen[cur.ID] {
 			return chain, true, window
@@ -197,7 +277,7 @@ func (m *Model) Chain(id int) (chain []*Object, cycle bool, window int) {
 		if cur.Parent == 0 {
 			return chain, false, window
 		}
-		cur, ok = m.objs[cur.Parent]
+		cur, ok = m.Get(cur.Parent)
 	}
 	return chain, !ok && len(chain) > 0, window
 }
@@ -236,7 +316,7 @@ func (m *Model) Propagate() int {
 			if o.Win != 0 || o.Parent == 0 || o.Type == "Window" {
 				continue
 			}
-			p, ok := m.objs[o.Parent]
+			p, ok := m.Get(o.Parent)
 			if !ok || p.Win == 0 {
 				continue
 			}
@@ -250,3 +330,6 @@ func (m *Model) Propagate() int {
 	}
 	return total
 }
+
+// CurrentWindow 返回运行期最近一次告知的当前窗口（un 0 {{currentWindow "N"}}）。
+func (m *Model) CurrentWindow() int { return m.curWindow }

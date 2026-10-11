@@ -44,6 +44,7 @@ type uiRow struct {
 	Col        string `json:"col,omitempty"`
 	Value      string `json:"value,omitempty"`
 	Active     string `json:"active,omitempty"`
+	Scope      int    `json:"scope,omitempty"`
 	// actionActive/actionIdRef：运行期自己标的"这个动作现在能不能按"／它真正的动作对象
 	ActionActive string `json:"actionActive,omitempty"`
 	ActionIDRef  string `json:"actionIdRef,omitempty"`
@@ -210,6 +211,7 @@ var uiFindCmd = &cobra.Command{
 			rows = append(rows, uiRow{ID: o.ID, Type: o.Type, Name: fn.Text, Source: fn.Source,
 				Confidence: string(fn.Confidence), Window: m.WindowName(o.ID),
 				Comment: o.Attr("comment"), Col: o.Attr("col"),
+				Scope: o.Scope,
 				Value: o.Attr("value"), Active: o.Attr("active"),
 				ActionActive: o.Attr("actionActive"), ActionIDRef: o.Attr("actionIdRef"),
 				Parent: o.Parent, PosX: geomInt(o, "posX"), PosY: geomInt(o, "posY"),

@@ -4,13 +4,17 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"tt/internal/fep"
 )
 
-var doCellIn string
+var (
+	doCellIn     string
+	doCellAccept bool
+)
 
 // doCellCmd：往网格格子里写值。
 //
@@ -50,10 +54,19 @@ tt fep do cell 'pmdn_t.pmdn010' 10       # 单价
 		if cerr != nil {
 			return fail(exitTarget, "%v", cerr)
 		}
-		ev := fep.ConfigureValueText(cell, args[1], nil) + "\n\t" +
+		// 多个事件在同一条消息里用 }{ 分隔（与前端形态一致）。
+		ev := fep.ConfigureValueText(cell, args[1], nil) + "}{" +
 			fep.ConfigureCursorText(col.ID, len([]rune(args[1])))
-		// 去掉换行/缩进：事件体本身不能有空白分隔错位
-		ev = "ConfigureEvent 0" + ev[len("ConfigureEvent 0"):]
+		// --accept：把当前可用的 ✓ 一起放进**同一条消息**。
+		// 实测：条件、光标、✓ 三个事件同一条消息发，开窗才“带着条件去查”；
+		// 分开发只会选中已有行（网格空时什么都不发生）。
+		if doCellAccept {
+			acc, aerr := currentAccept(m)
+			if aerr != nil {
+				return fail(exitTarget, "%v", aerr)
+			}
+			ev += "}{" + fep.ActionEventText(acc)
+		}
 
 		reg, _, err := registry()
 		if err != nil {
@@ -121,5 +134,26 @@ tt fep do cell 'pmdn_t.pmdn010' 10       # 单价
 
 func init() {
 	doCellCmd.Flags().StringVar(&doCellIn, "in", "", "限定窗口（路由用）")
+	doCellCmd.Flags().BoolVar(&doCellAccept, "accept", false,
+		"把当前可用的 ✓ 一起放进同一条消息（写条件 + 回车查的那种形态）")
 	doCmd.AddCommand(doCellCmd)
+}
+
+// currentAccept 找"此刻可用的 ✓"：带 image=tb/accept.png（或 name=accept）且 actionActive=1。
+// 实测这个 id 每个开窗都会变（上一轮 #3550、这一轮 #121），所以必须现查。
+func currentAccept(m *fep.Model) (int, error) {
+	for _, o := range m.Objects() {
+		switch o.Type {
+		case "ToolBarItem", "Action", "Button", "MenuAction":
+		default:
+			continue
+		}
+		if !strings.Contains(o.Attr("image"), "accept") && !strings.Contains(o.Attr("name"), "accept") {
+			continue
+		}
+		if o.Attr("actionActive") == "1" {
+			return o.ID, nil
+		}
+	}
+	return 0, fmt.Errorf("此刻没有可用的 ✓（开窗可能没开或已关闭）")
 }

@@ -100,6 +100,7 @@ type Control struct {
 	// 下面三个用于"能不能按"：运行期自己标的可用状态与真正的动作对象
 	ActionActive string `json:"actionActive,omitempty"`
 	ActionIDRef  string `json:"actionIdRef,omitempty"`
+	Scope        int    `json:"scope,omitempty"`
 	// Source 是源码里对应的字段（.4fd），有它角色才稳定
 	Source *SrcField `json:"source,omitempty"`
 }
@@ -155,6 +156,7 @@ func Catalog(m *Model, r *Resolver) []Control {
 			ID: o.ID, Kind: o.Type, Role: role, RoleName: display,
 			Window: m.WindowName(o.ID), Comment: o.Attr("comment"),
 			Value: o.Attr("value"), Active: o.Attr("active"), Hidden: o.Attr("hidden"),
+			Scope:        o.Scope,
 			Ops:          append([]string(nil), ops...),
 			ActionActive: o.Attr("actionActive"), ActionIDRef: o.Attr("actionIdRef"),
 		})
@@ -259,4 +261,88 @@ func FirstCellOf(m *Model, columnID int) (int, error) {
 		return 0, &roleError{msg: fmt.Sprintf("列 #%d 的 ValueList(#%d) 里没有格子（这一行可能还不存在）", columnID, listID)}
 	}
 	return best, nil
+}
+
+// NearestAncestor 往上找最近的某个类型的祖先（防环）。
+func NearestAncestor(m *Model, id int, types ...string) (*Object, bool) {
+	cur, ok := m.Get(id)
+	for hop := 0; ok && cur != nil && hop < 24; hop++ {
+		for _, t := range types {
+			if cur.Type == t {
+				return cur, true
+			}
+		}
+		if cur.Parent == 0 {
+			break
+		}
+		cur, ok = m.Get(cur.Parent)
+	}
+	return nil, false
+}
+
+// DialogOf 返回某个控件的最近 Dialog 祖先（= 它属于哪个交互指令）。
+func DialogOf(m *Model, id int) (int, bool) {
+	d, ok := NearestAncestor(m, id, "Dialog")
+	if !ok {
+		return 0, false
+	}
+	return d.ID, true
+}
+
+// ActiveDialogs 返回运行期标了 active=1 的 Dialog（当前交互指令的候选）。
+//
+// 官方依据（1514 Actions in the abstract user interface tree）：AUI 用一组 Action 节点
+// 表示"当前交互指令"能收到的动作，这组动作由 Dialog 节点持有；交互元素按 name 绑定到
+// Action 节点。所以"能不能发某个动作"要看它在不在当前 Dialog 的动作集里。
+func (m *Model) ActiveDialogs() []*Object {
+	var out []*Object
+	for _, o := range m.Objects() {
+		if o.Type == "Dialog" && o.Attr("active") == "1" {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
+// DialogActionIDs 返回某个 Dialog 直接持有的 Action/MenuAction/IdleAction 的 id 集合。
+func DialogActionIDs(m *Model, dialogID int) map[int]bool {
+	out := map[int]bool{}
+	cur, ok := m.Get(dialogID)
+	if !ok {
+		return out
+	}
+	// 直接子对象（用父链，Dialog 的动作在同一棵树内声明，实测可靠）
+	for _, o := range m.Objects() {
+		if o.Parent != cur.ID {
+			continue
+		}
+		switch o.Type {
+		case "Action", "MenuAction", "IdleAction":
+			out[o.ID] = true
+		}
+	}
+	return out
+}
+
+// ActionNameInDialog 在当前（active）Dialog 的动作集里按 name 找一个动作。
+//
+// 这就是"按 name 绑定"的落地：不去猜 id，而是问"当前交互指令提供名字为 accept 的动作吗"。
+// 找不到就返回 false —— 调用方据此拒绝发送（宁缺不猜）。
+func ActionNameInDialog(m *Model, name string) (int, bool) {
+	for _, d := range m.ActiveDialogs() {
+		for _, o := range m.Objects() {
+			if o.Parent != d.ID {
+				continue
+			}
+			switch o.Type {
+			case "Action", "MenuAction", "IdleAction":
+			default:
+				continue
+			}
+			if o.Attr("name") == name {
+				return o.ID, true
+			}
+		}
+	}
+	return 0, false
 }
