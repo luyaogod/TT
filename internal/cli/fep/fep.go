@@ -73,7 +73,7 @@ func init() {
 
 	Group.AddCommand(sessionCmd, uiCmd, recCmd, doCmd, waitCmd)
 	sessionCmd.AddCommand(sessionPsCmd, sessionCloseCmd)
-	uiCmd.AddCommand(uiSnapshotCmd, uiFindCmd, uiTreeCmd)
+	uiCmd.AddCommand(uiSnapshotCmd, uiFindCmd, uiTreeCmd, uiRolesCmd)
 	recCmd.AddCommand(recStepsCmd)
 }
 

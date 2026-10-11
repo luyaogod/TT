@@ -176,7 +176,7 @@ func recDirForAudit(s *fep.Session) string {
 }
 
 func init() {
-	doCmd.AddCommand(doActCmd, doKeyCmd, doTypeCmd)
+	doCmd.AddCommand(doActCmd, doKeyCmd, doTypeCmd, doRoleCmd)
 	for _, c := range []*cobra.Command{doActCmd, doKeyCmd, doTypeCmd} {
 		c.Flags().IntVar(&doConn, "conn", 0, "连接号（多窗口作业必给；给了 --window 就按窗口路由）")
 		c.Flags().BoolVar(&doDryRun, "dry-run", false, "只校验与打印，一个字节都不发")
