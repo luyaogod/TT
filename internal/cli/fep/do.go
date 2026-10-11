@@ -3,9 +3,9 @@ package fep
 import (
 	"errors"
 	"fmt"
-	"net"
 	"path/filepath"
-	"strconv"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -16,6 +16,7 @@ var (
 	doConn   int
 	doDryRun bool
 	doWindow string
+	doWait   time.Duration
 )
 
 var doCmd = &cobra.Command{
@@ -82,18 +83,12 @@ func runDo(cmd *cobra.Command, dc fep.DoConfig) error {
 	if err != nil {
 		return fail(exitFailed, "%v", err)
 	}
-	recDir := s.RecordDir
-	if recDir == "" {
-		if recDir, err = cacheDir(); err != nil {
-			return err
-		}
+	client, err := newClient()
+	if err != nil {
+		return err
 	}
-	client := &fep.Client{
-		InjectAddr: net.JoinHostPort("127.0.0.1", strconv.Itoa(s.InjectPort)),
-		RecordDir:  recDir,
-		Tag:        s.Tag,
-		Window:     doWindow,
-	}
+	client.Window = doWindow
+	dc.Wait = doWait
 	res, derr := fep.Do(client, dc)
 
 	entry := fep.AuditEntry{Verb: dc.Kind, DryRun: doDryRun, Session: s.Prog}
@@ -111,7 +106,10 @@ func runDo(cmd *cobra.Command, dc fep.DoConfig) error {
 	if res != nil && res.Suggest != "" {
 		entry.Note = res.Suggest
 	}
-	auditErr := fep.AppendAudit(filepath.Join(recDir, "audit.log"), entry)
+	if res != nil && len(res.Warnings) > 0 {
+		entry.Note = strings.Join(res.Warnings, "；")
+	}
+	auditErr := fep.AppendAudit(filepath.Join(recDirForAudit(s), "audit.log"), entry)
 
 	if derr != nil {
 		var ref *fep.Refusal
@@ -140,15 +138,50 @@ func runDo(cmd *cobra.Command, dc fep.DoConfig) error {
 		if res.Suggest != "" {
 			fmt.Printf("  提示：%s\n", res.Suggest)
 		}
+		for _, w := range res.Warnings {
+			fmt.Printf("  ⚠ %s\n", w)
+		}
+		if ch := res.Changes; ch != nil {
+			switch {
+			case ch.TimedOut:
+				fmt.Printf("  运行期在 %s 内没有回包（事件发出去了，作业没显式变化）\n", doWait)
+			case ch.RuntimeBytes == 0:
+				fmt.Println("  运行期没有新数据")
+			default:
+				fmt.Printf("  作业变化：运行期 +%d 字节 / 新消息 %d 条\n", ch.RuntimeBytes, ch.NewMessages)
+				if len(ch.NewWindows) > 0 {
+					fmt.Printf("    新窗口：%v\n", ch.NewWindows)
+				}
+				for _, vc := range ch.Values {
+					label := vc.Name
+					if label == "" {
+						label = fmt.Sprintf("#%d", vc.ID)
+					}
+					fmt.Printf("    值变化：%s %q → %q\n", label, vc.From, vc.To)
+				}
+			}
+		}
 	})
+}
+
+// recDirForAudit 返回审计日志的落点（与录制件同目录）。
+func recDirForAudit(s *fep.Session) string {
+	if s != nil && s.RecordDir != "" {
+		return s.RecordDir
+	}
+	if d, err := cacheDir(); err == nil {
+		return d
+	}
+	return "."
 }
 
 func init() {
 	doCmd.AddCommand(doActCmd, doKeyCmd, doTypeCmd)
 	for _, c := range []*cobra.Command{doActCmd, doKeyCmd, doTypeCmd} {
-		c.Flags().IntVar(&doConn, "conn", 0, "连接号（多窗口作业必给；单连接可省）")
+		c.Flags().IntVar(&doConn, "conn", 0, "连接号（多窗口作业必给；给了 --window 就按窗口路由）")
 		c.Flags().BoolVar(&doDryRun, "dry-run", false, "只校验与打印，一个字节都不发")
-		c.Flags().StringVar(&doWindow, "window", "", "只在某个窗口名里找目标")
+		c.Flags().StringVar(&doWindow, "window", "", "只在某个窗口名里找目标（并按它路由连接）")
+		c.Flags().DurationVar(&doWait, "wait", 10*time.Second, "发完等运行期回包多久（负数=不等）")
 	}
 	Group.AddCommand(doCmd)
 }

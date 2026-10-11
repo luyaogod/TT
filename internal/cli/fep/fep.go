@@ -66,7 +66,12 @@ var Group = &cobra.Command{
 func Register(root *cobra.Command) { root.AddCommand(Group) }
 
 func init() {
-	Group.AddCommand(sessionCmd, uiCmd, recCmd)
+	// 开关解析错也退 2：cobra 默认给 1，而这条线的表里 2 = 用法错
+	Group.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
+		return fail(exitUsage, "%v", err)
+	})
+
+	Group.AddCommand(sessionCmd, uiCmd, recCmd, doCmd, waitCmd)
 	sessionCmd.AddCommand(sessionPsCmd, sessionCloseCmd)
 	uiCmd.AddCommand(uiSnapshotCmd, uiFindCmd)
 	recCmd.AddCommand(recStepsCmd)

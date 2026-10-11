@@ -88,22 +88,44 @@ type DoConfig struct {
 	Target  string // 名字或 #id（click/input 必填）
 	Value   string // input
 	KeyName string // key
-	Conn    int    // 0 = 自动（只有一条连接时用它，多条时报错）
+	Conn    int    // 0 = 自动（给了 --window 就按窗口路由；只有一条连接时用它）
 	DryRun  bool
+	Wait    time.Duration // 发完等运行期回包多久（0 = 默认 10s；负数 = 不等）
+}
+
+// ValueChange is one field whose value changed while waiting.
+type ValueChange struct {
+	ID   int    `json:"id"`
+	Name string `json:"name,omitempty"`
+	From string `json:"from,omitempty"`
+	To   string `json:"to"`
+}
+
+// Changes summarises what the runtime did after an action.
+// "事件发出去了"与"作业真的变了"是两件事，只有后者有用。
+type Changes struct {
+	RuntimeBytes int64         `json:"runtimeBytes"`
+	NewMessages  int           `json:"newMessages"`
+	Acked        bool          `json:"acked"`
+	NewWindows   []string      `json:"newWindows,omitempty"`
+	Values       []ValueChange `json:"values,omitempty"`
+	TimedOut     bool          `json:"timedOut,omitempty"`
 }
 
 // DoResult is what happened (or would happen).
 type DoResult struct {
-	Event   string `json:"event"`
-	Conn    int    `json:"connection"`
-	Seq     int    `json:"seq"`
-	Target  string `json:"target"`
-	Name    string `json:"name,omitempty"`
-	Sent    bool   `json:"sent"`
-	Reply   string `json:"reply,omitempty"`
-	Refused string `json:"refused,omitempty"`
-	NotSent string `json:"notSentReason,omitempty"`
-	Suggest string `json:"suggestion,omitempty"`
+	Event    string   `json:"event"`
+	Conn     int      `json:"connection"`
+	Seq      int      `json:"seq"`
+	Target   string   `json:"target"`
+	Name     string   `json:"name,omitempty"`
+	Sent     bool     `json:"sent"`
+	Reply    string   `json:"reply,omitempty"`
+	Refused  string   `json:"refused,omitempty"`
+	NotSent  string   `json:"notSentReason,omitempty"`
+	Suggest  string   `json:"suggestion,omitempty"`
+	Changes  *Changes `json:"changes,omitempty"`
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // Do runs the pre-flight checks and, unless it is a dry run, sends the event.
@@ -169,18 +191,120 @@ func Do(c *Client, cfg DoConfig) (*DoResult, error) {
 		return nil, fmt.Errorf("fep: 不认识的动作 %q（click/key/input）", cfg.Kind)
 	}
 
+	// 正式区 + 写类动作：给一行警告（不硬禁，依决策②：安全靠审计/预演/警告，不靠禁令）
+	if prod, ev := ProductionEvidence(m); prod && writesData(cfg, res) {
+		res.Warnings = append(res.Warnings, "目标看起来是正式区（依据："+ev+"）：这一步会改数据，审计日志已记录")
+	}
+
 	if cfg.DryRun {
 		res.Sent = false
 		res.NotSent = "dry-run：只校验与打印，一个字节都没发"
 		return res, nil
 	}
+	// 记下动作前的现场：用来回答“这一步到底让作业变了什么”
+	before := snapshotOf(c, conn.ID)
+
 	reply, err := c.Send(conn.ID, res.Event)
 	res.Sent = err == nil
 	res.Reply = reply
 	if err != nil {
 		return res, err
 	}
+	if cfg.Wait >= 0 {
+		res.Changes = waitChanges(c, conn.ID, before, cfg.Wait)
+	}
 	return res, nil
+}
+
+// snapshot is the state we compare against after an action.
+type snapshot struct {
+	bytesRT int64
+	msgs    int
+	windows map[string]bool
+	values  map[int]string
+}
+
+func snapshotOf(c *Client, connID int) snapshot {
+	s := snapshot{windows: map[string]bool{}, values: map[int]string{}}
+	if conns, err := c.Status(); err == nil {
+		for _, cc := range conns {
+			if cc.ID == connID {
+				s.bytesRT = cc.BytesRT
+			}
+		}
+	}
+	m, _, n, err := LoadModelFrom(c.RecordDir, c.Tag)
+	if err != nil {
+		return s
+	}
+	s.msgs = n
+	for _, w := range m.Windows() {
+		s.windows[w.Attr("name")] = true
+	}
+	for _, o := range m.Objects() {
+		if v := o.Attr("value"); v != "" {
+			s.values[o.ID] = v
+		}
+	}
+	return s
+}
+
+// waitChanges blocks until the runtime pushes something (or the wait times out)
+// and summarises the difference.
+func waitChanges(c *Client, connID int, before snapshot, wait time.Duration) *Changes {
+	if wait == 0 {
+		wait = 10 * time.Second
+	}
+	ch := &Changes{}
+	deadline := time.Now().Add(wait)
+	for {
+		settled := false
+		if conns, err := c.Status(); err == nil {
+			for _, cc := range conns {
+				if cc.ID == connID && cc.BytesRT != before.bytesRT {
+					ch.RuntimeBytes = cc.BytesRT - before.bytesRT
+					settled = true
+				}
+			}
+		}
+		if settled {
+			break
+		}
+		if time.Now().After(deadline) {
+			ch.TimedOut = true
+			return ch
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	// 让它把这一屏推完再读：半截的界面看起来跟完整的一样
+	time.Sleep(500 * time.Millisecond)
+	m, r, n, err := LoadModelFrom(c.RecordDir, c.Tag)
+	if err != nil {
+		return ch
+	}
+	ch.NewMessages = n - before.msgs
+	for _, w := range m.Windows() {
+		name := w.Attr("name")
+		if name != "" && !before.windows[name] {
+			ch.NewWindows = append(ch.NewWindows, name)
+		}
+	}
+	for _, o := range m.Objects() {
+		v := o.Attr("value")
+		if v == "" {
+			continue
+		}
+		if old, had := before.values[o.ID]; had && old == v {
+			continue
+		}
+		name := ""
+		if fn, ok := r.Resolve(o.ID); ok && fn.Confidence == ConfHigh {
+			name = fn.Text
+		}
+		ch.Values = append(ch.Values, ValueChange{ID: o.ID, Name: name, From: before.values[o.ID], To: v})
+	}
+	ch.Acked = ch.NewMessages > 0 || ch.RuntimeBytes > 0
+	return ch
 }
 
 // pickConn chooses the connection to act on.
@@ -357,4 +481,27 @@ func (c *Client) Quit() error {
 		return fmt.Errorf("fep: 常驻进程拒绝退出: %s", reply)
 	}
 	return nil
+}
+
+// readOnlyActions 是"不改数据"的动作名（依据：真机工具栏里实际存在的项 ——
+// 查询/流程状态/打印/汇出/切换视图这类）。判断只用来出**警告行**，不硬禁：
+// 名单外的动作（录入/更改/删除/复制/确定…）都当成写类。
+var readOnlyActions = map[string]bool{
+	"查询": true, "二次筛选": true, "流程状态": true, "退出": true,
+	"转换至简易画面": true, "打印": true, "快速打印": true,
+	"列印语言别": true, "汇出Excel": true, "汇出EXCEL": true,
+}
+
+// writesData reports whether this action plausibly changes data.
+func writesData(cfg DoConfig, res *DoResult) bool {
+	switch cfg.Kind {
+	case "input":
+		return true
+	case "click":
+		if res.Name != "" && readOnlyActions[res.Name] {
+			return false
+		}
+		return true
+	}
+	return false
 }
