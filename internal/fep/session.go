@@ -29,8 +29,9 @@ type Session struct {
 	GDCPort    int       `json:"gdcPort"`
 	ProxyPort  int       `json:"proxyPort"`
 	InjectPort int       `json:"injectPort"`
-	Tag        string    `json:"tag"`      // recording prefix inside the cache dir
-	OwnerPID   int       `json:"ownerPid"` // the process that started it
+	Tag        string    `json:"tag"`       // recording prefix inside the cache dir
+	RecordDir  string    `json:"recordDir"` // where this session's recordings live
+	OwnerPID   int       `json:"ownerPid"`  // the process that started it
 	Started    time.Time `json:"started"`
 }
 

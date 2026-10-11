@@ -1,0 +1,330 @@
+package fep
+
+import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+// 动作面：把"点一下/打个字"变成一条事件，先校验再发。
+//
+// 跨进程：常驻会话在另一个进程里，本层通过**注入口**（回环 TCP）与它说话，
+// AUI 状态则从**录制件**里重建（运行期不会回答"当前界面是什么"，它只会推 om）。
+// 所以这一层没有任何内存里的会话状态，进程重启后照样能干活。
+
+// ConnStatus is one live connection as the resident process sees it.
+type ConnStatus struct {
+	ID      int    `json:"id"`
+	Seq     int    `json:"seq"`
+	Alive   bool   `json:"alive"`
+	Remote  string `json:"remote,omitempty"`
+	BytesRT int64  `json:"bytesRT,omitempty"`
+	BytesFE int64  `json:"bytesFE,omitempty"`
+}
+
+// Client talks to a resident session.
+type Client struct {
+	InjectAddr string // 127.0.0.1:<port>
+	RecordDir  string
+	Tag        string
+	Window     string // 可选：限定在某个窗口名里找目标
+}
+
+// Status lists the live connections (and, per connection, the next `_om` number).
+func (c *Client) Status() ([]ConnStatus, error) {
+	reply, err := c.roundTrip("status")
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Conns []ConnStatus `json:"conns"`
+	}
+	if err := json.Unmarshal([]byte(reply), &out); err != nil {
+		return nil, fmt.Errorf("fep: 注入口回了看不懂的东西: %q", reply)
+	}
+	return out.Conns, nil
+}
+
+// Send injects one event on one connection. The resident process numbers it.
+func (c *Client) Send(connID int, event string) (string, error) {
+	reply, err := c.roundTrip(fmt.Sprintf("@%d %s", connID, strings.TrimSpace(event)))
+	if err != nil {
+		return "", err
+	}
+	if strings.HasPrefix(reply, "ERR") {
+		return reply, fmt.Errorf("fep: 注入口拒绝: %s", strings.TrimPrefix(reply, "ERR "))
+	}
+	return reply, nil
+}
+
+func (c *Client) roundTrip(line string) (string, error) {
+	if c.InjectAddr == "" {
+		return "", fmt.Errorf("fep: 没有注入口地址（会话登记里没有 injectPort）")
+	}
+	conn, err := net.DialTimeout("tcp", c.InjectAddr, 3*time.Second)
+	if err != nil {
+		return "", fmt.Errorf("fep: 连不上注入口 %s: %w", c.InjectAddr, err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	if _, err := conn.Write([]byte(line + "\n")); err != nil {
+		return "", err
+	}
+	reply, err := bufio.NewReader(conn).ReadString('\n')
+	if err != nil && reply == "" {
+		return "", err
+	}
+	return strings.TrimSpace(reply), nil
+}
+
+// DoConfig describes one action.
+type DoConfig struct {
+	Kind    string // click | key | input
+	Target  string // 名字或 #id（click/input 必填）
+	Value   string // input
+	KeyName string // key
+	Conn    int    // 0 = 自动（只有一条连接时用它，多条时报错）
+	DryRun  bool
+}
+
+// DoResult is what happened (or would happen).
+type DoResult struct {
+	Event   string `json:"event"`
+	Conn    int    `json:"connection"`
+	Seq     int    `json:"seq"`
+	Target  string `json:"target"`
+	Name    string `json:"name,omitempty"`
+	Sent    bool   `json:"sent"`
+	Reply   string `json:"reply,omitempty"`
+	Refused string `json:"refused,omitempty"`
+	NotSent string `json:"notSentReason,omitempty"`
+	Suggest string `json:"suggestion,omitempty"`
+}
+
+// Do runs the pre-flight checks and, unless it is a dry run, sends the event.
+//
+// Everything that can be checked offline is checked before a single byte is sent:
+// that is the whole point of the pre-flight layer (a wrong event resets the
+// connection and can take the job down).
+func Do(c *Client, cfg DoConfig) (*DoResult, error) {
+	conns, err := c.Status()
+	if err != nil {
+		return nil, err
+	}
+	if len(conns) == 0 {
+		return nil, fmt.Errorf("fep: 会话里没有活着的连接（作业还没连上来？）")
+	}
+	conn, err := pickConn(conns, cfg.Conn)
+	if err != nil {
+		return nil, err
+	}
+	m, r, _, err := LoadModelFrom(c.RecordDir, c.Tag)
+	if err != nil {
+		return nil, err
+	}
+
+	res := &DoResult{Conn: conn.ID, Seq: conn.Seq}
+	switch cfg.Kind {
+	case "click":
+		id, name, err := resolveTarget(m, r, cfg.Target, c.Window, "click")
+		if err != nil {
+			return nil, err
+		}
+		res.Target, res.Name = fmt.Sprintf("#%d", id), name
+		if err := CheckClick(m, id); err != nil {
+			var ref *Refusal
+			if asRefusal(err, &ref) {
+				res.Refused, res.Suggest = ref.Message, ref.Hint
+				return res, err
+			}
+			return nil, err
+		}
+		res.Event = ActionEventText(id)
+	case "key":
+		if err := CheckKey(cfg.KeyName); err != nil {
+			return nil, err
+		}
+		res.Event = KeyEventText(cfg.KeyName)
+	case "input":
+		id, name, err := resolveTarget(m, r, cfg.Target, c.Window, "input")
+		if err != nil {
+			return nil, err
+		}
+		target, via, err := ResolveInputTarget(m, id)
+		if err != nil {
+			return nil, err
+		}
+		res.Target, res.Name = fmt.Sprintf("#%d", target), name
+		if !via {
+			res.NotSent = ""
+			res.Suggest = "这个字段没有 FormField 子对象，直接发给它自己；真机上若回 -6327，请改发字段的 FormField"
+		}
+		res.Event = ConfigureValueText(target, cfg.Value, nil)
+	default:
+		return nil, fmt.Errorf("fep: 不认识的动作 %q（click/key/input）", cfg.Kind)
+	}
+
+	if cfg.DryRun {
+		res.Sent = false
+		res.NotSent = "dry-run：只校验与打印，一个字节都没发"
+		return res, nil
+	}
+	reply, err := c.Send(conn.ID, res.Event)
+	res.Sent = err == nil
+	res.Reply = reply
+	if err != nil {
+		return res, err
+	}
+	return res, nil
+}
+
+// pickConn chooses the connection to act on.
+func pickConn(conns []ConnStatus, want int) (ConnStatus, error) {
+	if want != 0 {
+		for _, c := range conns {
+			if c.ID == want {
+				return c, nil
+			}
+		}
+		return ConnStatus{}, fmt.Errorf("fep: 没有连接 #%d（现有 %d 条，见 tt fep session ps）", want, len(conns))
+	}
+	live := make([]ConnStatus, 0, len(conns))
+	for _, c := range conns {
+		if c.Alive {
+			live = append(live, c)
+		}
+	}
+	switch len(live) {
+	case 1:
+		return live[0], nil
+	case 0:
+		return ConnStatus{}, fmt.Errorf("fep: 没有活着的连接")
+	default:
+		return ConnStatus{}, fmt.Errorf("fep: 有 %d 条连接，必须用 --conn 指定（多窗口作业每条窗口一条连接）", len(live))
+	}
+}
+
+// resolveTarget turns "客户编号" or "#272" into an object id.
+// resolveTarget turns "客户编号" or "#272" into an object id.
+//
+// 一个名字在一屏里往往命中多个对象（Label + ButtonEdit + FormField 都叫「客户编号」），
+// 这是**真实情况**而不是异常。所以按动作类型收敛：点击只认可点击的、输入只认可写的；
+// 收敛不到一个就照实报歧义让人用 #id 指定，绝不自己挑一个。
+func resolveTarget(m *Model, r *Resolver, target, window, kind string) (int, string, error) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return 0, "", fmt.Errorf("fep: 没给目标")
+	}
+	if strings.HasPrefix(target, "#") {
+		var id int
+		if _, err := fmt.Sscanf(target, "#%d", &id); err != nil {
+			return 0, "", fmt.Errorf("fep: 看不懂的目标 %q", target)
+		}
+		if _, ok := m.Get(id); !ok {
+			return 0, "", &Refusal{Code: "TARGET_MISSING", Exit: 5, Message: fmt.Sprintf("AUI 里没有 %s", target)}
+		}
+		return id, "", nil
+	}
+	// 按名字找：只认高置信度的名字，低置信一律不当依据
+	var hits []*Object
+	for _, o := range m.Objects() {
+		if window != "" && m.WindowName(o.ID) != window {
+			continue
+		}
+		fn, ok := r.Resolve(o.ID)
+		if !ok || fn.Text != target || fn.Confidence != ConfHigh {
+			continue
+		}
+		if !acceptableFor(kind, o.Type) {
+			continue
+		}
+		hits = append(hits, o)
+	}
+	if len(hits) == 0 {
+		return 0, "", &Refusal{Code: "TARGET_MISSING", Exit: 5,
+			Message: fmt.Sprintf("界面里没有叫 %q 且能接受该动作的目标（只认高置信度的名字）", target)}
+	}
+	if len(hits) == 1 {
+		return hits[0].ID, target, nil
+	}
+	// 输入优先字段值本身（FormField）：实测这是打字该发的地方
+	if kind == "input" {
+		var forms []*Object
+		for _, o := range hits {
+			if o.Type == "FormField" {
+				forms = append(forms, o)
+			}
+		}
+		if len(forms) == 1 {
+			return forms[0].ID, target, nil
+		}
+	}
+	ids := make([]int, 0, len(hits))
+	for _, o := range hits {
+		ids = append(ids, o.ID)
+	}
+	return 0, "", &Refusal{Code: "TARGET_MISSING", Exit: 5,
+		Message: fmt.Sprintf("%q 命中 %d 个可选目标（%v）：请用 #id 指定", target, len(hits), ids)}
+}
+
+// acceptableFor 判断一个类型能不能接受该动作。
+func acceptableFor(kind, typ string) bool {
+	switch kind {
+	case "input":
+		return writableTypes[typ]
+	case "click":
+		return ClickableTypes[typ]
+	}
+	return true
+}
+
+func asRefusal(err error, out **Refusal) bool {
+	if r, ok := err.(*Refusal); ok {
+		*out = r
+		return true
+	}
+	return false
+}
+
+// AuditEntry is one line of the audit trail. Every action is recorded, whether it
+// was sent or refused: "what did the tool do to the job" must be answerable after
+// the fact, and the refusal reasons are part of that answer.
+type AuditEntry struct {
+	Time    time.Time `json:"time"`
+	Verb    string    `json:"verb"`
+	Conn    int       `json:"connection"`
+	Target  string    `json:"target,omitempty"`
+	Name    string    `json:"name,omitempty"`
+	Event   string    `json:"event,omitempty"`
+	Sent    bool      `json:"sent"`
+	DryRun  bool      `json:"dryRun,omitempty"`
+	Result  string    `json:"result,omitempty"`
+	Note    string    `json:"note,omitempty"`
+	Session string    `json:"session,omitempty"`
+}
+
+// AppendAudit appends one entry as a JSON line.
+func AppendAudit(path string, e AuditEntry) error {
+	if path == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	b, err := json.Marshal(e)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(append(b, '\n'))
+	return err
+}

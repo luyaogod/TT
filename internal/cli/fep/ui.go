@@ -83,7 +83,7 @@ var uiCmd = &cobra.Command{
 var uiSnapshotCmd = &cobra.Command{
 	Use:   "snapshot",
 	Short: "汇总界面结构：窗口/对象数/父链冲突/字段名覆盖率",
-	Args:  cobra.NoArgs,
+	Args:  noArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		m, r, frames, err := loadModel(uiFrom)
 		if err != nil {
@@ -143,7 +143,7 @@ var uiSnapshotCmd = &cobra.Command{
 var uiFindCmd = &cobra.Command{
 	Use:   "find",
 	Short: "找对象：按名字/文本筛，输出 id、类型、名字来源与置信度",
-	Args:  cobra.NoArgs,
+	Args:  noArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		m, r, _, err := loadModel(uiFrom)
 		if err != nil {
@@ -212,7 +212,7 @@ var recCmd = &cobra.Command{
 var recStepsCmd = &cobra.Command{
 	Use:   "steps",
 	Short: "语义动作清单：点击/输入，附动作对象解析出的名字",
-	Args:  cobra.NoArgs,
+	Args:  noArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		events, err := loadEvents(uiFrom)
 		if err != nil {

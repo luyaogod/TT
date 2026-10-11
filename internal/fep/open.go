@@ -164,7 +164,7 @@ func Open(ctx context.Context, cfg OpenConfig, logf func(string, ...any)) (*Runt
 		Env: cfg.Env, Zone: cfg.Zone, Prog: cfg.Prog,
 		GDCPID: pid, GDCPort: cfg.GDCPort,
 		ProxyPort: cfg.ProxyPort, InjectPort: cfg.InjectPort,
-		Tag: cfg.Tag, OwnerPID: os.Getpid(), Started: time.Now(),
+		Tag: cfg.Tag, RecordDir: cfg.RecordDir, OwnerPID: os.Getpid(), Started: time.Now(),
 	}
 	if err := r.reg.Save(sess); err != nil {
 		p.Close()

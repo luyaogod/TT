@@ -305,6 +305,10 @@ func (p *Proxy) handleControlLine(w io.Writer, line string) {
 	if line == "" {
 		return
 	}
+	if line == "status" {
+		io.WriteString(w, p.statusJSON()+"\n")
+		return
+	}
 	if line == "list" {
 		infos := p.Conns()
 		var b strings.Builder

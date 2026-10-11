@@ -29,7 +29,7 @@ var sessionCmd = &cobra.Command{
 var sessionPsCmd = &cobra.Command{
 	Use:   "ps",
 	Short: "列出已登记的会话（含 GDC 是否还活着、权限是否对得上）",
-	Args:  cobra.NoArgs,
+	Args:  noArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		reg, _, err := registry()
 		if err != nil {
@@ -66,7 +66,7 @@ var sessionPsCmd = &cobra.Command{
 var sessionCloseCmd = &cobra.Command{
 	Use:   "close",
 	Short: "收掉已登记的会话（只杀登记的 pid），并清掉登记",
-	Args:  cobra.NoArgs,
+	Args:  noArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		reg, _, err := registry()
 		if err != nil {

@@ -46,7 +46,7 @@ var sessionOpenCmd = &cobra.Command{
 收工顺序是：远端作业 → 代理 → 隔离实例 → 清登记（只杀登记里的 pid）。
 
 注意：作业窗口是**普通窗口**，用户看得见、也能自己操作；TT 不碰键鼠。`,
-	Args: cobra.NoArgs,
+	Args: noArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// 用法错要在读配置、起任何东西之前就报出来
 		if openProg == "" && !openNoJob {

@@ -40,6 +40,17 @@ var ClickableTypes = map[string]bool{
 	"FormField":      true,
 }
 
+// writableTypes 是"能把值发过去"的对象类型：字段值本身与它的编辑控件。
+// 与 ClickableTypes 一样，来自真机录制里被输入过的对象，不是推断出来的全集。
+var writableTypes = map[string]bool{
+	"FormField":  true,
+	"Value":      true,
+	"Edit":       true,
+	"ButtonEdit": true,
+	"ComboBox":   true,
+	"DateEdit":   true,
+}
+
 // Refusal is a pre-flight refusal: nothing was sent.
 type Refusal struct {
 	Code    string
@@ -87,9 +98,10 @@ func EncodeEvent(seq int, ev string) []byte {
 
 // CheckClick runs the pre-flight rules for a click and sends nothing.
 //
-//	wantSeq/actualSeq: the sequence the caller is about to use, and the one this
-//	connection expects (plan §3.8 rule 4: reusing a number resets the connection).
-func CheckClick(m *Model, idRef, wantSeq, actualSeq int) error {
+// The sequence rule (plan §3.8 rule 4) is enforced by construction in the injector:
+// it always uses the connection's next number and never accepts one from a caller.
+// Replay computes its own numbers, so it calls CheckSeq separately.
+func CheckClick(m *Model, idRef int) error {
 	o, ok := m.Get(idRef)
 	if !ok {
 		return refuse(output.CodeTargetMissing, 5, "AUI 里没有 #%d：目标不存在（不发包）", idRef)
@@ -104,9 +116,15 @@ func CheckClick(m *Model, idRef, wantSeq, actualSeq int) error {
 	if v := strings.ToLower(o.Attr("actionActive")); v == "0" || v == "false" {
 		return refuse(output.CodeSessionState, 4, "目标 #%d 的 actionActive 为假：当前不可用（第 3 条）", idRef)
 	}
-	if wantSeq != actualSeq {
+	return nil
+}
+
+// CheckSeq enforces plan §3.8 rule 4 for callers that compute their own numbers:
+// reusing a number resets the connection.
+func CheckSeq(want, actual int) error {
+	if want != actual {
 		return refuse(output.CodeSessionState, 4,
-			"_om 序号不对：这条连接的下一个是 %d，你要发 %d（第 4 条，重号会打断连接）", actualSeq, wantSeq)
+			"_om 序号不对：这条连接的下一个是 %d，你要发 %d（第 4 条，重号会打断连接）", actual, want)
 	}
 	return nil
 }

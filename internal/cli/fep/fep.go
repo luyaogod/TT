@@ -11,9 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -141,79 +139,26 @@ func recordingFiles(from, suffix string, all bool) ([]string, error) {
 	if !st.IsDir() {
 		return []string{from}, nil
 	}
-	entries, err := os.ReadDir(from)
+	files, err := fep.RecordingFiles(from, suffix) // 按时间倒序
 	if err != nil {
 		return nil, fail(exitFailed, "读不到 %s: %v", from, err)
 	}
-	type cand struct {
-		path string
-		mod  time.Time
-	}
-	var cands []cand
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), suffix) {
-			continue
-		}
-		info, ierr := e.Info()
-		if ierr != nil {
-			continue
-		}
-		cands = append(cands, cand{filepath.Join(from, e.Name()), info.ModTime()})
-	}
-	if len(cands) == 0 {
+	if len(files) == 0 {
 		return nil, fail(exitFailed, "%s 下没有 *%s（先跑 tt fep session open 录一轮）", from, suffix)
 	}
-	sort.Slice(cands, func(i, j int) bool { return cands[i].mod.After(cands[j].mod) })
-	if !all {
-		cands = cands[:1]
+	if !all && len(files) > 1 {
+		files = files[:1]
 	}
-	out := make([]string, 0, len(cands))
-	for _, c := range cands {
-		out = append(out, c.path)
-	}
-	return out, nil
+	return files, nil
 }
 
-// readRecording 把一份录制件读成一串"消息体"。两种形态都吃：
-//
-//	原始帧（Go 代理写的）：带长度头的字节流，重解码；
-//	纯文本（早期原型写的）：一条消息一行。
-//
-// 两种都是真实产物，只认一种会得到一个安静的错误答案（解析出一堆噪音对象）。
+// readRecording 把一份录制件读成一串"消息体"（两种形态都吃，见 internal/fep/record.go）。
 func readRecording(path string) ([]string, error) {
-	b, err := os.ReadFile(path)
+	msgs, err := fep.ReadRecording(path)
 	if err != nil {
-		return nil, fail(exitFailed, "读 %s: %v", path, err)
+		return nil, fail(exitFailed, "读 %s: %v", filepath.Base(path), err)
 	}
-	if txtRec(b) {
-		var out []string
-		for _, line := range strings.Split(string(b), "\n") {
-			msg, ok := fep.TrimNoise(line)
-			if !ok {
-				continue // 不是消息（帧头噪声行、代理自己的标记）
-			}
-			out = append(out, msg)
-		}
-		return out, nil
-	}
-	d := fep.NewDecoder()
-	frames, err := d.Feed(b)
-	if err != nil {
-		return nil, fail(exitFailed, "%s 帧解析失败: %v", filepath.Base(path), err)
-	}
-	var out []string
-	for _, fr := range frames {
-		if fr.Type == fep.FrameTypeAUI {
-			out = append(out, string(fr.Payload))
-		}
-	}
-	return out, nil
-}
-
-// txtRec 判定一份录制件是不是文本形态：帧头是大端长度，首字节几乎不可能是小写字母，
-// 而动词（meta/om/event）一定是。
-func txtRec(b []byte) bool {
-	return len(b) > 0 && b[0] >= 'a' && b[0] <= 'z'
+	return msgs, nil
 }
 
 // pairedRecording 把一侧录制件换成同一连接的另一侧。
@@ -279,3 +224,16 @@ func printJSONOrText(v any, text func()) error {
 	text()
 	return nil
 }
+
+// exactArgs / noArgs 是本组自己的参数校验：cobra 自带的参数错退出码是 1，
+// 而这张线的表里 2 = 用法错。参数错是最常见的调用错误，读成"运行失败"会误导排障。
+func exactArgs(n int) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if len(args) != n {
+			return fail(exitUsage, "%s 需要 %d 个参数，收到 %d 个", cmd.CommandPath(), n, len(args))
+		}
+		return nil
+	}
+}
+
+var noArgs = exactArgs(0)

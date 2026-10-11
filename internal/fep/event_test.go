@@ -49,26 +49,25 @@ func TestEventBuildersMatchRecordedBytes(t *testing.T) {
 // 计划 §3.8：6 类非法事件必须全被拦，且**不发包**（这里只要求"被拒"）。
 func TestPreflightRefusesSixIllegalShapes(t *testing.T) {
 	m := testModel(t)
-	const seq = 9
 
 	// 1 目标不存在
-	if err := CheckClick(m, 12345, seq, seq); !refusedWith(err, 5) {
+	if err := CheckClick(m, 12345); !refusedWith(err, 5) {
 		t.Fatalf("1 目标不存在：%v", err)
 	}
 	// 2 类型不在白名单
-	if err := CheckClick(m, 900, seq, seq); !refusedWith(err, 5) {
+	if err := CheckClick(m, 900); !refusedWith(err, 5) {
 		t.Fatalf("2 类型不在白名单：%v", err)
 	}
 	// 3 ButtonEdit 没有 controlp（不是开窗按钮）
-	if err := CheckClick(m, 273, seq, seq); !refusedWith(err, 5) {
+	if err := CheckClick(m, 273); !refusedWith(err, 5) {
 		t.Fatalf("3 非开窗 ButtonEdit：%v", err)
 	}
 	// 4 actionActive 为假
-	if err := CheckClick(m, 5156, seq, seq); !refusedWith(err, 4) {
+	if err := CheckClick(m, 5156); !refusedWith(err, 4) {
 		t.Fatalf("4 actionActive 为假：%v", err)
 	}
 	// 5 序号不是该连接的下一个
-	if err := CheckClick(m, 5160, seq+1, seq); !refusedWith(err, 4) {
+	if err := CheckSeq(10, 9); !refusedWith(err, 4) {
 		t.Fatalf("5 序号不对：%v", err)
 	}
 	// 6 KeyEvent 带 idRef（回放时可能喂进来）
@@ -77,13 +76,13 @@ func TestPreflightRefusesSixIllegalShapes(t *testing.T) {
 	}
 
 	// 合法事件必须放行（否则上面全是"永远拒绝"式的假通过）
-	if err := CheckClick(m, 5160, seq, seq); err != nil {
+	if err := CheckClick(m, 5160); err != nil {
 		t.Fatalf("合法点击被拒：%v", err)
 	}
-	if err := CheckClick(m, 272, seq, seq); err != nil {
+	if err := CheckClick(m, 272); err != nil {
 		t.Fatalf("合法开窗按钮被拒：%v", err)
 	}
-	if err := CheckClick(m, 5197, seq, seq); err != nil {
+	if err := CheckClick(m, 5197); err != nil {
 		t.Fatalf("合法 Value 点击被拒（录制件里它确实被点过）：%v", err)
 	}
 	if err := CheckKey("Tab"); err != nil {
