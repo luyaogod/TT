@@ -104,6 +104,15 @@ type ValueChange struct {
 	Name string `json:"name,omitempty"`
 	From string `json:"from,omitempty"`
 	To   string `json:"to"`
+	// Kind 区分"这个值是谁改的"：
+	//   sent —— 就是我这一步发过去的
+	//   auto —— **运行期自己带出来的**（例如供应商编号 00000002 → 供应商名称 三洋开泰1）
+	// 后者正是用户眼里"系统自己填好了"的那一步，操作手册必须能看见它。
+	Kind string `json:"kind,omitempty"`
+	// Label 是中文名（能从协议解析出来才填），Comment 是源码键（cmt_xxx）。
+	Label   string `json:"label,omitempty"`
+	Comment string `json:"comment,omitempty"`
+	Role    string `json:"role,omitempty"`
 }
 
 // Changes summarises what the runtime did after an action.
@@ -118,6 +127,11 @@ type Changes struct {
 	// RuntimeError 是运行期推上来的报错（实测形态：Menu{text "ERROR"}{comment "Program stopped at …"}）。
 	// 它一出现，"这一步没变化"就不是"没生效"而是"作业已经停了、后面全是空 ACK"。
 	RuntimeError string `json:"runtimeError,omitempty"`
+	// Tree 是**树本身的差分**（新增/删除/开关窗/动作增失）——"这一步之后树变了什么"。
+	Tree *TreeDiff `json:"tree,omitempty"`
+	// Focus 是**这一步之后的焦点**（谁拿着焦点、在哪个窗口/网格/第几行第几列）。
+	// 它是"下一步能不能动手"的前置条件，也是手册里"光标现在在哪"的凭据。
+	Focus *FocusReport `json:"focus,omitempty"`
 }
 
 // DoResult is what happened (or would happen).
@@ -159,6 +173,9 @@ func Do(c *Client, cfg DoConfig) (*DoResult, error) {
 	}
 
 	res := &DoResult{Conn: conn.ID, Seq: conn.Seq}
+	// sentID/sentValue：这一步"我自己发的"是哪个对象、什么值（用于把变化分成
+	// "我写的"与"运行期自动带出来的"两类）。key/raw 形态由各自分支填。
+	sentID, sentValue := 0, ""
 	switch cfg.Kind {
 	case "click":
 		id, name, err := resolveTarget(m, r, cfg.Target, c.Window, "click")
@@ -166,6 +183,7 @@ func Do(c *Client, cfg DoConfig) (*DoResult, error) {
 			return nil, err
 		}
 		res.Target, res.Name = fmt.Sprintf("#%d", id), name
+		sentID = id
 		if err := CheckClick(m, id); err != nil {
 			var ref *Refusal
 			if asRefusal(err, &ref) {
@@ -190,6 +208,7 @@ func Do(c *Client, cfg DoConfig) (*DoResult, error) {
 			return nil, perr
 		}
 		res.Target, res.Name = fmt.Sprintf("#%d", itemID), name+" ← "+itemText
+		sentID, sentValue = id, itemText
 		res.Event = ActionEventText(itemID)
 	case "input":
 		id, name, err := resolveTarget(m, r, cfg.Target, c.Window, "input")
@@ -201,6 +220,7 @@ func Do(c *Client, cfg DoConfig) (*DoResult, error) {
 			return nil, err
 		}
 		res.Target, res.Name = fmt.Sprintf("#%d", target), name
+		sentID, sentValue = target, cfg.Value
 		if !via {
 			res.NotSent = ""
 			res.Suggest = "这个字段没有 FormField 子对象，直接发给它自己；真机上若回 -6327，请改发字段的 FormField"
@@ -210,6 +230,9 @@ func Do(c *Client, cfg DoConfig) (*DoResult, error) {
 		// 直接给事件体（可含多个事件）—— 像前端那样把"写值 + 光标"放进同一条消息。
 		res.Event = strings.TrimSpace(cfg.RawEvent)
 		res.Target = cfg.Target
+		// raw 形态（如写格子：值 + 光标同一条消息）：抠出第一个 ConfigureEvent 的
+		// idRef/value，好把"我写的那个值"从一堆自动带值里认出来。
+		sentID, sentValue = firstConfigureTarget(cfg.RawEvent)
 		if res.Event == "" {
 			return nil, fmt.Errorf("fep: raw 事件体为空")
 		}
@@ -237,7 +260,7 @@ func Do(c *Client, cfg DoConfig) (*DoResult, error) {
 		return res, err
 	}
 	if cfg.Wait >= 0 {
-		res.Changes = waitChanges(c, conn.ID, before, cfg.Wait)
+		res.Changes = waitChanges(c, conn.ID, before, cfg.Wait, sentID, sentValue)
 		// 发送后验证：作业要是被这一步搞停了，就**不要**让调用方把它当成功。
 		// 实测教训：停掉之后窗口对任何事件都只回空 ACK，看起来像"这一步没生效"，
 		// 于是接着改参数接着试 —— 每一步都在浪费，而且看不出错在哪。
@@ -260,6 +283,9 @@ type snapshot struct {
 	msgs    int
 	windows map[string]bool
 	values  map[int]string
+	// model 是发送**之前**的整个模型：有了它才能回答"树变了什么"（差分），
+	// 而不是只能报"运行期多了几个字节"。
+	model *Model
 }
 
 func snapshotOf(c *Client, connID int) snapshot {
@@ -275,6 +301,7 @@ func snapshotOf(c *Client, connID int) snapshot {
 	if err != nil {
 		return s
 	}
+	s.model = m
 	s.msgs = n
 	for _, w := range m.Windows() {
 		s.windows[w.Attr("name")] = true
@@ -289,7 +316,10 @@ func snapshotOf(c *Client, connID int) snapshot {
 
 // waitChanges blocks until the runtime pushes something (or the wait times out)
 // and summarises the difference.
-func waitChanges(c *Client, connID int, before snapshot, wait time.Duration) *Changes {
+//
+// sentID/sentValue：这一步**我自己发的**是哪个对象、什么值 —— 用来把变化分成
+// "我写的"与"运行期自动带出来的"两类（后者是手册里"系统自己填好了"那一步）。
+func waitChanges(c *Client, connID int, before snapshot, wait time.Duration, sentID int, sentValue string) *Changes {
 	if wait == 0 {
 		wait = 10 * time.Second
 	}
@@ -321,6 +351,10 @@ func waitChanges(c *Client, connID int, before snapshot, wait time.Duration) *Ch
 		return ch
 	}
 	ch.NewMessages = n - before.msgs
+	ch.Tree = DiffModels(before.model, m)
+	if f := m.FocusNow(); f.FocusID != 0 || f.CursorID != 0 {
+		ch.Focus = &f
+	}
 	for _, w := range m.Windows() {
 		name := w.Attr("name")
 		if name != "" && !before.windows[name] {
@@ -336,10 +370,26 @@ func waitChanges(c *Client, connID int, before snapshot, wait time.Duration) *Ch
 			continue
 		}
 		name := ""
-		if fn, ok := r.Resolve(o.ID); ok && fn.Confidence == ConfHigh {
+		if fn, ok := r.Resolve(o.ID); ok && fn.Text != "" {
 			name = fn.Text
 		}
-		ch.Values = append(ch.Values, ValueChange{ID: o.ID, Name: name, From: before.values[o.ID], To: v})
+		// 角色：优先协议 name（驱动寻址用），其次中文名
+		role := o.Attr("name")
+		if role == "" {
+			role = name
+		}
+		kind := "auto"
+		if sentID != 0 && o.ID == sentID {
+			kind = "sent"
+		} else if sentID != 0 && sentValue != "" && v == sentValue && name != "" {
+			// 没给到同一个 id（实测：输入往往落在 FormField，而运行期回收时
+			// 报的是那个 Value）—— 值一样且不是自动带的，仍归"我写的"。
+			kind = "sent"
+		}
+		ch.Values = append(ch.Values, ValueChange{
+			ID: o.ID, Name: name, Label: name, Role: role, Comment: o.Attr("comment"),
+			From: before.values[o.ID], To: v, Kind: kind,
+		})
 	}
 	// 最关键的一条：运行期有没有报错把程序停下。
 	// 它出现在这里，所有的"无变化"都该读成"作业已停"，而不是"这一步没生效"。

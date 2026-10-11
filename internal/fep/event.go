@@ -2,6 +2,7 @@ package fep
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -248,3 +249,32 @@ func ConfigureGridRowText(grid int, row int) string {
 }
 
 // （空 idRef 的检查已并入 CheckRaw —— 那条铁律在那里。）
+
+// firstConfigureTarget 从一条事件体里抠出第一个 ConfigureEvent 的 idRef 与 value。
+//
+// 用途：`raw` 形态的步骤（实测：写格子 = 值与光标**同一条消息**，拆开发运行期不认）
+// 发出去的是一串事件，报告里要能说出"这一串里我写的是哪个对象、什么值"，
+// 才能把变化分成"我写的"与"运行期自动带出来的"。
+//
+// 抠不到就返回 0/""（调用方按"不知道"处理，不猜）。
+func firstConfigureTarget(ev string) (int, string) {
+	idx := reConfigureID.FindAllStringSubmatchIndex(ev, -1)
+	if len(idx) == 0 {
+		return 0, ""
+	}
+	id, err := strconv.Atoi(ev[idx[0][2]:idx[0][3]])
+	if err != nil {
+		return 0, ""
+	}
+	// value 只认**紧跟在这个 id 之后**的那一个（同一串里后面可能还有别的对象的值）
+	tail := ev[idx[0][1]:]
+	if vm := reConfigureValue.FindStringSubmatch(tail); vm != nil {
+		return id, vm[1]
+	}
+	return id, ""
+}
+
+var (
+	reConfigureID    = regexp.MustCompile(`ConfigureEvent 0\{\{idRef "([0-9]+)"`)
+	reConfigureValue = regexp.MustCompile(`\{ value "([^"]*)"\}`)
+)

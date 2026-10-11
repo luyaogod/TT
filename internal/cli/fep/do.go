@@ -142,24 +142,7 @@ func runDo(cmd *cobra.Command, dc fep.DoConfig) error {
 			fmt.Printf("  ⚠ %s\n", w)
 		}
 		if ch := res.Changes; ch != nil {
-			switch {
-			case ch.TimedOut:
-				fmt.Printf("  运行期在 %s 内没有回包（事件发出去了，作业没显式变化）\n", doWait)
-			case ch.RuntimeBytes == 0:
-				fmt.Println("  运行期没有新数据")
-			default:
-				fmt.Printf("  作业变化：运行期 +%d 字节 / 新消息 %d 条\n", ch.RuntimeBytes, ch.NewMessages)
-				if len(ch.NewWindows) > 0 {
-					fmt.Printf("    新窗口：%v\n", ch.NewWindows)
-				}
-				for _, vc := range ch.Values {
-					label := vc.Name
-					if label == "" {
-						label = fmt.Sprintf("#%d", vc.ID)
-					}
-					fmt.Printf("    值变化：%s %q → %q\n", label, vc.From, vc.To)
-				}
-			}
+			printImpact(ch, doWait.String())
 		}
 	})
 }

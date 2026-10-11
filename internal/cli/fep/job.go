@@ -535,13 +535,12 @@ func printJobStep(i, total int, st jobStep, res *fep.DoResult) {
 			fmt.Printf("  ⚠ 作业停下：%s", res.Changes.RuntimeError)
 		} else {
 			fmt.Printf("  运行期 +%d 字节 / %d 条", res.Changes.RuntimeBytes, res.Changes.NewMessages)
-			for _, v := range res.Changes.Values {
-				fmt.Printf(" / %s=%q", orDash(v.Name), v.To)
-			}
-			if len(res.Changes.NewWindows) > 0 {
-				fmt.Printf(" / 新窗口 %s", strings.Join(res.Changes.NewWindows, ","))
-			}
 		}
+		fmt.Println()
+		// 每步都交出"树变了什么 / 我写了什么 / 自动带值了什么 / 焦点在哪" ——
+		// 这既是审计（出问题能回溯），也是手册的原始素材。
+		printImpact(res.Changes, doWait.String())
+		return
 	}
 	fmt.Println()
 }
