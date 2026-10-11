@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ import (
 // internal/fep 与 internal/view 谁都不 import 谁 —— 两条线的交界就落在这里。
 
 var (
+	marksCal    string
 	marksFrom   string
 	marksFields []string
 	marksImage  string
@@ -71,11 +73,29 @@ var marksCmd = &cobra.Command{
 			return fail(exitUsage, "要知道图有多大：给 --png <path> 或 --image WxH")
 		}
 
-		ref, refObjs, refNote := contentExtent(m, marksRef)
-		refNote = fmt.Sprintf("%s（%d 个对象，%dx%d 协议单位）", refNote, refObjs, ref.W, ref.H)
-		fm, problems := view.Derive(ref, imgSize)
-		if len(problems) > 0 {
-			return fail(exitQuality, "坐标映射推不出来：%s（参照物 %s）", strings.Join(problems, "；"), refNote)
+		// 优先用**实测校准**：静态推不出全局映射（几何单位混用），实测的那一份才是可信的。
+		var fm view.FrameMap
+		var refNote string
+		var problems []string
+		calPath := marksCal
+		if calPath == "" {
+			if dir, derr := cacheDir(); derr == nil {
+				calPath = filepath.Join(dir, "calibration.json")
+			}
+		}
+		if cal, cerr := view.LoadCalibration(calPath); cerr == nil {
+			fm = view.FrameMap{ScaleX: cal.ScaleX, ScaleY: cal.ScaleY, OriginX: cal.OriginX, OriginY: cal.OriginY}
+			refNote = fmt.Sprintf("实测校准 %s（%s 量的，%d 个样本）", calPath, cal.At, len(cal.Samples))
+		} else {
+			ref, refObjs, note := contentExtent(m, marksRef)
+			refNote = fmt.Sprintf("%s（%d 个对象，%dx%d 协议单位）", note, refObjs, ref.W, ref.H)
+			fm, problems = view.Derive(ref, imgSize)
+			if len(problems) > 0 {
+				return fail(exitQuality, "坐标映射推不出来：%s（%s）。先跑一次 tt view calibrate 实测一份",
+					strings.Join(problems, "；"), refNote)
+			}
+			reProblems := []string{"（提示：这是**推断**出来的映射，跑 tt view calibrate 可换成实测的）"}
+			refNote = refNote + "；" + strings.Join(reProblems, "；")
 		}
 
 		var boxes []view.Box
@@ -114,7 +134,11 @@ var marksCmd = &cobra.Command{
 			}
 			res.Image = marksOut
 		}
-		bad := frame.Gate()
+		// 只给了图尺寸（--image）时没有像素可查：像素门只在真有图时跑。
+		var bad []view.Verdict
+		if img != nil {
+			bad = frame.Gate()
+		}
 		if perr := printJSONOrText(res, func() {
 			fmt.Printf("参照物 %s → 比例 %.3f，客户区上沿 %dpx\n", res.Reference, res.Scale, res.OriginY)
 			for i, b := range boxes {
@@ -213,16 +237,36 @@ func areaOf(o *fep.Object) int { b := geomOf(o); return b.W * b.H }
 
 // boxForField 找一个栏位的几何：先按名字解析（只认高置信度），再取它的几何。
 func boxForField(m *fep.Model, r *fep.Resolver, name string) (view.Box, error) {
-	var hits []*fep.Object
+	var hits, positioned []*fep.Object
 	for _, o := range m.Objects() {
 		fn, ok := r.Resolve(o.ID)
 		if !ok || fn.Text != name || fn.Confidence != fep.ConfHigh {
 			continue
 		}
-		if b := geomOf(o); b.W <= 0 || b.H <= 0 {
-			continue // 没有几何的对象不能当落点
+		// 宽度必须有；高度在真实 AUI 里常常缺省（gridHeight 罕见），缺省就按 1 格算
+		b := geomOf(o)
+		if b.W <= 0 {
+			continue
 		}
 		hits = append(hits, o)
+		// 真实 AUI 里同一屏会累积多个画面的同名对象：查询画面那份常常停在 (0,0)，
+		// 那是"没定位"的副本，不能拿来当落点。优先挑真正有位置的。
+		if b.X > 0 || b.Y > 0 {
+			positioned = append(positioned, o)
+		}
+	}
+	if len(positioned) > 0 {
+		hits = positioned
+	}
+	// 标注画在**栏位**上：优先可写对象（FormField/ButtonEdit/Value…），而不是它旁边的 Label
+	var writable []*fep.Object
+	for _, o := range hits {
+		if fep.IsWritableType(o.Type) {
+			writable = append(writable, o)
+		}
+	}
+	if len(writable) > 0 {
+		hits = writable
 	}
 	if len(hits) == 0 {
 		return view.Box{}, fail(exitTarget, "界面里没有叫 %q 且有几何的栏位（只认高置信度的名字）", name)
@@ -235,6 +279,9 @@ func boxForField(m *fep.Model, r *fep.Resolver, name string) (view.Box, error) {
 		}
 	}
 	b := geomOf(best)
+	if b.H <= 0 {
+		b.H = 1
+	}
 	b.Label = fmt.Sprintf("%s %s#%d", name, best.Type, best.ID)
 	return b, nil
 }
@@ -261,6 +308,7 @@ func parseSize(s string) (int, int, error) {
 }
 
 func init() {
+	marksCmd.Flags().StringVar(&marksCal, "calibration", "", "校准文件（默认 <缓存>/calibration.json，没有就用推导）")
 	marksCmd.Flags().StringVar(&marksFrom, "from", "", "录制件：单个 .log 或目录（默认 fep 缓存目录最新一份）")
 	marksCmd.Flags().StringArrayVar(&marksFields, "field", nil, "要标注的栏位名（可重复）")
 	marksCmd.Flags().StringVar(&marksRef, "ref", "", "参照窗口名（默认 AUI 里最大的 Window）")

@@ -1,9 +1,12 @@
 package view
 
 import (
+	"encoding/json"
 	"fmt"
 	"image"
 	"math"
+	"os"
+	"path/filepath"
 )
 
 // 校准：协议格 → 像素的换算**靠实测**，不靠推断。
@@ -146,4 +149,56 @@ func maxResidual(obs []obs, slope, intercept float64) float64 {
 		}
 	}
 	return worst
+}
+
+// Calibration is a saved mapping plus the evidence it was derived from.
+//
+// 存"证据"而不只存结果：换主题/换字体之后映射会失效，而**样本与残差**是判断
+// "这份校准还能不能用"的唯一依据。
+type Calibration struct {
+	ScaleX  float64  `json:"scaleX"`
+	ScaleY  float64  `json:"scaleY"`
+	OriginX int      `json:"originX"`
+	OriginY int      `json:"originY"`
+	At      string   `json:"at"`            // 什么时候量的
+	Env     string   `json:"env,omitempty"` // 哪个环境/作业
+	Samples []Sample `json:"samples,omitempty"`
+	Notes   []string `json:"notes,omitempty"`
+}
+
+// Map converts a protocol box with this calibration.
+func (c Calibration) Map(b Box) image.Rectangle {
+	return FrameMap{ScaleX: c.ScaleX, ScaleY: c.ScaleY, OriginX: c.OriginX, OriginY: c.OriginY}.Map(b)
+}
+
+// SaveCalibration writes the calibration as JSON.
+func SaveCalibration(path string, c Calibration) error {
+	b, err := json.MarshalIndent(c, "", " ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, append(b, '\n'), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// LoadCalibration reads a calibration file.
+func LoadCalibration(path string) (Calibration, error) {
+	var c Calibration
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return c, err
+	}
+	if err := json.Unmarshal(b, &c); err != nil {
+		return c, err
+	}
+	if c.ScaleX <= 0 || c.ScaleY <= 0 {
+		return c, fmt.Errorf("view: 校准文件里的比例不合法（%g, %g）", c.ScaleX, c.ScaleY)
+	}
+	return c, nil
 }

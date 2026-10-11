@@ -6,7 +6,9 @@ package view
 
 import (
 	"fmt"
+	"net"
 	"os"
+	"strconv"
 
 	"github.com/spf13/cobra"
 
@@ -131,3 +133,13 @@ func loadEventsFile(from string) ([]string, error) {
 func loadModelFile(from string) (*fep.Model, *fep.Resolver, int, error) {
 	return fep.ReadModelFrom(from)
 }
+
+// 供 calibrate.go 使用的小工具（避免两处各写一份）。
+func configResolve() (string, error) { return common.ResolveConfig(true) }
+
+func dataDirOf(cfgPath string) string { return config.LocationsAt(cfgPath).DataDir() }
+
+func netJoin(port int) string { return net.JoinHostPort("127.0.0.1", strconv.Itoa(port)) }
+
+// exitNoSession2 与 tt fep 那边含义一致：没有登记中的会话。
+const exitNoSession2 = 3

@@ -201,3 +201,7 @@ func ConfigureCursorText(id, caret int) string {
 	return fmt.Sprintf(`ConfigureEvent 0{{idRef %q}{ cursor %q}{ cursor2 %q}}`,
 		strconv.Itoa(id), strconv.Itoa(caret), strconv.Itoa(caret))
 }
+
+// IsWritableType reports whether a type can take a value (the same list the
+// pre-flight uses). 标注该画在**栏位**上而不是它旁边的标签上，所以要能问这一句。
+func IsWritableType(t string) bool { return writableTypes[t] }
