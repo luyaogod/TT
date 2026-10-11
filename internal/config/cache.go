@@ -25,6 +25,7 @@ var CacheSubdirs = []string{
 	"debug-bps", // 断点存档
 	"spill",     // 查询被截断时落盘的完整结果(见 tt dict 的返回上限)
 	"update",    // tt 自身的更新：下载的安装包与最近一次检查结果(删了只是下次重下)
+	"fep",       // 前端协议线的录制件与截图（一轮一删也不心疼）
 }
 
 // CacheDir 数据目录下的缓存子目录。name 必须在 CacheSubdirs 清单里，

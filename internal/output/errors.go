@@ -19,6 +19,12 @@ const (
 	CodeQueryFailed  = "QUERY_FAILED"   // 查询本身失败
 	CodeNotFound     = "NOT_FOUND"      // 查到了,但没有这条数据
 
+	// tt fep 那条线。前端协议自己的目标族：会话、目标、体检。
+	CodeNoSession     = "NO_SESSION"      // 没有会话（未登记，或登记已过期）
+	CodeSessionState  = "SESSION_STATE"  // 会话状态不符
+	CodeTargetMissing = "TARGET_MISSING" // 目标（连接号/窗口/对象）不存在
+	CodePreflight     = "PREFLIGHT"      // 环境体检不过
+
 	// tt update 那条线。它管的是"tt 自己"，与字典无关，所以码也自成一族。
 	CodeUpdateUsage    = "UPDATE_USAGE"    // 参数组合不成立（如非交互环境没给 --yes）
 	CodeUpdateRefused  = "UPDATE_REFUSED"  // 这份 tt 不让自装（源码态、认不出的布局）

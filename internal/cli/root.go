@@ -23,6 +23,7 @@ import (
 	"tt/internal/cli/dev"
 	"tt/internal/cli/dict"
 	"tt/internal/cli/drawio"
+	"tt/internal/cli/fep"
 	"tt/internal/output"
 )
 
@@ -96,6 +97,7 @@ func init() {
 	debug.Register(rootCmd)
 	dev.Register(rootCmd)
 	dict.Register(rootCmd)
+	fep.Register(rootCmd)
 	drawio.Register(rootCmd)
 
 	rootCmd.AddCommand(newEnvCmd())
