@@ -19,6 +19,7 @@ import (
 // internal/fep 与 internal/view 谁都不 import 谁 —— 两条线的交界就落在这里。
 
 var (
+	marksRegion []string
 	marksCal    string
 	marksFrom   string
 	marksFields []string
@@ -42,8 +43,8 @@ var marksCmd = &cobra.Command{
 --out 会把框画到图上另存一张（合成用 Go 的 image/draw，逐像素、绝不缩放）。`,
 	Args: noArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(marksFields) == 0 {
-			return fail(exitUsage, "至少给一个 --field <栏位名>")
+		if len(marksFields) == 0 && len(marksRegion) == 0 {
+			return fail(exitUsage, "至少给一个 --field <栏位名> 或 --region <实测区域名>")
 		}
 		events, err := loadEventsFile(marksFrom)
 		if err != nil {
@@ -98,7 +99,30 @@ var marksCmd = &cobra.Command{
 			refNote = refNote + "；" + strings.Join(reProblems, "；")
 		}
 
+		// 实测区域优先：协议里没有坐标的东西（明细格子）只能靠量出来的矩形
+		var regionMarks []view.Overlay
+		var regionBoxes []view.Box
+		if len(marksRegion) > 0 {
+			rsPath := filepath.Join(filepath.Dir(markCalOrDefault(marksCal)), "regions.json")
+			if marksCal != "" {
+				rsPath = filepath.Join(filepath.Dir(marksCal), "regions.json")
+			}
+			rs, lerr := view.LoadRegions(rsPath)
+			if lerr != nil {
+				return fail(exitFailed, "读区域文件失败: %v", lerr)
+			}
+			for _, nm := range marksRegion {
+				reg, ok := rs.Get(nm)
+				if !ok {
+					return fail(exitTarget, "区域文件里没有 %q（先 tt view measure --target <栏位>）", nm)
+				}
+				regionMarks = append(regionMarks, view.Overlay{Rect: reg.Rect, Number: len(regionMarks) + 1, Color: view.HighlightColor})
+				regionBoxes = append(regionBoxes, view.Box{X: reg.Rect.Min.X, Y: reg.Rect.Min.Y, W: reg.Rect.Dx(), H: reg.Rect.Dy(), Label: nm + "（实测区域）"})
+			}
+		}
+
 		var boxes []view.Box
+		boxes = append(boxes, regionBoxes...)
 		for _, name := range marksFields {
 			b, berr := boxForField(m, r, name)
 			if berr != nil {
@@ -124,8 +148,12 @@ var marksCmd = &cobra.Command{
 			if img == nil {
 				return fail(exitUsage, "--out 需要同时给 --png（要往哪张图上画）")
 			}
-			var overlays []view.Overlay
+			overlays := append([]view.Overlay{}, regionMarks...)
+			offset := len(overlays)
 			for i, b := range boxes {
+				if i < offset {
+					continue // 实测区域已经加过
+				}
 				overlays = append(overlays, view.Overlay{Rect: fm.Map(b), Number: i + 1, Color: view.HighlightColor})
 			}
 			composed := view.Compose(img, overlays)
@@ -308,6 +336,7 @@ func parseSize(s string) (int, int, error) {
 }
 
 func init() {
+	marksCmd.Flags().StringArrayVar(&marksRegion, "region", nil, "实测区域名（可重复；先 tt view measure 量）")
 	marksCmd.Flags().StringVar(&marksCal, "calibration", "", "校准文件（默认 <缓存>/calibration.json，没有就用推导）")
 	marksCmd.Flags().StringVar(&marksFrom, "from", "", "录制件：单个 .log 或目录（默认 fep 缓存目录最新一份）")
 	marksCmd.Flags().StringArrayVar(&marksFields, "field", nil, "要标注的栏位名（可重复）")
@@ -318,4 +347,15 @@ func init() {
 	Group.AddCommand(marksCmd)
 	_ = os.MkdirAll
 	_ = time.Now
+}
+
+// markCalOrDefault 返回校准文件的实际落点（默认 <缓存>/calibration.json）。
+func markCalOrDefault(explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+	if dir, err := cacheDir(); err == nil {
+		return filepath.Join(dir, "calibration.json")
+	}
+	return "calibration.json"
 }
