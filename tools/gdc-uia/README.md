@@ -28,8 +28,12 @@ powershell -File invoke.ps1 -TargetPid <gdcPid> -AutoIdSuffix "ToolBarItem_inser
 
 ## 边界（同样重要）
 
-- **自绘的表格格子不在 UIA 里**：实测明细网格 `s_detail1` 在 UIA 里**只有 Table 本身**，
-  行列与格子都是 GDC 内部绘制的 —— 所以"往某个格子写值/勾选某行"仍然要走 FEP 协议。
+- **表格格子确实在 UIA 里**（此处前版写错了，2026-10-11 纠正）：格子暴露为 `ControlType.DataItem`，
+  带 `GridItemPattern`（**给出 row/col**）＋ `TableItemPattern` ＋ `ValuePattern` ＋ `InvokePattern`。
+  两个实测注意点：① 它们**不挂在 `Table` 元素下面**（在树里是平的，别只看 Table 的子节点就下结论）；
+  ② **只有当前行的格子被实例化**（实测 12 个 = 可见列数），滚动/换行后重新枚举。
+  另：**在只读（DisplayArray/浏览）网格上 Invoke 格子不会产生任何 FEP 事件**（实测）；
+  要验证"点格子会不会让 GDC 发出 currentRow/currentColumn"，必须先把作业推进到**可编辑**状态。
 - UIA 树里 `name` 有时是中文标签（`单价含税否`）、有时是 AUI 名（`cmt_pmdl012`）——
   按 `AutomationId` 的后缀匹配最稳（脚本都这么做）。
 - 需要有可访问性桥。实测 GDC 3.20.25 在 `QT_ACCESSIBILITY=1` 下就能被 UIA 看到。
