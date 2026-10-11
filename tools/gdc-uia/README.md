@@ -88,3 +88,62 @@ GDC 的 pid 用 `tt fep session ps` 拿。
 1. **按名字寻址会撞容器**：`FormField` 与 `Edit` 共享 `name=cmt_xxx` —— 必须加类型过滤
    （脚本的 `-Type`），否则 `SetValue` 会打到 FormField 上：**报告成功、值不落地**。
 2. **勾选框不能用 Toggle**：要 `Invoke`（见上表）。
+
+## GDC 二进制取证：能不能编译/反编译？源码拿得到吗？
+
+**事实（2026-10-11 实测）**：
+
+| 问题 | 答案 |
+|---|---|
+| 能拿到源码吗 | **不能**。Four Js 闭源发行（`C:\Program Files\FourJs\gdc`，v3.20.25），**无 PDB/调试符号**。可读的源码只有 3 个 JS（`gbc.bootstrap.js` / `webchannelbridge.js` / `webchannelurbridge.js`，属 Web/GBC 侧） |
+| 能全量反编译吗 | **技术上能，但没有必要**。`gdc.exe` 只有 **7.5 MB**（MSVC x64，Qt5），**5353 个修饰名/类名（RTTI）**、**63 个 .cpp 源文件名** 都在；定向反编译 1–2 个函数可行，但拿到的只是伪代码 |
+| 那还要不要猜 | **不需要**。二进制自己就把答案写着，再加上真机语料，两者互证 |
+
+### 从 gdc.exe 里直接抠出来的（无需反编译）
+
+**① GDC 能发出的全部事件——只有 7 种**（这才是"形状空间"的全集）：
+
+```
+{ActionEvent 0{{idRef …}}}                {KeyEvent 0{{keyName …}}}
+{ConfigureEvent 0{{idRef …}}              {DestroyEvent 0{{status …}{message …}}}
+{DragDropEvent 0{{idRef …}}}              {FunctionCallEvent 0 {{result …}}{errorMessage …}}
+{RowSelectionEvent 0{{idRef …}}}
+```
+
+**② 架构图（63 个源文件名）**：
+
+- `N*` = AUI 节点类：`NDialog` `NForm` `NFormField` `NGroup` `NTable` `NScrollGrid` `NMatrix` `NMenuAction` `NToolBarItem` `NWindow`
+- `W*` = Qt 控件：`WTableView` `WFrozenTableView` `WLineEdit` `WComboBox` `WPushButton` `WScrollView` `WToolButton`
+- `F*` = 栏位控件：`FButtonEdit` `FComboBox` `FRadioGroup` `FSpinEdit` **`FTableEdit`** `FTextEdit`
+- **`CFEAui.cpp`** = FEP 序列化层（"事件形状"就在这层）；`Node.cpp` / `ActionNode.cpp` / `NodeSelection.cpp`
+- **`QA.cpp` / `QAEventPlayer.cpp`** = QAccessible（本目录脚本用的那座桥，GDC 自带）
+
+**③ 勾选框的权威字面值**：AUI 类型声明自己写着（真机原样）：
+
+```
+{CheckBox 340 {{width "10"} {text "单价含税否"} {valueChecked "Y"} {valueUnchecked "N"} {sizePolicy "dynamic"} {comment "cmt…"}}}
+```
+
+### 真机语料里"勾选"的原始字节（这是最终判据，不是推断）
+
+```
+event _om 21{}{{ConfigureEvent 0{{idRef "5195"}{ currentColumn "0"}{ currentRow "4"}}}{ConfigureEvent 0{{idRef "5196"}{ cursor "0"}{ cursor2 "0"}}}}
+event _om 22{}{{ConfigureEvent 0{{idRef "6587"}{ value "Y"}}}}
+event _om 23{}{{ActionEvent 0{{idRef "6539"}}}}
+```
+
+对应运行期侧：
+
+```
+un 5195 {{size "5"} {dialogType "InputArray"} {active "1"} {currentColumn "0"}}   ← 5195 = 明细网格；勾选列 = 第 0 列
+un 6587 {{value "N"}}  →（前端写入）→ un 6587 {{value "Y"}}                      ← 6587 = 第 4 行"勾选格"的 Value 节点
+```
+
+**规则（有出处，可机械执行）**：
+
+> 勾选某一行 = ① `ConfigureEvent{idRef <网格>}{ currentRow "<r>"}{ currentColumn "<勾选列下标>" }`
+> ② `ConfigureEvent{idRef "<该行勾选格的 Value 节点>"}{ value "<valueChecked 字面值>" }`
+> ③ `ActionEvent{idRef <accept>}`
+
+注意：**失败往往不是形状错，而是目标节点选错** —— 同一窗口下会残留旧实例的同名 Value 节点，
+必须取**最新声明（Seq 最大）**那一个（这正是 `internal/fep` 的 `Seq` 规则存在的原因）。
