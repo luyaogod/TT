@@ -112,6 +112,16 @@ func (m *Model) Apply(nodes []Node) int {
 			if n.ID == 0 {
 				continue // 已当作全局状态处理（当前窗口）
 			}
+			// 顶层 Window 声明本身就该切换当前作用域：实测原始流里
+			//     an 0 Window 144 {{name "w_qry_q_pmaa001_3"} {style "openwin"} …}
+			// 紧接着就是属于它的 {Table 145 … —— 开窗的对象都在这条消息里声明。
+			// 以前只靠运行期的 un 0 {{currentWindow "N"}} 切，结果开窗自己的对象
+			// 被归到了旧作用域（实测 #145 的 scope 变成 1），于是我一直发到
+			// 上一个已关闭实例的网格上（#156）。
+			if n.Type == "Window" && n.Parent == 0 {
+				m.curWindow = n.ID
+				scope = n.ID
+			}
 			o := m.objForDef(n, scope)
 			if o.Scope == 0 {
 				o.Scope = scope

@@ -40,6 +40,9 @@ tt fep do cell 'pmdn_t.pmdn010' 10       # 单价
 			return fail(exitFailed, "%v", err)
 		}
 		cat := fep.Catalog(m, r)
+		// 格子操作只在 TableColumn 里选：带源码时角色是按字段名改写的，同名字段
+		// 会同时落到"列"和某个工具栏项上（实测 formonly.pmaa001_1 就是），必须按类型收窄。
+		cat = fep.FilterKind(cat, "TableColumn")
 		col, cands, rerr := fep.ResolveRole(cat, args[0])
 		if rerr != nil {
 			for _, c := range cands {
@@ -61,7 +64,12 @@ tt fep do cell 'pmdn_t.pmdn010' 10       # 单价
 		// 实测：条件、光标、✓ 三个事件同一条消息发，开窗才“带着条件去查”；
 		// 分开发只会选中已有行（网格空时什么都不发生）。
 		if doCellAccept {
-			acc, aerr := currentAccept(m)
+			// 用**当前交互指令持有的 accept**（官方 1514：动作按 Dialog 组织），不按图标猜。
+			acc, ok := fep.ActionNameInDialog(m, "accept")
+			var aerr error
+			if !ok {
+				aerr = fmt.Errorf("当前交互指令里没有名为 accept 的动作（不要猜着发）")
+			}
 			if aerr != nil {
 				return fail(exitTarget, "%v", aerr)
 			}

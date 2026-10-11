@@ -346,3 +346,14 @@ func ActionNameInDialog(m *Model, name string) (int, bool) {
 	}
 	return 0, false
 }
+
+// FilterKind 只保留某种类型的控件（给"格子操作只在列里选"这类场景用）。
+func FilterKind(cat []Control, kind string) []Control {
+	var out []Control
+	for _, c := range cat {
+		if c.Kind == kind {
+			out = append(out, c)
+		}
+	}
+	return out
+}
