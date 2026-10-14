@@ -142,8 +142,9 @@ type DebugSettings struct {
 	TermHeight      int    `json:"termHeight,omitempty"`
 	PrintElements   int    `json:"printElements,omitempty"`      // fgldb 单次 print 的数组元素上限；0=默认 1000
 	PersistBPs      *bool  `json:"persistBreakpoints,omitempty"` // 断点持久化开关（nil 视为 true）
-	// AITakeover 业主显式授权：true 时新建调试会话直接以协作模式起（AI 可写：启动作业/下断点/步进/求值）。
-	// 默认 false —— 纯人工模式下 AI 只能读不能写是**故意设的边界**，放开必须由业主在配置里显式打开。
+	// AITakeover 默认起步模式：true 时新建调试会话直接以协作模式起（AI 可写：启动作业/下断点/步进/求值）。
+	// 默认 false —— 新建会话以纯人工起步，人是默认驾驶者；但 AI 可对已有会话自行
+	// `tt debug mode collab` 接管，这个开关只是省掉那一次切换。
 	AITakeover bool `json:"aiTakeover,omitempty"`
 }
 

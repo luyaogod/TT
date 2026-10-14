@@ -264,7 +264,8 @@ type Session struct {
 	replayResponse string // 读回来的响应原文(只读一次)
 
 	// mode 谁在驾驶:ModeSolo(纯人工,默认) | ModeCollab(协作,AI 主导)。
-	// 由发起方决定,之后靠界面上的接管/交给 AI 按钮切换 —— 不做逐命令协商。
+	// 由发起方决定,之后人与 AI 都能切(界面上的接管/交给 AI 按钮,或 AI 的
+	// `tt debug mode`),两个方向都放行 —— 不做逐命令协商。
 	mode string
 }
 

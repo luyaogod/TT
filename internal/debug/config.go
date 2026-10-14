@@ -38,14 +38,12 @@ type Config struct {
 	TermHeight      int             `json:"termHeight"`
 	PrintElements   int             `json:"printElements"`      // fgldb 单次 print 的数组元素上限;0=默认 1000
 	PersistBPs      *bool           `json:"persistBreakpoints"` // 断点持久化开关(nil 视为 true)
-	// AITakeover 是**业主显式授权**：打开后，新建的调试会话直接以「协作模式」启动
+	// AITakeover 是**默认起步模式**：打开后，新建的调试会话直接以「协作模式」启动
 	// （AI 可写：能启动作业、下断点、步进、求值）。
 	//
-	// 为什么要有这个开关，而不是让 AI 自己切模式：
-	// 纯人工（solo）模式下 AI 只能读不能写，这是**故意设的边界** ——
-	// "若 AI 能自己把 solo 切成 collab，那'AI 只能读不能写'就是摆设，它一秒钟就能
-	// 把自己放出来"（api.go hMode 的原话）。所以放开的口子必须是
-	// **业主在配置里显式打开** ✔、默认 false ✔、且会话日志会记下当时的模式 ✔。
+	// 它只是**省掉一次切换**，不再是唯一的入口：AI 也可以对已有会话用
+	// `tt debug mode collab` 自行接管（hMode 两个方向都放行）。默认 false ——
+	// 没打开时新建会话仍以纯人工起步，人是默认驾驶者。
 	AITakeover bool   `json:"aiTakeover"`
 	DataDir    string `json:"-"` // 数据目录(断点持久化等);serve 注入,空=禁用
 

@@ -861,8 +861,8 @@ export const useStore = create<Store>((set, get) => ({
     }
   },
 
-  // 切模式(纯人工/协作)。人可任意方向切 —— 这是"协作模式下不被锁死"的逃生舱口;
-  // AI 侧不能自行解除纯人工模式(服务端会 403)。
+  // 切模式(纯人工/协作)。人与 AI 都能切任意方向 —— 界面上的「接管」同时是
+  // "协作模式下不被锁死"的逃生舱口:人始终能把控制权收回来。
   setMode: async (mode) => {
     const { sessionId } = get()
     if (!sessionId) return

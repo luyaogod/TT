@@ -109,8 +109,8 @@ func TestWriteGateRejectsWithActionableMessage(t *testing.T) {
 	if resp2.StatusCode != http.StatusForbidden {
 		t.Fatalf("纯人工模式下 AI 的写操作应 403,实际 %d", resp2.StatusCode)
 	}
-	if msg := respError(t, resp2); !strings.Contains(msg, "交给 AI") {
-		t.Fatalf("拒绝文案应指出让用户点「交给 AI」,实际 %q", msg)
+	if msg := respError(t, resp2); !strings.Contains(msg, "tt debug mode collab") {
+		t.Fatalf("拒绝文案应让 AI 能自救(给出接管命令),实际 %q", msg)
 	}
 }
 
@@ -185,35 +185,53 @@ func TestWhyIsConditionalWrite(t *testing.T) {
 	}
 }
 
-// 模式切换的权限是不对称的:人可任意方向切;AI 不能自行解除纯人工模式
+// 模式切换:两个方向都放行 —— 人与 AI 都能切,人始终能把控制权收回来。
+//
+// 从前 AI 切 solo→collab 会被 403("AI 不能自行解除纯人工模式")。那条限制已移除:
+// 它并不真的提供保护,却让"人从界面起过一个会话"永久锁住 AI 的写操作 ——
+// AI 连自己接管一步都做不到,只能回过头来求人。
 func TestModeSwitchRules(t *testing.T) {
-	hs, _, sess := modeTestServer(t, ModeSolo)
+	hs, srv, sess := modeTestServer(t, ModeSolo)
 
-	// AI 想把 solo 切成 collab → 拒绝
+	// AI 自行解除纯人工模式 → 放行(这就是这次放开的那一步)
 	resp := doReq(t, "POST", hs.URL+"/api/sessions/"+sess.ID+"/mode", "ai", `{"mode":"collab"}`)
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("AI 不能自升权限,应 403,实际 %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("AI 应能自行接管纯人工会话,实际 %d: %s", resp.StatusCode, respError(t, resp))
 	}
-	if sess.Mode() != ModeSolo {
-		t.Fatal("被拒的切换不该改变模式")
+	if sess.Mode() != ModeCollab {
+		t.Fatalf("模式应已切到 collab,实际 %q", sess.Mode())
+	}
+	// 闸门本身没变:模式仍决定"谁能写",接管后才轮到 AI
+	if !sess.MayWrite("ai") || sess.MayWrite("human") {
+		t.Fatalf("接管后应只有 AI 能写,实际 ai=%v human=%v", sess.MayWrite("ai"), sess.MayWrite("human"))
+	}
+	// 接管要留痕:时间线上得看得出是 AI 做的
+	attributed := false
+	for _, ev := range srv.mgr.Events(0) {
+		if ev.Type == "ai_action" && ev.Action == "session.mode" && ev.Actor == "ai" {
+			attributed = true
+		}
+	}
+	if !attributed {
+		t.Errorf("AI 的接管应在时间线上留一条 ai_action,实际 %+v", srv.mgr.Events(0))
 	}
 
-	// 人切到 collab → 放行
-	resp2 := doReq(t, "POST", hs.URL+"/api/sessions/"+sess.ID+"/mode", "", `{"mode":"collab"}`)
+	// 人把控制权收回来 → 放行(人始终有最终控制权)
+	resp2 := doReq(t, "POST", hs.URL+"/api/sessions/"+sess.ID+"/mode", "", `{"mode":"solo"}`)
 	if resp2.StatusCode != http.StatusOK {
 		t.Fatalf("人应可任意方向切换,实际 %d", resp2.StatusCode)
 	}
-	if sess.Mode() != ModeCollab {
-		t.Fatalf("模式应已切换,实际 %q", sess.Mode())
+	if sess.Mode() != ModeSolo {
+		t.Fatalf("模式应回到 solo,实际 %q", sess.Mode())
 	}
 
-	// AI 把 collab 降回 solo(让出控制权) → 放行
+	// AI 主动让出控制权 → 放行
 	resp3 := doReq(t, "POST", hs.URL+"/api/sessions/"+sess.ID+"/mode", "ai", `{"mode":"solo"}`)
 	if resp3.StatusCode != http.StatusOK {
 		t.Fatalf("AI 让出控制权应放行,实际 %d", resp3.StatusCode)
 	}
 	if sess.Mode() != ModeSolo {
-		t.Fatalf("模式应回到 solo,实际 %q", sess.Mode())
+		t.Fatalf("模式应为 solo,实际 %q", sess.Mode())
 	}
 
 	// 非法取值

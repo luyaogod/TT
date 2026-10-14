@@ -379,7 +379,7 @@ export const api = {
   bpDel: (id: string, num: number) => req<any>(`${API_BASE}/sessions/${id}/breakpoints/${num}`, { method: 'DELETE' }),
   control: (id: string, action: string, arg?: string) =>
     req<any>(`${API_BASE}/sessions/${id}/control`, { method: 'POST', body: JSON.stringify({ action, arg }) }),
-  // 切模式(纯人工/协作)。人可任意方向切;AI 不能自行解除纯人工模式(服务端 403)
+  // 切模式(纯人工/协作)。两个方向都放行:人与 AI 都能切(人在界面上的「接管」可随时收回)
   setMode: (id: string, mode: 'solo' | 'collab') =>
     req<{ mode: string }>(`${API_BASE}/sessions/${id}/mode`, { method: 'POST', body: JSON.stringify({ mode }) }),
   print: (id: string, expr: string) => req<{ value: string }>(`${API_BASE}/sessions/${id}/print`, { method: 'POST', body: JSON.stringify({ expr }) }),

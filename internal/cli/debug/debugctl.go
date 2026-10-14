@@ -850,9 +850,9 @@ var debugModeCmd = &cobra.Command{
 模式决定"谁能写":纯人工只有人能操作(AI 只能读),协作只有 AI 能操作(人只读,
 要下断点/执行命令请在对话里委托给 AI)。
 
-权限是不对称的:**人**可以任意方向切换(界面上有「接管」/「交给 AI」按钮);
-**AI 不能自行解除纯人工模式** —— 否则"纯人工模式下 AI 只能读不能写"就是摆设。
-所以 solo → collab 会被服务端拒绝,需要请用户在界面上点「交给 AI」。`,
+**两个方向都放行,人与 AI 都能切**:AI 可以用「tt debug mode collab」自行接管一个
+纯人工会话(不必等用户在界面上点「交给 AI」),人在界面上的「接管」也随时能收回 ——
+人始终有最终控制权。`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id, err := dbgCurrentID()
