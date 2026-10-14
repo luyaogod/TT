@@ -486,15 +486,11 @@ func (s *Server) hLaunch(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, fmt.Errorf("prog 必填(module 可留空,自动按作业名解析)"))
 		return
 	}
-	// 按名换 SSH / 覆盖区域:克隆配置,默认链路零影响
-	cfg := s.cfg
-	if req.SSH != "" || req.Zone != "" {
-		c2 := *s.cfg
-		if req.SSH != "" {
-			c2.SSH = s.cfg.SSHByName(req.SSH)
-		}
-		c2 = *c2.CloneWithZone(req.Zone)
-		cfg = &c2
+	// 按名换 SSH(环境)/ 覆盖区域:克隆配置,默认链路零影响
+	cfg, err := s.launchCfg(req.SSH, req.Zone)
+	if err != nil {
+		fail(w, 404, err)
+		return
 	}
 	// 启动会结束当前这次调试,所以它同样受模式闸门约束(无会话或空会话放行)
 	if !s.sessOfWriteGlobal(w, r) {
@@ -505,6 +501,9 @@ func (s *Server) hLaunch(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, err)
 		return
 	}
+	// reused: 这次是"复用已登录宿主"还是"新建连接"。CLI 据此说明"我没有真的重连",
+	// 免得把"复用了旧会话"当成"新建了一个会话"——那正是上错号时最难发现的一步。
+	reused := sess.Booted()
 	// 模式由发起方决定:AI 从 CLI 发起 → 协作(人只读);人从界面发起 → 纯人工(与旧行为一致)
 	sess.SetMode(launchModeFor(r))
 	if actorOf(r) == "ai" {
@@ -533,6 +532,7 @@ func (s *Server) hLaunch(w http.ResponseWriter, r *http.Request) {
 	}()
 	// runProg: gzzz_t 解析出的实体程序(前端源码命名/预取要用它,而不是作业编号)
 	writeJSON(w, 200, map[string]any{"ok": true, "sessionId": sess.ID,
+		"env": sess.EnvNameNow(), "reused": reused,
 		"module": sess.Module, "prog": sess.Prog, "runProg": sess.RunProg})
 }
 
@@ -549,8 +549,9 @@ func (s *Server) hSnapshot(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]any{
 		"ok": true,
 		"id": sess.ID, "module": sess.Module, "prog": sess.Prog, "runProg": sess.RunProg,
-		"env":   sess.EnvName(),
+		"env":   sess.EnvNameNow(),
 		"state": string(sess.State()), "stop": cur,
+		"zone":            sess.ZoneNow(),
 		"started":         sess.Started(),
 		"breakpoints":     sess.Breakpoints(),
 		"holdingSeconds":  sess.HoldingSeconds(),
@@ -599,6 +600,34 @@ func (s *Server) hQuit(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------- 会话管理(单一常驻会话的切换/重启/结束) ----------
+
+// launchCfg 组装"这次启动要连哪个环境"的生效配置:ssh(环境名)/ zone 覆盖。
+//
+// 按名点名是**权威**的:点到的环境不存在就报错列出可用名,绝不静默回落默认连接 ——
+// 同一台机器上有多个环境(同库不同企业)时,"静默回落"与"上错了号"在输出上完全
+// 无法区分(见 manager.prepareSession 的环境判据)。
+func (s *Server) launchCfg(sshName, zone string) (*Config, error) {
+	if sshName == "" && zone == "" {
+		return s.cfg, nil
+	}
+	cfg := s.cfg
+	if sshName != "" {
+		c2 := s.cfg.CloneEnv(sshName)
+		if c2 == nil {
+			names := make([]string, 0, len(s.cfg.SSHs))
+			for _, e := range s.cfg.SSHs {
+				names = append(names, e.Name)
+			}
+			if len(names) == 0 {
+				return nil, fmt.Errorf("环境 %q 不存在(配置里没有任何环境,运行 tt env list 查看)", sshName)
+			}
+			return nil, fmt.Errorf("环境 %q 不存在;可用环境: %s", sshName, strings.Join(names, "、"))
+		}
+		cfg = c2
+	}
+	c2 := *cfg.CloneWithZone(zone)
+	return &c2, nil
+}
 
 // envCfgFor 取指定环境的生效配置(CloneEnv);若与当前生效目标同名(或未配置 envs 列表)则用当前配置快照
 func (s *Server) envCfgFor(name string) *Config {
@@ -738,7 +767,7 @@ func (s *Server) hSessionSwitch(w http.ResponseWriter, r *http.Request) {
 	}
 	cur := s.mgr.Current()
 	if cur != nil {
-		if cur.sameTarget(cfg) {
+		if cur.sameEnvAs(cfg) {
 			writeJSON(w, 200, map[string]any{"ok": true, "sessionId": cur.ID, "env": req.Env, "state": string(cur.State())})
 			return
 		}
@@ -1525,6 +1554,8 @@ func (s *Server) hWSLogDebug(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		RowID   string `json:"rowid"`
 		Request string `json:"request"`
+		SSH     string `json:"ssh"`  // 多 SSH 配置名(环境名);空 = 当前环境
+		Zone    string `json:"zone"` // 区域覆盖(31/35/36/39/t);空 = 默认区域
 	}
 	if !readBody(w, r, &req) {
 		return
@@ -1534,8 +1565,20 @@ func (s *Server) hWSLogDebug(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err)
 		return
 	}
+	// 点名的环境同样权威:重放必须落在被点名的环境上,否则"重放出来的现象"与
+	// "这条日志来自哪个环境"对不上,查出来的结论会整个偏掉。
+	targetCfg, err := s.launchCfg(req.SSH, req.Zone)
+	if err != nil {
+		fail(w, 404, err)
+		return
+	}
 	if !s.sessOfWriteGlobal(w, r) {
 		return
+	}
+	// 换环境 = 换连接目标:热生效(仅内存),后续会话与只读 SQL 都以它为准。
+	// 少了这一步,本次重放仍会去连旧环境 —— 那正是"点了名却没生效"的老毛病。
+	if targetCfg != s.cfg {
+		s.selectEnv(targetCfg)
 	}
 	conn, err := s.dial(s.cfg.SSH)
 	if err != nil {
@@ -1554,15 +1597,15 @@ func (s *Server) hWSLogDebug(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err)
 		return
 	}
-	// 已有会话先收口:同目标(可复用空闲宿主)只结束本轮运行;不同目标直接断开。
+	// 已有会话先收口:同环境(可复用空闲宿主)只结束本轮运行;不同环境直接断开。
 	// 重放调试独占调试通道,旧会话不再有用。
 	if cur := s.mgr.Current(); cur != nil {
-		if cur.sameTarget(s.cfg) {
+		if cur.sameEnvAs(s.cfg) {
 			s.mgr.emit(Event{Type: "log", SessionID: cur.ID, Text: "重放调试启动,结束当前调试(会话保留)"})
 			_ = cur.EndRun()
 			// EndRun 卡死时降级为 Close(StateExit),残留会话由 prepareSession 清扫
 		} else {
-			s.mgr.emit(Event{Type: "log", SessionID: cur.ID, Text: "重放调试启动,断开当前会话"})
+			s.mgr.emit(Event{Type: "log", SessionID: cur.ID, Text: fmt.Sprintf("重放调试启动,断开当前会话(环境切换为 %s)", s.cfg.EnvName())})
 			_ = cur.Close()
 			s.mgr.Remove(cur.ID)
 		}

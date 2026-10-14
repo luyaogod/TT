@@ -353,13 +353,31 @@ func (s *Session) runProgName() string {
 
 // EnvName 返回会话所属环境名
 func (s *Session) EnvName() string {
+	return s.EnvNameNow()
+}
+
+// EnvNameNow 读**当前**环境名(跨多个调试轮次,可能已被 SetRun 刷新)。
+// 与会话创建时那一次快照不同 —— 它是判"这个会话现在连的是哪个环境"的权威值。
+func (s *Session) EnvNameNow() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.envName
 }
 
-// sameTarget 判断另一配置是否指向同一宿主(host/port/user/zone 全同)
-func (s *Session) sameTarget(cfg *Config) bool {
+// ZoneNow 读**当前**登录区域(与 EnvNameNow 同理:会话跨轮次,配置可被 SetRun 刷新)。
+func (s *Session) ZoneNow() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cfg == nil {
+		return ""
+	}
+	return s.cfg.Zone
+}
+
+// sameConn 判断另一配置是否指向**同一台机器同一区域**(host/port/user/zone 全同)。
+// 它只回答"连接能不能复用",不回答"是不是同一个环境" —— 同机多环境(同库不同
+// 企业)在这四样上完全一样,判环境必须用 sameEnvAs。
+func (s *Session) sameConn(cfg *Config) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if cfg == nil || s.cfg == nil {
@@ -368,6 +386,36 @@ func (s *Session) sameTarget(cfg *Config) bool {
 	a, b := s.cfg.SSH, cfg.SSH
 	return a.Host == b.Host && a.Port == b.Port && a.User == b.User && s.cfg.Zone == cfg.Zone
 }
+
+// sameTarget 判断"这次启动的目标环境与该会话当前所在环境是同一个"。
+//
+// 判据是**环境名**(不是连接四元组):同一台机器上可以有多个环境(恒烁正式区/测试1012,
+// 同库不同企业),它们的 host/port/user/zone 完全一样,只有环境名与企业编号不同。
+// 只比四元组会把它们判成同一个,于是点名切环境后仍旧复用旧会话、继续用旧的企业编号跑
+// (实测踩过:所有按企业编号取数的查询返回 0 行,看起来像"配置缺失",结论会完全反向)。
+//
+// 连接四元组仍是前置条件:同名但连接不同(设置页把某环境的 host 改了)也必须是"换目标",
+// 不能拿旧连接继续跑。
+//
+// 两条判据任意一条为空时的取向:连接四元组为空 → 不敢复用,**换**;
+// 环境名算不出(Config.EnvName 的 host-zone 兜底理论上兜得出非空值,这里是防御)→ 允许复用。
+// 宁可多登录一次,也不能上错号。
+func (s *Session) sameTarget(cfg *Config) bool {
+	if cfg == nil {
+		return false
+	}
+	if !s.sameConn(cfg) {
+		return false
+	}
+	a, b := s.EnvNameNow(), cfg.EnvName()
+	if a == "" || b == "" {
+		return true
+	}
+	return a == b
+}
+
+// sameEnvAs 就是 sameTarget 的别名:调用点用它读起来更像"落在同一个环境上吗"。
+func (s *Session) sameEnvAs(cfg *Config) bool { return s.sameTarget(cfg) }
 
 // Launch 启动一轮调试(单一常驻会话):
 // - 首次调用:先完成登录(区域菜单 → shell → 回读运行时环境),之后宿主常驻;
@@ -655,6 +703,7 @@ func (s *Session) SetRun(cfg *Config, module, prog, runProg, launchRef, extra st
 		cc := *cfg
 		cc.Runtime = s.cfg.Runtime // 会话内动态路径保留(同一宿主/区域)
 		s.cfg = &cc
+		s.envName = cc.EnvName() // 环境名跟着配置走,不然快照会报旧环境
 	}
 	s.Module = module
 	s.Prog = prog

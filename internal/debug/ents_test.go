@@ -240,6 +240,29 @@ func TestEntCatalog_DegradeRules(t *testing.T) {
 	if _, err := cat5.list(nil, nil, testCfg(empty), EntListOpt{Cached: true}); err == nil {
 		t.Error("--cached 且没有快照时应当报错")
 	}
+
+	// ⑦ Offline 且没有快照 → (nil, nil):只是查不到,不报错也不连网。
+	// 给"顺手补一行环境信息"的调用方用(tt debug start 的生效身份),别为它拨 SSH。
+	cat6 := NewEntCatalog(t.TempDir())
+	cat6.fetch = noSSH(t)
+	l6, err := cat6.list(nil, nil, testCfg(""), EntListOpt{Offline: true})
+	if err != nil {
+		t.Errorf("Offline 没有快照时不该报错(它只是一句说明),got %v", err)
+	}
+	if l6 != nil {
+		t.Errorf("Offline 没有快照时应返回 nil,got %+v", l6)
+	}
+
+	// ⑧ Offline 且有过期快照 → 照常给(调用方自己看新鲜度),同样不连网
+	cat7 := NewEntCatalog(dir)
+	cat7.fetch = noSSH(t)
+	l7, err := cat7.list(nil, nil, cfg, EntListOpt{Offline: true})
+	if err != nil || l7 == nil {
+		t.Fatalf("Offline 命中快照时应当给出结果: err=%v", err)
+	}
+	if l7.Count != 2 || l7.Current == nil {
+		t.Errorf("Offline 的结果内容应与现查同形: %+v", l7)
+	}
 }
 
 // 快照写不出去(数据目录是个文件)不该让"查到了"变成失败 —— 它只是下次还得现查。

@@ -90,7 +90,7 @@ func init() {
 	pf.StringVar(&common.Format, "format", "json",
 		"输出形态: json(默认,带环境信息的信封) | csv(带 # 环境头) | table(人读表格)")
 	pf.BoolVarP(&common.Verbose, "verbose", "v", false, "显示解析细节（如实际使用的数据源路径）")
-	pf.StringVar(&common.Env, "env", "", "指定环境名（config.json hosts.sshs 中的 name）")
+	pf.StringVar(&common.Env, "env", "", "指定环境名（config.json hosts.sshs 中的 name；认它的命令见各自 --help，tt dev 会明确拒绝）")
 	// --conn 是合并前 tdict 的叫法，保留为别名，但不出现在 --help 里
 	pf.StringVar(&common.Env, "conn", "", "指定环境名（--env 的别名）")
 	_ = pf.MarkHidden("conn")

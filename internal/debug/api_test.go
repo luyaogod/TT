@@ -9,9 +9,61 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
+
+	"tt/internal/host"
 )
+
+// launchCfg:点名的环境是**权威**的。
+//
+// 从前 /api/sessions 的 ssh 走 SSHByName:拼错了会**静默回落**当前连接,于是
+// "环境名打错"与"确实连上了那个环境"在输出上无法区分 —— 同一台机器上有多个环境
+// (同库不同企业)时,那就是上错号。这里钉住:认不出就报错并列出可用名。
+func TestLaunchCfgResolvesByName(t *testing.T) {
+	cfg := &Config{
+		SSH:  host.SSHConfig{Host: "top", Port: 22, User: "u"},
+		Zone: "36",
+		SSHs: []host.NamedSsh{
+			{Name: "恒烁正式区", SSHConfig: host.SSHConfig{Host: "h1", Port: 22, User: "u"}, Zone: "1", Topent: "9999"},
+			{Name: "测试1012", SSHConfig: host.SSHConfig{Host: "h1", Port: 22, User: "u"}, Zone: "1", Topent: "1012"},
+		},
+	}
+	cfg.fillDefaults()
+	cfg.ApplyDefaultEnv()
+	s := NewServer(cfg, nil, "")
+
+	// 不点名:用当前生效配置(与从前一致)
+	if got, err := s.launchCfg("", ""); err != nil || got != s.cfg {
+		t.Fatalf("不点名应回当前配置: got=%v err=%v", got, err)
+	}
+	// 点名:换成该环境,且企业编号跟着换
+	got, err := s.launchCfg("测试1012", "")
+	if err != nil {
+		t.Fatalf("点名存在的环境不该失败: %v", err)
+	}
+	if got.EnvName() != "测试1012" || string(got.Topent) != "1012" {
+		t.Fatalf("点名 测试1012 应拿到该环境的企业编号: env=%q topent=%q", got.EnvName(), got.Topent)
+	}
+	if got.SSH.Host != "h1" {
+		t.Fatalf("点名后应连该环境的机器, got %q", got.SSH.Host)
+	}
+	// 区域覆盖仍可用
+	if z, err := s.launchCfg("测试1012", "35"); err != nil || z.Zone != "35" {
+		t.Fatalf("zone 覆盖应生效: zone=%q err=%v", z.Zone, err)
+	}
+	// 点错了:报错并列出可用环境名(绝不静默回落)
+	_, err = s.launchCfg("并不存在的环境", "")
+	if err == nil {
+		t.Fatal("点名不存在的环境必须报错(静默回落就是上错号)")
+	}
+	for _, want := range []string{"并不存在的环境", "恒烁正式区", "测试1012"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("错误信息里应出现 %q: %v", want, err)
+		}
+	}
+}
 
 // Listen 必须报出真实监听端口:--listen 端口写 0 时由系统分配,只能回读。
 func TestListenReportsRealPort(t *testing.T) {

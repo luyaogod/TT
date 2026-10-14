@@ -144,6 +144,12 @@ type EntListOpt struct {
 	// Cached 只用内存/快照,完全不连网;没有可用快照就报错。
 	// 给 agent 一条确定性的快回路:不必猜 SSH 超时要等多久。
 	Cached bool
+	// Offline 禁止现查:与 Cached 的区别是**没有快照也只是查不到**(返回 nil,不报错)。
+	//
+	// 给"顺手补一行环境信息"这类调用方用:`tt debug start` 的「生效身份」要顺带说出
+	// 企业编号对应哪个账号,但那只是输出里的说明,不值得为它拨一次 SSH(慢时 40 秒),
+	// 更不该因为它没查到就把启动判成失败。要权威答案请用 tt debug ents。
+	Offline bool
 }
 
 // LookupEnts 企业目录查询的**唯一对外入口**(CLI 与其它调用方用)。
@@ -162,7 +168,9 @@ func LookupEnts(cfg *Config, opt EntListOpt) (*EntListing, error) {
 // 就地裁剪会让下一次不带 --ent 的调用也只看到一个企业。
 func (c *EntCatalog) list(conn *host.SSHConn, d *dbRun, cfg *Config, opt EntListOpt) (*EntListing, error) {
 	l, err := c.resolve(conn, d, cfg, opt)
-	if err != nil || opt.Ent <= 0 {
+	// l == nil 是 Offline 模式"没有快照、也没去查"的正常结果(见 EntListOpt.Offline):
+	// 调用方拿到 (nil, nil) 就是"这次没有目录可用",不该再往下走去做收窄。
+	if err != nil || l == nil || opt.Ent <= 0 {
 		return l, err
 	}
 	// --ent N = "只看这一个"。找不到 / 没配账号就**报错**,而且复用 pickEntAccount,
@@ -210,6 +218,15 @@ func (c *EntCatalog) resolve(conn *host.SSHConn, d *dbRun, cfg *Config, opt EntL
 			return finish(entSnapshotToListing(snap, cfg, opt, now, "snapshot-stale"), cfg, opt, now), nil
 		}
 		return nil, fmt.Errorf("没有可用的企业目录快照(%s);先联网跑一次 tt debug ents", path)
+	}
+
+	// Offline 在 Cached 之后:有快照就照常给(哪怕是过期的,调用方自己看新鲜度),
+	// 没快照就**查不到** —— 不报错也不拨 SSH。见 EntListOpt.Offline。
+	if opt.Offline {
+		if snap != nil {
+			return finish(entSnapshotToListing(snap, cfg, opt, now, "snapshot"), cfg, opt, now), nil
+		}
+		return nil, nil
 	}
 
 	// 到这里确定要连服务器了。--cached 那条路在上面就返回了,所以"完全不连网"

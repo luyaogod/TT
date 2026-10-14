@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -48,6 +49,7 @@ var (
 	dbgExecMax int    // exec --max:单条命令**显示**的行数上限(0=不限;不影响本地完整副本)
 	dbgSQLFile string // sql --file:从本地文件读语句(不是远端 @)
 	dbgSQLEnt  int    // sql --ent:显式指定企业编号(默认取会话 TOPENT)
+	dbgEnvFlag string // start/wsdebug --env:这次启动要连哪个环境(权威;空=回落全局 --env/当前环境)
 
 	wsShow         string   // wslogs --show <rowid>:只看这一条的报文
 	wsSaveReq      string   // wslogs --show --save-request:把请求原文另存一份(改完再 --request-file)
@@ -181,14 +183,163 @@ func dbgWaitStopped(id string, timeout time.Duration) (map[string]any, error) {
 	return out, nil
 }
 
+// dbgTargetEnv 这次启动要连哪个环境。
+//
+// 两条来源,命令自己的 --env 优先:
+//   - `tt debug start x --env 恒烁正式区`(写在子命令上,语义最明确);
+//   - `tt --env 恒烁正式区 debug start x`(根命令的持久开关,别处能用,这里也认)。
+//
+// 从前这里**只看 --ssh**,而 --env 是根命令的开关、debug 组里没人读 —— 于是
+// `tt debug start … --env X` 既不报错也不生效,方向永远取服务端当前环境。同机多环境
+// (同库不同企业)时那是"上错号"而不是"报错",所有按企业编号取数的查询返回 0 行,
+// 看起来和"配置缺失"一模一样(实测踩过,结论会完全反向)。
+func dbgTargetEnv() string {
+	if v := strings.TrimSpace(dbgEnvFlag); v != "" {
+		return v
+	}
+	return strings.TrimSpace(common.Env)
+}
+
+// dbgSnapView POST /api/sessions 回包 + GET /api/sessions/{id} 快照里本文件用到的字段。
+type dbgSnapView struct {
+	ID       string `json:"id"`
+	Env      string `json:"env"`
+	Reused   bool   `json:"reused"`
+	Module   string `json:"module"`
+	Prog     string `json:"prog"`
+	RunProg  string `json:"runProg"`
+	State    string `json:"state"`
+	Zone     string `json:"zone"`
+	Topent   string `json:"topent"`
+	TopentCf string `json:"topentCfg"`
+	TopentSh string `json:"topentShell"`
+	Stop     *struct {
+		File   string `json:"file"`
+		Line   int    `json:"line"`
+		Func   string `json:"func"`
+		Reason string `json:"reason"`
+	} `json:"stop"`
+}
+
+// dbgIdentity 会话的"生效身份":环境 / 区域 / 企业 / 账号 / 库。
+//
+// 为什么非要有这一行:同一台机器上可以有多个环境指向**同一个库**(只有企业编号不同),
+// 那时 topent/topentCfg/topentShell 三个裸字段要么全空、要么同值,人根本看不出这次
+// 连的是哪个账号。账号由企业编号经 gzou_t 解析而来,查不到数据时"上错号"与"配置真的
+// 缺失"在输出上一模一样 —— 这一行就是用来分开这两件事的。
+//
+// 账号走 LookupEnts(Offline):只读快照、**一次网络都不发**,没有快照就只回"查不到" ——
+// 这是输出里的一句说明,不值得为它拨一次 SSH(慢时 40 秒)。查不到不算错误,
+// 但会说明为什么没有,并给出自己核对的命令。
+func dbgIdentity(snap *dbgSnapView) string {
+	if snap == nil {
+		return ""
+	}
+	env := snap.Env
+	if env == "" {
+		env = "(未知)"
+	}
+	topent := firstNonEmpty(snap.TopentSh, snap.TopentCf, snap.Topent, "(未取到)")
+	zone := orPlain(snap.Zone)
+	target, acct, acctWhy := dbgDBIdentity(env, firstNonEmpty(snap.TopentSh, snap.TopentCf, snap.Topent))
+	reuse := ""
+	if snap.Reused {
+		reuse = "  ← 复用了已登录的宿主(未重新连接)"
+	}
+	return fmt.Sprintf("生效身份: 环境 %s / 区域 %s / 企业 %s / 账号 %s / 库 %s%s\n  %s",
+		env, zone, topent, acct, target, reuse, acctWhy)
+}
+
+func orPlain(v string) string {
+	if strings.TrimSpace(v) == "" {
+		return "(未配置)"
+	}
+	return v
+}
+
+func firstNonEmpty(vs ...string) string {
+	for _, v := range vs {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+// dbgDBIdentity 该环境挂的库 + 企业编号对应的账号(尽力而为,不连网优先)。
+func dbgDBIdentity(env, entRaw string) (target, acct, why string) {
+	path, err := resolveConfigPath()
+	if err != nil {
+		return "-", "-", "（读配置失败:" + err.Error() + "）"
+	}
+	cfg, err := debug.LoadConfig(path)
+	if err != nil {
+		return "-", "-", "（读配置失败:" + err.Error() + "）"
+	}
+	if env != "" && env != "(未知)" {
+		if c2 := cfg.CloneEnv(env); c2 != nil {
+			cfg = c2
+		}
+	} else {
+		cfg.ApplyDefaultEnv()
+	}
+	target = "-"
+	if cfg.DB != nil {
+		target = cfg.DB.Address()
+	}
+	cfg.DataDir = filepath.Dir(path)
+	ent := 0
+	if n, err := strconv.Atoi(strings.TrimSpace(entRaw)); err == nil {
+		ent = n
+	}
+	// Offline:有快照就照常给,没快照就只回"查不到" —— 这是输出里的一句说明,
+	// 不值得为它拨一次 SSH(慢时 40 秒),更不该因为它没查到就把启动判成失败。
+	l, err := debug.LookupEnts(cfg, debug.EntListOpt{Ent: ent, Offline: true})
+	if err != nil || l == nil {
+		return target, "-", "（账号未知:没有该环境的企业快照 —— 自己核一下:tt debug ents --env " + env + "）"
+	}
+	switch {
+	case l.Current != nil && l.Current.Resolved:
+		acct = l.Current.Account
+	case entRaw == "":
+		acct, why = "-", "（该环境没配 topent,账号由登录默认决定;用 tt debug ents 核对）"
+	default:
+		acct, why = "-", "（企业 "+entRaw+" 没解析出账号;用 tt debug ents 核对）"
+	}
+	return target, acct, why
+}
+
+// dbgVerifyEnv 把 --env 与实际生效环境对齐,不一致时**明说**。
+//
+// 这是"报了名就必须认账"的落点:点名了环境却没生效,不能静默 —— 静默回落与上错号
+// 在输出上完全无法区分。返回 false 表示点名的环境确实没生效(调用方按失败处理)。
+func dbgVerifyEnv(want string, snap *dbgSnapView) bool {
+	if want == "" || snap == nil {
+		return true
+	}
+	if snap.Env == want {
+		return true
+	}
+	fmt.Fprintf(os.Stderr, "⚠ --env %s 未生效:实际会话环境是 %s\n", want, orPlain(snap.Env))
+	fmt.Fprintf(os.Stderr, "  自己核一下:tt debug env            (列出环境与当前会话)\n")
+	fmt.Fprintf(os.Stderr, "              tt debug start %s --env <环境名>   (点名必须与环境清单里的名字一致)\n", snap.Prog)
+	return false
+}
+
 // debugStartCmd 封装:SSH 连接 + 对指定程序启动调试,等到入口停站
 var debugStartCmd = &cobra.Command{
 	Use:   "start <作业编号>",
 	Short: "连接 SSH 并对指定程序启动调试,等到入口停站",
 	Long: `封装"连服务器 + fglrun -d 启动作业 + 等入口停站"全流程。
-之后用 tt debug exec 透传 fgldb 标准命令调试(参考 Genero 调试命令文档)。`,
+之后用 tt debug exec 透传 fgldb 标准命令调试(参考 Genero 调试命令文档)。
+
+--env <环境名> 指定这次连哪个环境(等价 --ssh);不给则用服务端当前环境。
+点名了环境而实际没生效时会**明确告警**——同一台机器上可以有多个环境指向同一个库
+(只有企业编号不同),那种情况下"上错了号"与"配置真的缺失"表现完全一样:
+按企业编号取的数全返回 0 行。输出末尾的「生效身份」一行就是用来分开这两件事的。`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		target := dbgTargetEnv()
 		body := map[string]any{"prog": args[0]}
 		if dbgModule != "" {
 			body["module"] = dbgModule
@@ -196,8 +347,19 @@ var debugStartCmd = &cobra.Command{
 		if dbgZone != "" {
 			body["zone"] = dbgZone
 		}
-		if dbgSSHName != "" {
+		// --ssh 是环境名的历史叫法:两条并存时以 --ssh 为准(它就是为这件事存在的)。
+		switch {
+		case dbgSSHName != "":
 			body["ssh"] = dbgSSHName
+			target = dbgSSHName
+		case target != "":
+			body["ssh"] = strings.TrimSpace(target)
+		}
+		// 复用痕迹:启动前记下那个空闲会话,回包 sessionId 与它相同就是"复用了宿主"。
+		// 不标出来的话,"我并没有真正新建会话"这件事在输出里毫无痕迹(反馈 S1-④)。
+		prevID := ""
+		if sessions, err := dbgSessions(); err == nil && len(sessions) > 0 && sessions[0].State == "idle" {
+			prevID = sessions[0].ID
 		}
 		data, err := dbgAPI("POST", "/api/sessions", body)
 		if err != nil {
@@ -207,12 +369,66 @@ var debugStartCmd = &cobra.Command{
 			SessionID string `json:"sessionId"`
 		}
 		_ = json.Unmarshal(data, &r)
-		snap, err := dbgWaitStopped(r.SessionID, time.Duration(dbgTimeout)*time.Second)
+		reused := dbgReusedHost(prevID, r.SessionID)
+		raw, err := dbgWaitStopped(r.SessionID, time.Duration(dbgTimeout)*time.Second)
 		if err != nil {
 			return err
 		}
-		return dbgJSONOut(snap)
+		snap := dbgSnapOf(raw)
+		if snap != nil {
+			snap.Reused = reused
+		}
+		// JSON 模式:把身份字段并进同一个快照对象,不另打散的行,别破坏 jq 取字段的习惯。
+		if IsJSON() {
+			applyIdentityTo(raw, snap)
+			return dbgJSONOut(raw)
+		}
+		if err := dbgJSONOut(raw); err != nil {
+			return err
+		}
+		fmt.Println(dbgIdentity(snap))
+		if !dbgVerifyEnv(target, snap) {
+			// 点名的环境没生效:不是"成功跑起来了" —— 调用方得知道这一轮不可信。
+			return fmt.Errorf("--env %s 未生效(实际 %s),本轮调试的环境不对", target, orPlain(snap.Env))
+		}
+		return nil
 	},
+}
+
+// dbgReusedHost 这次 start 是"复用了启动前那个空闲会话"吗。
+//
+// 判据只有一条:服务端回来的 sessionId 与启动前那个空闲会话相同。会话 id 每次新建都会
+// 变(s<毫秒>),所以相同就意味着后端复用了那个已登录的宿主 —— 这时并没有重新登录,
+// 也就没有"按新环境重连"这回事。
+func dbgReusedHost(prevID, newID string) bool {
+	return prevID != "" && newID != "" && prevID == newID
+}
+
+// dbgSnapOf 把 /api/sessions/{id} 的原始快照解成 dbgSnapView。
+func dbgSnapOf(raw map[string]any) *dbgSnapView {
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var v dbgSnapView
+	if json.Unmarshal(b, &v) != nil {
+		return nil
+	}
+	return &v
+}
+
+// applyIdentityTo 把"生效身份"并进 JSON 快照(env 已由服务端给出,这里补 reused/identity)。
+func applyIdentityTo(raw map[string]any, snap *dbgSnapView) {
+	if raw == nil || snap == nil {
+		return
+	}
+	if snap.Env != "" {
+		raw["env"] = snap.Env
+	}
+	if snap.Reused {
+		raw["reused"] = true
+	}
+	raw["identity"] = dbgIdentity(snap)
 }
 
 // maxBatchCmds 一次批量最多执行的命令条数。
@@ -1214,9 +1430,20 @@ tt debug topent <企业编号> 改。`,
 		if err != nil {
 			return err
 		}
+		target := dbgTargetEnv()
 		body := map[string]any{"rowid": rowid}
 		if reqOverride != "" {
 			body["request"] = reqOverride
+		}
+		if dbgZone != "" {
+			body["zone"] = dbgZone
+		}
+		switch {
+		case dbgSSHName != "":
+			body["ssh"] = dbgSSHName
+			target = dbgSSHName
+		case target != "":
+			body["ssh"] = strings.TrimSpace(target)
 		}
 		data, err := dbgAPI("POST", "/api/wslogs/debug", body)
 		if err != nil {
@@ -1232,14 +1459,23 @@ tt debug topent <企业编号> 改。`,
 			// 下一件事一定是去查断点为什么没生效
 			fmt.Printf("⚠ %s\n", r.Warn)
 		}
-		snap, err := dbgWaitStopped(r.SessionID, time.Duration(dbgTimeout)*time.Second)
+		raw, err := dbgWaitStopped(r.SessionID, time.Duration(dbgTimeout)*time.Second)
 		if err != nil {
 			return err
 		}
-		if !IsJSON() {
-			printTopentContext(snap)
+		snap := dbgSnapOf(raw)
+		if IsJSON() {
+			applyIdentityTo(raw, snap)
+			return dbgJSONOut(raw)
 		}
-		return dbgJSONOut(snap)
+		if !IsJSON() {
+			printTopentContext(raw)
+			fmt.Println(dbgIdentity(snap))
+		}
+		if !dbgVerifyEnv(target, snap) {
+			return fmt.Errorf("--env %s 未生效(实际 %s),本次重放的环境不对", target, orPlain(snap.Env))
+		}
+		return dbgJSONOut(raw)
 	},
 }
 
@@ -1276,6 +1512,11 @@ func init() {
 	debugStartCmd.Flags().StringVarP(&dbgModule, "module", "m", "asf", "T100 模块目录名(如 asf)")
 	debugStartCmd.Flags().StringVar(&dbgZone, "zone", "", "区域代码覆盖(31开发/35测试/36正式;默认取配置)")
 	debugStartCmd.Flags().StringVar(&dbgSSHName, "ssh", "", "SSH 配置名(设置页配置的多 SSH;默认取配置)")
+	// --env 与全局 --env 同名同义:子命令上显式给的优先级更高(根命令那个是持久开关,
+	// 别处能用这里也必须能用;写在子命令上语义最明确)。--ssh 是环境名的历史叫法,两者并存。
+	debugStartCmd.Flags().StringVar(&dbgEnvFlag, "env", "", "环境名(等价 --ssh;不给则用服务端当前环境)。同机多环境时务必点名")
+	debugWsdebugCmd.Flags().StringVar(&dbgEnvFlag, "env", "", "环境名(等价 --ssh;不给则用服务端当前环境)。重放必须落在日志所在的那个环境上")
+	debugWsdebugCmd.Flags().StringVar(&dbgSSHName, "ssh", "", "环境名(--env 的别名)")
 	debugWslogsCmd.Flags().StringVar(&wsService, "service", "", "服务名称 wsfa001(支持 * ? 通配)。是 oa.schema.data.get 这类反域名,不是作业名")
 	debugWslogsCmd.Flags().StringVar(&wsJob, "job", "", "作业编号 wsfa012(支持 * ? 通配,如 wssp01131 / wssp*)—— 按「哪个作业」找日志的入口")
 	debugWslogsCmd.Flags().StringVar(&wsServer, "server", "", "服务端 wsfa018(等值,如 T100)")

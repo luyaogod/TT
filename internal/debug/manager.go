@@ -231,10 +231,13 @@ func (m *Manager) launchWith(cfg *Config, module, prog string) (*Session, error)
 }
 
 // prepareSession 启动一轮运行前的会话准备(单一常驻会话):
-// - 已有空闲(idle)且目标相同的会话 → 复用宿主,仅刷新本轮运行参数(免重新登录);
-// - 已有会话但目标不同(默认环境切换/按名启动其它服务器)→ 断开旧的再新建;
-// - 已有活跃运行且目标相同 → 报错(请先结束当前调试);
-// - 无会话 → 新建。
+//   - 已有空闲(idle)且目标环境相同的会话 → 复用宿主,仅刷新本轮运行参数(免重新登录);
+//   - 已有空闲会话但目标环境不同(切环境/点名另一台服务器)→ 断开旧的再新建 ——
+//     "同机同区域"不等于"同一环境":同库不同企业的两个环境在这四样上完全一样,
+//     复用会让新一轮继续用旧的企业编号跑(见 Session.sameTarget);
+//   - 已有活跃运行(运行中/已停站)→ 报错(请先结束当前调试);
+//   - 无会话 → 新建。
+//
 // 返回已登记的会话,由调用方驱动 Launch 登录/启动。
 func (m *Manager) prepareSession(cfg *Config, module, prog, runProg, launchRef, extra, argsOverride string) (*Session, error) {
 	m.mu.Lock()
@@ -251,18 +254,20 @@ func (m *Manager) prepareSession(cfg *Config, module, prog, runProg, launchRef, 
 	m.mu.Unlock()
 
 	if live != nil {
-		if live.State() == StateIdle && live.sameTarget(cfg) {
-			live.SetRun(cfg, module, prog, runProg, launchRef, extra)
-			live.ArgsOverride = argsOverride
-			return live, nil
-		}
-		if !live.sameTarget(cfg) {
-			log.Printf("[debug] 目标切换为 %s,断开旧会话 %s 后重建", cfg.EnvName(), live.ID)
-			_ = live.Close()
-			m.Remove(live.ID)
-		} else {
+		if live.sameTarget(cfg) {
+			if live.State() == StateIdle {
+				live.SetRun(cfg, module, prog, runProg, launchRef, extra)
+				live.ArgsOverride = argsOverride
+				return live, nil
+			}
 			return nil, fmt.Errorf("已存在调试会话(%s 运行中/已停站),请先结束当前调试", live.Prog)
 		}
+		// 目标不是同一个环境:即使连接可复用也不复用 ——
+		// 闲置的旧会话先收口再按新环境重建,避免"换了环境却还连着旧企业/旧账号"。
+		log.Printf("[debug] 目标切换为 %s(旧会话 %s 在 %s),断开旧会话后重建",
+			cfg.EnvName(), live.ID, live.EnvNameNow())
+		_ = live.Close()
+		m.Remove(live.ID)
 	}
 
 	sess, err := NewSession(cfg, module, prog, runProg, launchRef, extra, m.emit)

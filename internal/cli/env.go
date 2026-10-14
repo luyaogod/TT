@@ -53,7 +53,12 @@ func newEnvCmd() *cobra.Command {
 		Long: `把某环境设为默认环境。三个工具在没有显式指定环境时都用它。
 
 原来的 tdict 用 hosts.activeEnv、tdebug 用 debug 节里的「当前环境」，
-合并后统一走 hosts.activeEnv —— 在哪个工具里切换，另外两个也跟着切。`,
+合并后统一走 hosts.activeEnv —— 在哪个工具里切换，另外两个也跟着切。
+
+**它只改配置，不动正在跑的调试会话。** 调试会话的"当前环境"是运行态（服务内存里那份），
+tt env use 写的是文件 —— 所以已经起来的会话仍连在原来的环境上，要等服务重启，
+或在界面上「切换会话」/用 tt debug env <环境名> 切一次，它才按新环境连。
+要"这一次就换环境"，直接点名：tt debug start <作业> --env <环境名>。`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path, err := common.ResolveConfig(true)
@@ -88,7 +93,11 @@ func newEnvSetTopentCmd() *cobra.Command {
 		Short: "设置某环境的默认企业编号（TOPENT）",
 		Long: `设置登录该环境时下发的默认企业编号。
 
-企业编号可以是数字（如 10001）也可以是文本；留空字符串表示清除。`,
+企业编号可以是数字（如 10001）也可以是文本；留空字符串表示清除。
+
+**它改的是配置文件里该环境的默认值。** 已经建立的调试会话在创建时就把这份配置抄了一份，
+所以改完对运行中的会话不生效：要让本轮调试就用新企业编号，请重启会话（界面上的「重启会话」）
+或重新 tt debug start；只想这一次改企业编号，用 tt debug topent <编号>（会话级覆盖，立即下发）。`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path, err := common.ResolveConfig(true)

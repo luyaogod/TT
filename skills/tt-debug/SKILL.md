@@ -23,7 +23,11 @@ description: 通过 TDebug 命令行调试 T100 ERP 作业(4GL/Genero)——对�
 ```bash
 # 1. 启动调试:连 SSH → 启动作业 → 等入口停站(返回 JSON 快照)
 tt debug start bsft001_wf -m asf
-
+# 同机有多个环境(尤其**同一个库、不同企业**那两个)时,必须点名:
+tt debug start bsft001_wf -m asf --env 恒烁正式区
+#   ↑ 也可以用根开关:tt --env 恒烁正式区 debug start …(--ssh 是旧叫法,等价)
+#   输出末尾有一行「生效身份:环境/区域/企业/账号/库」和 reused 痕迹,启动后先看它。
+```
 # 2. 透传任意 fgldb 标准命令,原样返回输出
 tt debug exec "break 4450"          # 按行下断点
 tt debug exec "break bsft001_wf.b_fill"   # 按函数下断点
@@ -165,7 +169,7 @@ tt env list
 # 查看单个环境的完整配置
 tt env show 示例测试区
 
-# 切换当前环境:把会话重连到该环境(空闲 idle);当前环境只在运行时,不写 config.json
+# 切换当前环境:交给运行中的服务,由它重连会话(到空闲 idle);当前环境只在运行时,不写 config.json
 tt env use 示例测试区
 
 # 设置该环境的 TOPENT(企业编号,写入配置的 topent 默认值)
@@ -173,7 +177,13 @@ tt env topent 示例测试区 99
 ```
 
 - `tt env` 各命令都依赖运行中的 `tt serve`,默认自动发现其地址。
-- `tt env use <名称>` 会把目标环境设为默认并结束当前调试重连过去,切换前请确认无重要调试进行。
+- **`tt env use` 什么时候生效,要分清**:它写的是配置文件(`hosts.activeEnv`),
+  "当前环境"却是**服务运行时**的状态 —— 所以只有**服务侧**去切(界面上的「切换会话」,
+  或 `tt debug env <环境名>`)才立刻生效;`tt env use` 之后**已经起来的会话不受影响**,
+  要等会话重建(重启服务、或界面/`tt debug env` 切一次)才按新环境连。
+- 因此**要换环境就点名**:`tt debug start <作业> --env <环境名>` 是权威的,
+  它当场按点名的环境连(与 `tt env use` 无关)。EXPLICIT 点名的环境不存在时报错并列出可用名,
+  绝不静默回落 —— 同机多环境时"静默回落"与"上错号"在输出上完全无法区分。
 - TOPENT 由配置决定:每个环境 `hosts.sshs[].topent` 就是它的 TOPENT 默认值,可用 `tt env topent` 改。
 
 > **它必须是有效的企业编号(数字)。** 这个字段的值会决定 DB 连接与框架的据点校验 ——
@@ -631,6 +641,21 @@ Breakpoint 1 at 0x00000000: file wss_wssp01131.4gl, line 116.   ← 回显统一
 随便传哪个都解析得到。看到 `停站[entry] wss_wssp01131.4gl` 而本地副本叫
 `wssp01131.4gl`,是**正常现象,不是两个文件**。
 
+**前缀不止 `<模块>_` 一种:共享元件按它所在的库目录加前缀。** 4GL 的共享元件
+(`sub/`、`csub/`、`lib/`)在调试器里的逻辑名是 `<库目录前缀>_<文件名>`,而磁盘上、
+以及 `tt debug source` 用的是**不带前缀**的那个名字:
+
+| 磁盘上的名字(`source` / 本地副本用的一致) | 调试器的逻辑名(`info sources` / 停站回显) |
+| --- | --- |
+| `s_curr.4gl`(共享子程序,`com/sub/`) | `sub_s_curr.4gl` |
+| 客制共享子程序(`com/csub/`) | `csub_<文件名>.4gl` |
+| `cl_ap.4gl`(公共库,`com/lib/`) | `lib_cl_ap.4gl` |
+
+`break s_curr.4gl:435` 就会回 `No source file named s_curr.4gl.` —— 调试器只认带前缀的
+那个名字,而磁盘上确实叫 `s_curr.4gl`,**两边都没错**。遇到这句先
+`tt debug exec "info sources"` 看真实逻辑名,再照它写;或者干脆用**函数名 / 裸行号**
+下断点(不受前缀影响,最省事)。
+
 **列表里的 `ERR` 与响应正文里的 `description` 是两个来源,可能对不上。**
 `ERR` 取自日志表的 wsfa014(服务程序/框架记下的那条错误),响应正文里的
 `Status/description` 才是**这次调用实际返回**的内容。判断"为什么失败"要以**响应报文**
@@ -643,6 +668,13 @@ Breakpoint 1 at 0x00000000: file wss_wssp01131.4gl, line 116.   ← 回显统一
 `wsdebug` 只把程序停在**入口**,而**入口停站没有调用栈** —— 此时 `where` 报 `No stack`、
 `info locals` 报 `No frame selected`、`locate` 不可用,`stop` 显示的是 `? ()`。
 别以为重放坏了:还没进 MAIN,当然什么都取不到。
+
+> **入口停站时 `call` 会被调试器拒绝**:程序还没 `run`,`call <函数>()` 会回
+> `You can't do that without a process to debug.` —— 这不是会话坏了。
+> 工具层对 `next`/`step` 这类放行命令有"先 `tbreak main` 放起来"的兜底,`call` **没有**:
+> 想在入口试跑一个函数,得先 `tt debug exec "continue"`(或下好断点再 continue),
+> 等程序真的跑起来之后才 `call`。只想单测一个 `PUBLIC` 函数时,更省事的做法是
+> 下一批断点、用不同参数跑几轮对比,而不是在入口 call。
 
 **位置有惯例,变量名要现查。** 框架型作业(wssp/awsp)大致是这么分段的:
 
