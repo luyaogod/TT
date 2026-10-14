@@ -15,6 +15,12 @@
 //   3. `ON ACTION <动作名>` 中和规则必须写成「铺满式捕获」:Monarch 要求 actions 与捕获组
 //      1:1 且各组无缝铺满整条匹配,照搬 TextMate 的 `(?i:(ON)[ \t]+(ACTION))…`(其中
 //      `(?i:…)` 是非捕获组)会在词法期抛 matched number of groups does not match。
+//
+// 另有一个**移植陷阱**(不是引擎差异,是照抄 TextMate JSON 时的笔误):字符串里的转义规则是
+// `\\.`(反斜杠 + **一个**字符),不是 `\\..`(反斜杠 + 两个字符)。JSON 里写作 "\\\\.",
+// 直译成 JS 正则字面量时多留一个点,`"a=\""` 里的 `\` `"` `"` 就被整段当转义吃掉,
+// 字符串闭合位置跟着全错;`"\n"` 更会把字符串状态漏到后面每一行 —— 实测一个 1.4 万行的
+// 文件因此丢掉约三分之一的 keyword token(同一份文件在 BDL 侧不受影响,渲染正常)。
 
 /**
  * BDL 关键字表:逐字照抄 BDL `syntaxes/bdl.tmLanguage.json` 的 keyword.bdl match(1966 字符)。
@@ -87,21 +93,21 @@ export const FGL_MONARCH = {
     ],
     // %"…" 本地化字符串:内部规则必须显式重申 string(Monarch 无 scope 栈)
     loc: [
-      [/\\../, 'string'],
+      [/\\./, 'string'],
       [/""/, 'string'],
       [/"/, { token: 'string', next: '@pop' }],
       [/./, 'string'],
     ],
     // '…':内部 '' 是字面引号,故闭合引号判定为「后面不再跟一个 '」
     sq: [
-      [/\\../, 'string'],
+      [/\\./, 'string'],
       [/''/, 'string'],
       [/'/, { token: 'string', next: '@pop' }],
       [/./, 'string'],
     ],
     // "…":同上,内部 "" 是字面引号
     dq: [
-      [/\\../, 'string'],
+      [/\\./, 'string'],
       [/""/, 'string'],
       [/"/, { token: 'string', next: '@pop' }],
       [/./, 'string'],

@@ -91,6 +91,11 @@ const BATTERY = [
   { line: '&include "x.4gl"', kw: [], note: '同上' },
   { line: "LET s = 'it''s ok'", kw: ['LET'], note: '成对引号是字面引号:整对是一个字符串', str: [8, 18] },
   { line: 'cl_replace_str(x, \'\\\'\', \'\')', kw: [], note: "转义引号 '\\'' 不能让引号状态跑飞" },
+  // 转义规则的经典笔误:写成 `\\..`(反斜杠 + **两个**字符)时,`\"` 后面那个闭合引号会被一起吃掉,
+  // 于是「引号之后的代码」被并进字符串 —— 关键字成片丢色。行内断言 + ④ 的跨行状态断言各钉一半。
+  { line: 'LET x = f("a=\\"" || y CLIPPED || "\\"]")', kw: ['LET', 'CLIPPED'], note: '转义引号之后仍是代码:CLIPPED 照常染色' },
+  { line: 'LET s = "a=\\""', kw: ['LET'], note: '转义引号收尾的串', str: [8, 14] },
+  { line: 'LET p = "<?xml version=\\"1.0\\" encoding=\\"UTF-8\\"?>"', kw: ['LET'], note: 'XML 串里的成对转义引号' },
   { line: '%"localized"', kw: [], note: '%" 本地化字符串', str: [0, 12] },
   { line: '`raw \\n text`', kw: [], note: '反引号原始字符串(不处理转义)', str: [0, 13] },
   { line: "-- it's a comment", kw: [], note: '-- 注释里的撇号不开字符串', cmt: [0, 17] },
@@ -164,6 +169,32 @@ if (cur !== base) {
 } else {
   console.log(`  ✅ 与基线一致(${UNBALANCED_BASELINE.length} 个未闭合片段)`)
 }
+
+/* ------------------------------ ④ 转义不得漏状态 ------------------------------ */
+// 行内断言管不了"状态漏到后面每一行":`"\n"` 这种串一旦被 `\\..` 那类笔误吃掉结尾引号,
+// 后面整片代码都会被当成字符串(实测一份 1.4 万行的文件因此丢掉约三分之一 keyword)。
+// 这里逐行喂,再拿一行哨兵验:跑完含转义的行之后必须已经回到根状态。
+console.log('\n④ 转义不漏状态')
+const ESCAPE_LINES = [
+  'LET l_strEnd = " end at ", CURRENT HOUR TO FRACTION(3), "\\n"',
+  'LET p = "<?xml version=\\"1.0\\" encoding=\\"UTF-8\\" standalone=\\"no\\"?>"',
+  'LET s = "a\\\\"',
+  'LET s = "\\""',
+  "LET s = 'it''s'",
+]
+let leaked = 0
+for (const line of ESCAPE_LINES) {
+  const r = await t.tokenize(line, false, state0)
+  // 哨兵必须是**没有关键字、也不会自成注释**的一行:状态若漏出去,它会被整行染成 string
+  const SENT = 'zzsentinelafterescape zz'
+  const sent = await t.tokenize(SENT, false, r.endState)
+  const dirty = spans(sent.tokens, SENT).map((s) => s.kind).filter((k) => k !== '')
+  if (dirty.length) {
+    leaked++
+    bad(`状态漏到下一行: ${JSON.stringify(line)} → 哨兵被染成 ${dirty.join(',')}`)
+  }
+}
+if (!leaked) console.log(`  ✅ ${ESCAPE_LINES.length} 种转义写法跑完都回到根状态(哨兵干净)`)
 
 console.log(fail === 0 ? '\n✅ 全部通过' : `\n${fail} 处失败`)
 process.exit(fail === 0 ? 0 : 1)
