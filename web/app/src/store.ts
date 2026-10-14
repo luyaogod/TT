@@ -164,6 +164,8 @@ interface Store {
   // 会话管理(右侧「会话」sheet):切换/重启/结束常驻会话(会先结束当前 debug)
   sessionOp: (op: 'close' | 'restart' | 'switch', env?: string) => Promise<void>
   syncFromSessions: () => Promise<void>
+  // 停站态到了但本地不知道停在哪时的兜底(入口停站只发 state,没有 stopped 事件)
+  syncStopFromSnapshot: () => Promise<void>
 }
 
 let snapTimer: number | undefined
@@ -190,6 +192,47 @@ function isRetiringTeardown(ev: Event): boolean {
   if (!retireID || ev.sessionId !== retireID) return false
   if (retireUntil && Date.now() >= retireUntil) { retireID = null; return false }
   return ev.type === 'dead' || (ev.type === 'state' && (ev.state === 'idle' || ev.state === 'exit'))
+}
+
+// 会话模式归一:solo(纯人工)| collab(协作,AI 主导)。
+// 列表、快照两条路都要落同一个值:少落一处,界面就按旧模式收敛写操作 ——
+// 典型表现是 AI 起的协作会话在界面上显示成"交给 AI"(当前纯人工),命令框还可写。
+function modeOf(m?: string): 'solo' | 'collab' {
+  return m === 'collab' ? 'collab' : 'solo'
+}
+
+// adoptFromServer 按服务端现状认领会话(单飞)。
+//
+// 两个调用点:① 本地还没绑定,而事件带着会话 id —— 那是**别人**刚建的会话
+// (典型:AI 从 CLI 起的调试,而这个页面一直开着);② 本地绑的那个在服务端已经没了。
+// 不让调用方自己 set():绑定要连 id、状态、快照、源码、模式一起对齐,那份实现只有
+// syncFromSessions 一处,复制第二份必然与它漂移。
+let adopting = false
+function adoptFromServer() {
+  if (adopting) return
+  adopting = true
+  void useStore.getState().syncFromSessions().finally(() => { adopting = false })
+}
+
+// 本地绑的会话被换掉时,别每个事件都去问一次服务端(一次 list 是一次网络往返):
+// 攒到一个窗口后再问,由它决定要不要重绑。窗口内的后续事件照常进时间线,不丢信息。
+let rebindTimer: number | undefined
+const REBIND_CHECK_MS = 1500
+
+function scheduleRebindCheck() {
+  if (rebindTimer) return
+  rebindTimer = window.setTimeout(() => {
+    rebindTimer = undefined
+    const bound = useStore.getState().sessionId
+    void api.list()
+      .then(({ sessions }) => {
+        if (!useStore.getState().sessionId) { adoptFromServer(); return }
+        // 本地绑的那个已经不在服务端了(被换掉/已断开)→ 按服务端现状重绑;
+        // 还在就什么都不做 —— 那只是收口期旧会话的迟到事件(见 isRetiringTeardown)。
+        if (!sessions.some((x) => x.id === bound)) adoptFromServer()
+      })
+      .catch(() => { /* 问不到就保持现状:重连与下一次事件还会再来 */ })
+  }, REBIND_CHECK_MS)
 }
 
 function now() { return new Date().toLocaleTimeString('zh-CN', { hour12: false }) }
@@ -355,7 +398,27 @@ export const useStore = create<Store>((set, get) => ({
 
   onEvent: (ev) => {
     const st = get()
-    if (st.sessionId && ev.sessionId && ev.sessionId !== st.sessionId) return
+    // 本地还没绑定,而事件带着会话 id:有人(典型是 AI 从 CLI)刚建了会话。认领它 ——
+    // 不认领的话,协议流与状态栏照常动,而编辑器永远转圈、命令框永远"需停站后才能发送命令"、
+    // 会话卡也不出现:看起来只是"实时性不好",其实是根本没绑定。
+    //
+    // 先**同步**绑上 id,再让 syncFromSessions 去对齐模式/环境/快照/源码:同一批后续事件
+    // (state/stopped)的处理都依赖 sessionId,而"停站→取源码"的落位是延迟 150ms 的回调 ——
+    // 等对齐那次网络往返回来才绑,这条路会在未绑定状态空跑,编辑器就停在空白上(实测)。
+    //
+    // 护栏 launching:本页面正在启动/重放时,新会话的事件常常**先于**HTTP 响应到达,
+    // 此时 sessionId 也还是 null。那种"未绑定"是启动流程的正常中间态,由 launch() 自己
+    // 收口(它点下即置 loadingSource,不能被一次对齐清掉);认领只服务"别人建的会话"。
+    if (ev.sessionId && !st.sessionId && !st.launching) {
+      set({ sessionId: ev.sessionId })
+      adoptFromServer()
+    }
+    if (st.sessionId && ev.sessionId && ev.sessionId !== st.sessionId) {
+      // 本地绑的这个可能已经被换掉了(后端是单会话:新会话起来前旧的先收口)。
+      // 盲信本地会让界面冻在旧会话上,而协议流全是新会话的 —— 让服务端现状说话。
+      scheduleRebindCheck()
+      return
+    }
     // 刚点重放/重新开始:旧会话的收尾事件不得清掉新会话的加载态(见 retireID 注释)
     if (isRetiringTeardown(ev)) return
     // 序号去重:开场补发与流式之间可能重叠(服务端注释里说明了这点),
@@ -375,6 +438,9 @@ export const useStore = create<Store>((set, get) => ({
           if (get().stackAuto) void get().refreshFrames()
           void get().refreshWatches()
           startHoldTimer(set, get)
+          // 入口停站(程序还没 run)只发 state=stopped,**没有 stopped 事件** ——
+          // 停站位置只在快照里。少了这一句,刚绑上会话的页面会停在"已停站但编辑器空白"。
+          void get().syncStopFromSnapshot()
         }
         if (ev.state === 'running' || ev.state === 'idle' || ev.state === 'exit') {
           if (snapTimer) { clearInterval(snapTimer); snapTimer = undefined }
@@ -726,7 +792,7 @@ export const useStore = create<Store>((set, get) => ({
         holdingSeconds: snap.holdingSeconds || 0,
         sessionEnv: snap.env || get().sessionEnv,
         // 谁在驾驶 + 正在执行哪条命令(界面按它收敛写操作、显示 inflight)
-        mode: snap.mode === 'collab' ? 'collab' : 'solo',
+        mode: modeOf(snap.mode),
         inflight: snap.inflight || null,
         // 免模块启动时后端会按作业名解析模块,回读给前端(源码兜底路径依赖它)
         module: snap.module || get().module,
@@ -1034,7 +1100,7 @@ export const useStore = create<Store>((set, get) => ({
       const { sessions } = await api.list()
       if (!sessions.length) return
       const s = sessions[0]
-      set({ sessionId: s.id, module: s.module, prog: s.prog, runProg: s.runProg || s.prog, state: s.state, sessionEnv: s.env || '' })
+      set({ sessionId: s.id, module: s.module, prog: s.prog, runProg: s.runProg || s.prog, state: s.state, sessionEnv: s.env || '', mode: modeOf(s.mode) })
       if (s.state === 'idle') {
         // 空闲宿主(idle):仅接管绑定,不刷源码;等下一次启动直接复用
         get().pushTimeline({ origin: 'system', kind: 'info', text: `会话空闲(环境 ${s.env || '默认'}),可直接启动调试` })
@@ -1046,8 +1112,14 @@ export const useStore = create<Store>((set, get) => ({
         stop: snap.stop, breakpoints: snap.breakpoints || [],
         started: !!snap.started,
         currentLine: snap.stop?.line ?? 0, holdingSeconds: snap.holdingSeconds || 0,
+        // 快照里的模式比列表更新(接管期间可能刚被切换过)
+        mode: modeOf(snap.mode),
       })
-      if (snap.state === 'stopped') await get().refreshSource(snap.stop?.file)
+      if (snap.state === 'stopped') {
+        await get().refreshSource(snap.stop?.file)
+        // 停着的会话接管进来也要让"停留 Xs"走起来(否则它永远停在接管那一秒)
+        if (!snapTimer) startHoldTimer(set, get)
+      }
       if (get().stackAuto) void get().refreshFrames()
       void get().refreshWatches()
       alignAutoPrefs(set, get) // 重连接管:自动变量开关对齐 + 补拉最近一次求值结果
@@ -1088,7 +1160,7 @@ export const useStore = create<Store>((set, get) => ({
       }
       set({
         sessionId: s0.id, module: s0.module, prog: s0.prog, runProg: s0.runProg || s0.prog,
-        sessionEnv: s0.env || '', state: s0.state,
+        sessionEnv: s0.env || '', state: s0.state, mode: modeOf(s0.mode),
       })
       if (s0.state === 'idle' || s0.state === 'loading') {
         set({ ...clearRun, loadingSource: false })
@@ -1103,11 +1175,29 @@ export const useStore = create<Store>((set, get) => ({
         // 接管路径永远空白(只有行号 1);同样兜底的 pollUntilStopped 传的是 undefined,
         // 两条路径对"要不要加载"的判断不一致。统一成"有停站就加载"。
         if (snap.stop) void get().refreshSource(snap.stop.file, snap.stop.line)
+        // 停着的会话对齐进来同样要让"停留 Xs"走起来(syncFromSessions 开头已清掉轮询)
+        startHoldTimer(set, get)
         if (get().stackAuto) void get().refreshFrames()
         void get().refreshWatches()
         alignAutoPrefs(set, get) // 会话切换/重连后把自动变量开关对齐到新会话
       }
     } catch { /* list/snapshot 失败:保持现状 */ }
+  },
+
+  // 停站态到了,但本地没有停站位置:去快照问一次,并把它落到编辑器上。
+  //
+  // 为什么需要:停站有两条上报路 —— `stopped` 事件(带位置)与 `state=stopped`(只报状态)。
+  // **入口停站只有后者**(程序还没 run,没有源码行可报),位置在快照里。于是"AI 起好会话、
+  // 页面随后绑上"这条路上,页面拿到的是"已停站 + 空白编辑器":命令框又说"需停站后才能发送命令"。
+  // 判据是 stop 是否已知 —— 正常断点停站走 stopped 事件,这里会在第一行早退,不多打一次往返。
+  syncStopFromSnapshot: async () => {
+    const st = get()
+    if (!st.sessionId || st.state !== 'stopped' || st.stop) return
+    await get().refreshSnapshot()
+    const cur = get()
+    if (cur.stop && (cur.stop.file !== cur.sourceDVM || cur.sourceMissing)) {
+      await cur.refreshSource(cur.stop.file, cur.stop.line)
+    }
   },
 }))
 

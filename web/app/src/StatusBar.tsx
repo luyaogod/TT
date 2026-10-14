@@ -36,7 +36,8 @@ export function StatusBar() {
   let msg: string | null = null
   let title = ''
   if (state === 'stopped') {
-    const loc = stop?.file ? `${stop.file}:${stop.line}` : ''
+    // 入口停站只报文件、没有行号(程序还没 run):别拼出 "x.4gl:undefined"
+    const loc = stop?.file ? (stop.line ? `${stop.file}:${stop.line}` : stop.file) : ''
     bar = 'bg-[#cc6633] text-white'
     msg = `已停站${loc ? ` ${loc}` : ''} · 停留 ${Math.round(hold)}s`
     title = '程序已暂停,可查看变量/下断点/继续'

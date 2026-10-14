@@ -176,4 +176,104 @@ for (const fn of pending.splice(0)) await fn()
 assert.equal(S().loadingSource, false, '去抖走"同文件只落光标"分支时也必须收掉加载态')
 console.log('OK 10) 停站落位不再把加载态永久留在界面上')
 
-console.log('\n全部通过: 10/10')
+// ---------- 11) 别人建的会话的会话必须被"开着的页面"认领 ----------
+//
+// 场景:页面一直开着,这时 AI 从 CLI 起了调试。事件带着 sessionId 一路到来,
+// 而本地 sessionId 还是 null —— 不认领的话:协议流与状态栏照常动,编辑器却永远转圈、
+// 命令框永远"需停站后才能发送命令"、会话卡也不出现。看起来只是"实时性不好",
+// 其实是根本没绑定(会话模式 collab 也跟着丢,界面会按纯人工收敛写操作)。
+let listCalls = 0
+globalThis.fetch = async (url) => {
+  const u = String(url)
+  if (u.endsWith('/sessions')) {
+    listCalls++
+    return {
+      ok: true, status: 200,
+      json: async () => ({
+        ok: true,
+        sessions: [{
+          id: 'sess-ai', module: 'ain', prog: 'aint302_wf', runProg: 'aint302_wf',
+          state: 'stopped', env: '尚阳通', mode: 'collab', holdingSeconds: 7, breakpoints: 2, watchdogSeconds: 1800,
+        }],
+      }),
+    }
+  }
+  if (u.includes('/sessions/sess-ai/source')) {
+    return {
+      ok: true, status: 200,
+      json: async () => ({ ok: true, source: { path: '/u1/topprd/erp/cin/cin_aint302_wf.4gl', content: 'MAIN\nEND MAIN' } }),
+    }
+  }
+  if (u.includes('/sessions/sess-ai')) {
+    return {
+      ok: true, status: 200,
+      json: async () => ({
+        ok: true, id: 'sess-ai', module: 'ain', prog: 'aint302_wf', runProg: 'aint302_wf',
+        state: 'stopped', env: '尚阳通', mode: 'collab', holdingSeconds: 7, breakpoints: [],
+        stop: { reason: 'breakpoint', file: 'cin_aint302_wf.4gl', line: 24014, func: 'aint302_send' },
+      }),
+    }
+  }
+  return { ok: true, status: 200, json: async () => ({ ok: true }) }
+}
+
+const settle = async (n = 20) => { for (let i = 0; i < n; i++) await Promise.resolve() }
+
+useStore.setState({
+  sessionId: null, state: '', mode: 'solo', stop: null, currentLine: 0, launching: false,
+  sourceDVM: '', sourceMissing: false, sourceContent: '', loadingSource: false,
+})
+
+// 同一批到来的三个事件(启动 → 停站):本地还没绑定,必须只对齐一次(单飞)
+S().onEvent({ type: 'ai_action', sessionId: 'sess-ai', action: 'session.launch', text: '启动调试 ain/aint302_wf' })
+S().onEvent({ type: 'state', sessionId: 'sess-ai', state: 'stopped' })
+S().onEvent({ type: 'stopped', sessionId: 'sess-ai', stop: { reason: 'breakpoint', file: 'cin_aint302_wf.4gl', line: 24014 } })
+await settle()
+
+assert.equal(S().sessionId, 'sess-ai', '开着页面上出现的会话必须被认领(否则编辑器永远转圈、命令框永远不可用)')
+assert.equal(S().state, 'stopped')
+assert.equal(S().mode, 'collab', '协作模式要跟着会话进来(否则界面按纯人工放开写操作)')
+assert.equal(S().stop?.line, 24014)
+assert.equal(S().sourceContent, 'MAIN\nEND MAIN', '认领要把源码一起对齐,不是只填一个 id')
+assert.equal(listCalls, 1, '同一批事件只对齐一次,别每个事件都打一次服务端')
+console.log('OK 11) 开着页面上别人建的会话被认领:id/状态/模式/源码一起对齐,且只对齐一次')
+
+// ---------- 12) 入口停站只有 state=stopped,位置要从快照补 ----------
+//
+// 程序还没 run 的入口停站**不发 stopped 事件**(没有源码行可报),位置只在快照里。
+// 于是"AI 起好会话、页面随后绑上"这条路拿到的是"已停站 + 空白编辑器",而命令框还写着
+// "需停站后才能发送命令"。判据是"停站态到了却不知道停在哪"→ 去快照问一次并落到编辑器。
+useStore.setState({
+  sessionId: 'sess-entry', state: '', mode: 'solo', stop: null, launching: false,
+  sourceDVM: '', sourceMissing: false, sourceContent: '', loadingSource: false,
+})
+globalThis.fetch = async (url) => {
+  const u = String(url)
+  if (u.includes('/sessions/sess-entry/source')) {
+    return {
+      ok: true, status: 200,
+      json: async () => ({ ok: true, source: { path: '/u1/t35prd/erp/asf/4gl/bsft001_wf.4gl', content: 'TYPE\n\nMAIN\n  DISPLAY 1\nEND MAIN' } }),
+    }
+  }
+  if (u.includes('/sessions/sess-entry')) {
+    return {
+      ok: true, status: 200,
+      json: async () => ({
+        ok: true, id: 'sess-entry', module: 'asf', prog: 'bsft001_wf', runProg: 'bsft001_wf',
+        state: 'stopped', env: '主机109', mode: 'solo', holdingSeconds: 2, breakpoints: [],
+        // 入口停站:有文件、没有行号
+        stop: { reason: 'entry', file: 'asf_bsft001_wf.4gl' },
+      }),
+    }
+  }
+  return { ok: true, status: 200, json: async () => ({ ok: true }) }
+}
+S().onEvent({ type: 'state', sessionId: 'sess-entry', state: 'stopped' })
+await settle(30)
+assert.equal(S().state, 'stopped')
+assert.equal(S().sourceDVM, 'asf_bsft001_wf.4gl', '入口停站也必须把源码取回来(否则编辑器空白)')
+assert.ok(S().sourceContent.length > 0, '源码内容要落到编辑器上')
+assert.equal(S().currentLine, 3, '入口停站应跳到 MAIN 首条语句(第 3 行)')
+console.log('OK 12) 入口停站(无 stopped 事件)从快照补齐位置与源码')
+
+console.log('\n全部通过: 12/12')
