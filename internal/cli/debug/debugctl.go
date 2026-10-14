@@ -50,6 +50,10 @@ var (
 	dbgSQLFile string // sql --file:从本地文件读语句(不是远端 @)
 	dbgSQLEnt  int    // sql --ent:显式指定企业编号(默认取会话 TOPENT)
 	dbgEnvFlag string // start/wsdebug --env:这次启动要连哪个环境(权威;空=回落全局 --env/当前环境)
+	// dbgFGLServer 是 start/wsdebug --fglserver:这一轮作业画面画到哪儿(FGLSERVER)。
+	// 空串有语义("本轮交回 T100 自动设置"),所以判定一律用 cmd.Flags().Changed,
+	// 绝不能写成 `if dbgFGLServer != ""`。
+	dbgFGLServer string
 
 	wsShow         string   // wslogs --show <rowid>:只看这一条的报文
 	wsSaveReq      string   // wslogs --show --save-request:把请求原文另存一份(改完再 --request-file)
@@ -213,7 +217,11 @@ type dbgSnapView struct {
 	Topent   string `json:"topent"`
 	TopentCf string `json:"topentCfg"`
 	TopentSh string `json:"topentShell"`
-	Stop     *struct {
+	// FGLServer 本轮 FGLSERVER 覆盖值(空 = 由 T100 按 SSH 来源 IP 自动设置);
+	// ScreenTarget 是服务端给的同一件事的人话版本(见 debug.ScreenTarget)。
+	FGLServer    string `json:"fglserver"`
+	ScreenTarget string `json:"screenTarget"`
+	Stop         *struct {
 		File   string `json:"file"`
 		Line   int    `json:"line"`
 		Func   string `json:"func"`
@@ -336,25 +344,20 @@ var debugStartCmd = &cobra.Command{
 --env <环境名> 指定这次连哪个环境(等价 --ssh);不给则用服务端当前环境。
 点名了环境而实际没生效时会**明确告警**——同一台机器上可以有多个环境指向同一个库
 (只有企业编号不同),那种情况下"上错了号"与"配置真的缺失"表现完全一样:
-按企业编号取的数全返回 0 行。输出末尾的「生效身份」一行就是用来分开这两件事的。`,
+按企业编号取的数全返回 0 行。输出末尾的「生效身份」一行就是用来分开这两件事的。
+
+--fglserver <ip:port> 覆盖**这一轮**的 FGLSERVER(作业界面画到哪),不动配置文件。
+默认由 T100 按 SSH 来源 IP 自动设置,也就是回你本机的 GDC;要做 fep 无头前端
+(tt fep fe,听 7700)之类的实验时用 --fglserver <本机IP>:1300 传这一轮,
+别再去改全局配置 —— 改了之后每一次放行都不会有画面,而且启动输出不会提这件事。`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		target := dbgTargetEnv()
 		body := map[string]any{"prog": args[0]}
 		if dbgModule != "" {
 			body["module"] = dbgModule
 		}
-		if dbgZone != "" {
-			body["zone"] = dbgZone
-		}
-		// --ssh 是环境名的历史叫法:两条并存时以 --ssh 为准(它就是为这件事存在的)。
-		switch {
-		case dbgSSHName != "":
-			body["ssh"] = dbgSSHName
-			target = dbgSSHName
-		case target != "":
-			body["ssh"] = strings.TrimSpace(target)
-		}
+		target := dbgWireOverrides(cmd, body)
+		fglChanged := cmd.Flags().Changed("fglserver")
 		// 复用痕迹:启动前记下那个空闲会话,回包 sessionId 与它相同就是"复用了宿主"。
 		// 不标出来的话,"我并没有真正新建会话"这件事在输出里毫无痕迹(反馈 S1-④)。
 		prevID := ""
@@ -378,21 +381,90 @@ var debugStartCmd = &cobra.Command{
 		if snap != nil {
 			snap.Reused = reused
 		}
+		// 点了 --fglserver 就要认账(旧服务端不认这个字段时是静默忽略的)
+		screenErr := dbgScreenVerify(dbgFGLServer, fglChanged, snap)
 		// JSON 模式:把身份字段并进同一个快照对象,不另打散的行,别破坏 jq 取字段的习惯。
 		if IsJSON() {
 			applyIdentityTo(raw, snap)
-			return dbgJSONOut(raw)
+			if err := dbgJSONOut(raw); err != nil {
+				return err
+			}
+			return screenErr
 		}
 		if err := dbgJSONOut(raw); err != nil {
 			return err
 		}
 		fmt.Println(dbgIdentity(snap))
+		if line := dbgScreenLine(snap); line != "" {
+			fmt.Println(line)
+		}
 		if !dbgVerifyEnv(target, snap) {
 			// 点名的环境没生效:不是"成功跑起来了" —— 调用方得知道这一轮不可信。
 			return fmt.Errorf("--env %s 未生效(实际 %s),本轮调试的环境不对", target, orPlain(snap.Env))
 		}
-		return nil
+		return screenErr
 	},
+}
+
+// dbgWireOverrides 把"这一轮怎么接线"的三件套(环境 / 区域 / FGLSERVER)填进请求体,
+// 并回出这次点名的环境名(用于事后核对 --env 有没有真的生效)。
+//
+// 三个开关的语义一致:给了就是权威,服务端不猜、不回落。差别只在 FGLSERVER 的
+// 空串有语义 —— "本轮交回 T100 按 SSH 来源 IP 自动设置",所以必须按 Changed 判,
+// 不能按值判空(按值判空的话,这个最好用的动作恰恰做不到)。
+func dbgWireOverrides(cmd *cobra.Command, body map[string]any) string {
+	target := dbgTargetEnv()
+	if dbgZone != "" {
+		body["zone"] = dbgZone
+	}
+	// --ssh 是环境名的历史叫法:两条并存时以 --ssh 为准(它就是为这件事存在的)。
+	switch {
+	case dbgSSHName != "":
+		body["ssh"] = dbgSSHName
+		target = dbgSSHName
+	case target != "":
+		body["ssh"] = strings.TrimSpace(target)
+	}
+	if cmd.Flags().Changed("fglserver") {
+		body["fglserver"] = dbgFGLServer
+	}
+	return target
+}
+
+// dbgScreenLine 回"这一轮画面去哪"那一行(服务端已经算好人话,这里只做兜底与回显)。
+//
+// 为什么要单独打这一行:画面去哪是静默的 —— 被填错时程序照常启动、照常停站,
+// 只是放行之后什么都不弹,看起来像卡死。实测事故就是配置里留着 fep 的值
+// (10.1.25.33:1300 → 前端 7700),放行后 GDC 一片空白而启动输出只字未提。
+func dbgScreenLine(snap *dbgSnapView) string {
+	if snap == nil {
+		return ""
+	}
+	if snap.ScreenTarget != "" {
+		return snap.ScreenTarget
+	}
+	if snap.FGLServer != "" {
+		return "画面去向: FGLSERVER=" + snap.FGLServer + "(本轮覆盖)"
+	}
+	return ""
+}
+
+// dbgScreenVerify 点了 --fglserver 就必须认账,没认账就判失败。
+//
+// 为什么非要有这一条:服务端**不认识的请求字段会被静静忽略**。用新 CLI 对着没重启的
+// 旧服务端传 --fglserver,画面还留在老地方,而输出里没有任何痕迹 —— 那正是这次事故的
+// 形状:以为自己改了接线、实际没改,于是往"GDC 是不是坏了"的方向一路查下去。
+func dbgScreenVerify(want string, changed bool, snap *dbgSnapView) error {
+	if !changed || snap == nil {
+		return nil
+	}
+	if strings.TrimSpace(snap.FGLServer) == strings.TrimSpace(want) {
+		return nil
+	}
+	fmt.Fprintf(os.Stderr, "⚠ --fglserver %q 未生效:本轮会话用的是 %q\n", want, snap.FGLServer)
+	fmt.Fprintf(os.Stderr, "  多半是对面的服务端还没重启(它不认这个字段时会静静忽略):\n")
+	fmt.Fprintf(os.Stderr, "  tt serve --stop; tt serve   然后重发这一轮\n")
+	return fmt.Errorf("--fglserver %q 未生效(实际 %q),本轮画面去向不对", want, snap.FGLServer)
 }
 
 // dbgReusedHost 这次 start 是"复用了启动前那个空闲会话"吗。
@@ -1430,21 +1502,12 @@ tt debug topent <企业编号> 改。`,
 		if err != nil {
 			return err
 		}
-		target := dbgTargetEnv()
 		body := map[string]any{"rowid": rowid}
 		if reqOverride != "" {
 			body["request"] = reqOverride
 		}
-		if dbgZone != "" {
-			body["zone"] = dbgZone
-		}
-		switch {
-		case dbgSSHName != "":
-			body["ssh"] = dbgSSHName
-			target = dbgSSHName
-		case target != "":
-			body["ssh"] = strings.TrimSpace(target)
-		}
+		target := dbgWireOverrides(cmd, body)
+		fglChanged := cmd.Flags().Changed("fglserver")
 		data, err := dbgAPI("POST", "/api/wslogs/debug", body)
 		if err != nil {
 			return err
@@ -1464,18 +1527,26 @@ tt debug topent <企业编号> 改。`,
 			return err
 		}
 		snap := dbgSnapOf(raw)
+		// 点了 --fglserver 就要认账(旧服务端不认这个字段时是静默忽略的)
+		screenErr := dbgScreenVerify(dbgFGLServer, fglChanged, snap)
 		if IsJSON() {
 			applyIdentityTo(raw, snap)
-			return dbgJSONOut(raw)
+			if err := dbgJSONOut(raw); err != nil {
+				return err
+			}
+			return screenErr
 		}
 		if !IsJSON() {
 			printTopentContext(raw)
 			fmt.Println(dbgIdentity(snap))
+			if line := dbgScreenLine(snap); line != "" {
+				fmt.Println(line)
+			}
 		}
 		if !dbgVerifyEnv(target, snap) {
 			return fmt.Errorf("--env %s 未生效(实际 %s),本次重放的环境不对", target, orPlain(snap.Env))
 		}
-		return dbgJSONOut(raw)
+		return screenErr
 	},
 }
 
@@ -1517,6 +1588,12 @@ func init() {
 	debugStartCmd.Flags().StringVar(&dbgEnvFlag, "env", "", "环境名(等价 --ssh;不给则用服务端当前环境)。同机多环境时务必点名")
 	debugWsdebugCmd.Flags().StringVar(&dbgEnvFlag, "env", "", "环境名(等价 --ssh;不给则用服务端当前环境)。重放必须落在日志所在的那个环境上")
 	debugWsdebugCmd.Flags().StringVar(&dbgSSHName, "ssh", "", "环境名(--env 的别名)")
+	// --fglserver 是"这一轮画面去哪"的单轮覆盖:从前只能改全局 config.debug.fglserver,
+	// 于是做一次 fep 无头前端实验就把调试的画面接线顶掉了,而且静默(见 dbgScreenLine)。
+	fglHelp := "本轮作业画面画到哪(FGLSERVER ip:port)。端口 = 前端监听端口-6400:GDC 默认听 7400 → 用 :1000;" +
+		"tt fep fe 无头前端听 7700 → :1300。留空串 = 本轮交回 T100 按 SSH 来源 IP 自动设置;不给 = 用配置值"
+	debugStartCmd.Flags().StringVar(&dbgFGLServer, "fglserver", "", fglHelp)
+	debugWsdebugCmd.Flags().StringVar(&dbgFGLServer, "fglserver", "", fglHelp)
 	debugWslogsCmd.Flags().StringVar(&wsService, "service", "", "服务名称 wsfa001(支持 * ? 通配)。是 oa.schema.data.get 这类反域名,不是作业名")
 	debugWslogsCmd.Flags().StringVar(&wsJob, "job", "", "作业编号 wsfa012(支持 * ? 通配,如 wssp01131 / wssp*)—— 按「哪个作业」找日志的入口")
 	debugWslogsCmd.Flags().StringVar(&wsServer, "server", "", "服务端 wsfa018(等值,如 T100)")

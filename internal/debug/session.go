@@ -375,6 +375,38 @@ func (s *Session) ZoneNow() string {
 	return s.cfg.Zone
 }
 
+// FGLServer 读**本轮**生效的 FGLSERVER 覆盖值(空 = 未覆盖,由 T100 按 SSH 来源 IP 自动设置)。
+//
+// 与 EnvNameNow 同理:会话跨轮次,SetRun 会把本轮的配置刷进来,所以它回答的是
+// "这一轮启动时导出的是什么",而不是会话创建那一刻的值。
+func (s *Session) FGLServer() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cfg == nil {
+		return ""
+	}
+	return s.cfg.FGLServer
+}
+
+// ScreenTarget 用一句人话说明"这一轮作业界面会画到哪儿"。
+//
+// 为什么单独立一句:FGLSERVER 是"界面去哪"的**唯一**开关,而它是**静默**的 ——
+// 被填错、或被别的实验(如 fep 的无头前端)顶掉时,程序照常启动、照常停站,
+// 只是放行之后什么界面都不出现:看起来像卡死、像调试坏了,唯独不像"接线错了"。
+// 实测代价:配置里留着 fep 的值 10.1.25.33:1300,放行后 GDC 一片空白,而启动输出
+// 一个字都没提画面去哪了。所以这句话由服务端统一生成,事件日志与 CLI 都用它,
+// 免得两处措辞不一致。
+//
+// 端口约定(FGLSERVER 的数值 = 前端监听端口 - 6400,实测):GDC 默认听 7400 → 填 1000;
+// fep 的隔离代理听 7600 → 1200;`tt fep fe` 无头前端听 7700 → 1300。
+func ScreenTarget(fglserver string) string {
+	if v := strings.TrimSpace(fglserver); v != "" {
+		return "画面去向: FGLSERVER=" + v + "(本轮覆盖) —— 端口应等于前端监听端口 - 6400:" +
+			"GDC 默认听 7400 所以填 1000;填 1300 是 fep 无头前端(tt fep fe),画面不会出现在 GDC 上"
+	}
+	return "画面去向: 未覆盖 FGLSERVER —— 由 T100 按 SSH 来源 IP 自动设置(默认回本机 GDC)"
+}
+
 // sameConn 判断另一配置是否指向**同一台机器同一区域**(host/port/user/zone 全同)。
 // 它只回答"连接能不能复用",不回答"是不是同一个环境" —— 同机多环境(同库不同
 // 企业)在这四样上完全一样,判环境必须用 sameEnvAs。
@@ -599,6 +631,9 @@ func (s *Session) startRun(ctx context.Context, launchProg string) error {
 	if s.cfg.FGLServer != "" {
 		setup += "export FGLSERVER=" + s.cfg.FGLServer + "\r\n"
 	}
+	// 画面去哪必须**显式说出来**:接线错了的表现是"放行之后什么都不弹",与程序卡死
+	// 在界面上无法区分,而启动段本身不会报任何错(见 ScreenTarget 的注释)。
+	s.emitEvent(Event{Type: "log", Text: ScreenTarget(s.cfg.FGLServer)})
 	// TOPENT:会话内手动设置优先,其次配置企业(ENT);都没有则不导出,沿用选区登录默认
 	// (选区输出的是机器默认值如「TOPENT = 99」;作业运行/数据库连接都以 TOPENT 为准)
 	// 连接时(bootHost)已下发过一次,这里再下发是为了覆盖"会话开着时在设置页改了配置"的情况。

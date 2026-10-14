@@ -349,19 +349,29 @@ func (m *Manager) resolveJobWith(cfg *Config, module, job string) (mod, prog, la
 // 报文文件被清理时用 CLOB 内容落到服务器临时文件再重放。
 // 会话复用规则与普通启动一致:同目标空闲宿主直接复用。
 // LaunchReplay 用日志报文重放调试。reqOverride 非空 = 界面里改过的入参(落临时文件后作为 reqPath)。
+// fglserver 非 nil = 本轮 FGLSERVER 覆盖(语义见 Server.launchCfg 与 ScreenTarget)。
 // 返回的 warn 非空表示这次重放用的是入库的截断文本,结果可能不可信(见 WriteReplayFiles)。
-func (m *Manager) LaunchReplay(item *WSLogItem, content *WSLogContent, reqOverride string) (*Session, string, error) {
+func (m *Manager) LaunchReplay(item *WSLogItem, content *WSLogContent, reqOverride string, fglserver *string) (*Session, string, error) {
+	// 本轮启动用的配置快照:只有"单轮 FGLSERVER 覆盖"会改它。
+	// 直接改 m.cfg 会把一次重放的接线留在内存配置里 —— 下一轮(哪怕只是普通启动)
+	// 都还带着它,而画面去哪恰恰是静默的(见 ScreenTarget)。
+	cfg := m.cfg
+	if fglserver != nil {
+		cc := *m.cfg
+		cc.FGLServer = strings.TrimSpace(*fglserver)
+		cfg = &cc
+	}
 	job := strings.TrimSpace(item.Job)
 	if job == "" {
 		return nil, "", fmt.Errorf("该日志没有关联作业编号(wsfa012 为空),无法重放")
 	}
 	module, runProg, launchRef, extra := "", "", "", ""
-	if mod2, prog2, ref2, extra2, rerr := m.resolveJob("", job); rerr != nil {
+	if mod2, prog2, ref2, extra2, rerr := m.resolveJobWith(cfg, "", job); rerr != nil {
 		return nil, "", rerr
 	} else if prog2 != "" {
 		module, runProg, launchRef, extra = mod2, prog2, ref2, extra2
 	}
-	conn, err := host.Dial(m.cfg.SSH)
+	conn, err := host.Dial(cfg.SSH)
 	if err != nil {
 		return nil, "", fmt.Errorf("SSH 连接失败: %w", err)
 	}
@@ -374,18 +384,18 @@ func (m *Manager) LaunchReplay(item *WSLogItem, content *WSLogContent, reqOverri
 	// 对齐 r.dg:报文文件追加在标准参数(BBDL 会话标记等)之后,
 	// cl_wss_init 依 BBDL 标记识别调试模式并重建 g_argv;只传报文会导致 g_argv 为空 → -1
 	q := func(p string) string { return "'" + strings.ReplaceAll(p, "'", "") + "'" }
-	args := strings.ReplaceAll(m.cfg.LaunchArgs, "{prog}", job)
+	args := strings.ReplaceAll(cfg.LaunchArgs, "{prog}", job)
 	args += " " + q(reqPath)
 	if rspPath != "" {
 		args += " " + q(rspPath)
 	}
-	sess, err := m.prepareSession(m.cfg, module, job, runProg, launchRef, extra, args)
+	sess, err := m.prepareSession(cfg, module, job, runProg, launchRef, extra, args)
 	if err != nil {
 		return nil, "", err
 	}
 	// 新的一轮运行:清空上一轮攒下的源码副本(见 srcmirror.go);
 	// "已镜像"记录必须跟着一起清(复用的宿主会话会把它带进下一轮)。
-	clearMirror(m.cfg.DataDir)
+	clearMirror(cfg.DataDir)
 	sess.resetMirrored()
 	// 用了入库的截断文本重放:说清楚,别让人把"程序一路退出"当成 bug 去查
 	if replayWarn != "" {

@@ -26,7 +26,12 @@ tt debug start bsft001_wf -m asf
 # 同机有多个环境(尤其**同一个库、不同企业**那两个)时,必须点名:
 tt debug start bsft001_wf -m asf --env 恒烁正式区
 #   ↑ 也可以用根开关:tt --env 恒烁正式区 debug start …(--ssh 是旧叫法,等价)
-#   输出末尾有一行「生效身份:环境/区域/企业/账号/库」和 reused 痕迹,启动后先看它。
+#   输出末尾有「生效身份:环境/区域/企业/账号/库」「画面去向:…」与 reused 痕迹,启动后先看它们。
+#   「画面去向」= 作业界面画到哪:写着「未覆盖 FGLSERVER」时由 T100 按 SSH 来源 IP 指回你的 GDC;
+#   若它是 FGLSERVER=<ip>:1300,那是 fep 无头前端(tt fep fe),GDC 上不会有任何画面。
+#   做这类前端实验时用单轮开关,别改全局配置:
+#   tt debug start bsft001_wf -m asf --fglserver <本机IP>:1300
+#   --fglserver 留空串 = 本轮交回 T100 自动设置(即"画面回 GDC"),只影响这一轮。
 ```
 # 2. 透传任意 fgldb 标准命令,原样返回输出
 tt debug exec "break 4450"          # 按行下断点

@@ -21,13 +21,21 @@ import (
 // 换成我们自己当那个前端之后，**收什么、发什么、什么时候发**全在我们手里。
 //
 // 接线是现成的（实测）：运行期按 `FGLSERVER 端口 + 6400` 回连前端，
-// 而 internal/debug 的启动器会自动导出 FGLSERVER（session.go:550）。
-// 所以：FGLSERVER 指到 `<我们的IP>:1300` → 它连我们的 7700。
+// 而 internal/debug 的启动器会自动导出 FGLSERVER。
+// 所以：把这一轮的 FGLSERVER 指到 `<我们的IP>:1300` → 它连我们的 7700。
+//
+// **别去改全局配置里的 debug.fglserver 来做这件事**（实测踩过）：那个字段是调试线
+// 唯一的画面接线开关，改了之后每一次调试放行都不会有画面，而且不报错、不提画面去哪了，
+// 看起来就是"调试坏了"。要单轮改接线用启动开关：
+//
+//	tt debug start <作业> -m <模块> --env <环境> --fglserver <本机IP>:1300
+//
+// 跑完这一轮就自然回到默认（T100 按 SSH 来源 IP 自动设置 → 本机 GDC）。
 //
 // 用法（先起前端，再用调试器把作业跑起来）：
 //
 //	tt fep fe listen --port 1300 --ctl 7898          # 起前端（前台；实际用后台跑）
-//	tt debug start apmt500_wf -m apm --env 主机109    # 作业连过来
+//	tt debug start apmt500_wf -m apm --env 主机109 --fglserver <本机IP>:1300
 //	tt fep fe status --ctl 127.0.0.1:7898            # 看连上没有、收了多少
 //	tt fep fe send --ctl 127.0.0.1:7898 'ActionEvent 0{{idRef "3435"}}'
 //
@@ -55,7 +63,11 @@ var feListenCmd = &cobra.Command{
 接线（实测）：运行期按 FGLSERVER 端口 + 6400 回连前端。所以
 
     --port 1300      → 运行期会连到 7700（本进程监听的就是它）
-    FGLSERVER        → 用调试启动器时它自动导出（config 里的 debug.fglserver）
+    FGLSERVER        → 用调试启动器的**单轮开关**传：--fglserver <本机IP>:1300
+
+别去改全局 config 里的 debug.fglserver —— 那个字段是调试线唯一的画面接线开关，
+改了之后每次调试放行都不会有画面(GDC 一片空白)，而且不报错、也不提画面去哪了。
+单轮开关跑完这一轮就自然回到默认（T100 按 SSH 来源 IP 自动设置 → 本机 GDC）。
 
 控制口（--ctl，本地回环）是行协议，与注入口同形态：
     status                    一行 JSON：是否已连、序号、收了多少字节/消息、录制件路径
@@ -76,7 +88,8 @@ var feListenCmd = &cobra.Command{
 		fmt.Printf("  监听      : %s   （运行期按 FGLSERVER 端口+6400 回连到这里）\n", s.Addr())
 		fmt.Printf("  控制口    : %s\n", s.CtlAddr())
 		fmt.Printf("  录制件    : %s\n", s.RecPath())
-		fmt.Printf("  提示      : config 里 debug.fglserver 要指向「本机IP:%d」\n", fePort)
+		fmt.Printf("  提示      : 把这一轮的 FGLSERVER 指到「本机IP:%d」——\n", fePort)
+		fmt.Printf("              用 tt debug start <作业> --fglserver <本机IP>:%d（别改全局配置）\n", fePort)
 		fmt.Printf("  等运行期连入…\n")
 		if err := s.Accept(); err != nil {
 			return fail(exitFailed, "%v", err)

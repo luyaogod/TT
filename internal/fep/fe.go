@@ -19,7 +19,10 @@ import (
 //
 // 关键事实（实测）：运行期按 `FGLSERVER 端口 + 6400` 回连前端。
 // 所以 FGLSERVER 设成 `<我们的IP>:1300`，它就会连到我们监听的 7700。
-// `internal/debug` 的启动器会自动导出 FGLSERVER（session.go:550），接线是现成的。
+// `internal/debug` 的启动器会自动导出 FGLSERVER —— 传法用**单轮开关**
+// （`tt debug start --fglserver <本机IP>:1300`），**不要**去改全局配置里的
+// debug.fglserver：那个字段是调试线唯一的画面接线开关，改了之后每次调试
+// 放行都不会有画面，而且静默（见 debug.ScreenTarget 的注释）。
 //
 // 它做的三件事：
 //  1. 监听 → 收运行期的帧 → 喂给 Model（AUI 折叠）；

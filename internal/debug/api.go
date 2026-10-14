@@ -475,6 +475,10 @@ func (s *Server) hLaunch(w http.ResponseWriter, r *http.Request) {
 		Prog   string `json:"prog"`
 		SSH    string `json:"ssh"`  // 多 SSH 配置名(设置页维护);空 = 默认连接
 		Zone   string `json:"zone"` // 区域覆盖(31/35/36/39/t);空 = 默认区域
+		// FGLServer 本轮 FGLSERVER 覆盖(指针:给了就是权威,空串 = 本轮强制交回 T100 自动设置)。
+		// 存在的理由是"画面去哪"只该由这一轮决定:以前只能改全局配置,于是做一次 fep
+		// 无头前端实验就把调试的画面接线顶掉了,而且静默(见 ScreenTarget)。
+		FGLServer *string `json:"fglserver"`
 	}
 	if !readBody(w, r, &req) {
 		return
@@ -483,8 +487,8 @@ func (s *Server) hLaunch(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, fmt.Errorf("prog 必填(module 可留空,自动按作业名解析)"))
 		return
 	}
-	// 按名换 SSH(环境)/ 覆盖区域:克隆配置,默认链路零影响
-	cfg, err := s.launchCfg(req.SSH, req.Zone)
+	// 按名换 SSH(环境)/ 覆盖区域/ 覆盖本轮 FGLSERVER:克隆配置,默认链路零影响
+	cfg, err := s.launchCfg(req.SSH, req.Zone, req.FGLServer)
 	if err != nil {
 		fail(w, 404, err)
 		return
@@ -563,6 +567,10 @@ func (s *Server) hSnapshot(w http.ResponseWriter, r *http.Request) {
 		"silentSeconds": sess.SilentSeconds(),
 		// 谁在驾驶 + 正在执行哪条命令(界面上的"AI 正在执行 continue(已 12s)")
 		"mode": sess.Mode(),
+		// 这一轮作业界面画到哪儿:机器可读的原始值 + 一句人话结论。
+		// 界面上没有它的时候,"放行后什么都没弹"只能靠人去翻配置猜(实测踩过)。
+		"fglserver":    sess.FGLServer(),
+		"screenTarget": ScreenTarget(sess.FGLServer()),
 	}
 	if fl := sess.Inflight(); fl != nil {
 		resp["inflight"] = fl
@@ -598,13 +606,18 @@ func (s *Server) hQuit(w http.ResponseWriter, r *http.Request) {
 
 // ---------- 会话管理(单一常驻会话的切换/重启/结束) ----------
 
-// launchCfg 组装"这次启动要连哪个环境"的生效配置:ssh(环境名)/ zone 覆盖。
+// launchCfg 组装"这次启动要连哪个环境"的生效配置:ssh(环境名)/ zone 覆盖 + 单轮 FGLSERVER 覆盖。
 //
 // 按名点名是**权威**的:点到的环境不存在就报错列出可用名,绝不静默回落默认连接 ——
 // 同一台机器上有多个环境(同库不同企业)时,"静默回落"与"上错了号"在输出上完全
 // 无法区分(见 manager.prepareSession 的环境判据)。
-func (s *Server) launchCfg(sshName, zone string) (*Config, error) {
-	if sshName == "" && zone == "" {
+//
+// fglserver 用**指针**而不是字符串:空串在 JSON 里与"这一轮没给"无法区分,而
+// "这一轮把画面交回 T100 自动设置"恰恰是最需要的那个动作(见 ScreenTarget)。
+// 覆盖只落在克隆出来的本轮配置上,s.cfg 一字不动 —— 否则一次 fep 实验的接线
+// 会留在内存里,后面每一轮(哪怕只是普通启动)都还带着它。
+func (s *Server) launchCfg(sshName, zone string, fglserver *string) (*Config, error) {
+	if sshName == "" && zone == "" && fglserver == nil {
 		return s.cfg, nil
 	}
 	cfg := s.cfg
@@ -623,6 +636,9 @@ func (s *Server) launchCfg(sshName, zone string) (*Config, error) {
 		cfg = c2
 	}
 	c2 := *cfg.CloneWithZone(zone)
+	if fglserver != nil {
+		c2.FGLServer = strings.TrimSpace(*fglserver)
+	}
 	return &c2, nil
 }
 
@@ -1553,6 +1569,8 @@ func (s *Server) hWSLogDebug(w http.ResponseWriter, r *http.Request) {
 		Request string `json:"request"`
 		SSH     string `json:"ssh"`  // 多 SSH 配置名(环境名);空 = 当前环境
 		Zone    string `json:"zone"` // 区域覆盖(31/35/36/39/t);空 = 默认区域
+		// FGLServer 本轮 FGLSERVER 覆盖,语义同 hLaunch(指针:给空串 = 本轮交回 T100 自动设置)。
+		FGLServer *string `json:"fglserver"`
 	}
 	if !readBody(w, r, &req) {
 		return
@@ -1564,7 +1582,9 @@ func (s *Server) hWSLogDebug(w http.ResponseWriter, r *http.Request) {
 	}
 	// 点名的环境同样权威:重放必须落在被点名的环境上,否则"重放出来的现象"与
 	// "这条日志来自哪个环境"对不上,查出来的结论会整个偏掉。
-	targetCfg, err := s.launchCfg(req.SSH, req.Zone)
+	// 这里**不带** FGLSERVER 覆盖:那一个只影响"这一轮画面去哪",不是环境身份,
+	// 塞进 selectEnv 会把一次实验的接线留在内存配置里。
+	targetCfg, err := s.launchCfg(req.SSH, req.Zone, nil)
 	if err != nil {
 		fail(w, 404, err)
 		return
@@ -1607,7 +1627,7 @@ func (s *Server) hWSLogDebug(w http.ResponseWriter, r *http.Request) {
 			s.mgr.Remove(cur.ID)
 		}
 	}
-	sess, replayWarn, err := s.mgr.LaunchReplay(item, content, req.Request)
+	sess, replayWarn, err := s.mgr.LaunchReplay(item, content, req.Request, req.FGLServer)
 	if err != nil {
 		fail(w, 409, err)
 		return
