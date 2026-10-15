@@ -286,9 +286,8 @@ func (s *Server) hHostsGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"config":    path,
-		"activeEnv": root.Hosts.ActiveEnv,
-		"sshs":      root.Hosts.SSHs,
+		"config": path,
+		"sshs":   root.Hosts.SSHs,
 		// 监听地址也在这一份里下发，设置页的「外观/高级」页要用
 		"listen":  root.Listen,
 		"debug":   root.Debug,
@@ -730,8 +729,7 @@ func validateHosts(h *config.Hosts) error {
 			return fmt.Errorf("环境 %q 的数据库类型 %q 不支持（应为 oracle 或 kingbase）", e.Name, e.DB.Type)
 		}
 	}
-	if h.ActiveEnv != "" && !seen[h.ActiveEnv] {
-		return fmt.Errorf("默认环境 %q 不在环境列表里", h.ActiveEnv)
-	}
+	// 原先这里还校验"默认环境在不在列表里" —— activeEnv 已整个移除,
+	// 环境一律由调用方点名,没有"默认环境指向不存在的环境"这种状态了。
 	return nil
 }

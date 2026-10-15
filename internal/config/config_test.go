@@ -74,9 +74,11 @@ func TestEditHosts(t *testing.T) {
 	if len(r.Hosts.SSHs) != 1 || r.Hosts.SSHs[0].Name != "新环境" {
 		t.Fatalf("环境写入不正确: %+v", r.Hosts.SSHs)
 	}
-	if r.Hosts.ActiveEnv != "新环境" {
-		t.Errorf("activeEnv 未兜底为首条: %q", r.Hosts.ActiveEnv)
+	if r.Hosts.ByName("新环境") == nil {
+		t.Error("新写入的环境应当能按名解析到")
 	}
+	// 原先这里断言 "activeEnv 未兜底为首条" —— 默认环境已移除,
+	// 环境不再有任何落盘的默认值(见 Hosts 的注释)。
 	if r.SchemaVersion != SchemaVersion {
 		t.Errorf("写入未打上 schemaVersion: %d", r.SchemaVersion)
 	}
@@ -92,7 +94,6 @@ func TestSaveHosts_ReplacesOnlyHosts(t *testing.T) {
 	}
 
 	err := SaveHosts(path, Hosts{
-		ActiveEnv: "e1",
 		SSHs: []NamedSsh{{
 			Name:      "e1",
 			SSHConfig: SSHConfig{Host: "h", Port: 2222, User: "u", Password: "p"},
@@ -196,7 +197,7 @@ func TestLoadHosts(t *testing.T) {
 	path := filepath.Join(dir, DefaultConfigName)
 	seed := `{
   "schemaVersion": 2,
-  "hosts": {"activeEnv": "b", "sshs": [
+  "hosts": {"sshs": [
     {"name": "a", "host": "1.1.1.1", "user": "u"},
     {"name": "b", "host": "2.2.2.2", "user": "u", "db": {"type": "oracle", "host": "d", "service": "t35prd"}}
   ]}
@@ -209,14 +210,15 @@ func TestLoadHosts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadHosts: %v", err)
 	}
-	if h.ActiveEnv != "b" {
-		t.Errorf("ActiveEnv = %q, 期望 b", h.ActiveEnv)
-	}
 	if len(h.SSHs) != 2 {
 		t.Fatalf("环境数 = %d, 期望 2", len(h.SSHs))
 	}
-	if got := h.ByName(""); got == nil || got.Name != "b" {
-		t.Errorf("ByName(\"\") 应回退 activeEnv: %+v", got)
+	// 空名**不再**回退到任何环境:默认环境已移除,环境一律点名。
+	if got := h.ByName(""); got != nil {
+		t.Errorf("ByName(\"\") 不该取到环境(没有默认环境),得到 %+v", got)
+	}
+	if got := h.ByName("b"); got == nil {
+		t.Error("ByName(\"b\") 应当取到 b")
 	}
 	// db 要能正常解析出来
 	e := h.ByName("b")
@@ -281,9 +283,10 @@ func TestEnsureExists(t *testing.T) {
 	}
 }
 
+// ByName 只认**显式名字**:没有默认环境,所以空名一律取不到东西。
+// 这是"环境一律点名"的最后一道:任何地方想靠空名拿到一个环境都会被这里挡住。
 func TestHostsByName(t *testing.T) {
 	h := &Hosts{
-		ActiveEnv: "b",
 		SSHs: []NamedSsh{
 			{Name: "a"}, {Name: "b"}, {Name: "c"},
 		},
@@ -291,16 +294,11 @@ func TestHostsByName(t *testing.T) {
 	if got := h.ByName("c"); got == nil || got.Name != "c" {
 		t.Error("按名取环境失败")
 	}
-	if got := h.ByName(""); got == nil || got.Name != "b" {
-		t.Error("空名应取 activeEnv")
+	if got := h.ByName(""); got != nil {
+		t.Errorf("空名不该取到环境(没有默认环境,也不回退首条),得到 %+v", got)
 	}
 	if got := h.ByName("不存在"); got != nil {
 		t.Error("未命中应返回 nil")
-	}
-
-	h.ActiveEnv = ""
-	if got := h.ByName(""); got == nil || got.Name != "a" {
-		t.Error("activeEnv 为空时应取首条")
 	}
 }
 
@@ -350,17 +348,19 @@ func TestNetSettingsProxy(t *testing.T) {
 	}
 }
 
-// 工作区按**环境**存：往返不能丢，且 ActiveWorkspace 取的是当前环境那一份。
+// 工作区按**环境**存：往返不能丢，且要按名取到对应环境的那一份。
 //
 // 这条是"切了环境就该换工作区"的地基：机器级那份已经没有了（见 TzsSettings），所以一旦
 // 环境级这份在读-改-写里丢掉一个，切换环境就会退回"未配置工作区"。
+//
+// 注：原先这里顺带断言 ActiveWorkspace 取的是 activeEnv 那一份。默认环境已移除
+// （见 Hosts 的注释），所以现在直接按名取 —— 环境一律点名。
 func TestPerEnvWorkspace(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
 	seed := `{
   "schemaVersion": 3,
   "hosts": {
-    "activeEnv": "乙",
     "sshs": [
       {"name": "甲", "host": "h1", "port": 22, "user": "u", "password": "p", "workspace": "D:\\ws\\jia"},
       {"name": "乙", "host": "h2", "port": 22, "user": "u", "password": "p"}
@@ -378,13 +378,12 @@ func TestPerEnvWorkspace(t *testing.T) {
 	if got := r.Hosts.SSHs[0].Workspace; got != `D:\ws\jia` {
 		t.Errorf("环境「甲」的工作区 = %q", got)
 	}
-	// activeEnv 是「乙」，乙没配 → 空。**不回落**到别的环境或机器级（后者已不存在）。
-	if got := r.ActiveWorkspace(); got != "" {
-		t.Errorf("当前环境（乙）没配工作区时该是空串，得到 %q", got)
+	// 按名取：乙没配 → 空。**不回落**到别的环境（那是"拿别人的表单当草稿纸"）。
+	if got := r.Hosts.ByName("乙").Workspace; got != "" {
+		t.Errorf("环境「乙」没配工作区时该是空串，得到 %q", got)
 	}
-	r.Hosts.ActiveEnv = "甲"
-	if got := r.ActiveWorkspace(); got != `D:\ws\jia` {
-		t.Errorf("切到「甲」后该拿到它的工作区，得到 %q", got)
+	if got := r.Hosts.ByName("甲").Workspace; got != `D:\ws\jia` {
+		t.Errorf("按名取「甲」的工作区，得到 %q", got)
 	}
 
 	// 写回（整节替换）不能丢掉工作区：SaveHosts 走的是同一份类型化结构。

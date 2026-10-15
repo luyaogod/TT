@@ -70,7 +70,7 @@ debug / query / mirror / bdldoc / sync / tdev 是各命令组自己的设置。
 
 	getCmd := &cobra.Command{
 		Use:   "get <键路径>",
-		Short: "按点分路径读一个值（如 hosts.activeEnv、debug.termWidth）",
+		Short: "按点分路径读一个值（如 hosts.sshs、debug.termWidth）",
 		Long: `按点分路径读一个值。
 
 口令默认打码（路径点到 password/passwd/pwd，或值里嵌着这些键），要看原样加 --raw ——
@@ -235,14 +235,8 @@ func validateConfig(path string) []string {
 		}
 	}
 
-	if r.Hosts.ActiveEnv != "" && r.Hosts.ByName(r.Hosts.ActiveEnv) == nil {
-		problems = append(problems, fmt.Sprintf(
-			"hosts.activeEnv = %q 指向不存在的环境", r.Hosts.ActiveEnv))
-	}
-	if r.Debug.ActiveEnv != "" && r.Hosts.ByName(r.Debug.ActiveEnv) == nil {
-		problems = append(problems, fmt.Sprintf(
-			"debug.activeEnv = %q 指向不存在的环境", r.Debug.ActiveEnv))
-	}
+	// 原先这里还校验 hosts.activeEnv 与 debug.activeEnv 是否指向存在的环境 ——
+	// 两个字段都已移除("默认环境"这个概念不存在了),所以整段删掉。
 	// query.source 也是裸环境名(或 local / auto):环境被改名/删除后它会悬空,
 	// 直到下次查询才以"未找到环境"报错 —— 那是"配错了"被当成"查不到数据"的老毛病。
 	// 与上面两条同一个位置校验,零新增机制。

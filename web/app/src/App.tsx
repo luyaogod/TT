@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { RotateCcw, WifiOff, Bug, Globe, FlaskConical, Settings, X, ListTree, Sword, Server, type LucideIcon } from 'lucide-react'
+import { RotateCcw, WifiOff, Bug, BugPlay, Globe, FlaskConical, Settings, X, ListTree, Server, type LucideIcon } from 'lucide-react'
 import { connectWS, useStore } from './store'
 import { Toolbar } from './Toolbar'
 import { SourceView, editorRef } from './SourceView'
@@ -332,7 +332,7 @@ export function App() {
         {view === 'debug' && showRight && (
           <div className="flex w-10 shrink-0 flex-col items-center gap-1 py-2">
             <ActivityIcon icon={Server} label="会话" active={rightView === 'session'} onClick={() => setRightView('session')} />
-            <ActivityIcon icon={Sword} label="调试面板" active={rightView === 'debug'} onClick={() => setRightView('debug')} />
+            <ActivityIcon icon={BugPlay} label="调试面板" active={rightView === 'debug'} onClick={() => setRightView('debug')} />
             <ActivityIcon icon={ListTree} label="大纲" active={rightView === 'outline'} onClick={() => setRightView('outline')} />
           </div>
         )}

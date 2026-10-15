@@ -14,12 +14,12 @@
 //
 // ⚠ 后端的 PUT 是**整节替换**,而这些结构体每个字段都带 omitempty —— 省略的键等于删除。
 // 所以每张卡片的保存都必须提交**完整的节**(从读到的快照 + 编辑项构造),绝不能只发表单里
-// 那几个字段:老代码在「高级」里只发了 5 个键,于是 fglserver / persistBreakpoints /
-// activeEnv 在用户每次保存时被静默抹掉。debugPatchOf 就是为了堵这个。
+// 那几个字段:老代码在「高级」里只发了 5 个键,于是 fglserver / persistBreakpoints 在用户
+// 每次保存时被静默抹掉。debugPatchOf 就是为了堵这个。
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   AlertCircle, CheckCircle2, Copy, Download, Eye, EyeOff,
-  Monitor, Plus, RefreshCw, Star, Sun, Moon,
+  Monitor, Plus, RefreshCw, Sun, Moon,
   Terminal, Trash2, Zap,
 } from 'lucide-react'
 import {
@@ -64,7 +64,6 @@ interface SshItem {
   user: string
   password: string
   zone: string
-  topent: string
   // workspace 该环境的 .tzs 工作区（含 mta/ 的目录，绝对路径）。
   // 与 launchArgs / watchdogSeconds 不同：它是**必填**的（引擎的默认工作区是真实客户目录），
   // 而且只有环境级这一份 —— 切环境就该跟着换工作区。
@@ -278,7 +277,7 @@ const defaultAccounts = () => ['ds', 'dsdata', 'dsdemo'].map((a) => ({ account: 
 // 先填上能省掉每次手敲(不对再改)。注意 service 是**真值**不是占位符:
 // placeholder 在框里是灰字、不会被提交,而这里要的是"保存下去就是它"。
 const blankSsh = (): SshItem => ({
-  name: '', host: '', port: 22, user: '', password: '', zone: '1', topent: '', workspace: '',
+  name: '', host: '', port: 22, user: '', password: '', zone: '1', workspace: '',
   db: { ...blankDb(), accounts: defaultAccounts() },
 })
 
@@ -292,14 +291,14 @@ const blankSsh = (): SshItem => ({
  * 而 `workspace` 是这一页管得着的(表单里有输入框) —— 不要把它当成“未覆盖”加进那份保留名单,
  * 否则用户清空它时会被静默补回。
  */
-function hostsPatchOf(list: SshItem[], prevActiveEnv: string) {
+function hostsPatchOf(list: SshItem[]) {
   const sshsOut: HostsSsh[] = list.filter((x) => x.host).map((x) => {
     const o: HostsSsh = {
       name: x.name || `${x.host}-${x.zone}`.replace(/-$/, ''),
       host: x.host, port: x.port || 22, user: x.user, password: x.password,
     }
     if (x.zone.trim()) o.zone = x.zone.trim()
-    if (x.topent.trim()) o.topent = x.topent.trim()
+    // 企业编号(topent)不再写进环境配置 —— 该字段已整体移除,ENT 每次显式给。
     // 工作区：留空就是没配（不写这个键），与服务端“环境级没有兜底”一致。
     if (x.workspace.trim()) o.workspace = x.workspace.trim()
     if (x.db) {
@@ -314,12 +313,8 @@ function hostsPatchOf(list: SshItem[], prevActiveEnv: string) {
     }
     return o
   })
-  // 默认环境本页只在「环境清单」里改它,但 PUT 提交的是**整节**,必须原样回传:
-  // 若它刚好被这次删除带走了,就顺延到首条 —— 否则后端会以「默认环境不在环境列表里」整次 400 拒掉。
-  return {
-    activeEnv: sshsOut.some((e) => e.name === prevActiveEnv) ? prevActiveEnv : (sshsOut[0]?.name || ''),
-    sshs: sshsOut,
-  }
+  // 只有一个键了:activeEnv(默认环境)已整体移除,不再需要原样回传/顺延。
+  return { sshs: sshsOut }
 }
 
 /**
@@ -350,8 +345,8 @@ function debugPatchOf(d: DebugForm): NonNullable<HostsPatch['debug']> {
   if (d.printElements) out.printElements = d.printElements
   if (d.persistBreakpoints === 'on') out.persistBreakpoints = true
   else if (d.persistBreakpoints === 'off') out.persistBreakpoints = false
-  // activeEnv **不再回传**:「默认环境」那张卡已整张移除,它属于"用户不需要改"的那一类,
-  // 省略即回落到 hosts.activeEnv(站点管理里那个绿点),这正是想要的行为。
+  // activeEnv 这个键**已经不存在了**(hosts/debug 两处都随"默认环境"整体移除),
+  // 所以既不用回传也不用担心被整节替换抹掉。
   return out
 }
 
@@ -436,7 +431,7 @@ export function SettingsView() {
         const d = e.db
         return {
           name: e.name || '', host: e.host || '', port: e.port || 22, user: e.user || '', password: e.password || '',
-          zone: e.zone || '', topent: e.topent != null ? String(e.topent) : '',
+          zone: e.zone || '',
           workspace: e.workspace || '',
           db: d ? {
             type: d.type || 'oracle', host: d.host || '', port: d.port || 0,
@@ -496,7 +491,7 @@ export function SettingsView() {
   const save = async (keys: ConfigKey[], list?: SshItem[]) => {
     if (saveState === 'saving' || !cfg) return
     const body: HostsPatch = {}
-    if (keys.includes('hosts')) body.hosts = hostsPatchOf(list || sshs, cfg.activeEnv)
+    if (keys.includes('hosts')) body.hosts = hostsPatchOf(list || sshs)
     if (keys.includes('debug')) body.debug = debugPatchOf(dbg)
     if (keys.includes('listen')) body.listen = listen.trim()
     if (keys.includes('query')) body.query = { source: dict.querySource }
@@ -559,8 +554,8 @@ export function SettingsView() {
    * `主机-区域` 兜底算的,空名字的两条会撞成同一个键 —— 所以这里始终写一个显式名字
    * (原名/显示名 + -copy,撞了就再往后取 -copy2、-copy3)。
    *
-   * 刻意**不**顺手把副本设为默认:复制多半是为了试一套新参数,把线上默认环境
-   * 悄悄挪到未验证的副本上,代价比多点一下「设为默认」大得多。两个动作分开。
+   * 刻意**不**顺手做别的动作:复制多半是为了试一套新参数,顺手把线上某个环境改掉
+   * 的代价比多点一下大得多。两个动作分开。
    */
   const dupSsh = (i: number) => {
     const src = sshs[i]
@@ -579,11 +574,8 @@ export function SettingsView() {
     setSelSsh(sshs.length)
     markDirty('hosts')
   }
-  const setDefaultEnv = (name: string) => {
-    if (!cfg || name === cfg.activeEnv) return
-    setCfg({ ...cfg, activeEnv: name })
-    void save(['hosts'])
-  }
+  // setDefaultEnv 已删除:"设为默认环境"这个动作本身没有了
+  // (默认环境已移除,环境一律由 --env / 会话面板点名)。
   // 删除环境:先弹窗二次确认(误删代价高且不可撤销),确定后立即落盘保存
   const askDelSsh = () => { if (sshs[selSsh]) setDelTarget(selSsh) }
   const confirmDelSsh = async () => {
@@ -843,8 +835,7 @@ export function SettingsView() {
   if (!cfg) return <div className="p-6 text-sm text-muted-foreground">{err || '加载配置中…'}</div>
   const cur = sshs[selSsh]
   const curDb = cur?.db
-  // 当前选中的这个环境是不是默认环境(「设为默认」按钮的禁用依据,与左侧绿点同一判据)
-  const isCurDefault = !!cur && cfg.activeEnv === sshName(cur)
+  // isCurDefault 已删除:没有"默认环境"可判了(见上面 setDefaultEnv 的说明)。
   // 表格里那些行级动作的共用禁用条件:别的操作在跑、或这个动作自身在跑
   const mirrorBusy = mirrorRunning || opBusy !== ''
   const syncBusy = syncRunning || opBusy !== ''
@@ -937,7 +928,6 @@ export function SettingsView() {
                 <div className="min-h-0 flex-1 space-y-0.5 overflow-auto">
                   {sshs.length === 0 && <div className="py-2 text-muted-foreground">(空)</div>}
                   {sshs.map((e, i) => {
-                    const isDefault = cfg.activeEnv === sshName(e)
                     return (
                       <div key={i}
                         className={cn('flex items-center gap-1 rounded-ui px-1.5 py-1 transition-colors',
@@ -948,13 +938,8 @@ export function SettingsView() {
                             {e.zone || '-'} · {e.port || '-'} · {e.db ? (e.db.type === 'kingbase' ? '金仓' : 'Oracle') : '无库'}
                           </span>
                         </button>
-                        {/* 默认环境标记:**只表示状态,不可点**。改默认走右侧卡片的「设为默认」按钮
-                            —— 一个绿点既是标记又当开关的话,点它到底发生什么全靠猜(原来是星标,
-                            点亮/取消两种含义混在一个图标里)。非默认环境这里留同宽空位,
-                            免得名字列的右边界跟着"有没有绿点"忽宽忽窄。 */}
-                        <span className="flex w-3.5 shrink-0 justify-center" title={isDefault ? '默认环境' : undefined}>
-                          {isDefault && <span className="h-2 w-2 rounded-full bg-emerald-500" />}
-                        </span>
+                        {/* 默认环境标记与「设为默认」按钮都已移除:没有"默认环境"这个概念了,
+                            环境一律由 --env / 会话面板点名(见 config.Hosts 的注释)。 */}
                       </div>
                     )
                   })}
@@ -972,8 +957,7 @@ export function SettingsView() {
                     {/* 一行放完:页签在左、操作在右,右边跟着这张卡的「保存」。
                         卡片头部（Card 的 right 位）是右对齐的,单独放页签会偏到最右边,
                         而它下面还要再起一行放按钮 —— 上下两块都占宽度,中间空出一大片。
-                        这里合成一行,页面少一行高度,视线也不用上下折返。
-                        「设为默认」不用星形图标:文字已经把动作说全,图标只是多一个要解读的形状。 */}
+                        这里合成一行,页面少一行高度,视线也不用上下折返。 */}
                     <Tabs value={envTab} onValueChange={(v) => setEnvTab(v as 'ssh' | 'db')}>
                       <div className="flex items-center gap-2">
                         <TabsList>
@@ -987,12 +971,6 @@ export function SettingsView() {
                           </Button>
                           <Button variant="ghost" size="sm" title="删除该环境" onClick={askDelSsh}>
                             <Trash2 className="h-3.5 w-3.5" />删除
-                          </Button>
-                          <Button variant="outline" size="sm"
-                            title={isCurDefault ? '当前已是默认环境' : '设为默认环境(会话未指定环境时用它)'}
-                            disabled={isCurDefault}
-                            onClick={() => setDefaultEnv(sshName(cur))}>
-                            设为默认
                           </Button>
                           <SaveBtn keys={['hosts']} />
                         </span>
@@ -1029,15 +1007,13 @@ export function SettingsView() {
                               </button>
                             </div>
                           </Field>
-                          {/* 工作区目录排在 TOPENT 之前:它决定"这套源码在哪、包往哪出",
-                              是跑 tt dev tzs 的**前置条件**(留空运行类动词直接拒启),
-                              比 TOPENT(只有一个默认企业值)更靠前需要确认。 */}
+                          {/* 工作区目录:它决定"这套源码在哪、包往哪出",是跑 tt dev tzs 的
+                              **前置条件**(留空运行类动词直接拒启),所以是这一页最需要确认的一项。
+                              从前后面还跟着一个 TOPENT 输入框 —— 企业编号已从环境配置整体移除
+                              (不再有"环境默认企业"),ENT 改成开会话时每次显式给。 */}
                           <Field label="工作区目录" className="col-span-2">
                             <Input className={input} value={cur.workspace} placeholder="D:\\t100_wrok_dir\\客户\\prd"
                               onChange={(e) => patchSsh(selSsh, { workspace: e.target.value })} />
-                          </Field>
-                          <Field label="TOPENT" className="col-span-2">
-                            <Input className={input} value={cur.topent} onChange={(e) => patchSsh(selSsh, { topent: e.target.value })} />
                           </Field>
                         </div>
                       </TabsContent>
@@ -1109,7 +1085,7 @@ export function SettingsView() {
 
                           <div className="mt-4">
                             <div className="mb-1 text-[11px] text-muted-foreground">
-                              账号列表(账号即 schema 名;客户端直连取首项,服务器侧调试按 TOPENT 解析出账号后在此查密码)
+                              账号列表(账号即 schema 名;客户端直连取首项,服务器侧调试按 ENT 解析出账号后在此查密码)
                             </div>
                             {/* 账号可能很多:表格封顶 16rem 后就地滚,表头 sticky 常驻。
                                 滚动容器由我们自己提供(container={false}) —— 用 Table 自带的
@@ -1249,7 +1225,6 @@ export function SettingsView() {
                           <TableRow key={e.name} className="hover:bg-transparent">
                             <TableCell className="px-2">
                               {e.name}
-                              {e.name === sync.activeEnv && <span className="ml-1 text-[11px] text-muted-foreground">(默认)</span>}
                             </TableCell>
                             <TableCell className="px-2">{e.type}</TableCell>
                             <TableCell className="px-2">
@@ -1349,7 +1324,6 @@ export function SettingsView() {
                           <TableRow key={e.name} className="hover:bg-transparent">
                             <TableCell className="px-2">
                               {e.name}
-                              {e.name === mirror.activeEnv && <span className="ml-1 text-[11px] text-muted-foreground">(默认)</span>}
                             </TableCell>
                             <TableCell className="px-2">
                               <EnvStatus busy={busy} running={!!mirror.job?.running}
@@ -1510,7 +1484,7 @@ export function SettingsView() {
                 <InfoRow label="统一工具目录" value={meta?.toolsHome || '—'} />
                 <InfoRow label="配置结构版本" value={meta ? String(meta.schemaVersion) : '—'} />
                 <InfoRow label="支持的库类型" value={meta?.supportedTypes?.join(' / ') || '—'} />
-                <InfoRow label="默认环境" value={cfg.activeEnv || '(未设置)'} />
+                {/* 「默认环境」一行已删:没有默认环境了(环境一律 --env 点名)。 */}
                 <InfoRow label="环境数" value={String(cfg.sshs?.length ?? 0)} />
               </Card>
 
@@ -1613,7 +1587,7 @@ export function SettingsView() {
           <AlertDialogHeader>
             <AlertDialogTitle>删除环境「{delTarget !== null ? sshName(sshs[delTarget]) : ''}」?</AlertDialogTitle>
             <AlertDialogDescription>
-              该环境的 SSH 连接、登录区域、TOPENT 与数据库账号配置将一并移除。
+              该环境的 SSH 连接、登录区域、工作区与数据库账号配置将一并移除。
               点击「删除」后立即写入 config.json,不可撤销。
             </AlertDialogDescription>
           </AlertDialogHeader>

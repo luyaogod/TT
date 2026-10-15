@@ -3,7 +3,6 @@
   "listen": "127.0.0.1:28670",
 
   "hosts": {
-    "activeEnv": "开发环境",
     "sshs": [
       {
         "name": "开发环境",
@@ -12,7 +11,6 @@
         "user": "tiptop",
         "password": "换成真实口令",
         "zone": "31",
-        "topent": "10001",
         "workspace": "D:\\t100_wrok_dir\\某客户\\dev",
         "db": {
           "type": "oracle",
@@ -42,7 +40,6 @@
         "user": "tiptop",
         "password": "换成真实口令",
         "zone": "36",
-        "topent": "10002",
         "workspace": "D:\\t100_wrok_dir\\某客户\\prd",
         "db": {
           "type": "kingbase",
@@ -58,7 +55,6 @@
   },
 
   "debug": {
-    "activeEnv": "",
     "launchArgs": "BBDL512840855a 2 12345 'N' {prog}",
     "watchdogSeconds": 1800,
     "fglserver": "",

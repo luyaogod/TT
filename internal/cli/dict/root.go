@@ -33,6 +33,10 @@ var dbPath string
 // 企业目录快照的落点,也是截断时结果落盘的落点。
 var srcConfigPath string
 
+// dictEnt 本次查询显式指定的企业编号(--ent);空 = 不按企业解析账号。
+// 环境级 topent 已移除,所以这是企业编号的唯一来源之一(另一个是 tt debug --ent)。
+var dictEnt string
+
 func init() {
 	// 字典独有的 persistent flag:--db 只对 tt dict 有意义
 	Group.PersistentFlags().StringVarP(&dbPath, "db", "d", "",
@@ -41,6 +45,11 @@ func init() {
 	// 显示选项 —— 从前只有 msg/prog/r.t 各自定义了一个,其余命令等于没有防线。
 	Group.PersistentFlags().IntVar(&queryLimit, "limit", -1,
 		"结果最多返回多少条 (0 = 不限;-1 = 跟随配置;缺省取 config.json query.limit,再缺省 20)")
+	// --ent 挂在命令组上:账号由企业编号决定(ENT → gzou_t → 账号),而企业编号
+	// **不再存在环境配置里**(hosts.sshs[].topent 已删除)—— 每次显式给,
+	// 不给就用账号列表首项(并在信封 notes 里说明)。
+	Group.PersistentFlags().StringVar(&dictEnt, "ent", "",
+		"企业编号(ENT):据此解析该环境用哪个账号(schema);不给 = 用账号列表首项")
 
 	// 打开/关闭查询数据源:本地 SQLite(--db/TDICT_DB)或远程库(--env/query.source)。
 	// 不依赖本地字典库的子命令(bdldoc/db/mirror/spill)各自覆盖本钩子。

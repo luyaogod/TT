@@ -161,7 +161,8 @@ func TestHostsPut_Validation(t *testing.T) {
 			"name": "a", "host": "h", "user": "u",
 			"db": map[string]any{"type": "mysql", "host": "d"},
 		}}, "", "不支持"},
-		{"默认环境不存在", []any{map[string]any{"name": "a", "host": "h", "user": "u"}}, "b", "不在环境列表里"},
+		// 「默认环境不存在」这条用例已删:activeEnv 本身已移除,
+		// 不再有"默认环境指向不存在的环境"这种状态可校验(见 config.Hosts 的注释)。
 	}
 
 	for _, c := range cases {
@@ -206,13 +207,14 @@ func TestHostsGet(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("HTTP %d", rec.Code)
 	}
-	for _, k := range []string{"config", "activeEnv", "sshs", "listen", "debug", "query", "mirror", "bdldoc", "sync", "tdev"} {
+	// activeEnv 已不在响应里:没有默认环境了(环境一律点名)。
+	for _, k := range []string{"config", "sshs", "listen", "debug", "query", "mirror", "bdldoc", "sync", "tdev"} {
 		if _, has := out[k]; !has {
 			t.Errorf("响应缺少 %q", k)
 		}
 	}
-	if out["activeEnv"] != "开发环境" {
-		t.Errorf("activeEnv = %v", out["activeEnv"])
+	if _, has := out["activeEnv"]; has {
+		t.Error("响应里不该再有 activeEnv(默认环境已移除)")
 	}
 }
 

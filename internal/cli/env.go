@@ -47,85 +47,52 @@ func newEnvCmd() *cobra.Command {
 		RunE:  func(cmd *cobra.Command, args []string) error { return runEnvShow(cmd, args[0]) },
 	})
 
+	// env use 是**墓碑**,不是被删掉的命令:它背后的 hosts.activeEnv 已经整个移除
+	// (环境一律点名 —— 见 config.Hosts 的注释)。留一个会解释原因、并给出替代用法的
+	// 命令,好过让用户撞上"unknown command env use"而以为环境管理坏了。
 	cmd.AddCommand(&cobra.Command{
 		Use:   "use <环境名>",
-		Short: "把某环境设为默认（写 hosts.activeEnv）",
-		Long: `把某环境设为默认环境。三个工具在没有显式指定环境时都用它。
+		Short: "(已移除) 默认环境这个概念已取消 —— 请每次用 --env 点名",
+		Long: `"默认环境"已移除(hosts.activeEnv 不再存在)。
 
-原来的 tdict 用 hosts.activeEnv、tdebug 用 debug 节里的「当前环境」，
-合并后统一走 hosts.activeEnv —— 在哪个工具里切换，另外两个也跟着切。
+原因:同机多环境时,"回落到默认环境"与"上错环境"在输出上完全无法区分 ——
+而用错环境的典型症状是"查不到数据",与"数据不存在"一模一样。所以环境
+改为**一律点名**:
 
-**它只改配置，不动正在跑的调试会话。** 调试会话的"当前环境"是运行态（服务内存里那份），
-tt env use 写的是文件 —— 所以已经起来的会话仍连在原来的环境上，要等服务重启，
-或在界面上「切换会话」/用 tt debug env <环境名> 切一次，它才按新环境连。
-要"这一次就换环境"，直接点名：tt debug start <作业> --env <环境名>。`,
+  tt debug start <作业> --env <环境名>      # 调试:点名环境
+  tt dict <命令> --env <环境名>             # 字典:点名环境(或 --env local 查本地副本)
+  tt dev tzs <动词> --env <环境名>          # 表单:环境决定用哪个工作区
+
+Web 端在会话面板里选环境(那个选择是运行时的,同样不写配置文件)。`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			path, err := common.ResolveConfig(true)
-			if err != nil {
-				return err
-			}
-			name := args[0]
-			err = config.EditHosts(path, func(h *config.Hosts) error {
-				if h.ByName(name) == nil {
-					return fmt.Errorf("没有名为 %q 的环境（用 tt env list 看全部）", name)
-				}
-				h.ActiveEnv = name
-				return nil
-			})
-			if err != nil {
-				return err
-			}
-			cmd.Printf("默认环境已设为 %s\n", name)
-			return nil
+			return fmt.Errorf("`tt env use` 已移除:默认环境不再存在,请用 --env %s 点名(见 tt env use --help)", args[0])
 		},
 	})
 
-	cmd.AddCommand(newEnvSetTopentCmd())
-	return cmd
-}
-
-// newEnvSetTopentCmd 设置某环境的默认企业编号（TOPENT）。
-// 对应合并前 tdebug 的 `topent` 命令。
-func newEnvSetTopentCmd() *cobra.Command {
-	return &cobra.Command{
+	// env topent 同样是墓碑:环境级企业编号(topent)已从配置移除,ENT 只能每次显式给。
+	cmd.AddCommand(&cobra.Command{
 		Use:   "topent <环境名> <企业编号>",
-		Short: "设置某环境的默认企业编号（TOPENT）",
-		Long: `设置登录该环境时下发的默认企业编号。
+		Short: "(已移除) 企业编号不再存在环境配置里 —— 请每次用 --ent 给",
+		Long: `环境级的默认企业编号(hosts.sshs[].topent)已移除。
 
-企业编号可以是数字（如 10001）也可以是文本；留空字符串表示清除。
+原因:企业编号决定**用哪个账号(schema)**连库;把它登记在环境上等于给它一个
+会被静默沿用的默认值,而用错账号的症状是"查不到数据",与"数据不存在"一样。
+所以 ENT 改为**每次显式给**:
 
-**它改的是配置文件里该环境的默认值。** 已经建立的调试会话在创建时就把这份配置抄了一份，
-所以改完对运行中的会话不生效：要让本轮调试就用新企业编号，请重启会话（界面上的「重启会话」）
-或重新 tt debug start；只想这一次改企业编号，用 tt debug topent <编号>（会话级覆盖，立即下发）。`,
+  tt debug start <作业> --env <环境名> --ent <企业编号>
+  tt debug sql "<SQL>" --ent <企业编号>
+  tt dict <命令> --env <环境名> --ent <企业编号>
+
+不给 ENT 时:调试沿用登录 shell 里已有的 TOPENT(不覆盖),字典查询用账号列表首项
+(并在输出信封的 notes 里说明)。`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			path, err := common.ResolveConfig(true)
-			if err != nil {
-				return err
-			}
-			name, topent := args[0], args[1]
-			err = config.EditHosts(path, func(h *config.Hosts) error {
-				e := h.ByName(name)
-				if e == nil {
-					return fmt.Errorf("没有名为 %q 的环境（用 tt env list 看全部）", name)
-				}
-				e.Topent = config.EntValue(topent)
-				return nil
-			})
-			if err != nil {
-				return err
-			}
-			if topent == "" {
-				cmd.Printf("已清除 %s 的默认企业编号\n", name)
-			} else {
-				cmd.Printf("%s 的默认企业编号已设为 %s\n", name, topent)
-			}
-			return nil
+			return fmt.Errorf("`tt env topent` 已移除:企业编号不再存配置,请用 --ent %s 在命令上给", args[1])
 		},
-	}
+	})
+	return cmd
 }
-
 // envView 是环境在 --json 输出里的形状。口令一律不出现在输出里。
 type envView struct {
 	Name      string `json:"name"`
@@ -133,24 +100,22 @@ type envView struct {
 	Port      int    `json:"port"`
 	User      string `json:"user"`
 	Zone      string `json:"zone,omitempty"`
-	Topent    string `json:"topent,omitempty"`
 	DBType    string `json:"dbType,omitempty"`
 	DBAddress string `json:"dbAddress,omitempty"`
-	Active    bool   `json:"active"`
 }
 
 func envViews(h *config.Hosts) []envView {
 	out := make([]envView, 0, len(h.SSHs))
 	for i := range h.SSHs {
 		e := &h.SSHs[i]
+		// 原先这里带 Topent 与 Active("是不是默认环境")—— 两者都已移除:
+		// 企业编号不再存配置,默认环境这个概念也不存在了(环境一律点名)。
 		v := envView{
-			Name:   e.Name,
-			Host:   e.Host,
-			Port:   e.Port,
-			User:   e.User,
-			Zone:   e.Zone,
-			Topent: string(e.Topent),
-			Active: e.Name == h.ActiveEnv,
+			Name: e.Name,
+			Host: e.Host,
+			Port: e.Port,
+			User: e.User,
+			Zone: e.Zone,
 		}
 		if e.DB != nil {
 			v.DBType = e.DB.Type
@@ -174,9 +139,8 @@ func runEnvList(cmd *cobra.Command) error {
 
 	if common.JSON {
 		return common.PrintJSON(map[string]any{
-			"activeEnv": h.ActiveEnv,
-			"config":    path,
-			"sshs":      envViews(&h),
+			"config": path,
+			"sshs":   envViews(&h),
 		})
 	}
 
@@ -186,12 +150,9 @@ func runEnvList(cmd *cobra.Command) error {
 	}
 
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, " \t名称\tSSH\t区域\t企业\t数据库")
+	// 「企业」这一列已去掉:企业编号不再存配置(每次 --ent 给),列在这里只会误导。
+	fmt.Fprintln(w, "名称\tSSH\t区域\t数据库")
 	for _, v := range envViews(&h) {
-		mark := " "
-		if v.Active {
-			mark = "*"
-		}
 		ssh := fmt.Sprintf("%s@%s:%d", v.User, v.Host, v.Port)
 		db := v.DBAddress
 		if db == "" {
@@ -199,13 +160,13 @@ func runEnvList(cmd *cobra.Command) error {
 		} else if v.DBType != "" {
 			db = v.DBType + " " + db
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			mark, v.Name, ssh, orDash(v.Zone), orDash(v.Topent), db)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", v.Name, ssh, orDash(v.Zone), db)
 	}
 	if err := w.Flush(); err != nil {
 		return err
 	}
-	cmd.Printf("\n* = 默认环境（%s）\n配置文件：%s\n", h.ActiveEnv, path)
+	// 没有"默认环境"可标注了 —— 环境一律由 --env 点名。
+	cmd.Printf("\n配置文件：%s\n", path)
 	return nil
 }
 
@@ -237,7 +198,7 @@ func runEnvShow(cmd *cobra.Command, name string) error {
 	cmd.Printf("SSH       %s@%s:%d\n", e.User, e.Host, e.Port)
 	cmd.Printf("口令      %s\n", mask(e.Password))
 	cmd.Printf("区域      %s\n", orDash(e.Zone))
-	cmd.Printf("企业      %s\n", orDash(string(e.Topent)))
+	// 「企业」一行已去掉:企业编号不再存在环境配置里(每次 --ent 给)。
 	if e.LaunchArgs != "" {
 		cmd.Printf("启动参数  %s\n", e.LaunchArgs)
 	}

@@ -44,27 +44,25 @@ var (
 )
 
 // openQuerySource 在 Group PersistentPreRunE 打开数据源。
+//
+// **不再有"默认环境"这一层回落**(hosts.activeEnv 已移除):要么命令行点名(--env),
+// 要么配置里显式写了 query.source,要么就查本地副本。原来那条"未配置时用默认环境的
+// 远程库直查"会在一台机器配了多个环境时替用户挑一个 —— 挑错的表现与"数据不存在"一样。
 func openQuerySource() error {
 	srcStarted = time.Now()
 	if common.Env != "" { // ① 命令行指定(--env/--conn):强制
 		if common.Env == "local" {
 			return openLocalSource()
 		}
-		return openRemoteSource(common.Env)
+		return openRemoteSource(common.Env, dictEnt)
 	}
 	switch cfg := queryCfgSource(); cfg {
 	case "local": // ② 配置指定本地
 		return openLocalSource()
-	case "", "auto": // ③ 未配置:在线(没配环境才本地)
-		if env := defaultEnvName(); env != "" {
-			if err := openRemoteSource(env); err != nil {
-				return fmt.Errorf("%w\n提示: 想查本地库就加 `--env local`,或在 tt serve 的「设置 → 查询数据源」里切成「本地 SQLite」", err)
-			}
-			return nil
-		}
+	case "", "auto": // ③ 未配置:没有默认环境可回落,所以走本地副本
 		return openLocalSource()
 	default: // ② 配置指定了环境名:强制
-		return openRemoteSource(cfg)
+		return openRemoteSource(cfg, dictEnt)
 	}
 }
 
@@ -110,8 +108,10 @@ func openLocalSource() error {
 	return nil
 }
 
-// openRemoteSource 打开指定 SSH 环境的远程库(客户端直连,首账号)。
-func openRemoteSource(target string) error {
+// openRemoteSource 打开指定 SSH 环境的远程库(客户端直连)。
+//
+// entRaw = 用户显式给的企业编号(--ent);空 = 不按企业解析账号,用账号列表首项。
+func openRemoteSource(target, entRaw string) error {
 	path, err := common.ResolveConfig(false)
 	if err != nil {
 		return err
@@ -129,9 +129,9 @@ func openRemoteSource(target string) error {
 		return err
 	}
 	srcTarget = dbconfig.NewTarget(cc, ref.Name, ref.Env.Host, ref.Env.User, ref.Env.Zone,
-		string(ref.Env.Topent), dbconfig.RouteClientDirect)
-	// 用哪个账号由企业编号(topent)决定:与 tt debug 同一条规则、同一份快照 —— 见 entacct.go
-	srcNotes = hookEntAccount(cc, ref, config.LocationsAt(path).DataDir())
+		entRaw, dbconfig.RouteClientDirect)
+	// 用哪个账号由**显式给的企业编号**决定:与 tt debug 同一条规则、同一份快照 —— 见 entacct.go
+	srcNotes = hookEntAccount(cc, ref, config.LocationsAt(path).DataDir(), entRaw)
 	if common.Verbose {
 		fmt.Fprintf(os.Stderr, "[dict] 数据源: 远程 %s (账号 %s/%s, %s %s)\n",
 			ref.Name, srcTarget.Account, srcTarget.AccountSource, cc.Type, cc.Address())
@@ -156,22 +156,8 @@ func dbConnOf(ref *config.EnvRef) (*dbconfig.Connection, error) {
 	return &cc, nil
 }
 
-// defaultEnvName 尽力取默认环境名(读配置失败或未配置时返回空串)。只用于错误提示,不报错。
-func defaultEnvName() string {
-	path, err := common.ResolveConfig(true)
-	if err != nil {
-		return ""
-	}
-	cfg, err := config.LoadHosts(path)
-	if err != nil {
-		return ""
-	}
-	ref, err := cfg.Resolve("")
-	if err != nil {
-		return ""
-	}
-	return ref.Name
-}
+// defaultEnvName 已删除 —— 它读的是 hosts.activeEnv(默认环境),而那个概念已移除。
+// 没有"默认环境"就不该有任何地方替用户挑一个环境名;要环境就点 --env。
 
 // missingTableErr 主字典表缺失。**这是错误(退出码 3),不是一句提示。**
 //
@@ -190,11 +176,7 @@ func missingTableErr(subject string) error {
 // 远程源说明库的问题与回退方式。subject 如 "校验定义 (dzcd_t 等表)"。
 func missingHint(subject string) string {
 	if srcLocal {
-		remote := "  tt dict <命令> --env <环境名>       # 免写盘,直接查远程"
-		if env := defaultEnvName(); env != "" {
-			remote = fmt.Sprintf("  tt dict <命令> --env %-11s # 免写盘,直接查远程(当前默认环境)", env)
-		}
-		return fmt.Sprintf("本地库尚未包含%s数据。二选一:\n  tt dict db sync                  # 从 ERP 全量刷新(原库自动备份为 .bak)\n%s\n看各数据族缺什么: tt dict db status", subject, remote)
+		return fmt.Sprintf("本地库尚未包含%s数据。二选一:\n  tt dict db sync                  # 从 ERP 全量刷新(原库自动备份为 .bak)\n  tt dict <命令> --env <环境名>       # 免写盘,直接查远程\n看各数据族缺什么: tt dict db status", subject)
 	}
 	return fmt.Sprintf("远程库缺少%s相关字典表(该环境数据库未同步或账号权限不足);可用 --env local 切回本地库", subject)
 }

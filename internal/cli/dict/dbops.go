@@ -67,15 +67,13 @@ var dbListCmd = &cobra.Command{
 		}
 		fmt.Printf("数据库(按环境, %d):\n", len(rows))
 		for _, r := range rows {
-			mark := "  "
-			if r.Env == dbCfg.ActiveEnv {
-				mark = " *"
-			}
+			// 原先这里给"默认环境"打一个 `*` —— 默认环境已移除(环境一律点名),
+			// 没有"哪个是默认"可言,所以不再有星标。
 			via := ""
 			if r.ViaSsh != "" {
 				via = "  [viaSSH→" + r.ViaSsh + "]"
 			}
-			fmt.Printf("  %s %-12s %-8s %-28s 账号%d个%s\n", mark, r.Env, r.Type, r.Address, len(r.Accounts), via)
+			fmt.Printf("    %-12s %-8s %-28s 账号%d个%s\n", r.Env, r.Type, r.Address, len(r.Accounts), via)
 		}
 		return nil
 	},

@@ -29,8 +29,13 @@ const entLookupTimeout = 20 * time.Second
 
 // hookEntAccount 解析本次该用哪个账号,并写回连接的 Account 槽位(空 = 用列表首项)。
 // 返回的 notes 会被打进输出信封的环境头。
-func hookEntAccount(cc *dbconfig.Connection, ref *config.EnvRef, dataDir string) []string {
-	acct, source, ent, notes := resolveEntAccount(cc, ref, dataDir)
+//
+// entRaw 是**用户显式给的企业编号**(tt dict --ent <n> / 会话值),不再来自环境配置:
+// 环境级的 topent 已随"移除环境级企业"删除(见 config.NamedSsh 的注释)。
+// 没给就是没给 —— 退回客户端直连惯例(账号列表首项),并把这件事写进 notes,
+// 而不是替用户猜一个企业(猜错的表现是"查不到数据",与"数据不存在"无法区分)。
+func hookEntAccount(cc *dbconfig.Connection, ref *config.EnvRef, dataDir, entRaw string) []string {
+	acct, source, ent, notes := resolveEntAccount(cc, ref, dataDir, entRaw)
 	if acct != "" {
 		cc.Account = acct
 	}
@@ -40,19 +45,18 @@ func hookEntAccount(cc *dbconfig.Connection, ref *config.EnvRef, dataDir string)
 	return notes
 }
 
-// resolveEntAccount 按环境的 topent 解析账号。
+// resolveEntAccount 按**调用方显式给出的企业编号**解析账号。
 //
 // 返回的 source 为 dbconfig.AcctFromEnt 时 account 才是解析结果;其余情况 account 为空,
 // 调用方按客户端直连惯例取账号列表首项。
-func resolveEntAccount(cc *dbconfig.Connection, ref *config.EnvRef, dataDir string) (account, source string, ent int, notes []string) {
-	raw := strings.TrimSpace(string(ref.Env.Topent))
-	if raw == "" {
-		return "", dbconfig.AcctFromPrimary, 0, nil // 环境没配企业编号:按惯例用列表首项
+func resolveEntAccount(cc *dbconfig.Connection, ref *config.EnvRef, dataDir, entRaw string) (account, source string, ent int, notes []string) {
+	if entRaw == "" {
+		return "", dbconfig.AcctFromPrimary, 0, nil // 没给企业编号:按惯例用列表首项
 	}
-	ent, ok := ref.Env.Topent.Int()
-	if !ok || ent <= 0 {
+	ent, err := strconv.Atoi(strings.TrimSpace(entRaw))
+	if err != nil || ent <= 0 {
 		return "", dbconfig.AcctFromPrimary, 0,
-			[]string{fmt.Sprintf("环境的 topent 不是数字(%s),无法据此解析账号,已按账号列表首项连接", raw)}
+			[]string{fmt.Sprintf("企业编号不是正整数(%s),无法据此解析账号,已按账号列表首项连接", entRaw)}
 	}
 
 	fp := entdir.Fingerprint(ref.Env.Host, ref.Env.User, ref.Env.Zone,

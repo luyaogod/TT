@@ -132,13 +132,41 @@ func TestDevCobraRouting(t *testing.T) {
 		}
 	})
 
-	t.Run("env被点名拒绝", func(t *testing.T) {
-		code, _, errOut := run("tzc", "export", "--env", "正式区")
+	// --env 从前在这里被**明确拒绝**（"它是 tt dict / tt debug 那条线的开关"）。
+	// 现在它被接受:工作区按环境配,而"默认环境"已移除,所以这条线必须能收到一个点名的
+	// 环境(tzs 用它取该环境的 workspace)。这里钉住"摘出来后落进了注入的 setter"。
+	t.Run("env被桥接到setter", func(t *testing.T) {
+		var got string
+		oldGet, oldSet := envNameFn, envSetFn
+		envNameFn, envSetFn = func() string { return got }, func(v string) { got = v }
+		t.Cleanup(func() { envNameFn, envSetFn = oldGet, oldSet })
+
+		run("tzc", "export", "--env", "正式区")
+		if got != "正式区" {
+			t.Errorf("--env 未被桥接: %q", got)
+		}
+		// 带等号的写法是同一件事(根开关两种写法都要认)
+		got = ""
+		run("tzc", "export", "--env=测试")
+		if got != "测试" {
+			t.Errorf("--env= 写法未被桥接: %q", got)
+		}
+		// --conn 是别名
+		got = ""
+		run("tzc", "export", "--conn", "别名区")
+		if got != "别名区" {
+			t.Errorf("--conn 别名未被桥接: %q", got)
+		}
+	})
+
+	// 缺参数的 --env 要报错(不能静默当成"没给",那会退回"没点名"再报一个含糊的错)
+	t.Run("env缺参数被拒", func(t *testing.T) {
+		code, _, errOut := run("tzc", "export", "--env")
 		if code != 2 {
 			t.Errorf("退出码 = %d, 期望 2", code)
 		}
-		if !strings.Contains(errOut, "tt dict / tt debug") {
-			t.Errorf("应当点名开关归属，得到：%s", errOut)
+		if !strings.Contains(errOut, "环境名") {
+			t.Errorf("应当说清它要一个环境名，得到：%s", errOut)
 		}
 	})
 

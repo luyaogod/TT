@@ -51,7 +51,7 @@ func resetDictPackageState(t *testing.T) {
 
 	// 字符串
 	t.Cleanup(snapVars(
-		&dbPath, &srcConfigPath,
+		&dbPath, &srcConfigPath, &dictEnt,
 		&checkKW, &checkLang,
 		&dbSyncTable, &discoverType, &discoverHost,
 		&mirrorCfgPath,
@@ -188,7 +188,7 @@ func TestOpenQuerySourceLocalSucceedsWhenDBExists(t *testing.T) {
 // 所以它有残余缺口：往清单里加了名字却忘了真的在函数里还原，这条测不出来。
 // 但它挡得住最常见的那种：**新加一个包级 var，两处都忘了**。
 var dictMutableVars = []string{
-	"dbPath", "srcConfigPath", "queryLimit", "srcQueryLimit",
+	"dbPath", "srcConfigPath", "queryLimit", "srcQueryLimit", "dictEnt",
 	"checkKW", "checkLang",
 	"dbSyncTable", "discoverType", "discoverHost", "discoverSave", "dbListSecrets",
 	"mirrorCfg", "mirrorCfgPath", "mirrorFull",

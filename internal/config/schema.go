@@ -62,19 +62,23 @@ func (e EntValue) Int() (int, bool) {
 	return n, err == nil
 }
 
-// NamedSsh 服务器环境：SSH 连接 + 登录区域 + 默认企业(TOPENT)。
+// NamedSsh 服务器环境：SSH 连接 + 登录区域。
 //
 // 合并自 TDebug/host.NamedSsh 与 TDictCli/host.NamedSsh；TDebug 多出的
 // LaunchArgs / WatchdogSeconds 是该环境的调试参数覆盖，omitempty 不影响 TDict 侧。
 //
 // 这是三个工具共用的唯一环境登记处：原来 tdebug 放在 debug.sshs、
 // tdict 放在 hosts.sshs，schema 完全一致，合并后只留 hosts.sshs。
+//
+// **刻意没有 topent(企业编号)**:企业是"这一次要连哪个企业"运行时参数,
+// 登记在环境上等于给它一个会被静默沿用的默认值 —— 而用错企业的典型症状是
+// "查不到数据",与"数据不存在"完全一样。现在 ENT 只能每次显式给:
+// CLI `--ent`、Web 会话面板的输入框。
 type NamedSsh struct {
 	Name            string   `json:"name"`
 	SSHConfig                // 匿名嵌入：host/port/user/password 提升到 ssh 层
-	Zone            string   `json:"zone,omitempty"`            // 登录后区域菜单代码：31开发 35测试 36正式 39PATCH t出货
-	Topent          EntValue `json:"topent,omitempty"`          // 默认企业编号(TOPENT)；连接会话即下发，会话内可覆盖
-	LaunchArgs      string   `json:"launchArgs,omitempty"`      // 该环境的作业启动参数覆盖（空=用 debug.launchArgs）
+	Zone            string   `json:"zone,omitempty"`      // 登录后区域菜单代码：31开发 35测试 36正式 39PATCH t出货
+	LaunchArgs      string   `json:"launchArgs,omitempty"` // 该环境的作业启动参数覆盖（空=用 debug.launchArgs）
 	WatchdogSeconds int      `json:"watchdogSeconds,omitempty"` // 该环境的停站超时覆盖（0=用 debug.watchdogSeconds）
 	// Workspace 这个环境的 .tzs 工作区（含 mta/ 的目录，绝对路径）。
 	//
@@ -86,12 +90,16 @@ type NamedSsh struct {
 }
 
 // Hosts 服务器环境清单：config.json 顶层 hosts 节。
+//
+// **刻意没有 ActiveEnv(默认环境)**:那是"猜一个环境"的入口 —— 同机多环境时
+// 猜错的后果是连到另一台机/另一个企业上,而输出看起来完全正常(与"上错号"无法区分)。
+// 所以环境一律**点名**:CLI 用 `--env <环境名>`(不传就报错并列出可用环境),
+// Web 由会话面板选中。见 resolve.go 的 pickName —— 它现在只认显式名字。
 type Hosts struct {
-	ActiveEnv string     `json:"activeEnv"`
-	SSHs      []NamedSsh `json:"sshs"`
+	SSHs []NamedSsh `json:"sshs"`
 }
 
-// ByName 按名取环境；name 为空取 activeEnv；未命中返回 nil。
+// ByName 按名取环境；未命中(含 name 为空)返回 nil。
 // 选择顺序只有一份实现(见 resolve.go 的 pickName);需要"为什么选中它"或
 // "没找到时列出有哪些环境"时用 Hosts.Resolve。
 func (h *Hosts) ByName(name string) *NamedSsh {
@@ -116,25 +124,22 @@ func (h *Hosts) Names() []string {
 	return out
 }
 
-// Normalize 补全缺省值：activeEnv 缺失时取首条，端口缺失时取 22。
+// Normalize 补全缺省值：只补端口(22)。**不再补默认环境** —— 见 Hosts 的注释。
 func (h *Hosts) Normalize() {
 	for i := range h.SSHs {
 		if h.SSHs[i].Port == 0 {
 			h.SSHs[i].Port = DefaultSSHPort
 		}
 	}
-	if h.ActiveEnv == "" && len(h.SSHs) > 0 {
-		h.ActiveEnv = h.SSHs[0].Name
-	}
 }
 
 // ---------- 工具设置节 ----------
 
 // DebugSettings 调试工具自有设置（原 TDebug 的 debug 节，减去 sshs）。
-// 「当前环境」是运行时概念，不落盘：由会话选择/切换时确定，无会话时取 hosts.activeEnv。
+//
+// **刻意没有 ActiveEnv(调试默认环境)**:与 hosts 去掉默认环境同理 —— 调试连错环境
+// 等于在别人的库上跑作业。环境一律由 `tt debug start --env <名>` 或界面点名。
 type DebugSettings struct {
-	// ActiveEnv 该工具的环境覆盖；留空即继承 hosts.activeEnv。
-	ActiveEnv       string `json:"activeEnv,omitempty"`
 	LaunchArgs      string `json:"launchArgs,omitempty"`      // 作业启动参数默认模板，{prog} 替换为作业名（环境可覆盖）
 	WatchdogSeconds int    `json:"watchdogSeconds,omitempty"` // 停站停留超时默认（秒）；环境可覆盖
 	FGLServer       string `json:"fglserver,omitempty"`       // 留空使用 T100 按 SSH 来源 IP 自动设置
@@ -326,7 +331,7 @@ func Load(path string) (*Root, error) {
 }
 
 // LoadHosts 读取配置文件并返回环境清单，要求至少配置了一个环境
-// （CLI 命令都按"有环境可连"的前提工作）。activeEnv 缺省取首条。
+// （CLI 命令都按"有环境可连"的前提工作）。**不再补默认环境** —— 环境一律点名。
 // 读路径只认 hosts，不做任何旧结构兼容。
 func LoadHosts(path string) (*Hosts, error) {
 	r, err := Load(path)
@@ -340,26 +345,10 @@ func LoadHosts(path string) (*Hosts, error) {
 	return &h, nil
 }
 
-// ActiveEnv 当前环境（hosts.activeEnv，缺省摆首条）；一个环境都没配时返回 nil。
-//
-// 与 ActiveWorkspace 同一份实现：后者就建在它上面。
-func (r *Root) ActiveEnv() *NamedSsh {
-	if r == nil {
-		return nil
-	}
-	return r.Hosts.ByName("")
-}
-
-// ActiveWorkspace 当前环境的 .tzs 工作区（没环境、或环境没配时返回空串）。
-//
-// **只此一份实现**：命令层（tt dev tzs 的工作区解析）与 Web 状态页都从这里取。
-// 两边各算一次的话，设置页显示的那个路径与引擎真正 Boot 的那个可能不是同一个。
-func (r *Root) ActiveWorkspace() string {
-	if e := r.ActiveEnv(); e != nil {
-		return e.Workspace
-	}
-	return ""
-}
+// **ActiveEnv / ActiveWorkspace 已随"移除默认环境"删除**(不是改成返回 nil —— 那样
+// 调用方会静默拿到空值,把"忘了指定环境"伪装成"这个环境没配工作区")。
+// 需要环境时:Hosts.Resolve(name) / Hosts.ByName(name),名字必须由调用方给出;
+// 需要工作区时:先定环境,再取该环境的 Workspace。
 
 // ActiveHost 返回生效环境：工具的覆盖优先，其次 hosts.activeEnv，最后首条。
 // 与 ResolveForTool 同一套规则,只是这里不要错误(取不到就是 nil)。

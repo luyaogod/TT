@@ -68,7 +68,9 @@ func (c *Config) applySsh(e *host.NamedSsh) {
 	if e.Zone != "" {
 		c.Zone = e.Zone
 	}
-	c.Topent = e.Topent
+	// **不再从环境取企业编号**:topent 已从 config 移除,ENT 只能由用户每次显式给
+	// (CLI --ent / Web 会话面板)。这里刻意不清 c.Topent —— 它现在是"会话级显式值",
+	// 由 SetTopent 写入,换环境时不该被环境配置覆盖(环境配置已经不持有它了)。
 	// 换环境 = 换服务器/区域:清动态路径,登录后重新获取
 	c.Runtime = nil
 	if e.LaunchArgs != "" {
@@ -87,32 +89,35 @@ func (c *Config) applySsh(e *host.NamedSsh) {
 	c.fillDefaults()
 }
 
-// ApplyDefaultEnv 把当前环境(envName;未确定时取 sshs 首条)的 SSH/zone/topent/库引用
-// 合并到运行时字段。无任何 ssh 时(设置页可删空)清空当前环境,运行时字段保持为空。
+// ApplyDefaultEnv 把**当前会话环境**(envName)的 SSH/zone/库引用合并到运行时字段。
+//
+// 「当前会话环境」必须已经明确(c.envName 非空)——**不再有"未确定时取首条"这回事**:
+// 解不出环境就清空运行时字段,由调用方去要一个明确的环境名。
+// 无任何 ssh 时(设置页可删空)同样清空。
 func (c *Config) ApplyDefaultEnv() {
 	// 环境可能为空(首次运行还没配、或配置文件被手改成空;统一服务的 /api/hosts
 	// 保存路径会拦下空列表,此处仍须兜底):清空当前环境与全部运行时合并结果。
-	// 只清 envName 不够 —— EnvName() 会用 c.SSH.Host+Zone 兜底拼出幽灵环境名,
-	// 且下面的回落分支会对空切片取下标 panic。
+	// 只清 envName 不够 —— EnvName() 会用 c.SSH.Host+Zone 兜底拼出幽灵环境名。
 	if len(c.SSHs) == 0 {
 		c.envName = ""
 		c.SSH = host.SSHConfig{}
 		c.Zone = ""
-		c.Topent = ""
 		c.DB = nil
 		c.Runtime = nil
 		return
 	}
 	// 环境名的选择顺序只有一份实现(config.Hosts.Resolve),这里不再自己写一遍线性查找。
-	// ActiveEnv 留空:envName 是"会话当前环境",与配置里的 hosts.activeEnv 是两回事 ——
-	// 用配置默认值兜底会把会话悄悄切走。
+	// 与上面"没有环境"同一套处理:**解不出环境就清空运行时字段,不再回落到首条** ——
+	// 回落会把会话悄悄切到另一台机上,而那正是这次要根除的行为。
 	h := config.Hosts{SSHs: c.SSHs}
 	ref, err := h.Resolve(c.envName)
 	if err != nil {
-		// 当前环境已被删除:回落到首条,避免运行时字段悬空
-		if ref, err = h.Resolve(""); err != nil {
-			return
-		}
+		c.envName = ""
+		c.SSH = host.SSHConfig{}
+		c.Zone = ""
+		c.DB = nil
+		c.Runtime = nil
+		return
 	}
 	c.envName = ref.Name
 	c.applySsh(ref.Env)

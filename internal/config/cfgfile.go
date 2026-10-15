@@ -120,8 +120,8 @@ func NewSkeleton() map[string]any {
 		"schemaVersion": SchemaVersion,
 		"listen":        DefaultListen,
 		"hosts": map[string]any{
-			"activeEnv": "",
-			"sshs":      []any{},
+			// 只有 sshs:默认环境那个键已整体移除,新骨架里不再写它。
+			"sshs": []any{},
 		},
 		"query": map[string]any{"source": "auto"},
 		// 骨架里没有环境，所以也没有工作区 —— 工作区按环境配（hosts.sshs[].workspace），

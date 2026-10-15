@@ -35,7 +35,7 @@ const Usage = tzsUsage
 
 // Run 是 tzs 线的入口（父包接线用）：收**原始参数**（第一个词是动词名或
 // export/doctor/stop/reap/help），退出码契约见 tzsUsage 末尾。
-func Run(args []string) int { return cmdTzs(args) }
+func Run(args []string, envName string) int { return cmdTzs(args, envName) }
 
 const tzsUsage = `tt dev tzs —— 表单包工具（导出只读；读写表单由一个常驻引擎跑）
 
@@ -80,7 +80,7 @@ const tzsUsage = `tt dev tzs —— 表单包工具（导出只读；读写表�
 塞回包。要改表单走 ` + "`tt dev tzs <动词>`" + `：那是设计器自己的模型在算，改完设计器打得开。
 `
 
-func cmdTzs(args []string) int {
+func cmdTzs(args []string, envName string) int {
 	if len(args) == 0 {
 		fmt.Fprint(os.Stderr, tzsUsage)
 		return 2
@@ -89,11 +89,11 @@ func cmdTzs(args []string) int {
 	case "export":
 		return cmdTzsExport(args[1:])
 	case "doctor":
-		return cmdTzsDoctor(args[1:])
+		return cmdTzsDoctor(args[1:], envName)
 	case "stop":
-		return cmdTzsStop(args[1:])
+		return cmdTzsStop(args[1:], envName)
 	case "reap":
-		return cmdTzsReap(args[1:])
+		return cmdTzsReap(args[1:], envName)
 	case "-h", "--help", "help":
 		// 静态用法总是打得出（没有引擎、没有工作区也行），动词索引是**尽力而为**：
 		// 拉不到就只留一句指引。--help 绝不能因为环境不全而失败。
@@ -103,7 +103,7 @@ func cmdTzs(args []string) int {
 	default:
 		// 其余第一个词一律当**具名动词**（open / save / set_spec_attr / …）：
 		// 名字与参数来自引擎 manifest，这里不做任何硬编码（见 tzs_engine.go 的说明）。
-		return runTzsVerb(args)
+		return runTzsVerb(args, envName)
 	}
 }
 

@@ -26,8 +26,8 @@ func TestLaunchCfgResolvesByName(t *testing.T) {
 		SSH:  host.SSHConfig{Host: "top", Port: 22, User: "u"},
 		Zone: "36",
 		SSHs: []host.NamedSsh{
-			{Name: "恒烁正式区", SSHConfig: host.SSHConfig{Host: "h1", Port: 22, User: "u"}, Zone: "1", Topent: "9999"},
-			{Name: "测试1012", SSHConfig: host.SSHConfig{Host: "h1", Port: 22, User: "u"}, Zone: "1", Topent: "1012"},
+			{Name: "恒烁正式区", SSHConfig: host.SSHConfig{Host: "h1", Port: 22, User: "u"}, Zone: "1"},
+			{Name: "测试1012", SSHConfig: host.SSHConfig{Host: "h1", Port: 22, User: "u"}, Zone: "1"},
 		},
 	}
 	cfg.fillDefaults()
@@ -38,13 +38,18 @@ func TestLaunchCfgResolvesByName(t *testing.T) {
 	if got, err := s.launchCfg("", "", nil); err != nil || got != s.cfg {
 		t.Fatalf("不点名应回当前配置: got=%v err=%v", got, err)
 	}
-	// 点名:换成该环境,且企业编号跟着换
+	// 点名:换成该环境。
+	// 注:企业编号不再从环境里取(hosts.sshs[].topent 已移除)—— 所以这里只断言环境名
+	// 与连接换了;ENT 由调用方显式给(launchCfg 的 ent 参数 / --ent)。
 	got, err := s.launchCfg("测试1012", "", nil)
 	if err != nil {
 		t.Fatalf("点名存在的环境不该失败: %v", err)
 	}
-	if got.EnvName() != "测试1012" || string(got.Topent) != "1012" {
-		t.Fatalf("点名 测试1012 应拿到该环境的企业编号: env=%q topent=%q", got.EnvName(), got.Topent)
+	if got.EnvName() != "测试1012" {
+		t.Fatalf("点名 测试1012 应换成该环境: env=%q", got.EnvName())
+	}
+	if got.Topent != "" {
+		t.Fatalf("没显式给 ENT 时不该从环境里继承一个,got %q", got.Topent)
 	}
 	if got.SSH.Host != "h1" {
 		t.Fatalf("点名后应连该环境的机器, got %q", got.SSH.Host)
@@ -163,29 +168,12 @@ func TestLoadConfigSplitSections(t *testing.T) {
 	if cfg.LaunchArgs != "X {prog}" || cfg.WatchdogSeconds != 9 {
 		t.Fatalf("调试设置未读回: %+v", cfg)
 	}
+	// 原先这里断言 hosts.activeEnv / debug.activeEnv 决定"默认环境"以及两者的覆盖关系。
+	// 两个字段都已移除(环境一律点名,见 config.Hosts 的注释),所以整段删掉。
+	// 现在的等价保证:没有点名环境时**不挑任何环境**(ApplyDefaultEnv 清空运行时字段)。
 	cfg.ApplyDefaultEnv()
-	if cfg.EnvName() != "B" || cfg.SSH.Host != "2.2.2.2" {
-		t.Fatalf("默认环境应为 hosts.activeEnv=B, got %q %q", cfg.EnvName(), cfg.SSH.Host)
-	}
-
-	// debug.activeEnv 覆盖 hosts.activeEnv
-	override := `{
-	  "hosts": {"activeEnv": "B", "sshs": [
-	    {"name": "A", "host": "1.1.1.1", "port": 22, "user": "u"},
-	    {"name": "B", "host": "2.2.2.2", "port": 22, "user": "u"}
-	  ]},
-	  "debug": {"activeEnv": "A"}
-	}`
-	if err := os.WriteFile(p, []byte(override), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	cfg2, err := LoadConfig(p)
-	if err != nil {
-		t.Fatalf("LoadConfig(override): %v", err)
-	}
-	cfg2.ApplyDefaultEnv()
-	if cfg2.EnvName() != "A" {
-		t.Fatalf("debug.activeEnv 应覆盖 hosts.activeEnv, got %q", cfg2.EnvName())
+	if cfg.envName != "" || cfg.SSH.Host != "" {
+		t.Fatalf("没有点名环境时不该自动挑一个,got env=%q host=%q", cfg.envName, cfg.SSH.Host)
 	}
 }
 

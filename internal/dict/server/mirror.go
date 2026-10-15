@@ -40,7 +40,6 @@ type mirrorEnv struct {
 
 type mirrorResp struct {
 	MirrorDir string      `json:"mirrorDir"`
-	ActiveEnv string      `json:"activeEnv"` // 默认环境(前端下拉默认选中)
 	Envs      []mirrorEnv `json:"envs"`
 	Job       mirrorJob   `json:"job"`
 }
@@ -53,7 +52,6 @@ func (s *Server) hMirrorGet(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := mirrorResp{MirrorDir: dir, Envs: []mirrorEnv{}}
 	if hosts, err := config.LoadHosts(s.cfgPath); err == nil {
-		resp.ActiveEnv = hosts.ActiveEnv
 		for i := range hosts.SSHs {
 			e := &hosts.SSHs[i]
 			resp.Envs = append(resp.Envs, mirrorEnv{

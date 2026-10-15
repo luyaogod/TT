@@ -26,9 +26,7 @@ func TestDBSyncGet(t *testing.T) {
 	if resp.Target != "D:/tmp/erp_data.db" {
 		t.Fatalf("target = %q", resp.Target)
 	}
-	if resp.ActiveEnv != "b" {
-		t.Fatalf("activeEnv = %q, want b", resp.ActiveEnv)
-	}
+	// activeEnv 已从响应里移除:没有默认环境了(环境一律点名)
 	if len(resp.Envs) != 1 || resp.Envs[0].Name != "b" || resp.Envs[0].Type != "oracle" {
 		t.Fatalf("应只列挂库环境: %+v", resp.Envs)
 	}

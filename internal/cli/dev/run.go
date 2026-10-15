@@ -20,11 +20,12 @@ import (
 // --json 一个机器可读开关（实测 2026-09-25：`tt dev tzc selftest --format csv` 与
 // `tt --format csv dev tzc selftest` 两种位置都只得到「未知子命令」）。翻译表见 devFormat：
 // json → --json；table/text → 丢掉（缺省就是人读文本）；csv → **明确拒绝**（这条线没有
-// CSV，而"要 CSV 拿到 JSON"正是最该避免的静默走偏）。`--env/--conn` 同理拒绝并点名它属于哪条线。
+// CSV，而"要 CSV 拿到 JSON"正是最该避免的静默走偏）。
 //
-// 翻译出来的开关**攒着挂到最后**，不能就地放进 out：`tt dev tzc export --json pkg` 里若
-// 就地保留，动词解析器虽然位置无关，但「第一个位置参数是子命令/包名」的语义会被打乱
-// —— 攒到最后与原 tdev 入口的顺序语义一致。
+// `--env/--conn` **现在被接受**（从前这里明确拒绝）：工作区是按环境配的，而"默认环境"
+// 已经移除，所以这条线必须能接收一个点名的环境 —— tzs 用它去取该环境的 workspace
+// （见 tzs_engine.go 的 envWorkspace）。摘到后经 SetEnvNameFunc 注入的 setter 落到
+// cli/common.Env，与 tt debug/tt dict 读的是同一个值。
 func takeRootFlags(args []string) ([]string, error) {
 	out := make([]string, 0, len(args))
 	extra := make([]string, 0, 2)
@@ -40,10 +41,14 @@ func takeRootFlags(args []string) ([]string, error) {
 			extra = append(extra, "--json")
 		case a == "--csv":
 			return nil, devFormatErr("csv")
-		case a == "--env" || a == "--conn" || strings.HasPrefix(a, "--env=") || strings.HasPrefix(a, "--conn="):
-			return nil, fmt.Errorf("%s 是 tt dict / tt debug 那条线的开关（选哪个库/哪个环境）；"+
-				"`tt dev` 这条线的工作区按环境配（设置页「站点管理 → 环境 → 工作区目录」），"+
-				"临时换用 --workspace", strings.SplitN(a, "=", 2)[0])
+		case a == "--env" || a == "--conn":
+			if i+1 >= len(args) {
+				return nil, fmt.Errorf("%s 需要参数（环境名；可用环境见 tt env list）", a)
+			}
+			envSetFn(strings.TrimSpace(args[i+1]))
+			i++
+		case strings.HasPrefix(a, "--env=") || strings.HasPrefix(a, "--conn="):
+			envSetFn(strings.TrimSpace(strings.SplitN(a, "=", 2)[1]))
 		case a == "--format" && i+1 < len(args):
 			v, err := devFormat(args[i+1])
 			if err != nil {

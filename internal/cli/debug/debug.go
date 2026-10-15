@@ -37,7 +37,19 @@ var debugProbeCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		cfg.ApplyDefaultEnv() // 默认环境的连接/参数合并到运行时字段
+		// **环境必须点名**(--env):hosts 里已经没有"默认环境"可回落了,
+		// 不点名就没有该连哪台机器可言。与 tt debug start 走同一条解析(见 dbgTargetEnv)。
+		if envName := dbgTargetEnv(); envName != "" {
+			if sel := cfg.CloneEnv(envName); sel != nil {
+				cfg = sel
+			} else {
+				return fmt.Errorf("环境 %q 不存在(用 tt env list 看全部)", envName)
+			}
+		}
+		cfg.ApplyDefaultEnv() // 环境的连接/参数合并到运行时字段
+		if cfg.SSH.Host == "" {
+			return fmt.Errorf("没有可连的环境:请用 --env <环境名> 点名(tt env list 看全部)")
+		}
 		fmt.Printf("[probe] 服务器 %s:%d 区域 %s\n", cfg.SSH.Host, cfg.SSH.Port, cfg.Zone)
 
 		sess, err := debug.NewSession(cfg, dbgModule, dbgProg, "", "", "", func(ev debug.Event) {

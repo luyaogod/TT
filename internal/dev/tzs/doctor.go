@@ -157,7 +157,7 @@ func Doctor(ctx context.Context, o Options) *DoctorReport {
 	}
 	switch {
 	case werr != nil:
-		r.add(LevelFail, "工作区", "未配置（--workspace / TZSCLI_WS / 当前环境的 workspace 三选一；"+
+		r.add(LevelFail, "工作区", "未配置（--workspace / TZSCLI_WS / --env <环境名> 的工作区 三选一；"+
 			"环境那一份在设置页的「站点管理 → 环境 → 工作区目录」）")
 	default:
 		st, err := os.Stat(ws)

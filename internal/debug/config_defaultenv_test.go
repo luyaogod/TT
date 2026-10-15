@@ -27,8 +27,12 @@ func TestApplyDefaultEnvEmptySSHs(t *testing.T) {
 	}
 }
 
-// 当前环境已被删除但仍有其它环境时,回落到首条(原有语义不变)。
-func TestApplyDefaultEnvFallsBackToFirst(t *testing.T) {
+// 当前环境已被删除时:**清空运行时字段,不再回落到首条**。
+//
+// 原先这里是"回落到首条(原有语义不变)"。默认环境移除之后这条回落变成了危险行为:
+// 它会静默把会话切到另一台机器上,而输出看起来一切正常 —— 与"上错号"无法区分。
+// 现在解不出环境就什么都不连(见 ApplyDefaultEnv)。
+func TestApplyDefaultEnvClearsWhenEnvMissing(t *testing.T) {
 	c := &Config{
 		SSHs: []host.NamedSsh{
 			{Name: "A", SSHConfig: host.SSHConfig{Host: "1.1.1.1"}},
@@ -37,11 +41,11 @@ func TestApplyDefaultEnvFallsBackToFirst(t *testing.T) {
 		envName: "已删除的环境",
 	}
 	c.ApplyDefaultEnv()
-	if c.envName != "A" {
-		t.Fatalf("应回落到首条环境 A,got %q", c.envName)
+	if c.envName != "" {
+		t.Fatalf("环境不存在时应清空当前环境(不回落到首条),got %q", c.envName)
 	}
-	if c.SSH.Host != "1.1.1.1" {
-		t.Fatalf("回落应合并首条 SSH,got %q", c.SSH.Host)
+	if c.SSH.Host != "" {
+		t.Fatalf("环境不存在时不该合并任何 SSH(否则会连到别人机器上),got %q", c.SSH.Host)
 	}
 }
 

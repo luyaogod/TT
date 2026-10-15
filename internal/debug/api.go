@@ -558,7 +558,9 @@ func (s *Server) hSnapshot(w http.ResponseWriter, r *http.Request) {
 		"holdingSeconds":  sess.HoldingSeconds(),
 		"watchdogSeconds": s.cfg.WatchdogSeconds,
 		"topent":          sess.TopentOverride(),
-		"topentCfg":       sess.TopentCfg(),
+		// 本会话显式给的 TOPENT(启动 --ent / 面板输入)。**不再是"配置级"** ——
+		// 环境配置里的企业编号已移除,所以它与 topent(会话内覆盖)只在"启动给 vs 中途改"上有别。
+		"topentSession":   sess.TopentSession(),
 		"topentShell":     sess.TopentShell(),
 		// 本次重放跑完后读回来的响应原文(非重放会话为空)。
 		// 以前想看它只能"停在收尾断点再 continue 到 exit"从 stdout 抓,很绕。
@@ -687,12 +689,18 @@ func (s *Server) hSessionClose(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true, "state": "exit"})
 }
 
-// hSessionRestart 「重启会话」:断开并重连同环境,回到 idle 待启动
+// hSessionRestart 「重启会话」:断开并重连同环境,回到 idle 待启动。
+// ent = 本次要用的企业编号(同 hSessionSwitch;空 = 沿用登录 shell 的 $TOPENT)。
 func (s *Server) hSessionRestart(w http.ResponseWriter, r *http.Request) {
 	sess := s.sessOfWrite(w, r)
 	if sess == nil {
 		return
 	}
+	// 请求体可选:不传就是"原样重启"(沿用该会话当前的企业编号)。
+	var req struct {
+		Ent string `json:"ent"`
+	}
+	_ = readBody(w, r, &req)
 	env := sess.EnvName()
 	id := sess.ID
 	// 先收口当前会话(运行中会先中断/quit),再重建连接
@@ -703,11 +711,13 @@ func (s *Server) hSessionRestart(w http.ResponseWriter, r *http.Request) {
 	s.mgr.Remove(id)
 	cfg := s.envCfgFor(env)
 	if cfg == nil {
-		cfg = s.envCfgFor(s.cfg.EnvName()) // 原环境已被删除:退回当前默认
-	}
-	if cfg == nil {
-		fail(w, 500, fmt.Errorf("找不到可用的连接配置(环境 %q 已被删除)", env))
+		// 原环境已被删除 ⇒ **不再退回某个"默认"环境**(默认环境这个概念已移除):
+		// 那会把会话悄悄连到另一台机器上。直接报错,让人点名一个存在的环境。
+		fail(w, 500, fmt.Errorf("环境 %q 已被删除,无法重启;请用 /api/sessions/switch 点名一个存在的环境", env))
 		return
+	}
+	if ent := strings.TrimSpace(req.Ent); ent != "" {
+		cfg.Topent = host.EntValue(ent)
 	}
 	ns, err := s.mgr.CreateSessionOn(cfg)
 	if err != nil {
@@ -760,9 +770,14 @@ func trimTopent(v string) string {
 
 // hSessionSwitch 「切换会话」:把当前环境切到目标环境(仅内存)并按该环境重连到 idle。
 // 若已是目标环境会话则幂等返回(不改动正在进行的调试)。
+//
+// ent = 本次要用的**企业编号**(界面面板填的那个)。环境配置里已经没有企业编号了
+// (hosts.sshs[].topent 已移除),所以 ENT 只能随这次请求进来;留空 = 不覆盖,
+// 沿用登录 shell 自己的 $TOPENT(见 Session.bootHost 2.5)。
 func (s *Server) hSessionSwitch(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Env string `json:"env"`
+		Ent string `json:"ent"`
 	}
 	if !readBody(w, r, &req) {
 		return
@@ -771,6 +786,9 @@ func (s *Server) hSessionSwitch(w http.ResponseWriter, r *http.Request) {
 	if cfg == nil {
 		fail(w, 404, fmt.Errorf("环境 %q 不存在(请在设置中添加)", req.Env))
 		return
+	}
+	if ent := strings.TrimSpace(req.Ent); ent != "" {
+		cfg.Topent = host.EntValue(ent)
 	}
 	if !s.sessOfWriteGlobal(w, r) {
 		return

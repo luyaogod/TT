@@ -371,7 +371,7 @@ func (o Options) workspace() (string, error) {
 		Msg: "未配置工作区（拒绝启动引擎）",
 		Detail: []string{
 			"引擎的默认工作区是一个真实客户目录，工具绝不替你选",
-			"三种给法：--workspace <dir> / 环境变量 TZSCLI_WS / 当前环境的 workspace",
+			"三种给法：--workspace <dir> / 环境变量 TZSCLI_WS / --env <环境名> 的工作区",
 			"（环境那一份在设置页「站点管理 → 环境 → 工作区目录」，即 hosts.sshs[].workspace）",
 		},
 	}

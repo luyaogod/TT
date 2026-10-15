@@ -162,7 +162,7 @@ interface Store {
   doPrint: (expr: string) => Promise<void>
   adoptExisting: () => Promise<void>
   // 会话管理(右侧「会话」sheet):切换/重启/结束常驻会话(会先结束当前 debug)
-  sessionOp: (op: 'close' | 'restart' | 'switch', env?: string) => Promise<void>
+  sessionOp: (op: 'close' | 'restart' | 'switch', env?: string, ent?: string) => Promise<void>
   syncFromSessions: () => Promise<void>
   // 停站态到了但本地不知道停在哪时的兜底(入口停站只发 state,没有 stopped 事件)
   syncStopFromSnapshot: () => Promise<void>
@@ -1131,14 +1131,14 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   // 会话管理:右侧「会话」sheet 的 结束/重启/切换(后端会先结束当前 debug)
-  sessionOp: async (op, env) => {
+  sessionOp: async (op, env, ent) => {
     const st = get()
     const label = op === 'close' ? '结束会话' : op === 'restart' ? '重启会话' : '切换会话'
     try {
       if (op === 'close' && st.sessionId) await api.sessionClose(st.sessionId)
-      else if (op === 'restart' && st.sessionId) await api.sessionRestart(st.sessionId)
-      else if (op === 'switch' && env) await api.sessionSwitch(env)
-      st.pushTimeline({ origin: 'human', kind: 'command', text: label + (env ? ' → ' + env : '') })
+      else if (op === 'restart' && st.sessionId) await api.sessionRestart(st.sessionId, ent)
+      else if (op === 'switch' && env) await api.sessionSwitch(env, ent)
+      st.pushTimeline({ origin: 'human', kind: 'command', text: label + (env ? ' → ' + env : '') + (ent ? ' (ENT ' + ent + ')' : '') })
     } catch (e: any) {
       st.pushTimeline({ origin: 'system', kind: 'warn', text: `${label}失败: ${e.message || String(e)}` })
       throw e

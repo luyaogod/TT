@@ -262,7 +262,7 @@ func TestRunTzsVerbLocalFailures(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := testkit.Silent(t, func() int { return runTzsVerb(c.args) }); got != c.want {
+			if got := testkit.Silent(t, func() int { return runTzsVerb(c.args, "") }); got != c.want {
 				t.Errorf("该退 %d，得 %d", c.want, got)
 			}
 		})
@@ -609,7 +609,7 @@ func TestRemovedCommandsAreNotAdvertised(t *testing.T) {
 		}
 	}
 	for _, a := range []string{"fns", "manifest"} {
-		if got := testkit.Silent(t, func() int { return cmdTzs([]string{a}) }); got != 2 {
+		if got := testkit.Silent(t, func() int { return cmdTzs([]string{a}, "") }); got != 2 {
 			t.Errorf("tt dev tzs %s 该退 2（已不是命令），得 %d", a, got)
 		}
 	}
@@ -628,7 +628,7 @@ func TestRemovedCommandsAreNotAdvertised(t *testing.T) {
 // 引擎不可达（默认）与可达（配了 TT_CONFIG 时）。
 func TestCmdTzsHelpIsStatic(t *testing.T) {
 	for _, a := range []string{"-h", "--help", "help"} {
-		code, out := testkit.CaptureStdout(t, func() int { return cmdTzs([]string{a}) })
+		code, out := testkit.CaptureStdout(t, func() int { return cmdTzs([]string{a}, "") })
 		if code != 0 {
 			t.Errorf("tt dev tzs %s 该退 0，得 %d", a, code)
 		}
@@ -636,7 +636,7 @@ func TestCmdTzsHelpIsStatic(t *testing.T) {
 			t.Errorf("tt dev tzs %s 的输出里该有动词用法：\n%s", a, out)
 		}
 	}
-	if got := testkit.Silent(t, func() int { return cmdTzs(nil) }); got != 2 {
+	if got := testkit.Silent(t, func() int { return cmdTzs(nil, "") }); got != 2 {
 		t.Errorf("没有子命令该退 2，得 %d", got)
 	}
 }

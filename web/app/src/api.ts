@@ -90,14 +90,13 @@ export interface HostsSsh {
   user: string
   password: string
   zone?: string
-  topent?: string
+  // 企业编号(topent)已从环境配置移除:ENT 每次显式给(CLI --ent / 会话面板)。
   // workspace 该环境的 .tzs 工作区（绝对路径）。机器级没有这一项（见 internal/config 的 TzsSettings）
   workspace?: string
   db?: HostsDb | null
 }
 // 调试节(debug.*):本机参数,不随环境走
 export interface HostsDebug {
-  activeEnv?: string
   launchArgs?: string
   watchdogSeconds?: number
   fglserver?: string
@@ -109,7 +108,6 @@ export interface HostsDebug {
 // GET /api/hosts 的响应:设置页用的那一份配置快照
 export interface HostsView {
   config: string
-  activeEnv: string
   sshs: HostsSsh[]
   listen: string // 监听地址在顶层(合并前它藏在 debug.listen 里)
   debug: HostsDebug
@@ -123,7 +121,7 @@ export interface HostsView {
 // PUT /api/hosts 的请求体:只带要改的节,省略的节后端保持原样 ——
 // 设置页的各张卡片各改各的节时不会用陈旧快照把对方刚改好的节覆盖掉。
 export interface HostsPatch {
-  hosts?: { activeEnv: string; sshs: HostsSsh[] }
+  hosts?: { sshs: HostsSsh[] }
   listen?: string
   debug?: HostsDebug
   query?: { source?: string }
@@ -241,7 +239,6 @@ export interface MirrorJob {
 }
 export interface MirrorResp {
   mirrorDir: string
-  activeEnv: string
   envs: MirrorEnv[]
   job: MirrorJob
 }
@@ -275,7 +272,6 @@ export interface DBSyncResp {
   configured: string
   defaultTarget: string
   exists: boolean
-  activeEnv: string
   envs: DBSyncEnv[]
   job: DBSyncJob
 }
@@ -372,9 +368,17 @@ export const api = {
   // 结束调试:只结束本轮运行,宿主会话保留(idle),可直接再次启动
   quit: (id: string) => req<any>(`${API_BASE}/sessions/${id}`, { method: 'DELETE' }),
   // 会话管理(单一常驻会话)
-  sessionRestart: (id: string) => req<{ sessionId: string; env?: string; state?: string }>(`${API_BASE}/sessions/${id}/restart`, { method: 'POST' }),
+  //
+  // ent = 本次要用的企业编号(面板上填的那个)。环境配置里已不再存企业编号
+  // (hosts.sshs[].topent 已移除),所以 ENT 必须随这次请求带上去;省略 = 不覆盖,
+  // 沿用登录 shell 自己的 $TOPENT。
+  sessionRestart: (id: string, ent?: string) =>
+    req<{ sessionId: string; env?: string; state?: string }>(
+      `${API_BASE}/sessions/${id}/restart`, { method: 'POST', body: JSON.stringify({ ent: ent || '' }) }),
   sessionClose: (id: string) => req<any>(`${API_BASE}/sessions/${id}/close`, { method: 'POST' }),
-  sessionSwitch: (env: string) => req<{ sessionId: string; env?: string; state?: string }>(`${API_BASE}/sessions/switch`, { method: 'POST', body: JSON.stringify({ env }) }),
+  sessionSwitch: (env: string, ent?: string) =>
+    req<{ sessionId: string; env?: string; state?: string }>(
+      `${API_BASE}/sessions/switch`, { method: 'POST', body: JSON.stringify({ env, ent: ent || '' }) }),
   // 空闲态重新设置会话 TOPENT(空值 = 清除覆盖并重新下发配置默认)
   topent: (id: string, value: string) => req<{ topent: string }>(`${API_BASE}/sessions/${id}/topent`, { method: 'POST', body: JSON.stringify({ value }) }),
   bpAdd: (id: string, location: string) =>

@@ -70,7 +70,11 @@ func tzsEngineExe() (string, error) {
 //   - doctor 的职责就是回答"还差什么"，它自己先因为缺工作区退 5 的话，就永远走不到
 //     它那条「工作区：未配置」的自检项（README 承诺的正是那一句）；
 //   - 运行类动词走 tzsEngineOptions（严格版）：没有工作区就不该开工（见下）。
-func tzsExecOptions(wsFlag string) (tzs.Options, error) {
+//
+// envName 取自**命令行**(--env,由根命令的 persistent flag 落到 common.Env)。
+// 工作区按环境配,所以没有环境就没有"该用哪个工作区"可言 —— 这里不接受空值兜底,
+// 空值会在 tzsEngineOptions 里被拒(doctor 允许空,它只报告)。
+func tzsExecOptions(wsFlag, envName string) (tzs.Options, error) {
 	exe, err := tzsEngineExe()
 	if err != nil {
 		return tzs.Options{}, err
@@ -87,7 +91,7 @@ func tzsExecOptions(wsFlag string) (tzs.Options, error) {
 		}
 	}
 	if ws == "" {
-		ws, wsSrc = activeWorkspace()
+		ws, wsSrc = envWorkspace(envName)
 	}
 	workDir := ""
 	if path, err := config.ResolvePath("", true); err == nil && path != "" {
@@ -102,11 +106,14 @@ func tzsExecOptions(wsFlag string) (tzs.Options, error) {
 	}, nil
 }
 
-// activeWorkspace 当前环境的工作区与**它的来源**（"环境「主机109」" 这种说法，直接进
-// doctor 的报告）。取工作区只有一份实现（config.Root.ActiveWorkspace），所以设置页显示的
-// 那个路径与引擎真正 Boot 的那个不可能是两个 —— 这正是把工作区从机器级搬到环境级的原因。
-// 读不到配置（首次运行、配置坏了）就是空串，交给上层拒绝。
-func activeWorkspace() (ws, src string) {
+// envWorkspace 指定环境的工作区与**它的来源**（"环境「主机109」" 这种说法，直接进
+// doctor 的报告）。工作区按环境配（hosts.sshs[].workspace），所以这个函数**必须**拿到
+// 环境名 —— 没有"默认环境"可回落（那正是这次要根除的猜测）。
+// envName 为空时返回空串，由上层决定是报错还是只报告（doctor）。
+func envWorkspace(envName string) (ws, src string) {
+	if strings.TrimSpace(envName) == "" {
+		return "", ""
+	}
 	path, err := config.ResolvePath("", true)
 	if err != nil || path == "" {
 		return "", ""
@@ -115,15 +122,15 @@ func activeWorkspace() (ws, src string) {
 	if err != nil {
 		return "", ""
 	}
-	e := root.ActiveEnv()
-	if e == nil {
+	ref, err := root.Hosts.Resolve(envName)
+	if err != nil || ref == nil || ref.Env == nil {
 		return "", ""
 	}
-	name := e.Name
+	name := ref.Name
 	if name == "" {
 		name = "（未命名）"
 	}
-	return e.Workspace, "环境「" + name + "」"
+	return ref.Env.Workspace, "环境「" + name + "」"
 }
 
 // tzsEngineOptions 是**运行类**动词用的严格版。
@@ -133,18 +140,28 @@ func activeWorkspace() (ws, src string) {
 // 机器级没有工作区这一层：一台机器对着几个客户就有几个工作区。
 // **末端拒绝**：三层都没有时报错（调用方退 5）并说清该配哪个键，绝不 spawn —— 引擎的缺省
 // 是一个真实客户目录，落上去等于拿别人的表单当草稿纸。
-func tzsEngineOptions(wsFlag string) (tzs.Options, error) {
-	o, err := tzsExecOptions(wsFlag)
+func tzsEngineOptions(wsFlag, envName string) (tzs.Options, error) {
+	o, err := tzsExecOptions(wsFlag, envName)
 	if err != nil {
 		return tzs.Options{}, err
 	}
 	if o.Workspace == "" {
 		return tzs.Options{}, fmt.Errorf(
-			"未配置工作区：--workspace、TZSCLI_WS 与当前环境的 workspace 都是空的。\n" +
-				"  引擎的缺省工作区是一个真实客户目录，所以这里拒绝启动而不是回落。\n" +
-				"  在设置页的「站点管理 → 环境 → 工作区目录」里填上它（或设 TZSCLI_WS / 临时用 --workspace）")
+			"没有可用的工作区：--workspace、TZSCLI_WS、以及环境 %s 的 workspace 都是空的。\n"+
+				"  引擎的缺省工作区是一个真实客户目录，所以这里拒绝启动而不是回落。\n"+
+				"  要么用 --env <环境名> 指定一个配了工作区的环境（设置页「站点管理 → 环境 → 工作区目录」），\n"+
+				"  要么直接给 --workspace <目录> / 设 TZSCLI_WS。",
+			envLabel(envName))
 	}
 	return o, nil
+}
+
+// envLabel 报错文案里的环境名：没给就明确说"未指定"，别让用户以为程序知道。
+func envLabel(envName string) string {
+	if strings.TrimSpace(envName) == "" {
+		return "(未指定 --env)"
+	}
+	return "「" + envName + "」"
 }
 
 // ---------- 动词索引：唯一的枚举入口 ----------
@@ -462,7 +479,7 @@ func oldCallExample(rest []string) string {
 //
 // 它是**唯一**的表单读写入口，而且不认识任何具体动词 —— 名字、参数、必填、取值范围
 // 全部来自 manifest。想确认"零 per-function 代码"：这个函数里没有一个动词的字面量。
-func runTzsVerb(args []string) int {
+func runTzsVerb(args []string, envName string) int {
 	if len(args) == 0 {
 		fmt.Fprint(os.Stderr, tzsUsage)
 		return 2
@@ -542,7 +559,7 @@ func runTzsVerb(args []string) int {
 	}
 
 	// 参数都定型了，现在才需要工作区：**运行**要它，校验不要。
-	o, err := tzsEngineOptions(f.workspace)
+	o, err := tzsEngineOptions(f.workspace, envName)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 5
@@ -752,7 +769,7 @@ func progressAfter(w io.Writer, d time.Duration, what string) func() {
 
 // ---------- stop / reap / doctor ----------
 
-func cmdTzsStop(args []string) int {
+func cmdTzsStop(args []string, envName string) int {
 	fs := flag.NewFlagSet("tzs stop", flag.ContinueOnError)
 	ws := fs.String("workspace", "", "工作区（默认取 TZSCLI_WS / 配置）")
 	// 这里曾声明过一个 `all`（"停掉状态文件里记录的全部守护进程"），但它只是
@@ -763,7 +780,7 @@ func cmdTzsStop(args []string) int {
 	if err := common.ParseArgs(fs, args, "workspace"); err != nil {
 		return 2
 	}
-	o, err := tzsEngineOptions(*ws)
+	o, err := tzsEngineOptions(*ws, envName)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 5
@@ -775,7 +792,7 @@ func cmdTzsStop(args []string) int {
 	return 0
 }
 
-func cmdTzsReap(args []string) int {
+func cmdTzsReap(args []string, envName string) int {
 	fs := flag.NewFlagSet("tzs reap", flag.ContinueOnError)
 	yes := fs.Bool("yes", false, "确认结束这些进程")
 	ws := fs.String("workspace", "", "工作区（可选：reap 按**记录**收，与当前工作区无关）")
@@ -789,7 +806,7 @@ func cmdTzsReap(args []string) int {
 	// 从前这里走的是严格版（tzsEngineOptions），于是"引擎重编过、旧守护进程收不掉"这件事
 	// 发生在**恰恰最需要它的场合**：换机器、换工作区、或者刚把配置改坏了的时候，reap 先
 	// 因为"没配工作区"退 5，而它正是来收拾这种残局的。实测 2026-09-24 记在 §11.9。
-	o, err := tzsExecOptions(*ws)
+	o, err := tzsExecOptions(*ws, envName)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 5
@@ -804,7 +821,7 @@ func cmdTzsReap(args []string) int {
 	return 0
 }
 
-func cmdTzsDoctor(args []string) int {
+func cmdTzsDoctor(args []string, envName string) int {
 	fs := flag.NewFlagSet("tzs doctor", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "输出 JSON")
 	if err := common.ParseArgs(fs, args); err != nil {
@@ -812,7 +829,7 @@ func cmdTzsDoctor(args []string) int {
 	}
 	// 宽松版：缺工作区时 doctor **自己**要在报告里说出来（那是它的职责），
 	// 在这里先退 5 就永远走不到那条自检项。
-	o, err := tzsExecOptions("")
+	o, err := tzsExecOptions("", envName)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 5

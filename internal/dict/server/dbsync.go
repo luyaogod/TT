@@ -47,7 +47,6 @@ type dbSyncResp struct {
 	Configured    string      `json:"configured"`    // config.json 顶层 sync.target(空=用默认)
 	DefaultTarget string      `json:"defaultTarget"` // 默认目标(exe 同目录;便携版自带)
 	Exists        bool        `json:"exists"`        // 目标文件当前是否已存在
-	ActiveEnv     string      `json:"activeEnv"`
 	Envs          []dbSyncEnv `json:"envs"`
 	Job           dbSyncJob   `json:"job"`
 }
@@ -63,7 +62,6 @@ func (s *Server) dbSyncView() dbSyncResp {
 		resp.Exists = true
 	}
 	if hosts, err := config.LoadHosts(s.cfgPath); err == nil {
-		resp.ActiveEnv = hosts.ActiveEnv
 		for i := range hosts.SSHs {
 			e := &hosts.SSHs[i]
 			if e.DB == nil {

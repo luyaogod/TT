@@ -558,14 +558,15 @@ func (s *Session) bootHost(ctx context.Context) error {
 		return err
 	}
 	s.markShellReady()
-	// 2.5 连接即下发环境默认 TOPENT(配置企业;会话内已有手动覆盖时用覆盖值)。
-	// 选区只给机器默认(日志里那行 TOPENT = 99),配置里的企业原本要等下一轮调试启动才
-	// export,会让"刚连上的会话"与设置页不一致 —— 故登录后立即下发,会话企业从一开始就是配置值。
-	// 空值不下发(保持选区登录默认),与 topentForRun 语义一致。
-	// 特意放在回读之前:回读到的 TOPENT 就是下发后的当前真实值,界面不必自行推断。
+	// 2.5 连接即下发**用户显式给的企业编号**(tt debug start --ent / 界面面板输入)。
+	//
+	// 环境配置里已经**没有**企业编号了(hosts.sshs[].topent 已移除)——所以这里不再有
+	// "环境默认企业"可下发。空值就什么都不做:**保留登录 shell 自己的 $TOPENT**
+	// (选区/环境脚本给的那个),它会被下面 2.6 的回读如实抓成 TopentShell。
+	// 换句话说:不给 --ent = 沿用这台机器登录后的企业;给了 = 以给的那个为准。
 	if ent := s.topentForRun(); ent != "" {
 		if err := s.applyTopentToShell(ent); err != nil {
-			return fmt.Errorf("登录 %s(环境 %s)后下发默认 TOPENT=%q 失败: %w",
+			return fmt.Errorf("登录 %s(环境 %s)后下发 TOPENT=%q 失败: %w",
 				s.cfg.SSH.Host, s.envName, ent, err)
 		}
 	}
@@ -794,16 +795,20 @@ func (s *Session) TopentOverride() string {
 	return s.topentOverride
 }
 
-// TopentCfg 配置级企业 TOPENT(设置页 SSH 页 topent;未手动设置时运行生效值)
-func (s *Session) TopentCfg() string {
+// TopentSession 本会话的 TOPENT(用户显式给的那个:tt debug start --ent / 界面面板)。
+//
+// **不再是"配置级"值**:环境配置里的企业编号已移除(hosts.sshs[].topent),所以这个值
+// 只有两个来源 —— 启动时显式给,或会话内用 SetTopent 改。空 = 用户没给,
+// 此时企业由**登录 shell 自己的 $TOPENT** 决定(见 TopentShell)。
+func (s *Session) TopentSession() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return strings.TrimSpace(string(s.cfg.Topent))
 }
 
 // TopentShell 登录后 shell 里实际回读到的 $TOPENT(选区/环境脚本给的企业;空 = 登录未导出)。
-// 与 TopentCfg 的区别:连接会话本身不 export TOPENT,只有下一轮调试启动才 export
-// override/配置值,所以"当前连的是哪个企业"以本值为准,供界面展示给用户参考。
+// 与 TopentSession 的区别:用户没显式给 TOPENT 时,会话不会去 export ——
+// 所以"当前这台机器连的是哪个企业"以本值为准。
 func (s *Session) TopentShell() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -813,7 +818,8 @@ func (s *Session) TopentShell() string {
 	return strings.TrimSpace(s.cfg.Runtime.Topent)
 }
 
-// topentForRun 本轮运行生效的 TOPENT:会话内手动设置优先,其次配置企业(TOPENT),再否则不导出(沿用登录默认)
+// topentForRun 本轮运行生效的 TOPENT:会话内手动设置优先,其次启动时显式给的值,
+// 再否则**不导出**(沿用登录 shell 自己的 $TOPENT)。
 func (s *Session) topentForRun() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -25,9 +25,6 @@ func TestMirrorGet(t *testing.T) {
 	if resp.MirrorDir != "" || len(resp.Envs) != 1 || resp.Envs[0].Ready {
 		t.Fatalf("初始 resp = %+v", resp)
 	}
-	if resp.ActiveEnv != "a" {
-		t.Fatalf("activeEnv = %q, want a", resp.ActiveEnv)
-	}
 	if resp.Envs[0].Name != "a" || resp.Envs[0].Zone != "36" {
 		t.Fatalf("环境信息不符: %+v", resp.Envs[0])
 	}

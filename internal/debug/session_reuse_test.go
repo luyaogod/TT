@@ -74,16 +74,25 @@ func TestPrepareSessionReusesIdleHost(t *testing.T) {
 // 那种会话没有 pty/conn,Close() 会打到 nil(见 session.go 的 forceExit)。
 // 这里只钉纯判据与"旧会话必须被移除"这件事,真拨 SSH 的那一步在真机验证。
 
-// envCfg 造一个"同机同区域、只有环境名与企业编号不同"的配置 ——
-// 这正是"同一个库、不同企业"的两个环境在连接四元组上的样子。
-func envCfg(name, topent string) *Config {
-	e := host.NamedSsh{Name: name, Topent: host.EntValue(topent)}
+// envCfg 造一个"同机同区域、只有环境名不同"的配置。
+//
+// 注:从前这里靠 Topent 让两个环境"同库不同企业"。企业编号已从环境配置移除
+// (ENT 每次显式给),所以两者的区别**只剩环境名** —— 而这恰好是判据本身:
+// envName 不同就是不同目标(不许复用旧会话),与连接四元组是否相同无关。
+func envCfg(name string) *Config {
+	e := host.NamedSsh{Name: name}
 	e.Host, e.Port, e.User, e.Zone = "h1", 22, "u", "36"
 	c := &Config{SSH: host.SSHConfig{Host: "h1", Port: 22, User: "u"}, Zone: "36",
 		SSHs: []host.NamedSsh{e}}
 	c.fillDefaults()
-	c.ApplyDefaultEnv()
-	return c
+	// 必须**走真实的环境选择路径**把 envName 定下来:没有默认环境之后,
+	// 不点名时 EnvName() 会退回 `host-zone` 推导名 —— 两个同机同区域的环境
+	// 于是算出同一个名字,安全判据(不许复用旧会话)当场失效。
+	sel := c.CloneEnv(name)
+	if sel == nil {
+		panic("envCfg: CloneEnv 未命中 " + name)
+	}
+	return sel
 }
 
 // idleOn 造一个"已在该环境登录、空闲待命"的会话:envName 与 cfg 一致,
@@ -97,18 +106,18 @@ func idleOn(id string, cfg *Config) *Session {
 // 判成同一个就会复用旧会话、继续用旧的企业编号跑(实测:所有按企业编号取数的
 // 查询返回 0 行,看起来像"配置缺失",结论会完全反向)。
 func TestSameTargetDistinguishesSiblingEnvs(t *testing.T) {
-	live := idleOn("s1", envCfg("恒烁正式区", "9999"))
-	if !live.sameConn(envCfg("测试1012", "1012")) {
+	live := idleOn("s1", envCfg("恒烁正式区"))
+	if !live.sameConn(envCfg("测试1012")) {
 		t.Fatal("两个环境指向同一台机器同一区域,连接本身是可复用的")
 	}
-	if live.sameTarget(envCfg("测试1012", "1012")) {
+	if live.sameTarget(envCfg("测试1012")) {
 		t.Fatal("同机不同环境不应判定为同一目标(否则复用旧会话 = 上错号)")
 	}
 	// 同名但连接不同(设置页把某环境的 host 改了):仍是"换目标",不能拿旧连接继续跑。
-	if !live.sameTarget(envCfg("恒烁正式区", "9999")) {
+	if !live.sameTarget(envCfg("恒烁正式区")) {
 		t.Fatal("同名同连接应判定为同一目标")
 	}
-	other := envCfg("恒烁正式区", "9999")
+	other := envCfg("恒烁正式区")
 	other.SSH.Host, other.SSH.User = "h2", "u"
 	if live.sameTarget(other) {
 		t.Fatal("同名但连接不同不应判定为同一目标")
@@ -118,13 +127,13 @@ func TestSameTargetDistinguishesSiblingEnvs(t *testing.T) {
 // 空闲旧会话遇到不同环境:即使连接可复用也必须重建,且新会话带上新的企业编号。
 // 这里只验证"旧会话被移除、新的那份配置被用上" —— 真拨 SSH 那一步在真机验证。
 func TestPrepareSessionRebuildsOnEnvSwitch(t *testing.T) {
-	m := NewManager(envCfg("恒烁正式区", "9999"))
-	live := idleOn("s1", envCfg("恒烁正式区", "9999"))
+	m := NewManager(envCfg("恒烁正式区"))
+	live := idleOn("s1", envCfg("恒烁正式区"))
 	m.mu.Lock()
 	m.sessions["s1"] = live
 	m.mu.Unlock()
 
-	target := envCfg("测试1012", "1012")
+	target := envCfg("测试1012")
 	if live.sameTarget(target) {
 		t.Fatal("前置条件不成立:两个环境被判成了同一个")
 	}
@@ -137,20 +146,18 @@ func TestPrepareSessionRebuildsOnEnvSwitch(t *testing.T) {
 	if got := ns.EnvNameNow(); got != "测试1012" {
 		t.Fatalf("新会话环境应为 测试1012, got %q", got)
 	}
-	if got := ns.TopentCfg(); got != "1012" {
-		t.Fatalf("新会话配置级企业应为 1012, got %q", got)
+	// 会话级企业编号:没显式给就是空(不再从环境配置继承 —— 那个字段已移除)。
+	if got := ns.TopentSession(); got != "" {
+		t.Fatalf("没显式给 ENT 时会话企业应为空(企业由登录 shell 的 $TOPENT 决定), go %q", got)
 	}
 }
 
 // 复用同环境会话时,环境名要跟着配置刷新(否则快照会报旧环境名)。
 func TestSetRunRefreshesEnvName(t *testing.T) {
-	s := &Session{ID: "s1", cfg: envCfg("恒烁正式区", "9999"), state: StateIdle, envName: "旧名"}
-	s.SetRun(envCfg("恒烁正式区", "9999"), "m", "p", "", "", "")
+	s := &Session{ID: "s1", cfg: envCfg("恒烁正式区"), state: StateIdle, envName: "旧名"}
+	s.SetRun(envCfg("恒烁正式区"), "m", "p", "", "", "")
 	if got := s.EnvNameNow(); got != "恒烁正式区" {
 		t.Fatalf("SetRun 后环境名应为 恒烁正式区, got %q", got)
-	}
-	if got := s.TopentCfg(); got != "9999" {
-		t.Fatalf("SetRun 后配置级企业应为 9999, got %q", got)
 	}
 }
 
@@ -171,38 +178,38 @@ func TestPrepareSessionRejectsActiveRun(t *testing.T) {
 
 func TestTopentForRun(t *testing.T) {
 	c := cfgFor("h1", "36")
-	c.Topent = "7"
+	c.Topent = "7" // 会话级 ENT(启动 --ent 给的那个);不再是环境配置值
 	s := fakeIdleSession("s1", "h1", "36")
 	s.cfg = c
 	if got := s.topentForRun(); got != "7" {
-		t.Fatalf("无手动设置时应回退 ssh 环境 topent,got %q", got)
+		t.Fatalf("无手动设置时应回退到本会话显式给的 ENT,got %q", got)
 	}
-	// 文本型 TOPENT(设置页/会话面板均允许)原样透传
+	// 文本型 TOPENT(会话面板允许)原样透传
 	c2 := cfgFor("h1", "36")
 	c2.Topent = " txt-9 "
 	s3 := fakeIdleSession("s3", "h1", "36")
 	s3.cfg = c2
 	if got := s3.topentForRun(); got != "txt-9" {
-		t.Fatalf("文本型配置 TOPENT 应剔除两侧空白透传,got %q", got)
+		t.Fatalf("文本型 ENT 应剔除两侧空白透传,got %q", got)
 	}
 	s.mu.Lock()
 	s.topentOverride = "99"
 	s.mu.Unlock()
 	if got := s.topentForRun(); got != "99" {
-		t.Fatalf("手动设置应优先于配置企业,got %q", got)
+		t.Fatalf("手动设置应优先于会话初始 ENT,got %q", got)
 	}
 	s2 := fakeIdleSession("s2", "h1", "36")
 	if got := s2.topentForRun(); got != "" {
-		t.Fatalf("无 topent 且无手动设置应返回空(沿用登录默认),got %q", got)
+		t.Fatalf("没给 ENT 也没手动设置应返回空(沿用登录 shell 的 $TOPENT),got %q", got)
 	}
 	if got := s.TopentOverride(); got != "99" {
 		t.Fatalf("TopentOverride 应返回手动值,got %q", got)
 	}
-	if got := s.TopentCfg(); got != "7" {
-		t.Fatalf("TopentCfg 应返回配置值,got %q", got)
+	if got := s.TopentSession(); got != "7" {
+		t.Fatalf("TopentSession 应返回启动时显式给的值,got %q", got)
 	}
-	// TopentShell 取登录回读的 $TOPENT:与配置级 TopentCfg 是两个来源
-	// (连接会话不 export TOPENT,故"当前连的是哪个"以回读值为准)
+	// TopentShell 取登录回读的 $TOPENT:与 TopentSession 是两个来源
+	// (没给 ENT 时会话不 export TOPENT,故"当前连的是哪个"以回读值为准)
 	if got := s.TopentShell(); got != "" {
 		t.Fatalf("未回读(无 Runtime)时 TopentShell 应为空,got %q", got)
 	}
@@ -213,7 +220,8 @@ func TestTopentForRun(t *testing.T) {
 }
 
 func TestCloneEnvAndEnvName(t *testing.T) {
-	e1 := host.NamedSsh{Name: "E1", Zone: "35", Topent: "7"}
+	// 环境不再带企业编号(ENT 每次显式给),所以这里只造连接与库。
+	e1 := host.NamedSsh{Name: "E1", Zone: "35"}
 	e1.Host = "e1h"
 	e1.Port = 22
 	e1.User = "u1"
@@ -235,9 +243,6 @@ func TestCloneEnvAndEnvName(t *testing.T) {
 	}
 	if clone.SSH.Host != "e1h" || clone.Zone != "35" || clone.EnvName() != "E1" {
 		t.Fatalf("CloneEnv 字段不符: %+v", clone.SSH)
-	}
-	if clone.Topent != "7" {
-		t.Fatalf("CloneEnv 应带环境 TOPENT,got %q", clone.Topent)
 	}
 	if clone.DB == nil || clone.DB.Type != "oracle" || clone.DB.Service != "s1" {
 		t.Fatal("CloneEnv 应带环境内嵌的 db 配置")

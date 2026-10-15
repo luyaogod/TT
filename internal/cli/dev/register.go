@@ -26,6 +26,28 @@ import (
 // Group 是 tt dev 命令组。
 var Group = newDevCmd()
 
+// envNameFn 由 internal/cli 注入根命令的 --env 取值。
+//
+// 为什么要这一层:本包**不能**直接 import internal/cli/common —— 它已经 import 了
+// internal/cli/dev/common(包名同为 common),两个 common 撞名;而改名会牵动本包所有文件。
+// 所以沿用与 WebFS 同样的做法:上游给一对存取函数,这里只转手。
+var envNameFn = func() string { return "" }
+
+// envSetFn 由 internal/cli 注入"把 --env 写进全局开关"的方式。
+// takeRootFlags 摘到 --env 时调它 —— 与 --config 走 TT_CONFIG 同一个思路:
+// 摘出来的根开关不重发给动词解析器,而是落到这条线真正会读的地方。
+var envSetFn = func(string) {}
+
+// SetEnvNameFunc 由 internal/cli 在装配命令树时调用,注入 --env 的读写方式。
+func SetEnvNameFunc(get func() string, set func(string)) {
+	if get != nil {
+		envNameFn = get
+	}
+	if set != nil {
+		envSetFn = set
+	}
+}
+
 // Register 把本命令组挂到根命令上。
 func Register(parent *cobra.Command) { parent.AddCommand(Group) }
 
@@ -140,7 +162,9 @@ func newTzsCmd() *cobra.Command {
 				fmt.Fprintln(os.Stderr, err)
 				return exitCode(2)
 			}
-			if code := tzs.Run(bridged); code != 0 {
+			// 环境名来自根命令的 --env(--conn 是别名),经 SetEnvNameFunc 注入。
+			// 工作区按环境配,所以 tzs 这条线必须拿到它 —— 没有"默认环境"可回落。
+			if code := tzs.Run(bridged, envNameFn()); code != 0 {
 				return exitCode(code)
 			}
 			return nil

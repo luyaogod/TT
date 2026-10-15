@@ -25,7 +25,10 @@ import (
 	"tt/internal/testkit"
 )
 
-// probe 报出的服务器与区域必须是配置里的那一份(而不是零值)。
+// probe 报出的服务器与区域必须是**点名的那个环境**里的那一份(而不是零值)。
+//
+// 注:从前靠配置里的 hosts.activeEnv 触发选择;默认环境已移除,
+// 所以现在必须 `--env` 点名 —— 这条用例顺带把"点名才连"钉住了。
 func TestDBGProbeReportsConfiguredHost(t *testing.T) {
 	oldPath := common.ConfigPath
 	common.ConfigPath = writeProbeConfig(t)
@@ -33,7 +36,12 @@ func TestDBGProbeReportsConfiguredHost(t *testing.T) {
 
 	oldModule, oldProg := dbgModule, dbgProg
 	dbgModule, dbgProg = "asf", "bsft001_wf"
-	t.Cleanup(func() { dbgModule, dbgProg = oldModule, oldProg })
+	oldEnvFlag, oldEnv := dbgEnvFlag, common.Env
+	dbgEnvFlag, common.Env = "", "探针机" // 等价于 --env 探针机
+	t.Cleanup(func() {
+		dbgModule, dbgProg = oldModule, oldProg
+		dbgEnvFlag, common.Env = oldEnvFlag, oldEnv
+	})
 
 	_, out := testkit.CaptureStdout(t, func() int {
 		// 连不上是这一条的**预期**:端口 1 上不会有 SSH。这里要的是"连哪台",不是"连得上"。
@@ -42,7 +50,26 @@ func TestDBGProbeReportsConfiguredHost(t *testing.T) {
 	})
 
 	if !strings.Contains(out, "[probe] 服务器 127.0.0.1:1 区域 36") {
-		t.Fatalf("probe 没按配置里的环境连。\n漏掉 ApplyDefaultEnv 的表现是 `[probe] 服务器 :22 区域 `(主机空、区域空、端口回落成默认的 22):\n%s", out)
+		t.Fatalf("probe 没按点名的环境连。\n漏掉 CloneEnv/ApplyDefaultEnv 的表现是 `[probe] 服务器 :22 区域 `(主机空、区域空):\n%s", out)
+	}
+}
+
+// **不点名就不许连**:这是"移除默认环境"的直接效果 —— 没有"挑一个"这回事。
+func TestDBGProbeRefusesWithoutEnv(t *testing.T) {
+	oldPath := common.ConfigPath
+	common.ConfigPath = writeProbeConfig(t)
+	t.Cleanup(func() { common.ConfigPath = oldPath })
+
+	oldEnvFlag, oldEnv := dbgEnvFlag, common.Env
+	dbgEnvFlag, common.Env = "", ""
+	t.Cleanup(func() { dbgEnvFlag, common.Env = oldEnvFlag, oldEnv })
+
+	err := debugProbeCmd.RunE(debugProbeCmd, nil)
+	if err == nil {
+		t.Fatal("没点名环境时 probe 不该默默挑一个连")
+	}
+	if !strings.Contains(err.Error(), "--env") {
+		t.Errorf("拒绝时该指向 --env:%v", err)
 	}
 }
 

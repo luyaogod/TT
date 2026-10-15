@@ -90,12 +90,20 @@ func init() {
 	pf.StringVar(&common.Format, "format", "json",
 		"输出形态: json(默认,带环境信息的信封) | csv(带 # 环境头) | table(人读表格)")
 	pf.BoolVarP(&common.Verbose, "verbose", "v", false, "显示解析细节（如实际使用的数据源路径）")
-	pf.StringVar(&common.Env, "env", "", "指定环境名（config.json hosts.sshs 中的 name；认它的命令见各自 --help，tt dev 会明确拒绝）")
+	// 环境一律点名:没有"默认环境"可回落(见 config.Hosts 的注释)。认它的命令见各自 --help。
+	// tt dev tzs 也认它 —— 工作区按环境配,不给环境就没有该用哪个工作区可言。
+	pf.StringVar(&common.Env, "env", "", "指定环境名（config.json hosts.sshs 中的 name；环境一律点名，没有默认环境可回落）")
 	// --conn 是合并前 tdict 的叫法，保留为别名，但不出现在 --help 里
 	pf.StringVar(&common.Env, "conn", "", "指定环境名（--env 的别名）")
 	_ = pf.MarkHidden("conn")
 
 	debug.Register(rootCmd)
+	// 把 --env 的读写方式注入 dev 包:它不能直接 import cli/common(与 dev/common 撞包名)。
+	// 读:tzs 用它取该环境的 workspace;写:takeRootFlags 摘到 --env 时落到同一个 common.Env。
+	dev.SetEnvNameFunc(
+		func() string { return common.Env },
+		func(v string) { common.Env = v },
+	)
 	dev.Register(rootCmd)
 	dict.Register(rootCmd)
 	fep.Register(rootCmd)

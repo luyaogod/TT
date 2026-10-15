@@ -538,7 +538,7 @@ func stTzsExport(dir string) error {
 		return err
 	}
 	out := filepath.Join(dir, "unzip")
-	if code := tzs.Run([]string{"export", p, "-o", out}); code != 0 {
+	if code := tzs.Run([]string{"export", p, "-o", out}, ""); code != 0 {
 		return fmt.Errorf("tzs export 退出码 %d", code)
 	}
 	for name, want := range entries {
@@ -556,10 +556,10 @@ func stTzsExport(dir string) error {
 		}
 	}
 	// 非空目标默认拒绝；--force 才覆盖
-	if code := tzs.Run([]string{"export", p, "-o", out}); code != 5 {
+	if code := tzs.Run([]string{"export", p, "-o", out}, ""); code != 5 {
 		return fmt.Errorf("非空目标应退出 5，实际 %d", code)
 	}
-	if code := tzs.Run([]string{"export", p, "-o", out, "--force"}); code != 0 {
+	if code := tzs.Run([]string{"export", p, "-o", out, "--force"}, ""); code != 0 {
 		return fmt.Errorf("--force 应退出 0，实际 %d", code)
 	}
 	// 代码包走 tzs → 退出 2（指回 tzc）
@@ -567,7 +567,7 @@ func stTzsExport(dir string) error {
 	if err != nil {
 		return err
 	}
-	if code := tzs.Run([]string{"export", codePkg, "-o", filepath.Join(dir, "bad")}); code != 2 {
+	if code := tzs.Run([]string{"export", codePkg, "-o", filepath.Join(dir, "bad")}, ""); code != 2 {
 		return fmt.Errorf("代码包走 tzs 应退出 2，实际 %d", code)
 	}
 	return nil
