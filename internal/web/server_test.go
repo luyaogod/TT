@@ -141,6 +141,72 @@ func TestHostsPut_LeavesOtherSectionsAlone(t *testing.T) {
 	}
 }
 
+// **表单没提交的字段要保留旧值**：请求体是前端照它的表单序列化出来的，
+// 表单里没有的字段（后加进 schema 的、只给命令行用的）会整个缺席。
+//
+// 这条钉的是真实踩到的两次：`debug.aiTakeover` 与 `query.limit` ——
+// 两个都在 schema 里、都有代码读，而配置页里没有对应控件。整节替换就等于
+// "打开设置页点一次保存，那个字段静默消失"（用户完全看不出发生过什么）。
+func TestHostsPut_KeepsFieldsTheFormDoesNotSend(t *testing.T) {
+	seed := `{"schemaVersion":3,
+	  "hosts":{"sshs":[{"name":"甲","host":"h","port":22,"user":"u","password":"p","zone":"36"}]},
+	  "debug":{"termWidth":240,"aiTakeover":true},
+	  "query":{"source":"local","limit":500}}`
+	s, path := newTestServer(t, seed)
+
+	rec, _ := doJSON(t, s, http.MethodPut, "/api/hosts", map[string]any{
+		"debug": map[string]any{"termWidth": 180},
+		"query": map[string]any{"source": "remote"},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT 失败 HTTP %d: %s", rec.Code, rec.Body.String())
+	}
+	root, _ := config.Open(path)
+	d, _ := root["debug"].(map[string]any)
+	if d["termWidth"] != float64(180) {
+		t.Errorf("表单提交的 debug.termWidth 未生效: %v", d["termWidth"])
+	}
+	if d["aiTakeover"] != true {
+		t.Errorf("表单没提交的 debug.aiTakeover 被抹掉了（保存一次就丢配置）: %v", d["aiTakeover"])
+	}
+	q, _ := root["query"].(map[string]any)
+	if q["source"] != "remote" {
+		t.Errorf("表单提交的 query.source 未生效: %v", q["source"])
+	}
+	if q["limit"] != float64(500) {
+		t.Errorf("表单没提交的 query.limit 被抹掉了: %v", q["limit"])
+	}
+}
+
+// **hosts 节里表单不管理的键也要保留**：`hosts.activeEnv`（"默认环境"）就是这一类 ——
+// 配置页上早就没有这个控件了，而 `config.ActiveHost` 还在拿它兜底。
+// 保存一次就把它抹掉，等于把用户手工配的默认环境悄悄清空。
+func TestHostsPut_KeepsSectionKeysTheFormDoesNotManage(t *testing.T) {
+	seed := `{"schemaVersion":3,"hosts":{"activeEnv":"甲","sshs":[
+	  {"name":"甲","host":"10.0.0.1","port":22,"user":"u","password":"p","zone":"36"}]}}`
+	s, path := newTestServer(t, seed)
+
+	rec, _ := doJSON(t, s, http.MethodPut, "/api/hosts", map[string]any{
+		"hosts": map[string]any{
+			"sshs": []any{map[string]any{
+				"name": "甲", "host": "10.0.0.2", "port": 22, "user": "u", "password": "p", "zone": "36",
+			}},
+		},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT 失败 HTTP %d: %s", rec.Code, rec.Body.String())
+	}
+	root, _ := config.Open(path)
+	hosts, _ := root["hosts"].(map[string]any)
+	if hosts["activeEnv"] != "甲" {
+		t.Errorf("hosts.activeEnv 被抹掉了（表单里没有这一栏，可它有代码在读）: %v", hosts["activeEnv"])
+	}
+	sshs, _ := hosts["sshs"].([]any)
+	if len(sshs) != 1 || sshs[0].(map[string]any)["host"] != "10.0.0.2" {
+		t.Errorf("表单提交的改动该生效: %v", sshs)
+	}
+}
+
 // 校验拦在保存之前，且错误信息是给人看的中文。
 func TestHostsPut_Validation(t *testing.T) {
 	cases := []struct {

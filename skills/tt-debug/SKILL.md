@@ -184,6 +184,11 @@ tt fep rec reproduce <录制 ID> --break <文件>:<行>      # 例: --break asf_
 #   停站后不收拾会话：接着 tt debug exec 取证，收工 tt debug quit ; tt fep session close
 ```
 
+只想把事件原样发出去、不等停站（面板那个「回放」按钮就是这么用的）就加 `--no-wait`：
+它发完就退，**留下的是一个还开着的作业窗口**（用户要看最后那一屏）与一份会话登记 ——
+那份登记里的 `ownerPid` 已经不在了，所以它**不算"还在录"**，不会挡下一轮；
+要关掉那个窗口就用 `tt fep session close`（面板上是「收工(关窗口)」）。
+
 ### 手工分步(要自己控制节奏时)
 
 ```bash

@@ -13,9 +13,9 @@
 | `/api/config/meta` / `/api/config/status` | 配置的元信息与**派生状态** |
 | `/api/cache/clear` | 清缓存 |
 | `/api/recordings` GET / POST | **录制面板**：按 环境+ENT 列录制（长期库与缓存两处）／起一轮录制（**另起一个进程**跑 `tt fep rec start`，照 `tt update` 那条先例） |
-| `/api/recordings/current` · `/api/recordings/stop` | 现在在录吗（看会话登记，不看文件）／停一轮（= `session close` + 收掉调试会话） |
+| `/api/recordings/current` · `/api/recordings/stop` | 现在在录吗（看会话登记，不看文件；另答两件事：`kind` = 录还是回放、`stale` = 起它的进程还在不在）／停一轮（= `session close` + 收掉调试会话）；**过期登记**（`rec reproduce --no-wait` 发完就退留下的那份）照样报出来 —— 它是那个窗口的收工凭据，但**不算"在跑"**，不挡下一轮起录 |
 | `/api/recordings/{id}` GET / DELETE | 看一份（含身份）／删一份（**必须 `?confirm=1`**：录制不可再生） |
-| `/api/recordings/{id}/replay` POST | 回放这一份：**另起一个进程**跑 `tt fep rec reproduce <ID> --no-wait`（按身份起调试线会话 → 过指纹闸 → 发事件，**不等停站**，会话留着给 AI 取证）。r.r 录的件、以及"已经有一轮在跑"，这两种情形**在起进程之前**就 409 |
+| `/api/recordings/{id}/replay` POST | 回放这一份：**另起一个进程**跑 `tt fep rec reproduce <ID> --no-wait`（按身份起调试线会话 → 过指纹闸 → 发事件，**不等停站**，会话留着给 AI 取证）。r.r 录的件、以及"已经有一轮**活着**的录制在跑"，这两种情形**在起进程之前**就 409 |
 | `/api/install` GET / POST / DELETE | 把 tt 加进 / 移出用户 PATH |
 | `/api/update` / `/api/update/check` / `/api/update/apply` | tt 自身的更新：读状态（不联网）/ 人去点才查一次 / 交棒给更新器 |
 | `/api/shutdown` | 停止服务（仅在有停止回调时挂） |

@@ -12,10 +12,11 @@
 // 保存**按节提交**:设置页的各张卡片各改各的节,不拿陈旧快照覆盖对方刚改好的节
 // (后端约定:PUT /api/hosts 里省略的节保持原样)。
 //
-// ⚠ 后端的 PUT 是**整节替换**,而这些结构体每个字段都带 omitempty —— 省略的键等于删除。
-// 所以每张卡片的保存都必须提交**完整的节**(从读到的快照 + 编辑项构造),绝不能只发表单里
-// 那几个字段:老代码在「高级」里只发了 5 个键,于是 fglserver / persistBreakpoints 在用户
-// 每次保存时被静默抹掉。debugPatchOf 就是为了堵这个。
+// 字段级也一样:**表单里没有的键不必回传**,后端会从旧配置原样补回(`putSection`)——
+// 这条是 2026-10-15 补上的,它之前是"整节替换 + 每个字段 omitempty = 省略一个键就删掉它",
+// 于是 `debug.aiTakeover`、`query.limit` 这种"后端有、界面没有"的字段每次保存都被静默抹掉。
+// 现在两端各有一道:后端补回缺席的键,前端也**只提交自己管得着的**字段(不再把读到的
+// 一整套默认值写回去 —— 那会在配置里凭空写出 `termWidth: 200` 这种用户从没设过的值)。
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   AlertCircle, CheckCircle2, Copy, Download, Eye, EyeOff,
@@ -75,17 +76,13 @@ interface SshItem {
   db: SshDb | null
 }
 
-// debug 节的完整表单。字段与 internal/config/schema.go 的 DebugSettings 一一对应 ——
-// 少一个键就意味着保存时把它删了(整节替换),所以这里必须是全集。
+// debug 节的表单。只放**这一页真的有控件**的字段（目前只有停站看门狗）。
+//
+// 刻意不做成"与 DebugSettings 一一对应的全集"：那种平行名单要么漏字段（保存一次就丢一个）、
+// 要么把读到的默认值原样写回（凭空在配置里写出用户没设过的键）。缺席的键由服务端
+// `putSection` 从旧配置补回 —— 保住配置这件事只有一处实现。
 interface DebugForm {
-  launchArgs: string
   watchdogSeconds: number
-  fglserver: string
-  termWidth: number
-  termHeight: number
-  printElements: number
-  // *bool 三态:nil = 跟随默认(开启)。复选框写不了三态,所以用下拉。
-  persistBreakpoints: 'default' | 'on' | 'off'
 }
 
 interface DictForm {
@@ -291,9 +288,13 @@ const blankSsh = (): SshItem => ({
  * 环境清单 → hosts 节。**整节提交**,所以这里必须给出完整的 sshs 列表。
  *
  * 仍未覆盖的字段:`hosts.sshs[].launchArgs` / `watchdogSeconds`(每环境的调试覆盖项,
- * 本页不暴露)。它们由服务端的保留机制补回(见 internal/web 的 preserveUngovernedDBFields)。
- * 而 `workspace` 是这一页管得着的(表单里有输入框) —— 不要把它当成“未覆盖”加进那份保留名单,
+ * 本页不暴露)。它们由服务端的保留机制补回(见 internal/web 的 preserveUngovernedFields)。
+ * 而 `workspace` 是这一页管得着的(表单里有输入框) —— 不要把它当成"未覆盖"加进那份保留名单,
  * 否则用户清空它时会被静默补回。
+ *
+ * 名字留空会被补成 `host-zone`(sshName 的口径,列表上显示的也是它):对**新环境**是省事,
+ * 对**已有环境**等于改名 —— 服务端把"改名"判成搬家(录像跟着走、身份里的环境名一起改),
+ * 不再当成"环境被删掉"去级联清库(见 internal/web 的 diffEnvs 与 Library.RenameEnv)。
  */
 function hostsPatchOf(list: SshItem[]) {
   const sshsOut: HostsSsh[] = list.filter((x) => x.host).map((x) => {
@@ -322,36 +323,48 @@ function hostsPatchOf(list: SshItem[]) {
 }
 
 /**
- * debug 节 → 完整节对象。
+ * debug 节 → 只带**这一页管得着**的键（目前只有停站看门狗）。
  *
- * **这里是那个数据丢失 bug 的修法**:不按表单里"用户改过哪些"挑选,而是把 debug 节的
- * 每个键都给出来。老代码只发 5 个键,于是 fglserver / persistBreakpoints / activeEnv
- * 每次保存都被删掉。
+ * 为什么现在敢只发一个键：后端 `putSection` 会把"本次没提交的键"从旧配置原样补回
+ * （`debug.aiTakeover` / `query.limit` / `fglserver` / `persistBreakpoints` 都是这么保住的）。
  *
- * ⚠ 后端的 PUT 是**整节替换**(internal/web 的 putSection:`root["debug"] = sec`),
- * 而 DebugSettings 每个字段都是 omitempty —— **省略一个键 = 从 config.json 里删掉它**。
- * 而 debug 节**没有** hosts 那样的"保留未管理键"机制(那条只罩 hosts.sshs[].db)。
- *
- * 所以下面几个"界面已经不显示"的键仍然要**原样回传**:它们只是不再提供编辑入口,
- * 不是不再存在。不回传的话,用户在设置页点一次保存,自己手工写进 config.json 的
- * 自定义启动参数 / 终端尺寸就被静默抹掉了 —— 正是这个文件开头那段注释里描述的同一类 bug。
+ * 老做法（把读到的整套值原样回传）有两个毛病，实测都踩到了：
+ *   - **凭空写入**：配置里本来没有 `termWidth`，表单读到内置默认 200，保存一次就把它写死进
+ *     config.json —— 用户从没设过这个值，却从此跟着他走（以后改内置默认值也带不动它）；
+ *   - **漏一个键就丢一个字段**：`aiTakeover` 是后加的，名单没跟上，于是保存 DEBUG 卡片
+ *     就把它删了（新建调试会话不再默认协作模式）。名单式回传天生跟不上 schema 的变化。
+ * 现在把"保住没提交的键"这件事交给后端一处做，前端不再维护一份平行的字段名单。
  */
 function debugPatchOf(d: DebugForm): NonNullable<HostsPatch['debug']> {
   const out: NonNullable<HostsPatch['debug']> = {}
-  // 只有看门狗还在界面上(见「调试参数」卡片)
+  // 只有看门狗还在界面上（见「调试参数」卡片）
   if (d.watchdogSeconds) out.watchdogSeconds = d.watchdogSeconds
-  // 以下五项**界面已移除**(一律跟内置默认走,用户不需要改),但按上面的理由原样回传。
-  // 空值仍然省略:omitempty 语义下"省略 = 用默认",与"写一个空字符串"不是一回事。
-  if (d.launchArgs) out.launchArgs = d.launchArgs
-  if (d.fglserver.trim()) out.fglserver = d.fglserver.trim()
-  if (d.termWidth) out.termWidth = d.termWidth
-  if (d.termHeight) out.termHeight = d.termHeight
-  if (d.printElements) out.printElements = d.printElements
-  if (d.persistBreakpoints === 'on') out.persistBreakpoints = true
-  else if (d.persistBreakpoints === 'off') out.persistBreakpoints = false
-  // activeEnv 这个键**已经不存在了**(hosts/debug 两处都随"默认环境"整体移除),
-  // 所以既不用回传也不用担心被整节替换抹掉。
   return out
+}
+
+/**
+ * 配置 → 环境表单。**只有这一处实现**：读设置时用它，保存成功后的回读也用它。
+ *
+ * 为什么保存后要回读：本地那份是"提交前的意图"，服务端返回的才是"存下来的事实"
+ * （名字会被补成 host-zone、没填主机的条目根本不会存进去）。原来保存后只把名字 map 一遍，
+ * 于是"界面列着、配置里没有"的幽灵行、以及"删掉最后一个环境后下标越界、整张表单与保存
+ * 按钮一起消失"都能发生（实测，2026-10-15）。
+ */
+function sshsFormOf(c: HostsView): SshItem[] {
+  return (c.sshs || []).map((e) => {
+    const d = e.db
+    return {
+      name: e.name || '', host: e.host || '', port: e.port || 22, user: e.user || '', password: e.password || '',
+      zone: e.zone || '',
+      workspace: e.workspace || '',
+      db: d ? {
+        type: d.type || 'oracle', host: d.host || '', port: d.port || 0,
+        service: d.service || '', database: d.database || '',
+        accounts: (d.accounts || []).map((a) => ({ account: a.account || '', password: a.password || '' })),
+        readonlySql: d.readonlySql === false ? false : undefined,
+      } : null,
+    }
+  })
 }
 
 export function SettingsView() {
@@ -366,10 +379,7 @@ export function SettingsView() {
   const [envTab, setEnvTab] = useState<'ssh' | 'db'>('ssh')
   const [cfg, setCfg] = useState<HostsView | null>(null)
   const [sshs, setSshs] = useState<SshItem[]>([])
-  const [dbg, setDbg] = useState<DebugForm>({
-    launchArgs: '', watchdogSeconds: 0, fglserver: '',
-    termWidth: 200, termHeight: 50, printElements: 1000, persistBreakpoints: 'default',
-  })
+  const [dbg, setDbg] = useState<DebugForm>({ watchdogSeconds: 0 })
   const [dict, setDict] = useState<DictForm>({ querySource: '', mirrorDir: '', bdldocDir: '' })
   const [listen, setListen] = useState('')
   // 派生状态(路径存不存在只有服务端算得出来)与配置元信息,以及 PATH 安装状态
@@ -432,31 +442,10 @@ export function SettingsView() {
   const loadSettings = useCallback(() => {
     api.settings().then((c) => {
       setCfg(c)
-      setSshs((c.sshs || []).map((e) => {
-        const d = e.db
-        return {
-          name: e.name || '', host: e.host || '', port: e.port || 22, user: e.user || '', password: e.password || '',
-          zone: e.zone || '',
-          workspace: e.workspace || '',
-          db: d ? {
-            type: d.type || 'oracle', host: d.host || '', port: d.port || 0,
-            service: d.service || '', database: d.database || '',
-            accounts: (d.accounts || []).map((a) => ({ account: a.account || '', password: a.password || '' })),
-            readonlySql: d.readonlySql === false ? false : undefined,
-          } : null,
-        }
-      }))
-      setDbg({
-        // 这几项界面已不显示,但仍然要读进来:保存时原样回传,避免整节替换把它们删掉
-        launchArgs: c.debug?.launchArgs || '',
-        watchdogSeconds: c.debug?.watchdogSeconds || 0,
-        fglserver: c.debug?.fglserver || '',
-        termWidth: c.debug?.termWidth || 200,
-        termHeight: c.debug?.termHeight || 50,
-        printElements: c.debug?.printElements || 1000,
-        persistBreakpoints: c.debug?.persistBreakpoints === true ? 'on'
-          : c.debug?.persistBreakpoints === false ? 'off' : 'default',
-      })
+      setSshs(sshsFormOf(c))
+      // 只读这一页真的有的那个字段。其余 debug 键（aiTakeover / fglserver / persistBreakpoints…）
+      // 界面没有控件，也就**不必读进来再回传** —— 服务端 putSection 会从旧配置原样补回。
+      setDbg({ watchdogSeconds: c.debug?.watchdogSeconds || 0 })
       setDict({
         querySource: c.query?.source || '',
         mirrorDir: c.mirror?.dir || '',
@@ -477,8 +466,11 @@ export function SettingsView() {
   // 本页被 keep-alive 常驻挂载(切走只是 display:none),所以**不能轮询** ——
   // 改为"每次切回本页、且没有未保存修改时"回读一次,拿别处(命令行)改过的值。
   const dirtyRefAny = () => (Object.keys(dirtyRef.current) as ConfigKey[]).some((k) => dirtyRef.current[k])
-  const visibleRef = useRef(false)
   const view = useStore((s) => s.view)
+  // 初值取"挂载那一刻可不可见":本页是 store 的初始视图,若从 false 起步,第一条 effect
+  // 已经拉过一次 /api/hosts,这一条又会把同一次挂载当成"刚从别处切回来"再拉一次
+  // （CDP 抓到两次同源调用，实测）。判据是"可见性**变化**"，不是"现在可见"。
+  const visibleRef = useRef(view === 'settings')
   useEffect(() => {
     const visible = view === 'settings'
     if (visible && !visibleRef.current && !dirtyRefAny()) void loadSettings()
@@ -503,10 +495,33 @@ export function SettingsView() {
   }, [section])
 
   // ---- 统一保存:按节提交;keys 指明这次要提交哪些节 ----
+  //
+  // 提交环境清单前先拦一道**只有前端才看得见**的事：`hostsPatchOf` 是整节提交，它会
+  // `filter(x => x.host)` 掉没有服务器地址的条目 —— 于是界面照旧列着它、还显示"已保存 ✓"，
+  // 而配置里根本没有它（用户以为存上了）。服务端见不到这类条目（上一步就被滤掉了），
+  // 所以后端那些"缺少服务器地址"的校验永远不会响。返回 null = 可以保存。
+  const hostsSaveBlocker = (list: SshItem[]): string | null => {
+    for (let i = 0; i < list.length; i++) {
+      if (!list[i].host.trim()) {
+        const who = list[i].name.trim() || sshName(list[i]) || '还没填名字'
+        return `第 ${i + 1} 个环境（${who}）没有服务器地址：没有地址的环境不会被保存，` +
+          `界面会照旧列着它 —— 那是个假象。填上地址，或先把它删掉。`
+      }
+    }
+    return null
+  }
+
   const save = async (keys: ConfigKey[], list?: SshItem[]) => {
     if (saveState === 'saving' || !cfg) return
     const body: HostsPatch = {}
-    if (keys.includes('hosts')) body.hosts = hostsPatchOf(list || sshs)
+    if (keys.includes('hosts')) {
+      const blocker = hostsSaveBlocker(list || sshs)
+      if (blocker) {
+        toast.error('保存失败', { description: blocker, duration: 0 })
+        return
+      }
+      body.hosts = hostsPatchOf(list || sshs)
+    }
     if (keys.includes('debug')) body.debug = debugPatchOf(dbg)
     if (keys.includes('listen')) body.listen = listen.trim()
     if (keys.includes('query')) body.query = { source: dict.querySource }
@@ -518,7 +533,18 @@ export function SettingsView() {
     try {
       const next = await api.saveSettings(body)
       setCfg(next)
-      setSshs((prev) => prev.map((x) => ({ ...x, name: sshName(x) })))
+      if (keys.includes('hosts')) {
+        // 用**服务端返回的**环境清单重建表单：名字会被补成 host-zone、没填主机的条目根本
+        // 不会存进去 —— 本地那份"提交前的意图"照旧显示，就成了"界面列着、配置里没有"的幽灵行。
+        const list = sshsFormOf(next)
+        const keepName = sshs[selSsh] ? sshName(sshs[selSsh]) : ''
+        const same = list.findIndex((x) => sshName(x) === keepName)
+        setSshs(list)
+        // 下标必须落回范围内：删掉最后一个环境之后它还指着旧位置，界面就成了"表单与保存按钮
+        // 一起消失、列表也没有高亮"（实测）。先按名字找回来（改名也不丢选中），否则按原位置收敛。
+        setSelSsh(same >= 0 ? same : Math.min(selSsh, Math.max(0, list.length - 1)))
+      }
+      if (keys.includes('listen')) setListen(next.listen || '')
       cleanDirty(keys); setSaveState('saved')
       // 路径型取值的 exists 是服务端算的,保存后要回读一次才对得上新值
       void api.configStatus().then(setStatus).catch(() => { /* 提示性信息,取不到不影响 */ })
@@ -1234,7 +1260,9 @@ export function SettingsView() {
                                           onChange={(e) => patchAcct(selSsh, j, { account: e.target.value })} />
                                       </TableCell>
                                       <TableCell className={cn(CELL_EDITING, 'relative')}>
-                                        <input className="cell-input font-mono" value={a.password}
+                                        {/* type=password:数据库账号口令不该常显在屏幕上（也不该以明文躺在 DOM 里）。
+                                            与上面 SSH 口令那一栏同一口径；要看内容时用浏览器/系统的密码提示，而不是把它摊开。 */}
+                                        <input className="cell-input font-mono" type="password" autoComplete="off" value={a.password}
                                           onChange={(e) => patchAcct(selSsh, j, { password: e.target.value })} />
                                       </TableCell>
                                       <TableCell className="text-center whitespace-nowrap">
@@ -1683,7 +1711,9 @@ export function SettingsView() {
             <AlertDialogTitle>删除环境「{delTarget !== null ? sshName(sshs[delTarget]) : ''}」?</AlertDialogTitle>
             <AlertDialogDescription>
               该环境的 SSH 连接、登录区域、工作区与数据库账号配置将一并移除。
+              它名下**长期库里的录像也会一起删掉**（不可再生，删了就再也造不出来）。
               点击「删除」后立即写入 config.json,不可撤销。
+              {'\n'}只是改了名字的话不会删录像：改名会把它们搬到新名字下。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

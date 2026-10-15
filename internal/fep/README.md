@@ -61,7 +61,7 @@ go test ./internal/fep -run TestGate -count=1 -v   # 指纹闸：阈值两侧各
 | 文件 | 内容 |
 |---|---|
 | `proxy.go` | 本地反向代理：运行期连进来 → 转发到本机 GDC。多连接、逐连接落盘（原始字节）、按连接寻址的注入口（`list` / `@<id> <事件>`） |
-| `session.go` | 跨进程登记 `.tt-fep.json`（数据目录下，原子写）；`Stop` **只杀登记的 pid**；`CheckElevation` 权限体检 |
+| `session.go` | 跨进程登记 `.tt-fep.json`（数据目录下，原子写）；`Stop` **只杀登记的 pid**；`CheckElevation` 权限体检。登记里还写着 `kind`（录 / 回放）与 `ownerPid` —— `Stale()` 用它判"登记比进程活得久"（`rec reproduce --no-wait` 发完就退就是这种） |
 
 `internal/winproc` 增 `TokenElevated(pid)`（Windows；其余平台返回错误）。
 

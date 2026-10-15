@@ -226,10 +226,119 @@ func (l *Library) Remove(item LibraryItem) (files int, bytes int64, err error) {
 	return config.RemoveTree(item.Dir)
 }
 
+// RenameEnv 把某个环境的**整个库目录**改到新名字下（改名 = 搬家，不是删掉）。
+//
+// 为什么要有这一条：设置页保存一次 hosts，"环境改了名"与"环境被删了"在名字集合上
+// 长得一模一样，而级联清理只认名字 —— 于是改个名字就把那个环境名下长期库里的录像全删了
+// （2026-10-15 实测：清空环境名再保存，27 份录像、2.5 MB，`os.RemoveAll` 不可恢复）。
+// 名字是**标签**，录像才是不可再生的东西：改名要把录像一起搬过去。
+//
+// 顺手把每一份的**身份文件里的 Env 也改成新名字**：`rec reproduce` 是拿身份里的环境去起
+// 会话的，留旧名字的话改名之后那些录像就再也回放不起来了（"环境不存在"）。
+// 返回搬过去的**录制份数**。
+func (l *Library) RenameEnv(from, to string) (int, error) {
+	if l == nil || l.Root == "" {
+		return 0, errors.New("fep: 没有数据目录，长期库落点算不出来")
+	}
+	if strings.TrimSpace(from) == "" || strings.TrimSpace(to) == "" {
+		return 0, errors.New("fep: 改名前后的环境名都要给全，不猜着搬")
+	}
+	src := filepath.Join(l.Root, EnvSegment(from))
+	dst := filepath.Join(l.Root, EnvSegment(to))
+	if src == dst {
+		return 0, nil
+	}
+	if _, serr := os.Stat(src); serr != nil {
+		return 0, nil // 这个环境本来就没录过：不是错
+	}
+	if _, derr := os.Stat(dst); derr != nil {
+		// 目标还不存在：整棵搬过去（同一卷上是原子的）
+		if err := os.Rename(src, dst); err != nil {
+			return 0, fmt.Errorf("fep: 把 %s 的录制库搬到 %s 失败: %w", from, to, err)
+		}
+	} else {
+		// 目标已经有了（新旧两个环境都在录过）：把每个 ENT 目录并进去。
+		// 同名 ENT 目录里的录制 ID 不会撞（ID 带时间戳），所以并进去是安全的。
+		ents, rerr := os.ReadDir(src)
+		if rerr != nil {
+			return 0, rerr
+		}
+		for _, e := range ents {
+			s, d := filepath.Join(src, e.Name()), filepath.Join(dst, e.Name())
+			if err := os.MkdirAll(d, 0o755); err != nil {
+				return 0, err
+			}
+			subs, serr := os.ReadDir(s)
+			if serr != nil {
+				return 0, serr
+			}
+			for _, sub := range subs {
+				if err := os.Rename(filepath.Join(s, sub.Name()), filepath.Join(d, sub.Name())); err != nil {
+					return 0, fmt.Errorf("fep: 并 %s 到 %s 失败: %w", sub.Name(), d, err)
+				}
+			}
+			_ = os.Remove(s)
+		}
+		_ = os.Remove(src)
+	}
+	// 身份文件里的环境名要跟着改（见函数头：不改的话 `rec reproduce` 会找不到这个环境）。
+	n, terr := l.rewriteEnvInMetas(dst, to)
+	if terr != nil {
+		return n, terr
+	}
+	return n, nil
+}
+
+// rewriteEnvInMetas 把一棵库目录下每份录制身份里的 Env 改成 to，返回改了几份。
+//
+// 目录形态照 List 的口径认两种：`<环境>/<ENT>/<录制 ID>/`（Promote 落的）与
+// "直接摊在 ENT 目录下"（手工拷进来的）—— 两边都遍历一遍，别只认一种。
+func (l *Library) rewriteEnvInMetas(envDir, to string) (int, error) {
+	ents, err := os.ReadDir(envDir)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, e := range ents {
+		if !e.IsDir() {
+			continue
+		}
+		entDir := filepath.Join(envDir, e.Name())
+		dirs := []string{entDir}
+		if subs, serr := os.ReadDir(entDir); serr == nil {
+			for _, s := range subs {
+				if s.IsDir() {
+					dirs = append(dirs, filepath.Join(entDir, s.Name()))
+				}
+			}
+		}
+		for _, dir := range dirs {
+			ids, lerr := ListIDs(dir)
+			if lerr != nil {
+				continue
+			}
+			for _, id := range ids {
+				mt, merr := ReadMeta(dir, id)
+				if merr != nil || mt.Env == to {
+					continue
+				}
+				mt.Env = to
+				if _, werr := WriteMeta(dir, *mt); werr != nil {
+					return n, werr
+				}
+				n++
+			}
+		}
+	}
+	return n, nil
+}
+
 // RemoveEnv 删掉某个环境的**整个库目录**（级联清理）。
 //
-// 什么时候用它：环境配置被删掉（设置页移除那个环境）时，它名下的录制一起收掉 ——
+// 什么时候用它：环境配置被**删掉**（设置页移除那个环境）时，它名下的录制一起收掉 ——
 // 那些录制件的画面与业务数据都属于那个环境，环境没了它们就是一堆没人认领的字节。
+//
+// 只认"真的删了"：改名走 RenameEnv（见那里的说明），调用方要用 web.envDiff 把两者分开。
 func (l *Library) RemoveEnv(env string) (files int, bytes int64, err error) {
 	if l == nil || l.Root == "" {
 		return 0, 0, errors.New("fep: 没有数据目录，长期库落点算不出来")

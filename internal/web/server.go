@@ -338,6 +338,9 @@ func (s *Server) hHostsPut(w http.ResponseWriter, r *http.Request) {
 	// 环境被删掉时要**级联清掉它的录制库**（用户定的策略：用户主动录的长期留着，
 	// 但环境没了它们就是没人认领的字节）。名字在写配置前记下来、写成功之后再删 ——
 	// 删文件不能放进 config.Edit 的事务里：事务回滚不了已经删掉的文件。
+	//
+	// 改名**不算删**：先算出哪些是改名（录像跟着搬），只有真的少掉的环境才级联清。
+	var renamed []envRename
 	var removedEnvs []string
 	err = config.Edit(path, nil, func(root map[string]any) error {
 		if req.Hosts != nil {
@@ -349,7 +352,7 @@ func (s *Server) hHostsPut(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 			if oldHosts, ok := root["hosts"].(map[string]any); ok {
-				removedEnvs = lostNames(envNamesIn(oldHosts), envNamesIn(sec))
+				renamed, removedEnvs = diffEnvs(envEntries(oldHosts), envEntries(sec))
 			}
 			// 保留前端表单不管理的 db 字段（目前是 viaSsh）。
 			// 配置页只编辑 type/host/port/service/database/readonlySql/accounts，
@@ -418,11 +421,24 @@ func (s *Server) hHostsPut(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	// 级联清理：被删掉的那些环境，把它们的录制库一起收掉。
-	// 失败只记日志：配置已经落盘成功，但必须让用户看见 —— 否则就成了
-	// "以为清了、其实还留着几十 MB 业务数据"。
-	if len(removedEnvs) > 0 {
+	// 改名 = 搬家（先搬，后删；顺序要紧：**搬不动的绝不删**）。
+	// 失败只记日志：配置已经落盘成功，但必须让用户看见 —— 那句"没有删任何东西"是关键。
+	if len(renamed) > 0 || len(removedEnvs) > 0 {
 		lib := fep.NewLibrary(filepath.Dir(path))
+		for _, rn := range renamed {
+			n, rerr := lib.RenameEnv(rn.From, rn.To)
+			if rerr != nil {
+				log.Printf("[tt] 环境 %s 改名为 %s，但它的录制库没搬过去（**没有删任何东西**）: %v",
+					rn.From, rn.To, rerr)
+				continue
+			}
+			if n > 0 {
+				log.Printf("[tt] 环境 %s 改名为 %s：把 %d 份录制搬了过去", rn.From, rn.To, n)
+			}
+		}
+		// 级联清理：被删掉的那些环境，把它们的录制库一起收掉。
+		// 失败只记日志：配置已经落盘成功，但必须让用户看见 —— 否则就成了
+		// "以为清了、其实还留着几十 MB 业务数据"。
 		for _, name := range removedEnvs {
 			files, bytes, derr := lib.RemoveEnv(name)
 			if derr != nil {
@@ -448,51 +464,187 @@ func (s *Server) hHostsPut(w http.ResponseWriter, r *http.Request) {
 	s.hHostsGet(w, r)
 }
 
-// envNamesIn 取一个 hosts 节里的环境名（`sshs` 里每条的 `name`，没有名字的略过）。
-func envNamesIn(hostsSec map[string]any) []string {
+// envEntry 是 hosts.sshs 里的一条（原始 JSON 形态 + 它在列表里的下标）。
+type envEntry struct {
+	idx  int
+	name string
+	raw  map[string]any
+}
+
+// envRename 是一对"改名"（旧名 → 新名）。
+type envRename struct{ From, To string }
+
+// envEntries 按顺序取 hosts 节里的环境条目。
+//
+// 没有名字的照留（下标要对齐 —— 改名判定第一道判据就是"同一个下标"）。
+func envEntries(hostsSec map[string]any) []envEntry {
 	list, _ := hostsSec["sshs"].([]any)
-	var out []string
-	for _, e := range list {
+	out := make([]envEntry, 0, len(list))
+	for i, e := range list {
 		m, _ := e.(map[string]any)
 		if m == nil {
 			continue
 		}
-		if n, _ := m["name"].(string); n != "" {
-			out = append(out, n)
+		name, _ := m["name"].(string)
+		out = append(out, envEntry{idx: i, name: name, raw: m})
+	}
+	return out
+}
+
+// envIdent 是对比两条环境时**看身份、不看名字**的那部分：同一台机器上的同一个库。
+var envIdentEnvKeys = []string{"host", "port", "user", "zone"}
+
+// sameEnvBesidesName 判"两条环境除了名字之外一模一样"（设置页改名就是这个形态）。
+func sameEnvBesidesName(a, b map[string]any) bool {
+	return jsonEqual(withoutKey(a, "name"), withoutKey(b, "name"))
+}
+
+// sameEnvIdentity 判"两条环境指向同一台机器上的同一个库"（忽略名字，也忽略别的无关字段）。
+//
+// 第二道判据用它：重排 + 改名时下标对不上，但 host/zone/db 还在。
+func sameEnvIdentity(a, b map[string]any) bool {
+	for _, k := range envIdentEnvKeys {
+		if !jsonEqual(a[k], b[k]) {
+			return false
+		}
+	}
+	ad, _ := a["db"].(map[string]any)
+	bd, _ := b["db"].(map[string]any)
+	for _, k := range []string{"type", "host", "port", "service", "database"} {
+		if !jsonEqual(ad[k], bd[k]) {
+			return false
+		}
+	}
+	return true
+}
+
+// withoutKey 复制一份并去掉某个键（不改原 map）。
+func withoutKey(m map[string]any, key string) map[string]any {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		if k != key {
+			out[k] = v
 		}
 	}
 	return out
 }
 
-// lostNames 返回"旧的里有、新的里没有"的那几个名字（环境被删掉的就是它们）。
-func lostNames(old, cur []string) []string {
-	keep := make(map[string]bool, len(cur))
-	for _, n := range cur {
-		keep[n] = true
+// jsonEqual 比两个 any 的 JSON 形态（map 的键序由 encoding/json 归一，再不用手写深比较）。
+func jsonEqual(a, b any) bool {
+	ab, aerr := json.Marshal(a)
+	bb, berr := json.Marshal(b)
+	if aerr != nil || berr != nil {
+		return false
 	}
-	var out []string
-	for _, n := range old {
-		if !keep[n] {
-			out = append(out, n)
+	return string(ab) == string(bb)
+}
+
+// diffEnvs 把"旧名单 → 新名单"分成两类：**改名**（录像要跟着搬）与**真的删掉了**（才级联清）。
+//
+// 为什么不能只看名字（2026-10-15 那次事故的根因）：设置页保存一次 hosts，
+// "改了名"与"被删了"在名字集合上长得一模一样，而级联清理只认名字 ——
+// 于是**改个名字 = 把那个环境名下长期库里的录像全删掉**。实测那次：清空环境名再保存，
+// 前端静默补成 `host-zone`，服务端判定旧环境被删，27 份录像 2.5 MB，`os.RemoveAll` 不可恢复。
+//
+// 判据三道，从准到宽：
+//  1. **同一个下标、只有名字变了** —— 设置页改名的形态（位置不动）；
+//  2. 剩下的一对一里**身份相同**（host/port/user/zone/db 全同）—— 重排 + 改名；
+//  3. 还剩下的，gone 与 added **数量相等**时按下标配对 —— 当作改名。
+//
+// 第三道是**故意偏向"搬"而不是"删"**：判错的代价不对称 —— 误判成改名只是把甲的录像
+// 留在乙名下（用户看得见、可手动删），误判成删除则是不可再生的录像没了。
+// 只有"删得比加得多"（真的少了一个环境）才会走到级联删除。
+func diffEnvs(oldList, newList []envEntry) (renames []envRename, removed []string) {
+	oldName := map[string]bool{}
+	newName := map[string]bool{}
+	for _, e := range oldList {
+		oldName[e.name] = true
+	}
+	for _, e := range newList {
+		newName[e.name] = true
+	}
+	usedOld := make([]bool, len(oldList))
+	usedNew := make([]bool, len(newList))
+
+	// ① 同一个下标、只有名字变了
+	for i := 0; i < len(oldList) && i < len(newList); i++ {
+		o, n := oldList[i], newList[i]
+		if o.name == "" || n.name == "" || o.name == n.name {
+			continue
+		}
+		if sameEnvBesidesName(o.raw, n.raw) {
+			renames = append(renames, envRename{From: o.name, To: n.name})
+			usedOld[i], usedNew[i] = true, true
 		}
 	}
-	return out
+	// ② 身份相同的一对一（名字确实是一边没了、一边新来）
+	for i, o := range oldList {
+		if usedOld[i] || o.name == "" || newName[o.name] {
+			continue
+		}
+		for j, n := range newList {
+			if usedNew[j] || n.name == "" || oldName[n.name] {
+				continue
+			}
+			if sameEnvIdentity(o.raw, n.raw) {
+				renames = append(renames, envRename{From: o.name, To: n.name})
+				usedOld[i], usedNew[j] = true, true
+				break
+			}
+		}
+	}
+	// ③ 数量相等时按下标配对（宁可搬，不要删）
+	var leftOld, leftNew []int
+	for i, o := range oldList {
+		if !usedOld[i] && !newName[o.name] {
+			leftOld = append(leftOld, i)
+		}
+	}
+	for j, n := range newList {
+		if !usedNew[j] && !oldName[n.name] {
+			leftNew = append(leftNew, j)
+		}
+	}
+	if len(leftOld) == len(leftNew) {
+		for k := range leftOld {
+			o, n := oldList[leftOld[k]], newList[leftNew[k]]
+			if o.name == "" || n.name == "" {
+				continue
+			}
+			renames = append(renames, envRename{From: o.name, To: n.name})
+			usedOld[leftOld[k]], usedNew[leftNew[k]] = true, true
+		}
+	}
+	// 剩下的才是真的删了
+	for i, o := range oldList {
+		if !usedOld[i] && o.name != "" && !newName[o.name] {
+			removed = append(removed, o.name)
+		}
+	}
+	return renames, removed
 }
 
 // preserveUngovernedFields 把旧配置里、配置页表单不管理的字段补进新节。
 //
 // 有两层：
 //
+//	节级    hosts.activeEnv                        —— "默认环境"（`config.ActiveHost` 还在拿它兜底）
 //	环境级  hosts.sshs[].launchArgs / watchdogSeconds —— 该环境的调试参数覆盖
 //	db 级   hosts.sshs[].db.viaSsh                  —— SSH 端口转发隧道
 //
 // 表单里都没有对应的输入控件，而 PUT 是整节替换，所以不做这一步就会"打开设置页点一次
-// 保存，手工配的东西静默消失"。做法是按环境名对齐，新条目缺该键而旧条目有时原样搬过来。
+// 保存，手工配的东西静默消失"。节级按"旧节有、新节没有"整键搬；环境级按环境名对齐。
 //
 // 权衡：这样也就无法通过配置页删掉它们 —— 想删就手改 config.json，或 `tt config` 改。
 // 宁可"删不掉"也不要"保存一次就静默丢配置"。
 func preserveUngovernedFields(oldRoot, newSec map[string]any) {
 	oldHosts, _ := oldRoot["hosts"].(map[string]any)
+	// 节级：旧 hosts 节里有、新节里没有的键（activeEnv 就是这一类）原样搬过去。
+	for k, v := range oldHosts {
+		if _, has := newSec[k]; !has {
+			newSec[k] = v
+		}
+	}
 	oldList, _ := oldHosts["sshs"].([]any)
 	if len(oldList) == 0 {
 		return
@@ -734,10 +886,25 @@ func decodeBody(r *http.Request, v any) error {
 }
 
 // putSection 把类型化结构写回某个顶层节。
+//
+// **缺席的键保留旧值**（不是整节替换）：请求体是前端照它的表单序列化出来的，
+// 表单里没有的字段（后加进 schema 的、只给命令行用的）会整个缺席 —— 整节替换就等于
+// "打开设置页点一次保存，那个字段静默消失"。实测踩过两次：`debug.aiTakeover` 与
+// `query.limit`（两个都在 schema 里、都有代码读，而前端表单里没有）。
+//
+// 代价：这些字段也就**没法从配置页删掉**（想删就手改 config.json 或 `tt config`）——
+// 与 preserveUngovernedFields 同一笔权衡：宁可"删不掉"，不要"保存一次就静默丢配置"。
 func putSection(root map[string]any, key string, v any) error {
 	sec, err := structToSection(v)
 	if err != nil {
 		return fmt.Errorf("配置节 %s 无法序列化: %w", key, err)
+	}
+	if old, ok := root[key].(map[string]any); ok {
+		for k, val := range old {
+			if _, has := sec[k]; !has {
+				sec[k] = val
+			}
+		}
 	}
 	root[key] = sec
 	return nil
