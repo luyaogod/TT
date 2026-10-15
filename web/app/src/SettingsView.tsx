@@ -551,9 +551,6 @@ export function SettingsView() {
   }
   const addSsh = () => { setSelSsh(sshs.length); setSshs([...sshs, blankSsh()]); markDirty('hosts') }
 
-  // 导入结果提示(与「删除环境」同一套:动作完成后卡片头上给一句,不弹第二个窗)
-  const [discNote, setDiscNote] = useState('')
-
   /**
    * 发现环境:扫描本机的 T100 设计器站点清单,让用户勾选导入。
    *
@@ -576,7 +573,6 @@ export function SettingsView() {
   const discKey = (e: DiscoveredEnv, i: number) => e.uid || `${e.name}#${i}`
 
   const openDiscover = () => {
-    setDiscNote('')
     setDisc({ open: true, loading: true, reason: '', sitesFile: '', envs: [], picked: {} })
     api.discoverEnvs().then((r) => {
       // 默认勾选规则:**已存在的名字不勾**,其余可用的一条都勾上。
@@ -616,7 +612,6 @@ export function SettingsView() {
     setSelSsh(sshs.length) // 选中第一条新导入的,让用户直接接着填数据库
     setSshs([...sshs, ...add])
     markDirty('hosts')
-    setDiscNote(`已导入 ${add.length} 个环境。数据库那一节设计器里没有,请在右侧「数据库」页签补上;记得按「保存」。`)
   }
 
   /**
@@ -1031,9 +1026,6 @@ export function SettingsView() {
                     <Search className="h-3.5 w-3.5" />发现环境
                   </Button>
                 </div>
-                {discNote && (
-                  <p className="text-[11px] text-muted-foreground">{discNote}</p>
-                )}
               </Card>
 
               <Card id="card-sites-conn" panel>
