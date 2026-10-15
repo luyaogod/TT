@@ -13,7 +13,7 @@
 // 面板说的是一件列表里放不下的事:**回放前自己核对一遍** —— 身份里的启动路径/作业/ENT 对不对、
 // 编号表多少条、这份录制里到底有几条连接(闸门是**按连接**比对的,一条对得上就算过)。
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Check, Copy, Fingerprint, Play, RefreshCw, Square, Trash2, Video, X } from 'lucide-react'
+import { Check, Fingerprint, Play, RefreshCw, Square, Trash2, Video, X } from 'lucide-react'
 import { useStore } from './store'
 import { api, type RecordingCurrent, type RecordingMeta, type RecordingRow } from './api'
 import { Input, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../shared/ui'
@@ -108,7 +108,6 @@ export function RecordView() {
   const [sel, setSel] = useState<RecordingRow | null>(null)
   const [selMeta, setSelMeta] = useState<RecordingMeta | null>(null)
   const [metaLoading, setMetaLoading] = useState(false)
-  const [tab, setTab] = useState<'info' | 'conns' | 'raw'>('info')
 
   // 列表与「现在在录吗」一起拉:它们是同一屏的两个事实,分两次进入会看到互相矛盾的画面
   // (列表里已有刚收工的件、而"正在录"还挂着;或反过来)。
@@ -158,8 +157,7 @@ export function RecordView() {
     return () => { alive = false }
   }, [sel, toast])
 
-  // Esc 关闭详情(仅在本视图可见时生效)。选中项变化时重置回第一个页签。
-  useEffect(() => { setTab('info') }, [sel?.id, sel?.where])
+  // Esc 关闭详情(仅在本视图可见时生效)
   useEffect(() => {
     if (!sel || view !== 'record') return
     const onKey = (e: KeyboardEvent) => {
@@ -369,8 +367,9 @@ export function RecordView() {
                 border-separate + 单元格只留"右+下"框线,理由与接口日志页列表相同。
                 详情面板打开时列表只剩一半宽,所以列要跟着收(与日志页的 COLS_COMPACT 同一个道理):
                 面板里已经逐项列着的(环境·区域·ENT / 时间 / 体积 / 指纹)在这里让位,只留
-                "这是哪一份"的四项 + 操作 —— 不然固定列宽加起来就吃掉整张表,操作列会被挤成 0 宽。
-                宽度也随之压一档,让剩下的列还有地方放(每格都 truncate,不会撑破)。 */}
+                "这是哪一份"的四项。
+                没有「操作」列了(用户 2026-10-15 要求移除):复制 ID、删除、回放都在详情面板里 ——
+                行只负责"点开看",不摆按钮(与接口日志页的列表同一形态)。 */}
             <Table container={false} className="table-fixed border-separate border-spacing-0 text-xs">
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
@@ -391,12 +390,10 @@ export function RecordView() {
                         title="编号表摘要:sha256 前 16 位(条数)。整体比对用它,不看数字也不看声明顺序">指纹</TableHead>
                     </>
                   )}
-                  <TableHead className="sticky top-0 z-10 border-t-0 border-l-0 bg-background">操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {rows.map((r) => {
-                  const cpR = copied?.id === r.id ? copied.state : null
                   const selected = sel?.id === r.id && sel?.where === r.where
                   return (
                     <TableRow key={`${r.where}:${r.id}`} data-state={selected ? 'selected' : undefined}
@@ -438,22 +435,6 @@ export function RecordView() {
                           </TableCell>
                         </>
                       )}
-                      <TableCell className="border-t-0 border-l-0 px-1 py-0">
-                        {/* 行内只留最常用那一下:把 ID 复制走交给 AI / 命令行。
-                            删除挪进了详情面板 —— 那是在看着这一份做决定,不该在列表里误点。
-                            stopPropagation:别让点按钮顺带把行也选中。 */}
-                        <button
-                          onClick={(e) => { e.stopPropagation(); void copyRow(r.id) }}
-                          title="复制这份录制的 ID。把它发给 AI / 贴到命令行(tt fep rec show/rm/reproduce <ID>)都用它"
-                          className={`inline-flex shrink-0 items-center gap-1 border px-1.5 py-0 text-[11px] transition-colors ${
-                            cpR === 'fail'
-                              ? 'border-red-500/20 text-red-600 dark:text-red-400'
-                              : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground'
-                          }`}>
-                          {cpR === 'ok' ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                          {cpR === 'ok' ? '已复制' : cpR === 'fail' ? '复制失败' : '复制 ID'}
-                        </button>
-                      </TableCell>
                     </TableRow>
                   )
                 })}
@@ -484,15 +465,10 @@ export function RecordView() {
                   className="p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
                   <X className="h-3.5 w-3.5" />
                 </button>
-                {([['info', '基本信息'], ['conns', '连接'], ['raw', '身份文件']] as const).map(([k, label]) => (
-                  <button key={k} onClick={() => setTab(k)}
-                    className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs ${tab === k ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
-                    {label}
-                    {k === 'conns' && !metaLoading && !!selMeta?.conns?.length && (
-                      <span className="text-[10px] text-muted-foreground">{selMeta.conns.length}</span>
-                    )}
-                  </button>
-                ))}
+                {/* 只剩「基本信息」一个页签(用户 2026-10-15 要求去掉 连接 / 身份文件):
+                    连接清单与原始 JSON 在命令行那边看得到(`tt fep rec show`),这一页只留
+                    人选录像时要核对的那些字段。页签样式留着,免得这一行看不出是"面板头"。 */}
+                <span className="inline-flex items-center gap-1 bg-accent px-2 py-0.5 text-xs text-foreground">基本信息</span>
                 {/* 把这行的 ID 交给 AI:AI 用 tt fep rec reproduce <ID> 重放这一份 */}
                 <button
                   onClick={() => void copyRow(sel.id)}
@@ -523,11 +499,8 @@ export function RecordView() {
                   这一轮没录到界面(作业没连上来,或刚起来就断了):没有编号表,回放时闸门会拒。
                 </div>
               )}
-              {/* 基本信息是普通内容流,需要外层滚动;身份文件是长文本,同样交给外层滚 */}
               <div className="min-h-0 flex-1 overflow-auto">
-                {tab === 'info' && <InfoBody row={sel} meta={selMeta} loading={metaLoading} />}
-                {tab === 'conns' && <ConnsBody meta={selMeta} loading={metaLoading} />}
-                {tab === 'raw' && <RawBody meta={selMeta} loading={metaLoading} />}
+                <InfoBody row={sel} meta={selMeta} loading={metaLoading} />
               </div>
             </div>
           </>
@@ -599,62 +572,5 @@ function InfoBody({ row, meta, loading }: { row: RecordingRow; meta: RecordingMe
         </div>
       ))}
     </div>
-  )
-}
-
-// 连接:一份录制里可能有多条连接,而且可以是**两棵不同的界面树**(实测 r.d 那一轮的
-// #1 是调试器自己的界面 298 条、#2 才是作业 3976 条)。所以这里逐条摊开:
-// 回放时对不上的那一条要能一眼看出是哪一条。
-function ConnsBody({ meta, loading }: { meta: RecordingMeta | null; loading: boolean }) {
-  if (loading && !meta) return <div className="p-3 text-xs text-muted-foreground">读身份中…</div>
-  if (!meta?.conns?.length) {
-    return (
-      <div className="p-3 text-xs leading-5 text-muted-foreground">
-        这一份没有连接清单 —— 老录制件没写身份,或者这一轮没录到任何连接。
-      </div>
-    )
-  }
-  return (
-    <div className="p-2 text-xs">
-      <div className="px-0.5 pb-2 text-[11px] leading-5 text-muted-foreground">
-        回放闸门按连接比对:下面每一条连接各自一张编号表,只要有一条对得上就算同一棵界面树。
-        同一个会话里完全可能有多条连接,而且是两棵不同的树。
-      </div>
-      {meta.conns.map((c) => (
-        <div key={c.id} className="mb-2 border border-border/60">
-          <div className="flex flex-wrap items-center gap-2 border-b border-border/60 bg-muted/40 px-2 py-1">
-            <span className="font-mono text-foreground">#{c.id}</span>
-            <span className="text-muted-foreground">{c.remote || '远端未知'}</span>
-            <span className="ml-auto font-mono text-[11px] text-muted-foreground">
-              运行→前端 {fmtBytes(c.bytesRT || 0)} ／ 前端→运行 {fmtBytes(c.bytesFE || 0)}
-            </span>
-          </div>
-          <div className="space-y-0.5 px-2 py-1 font-mono text-[11px] leading-5 text-muted-foreground">
-            <div className="break-all">AUI（运行期→前端）: {c.rt2gdc || '-'}</div>
-            <div className="break-all">事件（前端→运行期）: {c.gdc2rt || '-'}</div>
-            <div className="break-all">时间线: {c.timeline || '-'}</div>
-          </div>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-// 身份文件:原始 JSON。给"闸门为什么这么判"这类问题留一个能自己看的窗口 ——
-// 上面两页是给人读的摘要,这里是原样。
-function RawBody({ meta, loading }: { meta: RecordingMeta | null; loading: boolean }) {
-  if (loading && !meta) return <div className="p-3 text-xs text-muted-foreground">读身份中…</div>
-  if (!meta) {
-    return (
-      <div className="p-3 text-xs leading-5 text-muted-foreground">
-        没有身份文件（.meta.json）—— 早期录的、或者进程被硬杀时录的件就是这样：
-        指纹还能从录制件的字节算出来，但启动路径/作业/ENT 这些只有身份里才有。
-      </div>
-    )
-  }
-  return (
-    <pre className="p-2 font-mono text-[11px] leading-5 break-all whitespace-pre-wrap text-muted-foreground">
-      {JSON.stringify(meta, null, 2)}
-    </pre>
   )
 }
