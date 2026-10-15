@@ -337,6 +337,36 @@ export interface RecordingCurrent {
   path?: string
   started?: string
 }
+// 一份录制件的**完整身份**(详情面板用;形状见 internal/fep/meta.go 的 RecordingMeta)。
+// 列表里的一行是它的摘要,这里多出连接清单(回放闸门按连接比对,所以要看得见每条连接)、
+// 编译件标识与结束时间。
+export interface RecordingConn {
+  id: number
+  remote?: string
+  rt2gdc?: string // AUI 录制件(运行期→前端)的**文件名**;绝对路径按"这份现在住哪"拼
+  gdc2rt?: string // 事件(前端→运行期)的文件名
+  timeline?: string
+  bytesRT?: number
+  bytesFE?: number
+}
+export interface RecordingMeta {
+  id: string
+  path?: string
+  prog?: string
+  origin?: string
+  retention?: string
+  env?: string
+  zone?: string
+  ent?: string
+  host?: string
+  fglserver?: string
+  started?: string
+  finished?: string
+  binary?: { ref?: string; size?: number; modTime?: string }
+  conns?: RecordingConn[]
+  fingerprint: { total: number; hash: string }
+  note?: string
+}
 
 export interface Event {
   type: string; sessionId: string; time: string
@@ -505,7 +535,7 @@ export const api = {
   // 现在在录吗(null = 没有)。判据是会话登记:录制件要收工才落身份,看文件会在录到一半时说"没有"。
   recordingCurrent: () => req<{ ok: boolean; recording: RecordingCurrent | null }>('/api/recordings/current'),
   recordingShow: (id: string) =>
-    req<{ ok: boolean; recording: RecordingRow; meta: any }>(`/api/recordings/${encodeURIComponent(id)}`),
+    req<{ ok: boolean; recording: RecordingRow; meta: RecordingMeta }>(`/api/recordings/${encodeURIComponent(id)}`),
   recordingStart: (body: { env: string; prog: string; ent?: string; module?: string; binaryRef?: string }) =>
     req<{ ok: boolean; recording: RecordingCurrent; log: string }>('/api/recordings', {
       method: 'POST', body: JSON.stringify(body),
