@@ -12,10 +12,6 @@
 !/web/dist/.gitkeep
 /web/node_modules/
 /web/app/node_modules/
-/web/showcase/node_modules/
-/web/showcase/dist/
-# 演示台的无头浏览器取证截图(本机验证用,随用随生成)
-/web/showcase/.shots/
 
 # 配置：含明文 SSH / 数据库口令，绝不入库
 /config.json
@@ -38,9 +34,6 @@
 # 本机构建缓存
 /.gocache/
 /.gotmp/
-# 本机 npm 缓存与无头浏览器(演示台验证用;缓存默认落在用户目录,沙箱下改落到工作区内)
-/.npm-cache/
-/.pw-browsers/
 
 # 编辑器与工具
 /.zcode/

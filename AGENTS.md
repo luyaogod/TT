@@ -54,7 +54,6 @@ TT/
 ├─ web/                 前端（npm workspaces，根）
 │  ├─ app/              唯一 workspace 成员：React + vite 调试工作台/设置页
 │  ├─ shared/           前端共享层（主题、设计系统；被 @source 扫描，动它要小心）
-│  ├─ showcase/         UI 决策演示台：独立包（不进 workspace），用官方 shadcn 组件与默认主题逐块还原功能点
 │  └─ dist/             构建产物，被 Go 嵌入（.gitkeep 是承重墙，删了 go build 失败）
 │
 ├─ engine/              .tzs 表单引擎（C#，csc.exe 单独构建，只在改 engine/ 时重编）

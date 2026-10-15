@@ -118,7 +118,7 @@ export function PopoverContent({ className, align = 'end', sideOffset = 4, ...pr
 // ⚠ 切页签**不卸载**内容:Radix 默认把非活动 TabsContent 从 DOM 里摘掉,非受控输入
 // (defaultValue)会被重置。本仓库的表单都是受控的(值在 SettingsView 的 state 里),
 // 卸不卸载不影响取值,但调用方仍应传 forceMount + data-[state=inactive]:hidden:
-// 少一次卸载/重挂载,滚动位置与 DOM 顺序也更稳。见 web/showcase 里同一处的原型与说明。
+// 少一次卸载/重挂载,滚动位置与 DOM 顺序也更稳。
 export function Tabs(props: React.ComponentProps<typeof TabsPrimitive.Root>) {
   return <TabsPrimitive.Root {...props} />
 }
