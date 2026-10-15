@@ -22,6 +22,17 @@ const SessionFileName = ".tt-fep.json"
 // ErrNoSession reports that no session is registered.
 var ErrNoSession = errors.New("fep: no session registered")
 
+// 会话的两种用途：**录一轮**与**把一份录制回放出来**。
+//
+// 为什么登记里要写这一栏：两种会话落在登记里的形状一模一样（都是隔离 GDC + 代理 +
+// 常驻 Runtime），但活法完全不同 —— 录制是"人还在录"，回放是"发完就完了"。
+// 不区分的话，录制面板只能把两者都说成"正在录"：面板上写着"正在录:fep-x"，
+// 而那一轮其实是回放留下的窗口（用户 2026-10-15 撞上过）。
+const (
+	SessionKindRec    = "rec"    // tt fep rec start：人在录
+	SessionKindReplay = "replay" // tt fep rec reproduce：把一份录制重放出来
+)
+
 // Session is one running, isolated job: the GDC instance we launched, the local
 // proxy the runtime dials, and the control endpoint for injections.
 type Session struct {
@@ -29,6 +40,7 @@ type Session struct {
 	Zone       string     `json:"zone"`
 	Prog       string     `json:"prog"`
 	Path       LaunchPath `json:"path,omitempty"` // 这一次作业怎么起的（进录制身份；见 path.go）
+	Kind       string     `json:"kind,omitempty"` // 这一轮是录还是回放（SessionKindRec / SessionKindReplay）
 	Ent        string     `json:"ent,omitempty"`  // 本轮下发的企业编号（ENT）；空 = 沿用登录 shell 的 $TOPENT
 	GDCPID     int        `json:"gdcPid"`
 	GDCPort    int        `json:"gdcPort"`
@@ -48,6 +60,19 @@ func (s *Session) PIDs() []int {
 		out = append(out, s.GDCPID)
 	}
 	return out
+}
+
+// Stale reports whether this registration outlived the process that started it.
+//
+// 为什么需要它：**登记文件比进程活得久**。`rec reproduce --no-wait`（面板那个回放
+// 按钮就是这么用的）发完事件就退，留下的是一份 ownerPid 已经不在的登记 + 一个还开着
+// 的 gdc 窗口（用户要看最后那一屏）。谁把这份登记当成"还在录"，下一轮起录就会被莫名
+// 拒掉 —— 面板会说"已经在录了"，可其实谁都没在录。
+//
+// OwnerPID 为 0 表示"不知道是谁起的"（更早版本写的登记）：**不**当作过期，
+// 宁可保守地拦住 —— 猜错的代价是一轮录制与一组端口。
+func (s *Session) Stale() bool {
+	return s != nil && s.OwnerPID != 0 && !winproc.Alive(s.OwnerPID)
 }
 
 // Registry reads and writes the session file. The registration is written

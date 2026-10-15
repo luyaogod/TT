@@ -33,6 +33,9 @@ type recSession struct {
 	// NoContinue 只下断点、不放行（给人自己下断点用：`rec start --no-continue`）。
 	NoContinue bool
 	Origin     fep.Origin
+	// Kind 是这一轮会话的用途（`rec` / `replay`）：只进会话登记，让面板能分清
+	// "人还在录"与"回放发完留下的窗口"（见 internal/fep/session.go 那一栏的说明）。
+	Kind string
 }
 
 // openDebugRecording 起隔离实例 + 代理，再把调试线的作业挂到这条代理上。
@@ -87,7 +90,7 @@ func openDebugRecording(cmd *cobra.Command, s recSession) (*fep.Runtime, string,
 	rt, err := fep.Open(s.Ctx, fep.OpenConfig{
 		Env: dcfg.EnvName(), Zone: dcfg.Zone,
 		// 身份：作业是调试线起的（见 path.go）。写对了，回放前的路径比对才有双方的值。
-		Prog: s.Prog, Path: fep.PathDebug, Ent: s.Ent, Origin: s.Origin,
+		Prog: s.Prog, Path: fep.PathDebug, Ent: s.Ent, Origin: s.Origin, Kind: s.Kind,
 		SSH: dcfg.SSH, DataDir: loc.DataDir(), RecordDir: recDir, Tag: tag,
 		GDCLog: filepath.Join(recDir, tag+"-gdc.log"),
 		NoJob:  true,

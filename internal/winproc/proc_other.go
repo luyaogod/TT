@@ -42,11 +42,24 @@ func Alive(pid int) bool {
 	return syscall.Kill(pid, 0) == nil
 }
 
-// Kill 结束指定进程。
+// Kill 结束指定进程。语义与 Windows 版一致：进程已经不在了算成功（收尾要的是
+// "它别再挡路"），真的杀不掉才报错。
 func Kill(pid int) error {
+	if pid <= 0 {
+		return nil
+	}
 	p, err := os.FindProcess(pid)
 	if err != nil {
+		if !Alive(pid) {
+			return nil
+		}
 		return err
 	}
-	return p.Kill()
+	if kerr := p.Kill(); kerr != nil {
+		if !Alive(pid) {
+			return nil
+		}
+		return kerr
+	}
+	return nil
 }

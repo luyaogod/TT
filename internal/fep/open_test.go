@@ -183,21 +183,34 @@ func TestJobLaunchCmdKeepsOneCommandPerLine(t *testing.T) {
 // 落在里面的端口 bind 直接 WSAEACCES，**没有进程在监听也一样失败** —— 实测 7899 落在
 // 7809–7908 里，Get-NetTCPConnection 看是"空闲"，而默认那组端口因此整组不可用。
 func TestPickPortsFallsBackWhenDefaultUnusable(t *testing.T) {
-	// 占住默认那组的第一个端口（模拟"用不了"）
-	ln, err := net.Listen("tcp", "127.0.0.1:7400")
-	if err != nil {
-		t.Skipf("7400 起不来（这台机器本身就占着）: %v", err)
+	// 占住"这一组"的第一个端口（模拟"整组用不了"）。
+	//
+	// 为什么不是写死 7400：它不一定是空的（这台机器上它有时落在 Windows 给 Hyper-V/WSL
+	// 保留的段里），而**这条测试不该因此变成空转** —— 它测的是"该换一组"这个行为，
+	// 与端口号具体是几无关。候选都在低位、且 +7000 仍在合法范围内（换组最多挪 8 组）。
+	var ln net.Listener
+	base := 0
+	for _, cand := range []int{7400, 17400, 27400, 37400, 47400, 57400} {
+		l, lerr := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(cand)))
+		if lerr != nil {
+			continue
+		}
+		ln, base = l, cand
+		break
+	}
+	if ln == nil {
+		t.Fatalf("这条用例要占住一个基准端口，六个候选都占不住（这台机器的端口保留段太宽？）")
 	}
 	defer ln.Close()
 
-	cfg := OpenConfig{GDCPort: 7400, ProxyPort: 7600, InjectPort: 7899}
+	cfg := OpenConfig{GDCPort: base, ProxyPort: base + fepPortOffsets[1], InjectPort: base + fepPortOffsets[2]}
 	var logged []string
 	logf := func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) }
 	if err := pickPorts(&cfg, false, logf); err != nil {
-		t.Fatalf("默认端口不通时该自动换一组: %v", err)
+		t.Fatalf("这一组端口不通时该自动换一组: %v", err)
 	}
-	if cfg.GDCPort == 7400 {
-		t.Fatalf("7400 被占着，不该还挑它: %+v", cfg)
+	if cfg.GDCPort == base {
+		t.Fatalf("%d 被占着，不该还挑它: %+v", base, cfg)
 	}
 	if cfg.ProxyPort-cfg.GDCPort != fepPortOffsets[1] || cfg.InjectPort-cfg.GDCPort != fepPortOffsets[2] {
 		t.Fatalf("三个端口的相对关系必须成套（代理−6400 就是画面接线里那个数值）: %+v", cfg)
@@ -212,11 +225,65 @@ func TestPickPortsFallsBackWhenDefaultUnusable(t *testing.T) {
 	}
 
 	// 点名要的端口：不通就报错，不许自作主张换
-	pinned := OpenConfig{GDCPort: 7400, ProxyPort: 7600, InjectPort: 7899}
+	pinned := OpenConfig{GDCPort: base, ProxyPort: base + fepPortOffsets[1], InjectPort: base + fepPortOffsets[2]}
 	if err := pickPorts(&pinned, true, logf); err == nil {
 		t.Fatal("调用方点名要的端口不通时该报错，而不是偷偷换一组")
 	}
-	if pinned.GDCPort != 7400 {
+	if pinned.GDCPort != base {
 		t.Fatalf("报错路径也不该改动调用方给的端口: %+v", pinned)
+	}
+}
+
+// 点名要的端口要**按调用方给的那三个**检查，不是按 GDC 端口 +200/+499 推。
+//
+// 为什么值得钉住：从 GDC 端口推另外两个只对"默认那一组"成立。按偏移推有两个后果，
+// 一个比一个难查：
+//   - 调用方给的 ProxyPort 被占**查不出来** —— 隔离实例照起，等到代理那一步才失败，
+//     白起一个 gdc（正好是这条测试要钉的那件事，TestOpenRejectsBusyPortWithoutResidue
+//     就是照着"端口体检在起实例之前"写的，实测挂在"起隔离实例失败"上）；
+//   - GDCPort+200 恰好被占时**误报**，用户点名的端口明明是空的。
+func TestPickPortsChecksThePinnedPortsThemselves(t *testing.T) {
+	// ① 调用方点名的代理端口被占 → 必须报 ErrPortBusy，且不许改调用方的值
+	busy, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer busy.Close()
+	proxyPort := busy.Addr().(*net.TCPAddr).Port
+	gdcPort := freePort(t)
+	cfg := OpenConfig{GDCPort: gdcPort, ProxyPort: proxyPort, InjectPort: freePort(t)}
+	if err := pickPorts(&cfg, true, func(string, ...any) {}); !errors.Is(err, ErrPortBusy) {
+		t.Fatalf("点名的代理端口 %d 被占就该报 ErrPortBusy，实得 %v", proxyPort, err)
+	}
+	if cfg.GDCPort != gdcPort || cfg.ProxyPort != proxyPort {
+		t.Fatalf("报错路径不该改动调用方给的端口: %+v", cfg)
+	}
+
+	// ② 反面：GDCPort+200 被占，但调用方要的代理端口是别的空闲端口 → 不该误报。
+	//
+	// 基准端口要**同时**满足两件事：它自己空着、而它 +200 能占住。找不到就是这台机器的
+	// 端口保留段太宽（那是"假设不成立"），照实红，别静默跳过变成空转。
+	var blocker net.Listener
+	gdc2 := 0
+	for _, cand := range []int{17400, 27400, 37400, 47400, 57400, 63000} {
+		p, perr := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(cand)))
+		if perr != nil {
+			continue
+		}
+		p.Close()
+		l, lerr := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(cand+fepPortOffsets[1])))
+		if lerr != nil {
+			continue
+		}
+		blocker, gdc2 = l, cand
+		break
+	}
+	if blocker == nil {
+		t.Fatalf("找不到「自己空着、+%d 又能占住」的基准端口：这条反面用例的假设不成立", fepPortOffsets[1])
+	}
+	defer blocker.Close()
+	cfg2 := OpenConfig{GDCPort: gdc2, ProxyPort: freePort(t), InjectPort: freePort(t)}
+	if err := pickPorts(&cfg2, true, func(string, ...any) {}); err != nil {
+		t.Fatalf("点名的三个端口都空着，不该报错（%d 被占跟它们无关）: %v", gdc2+fepPortOffsets[1], err)
 	}
 }

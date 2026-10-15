@@ -140,6 +140,11 @@ func (s *Server) hRecordingShow(w http.ResponseWriter, r *http.Request) {
 //
 // 判据是**会话登记**（`.tt-fep.json`）：它是"这一轮还活着"的唯一权威，
 // 而录制件本身要等收工才落身份，看文件只会在录到一半时给出"没有"。
+//
+// 但登记会**比进程活得久**（`rec reproduce --no-wait` 发完就退，留下登记 + 一个还开着的
+// gdc 窗口），所以除了 id 之外还要把两样事实说清楚：
+//   - kind：这一轮是录还是回放（登记里那一栏，见 internal/fep/session.go）；
+//   - stale：起它的那个进程已经不在（= 只剩窗口，面板该说"收工/关掉"而不是"正在录"）。
 func (s *Server) hRecordingsCurrent(w http.ResponseWriter, r *http.Request) {
 	dataDir, _, _, err := s.recDirs()
 	if err != nil {
@@ -154,6 +159,7 @@ func (s *Server) hRecordingsCurrent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "recording": map[string]any{
 		"id": sess.Tag, "env": sess.Env, "zone": sess.Zone, "ent": sess.Ent,
 		"prog": sess.Prog, "path": sess.Path, "started": sess.Started,
+		"kind": sess.Kind, "stale": sess.Stale(),
 	}})
 }
 
@@ -164,6 +170,23 @@ type recStartReq struct {
 	Ent       string `json:"ent"`
 	Module    string `json:"module"`
 	BinaryRef string `json:"binaryRef"`
+}
+
+// busySession 读会话登记，并回答"这一轮是不是**真的还占着**"。
+//
+//   - (sess, true)：起它的进程还活着 —— 它占着三个端口与调试会话，不能起新的；
+//   - (sess, false) 且 sess != nil：只剩一份**过期登记**（`rec reproduce --no-wait`
+//     发完就退留下的那份），可以起新的；
+//   - (nil, false)：没有登记。
+//
+// 为什么要分这两件事：把过期登记也当成"已经在录"，用户看到的是"已经在录了（fep-x）：
+// 先停掉它再起新的"，可其实谁都没在录 —— 那一轮早就发完了，只剩一个还开着的 gdc 窗口。
+func busySession(dataDir string) (*fep.Session, bool) {
+	sess, err := fep.NewRegistry(dataDir).Load()
+	if err != nil || sess == nil {
+		return nil, false
+	}
+	return sess, !sess.Stale()
 }
 
 // hRecordingStart POST /api/recordings
@@ -187,11 +210,17 @@ func (s *Server) hRecordingStart(w http.ResponseWriter, r *http.Request) {
 	}
 	dataDir := filepath.Dir(cfgPath)
 	// 已经在录了就不要再起一个：两个会话会抢同一组端口（7400/7600/7899），
-	// 而且用户看到的是"点了一下没反应"。
-	if sess, lerr := fep.NewRegistry(dataDir).Load(); lerr == nil && sess != nil {
+	// 而且用户看到的是"点了一下没反应"。**过期登记不算在录**（见 busySession）。
+	reg := fep.NewRegistry(dataDir)
+	prevTag := ""
+	if sess, busy := busySession(dataDir); busy {
 		writeErr(w, http.StatusConflict,
 			fmt.Errorf("已经在录了（%s，%s）：先停掉它再起新的", sess.Tag, sess.Prog))
 		return
+	} else if sess != nil {
+		// 只留旧登记不算数：下面"等它登记"会立刻读到它，把**旧 ID** 当成新一轮报给用户。
+		// 所以记住它是谁，等一个不一样的那一份（旧登记本身留着 —— 它是那个窗口的收工凭据）。
+		prevTag = sess.Tag
 	}
 	exe, eerr := os.Executable()
 	if eerr != nil {
@@ -216,15 +245,17 @@ func (s *Server) hRecordingStart(w http.ResponseWriter, r *http.Request) {
 	if b := strings.TrimSpace(req.BinaryRef); b != "" {
 		args = append(args, "--binary-ref", b)
 	}
+	spawnedAt := time.Now()
 	if _, perr := spawnAndCheck(exe, args, logPath); perr != nil {
 		writeErr(w, http.StatusInternalServerError, fmt.Errorf("起录制失败: %w", perr))
 		return
 	}
-	// 等它登记（登记是它能干活之前的第一件事，所以这就是"就绪"的信号）
-	reg := fep.NewRegistry(dataDir)
+	// 等它登记（登记是它能干活之前的第一件事，所以这就是"就绪"的信号）。
+	// 判据是"读到一份**不是上一轮**的登记"：上一轮那份可能还在（过期但没清，见 prevTag）。
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
-		if sess, lerr := reg.Load(); lerr == nil && sess != nil {
+		if sess, lerr := reg.Load(); lerr == nil && sess != nil &&
+			(sess.Tag != prevTag || sess.Started.After(spawnedAt)) {
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "recording": map[string]any{
 				"id": sess.Tag, "env": sess.Env, "prog": sess.Prog, "ent": sess.Ent, "path": sess.Path,
 			}, "log": logPath})
@@ -326,6 +357,7 @@ func tailOf(path string, n int) string {
 //   - r.r 录的件：那条路不带 -d，编号表与调试线不是同一张（跨路径实测共同编号 0 条相同），
 //     重放会点错控件；
 //   - 已经有一轮录制在跑：两边要占同一组端口（隔离实例/代理）与同一个调试会话。
+//     过期登记（回放发完留下的那份）不算"在跑"，见 busySession。
 func (s *Server) hRecordingReplay(w http.ResponseWriter, r *http.Request) {
 	cfgPath, err := s.configPath(true)
 	if err != nil {
@@ -354,7 +386,7 @@ func (s *Server) hRecordingReplay(w http.ResponseWriter, r *http.Request) {
 				"要在断点下重放，请用面板「开始录制」录的那一份（走 debug 线）"))
 		return
 	}
-	if sess, lerr := fep.NewRegistry(dataDir).Load(); lerr == nil && sess != nil {
+	if sess, busy := busySession(dataDir); busy {
 		writeErr(w, http.StatusConflict,
 			fmt.Errorf("现在有一轮录制在跑（%s，%s）：先停掉它再回放（两边要占同一组端口与调试会话）",
 				sess.Tag, sess.Prog))

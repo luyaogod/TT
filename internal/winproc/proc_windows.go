@@ -8,9 +8,12 @@
 package winproc
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/windows"
 )
@@ -71,10 +74,37 @@ func Alive(pid int) bool {
 }
 
 // Kill 结束指定进程。
+//
+// 两种失败要分开对待，因为处置完全不同：
+//   - 进程**已经不在了**：当作成功 —— 收尾要的是"它别再挡路"，不是"我亲手杀了它"。
+//     收工的时机恰恰是会话正在退场的时候（pid 也可能刚被复用），把这一下当成失败，
+//     用户看到的就是"收尾有失败"，可现场其实干干净净。
+//   - **拒绝访问**：它是提权启动的（T100 客户端拉起的那个 gdc 就是，登记里出现它的
+//     唯一可能是配置指错了端口），普通权限结束不了 —— 照实报出来并给出处置，
+//     而不是甩一句 `OpenProcess: Access is denied.` 让人去猜。
 func Kill(pid int) error {
+	if pid <= 0 {
+		return nil
+	}
 	p, err := os.FindProcess(pid)
 	if err != nil {
+		if !Alive(pid) {
+			return nil
+		}
 		return err
 	}
-	return p.Kill()
+	kerr := p.Kill()
+	if kerr == nil {
+		return nil
+	}
+	// 退场中的进程会短暂拒绝 PROCESS_TERMINATE：等一下再看一眼它还在不在。
+	time.Sleep(300 * time.Millisecond)
+	if !Alive(pid) {
+		return nil
+	}
+	if errors.Is(kerr, windows.ERROR_ACCESS_DENIED) {
+		return fmt.Errorf("结束进程 %d 被拒（错误 5:拒绝访问）—— 它多半是提权启动的,"+
+			"普通权限结束不了:请用管理员身份结束它,或确认登记的 pid 是不是这一轮的", pid)
+	}
+	return kerr
 }

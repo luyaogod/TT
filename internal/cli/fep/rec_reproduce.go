@@ -98,6 +98,9 @@ var recReproduceCmd = &cobra.Command{
 			rt, fgl, oerr := openDebugRecording(cmd, recSession{
 				Ctx: ctx, Env: env, Prog: prog, Ent: ent, Module: repModule,
 				Breaks: repBreak, Origin: fep.OriginUser,
+				// 这一轮是**回放**：面板据此说"正在回放"，不再把它说成"正在录"
+				// （--no-wait 退场后留下的这份登记就是这么被认出来的）。
+				Kind: fep.SessionKindReplay,
 			})
 			if oerr != nil {
 				return oerr

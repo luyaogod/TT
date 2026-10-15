@@ -636,8 +636,12 @@ func listRoot(root recRoot) ([]recRow, error) {
 	}
 	out := make([]recRow, 0, len(items))
 	for _, it := range items {
+		// 身份只填一次：`describeRecording` 自己已经从 `.meta.json` 填过一遍（它就在那个目录里），
+		// 这里再调一次 `fillFromMeta` 会把 bytesRT 加**两遍** —— 长期库行体积翻倍、而缓存行正常，
+		// 表现就是"界面与 rec list 的体积对不上"（实测 545030 = 2 × 272515）。
+		// 库这份 items 已经带了 Meta，用它只是为了省一次读盘，所以只在"它真的没读到自己的身份"时补。
 		r := describeRecording(root.Label, it.Dir, it.ID)
-		if it.Meta != nil {
+		if !r.HasMeta && it.Meta != nil {
 			r.Meta = it.Meta
 			fillFromMeta(&r)
 		}

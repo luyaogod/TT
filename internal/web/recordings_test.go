@@ -211,3 +211,68 @@ func TestRecordingsCurrentFollowsTheRegistry(t *testing.T) {
 		t.Fatalf("该报出正在录的那一轮：%v", out)
 	}
 }
+
+// 登记要分清"还活着"与"只剩一份过期登记"。
+//
+// 为什么值得钉住：登记文件比进程活得久 —— 面板那个「回放」按钮走
+// `tt fep rec reproduce --no-wait`，发完事件就退场，留下的是**一份 ownerPid 已经不在的
+// 登记** + 一个还开着的 gdc 窗口（用户要看最后那一屏）。原来只有"在不在"一种判断，
+// 于是面板把它说成"正在录"，而起一轮新录制也会被它挡住（"已经在录了"，可谁都没在录）。
+//
+// 这条钉三件事：kind 要照实报（replay 不是 rec）、stale 要照实报、过期登记不挡下一轮。
+func TestRecordingsCurrentTellsStaleFromLive(t *testing.T) {
+	s, cfgPath := newTestServer(t, `{"schemaVersion":3,"hosts":{"sshs":[]}}`)
+	dataDir := filepath.Dir(cfgPath)
+	reg := fep.NewRegistry(dataDir)
+
+	// ① 过期登记：起它的进程已经不在了（这个 pid 不可能存在）
+	if err := reg.Save(&fep.Session{
+		Env: "主机109", Zone: "36", Prog: "bsft001_wf", Ent: "99",
+		Path: fep.PathDebug, Kind: fep.SessionKindReplay, Tag: "fep-replayed",
+		GDCPID: 4242, OwnerPID: 0x7FFFFFF0, Started: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, out := getJSON(t, s, "/api/recordings/current")
+	cur, _ := out["recording"].(map[string]any)
+	if cur == nil {
+		t.Fatalf("过期登记也该报出来（它是那个窗口的收工凭据）：%v", out)
+	}
+	if cur["kind"] != fep.SessionKindReplay {
+		t.Errorf("kind = %v，应为 %q（回放留下的登记不能说成在录）", cur["kind"], fep.SessionKindReplay)
+	}
+	if cur["stale"] != true {
+		t.Errorf("stale = %v，应为 true（起它的进程已经不在）", cur["stale"])
+	}
+	if _, busy := busySession(dataDir); busy {
+		t.Fatal("过期登记不该算「在跑」：它挡住的是一轮本来能起的录制")
+	}
+
+	// ② 还活着的：拿本进程当"起它的进程"（Alive 判的就是这个 pid）
+	if err := reg.Save(&fep.Session{
+		Env: "主机109", Zone: "36", Prog: "bsft001_wf", Ent: "99",
+		Path: fep.PathDebug, Kind: fep.SessionKindRec, Tag: "fep-live",
+		OwnerPID: os.Getpid(), Started: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, out = getJSON(t, s, "/api/recordings/current")
+	cur, _ = out["recording"].(map[string]any)
+	if cur["stale"] != false {
+		t.Errorf("stale = %v，应为 false（进程还在）", cur["stale"])
+	}
+	sess, busy := busySession(dataDir)
+	if !busy || sess == nil || sess.Tag != "fep-live" {
+		t.Fatalf("活着的会话该算「在跑」：%v %v", busy, sess)
+	}
+
+	// ③ OwnerPID 为 0（更早版本写的登记）= 不知道是谁起的：**不**当作过期，宁可保守地拦
+	if err := reg.Save(&fep.Session{
+		Env: "主机109", Prog: "bsft001_wf", Tag: "fep-old", Started: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if sess, busy := busySession(dataDir); !busy || sess == nil {
+		t.Fatal("ownerPid 为空的登记不该被当成过期（猜错的代价是一轮录制与一组端口）")
+	}
+}

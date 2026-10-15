@@ -55,6 +55,10 @@ type OpenConfig struct {
 	// 拿它跟录制件比对。空 = 按"起没起作业"推默认（起了就是 r.r，没起就是 none）。
 	Path LaunchPath
 
+	// Kind 是这一轮会话的用途（SessionKindRec / SessionKindReplay，见 session.go）。
+	// 空 = 录（老调用方的默认）。它只进会话登记，给"面板怎么称呼这一轮"用。
+	Kind string
+
 	// Ent 本次要用的企业编号（ENT）。空 = 不覆盖，沿用登录 shell 自己的 $TOPENT。
 	//
 	// 为什么必须由调用方显式给：环境配置里已经**没有**企业编号了
@@ -221,6 +225,7 @@ func Open(ctx context.Context, cfg OpenConfig, logf func(string, ...any)) (*Runt
 	// 3. register first, clean up later
 	sess := &Session{
 		Env: cfg.Env, Zone: cfg.Zone, Prog: cfg.Prog, Ent: cfg.Ent, Path: cfg.Path,
+		Kind: cfg.Kind,
 		GDCPID: pid, GDCPort: cfg.GDCPort,
 		ProxyPort: cfg.ProxyPort, InjectPort: cfg.InjectPort,
 		Tag: cfg.Tag, RecordDir: cfg.RecordDir, OwnerPID: os.Getpid(), Started: time.Now(),
@@ -708,7 +713,11 @@ func pickPorts(cfg *OpenConfig, pinned bool, logf func(string, ...any)) error {
 	}
 	want := ports(cfg.GDCPort)
 	if pinned {
-		for _, p := range want {
+		// 点名要的端口就检查**调用方给的那三个**（也包括"只点了其中一个、其余走默认"这种混合）。
+		// 从 GDC 端口按 +200/+499 推另外两个只对"默认那一组"成立：按偏移推的话，
+		// 调用方给的 ProxyPort 被占**查不出来**（要等隔离实例起完、代理那一步才失败，
+		// 白起一个 gdc），而 GDCPort+200 恰好被占时又会误报。这条是实测出来的（open_test.go）。
+		for _, p := range []int{cfg.GDCPort, cfg.ProxyPort, cfg.InjectPort} {
 			if err := portFree(p); err != nil {
 				return err
 			}

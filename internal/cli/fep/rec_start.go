@@ -103,6 +103,8 @@ var recStartCmd = &cobra.Command{
 			Env: dcfg.EnvName(), Zone: dcfg.Zone,
 			// 这一轮的身份：作业是调试线起的（见 path.go）。身份写对了，回放前的路径比对才有双方的值。
 			Prog: recStartProg, Path: fep.PathDebug, Ent: ent,
+			// 这一轮是**录**：面板据此说"正在录"（回放那一轮登记成 replay）
+			Kind: fep.SessionKindRec,
 			// 用户主动录的 → 长期库（策略见 internal/fep/retention.go）
 			Origin: fep.OriginUser,
 			// 编译件标识：这一条不是所有路径都知道（走 r.r 时程序位置由登录环境决定），
