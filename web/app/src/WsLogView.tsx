@@ -104,7 +104,7 @@ const COLS_COMPACT: Col[] = [COL_STATUS, { ...COL_SERVICE, cls: '' }, COL_JOB, C
 // 窗口缩放时两栏等比跟随,不会像固定像素那样一边被夹死、拖不动
 const RATIO_MIN = 0.25 // 详情面板最小占比
 const RATIO_MAX = 0.75 // 详情面板最大占比
-const RESIZER_W = 5    // .col-resizer 固定占位
+const RESIZER_W = 1    // .col-resizer 的宽度(见 index.css:1px 线 + 透明溢出命中区)
 
 // 工具条查询输入框(四个条件共用外观;服务名称放通配,给宽一点)
 // rounded-ui:全站唯一那一档圆角,见 tokens.css 的圆角口径

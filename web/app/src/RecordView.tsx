@@ -44,7 +44,7 @@ const RETENTION_LABEL: Record<string, string> = {
 // 三个数是那边同一份口径,量很小,先各留一份;哪天有第三处再抽出去。
 const RATIO_MIN = 0.25
 const RATIO_MAX = 0.75
-const RESIZER_W = 5
+const RESIZER_W = 1 // .col-resizer 的宽度(见 index.css:1px 线 + 透明溢出命中区)
 
 // 体积:与设置页那份同一口径(那边是视图内的本地函数,没有导出,这里照抄一份)。
 function fmtBytes(n: number): string {
