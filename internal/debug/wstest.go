@@ -145,6 +145,13 @@ func WSTest(conn *host.SSHConn, url, body string, soap bool, timeoutSec int) (*W
 		if len(parts) > 1 {
 			fmt.Sscanf(parts[1], "%f", &res.DurationSec)
 		}
+		// http_code=000:curl 跑起来了但**一个字节都没交换**(连接被拒 / 域名解析不了 /
+		// 超时)。META 在、所以上面那条"无 HTTP 响应"不会响 —— 不补这一句,结果就是
+		// `{httpCode:0, response:""}` 一个字的解释都没有,界面上与"还没执行"长得一样
+		// (实测,2026-10-15)。耗时字段照留:它是"什么时候失败的"的证据。
+		if res.HTTPCode == 0 {
+			res.Error = "没有拿到 HTTP 状态码(连接被拒 / 域名解析失败 / 超时;服务器侧 curl 已返回)"
+		}
 	} else {
 		res.Error = "无 HTTP 响应(连接失败或超时)"
 	}

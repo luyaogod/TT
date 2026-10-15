@@ -1494,7 +1494,7 @@ func (s *Server) hWSTest(w http.ResponseWriter, r *http.Request) {
 	if req.URL == "" {
 		req.URL = WSDefaultURLFor(s.cfg, req.Mode)
 	}
-	conn, err := s.dial(s.cfg.SSH)
+	conn, err := s.dialSSH()
 	if err != nil {
 		fail(w, 500, fmt.Errorf("SSH 连接失败: %w", err))
 		return
@@ -1506,6 +1506,23 @@ func (s *Server) hWSTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true, "result": res})
+}
+
+// dialSSH 是那五个"要连服务器"的端点统一走的门（拨当前生效环境）。
+//
+// 多包一层只为了一件事：**"服务当前没有生效环境"这句要说出来**。
+//
+// `ApplyDefaultEnv` 在"记住的环境名已经不在配置里"（改名、删除、手改配置）时会故意清空
+// 运行时字段 —— 它**不**回落到首条（回落会把会话悄悄切到另一台机器上，那正是要根除的行为）。
+// 于是这里拿到的是空地址，原样报出去就是 `dial tcp :0`：接口日志与服务测试一起全红，
+// 而会话面板还显示着环境在跑，谁看都不知道该干什么（2026-10-15 实测过这个现场）。
+func (s *Server) dialSSH() (*host.SSHConn, error) {
+	conn, err := s.dial(s.cfg.SSH)
+	if err != nil && strings.TrimSpace(s.cfg.SSH.Host) == "" {
+		return nil, fmt.Errorf("%w（服务当前**没有生效环境**：配置里那个环境可能被改名或删掉了 —— "+
+			"在左侧「会话」面板重新选一个环境再试）", err)
+	}
+	return conn, err
 }
 
 // ---------- 接口日志(wsfa_t) ----------
@@ -1524,7 +1541,7 @@ func (s *Server) hWSLogs(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	page, _ := strconv.Atoi(q.Get("page"))
 	pageSize, _ := strconv.Atoi(q.Get("pageSize"))
-	conn, err := s.dial(s.cfg.SSH)
+	conn, err := s.dialSSH()
 	if err != nil {
 		fail(w, 500, fmt.Errorf("SSH 连接失败: %w", err))
 		return
@@ -1559,7 +1576,7 @@ func (s *Server) hWSLogs(w http.ResponseWriter, r *http.Request) {
 // hWSLogContent GET /api/wslogs/content?rowid=
 func (s *Server) hWSLogContent(w http.ResponseWriter, r *http.Request) {
 	rowid := r.URL.Query().Get("rowid")
-	conn, err := s.dial(s.cfg.SSH)
+	conn, err := s.dialSSH()
 	if err != nil {
 		fail(w, 500, fmt.Errorf("SSH 连接失败: %w", err))
 		return
@@ -1615,7 +1632,7 @@ func (s *Server) hWSLogDebug(w http.ResponseWriter, r *http.Request) {
 	if targetCfg != s.cfg {
 		s.selectEnv(targetCfg)
 	}
-	conn, err := s.dial(s.cfg.SSH)
+	conn, err := s.dialSSH()
 	if err != nil {
 		fail(w, 500, fmt.Errorf("SSH 连接失败: %w", err))
 		return
@@ -1713,7 +1730,7 @@ func (s *Server) hDBSQL(w http.ResponseWriter, r *http.Request) {
 			ent = cur.TopentIntForDB()
 		}
 	}
-	conn, err := s.dial(s.cfg.SSH)
+	conn, err := s.dialSSH()
 	if err != nil {
 		fail(w, 500, fmt.Errorf("SSH 连接失败: %w", err))
 		return
