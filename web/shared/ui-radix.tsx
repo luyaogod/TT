@@ -3,6 +3,7 @@
 import * as React from 'react'
 import * as AccordionPrimitive from '@radix-ui/react-accordion'
 import * as AlertDialogPrimitive from '@radix-ui/react-alert-dialog'
+import * as DialogPrimitive from '@radix-ui/react-dialog'
 import * as CheckboxPrimitive from '@radix-ui/react-checkbox'
 import * as PopoverPrimitive from '@radix-ui/react-popover'
 import * as ProgressPrimitive from '@radix-ui/react-progress'
@@ -394,6 +395,55 @@ export function AlertDialogCancel({ className, ...props }:
       <Button variant="outline" className={className} {...props} />
     </AlertDialogPrimitive.Cancel>
   )
+}
+
+// ---- Dialog(Radix):**装内容**的弹窗,与 AlertDialog 分工不同 ----
+//
+// 为什么不能拿 AlertDialog 顶替(它俩是两套原语,不是同一个东西的两种皮肤):
+//   · AlertDialog 语义上要求"用户必须做选择",于是**点遮罩/按 Esc 都不关**
+//     (想做也得显式改);它面向的是"确认/取消"两个动作。
+//   · 这里要的是**可交互内容**(一列带勾选框的候选项、loading 态、可能还要滚动),
+//     用户点外面就该关掉 —— 那是 Dialog 的语义。
+// 样式与 AlertDialog 保持同一套 token(无阴影之外的装饰、1px 边框、卡片底),
+// 免得两种弹窗看起来像两个产品。
+export function Dialog(props: React.ComponentProps<typeof DialogPrimitive.Root>) {
+  return <DialogPrimitive.Root {...props} />
+}
+
+export function DialogContent({ className, children, ...props }:
+  React.ComponentProps<typeof DialogPrimitive.Content>) {
+  return (
+    <DialogPrimitive.Portal>
+      <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50" />
+      <DialogPrimitive.Content
+        className={cn(
+          'fixed top-1/2 left-1/2 z-50 flex max-h-[80vh] w-full max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col gap-2 border border-border bg-card p-4 text-xs text-card-foreground shadow-lg outline-none',
+          className,
+        )}
+        {...props}
+      >
+        {children}
+      </DialogPrimitive.Content>
+    </DialogPrimitive.Portal>
+  )
+}
+
+export function DialogHeader({ className, ...props }: React.ComponentProps<'div'>) {
+  return <div className={cn('flex flex-col gap-1.5', className)} {...props} />
+}
+
+export function DialogFooter({ className, ...props }: React.ComponentProps<'div'>) {
+  return <div className={cn('mt-1 flex items-center justify-end gap-2', className)} {...props} />
+}
+
+export function DialogTitle({ className, ...props }:
+  React.ComponentProps<typeof DialogPrimitive.Title>) {
+  return <DialogPrimitive.Title className={cn('text-sm font-medium text-foreground', className)} {...props} />
+}
+
+export function DialogDescription({ className, ...props }:
+  React.ComponentProps<typeof DialogPrimitive.Description>) {
+  return <DialogPrimitive.Description className={cn('text-xs leading-5 text-muted-foreground whitespace-pre-line', className)} {...props} />
 }
 
 export const stateTone = (s: string): 'green' | 'yellow' | 'red' | 'gray' | 'blue' => {

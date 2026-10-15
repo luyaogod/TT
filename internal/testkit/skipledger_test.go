@@ -84,6 +84,11 @@ var skipLedger = []skipSite{
 	{file: "internal/dev/pkgfile/zipshape_test.go", msg: "语料里没找到设计器形态的 .tap 包", layer: layL3Missing, why: "需真实语料：这一类形态只在真语料里出现"},
 	{file: "internal/dev/pkgfile/zipshape_test.go", msg: "语料里没有 Zip64 形态的 .tap 包", layer: layL3Missing, why: "需真实语料：这一类形态只在真语料里出现"},
 	{file: "internal/dev/store/store_test.go", msg: "环境里没有 git，跳过 git 相关断言", layer: layEnv, why: "本机没装 git（装了才跑 git 相关断言）"},
+	// 「发现环境」对真实设计器文件的冒烟检查:它**必须**在没装设计器的机器上跳过,
+	// 而那个跳过正是它的价值所在 —— 有设计器的机器(开发机)会真的拿 .NET 生成的密文
+	// 解一遍,没有的机器不假红。所以这两条不影响「全绿」这个结论。
+	{file: "internal/designer/sites_local_test.go", msg: "没有 APPDATA,跳过本机真实文件检查", layer: layEnv, why: "非 Windows / 环境异常时没有 %APPDATA%，定位不到设计器目录；合成密文的用例仍然全跑"},
+	{file: "internal/designer/sites_local_test.go", msg: "这台机器没有设计器站点清单,跳过", layer: layEnv, why: "未安装 T100 设计器或从未保存过站点。**不影响「全绿」这个结论**：参数是否正确由合成密文的往返用例保证，这条只是拿真实 .NET 密文再验一次（装了设计器的机器上必跑）"},
 	{file: "internal/dev/tapfile/tapfile_test.go", msg: "%s 下没有 .tap", layer: layL3Missing, why: "语料在，但里面没有 .tap"},
 	{file: "internal/dev/tzs/chain_test.go", msg: "语料里没有 %s —— 这条链要一个真实的数据绑定叶子；换个语料就得同时改 chainQuery", layer: layL3Missing, why: "需真实语料里那个数据绑定叶子；换语料要同时改 chainQuery"},
 	{file: "internal/dev/tzs/chain_test.go", msg: "%s 的祖先目录里没有 mta/，且没给 TTZS_WS —— 工作区绝不替你选", layer: layL3, why: "需真工作区：开关 TTZS_WS（工作区绝不替你选）"},
