@@ -408,11 +408,11 @@ export function RecordView() {
                   <TableHead className={`sticky top-0 z-10 border-t-0 border-l-0 bg-background ${sel ? 'w-24' : 'w-32'}`}>作业</TableHead>
                   {!sel && (
                     <>
-                      <TableHead className="sticky top-0 z-10 w-44 border-t-0 border-l-0 bg-background"
+                      <TableHead className="sticky top-0 z-10 w-36 border-t-0 border-l-0 bg-background"
                         title="环境 / 区域 / ENT(企业编号)">环境/区域/ENT</TableHead>
                       <TableHead className="sticky top-0 z-10 w-36 border-t-0 border-l-0 bg-background">时间</TableHead>
                       <TableHead className="sticky top-0 z-10 w-20 border-t-0 border-l-0 bg-background">体积</TableHead>
-                      <TableHead className="sticky top-0 z-10 w-40 border-t-0 border-l-0 bg-background"
+                      <TableHead className="sticky top-0 z-10 w-48 border-t-0 border-l-0 bg-background"
                         title="编号表摘要:sha256 前 16 位(条数)。整体比对用它,不看数字也不看声明顺序">指纹</TableHead>
                     </>
                   )}

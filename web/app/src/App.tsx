@@ -347,28 +347,28 @@ export function App() {
               (设置页不渲染会话栏,不这么办这个按钮在设置页就是个死键)。 */}
           <ActivityIcon icon={Server} label={sessionIconLabel} active={view !== 'settings' && showSession} onClick={onSessionClick} />
         </div>
-        {/* 会话栏:活动栏的右邻,自己一列(宽度可拖,与右侧栏同一套 clamp 口径)。
-            min-w-0 + overflow-hidden:面板内部是 auto 滚动区,不给这两条的话
-            里面的长环境名会把整列顶宽,再挤主面板 —— 就是"宽度反馈环"那条老账。
-            它不挂在任何一个 ViewPane 里,所以接口日志/服务测试/录制/调试之间切换时
-            一次都不重挂:手风琴展开态与 TOPENT 输入跟着一直在(那正是"为什么要单独一列")。
-            设置页整列不渲染:设置是"先配环境"的地方,环境就在它自己页里管,
-            一列列环境与会话的面板在那里只是重复,还白占宽度。 */}
-        {view !== 'settings' && showSession && (
-          <>
-            <div style={{ width: sessionW }} className="flex min-h-0 min-w-0 shrink-0 flex-col overflow-hidden rounded-ui border border-border">
-              <SessionPanel />
-            </div>
-            {/* 分割条放在会话栏**右边**:它是这一列真正的边(和右侧栏那条一样,分割线始终
-                贴着被拖的那条边)。放在左边的话,往右拖时面板变宽、而把手留在原地,
-                光标与那条 1px 线当场分家。 */}
-            <div className="col-resizer" onMouseDown={onSessionResizeDown} title="拖拽调整会话面板宽度" />
-          </>
-        )}
-        {/* 主内容面板:五套视图都装在这一个带边线的圆角面板里,四周与活动栏/会话栏/图标栏/状态栏留出间隙。
-            overflow-hidden 让四个圆角真正裁掉里面的直角内容(页签栏、编辑器底色)。 */}
+        {/* 工作区 = 会话栏 + 主内容,**同一个面板**(共用一圈边线、中间只隔那条可拖的分割线)。
+            为什么不各自成块:两块各自带边线时,中间会同时出现"4px 间隙 + 两条平行边线",
+            看着就是一道莫名其妙的空隙(用户反馈)。这里与调试视图内部(代码区 | 侧边栏)同一套做法。
+            会话栏不渲染时(设置页、或用户收起),这层壳里只剩主内容,边线与圆角照旧。
+            会话栏自身:min-w-0 + overflow-hidden —— 里面是 auto 滚动区,不给这两条的话
+            长环境名会把整列顶宽、再挤主内容(就是"宽度反馈环"那条老账)。
+            它不挂在任何一个 ViewPane 里,所以四个容器之间切换时一次都不重挂:
+            手风琴展开态与 TOPENT 输入跟着一直在(那正是"为什么要单独一列")。 */}
         <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-ui border border-border">
-          {/* 五个视图全部 keep-alive:首次访问后常驻挂载,切换仅改 display */}
+          {view !== 'settings' && showSession && (
+            <>
+              <div style={{ width: sessionW }} className="flex min-h-0 min-w-0 shrink-0 flex-col overflow-hidden">
+                <SessionPanel />
+              </div>
+              {/* 分割条放在会话栏**右边**:它是这一列真正的边(和右侧栏那条一样,分割线始终
+                  贴着被拖的那条边)。放在左边的话,往右拖时面板变宽、而把手留在原地,
+                  光标与那条 1px 线当场分家。 */}
+              <div className="col-resizer" onMouseDown={onSessionResizeDown} title="拖拽调整会话面板宽度" />
+            </>
+          )}
+          {/* 五个视图全部 keep-alive:首次访问后常驻挂载,切换仅改 display。
+              它们与上面的会话栏是同一层的兄弟,只是同时只有一个不是 display:none。 */}
           <ViewPane show={view === 'debug'}>
             <Toolbar />
             {/* 面板紧贴(VS Code 经典密度):无外边距,仅靠 sash 分割线分区
