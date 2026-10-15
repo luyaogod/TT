@@ -12,7 +12,12 @@ import { RecordView } from './RecordView'
 import { SettingsView } from './SettingsView'
 import { StatusBar, STATUS_BAR_H } from './StatusBar'
 import { api } from './api'
-import { parseHash } from './routing'
+import { parseHash, type ViewKey } from './routing'
+
+// 视图键 → 中文名(只给 tooltip 用:界面上的说法要与右侧图标栏、README 一致)。
+const VIEW_LABEL: Partial<Record<ViewKey, string>> = {
+  debug: '调试', wslogs: '接口日志', wstest: '服务测试', record: '录制', settings: '设置',
+}
 
 // 活动栏图标按钮(左右两条栏共用):悬停/选中都是浮在栏底上的小方块,不贴边 ——
 // 直角色块贴到栏壁会看起来像"栏被切掉一块",而留白 + 圆角让选中成为一个明确的"按钮"。
@@ -180,6 +185,10 @@ export function App() {
   // 会话栏的展开/收起:只由左侧那个图标按钮驱动,直接读 localStorage 而不是进 store ——
   // 因为它没有第二个消费者,进 store 只会多一层。默认展开(只有明确关过才是 '0')。
   const [showSession, setShowSession] = useState(() => localStorage.getItem('tt.sessionOpen') !== '0')
+  // 最后一个"带会话栏"的视图(设置页不算)。设置页里点会话图标要能回到这里 ——
+  // 否则在设置页点它毫无动静(设置页压根不渲染会话栏),用户看到的就是一个死按钮(用户实测反馈)。
+  const lastViewRef = useRef<Exclude<ViewKey, 'settings'>>('debug')
+  useEffect(() => { if (view !== 'settings') lastViewRef.current = view as Exclude<ViewKey, 'settings'> }, [view])
   // 下方面板(操作时间线/协议流)高度拖拽(记忆到 localStorage)
   const [bottomH, setBottomH] = useState(() => {
     const v = Number(localStorage.getItem('tt.bottomH'))
@@ -245,6 +254,20 @@ export function App() {
       return !v
     })
   }
+  // 会话图标真正干的事:在四个容器里就是收/展会话栏;在**设置页**则先切回上一个容器
+  // 再把它展开 —— 设置页不渲染会话栏,不这么办这个按钮在设置页按下去毫无反应。
+  const onSessionClick = () => {
+    if (view === 'settings') {
+      setView(lastViewRef.current)
+      setShowSession(true)
+      localStorage.setItem('tt.sessionOpen', '1')
+      return
+    }
+    toggleSession()
+  }
+  const sessionIconLabel = view === 'settings'
+    ? `会话(离开设置,回到「${VIEW_LABEL[lastViewRef.current] || lastViewRef.current}」并展开会话栏)`
+    : showSession ? '收起会话面板' : '展开会话面板'
   // 下方面板(操作时间线/协议流)高度拖拽(记忆到 localStorage)
   const onBottomResizeDown = (e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault()
@@ -320,8 +343,9 @@ export function App() {
         <div className="flex w-10 shrink-0 flex-col items-center gap-1 py-2">
           <ActivityIcon icon={Settings} label="设置(站点 / 数据字典 / DEBUG / 应用)" active={view === 'settings'} onClick={() => setView('settings')} />
           {/* active 即"会话栏此刻可见":它是个收展开关,不是视图切换 —— 所以不跟 view 走。
-              设置页也留着它:折叠意图此时仍要能表达,切回其它视图时才不会是意外状态。 */}
-          <ActivityIcon icon={Server} label={showSession ? '收起会话面板' : '展开会话面板'} active={showSession} onClick={toggleSession} />
+              在设置页它不是"没反应":点一下会离开设置、回到上一个容器并把会话栏展开
+              (设置页不渲染会话栏,不这么办这个按钮在设置页就是个死键)。 */}
+          <ActivityIcon icon={Server} label={sessionIconLabel} active={view !== 'settings' && showSession} onClick={onSessionClick} />
         </div>
         {/* 会话栏:活动栏的右邻,自己一列(宽度可拖,与右侧栏同一套 clamp 口径)。
             min-w-0 + overflow-hidden:面板内部是 auto 滚动区,不给这两条的话
