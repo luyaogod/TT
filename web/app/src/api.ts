@@ -542,6 +542,13 @@ export const api = {
     }),
   recordingStop: () =>
     req<{ ok: boolean; stopped: { id: string; env: string; prog: string } }>('/api/recordings/stop', { method: 'POST' }),
+  // 回放:服务端**另起一个进程**跑 `tt fep rec reproduce <ID> --no-wait` —— 按身份起调试线
+  // 会话、过指纹闸、把事件原样发出去。**不等停站**(面板不带断点,等下去只会等到超时),
+  // 会话留着给 AI 接着取证;进度看返回的日志文件,界面这边不轮询。
+  // 两种情形服务端直接拒(409):r.r 录的件、以及已经有一轮录制在跑。
+  recordingReplay: (id: string) =>
+    req<{ ok: boolean; id: string; pid: number; log: string; note: string }>(
+      `/api/recordings/${encodeURIComponent(id)}/replay`, { method: 'POST' }),
   // 删长期库里的那一份。**必须带 confirm=1**:录制不可再生(用户再报一次 bug、再操作一遍才有),
   // 不带后端直接 400。缓存里那类不归它管(服务端会回一句"归统一清理框架管")。
   recordingDelete: (id: string) =>

@@ -13,7 +13,7 @@
 // 面板说的是一件列表里放不下的事:**回放前自己核对一遍** —— 身份里的启动路径/作业/ENT 对不对、
 // 编号表多少条、这份录制里到底有几条连接(闸门是**按连接**比对的,一条对得上就算过)。
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Check, Fingerprint, Play, RefreshCw, Square, Trash2, Video, X } from 'lucide-react'
+import { Check, Fingerprint, Play, RefreshCw, RotateCcw, Square, Trash2, Video, X } from 'lucide-react'
 import { useStore } from './store'
 import { api, type RecordingCurrent, type RecordingMeta, type RecordingRow } from './api'
 import { Input, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../shared/ui'
@@ -297,6 +297,25 @@ export function RecordView() {
 
   const cp = copied && sel && copied.id === sel.id ? copied.state : null
 
+  // 回放:交给服务端**另起一个进程**(见 internal/web/recordings.go 的 hRecordingReplay)——
+  // 它按身份起调试线会话、过指纹闸、把事件原样发出去,不等停站。界面这边只负责
+  // "把人送进去 + 把日志落点告诉他",不轮询进度(那是看日志的事)。
+  const [replaying, setReplaying] = useState(false)
+  const onReplay = async (row: RecordingRow) => {
+    setReplaying(true)
+    try {
+      const r = await api.recordingReplay(row.id)
+      toast.success(`已开始回放:${r.id}`, {
+        description: `后台进程 pid ${r.pid};进度看日志 ${r.log};会话留着给 AI 取证`,
+        duration: 8000, // 日志路径要看得清,别 3.5 秒就没了
+      })
+    } catch (e: any) {
+      toast.error('回放失败', { description: e?.message || String(e) })
+    } finally {
+      setReplaying(false)
+    }
+  }
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {/* 工具条一行:**只有"录哪个作业"这一件事**。
@@ -469,11 +488,23 @@ export function RecordView() {
                     连接清单与原始 JSON 在命令行那边看得到(`tt fep rec show`),这一页只留
                     人选录像时要核对的那些字段。页签样式留着,免得这一行看不出是"面板头"。 */}
                 <span className="inline-flex items-center gap-1 bg-accent px-2 py-0.5 text-xs text-foreground">基本信息</span>
+                {/* 回放:这一份能不能重放,闸门看的是"启动路径"(r.r 那条路不带 -d,
+                    编号表与调试线不是同一张),所以 r.r 的件直接禁用并说清原因。 */}
+                <button
+                  onClick={() => void onReplay(sel)}
+                  disabled={replaying || sel.path === 'r.r'}
+                  title={sel.path === 'r.r'
+                    ? '这份是 r.r 录的:编号表与调试线不是同一张,重放会点错控件(要回放请用「开始录制」录的那份)'
+                    : '把这份录制在调试器下重放出来:服务端另起一个进程,按身份起调试线会话、过指纹闸、把事件原样发出去(不等停站);会话留着给 AI 取证,进度看日志'}
+                  className="ml-auto inline-flex shrink-0 items-center gap-1 border border-emerald-500/20 px-2 py-0.5 text-xs text-emerald-600 transition-colors hover:bg-emerald-500/10 disabled:pointer-events-none disabled:opacity-40 dark:text-emerald-400">
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  {replaying ? '正在起…' : '回放'}
+                </button>
                 {/* 把这行的 ID 交给 AI:AI 用 tt fep rec reproduce <ID> 重放这一份 */}
                 <button
                   onClick={() => void copyRow(sel.id)}
                   title="复制这份录制的 ID。把它发给 AI,AI 就能用 tt fep rec reproduce <ID> 重放这一份"
-                  className={`ml-auto inline-flex shrink-0 items-center gap-1 border px-2 py-0.5 text-xs transition-colors ${
+                  className={`inline-flex shrink-0 items-center gap-1 border px-2 py-0.5 text-xs transition-colors ${
                     cp === 'fail'
                       ? 'border-red-500/20 text-red-600 dark:text-red-400'
                       : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground'

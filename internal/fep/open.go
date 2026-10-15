@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"tt/internal/host"
@@ -668,6 +669,15 @@ func preflightElevation(gdcExe string) error {
 func portFree(port int) error {
 	ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
 	if err != nil {
+		// "被占"有两种成因，报错要说清是哪一种 —— Windows 上很常见的一种是**根本没人监听**，
+		// 而是这个端口落在系统/Hyper-V/WSL 保留的端口段里（bind 直接 WSAEACCES），
+		// 这时说"已被占用"会把查的人指向错的方向（去看谁在听，当然什么也看不到）。
+		if errors.Is(err, syscall.EACCES) || strings.Contains(err.Error(), "forbidden") {
+			return fmt.Errorf("%w: %d 用不了（被系统保留，不是有人占用）："+
+				"Windows 上常见于 Hyper-V/WSL 保留的端口段 —— "+
+				"`netsh interface ipv4 show excludedportrange protocol=tcp` 看一眼，换个端口或重启 winnat 服务",
+				ErrPortBusy, port)
+		}
 		return fmt.Errorf("%w: %d 已被占用（%v）", ErrPortBusy, port, err)
 	}
 	ln.Close()

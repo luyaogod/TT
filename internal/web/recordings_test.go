@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +20,12 @@ import (
 
 func seedLibRecording(t *testing.T, dataDir, env, ent, id, prog string) string {
 	t.Helper()
+	return seedLibRecordingPath(t, dataDir, env, ent, id, prog, fep.PathDebug)
+}
+
+// seedLibRecordingPath 同上，只是能指定**启动路径**（回放那道闸按它判 r.r）。
+func seedLibRecordingPath(t *testing.T, dataDir, env, ent, id, prog string, path fep.LaunchPath) string {
+	t.Helper()
 	cache := filepath.Join(dataDir, "fep")
 	if err := os.MkdirAll(cache, 0o755); err != nil {
 		t.Fatal(err)
@@ -30,7 +37,7 @@ func seedLibRecording(t *testing.T, dataDir, env, ent, id, prog string) string {
 		}
 	}
 	if _, err := fep.WriteMeta(cache, fep.RecordingMeta{
-		ID: id, Path: fep.PathDebug, Prog: prog, Env: env, Ent: ent, Zone: "36",
+		ID: id, Path: path, Prog: prog, Env: env, Ent: ent, Zone: "36",
 		Origin: fep.OriginUser, Retention: fep.RetainLibrary,
 		Started: time.Now(), Finished: time.Now().Add(time.Minute),
 		Fingerprint: fep.Fingerprint{Total: 3, Hash: "abcdef0123456789"},
@@ -134,6 +141,53 @@ func TestRecordingDeleteNeedsConfirm(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dataDir, "records", "主机109", "99", "fep-b")); err != nil {
 		t.Fatalf("别的录制不该动：%v", err)
+	}
+}
+
+// 回放：两种情形必须在**起进程之前**就拒 —— r.r 录的件（编号表不是同一张）、
+// 以及已经有一轮录制在跑（两边要占同一组端口与调试会话）。
+// 真正起进程那条路不在这里测：与起录同理，它是"另起一个进程"，在命令行上真机验过。
+func TestRecordingReplayRefusals(t *testing.T) {
+	s, cfgPath := newTestServer(t, `{"schemaVersion":3,"hosts":{"sshs":[]}}`)
+	dataDir := filepath.Dir(cfgPath)
+	seedLibRecordingPath(t, dataDir, "主机109", "99", "fep-rr", "bsft001_wf", fep.PathRunnerRR)
+
+	post := func(target string) (int, map[string]any) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, target, nil)
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, req)
+		out := map[string]any{}
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return rec.Code, out
+	}
+
+	if code, _ := post("/api/recordings/没有这一份/replay"); code != http.StatusNotFound {
+		t.Fatalf("找不到该回 404：%d", code)
+	}
+	code, out := post("/api/recordings/fep-rr/replay")
+	if code != http.StatusConflict {
+		t.Fatalf("r.r 录的件该拒：%d %v", code, out)
+	}
+	if msg, _ := out["error"].(string); !strings.Contains(msg, "r.r") || !strings.Contains(msg, "编号表") {
+		t.Fatalf("拒绝理由要说清是编号表对不上：%v", out)
+	}
+
+	// 有一轮在跑（会话登记里有它）→ 也拒，并让人先停掉
+	seedLibRecording(t, dataDir, "主机109", "99", "fep-dbg", "bsft001_wf")
+	reg := fep.NewRegistry(dataDir)
+	if err := reg.Save(&fep.Session{
+		Env: "主机109", Zone: "36", Prog: "bsft001_wf", Ent: "99",
+		Path: fep.PathDebug, Tag: "fep-now", Started: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	code, out = post("/api/recordings/fep-dbg/replay")
+	if code != http.StatusConflict {
+		t.Fatalf("有一轮在录时该拒：%d %v", code, out)
+	}
+	if msg, _ := out["error"].(string); !strings.Contains(msg, "先停掉") {
+		t.Fatalf("拒绝理由要指路：%v", out)
 	}
 }
 

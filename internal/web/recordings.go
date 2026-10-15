@@ -34,6 +34,7 @@ func (s *Server) registerRecordings(m *http.ServeMux) {
 	m.HandleFunc("GET /api/recordings/{id}", s.hRecordingShow)
 	m.HandleFunc("POST /api/recordings", s.hRecordingStart)
 	m.HandleFunc("POST /api/recordings/stop", s.hRecordingStop)
+	m.HandleFunc("POST /api/recordings/{id}/replay", s.hRecordingReplay)
 	m.HandleFunc("DELETE /api/recordings/{id}", s.hRecordingDelete)
 }
 
@@ -215,8 +216,8 @@ func (s *Server) hRecordingStart(w http.ResponseWriter, r *http.Request) {
 	if b := strings.TrimSpace(req.BinaryRef); b != "" {
 		args = append(args, "--binary-ref", b)
 	}
-	if _, perr := winproc.SpawnDetached(exe, args, logPath); perr != nil {
-		writeErr(w, http.StatusInternalServerError, fmt.Errorf("起录制进程失败: %w", perr))
+	if _, perr := spawnAndCheck(exe, args, logPath); perr != nil {
+		writeErr(w, http.StatusInternalServerError, fmt.Errorf("起录制失败: %w", perr))
 		return
 	}
 	// 等它登记（登记是它能干活之前的第一件事，所以这就是"就绪"的信号）
@@ -275,6 +276,123 @@ func (s *Server) hRecordingStop(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "stopped": map[string]any{
 		"id": stopped.Tag, "env": stopped.Env, "prog": stopped.Prog,
 	}})
+}
+
+// spawnAndCheck 起一个脱离的子进程，并给它一个"起手就退"的检查窗口。
+//
+// 为什么需要：这两个按钮的动作都是**另起进程**，而子进程死在第一件事上（端口用不了、
+// 配置读不到）时，界面这边什么都看不出来 —— 调用方拿到的是"已开始…"，然后永远没有下文。
+// 在这里等一小会儿看它还活着没有：活着就是正常（真干活要几十秒），已经退了就把日志尾巴
+// 带回去当错误。窗口取得很短（1.2 秒），正常路径的额外代价就是这一下等待。
+func spawnAndCheck(exe string, args []string, logPath string) (int, error) {
+	pid, err := winproc.SpawnDetached(exe, args, logPath)
+	if err != nil {
+		return 0, err
+	}
+	time.Sleep(1200 * time.Millisecond)
+	if winproc.Alive(pid) {
+		return pid, nil
+	}
+	return pid, fmt.Errorf("进程起来就退了（pid %d）：%s", pid, tailOf(logPath, 300))
+}
+
+// tailOf 取日志末尾若干字符（只给错误信息用；读不到就照实说）。
+func tailOf(path string, n int) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "（读不到日志 " + path + "）"
+	}
+	s := strings.TrimSpace(string(b))
+	if s == "" {
+		return "（日志是空的）"
+	}
+	if r := []rune(s); len(r) > n {
+		s = "…" + string(r[len(r)-n:])
+	}
+	return s
+}
+
+// hRecordingReplay POST /api/recordings/{id}/replay
+//
+// 「回放」按钮：**另起一个脱离的进程**跑 `tt fep rec reproduce <ID> --no-wait`
+// （与起录同一条先例）。为什么是另起进程而不是在 serve 里做：回放自己要走一遍
+// "起调试线会话 + 过指纹闸 + 把事件发出去"，那是一轮**前台**的活，和录制一样天然属于一个
+// 独立进程；serve 只负责把它拉起来并回报日志落点。
+//
+// `--no-wait`：面板不带断点（断点归 AI 在会话上接着下），等停站只会等到超时、看着像失败，
+// 而那时事件其实已经原样发出去了。会话照样留着给后面取证。
+//
+// 两种情形直接拒，不浪费一次起进程：
+//   - r.r 录的件：那条路不带 -d，编号表与调试线不是同一张（跨路径实测共同编号 0 条相同），
+//     重放会点错控件；
+//   - 已经有一轮录制在跑：两边要占同一组端口（隔离实例/代理）与同一个调试会话。
+func (s *Server) hRecordingReplay(w http.ResponseWriter, r *http.Request) {
+	cfgPath, err := s.configPath(true)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("没给录制 ID"))
+		return
+	}
+	dataDir := filepath.Dir(cfgPath)
+	_, cacheDir, lib, derr := s.recDirs()
+	if derr != nil {
+		writeErr(w, http.StatusInternalServerError, derr)
+		return
+	}
+	mt, found := findRecordingMeta(lib, cacheDir, id)
+	if !found {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("找不到录制 %s（长期库与缓存都没有）", id))
+		return
+	}
+	if mt.Path == fep.PathRunnerRR {
+		writeErr(w, http.StatusConflict,
+			fmt.Errorf("这份录制是 r.r 录的：编号表与调试线不是同一张，重放会点错控件。"+
+				"要在断点下重放，请用面板「开始录制」录的那一份（走 debug 线）"))
+		return
+	}
+	if sess, lerr := fep.NewRegistry(dataDir).Load(); lerr == nil && sess != nil {
+		writeErr(w, http.StatusConflict,
+			fmt.Errorf("现在有一轮录制在跑（%s，%s）：先停掉它再回放（两边要占同一组端口与调试会话）",
+				sess.Tag, sess.Prog))
+		return
+	}
+	exe, eerr := os.Executable()
+	if eerr != nil {
+		writeErr(w, http.StatusInternalServerError, eerr)
+		return
+	}
+	// 日志落缓存目录；SpawnDetached 只 OpenFile 不建目录（全新装好时它还不存在）
+	if merr := os.MkdirAll(cacheDir, 0o755); merr != nil {
+		writeErr(w, http.StatusInternalServerError, merr)
+		return
+	}
+	logPath := filepath.Join(cacheDir, "rec-replay-"+time.Now().Format("20060102-150405")+".log")
+	pid, perr := spawnAndCheck(exe,
+		[]string{"fep", "rec", "reproduce", id, "--no-wait", "--config", cfgPath}, logPath)
+	if perr != nil {
+		writeErr(w, http.StatusInternalServerError, fmt.Errorf("起回放失败: %w", perr))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "id": id, "pid": pid, "log": logPath,
+		"note": "回放已交给后台进程：它按身份起调试线会话、过指纹闸、把事件原样发出去（不等停站）；" +
+			"进度看这个日志，会话留着给 AI 取证",
+	})
+}
+
+// findRecordingMeta 按 ID 找一份录制的身份：长期库优先，再缓存。
+func findRecordingMeta(lib *fep.Library, cacheDir, id string) (*fep.RecordingMeta, bool) {
+	if it, found, err := lib.Find(id); err == nil && found && it.Meta != nil {
+		return it.Meta, true
+	}
+	if mt, err := fep.ReadMeta(cacheDir, id); err == nil {
+		return mt, true
+	}
+	return nil, false
 }
 
 // hRecordingDelete DELETE /api/recordings/{id}?confirm=1

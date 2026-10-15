@@ -30,6 +30,7 @@ var (
 	repBreak    []string
 	repTimeout  time.Duration
 	repAttached bool
+	repNoWait   bool
 	repEnv      string
 	repProg     string
 	repEnt      string
@@ -57,6 +58,7 @@ var recReproduceCmd = &cobra.Command{
   tt debug quit ; tt fep session close
 
 没停站（断点没命中）时退 1 并说清是超时还是程序已经结束 —— 那不是"发失败"，是"没捕获到现场"。
+只想把事件重放出去、不等停站（前端面板那个回放按钮就是这么用的）就加 --no-wait。
 
 已经有一个会话在跑（例如你刚用 rec start 起过）就加 --attached，跳过第 1、2 步。`,
 	Args: exactArgs(1),
@@ -159,6 +161,23 @@ var recReproduceCmd = &cobra.Command{
 		}
 
 		// ④ 等停站，把现场报出来
+		//
+		// --no-wait：重放发完就回，**不等停站**。这是"面板上那个回放按钮"要的口径 ——
+		// 面板不带断点（断点归 AI 在会话上接着下），等下去只会等到超时、看着像失败，
+		// 而那时候事件其实已经原样发出去了。会话照样留着给后面取证。
+		if repNoWait {
+			out := map[string]any{
+				"recording": t.ID, "gate": v, "replay": res, "noWait": true,
+			}
+			if started != nil {
+				out["session"] = started.Session.Tag
+			}
+			return printJSONOrText(out, func() {
+				fmt.Printf("重放：发 %d 条 / 跳 %d 条 / 失败 %d 条\n", res.Sent, res.Skipped, res.Failed)
+				fmt.Println("✓ 事件已发完（--no-wait：不等停站）。会话留着：tt debug status 看它现在在哪")
+				fmt.Println("  收工：tt debug quit ; tt fep session close")
+			})
+		}
 		spot, timedOut, werr := waitStopped(cmd, repTimeout)
 		if werr != nil {
 			return fail(exitFailed, "%v", werr)
@@ -238,6 +257,8 @@ func init() {
 	recReproduceCmd.Flags().DurationVar(&repTimeout, "timeout", 120*time.Second, "重放完等停站多久")
 	recReproduceCmd.Flags().DurationVar(&repWaitUI, "wait-ui", 90*time.Second, "等作业界面出来多久（界面没出来就没法比指纹闸）")
 	recReproduceCmd.Flags().BoolVar(&repAttached, "attached", false, "用已经在跑的会话，不自己起（跳过起会话与下断点）")
+	recReproduceCmd.Flags().BoolVar(&repNoWait, "no-wait", false,
+		"重放发完就回，不等停站（面板那个回放按钮用这个口径：不带断点时等下去只会等到超时）")
 	recReproduceCmd.Flags().StringVar(&repEnv, "env", "", "环境名（身份里没有时才需要）")
 	recReproduceCmd.Flags().StringVar(&repProg, "prog", "", "作业程序名（身份里没有时才需要）")
 	recReproduceCmd.Flags().StringVar(&repEnt, "ent", "", "企业编号（身份里没有时才需要）")
