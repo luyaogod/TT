@@ -1,7 +1,7 @@
 // 右侧面板:运行/调试(VS Code 风格)+ 调用栈 / 变量监视 / 断点(一体化容器,分割线分区)
 import * as React from 'react'
 import { useEffect, useRef, useState } from 'react'
-import { Eye, EyeOff, Play, Ruler } from 'lucide-react'
+import { Eye, EyeOff, Play, Ruler, ZoomIn } from 'lucide-react'
 import { useStore } from './store'
 import type { Breakpoint } from './api'
 import { Input } from '../../shared/ui'
@@ -415,6 +415,12 @@ function BpsBody() {
   )
 }
 
+// 下方面板正文的字号档位(用户要求加一个缩放按钮):协议流是逐行读的东西,
+// 11px 在高分屏上偏小,而这个面板又常常被人贴着屏幕看。
+// 只有一个按钮循环 —— 档位就这几档,一个按钮 + tooltip 报当前值最省地方,
+// 点一下正文立刻变,看得见反馈。记忆键 tt.bottomFont(与其它面板宽度/显隐同一档口径)。
+const FONT_STEPS = [11, 12, 13, 14, 16]
+
 export function TimelinePanel() {
   const [tab, setTab] = useState<'timeline' | 'raw'>('raw')
   const timeline = useStore((s) => s.timeline)
@@ -426,6 +432,18 @@ export function TimelinePanel() {
   const [cmd, setCmd] = useState('')
   const [hist, setHist] = useState<string[]>([])
   const [histIdx, setHistIdx] = useState(-1)
+  // 正文字号(见 FONT_STEPS):循环放大,到头回到最小
+  const [fontPx, setFontPx] = useState(() => {
+    const v = Number(localStorage.getItem('tt.bottomFont'))
+    return FONT_STEPS.includes(v) ? v : FONT_STEPS[0]
+  })
+  const zoom = () => {
+    setFontPx((cur) => {
+      const next = FONT_STEPS[(FONT_STEPS.indexOf(cur) + 1) % FONT_STEPS.length]
+      localStorage.setItem('tt.bottomFont', String(next))
+      return next
+    })
+  }
   // 新条目到达时自动滚动到底部(最新操作始终可见)
   useEffect(() => {
     const el = bodyRef.current
@@ -474,8 +492,18 @@ export function TimelinePanel() {
             {tab === k && <span className="absolute inset-x-0 bottom-0 h-px bg-primary" />}
           </button>
         ))}
+        {/* 缩放:钉在页签行右端(这一行本来右边就空着)。点一下正文换一档字号,
+            tooltip 里报当前档位 —— 只放图标,免得给这一行添常驻数字。 */}
+        <button
+          onClick={zoom}
+          title={`正文字号 ${fontPx}px（点击放大,到最大回到最小）`}
+          className="ml-auto mr-0.5 shrink-0 p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <ZoomIn className="h-3.5 w-3.5" />
+        </button>
       </div>
-      <div ref={bodyRef} className="min-h-0 flex-1 overflow-auto p-1 font-mono text-[11px] leading-5">
+      <div ref={bodyRef} className="min-h-0 flex-1 overflow-auto p-1 font-mono"
+        style={{ fontSize: fontPx, lineHeight: `${Math.round(fontPx * 1.8)}px` }}>
         {tab === 'timeline' && (
           <>
             {timeline.length === 0 && <div className="p-2 text-muted-foreground">暂无记录</div>}
