@@ -5,14 +5,16 @@ import * as AccordionPrimitive from '@radix-ui/react-accordion'
 import * as AlertDialogPrimitive from '@radix-ui/react-alert-dialog'
 import * as CheckboxPrimitive from '@radix-ui/react-checkbox'
 import * as PopoverPrimitive from '@radix-ui/react-popover'
+import * as ProgressPrimitive from '@radix-ui/react-progress'
 import * as SelectPrimitive from '@radix-ui/react-select'
+import * as TabsPrimitive from '@radix-ui/react-tabs'
 import { DayPicker } from 'react-day-picker'
 import { CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Button } from './ui'
 import { cn } from './utils'
 
 // ---- Select(shadcn 规范,Radix 实现):全站下拉统一用这套,不再用原生 <select> ----
-// 触发钮外观对齐 Input(同高同边框同聚焦环),尺寸/宽度由调用方 className 覆盖(cn 后写优先)。
+// 触发钮外观对齐 Input(同高同边框同圆角同聚焦环),尺寸/宽度由调用方 className 覆盖(cn 后写优先)。
 export function Select(props: React.ComponentProps<typeof SelectPrimitive.Root>) {
   return <SelectPrimitive.Root {...props} />
 }
@@ -22,8 +24,10 @@ export function SelectTrigger({ className, children, ...props }:
   return (
     <SelectPrimitive.Trigger
       className={cn(
-        'flex h-8 w-fit min-w-0 items-center justify-between gap-1.5 border border-input bg-transparent px-2 py-1 text-sm whitespace-nowrap transition-[color,box-shadow] outline-none',
-        'data-[placeholder]:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]',
+        // rounded-ui:与 Input 同值 —— 上面那句"外观对齐 Input"要真的同值才算数
+        // ring-inset:聚焦环画在内侧,理由与 Input 相同(tokens.css 的圆角口径那节有说明)
+        'flex h-8 w-fit min-w-0 items-center justify-between gap-1.5 rounded-ui border border-input bg-transparent px-2 py-1 text-sm whitespace-nowrap transition-[color,box-shadow] outline-none',
+        'data-[placeholder]:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50',
         'disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30 [&>span]:truncate',
         className,
       )}
@@ -102,6 +106,80 @@ export function PopoverContent({ className, align = 'end', sideOffset = 4, ...pr
         {...props}
       />
     </PopoverPrimitive.Portal>
+  )
+}
+
+// ---- Tabs(shadcn 规范,Radix 实现) ----
+// 设置页「SSH 服务器 / 数据库」用它。相对 shadcn 默认件按本仓库的口径改了三处:
+//   1. 圆角一律走 --radius-ui(全站唯一的 6px),不用 rounded-lg/rounded-md —— 那些档位被清零了;
+//   2. TabsList 给 muted 底 + p-0.5,活动项用卡片底 + 边框(分段控件观感,与全站朴素风格一致);
+//   3. 不加 shadow —— 这个界面的基调是"面板 + 1px 分割线",弹窗之外不铺阴影。
+//
+// ⚠ 切页签**不卸载**内容:Radix 默认把非活动 TabsContent 从 DOM 里摘掉,非受控输入
+// (defaultValue)会被重置。本仓库的表单都是受控的(值在 SettingsView 的 state 里),
+// 卸不卸载不影响取值,但调用方仍应传 forceMount + data-[state=inactive]:hidden:
+// 少一次卸载/重挂载,滚动位置与 DOM 顺序也更稳。见 web/showcase 里同一处的原型与说明。
+export function Tabs(props: React.ComponentProps<typeof TabsPrimitive.Root>) {
+  return <TabsPrimitive.Root {...props} />
+}
+
+export function TabsList({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.List>) {
+  return (
+    <TabsPrimitive.List
+      className={cn(
+        'inline-flex w-fit items-center justify-center gap-0.5 rounded-ui border border-border bg-muted p-0.5 text-muted-foreground',
+        className,
+      )}
+      {...props}
+    />
+  )
+}
+
+export function TabsTrigger({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.Trigger>) {
+  return (
+    <TabsPrimitive.Trigger
+      className={cn(
+        'inline-flex items-center justify-center gap-1.5 rounded-ui px-2.5 py-1 text-xs whitespace-nowrap transition-colors outline-none',
+        'text-muted-foreground hover:text-foreground',
+        'focus-visible:ring-ring/50 focus-visible:ring-[3px]',
+        // 活动态:卡片底 + 边框盖住 muted 底,视觉上"浮起一格"
+        'data-[state=active]:border data-[state=active]:border-border data-[state=active]:bg-card data-[state=active]:font-medium data-[state=active]:text-foreground',
+        'disabled:pointer-events-none disabled:opacity-50',
+        className,
+      )}
+      {...props}
+    />
+  )
+}
+
+// TabsContent 刻意不预设布局类:设置页这几块内容是内容流里的普通盒子,
+// 给它 flex-1 之类会与卡片内的 space-y 打架(官方件的 flex-1 是给整屏页签场景的)。
+export function TabsContent({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.Content>) {
+  return <TabsPrimitive.Content className={cn('outline-none', className)} {...props} />
+}
+
+// ---- Progress(shadcn 规范,Radix 实现) ----
+// 圆角走全站唯一那一档(--radius-ui):进度条是细长条,胶囊头在这个界面里会与
+// 其它直角块状元素打架,所以轨道与填充同一档圆角。
+// 只做「一条轨道 + 一段填充」,百分比文字由调用方放在旁边 —— 数字的字级与对齐
+// 才能跟同一行的其它数值(大小、速度、耗时)一致,而不是塞进条子里被压成小字。
+//
+// barClassName 单独给**填充**那一段:失败要变红这类状态只能由调用方知道。
+// 用它的理由是这个填充自带 bg-primary,靠 `[&>div]:bg-*` 之类的任意变体去覆盖
+// 要赌 Tailwind 的生成顺序,不如显式把颜色交出去。
+export function Progress({ value, className, barClassName, ...props }:
+  React.ComponentProps<typeof ProgressPrimitive.Root> & { barClassName?: string }) {
+  return (
+    <ProgressPrimitive.Root
+      className={cn('relative h-1.5 w-full overflow-hidden rounded-ui bg-muted', className)}
+      value={value}
+      {...props}
+    >
+      <ProgressPrimitive.Indicator
+        className={cn('h-full w-full flex-1 bg-primary transition-[transform] duration-300', barClassName)}
+        style={{ transform: `translateX(-${100 - (value || 0)}%)` }}
+      />
+    </ProgressPrimitive.Root>
   )
 }
 

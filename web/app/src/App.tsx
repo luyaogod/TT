@@ -28,7 +28,7 @@ function ActivityIcon({ icon: Icon, label, active, onClick }: {
 }) {
   return (
     <button title={label} onClick={onClick}
-      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] transition-colors ${
+      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-ui transition-colors ${
         active ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'
       }`}>
       <Icon className="h-5 w-5" />
@@ -107,8 +107,10 @@ export function App() {
       if (r.view === 'settings' && r.section) useStore.getState().setSettingsSection(r.section)
       return
     }
-    // 还没有任何服务器环境时(首次运行、或本地还没配过):直接落到「设置 → 站点管理」,
-    // 而不是把用户丢在一个什么都干不了的调试页。只在本页首次加载时判一次。
+    // 兜底:还没有任何服务器环境时(首次运行,或本地还没配过)落到「设置 → 站点管理」。
+    // 正常情况下 store 的初始 view 已经是 settings(见 store.ts),所以这条通常**不产生动作**;
+    // 它留着的意义是:哪怕哪天默认视图被改回调试页,空环境这个"什么都干不了"的状态
+    // 也不会把人丢在一个没用的页面上。只在本页首次加载时判一次。
     void api.settings().then((c) => {
       const sshs = (c as { sshs?: unknown[] })?.sshs
       if (!Array.isArray(sshs) || sshs.length === 0) useStore.getState().setView('settings')
@@ -263,16 +265,18 @@ export function App() {
           两边各再加 4px,两侧都是 8px。之前间隙给 8px,内侧就成了 12px、外侧 8px,
           看上去按钮贴着窗口而离面板远。底部 8px 与状态栏隔开。 */}
       <div className="flex min-h-0 flex-1 gap-1 px-1 pb-2">
-        {/* VS Code 经典活动栏:栏与内容各自成块,靠间隙分开,不再用分割线 */}
+        {/* VS Code 经典活动栏:栏与内容各自成块,靠间隙分开,不再用分割线。
+            顺序:**设置排第一** —— 首次进来落在设置页(见 store 的初始 view 与
+            下面那条"没有环境就跳设置"),入口与落点排在同一侧才不用回头找。 */}
         <div className="flex w-10 shrink-0 flex-col items-center gap-1 py-2">
+          <ActivityIcon icon={Settings} label="设置(站点 / 数据字典 / DEBUG / 应用)" active={view === 'settings'} onClick={() => setView('settings')} />
           <ActivityIcon icon={Bug} label="调试" active={view === 'debug'} onClick={() => setView('debug')} />
           <ActivityIcon icon={Globe} label="接口日志" active={view === 'wslogs'} onClick={() => setView('wslogs')} />
           <ActivityIcon icon={FlaskConical} label="服务测试" active={view === 'wstest'} onClick={() => setView('wstest')} />
-          <ActivityIcon icon={Settings} label="设置(站点 / 数据字典 / DEBUG / 应用)" active={view === 'settings'} onClick={() => setView('settings')} />
         </div>
         {/* 主内容面板:四套视图都装在这一个带边线的圆角面板里,四周与活动栏/右侧栏/状态栏留出间隙。
             overflow-hidden 让四个圆角真正裁掉里面的直角内容(页签栏、编辑器底色)。 */}
-        <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-[6px] border border-border">
+        <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-ui border border-border">
           {/* 四个视图全部 keep-alive:首次访问后常驻挂载,切换仅改 display */}
           <ViewPane show={view === 'debug'}>
             <Toolbar />

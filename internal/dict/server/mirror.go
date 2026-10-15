@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -114,14 +116,40 @@ func (s *Server) hMirrorPull(w http.ResponseWriter, r *http.Request) {
 		StartedAt: time.Now().Format(time.RFC3339),
 	}
 	s.mirrorStart = time.Now()
+	// 可取消的 context:用户点「停止」时由 hMirrorStop 调用它。
+	// 这里不用 r.Context() —— 那个会在 HTTP 响应写完之后就结束,
+	// 而拉取是**有意**跑在请求之外的后台任务(见上面 go s.runMirror)。
+	ctx, cancel := context.WithCancel(context.Background())
+	s.mirrorCancel = cancel
 	s.mirrorMu.Unlock()
 
-	go s.runMirror(e, dir, req.Full)
+	go s.runMirror(ctx, e, dir, req.Full)
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// hMirrorStop 中途取消正在跑的拉取。没有任务在跑时返回 ok=false(而不是报错)——
+// 前端可能在轮询间隙多点了一次,那不算错误。
+func (s *Server) hMirrorStop(w http.ResponseWriter, r *http.Request) {
+	s.mirrorMu.Lock()
+	cancel := s.mirrorCancel
+	running := s.mirror.Running
+	if running && cancel != nil {
+		// 先把状态写成"正在停止",再真正取消:取消是异步的(SFTP 读到下一个分片才返回),
+		// 这期间轮询会看到 running=true,靠这个文案告诉用户"已经在停了"。
+		s.mirror.Message = "正在停止…"
+	}
+	s.mirrorMu.Unlock()
+
+	if !running || cancel == nil {
+		writeJSON(w, 200, map[string]any{"ok": false, "error": "没有正在进行的拉取任务"})
+		return
+	}
+	cancel()
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
 // runMirror 后台执行拉取,把 host 的进度回调同步到任务状态。
-func (s *Server) runMirror(e *host.NamedSsh, dir string, full bool) {
+func (s *Server) runMirror(ctx context.Context, e *host.NamedSsh, dir string, full bool) {
 	onProgress := func(p host.MirrorProgress) {
 		s.mirrorMu.Lock()
 		if p.Phase != "" {
@@ -143,14 +171,23 @@ func (s *Server) runMirror(e *host.NamedSsh, dir string, full bool) {
 		s.mirrorMu.Unlock()
 	}
 
-	st, err := host.MirrorPullProgress(e, dir, full, onProgress)
+	st, err := host.MirrorPullProgress(ctx, e, dir, full, onProgress)
 
 	s.mirrorMu.Lock()
 	defer s.mirrorMu.Unlock()
 	s.mirror.Running = false
 	s.mirror.Done = true
+	s.mirrorCancel = nil // 任务收尾:清掉取消句柄,停止端点据此回"没有正在进行的任务"
 	s.mirror.Elapsed = time.Since(s.mirrorStart).Round(100 * time.Millisecond).String()
 	if err != nil {
+		// 用户取消 ≠ 失败:标成 cancelled 并给一句人话,不要把 context.Canceled
+		// 原样丢到界面上("context canceled" 对用户毫无意义)。
+		// 中途取消不会留下被误判的完整基线:.tdict-mirror.ok 没写(见 host.MirrorPullProgress)。
+		if errors.Is(err, context.Canceled) {
+			s.mirror.Phase = "cancelled"
+			s.mirror.Message = "已停止;本地镜像未写完,下次拉取会自动按全量重建"
+			return
+		}
 		s.mirror.Phase = "error"
 		s.mirror.Error = err.Error()
 		return

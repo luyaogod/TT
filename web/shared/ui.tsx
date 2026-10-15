@@ -8,7 +8,7 @@ import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from './utils'
 
 const buttonVariants = cva(
-  "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-[6px] whitespace-nowrap text-sm font-medium transition-colors outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:pointer-events-none disabled:opacity-40 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4",
+  "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-ui whitespace-nowrap text-sm font-medium transition-colors outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:pointer-events-none disabled:opacity-40 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
@@ -75,6 +75,12 @@ export function Panel({ title, right, children, className }: {
   )
 }
 
+// 有边框的输入框:圆角走全站唯一那一档(--radius-ui),见 tokens.css 的圆角口径。
+// 聚焦高亮用 `ring-inset`(**画在边框内侧**),不用默认的外扩环:外扩环会溢出到
+// 控件盒子之外,任何一层带 overflow 的祖先(设置页的内容列、可滚表格、未来的新容器)
+// 都可能把它裁掉一条边或一个角 —— 表现是"聚焦了但高亮缺一角"。内嵌环画在盒内,
+// 与祖先的 overflow 无关,是根治;它也正好与可编辑表格单元格的 CELL_EDITING 同一手法。
+// 刻意不加 focus 时的圆角变化 —— 聚焦只改边框色与 ring,形状不跳。
 export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
   function Input({ className, type, ...props }, ref) {
     return (
@@ -82,7 +88,7 @@ export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttribute
         ref={ref}
         type={type}
         className={cn(
-          'flex h-8 w-full min-w-0 border border-input bg-transparent px-2 py-1 text-sm transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30',
+          'flex h-8 w-full min-w-0 rounded-ui border border-input bg-transparent px-2 py-1 text-sm transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30',
           className,
         )}
         {...props}

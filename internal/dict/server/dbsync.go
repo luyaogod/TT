@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -124,14 +125,35 @@ func (s *Server) hDBSyncPost(w http.ResponseWriter, r *http.Request) {
 		StartedAt: time.Now().Format(time.RFC3339),
 	}
 	s.syncStart = time.Now()
+	// 可取消的 context(理由同镜像:任务有意跑在请求之外)
+	ctx, cancel := context.WithCancel(context.Background())
+	s.syncCancel = cancel
 	s.syncMu.Unlock()
 
-	go s.runDBSync(e, target)
+	go s.runDBSync(ctx, e, target)
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// hDBSyncStop 中途取消正在跑的同步。没有任务在跑时返回 ok=false(不算错误)。
+func (s *Server) hDBSyncStop(w http.ResponseWriter, r *http.Request) {
+	s.syncMu.Lock()
+	cancel := s.syncCancel
+	running := s.sync.Running
+	if running && cancel != nil {
+		s.sync.Message = "正在停止…"
+	}
+	s.syncMu.Unlock()
+
+	if !running || cancel == nil {
+		writeJSON(w, 200, map[string]any{"ok": false, "error": "没有正在进行的同步任务"})
+		return
+	}
+	cancel()
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
 // runDBSync 后台执行同步,把 dbsync 的进度回调同步到任务状态。
-func (s *Server) runDBSync(e *host.NamedSsh, target string) {
+func (s *Server) runDBSync(ctx context.Context, e *host.NamedSsh, target string) {
 	onProgress := func(p dbsync.Progress) {
 		s.syncMu.Lock()
 		if p.Phase != "" {
@@ -157,14 +179,21 @@ func (s *Server) runDBSync(e *host.NamedSsh, target string) {
 		s.syncMu.Unlock()
 	}
 
-	st, err := dbsync.Run(context.Background(), *e.DB, target, nil, onProgress)
+	st, err := dbsync.Run(ctx, *e.DB, target, nil, onProgress)
 
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
 	s.sync.Running = false
 	s.sync.Done = true
+	s.syncCancel = nil // 收尾:停止端点据此回"没有正在进行的任务"
 	s.sync.Elapsed = time.Since(s.syncStart).Round(100 * time.Millisecond).String()
 	if err != nil {
+		// 用户取消 ≠ 失败(与镜像同一套口径)
+		if errors.Is(err, context.Canceled) {
+			s.sync.Phase = "cancelled"
+			s.sync.Message = "已停止;本地库未被替换,原库保持原样"
+			return
+		}
 		s.sync.Phase = "error"
 		s.sync.Error = err.Error()
 		return

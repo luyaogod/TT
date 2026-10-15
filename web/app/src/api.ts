@@ -359,9 +359,12 @@ export const api = {
   mirror: () => req<MirrorResp>('/api/mirror'),
   mirrorPull: (env: string, full: boolean) =>
     req<{ ok: boolean }>('/api/mirror/pull', { method: 'POST', body: JSON.stringify({ env, full }) }),
+  // 中途取消:ok=false 表示当时没有任务在跑(用户在轮询间隙多点了一次,不算错误)
+  mirrorStop: () => req<{ ok: boolean; error?: string }>('/api/mirror/stop', { method: 'POST' }),
   dbsync: () => req<DBSyncResp>('/api/dbsync'),
   dbsyncRun: (env: string) =>
     req<{ ok: boolean }>('/api/dbsync', { method: 'POST', body: JSON.stringify({ env }) }),
+  dbsyncStop: () => req<{ ok: boolean; error?: string }>('/api/dbsync/stop', { method: 'POST' }),
   list: () => req<{ sessions: SessionBrief[] }>(`${API_BASE}/sessions`),
   launch: (module: string, prog: string, opts?: { ssh?: string; zone?: string }) =>
     req<{ sessionId: string; module?: string; prog?: string; runProg?: string }>(`${API_BASE}/sessions`, { method: 'POST', body: JSON.stringify({ module, prog, ...opts }) }),

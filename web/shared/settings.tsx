@@ -14,11 +14,21 @@ import { cn } from './utils'
  *
  * 刻意不用 Panel —— Panel 是 flex 列 + 自带 overflow-auto 的"面板",要撑满父容器;
  * 设置卡片是内容流里的静态盒子,滚动归外层的设置页内容列管。两者混用会套出嵌套滚动容器。
+ *
+ * 圆角取全站唯一那一档(--radius-ui → rounded-ui),与卡片里的输入框、下拉触发器同值:
+ * 卡片与它内部控件的左右边缘落在同一条竖线上,弧度一致才不会看着像两套东西拼起来的。
+ * 卡片**里面的那些块状元素**(进度块、虚线框、代码块)保持直角 —— 卡片是分组边界,
+ * 里面再套圆角会把一屏碎成许多小圆片。
+ *
+ * title 可省:不是每张卡片都需要一个标题(「服务器与数据库」那张就不需要 ——
+ * 右边一屏本来就只有它一张卡,顶上再写一遍卡名是把左侧选中的环境名说两遍)。
+ * 标题/说明/右操作位三样都没有时,整个头部不渲染 —— 否则会留下一条空行把内容顶下去。
  */
 export function Card({ id, title, description, right, children, className, panel }: {
   /** 锚点 id:锚点跳转落到这张卡时用它定位,scroll-mt-3 保证落点不贴着面板上沿 */
   id?: string
-  title: React.ReactNode
+  /** 卡片标题。省掉 = 这张卡不要头部标题(与 description/right 一起都不给时头部整块不渲染) */
+  title?: React.ReactNode
   description?: React.ReactNode
   /** 右侧操作位:通常是这张卡的「保存」按钮 */
   right?: React.ReactNode
@@ -33,31 +43,50 @@ export function Card({ id, title, description, right, children, className, panel
    */
   panel?: boolean
 }) {
+  const hasHeader = title != null || description != null || right != null
   return (
-    <section id={id} className={cn('scroll-mt-3 border border-border bg-card p-3', panel && 'flex min-h-0 flex-col', className)}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className="text-xs font-medium text-foreground">{title}</h3>
-          {description && (
-            <p className="mt-1 text-[11px] leading-4 text-muted-foreground">{description}</p>
-          )}
+    <section id={id} className={cn('scroll-mt-3 rounded-ui border border-border bg-card p-3', panel && 'flex min-h-0 flex-col', className)}>
+      {hasHeader && (
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            {title != null && <h3 className="text-xs font-medium text-foreground">{title}</h3>}
+            {description && (
+              <p className="mt-1 text-[11px] leading-4 text-muted-foreground">{description}</p>
+            )}
+          </div>
+          {right && <div className="flex shrink-0 items-center gap-1.5">{right}</div>}
         </div>
-        {right && <div className="flex shrink-0 items-center gap-1.5">{right}</div>}
-      </div>
-      <div className={cn('mt-3 space-y-3', panel && 'flex min-h-0 flex-1 flex-col overflow-auto')}>{children}</div>
+      )}
+      <div className={cn('space-y-3', hasHeader && 'mt-3', panel && 'flex min-h-0 flex-1 flex-col overflow-auto')}>{children}</div>
     </section>
   )
 }
 
 /**
- * 一条设置:标签在上、说明其次、控件在下(VS Code 设置页的版式)。
+ * 一条设置:**左说明 + 右控件**(左右两端布局)。
  *
- * 控件宽度统一收到 max-w-md。内容列有 700px 出头,让输入框撑满会被拉成一条细长的线,
- * 同一张卡里的下拉、按钮也会各走各的宽度。要整行宽的控件(进度块、环境清单那种)
- * 不走这里,直接做卡片的子元素。
+ * 左侧是标签与说明(占满剩余宽度),右侧是控件(定宽,贴右缘)。
+ * 这是设置界面最常见的版式(编辑器/浏览器/各 SaaS 的设置页都是这样),
+ * 视线沿一条竖线扫下来就能配对,不必在上下两块之间来回找。
  *
- * 竖直排列的另一半原因是说明文字:原先标签在左、控件在右,说明只能挤在窄窄的左半栏里折行,
- * 折出来的三四行会把控件和它的说明拉开很远。
+ * ⚠ 右侧控件的宽度是这个版式的关键,别写成 w-full 或 max-w-md:
+ * 设置页的控件大多只是"一个下拉 / 一个不长的输入框",用不上 400px 以上;
+ * 而横向空间是零和的 —— 右栏多占多少,左栏的说明就少多少。曾经的写法
+ * (`w-full max-w-md shrink-0`)在窄窗口下会把右栏顶到父宽的最大值,
+ * 左栏被压到只剩几个字符宽,说明文字于是**每行一个字**竖着排下来。
+ * 现在的 w-80(320px)是实测下来够放下拉/路径输入框、又给说明留出两行余量的宽度。
+ * 要更宽的表单请直接改这里,不要去改调用方。
+ *
+ * 要整行宽的控件(进度块、两张按环境的表格)不走这里,直接做卡片的子元素。
+ *
+ * 行与行之间有一条 1px 分割线(border-t):左右版式下,左右两块各自成列、
+ * 纵向又没有对齐的参照,不加线时相邻两行会糊成一片 —— 上一行的控件与下一行的说明
+ * 挨得太近时,读的人分不清哪个控件属于哪条说明。线取 border 语义 token,不用写死颜色。
+ * 线画在**每行**的上沿(含第一行,于是卡片标题与第一条设置之间也有一条),
+ * 这不是漏判"第一行该不该有线":卡片的 space-y-3 会给每条线上下各留 12px,
+ * 所以线不会贴着标题,看着就是一组设置的分行线,而不是把标题切开的一条边。
+ * 注意这条线与 Card 那句"卡片内部不打分割线"是有意冲突的:卡片是**分组**边界,
+ * 一条条设置需要**行**边界,两种边界不矛盾。
  */
 export function SettingRow({ id, label, description, control, className }: {
   /** 锚点 id,与 Card 的 id 一起构成深链接可定位的粒度 */
@@ -68,12 +97,15 @@ export function SettingRow({ id, label, description, control, className }: {
   className?: string
 }) {
   return (
-    <div id={id} className={cn('scroll-mt-3', className)}>
-      <div className="text-xs text-foreground">{label}</div>
-      {description && (
-        <div className="mt-1 text-[11px] leading-4 text-muted-foreground">{description}</div>
-      )}
-      <div className="mt-1.5 w-full max-w-md">{control}</div>
+    <div id={id} className={cn('flex scroll-mt-3 items-start gap-4 border-t border-border pt-3', className)}>
+      <div className="min-w-0 flex-1">
+        <div className="text-xs text-foreground">{label}</div>
+        {description && (
+          <div className="mt-1 text-[11px] leading-4 text-muted-foreground">{description}</div>
+        )}
+      </div>
+      {/* max-w-full:窗口很窄时允许它继续收,不至于把左栏挤没 */}
+      <div className="w-80 max-w-full shrink-0">{control}</div>
     </div>
   )
 }

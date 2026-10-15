@@ -3,9 +3,17 @@
    组件一律用语义工具类(bg-background/border-border/text-muted-foreground...),
    亮暗两套取值集中在这里维护,禁止在组件里写死 zinc 色板。
    布局密度对齐 VS Code 经典 UI:面板紧贴,仅以 1px 分割线(sash)相隔,默认零圆角。
-   圆角集中在少数几处,一律取 6px(rounded-[6px]):Button(shared/ui.tsx)、
-   ToolIcon 与左右活动栏的图标按钮、主内容面板(App.tsx)。别处不要再引入圆角 ——
-   直角仍是这个界面的基调,输入框、下拉、表格、卡片都还是直角。
+   圆角**全站只有一个值 6px**,由 --radius-ui 一处给出,组件一律写 rounded-ui:
+   卡片(shared/settings.tsx)、输入框与下拉触发器(shared/ui.tsx 的 Input、
+   shared/ui-radix.tsx 的 SelectTrigger)、调试台那几个自带边框的原生输入框
+   (WsTestView / WsLogView),以及 Button、ToolIcon 与左右活动栏的图标按钮、主内容面板(App.tsx)。
+   要改口径只动这一个 token —— 别再往组件里写 rounded-[6px] 这类字面量,
+   否则同一个值会有两套机制,改的时候必漏一处。
+   两处**刻意不圆**的,别顺手"统一"掉:
+     · 表格与零散小件(下拉弹层、弹窗、表格网格、Calendar、Checkbox)保持直角;
+     · 没有边框、底色透明的输入框也保持直角 —— 可编辑表格的 .cell-input 要融进网格线,
+       调试台 `>` 命令行是 VS Code 式的裸文本行;它们没有边框可循,
+       圆角只会露出圆底或看不出形状的弧度。
 
    合并前这份在 web/app/src/index.css 里,只服务调试工作台 —— 字典页因此完全没有主题机制
    (它的 dark: 类走 Tailwind v4 默认的 prefers-color-scheme,跟随系统且不可切换)。
@@ -16,7 +24,9 @@
 @custom-variant dark (&:is(.dark *));
 
 /* 零圆角:rounded-sm/md/... 走这里的 radius token(统一清零);
-   裸 rounded 是字面量工具类不走 token,单独压平。两层兜底保证全站无圆角 */
+   裸 rounded 是字面量工具类不走 token,单独压平。两层兜底保证通用档位全是直角。
+   唯一的例外是下面那个 ui 档 —— 它不走这些通用档位,也就不受清零影响:
+   通用档位一旦放开,表格/弹层/复选框会跟着一起圆,那不是这次要的口径。 */
 @theme {
   --radius-xs: 0px;
   --radius-sm: 0px;
@@ -26,6 +36,9 @@
   --radius-2xl: 0px;
   --radius-3xl: 0px;
   --radius-4xl: 0px;
+  /* 全站唯一的圆角:组件里写 rounded-ui(值见文件头,卡片与控件同值)。
+     不挪去 --radius-lg 是因为那一档被上面的清零口径占着,放开它等于全站放开圆角。 */
+  --radius-ui: 6px;
 }
 .rounded { border-radius: 0px; }
 
@@ -180,7 +193,7 @@ body { margin: 0; background: var(--background); }
   height: 100%;
 }
 
-/* 活动页签(VS Code 签名样式):与编辑区同底色融入下方 + 顶部主色细线 */
-.tab-active {
-  box-shadow: inset 0 1px 0 0 var(--primary);
-}
+/* 活动页签原先还有一条顶部主色细线(.tab-active 的 inset box-shadow)。
+   已移除:那条线在页签顶端单独画一道蓝,与这个界面其余地方的表达方式不一致 ——
+   选中态由别处统一表达(与编辑区同底色的 bg-card + 字重加重)。
+   所以现在**没有** .tab-active 这个类,页签的选中态直接在组件里用工具类写。 */

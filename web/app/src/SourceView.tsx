@@ -240,14 +240,14 @@ export function SourceView() {
         <div className="flex min-w-0 flex-1 items-stretch overflow-x-auto">
           <button onClick={() => setActiveTab('debug')}
             className={cn('flex shrink-0 items-center gap-1.5 border-r border-border px-3 text-xs transition-colors',
-              isDebug ? 'tab-active bg-card font-medium text-foreground' : 'text-muted-foreground hover:bg-accent/60')}>
+              isDebug ? 'bg-card font-medium text-foreground' : 'text-muted-foreground hover:bg-accent/60')}>
             <Bug className="h-3 w-3" />
             {prog || '调试'}
           </button>
           {tabs.map((t) => (
             <div key={t.key}
               className={cn('group flex shrink-0 items-center border-r border-border transition-colors',
-                activeTab === t.key ? 'tab-active bg-card text-foreground' : 'text-muted-foreground hover:bg-accent/60')}>
+                activeTab === t.key ? 'bg-card text-foreground' : 'text-muted-foreground hover:bg-accent/60')}>
               <button className="max-w-45 truncate px-3 text-xs" title={t.path || t.file}
                 onClick={() => setActiveTab(t.key)}>
                 {t.loading ? <Loader2 className="mr-1 inline h-3 w-3 animate-spin" /> : null}

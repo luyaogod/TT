@@ -3,6 +3,8 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	_ "modernc.org/sqlite"
@@ -14,16 +16,37 @@ type DB struct {
 }
 
 // Open opens the SQLite database at the given path.
+//
+// 两处刻意为之:
+//
+//  1. **先建父目录**。SQLite 在父目录不存在时只回一句 "unable to open database file (14)",
+//     不告诉你是哪一层缺了;调用方(如同步的临时库)如果忘了建目录,报错就落在很远的地方。
+//  2. 失败时把**父目录及其状态**一起报出来。真实踩过:同步报
+//     `创建临时数据库失败 (...\erp_data.db.sync.tmp): ping database: unable to open
+//     database file (14)`,而那个目录当时明明存在、也能写 —— 只给文件路径的话,
+//     排查只能靠猜。带上 dir 与 exists 之后,下次一眼能看出是"目录没了"还是"目录在但打不开"。
 func Open(path string) (*DB, error) {
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, fmt.Errorf("创建数据库目录失败 (%s): %w", dir, err)
+		}
+	}
 	conn, err := sql.Open("sqlite", path)
 	if err != nil {
-		return nil, fmt.Errorf("open database: %w", err)
+		return nil, fmt.Errorf("open database (%s): %w", path, err)
 	}
 	conn.SetMaxOpenConns(1) // SQLite works best with single writer
 	if err := conn.Ping(); err != nil {
-		return nil, fmt.Errorf("ping database: %w", err)
+		return nil, fmt.Errorf("ping database (%s, 父目录 %s 存在=%v): %w",
+			path, filepath.Dir(path), dirExists(filepath.Dir(path)), err)
 	}
 	return &DB{conn: conn}, nil
+}
+
+// dirExists 供错误信息用:父目录在不在,是这类 "unable to open" 最要紧的一条线索。
+func dirExists(dir string) bool {
+	st, err := os.Stat(dir)
+	return err == nil && st.IsDir()
 }
 
 // Close closes the database connection.

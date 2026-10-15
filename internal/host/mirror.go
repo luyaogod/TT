@@ -20,6 +20,7 @@ package host
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"crypto/sha1"
 	"fmt"
 	"io"
@@ -74,12 +75,21 @@ type ProgressFunc func(MirrorProgress)
 // 本地首次/目录被清/旧版无标记 → 自动转全量,防止"服务器 marker 存在而本地
 // 无镜像"时只拉到变更文件造成镜像永久残缺。成功结束后写入/刷新本地基线标记。
 // 镜像目录本身(mirrorDir)由调用方保证已配置;本函数只负责连服务器与落盘。
-func MirrorPull(e *NamedSsh, mirrorDir string, full bool) (*MirrorStats, error) {
-	return MirrorPullProgress(e, mirrorDir, full, nil)
+// ctx 见 MirrorPullProgress(它才是实现,这里是给不需要取消的调用方的薄封装)。
+func MirrorPull(ctx context.Context, e *NamedSsh, mirrorDir string, full bool) (*MirrorStats, error) {
+	return MirrorPullProgress(ctx, e, mirrorDir, full, nil)
 }
 
 // MirrorPullProgress 同 MirrorPull,并在各阶段回调 onProgress(供 Web 显示拉取进度)。
-func MirrorPullProgress(e *NamedSsh, mirrorDir string, full bool, onProgress ProgressFunc) (*MirrorStats, error) {
+//
+// ctx 用来**中途取消**:用户误点「全量重建」时界面上的「停止」按钮走的就是它。
+// 取消点选在三处 —— 连接、服务器打包、下载解压循环(见 countingReader / extractTarGz)。
+// 取消后返回 ctx.Err()(context.Canceled),调用方据此把任务标成"已停止"而不是"失败"。
+//
+// 取消不会留下"看着完整"的半个镜像:.tdict-mirror.ok 只在**解压全部成功之后**才写,
+// 而 MirrorReady() 判的就是这个标记 —— 所以中途停下的目录会被下次拉取当作"缺基线",
+// 自动转全量重建(见上面 needFull 的判定)。
+func MirrorPullProgress(ctx context.Context, e *NamedSsh, mirrorDir string, full bool, onProgress ProgressFunc) (*MirrorStats, error) {
 	report := func(p MirrorProgress) {
 		if onProgress != nil {
 			onProgress(p)
@@ -97,6 +107,9 @@ func MirrorPullProgress(e *NamedSsh, mirrorDir string, full bool, onProgress Pro
 		return nil, fmt.Errorf("连接 %s 失败: %w", e.SSHConfig.Addr(), err)
 	}
 	defer conn.Close()
+	if err := ctx.Err(); err != nil { // 连上就被取消:别再往下走
+		return nil, err
+	}
 
 	report(MirrorProgress{Phase: "probe", Message: "探测 T100 目录(zone " + e.Zone + ")"})
 	top, err := mirrorTopDir(conn, e)
@@ -125,7 +138,7 @@ func MirrorPullProgress(e *NamedSsh, mirrorDir string, full bool, onProgress Pro
 
 	// 服务器打包(输出 TDICT_MIRROR_OK <文件数> <字节> / TDICT_MIRROR_NONE)
 	report(MirrorProgress{Phase: "pack", Message: "服务器打包中…"})
-	n, size, err := mirrorPackProgress(conn, base, top, needFull, report)
+	n, size, err := mirrorPackProgress(ctx, conn, base, top, needFull, report)
 	if err != nil {
 		return nil, fmt.Errorf("服务器打包失败: %w", err)
 	}
@@ -165,7 +178,7 @@ func MirrorPullProgress(e *NamedSsh, mirrorDir string, full bool, onProgress Pro
 	defer rf.Close()
 
 	report(MirrorProgress{Phase: "download", Message: "下载并解压…", Total: size})
-	cr := &countingReader{r: rf, total: size, report: report}
+	cr := &countingReader{ctx: ctx, r: rf, total: size, report: report}
 	var files int
 	if needFull {
 		files, err = extractFull(cr, envDir)
@@ -173,7 +186,18 @@ func MirrorPullProgress(e *NamedSsh, mirrorDir string, full bool, onProgress Pro
 		files, err = extractIncremental(cr, envDir)
 	}
 	if err != nil {
+		// 用户中途取消:原样返回 context.Canceled(调用方据此标"已停止",不当失败)。
+		// 此时**不写基线标记** —— 半个镜像不会被下次拉取当成完整基线(见函数注释)。
+		// 全量路径的 .staging 临时目录由 extractFull 自己清掉。
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, fmt.Errorf("本地解压失败: %w", err)
+	}
+	// 解压完成、还没落任何"完成"痕迹之前再确认一次取消:
+	// 否则用户刚点停止、这边刚好解压完,会留下一个标记完整但用户以为已停止的镜像。
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	st.Files = files
 	if err := writeLocalMark(envDir); err != nil {
@@ -197,7 +221,10 @@ func MirrorPullProgress(e *NamedSsh, mirrorDir string, full bool, onProgress Pro
 }
 
 // countingReader 统计已读字节并节流回调进度(下载/解压阶段共用;压缩字节即下载量)。
+// 同时是**取消点**:带 ctx 时每次 Read 先看有没有被取消,取消了就返回 ctx.Err(),
+// 让解压链路立刻断开(不必等整个归档下完)。
 type countingReader struct {
+	ctx    context.Context
 	r      io.Reader
 	n      int64
 	total  int64
@@ -206,13 +233,20 @@ type countingReader struct {
 }
 
 func (c *countingReader) Read(p []byte) (int, error) {
+	if c.ctx != nil {
+		if err := c.ctx.Err(); err != nil {
+			return 0, err
+		}
+	}
 	n, err := c.r.Read(p)
 	if n > 0 {
 		c.n += int64(n)
 	}
 	now := time.Now()
-	// 节流:每 200ms 一次;流结束时(EOF)必报一次最终字节数
-	if (n > 0 && now.Sub(c.last) >= 200*time.Millisecond) || err == io.EOF {
+	// 节流:每 200ms 一次;流结束时(EOF)必报一次最终字节数。
+	// report 可能为 nil —— MirrorPullProgress 的进度回调是可选参数,
+	// 而 CLI(tt dict mirror)就是不传的那个;这里不判空会直接空指针崩。
+	if c.report != nil && ((n > 0 && now.Sub(c.last) >= 200*time.Millisecond) || err == io.EOF) {
 		c.last = now
 		c.report(MirrorProgress{Phase: "download", Message: "下载并解压…", Bytes: c.n, Total: c.total})
 	}
@@ -220,7 +254,9 @@ func (c *countingReader) Read(p []byte) (int, error) {
 }
 
 // mirrorPackProgress 在服务器打包期间轮询归档大小回报进度(pack 阶段无法预知总量)。
-func mirrorPackProgress(conn *SSHConn, base, top string, full bool, report ProgressFunc) (int, int64, error) {
+// ctx 取消时主动返回:打包在服务器上是 `tar` 子进程,取消不会杀它,但至少本端立刻收手,
+// 不再等它跑完(服务器归档是临时文件,下次拉取会重建)。
+func mirrorPackProgress(ctx context.Context, conn *SSHConn, base, top string, full bool, report ProgressFunc) (int, int64, error) {
 	var stopped atomic.Bool
 	done := make(chan struct{})
 	defer func() {
@@ -235,6 +271,8 @@ func mirrorPackProgress(conn *SSHConn, base, top string, full bool, report Progr
 			select {
 			case <-done:
 				return
+			case <-ctx.Done():
+				return
 			case <-t.C:
 				out, err := conn.Output(cmd, 8*time.Second)
 				if err != nil {
@@ -247,7 +285,23 @@ func mirrorPackProgress(conn *SSHConn, base, top string, full bool, report Progr
 			}
 		}
 	}()
-	return mirrorPack(conn, base, top, full)
+	// 打包本身也放进一个受 ctx 约束的等待:取消了就不再阻塞在后端调用上
+	type packResult struct {
+		n    int
+		size int64
+		err  error
+	}
+	ch := make(chan packResult, 1)
+	go func() {
+		n, size, err := mirrorPack(conn, base, top, full)
+		ch <- packResult{n, size, err}
+	}()
+	select {
+	case <-ctx.Done():
+		return 0, 0, ctx.Err()
+	case r := <-ch:
+		return r.n, r.size, r.err
+	}
 }
 
 // writeLocalMark 在镜像环境目录写入完整基线标记(白名单版本 + 时间)。

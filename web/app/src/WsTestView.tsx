@@ -61,7 +61,7 @@ export function WsTestView() {
             value={url}
             onChange={(e) => setWsTest({ url: e.target.value })}
             placeholder={defaultUrl}
-            className="h-7 w-[440px] min-w-0 border border-border bg-background px-2 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:border-border focus:outline-none"
+            className="h-7 w-[440px] min-w-0 rounded-ui border border-border bg-background px-2 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:border-border focus:outline-none"
             title={defaultUrl}
           />
         </div>

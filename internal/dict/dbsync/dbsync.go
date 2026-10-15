@@ -168,6 +168,10 @@ func Run(ctx context.Context, conn dbconfig.Connection, target string, tables []
 	var dzedCols []string
 	var dzedRows [][]string
 	for i, t := range tables {
+		// 两张表之间也要看取消:大表可能拉几十秒,不查的话用户点了停止还要白等一张表
+		if err := ctx.Err(); err != nil {
+			return fail(err)
+		}
 		report(Progress{Phase: "table", Table: t, TableIndex: i + 1, TableTotal: total,
 			TotalRows: totalRows, Message: "拉取 " + t})
 		ts := time.Now()
@@ -177,6 +181,12 @@ func Run(ctx context.Context, conn dbconfig.Connection, target string, tables []
 		}
 		cols, rows, err := ext.Query(ctx, sql)
 		if err != nil {
+			// 取消时驱动的报错往往被包成自己的文案(驱动侧 "query canceled" 之类),
+			// 这里把它还原成 ctx.Err():否则调用方 errors.Is(err, context.Canceled)
+			// 判不出来,界面上会把"用户主动停止"显示成一条红色失败。
+			if cerr := ctx.Err(); cerr != nil {
+				return fail(cerr)
+			}
 			return fail(fmt.Errorf("查询表 %s 失败: %w", t, err))
 		}
 		n, err := sq.RebuildTable(t, cols, rows)

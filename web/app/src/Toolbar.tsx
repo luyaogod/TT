@@ -24,7 +24,7 @@ export function ToolIcon({ icon: Icon, label, onClick, disabled, color = 'text-s
       title={label}
       disabled={disabled}
       onClick={onClick}
-      className={`rounded-[6px] p-1 transition-colors hover:bg-accent/60 disabled:pointer-events-none disabled:opacity-30 ${color}`}
+      className={`rounded-ui p-1 transition-colors hover:bg-accent/60 disabled:pointer-events-none disabled:opacity-30 ${color}`}
     >
       <Icon className="h-4 w-4" />
     </button>

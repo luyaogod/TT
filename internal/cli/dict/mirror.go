@@ -165,7 +165,9 @@ var mirrorPullCmd = &cobra.Command{
 			mode = "全量"
 		}
 		fmt.Printf("正在拉取 %s 源码镜像(%s): %s -> %s\n", e.Name, mode, e.Host, filepath.Join(dir, e.Name))
-		st, err := host.MirrorPull(e, dir, mirrorFull)
+		// 用 cmd.Context():Cobra 的 ExecuteContext 装了信号处理,Ctrl+C 会取消它 ——
+		// 命令行这一侧也就能中途停(与 Web 的「停止」按钮走的是同一套取消点)。
+		st, err := host.MirrorPull(cmd.Context(), e, dir, mirrorFull)
 		if err != nil {
 			return err
 		}

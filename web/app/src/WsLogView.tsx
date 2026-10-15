@@ -107,8 +107,9 @@ const RATIO_MAX = 0.75 // 详情面板最大占比
 const RESIZER_W = 5    // .col-resizer 固定占位
 
 // 工具条查询输入框(四个条件共用外观;服务名称放通配,给宽一点)
-const QUERY_INPUT = 'h-7 w-52 border border-border bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus:border-border focus:outline-none'
-const QUERY_INPUT_SM = 'h-7 w-36 border border-border bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus:border-border focus:outline-none'
+// rounded-ui:全站唯一那一档圆角,见 tokens.css 的圆角口径
+const QUERY_INPUT = 'h-7 w-52 rounded-ui border border-border bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus:border-border focus:outline-none'
+const QUERY_INPUT_SM = 'h-7 w-36 rounded-ui border border-border bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus:border-border focus:outline-none'
 
 export function WsLogView() {
   const wsLogs = useStore((s) => s.wsLogs)

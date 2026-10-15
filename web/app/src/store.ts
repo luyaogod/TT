@@ -329,7 +329,11 @@ export const useStore = create<Store>((set, get) => ({
   mode: 'solo' as 'solo' | 'collab', inflight: null,
   timeline: [], rawLog: [],
   runProg: '',
-  view: 'debug',
+  // 首屏落在设置页(而不是调试页):这个工具"先配环境才能干活",
+  // 没有环境时调试页什么也做不了(App.tsx 里那条空环境兜底原本就是在补这件事)。
+  // 已经有环境的用户也一样从这里开始 —— 配好之后活动栏第一个图标就是设置,
+  // 想干活点「调试」只需往下一格。深链接(#debug、#wslogs…)仍然优先,见 App.tsx 的 parseHash。
+  view: 'settings',
   settingsSection: 'sites',
   theme: initialTheme,
   dark: resolveDark(initialTheme),

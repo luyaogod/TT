@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Eye, EyeOff, Play, Ruler } from 'lucide-react'
 import { useStore } from './store'
 import type { Breakpoint } from './api'
-import { Badge, Input } from '../../shared/ui'
+import { Input } from '../../shared/ui'
+import { cn } from '../../shared/utils'
 import { Accordion, AccordionChevron, AccordionContent, AccordionItem, AccordionTrigger, Checkbox } from '../../shared/ui-radix'
 import { parseFglTree, type TNode } from './fglparse'
 import { VarTreeNodes } from './VarTreeUi'
@@ -480,10 +481,15 @@ export function TimelinePanel() {
             {timeline.length === 0 && <div className="p-2 text-muted-foreground">暂无记录</div>}
             {timeline.map((t, i) => (
               <div key={i} className="flex gap-2">
-                <span className="shrink-0 text-muted-foreground">{t.time}</span>
-                <Badge tone={t.origin === 'ai' ? 'blue' : t.origin === 'human' ? 'green' : 'gray'} className="mt-0.5 h-4 shrink-0">
-                  {t.origin === 'ai' ? 'AI' : t.origin === 'human' ? '用户' : '系统'}
-                </Badge>
+                <span className="shrink-0 font-mono text-muted-foreground">{t.time}</span>
+                {/* 来源标签固定成一列(w-[4.5rem] 右对齐):三种来源的宽度不一致时
+                    (「用户」两字 / 「系统」两字 / 「agent」五字母),正文的起始位置会随来源左右跳,
+                    一列看下来参差不齐。定宽之后时间、来源、正文各自成列。
+                    「agent」不再叫「AI」:这条时间线记的是"谁执行了这一步",
+                    执行者既可能是 AI 也可能是用户手动,而真正"由 AI 代理执行"的那些用 agent 更准确。 */}
+                <span className={cn('w-[4.5rem] shrink-0 text-right', t.origin === 'ai' ? 'text-sky-600 dark:text-sky-400' : 'text-muted-foreground')}>
+                  {t.origin === 'ai' ? 'agent' : t.origin === 'human' ? '用户' : '系统'}
+                </span>
                 <span className={`min-w-0 ${kindTone[t.kind] || 'text-muted-foreground'}`}>{t.text}</span>
               </div>
             ))}
