@@ -77,7 +77,9 @@ function FloatingToolbar({ children }: { children: ReactNode }) {
 
   return (
     <div
-      className="fixed z-50 inline-flex items-center gap-0.5 border border-border/70 bg-card/95 px-1 py-0.5 shadow-xl"
+      // rounded-ui:全站唯一那一档圆角(见 tokens.css 的文件头)。这块工具条是**浮在编辑器上**的
+      // 一块面,与面板/按钮同属"面上的方块",直角色块浮在上面看着像没画完。
+      className="fixed z-50 inline-flex items-center gap-0.5 rounded-ui border border-border/70 bg-card/95 px-1 py-0.5 shadow-xl"
       style={style}
     >
       <span
