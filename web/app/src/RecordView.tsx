@@ -20,7 +20,6 @@ import { Input, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } 
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '../../shared/ui-radix'
 import { useToast } from './toast'
 
@@ -86,15 +85,14 @@ function fmtFP(fp?: { total: number; hash: string }): string {
 
 export function RecordView() {
   const view = useStore((s) => s.view)
+  // 环境与会话都取自**左侧那个会话面板**(用户 2026-10-15 要求):
+  // 有了独立的会话栏,这里再摆一个环境下拉就是在两个地方管同一件事。
+  // 于是本面板不再自己选环境 —— 列表按"当前会话的环境"过滤,起录也用同一个。
+  const sessionEnv = useStore((s) => s.sessionEnv)
+  const sessionId = useStore((s) => s.sessionId)
   const toast = useToast()
 
-  const [envNames, setEnvNames] = useState<string[]>([])
-  // ENT 是**草稿**,改了要点「刷新」或回车才作用到列表(与接口日志页的"回车生效"同一口径);
-  // 起录时用它当前的值 —— 用户刚打的字当然要用上。
-  const [ent, setEnt] = useState('')
   const [prog, setProg] = useState('')
-  // 已生效的查询条件。对象形式是为了让"环境变了/ENT 变了"都只走一条重拉路径。
-  const [q, setQ] = useState<{ env: string; ent: string }>({ env: '', ent: '' })
   // 「刷新」按钮的强制重拉信号(条件没变时也要重新拉一次)
   const [tick, setTick] = useState(0)
 
@@ -112,24 +110,15 @@ export function RecordView() {
   const [metaLoading, setMetaLoading] = useState(false)
   const [tab, setTab] = useState<'info' | 'conns' | 'raw'>('info')
 
-  // 环境清单与环境配置同源(设置 → 站点管理);失败不打扰用户 ——
-  // 列表那条路会把真正的错(服务没起来)报出来。
-  const loadEnvs = useCallback(() => {
-    void api.settings().then((c) => {
-      const names = (c.sshs || []).map((e) => e.name).filter(Boolean)
-      setEnvNames(names)
-      // 首次进面板还没选过环境:落到第一个(列表按环境过滤,空着等于"看全部")
-      setQ((s) => (s.env ? s : { ...s, env: names[0] || '' }))
-    }).catch(() => { /* 服务未就绪:列表那边会报错 */ })
-  }, [])
-
   // 列表与「现在在录吗」一起拉:它们是同一屏的两个事实,分两次进入会看到互相矛盾的画面
   // (列表里已有刚收工的件、而"正在录"还挂着;或反过来)。
-  const load = useCallback(async (query: { env: string; ent: string }) => {
+  // env 空 = 不按环境过滤(还没连会话时也能浏览全部),那时列表里的「环境/区域/ENT」列
+  // 就是唯一的归属线索。
+  const load = useCallback(async (env: string) => {
     setLoading(true)
     try {
       const [list, now] = await Promise.all([
-        api.recordings(query.env, query.ent),
+        api.recordings(env, ''),
         api.recordingCurrent(),
       ])
       const next = list.recordings || []
@@ -145,13 +134,13 @@ export function RecordView() {
     }
   }, [toast])
 
-  useEffect(() => { loadEnvs() }, [loadEnvs])
   // 进面板就先拉一次。视图是 keep-alive(只切显隐、不卸载重挂),所以"进面板"这件事
   // 只能由 view 的变化来标识 —— 挂载那一刻 view 就已经是 record 了。
+  // 会话换了环境(sessionEnv 变)也要跟着重拉:列表是按它过滤的。
   useEffect(() => {
     if (view !== 'record') return
-    void load(q)
-  }, [view, q, tick, load])
+    void load(sessionEnv)
+  }, [view, sessionEnv, tick, load])
 
   // 点开一行就取它的身份。取不到(没有 .meta.json 的老件)照实说,不假装有。
   useEffect(() => {
@@ -222,11 +211,7 @@ export function RecordView() {
     window.addEventListener('mouseup', up)
   }
 
-  const onRefresh = () => {
-    setQ((s) => (s.ent === ent.trim() ? s : { ...s, ent: ent.trim() }))
-    setTick((t) => t + 1)
-    loadEnvs()
-  }
+  const onRefresh = () => setTick((t) => t + 1)
 
   const copyRow = async (id: string) => {
     try {
@@ -239,26 +224,37 @@ export function RecordView() {
   }
 
   // 起一轮录制。已经在录时服务端回 409 与一句中文原因,原样弹出来 ——
-  // 所以这里只把"点不了"的两种情形(没环境 / 没作业名)挡在前面。
+  // 所以这里只把"点不了"的两种情形(没会话环境 / 没作业名)挡在前面。
+  //
+  // 环境与 ENT 都跟着**当前会话**走(面板上不再单独选):环境用会话的环境名,
+  // 企业编号读会话自己的 TOPENT(读取失败就不带 —— 那就等于沿用登录 shell 的 $TOPENT,
+  // 与服务端 "空 = 沿用 $TOPENT" 的口径一致)。
   const onStart = async () => {
-    if (!q.env) {
-      toast.error('请先选环境', { description: '录制要落在某个环境上(列表也按它过滤)。' })
+    if (!sessionEnv) {
+      toast.error('还没有会话环境', { description: '先在左侧「会话」面板连一个环境 —— 录制落在哪个环境、用哪个企业,都跟着它走。' })
       return
     }
     const p = prog.trim()
     if (!p) {
-      toast.error('请填作业名', { description: '要录哪个作业(如 bsft001_wf);它落在哪个企业只由 ENT 决定。' })
+      toast.error('请填作业名', { description: '要录哪个作业(如 bsft001_wf)。' })
       return
     }
     setBusy('start')
     try {
-      const r = await api.recordingStart({ env: q.env, prog: p, ent: ent.trim() })
+      let ent = ''
+      if (sessionId) {
+        try {
+          const snap: any = await api.snapshot(sessionId)
+          ent = snap?.topentSession || ''
+        } catch { /* 读不到就不带 ENT:等同于沿用 $TOPENT */ }
+      }
+      const r = await api.recordingStart({ env: sessionEnv, prog: p, ent })
       const id = r.recording?.id || ''
       toast.success(`已开始录制:${id}`, {
         description: `作业 ${r.recording?.prog || p}${r.log ? `;日志 ${r.log}` : ''}`,
         duration: 8000, // 录制 ID 多留一会儿:默认 3.5 秒常常还没看清就没了
       })
-      await load(q)
+      await load(sessionEnv)
     } catch (e: any) {
       toast.error('开始录制失败', { description: e?.message || String(e) })
     } finally {
@@ -276,7 +272,7 @@ export function RecordView() {
       toast.success(`已停止录制:${id}`, {
         description: `${r.stopped?.prog || ''} 已收工,录制件落到长期库/缓存(稍等再点刷新)`,
       })
-      await load(q)
+      await load(sessionEnv)
     } catch (e: any) {
       toast.error('停止录制失败', { description: e?.message || String(e) })
     } finally {
@@ -295,54 +291,62 @@ export function RecordView() {
       const r = await api.recordingDelete(row.id)
       toast.success(`已删除录制:${r.id}`, { description: `清除 ${r.files} 个文件,释放 ${fmtBytes(r.bytes)}` })
       setSel(null)
-      await load(q)
+      await load(sessionEnv)
     } catch (e: any) {
       toast.error('删除录制失败', { description: e?.message || String(e) })
     }
   }
 
-  const entDirty = ent.trim() !== q.ent
   const cp = copied && sel && copied.id === sel.id ? copied.state : null
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {/* 工具条一行(条件不多):左边 = 列表条件(环境/ENT/刷新),右边 = 起录/停录。
-           每个条件都是「字段名 + 控件」两件东西,字段名在左、控件在右 —— 字段名不写进
-           placeholder(那样看不出哪里是说明、哪里能打字;与接口日志页的 QueryField 同一口径)。
-           下缘分割线与列表连成整体;窄了各自内部换行(flex-wrap),与接口日志页一致。 */}
+      {/* 工具条一行:**只有"录哪个作业"这一件事**。
+          环境与企业编号本来在这里各有一个控件,现在都去掉了 —— 左侧独立的会话面板已经在管
+          这两样(用户 2026-10-15:"因为我们有环境面板了"),同一个事实摆两处只会对不上。
+          于是这一行只留:作业名 + 起录/停录 + 刷新,并且**靠左**(不再 ml-auto 顶到右边:
+          左边的条件没了,再把人赶到右边纯属浪费)。
+          字段名在左、控件在右,不写进 placeholder(与接口日志页的 QueryField 同一口径)。 */}
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-2 py-2">
         <span className="shrink-0 text-xs text-muted-foreground"
-          title="环境:列表按它过滤,起录也用它(作业落在哪台机器)">环境</span>
-        {envNames.length > 0 ? (
-          <Select value={q.env} onValueChange={(v) => setQ((s) => ({ ...s, env: v }))}>
-            <SelectTrigger className="h-7 w-40 text-xs"
-              title="环境:列表按它过滤,起录也用它(作业落在哪台机器)">
-              <SelectValue placeholder="选择" />
-            </SelectTrigger>
-            <SelectContent>
-              {envNames.map((n) => <SelectItem key={n} value={n}>{n}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        ) : (
-          <span className="text-xs text-muted-foreground">尚未配置环境(设置 → 站点管理)</span>
-        )}
-        <span className="shrink-0 text-xs text-muted-foreground"
-          title="企业编号(ENT):起录时决定用哪个企业的账号连库;留空 = 沿用登录 shell 的 $TOPENT。作为列表条件时留空 = 不按 ENT 过滤">ENT</span>
+          title="要录的作业编号。起录走的是服务端另起的 `tt fep rec start`,与调试会话互不干扰">作业名</span>
         <Input
-          value={ent}
-          onChange={(e) => setEnt(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') onRefresh() }}
-          placeholder="留空 = 沿用 $TOPENT"
-          title="企业编号(ENT):起录时决定用哪个企业的账号连库;留空 = 沿用登录 shell 的 $TOPENT。作为列表条件时留空 = 不按 ENT 过滤。回车生效"
+          value={prog}
+          onChange={(e) => setProg(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') void onStart() }}
+          placeholder="如 bsft001_wf"
+          title="要录的作业编号。起录走的是服务端另起的 `tt fep rec start`,与调试会话互不干扰;环境与企业编号都跟着左侧会话面板当前那个会话走"
           className="h-7 w-40 text-xs"
         />
-        <button onClick={onRefresh} disabled={loading} title="按当前环境/ENT 重新拉列表与「在录吗」"
+        <button
+          onClick={() => void onStart()}
+          disabled={!!busy || !sessionEnv || !prog.trim() || !!cur}
+          title={cur
+            ? `已经在录了(${cur.id}):先停掉它再起新的(两个会话会抢同一组端口)`
+            : !sessionEnv
+              ? '先在左侧「会话」面板连一个环境 —— 录制落在哪个环境跟着它走'
+              : `起一轮录制(环境 ${sessionEnv}):服务端会另起一个脱离的进程,等它登记(秒级到几十秒)`}
+          className="inline-flex shrink-0 items-center gap-1 border border-emerald-500/20 px-2 py-0.5 text-xs text-emerald-600 hover:bg-emerald-500/10 disabled:pointer-events-none disabled:opacity-40 dark:text-emerald-400">
+          <Play className="h-3.5 w-3.5" />
+          {busy === 'start' ? '正在起…' : '开始录制'}
+        </button>
+        <button
+          onClick={() => void onStop()}
+          disabled={!!busy || !cur}
+          title={cur ? `停止并收工:${cur.id}(它会落身份并搬进长期库)` : '现在没有在录的会话'}
+          className="inline-flex shrink-0 items-center gap-1 border border-border px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40">
+          <Square className="h-3.5 w-3.5" />
+          {busy === 'stop' ? '正在停…' : '停止录制'}
+        </button>
+        <button onClick={onRefresh} disabled={loading} title="重新拉列表与「在录吗」"
           className="p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40">
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
         </button>
-        {entDirty && (
-          <span className="text-[11px] text-amber-600 dark:text-amber-400">ENT 已改,点刷新或回车按新值过滤</span>
-        )}
+        {/* 列表按哪个环境过滤:说清它跟着会话走,不然用户会以为漏了一份 */}
+        <span className="shrink-0 text-[11px] text-muted-foreground"
+          title="列表按当前会话的环境过滤;还没连会话时列全部环境">
+          {sessionEnv ? `环境 ${sessionEnv}` : '未连会话:列全部环境'}
+        </span>
         {cur && (
           <span className="flex min-w-0 items-center gap-1 text-xs text-amber-600 dark:text-amber-400"
             title={`这一轮还活着(会话登记里有它)。停止录制会让它收工并落身份:${PATH_LABEL[cur.path || ''] || cur.path || ''}`}>
@@ -350,35 +354,6 @@ export function RecordView() {
             <span className="truncate">正在录:{cur.id}({cur.prog || '-'})</span>
           </span>
         )}
-        <div className="ml-auto flex items-center gap-2">
-          <span className="shrink-0 text-xs text-muted-foreground"
-            title="要录的作业编号。起录走的是服务端另起的 `tt fep rec start`,与调试会话互不干扰">作业名</span>
-          <Input
-            value={prog}
-            onChange={(e) => setProg(e.target.value)}
-            placeholder="如 bsft001_wf"
-            title="要录的作业编号。起录走的是服务端另起的 `tt fep rec start`,与调试会话互不干扰"
-            className="h-7 w-40 text-xs"
-          />
-          <button
-            onClick={() => void onStart()}
-            disabled={!!busy || !q.env || !prog.trim() || !!cur}
-            title={cur
-              ? `已经在录了(${cur.id}):先停掉它再起新的(两个会话会抢同一组端口)`
-              : '起一轮录制:服务端会另起一个脱离的进程,等它登记(秒级到几十秒)'}
-            className="inline-flex shrink-0 items-center gap-1 border border-emerald-500/20 px-2 py-0.5 text-xs text-emerald-600 hover:bg-emerald-500/10 disabled:pointer-events-none disabled:opacity-40 dark:text-emerald-400">
-            <Play className="h-3.5 w-3.5" />
-            {busy === 'start' ? '正在起…' : '开始录制'}
-          </button>
-          <button
-            onClick={() => void onStop()}
-            disabled={!!busy || !cur}
-            title={cur ? `停止并收工:${cur.id}(它会落身份并搬进长期库)` : '现在没有在录的会话'}
-            className="inline-flex shrink-0 items-center gap-1 border border-border px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40">
-            <Square className="h-3.5 w-3.5" />
-            {busy === 'stop' ? '正在停…' : '停止录制'}
-          </button>
-        </div>
       </div>
 
       {/* 查询/操作失败一律走 toast(与接口日志页同口径),列表区不内联错误行 —— 那会把表格挤动 */}
@@ -486,16 +461,10 @@ export function RecordView() {
             </Table>
             {rows.length === 0 && !loading && (
               <div className="space-y-1 p-4 text-center text-xs text-muted-foreground">
-                {envNames.length === 0 ? (
-                  <>
-                    <div>尚未配置环境(设置 → 站点管理)。</div>
-                    <div>配好环境后,这里才有可录、可看的东西。</div>
-                  </>
-                ) : (
-                  <>
-                    <div>{q.env || '当前条件'} 下还没有录制件。</div>
-                    <div>填好上方的作业名,点「开始录制」录一轮;录完收工后它就会出现在这里。</div>
-                  </>
+                <div>{sessionEnv ? `环境 ${sessionEnv} 下还没有录制件。` : '还没有录制件。'}</div>
+                <div>填好上方的作业名,点「开始录制」录一轮;录完收工后它就会出现在这里。</div>
+                {!sessionEnv && (
+                  <div>起录需要一个环境:先在左侧「会话」面板连一个(环境与企业编号都跟着它走)。</div>
                 )}
               </div>
             )}
