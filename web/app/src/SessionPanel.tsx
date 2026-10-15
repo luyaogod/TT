@@ -156,10 +156,8 @@ export function SessionPanel() {
   //     后端在登录后把它 export 进宿主 shell。
   // 所以没有保存按钮,也没有"配置值 vs 覆盖值"那套三方对比。
   //
-  // ent       = 输入框里的值(要用哪个企业);
-  // entShell  = 当前会话登录后回读到的真实 $TOPENT(没给 ENT 时它就是实际生效值)。
+  // ent = 输入框里的值(要用哪个企业)。
   const [ent, setEnt] = useState('')
-  const [entShell, setEntShell] = useState('')
   const mode = useStore((s) => s.mode)
 
   // **输入框永远可编辑。**
@@ -174,9 +172,8 @@ export function SessionPanel() {
   // 依赖里必须带 state:会话先建好(sessionId 先到、state=loading),登录与 ENT 回读
   // 完成后才有值;只在 sessionId 变化时取会拿到登录前的空值。
   const loadEnt = useCallback(() => {
-    if (!sessionId) { setEntShell(''); return }
+    if (!sessionId) return
     void api.snapshot(sessionId).then((snap: any) => {
-      setEntShell(snap.topentShell || '')
       // 会话已有的值回填到输入框(用户没改过时),便于确认"这次连的是哪个企业"。
       setEnt((cur) => cur || snap.topentSession || '')
     }).catch(() => {})
@@ -203,18 +200,6 @@ export function SessionPanel() {
                   : '企业编号(ENT):决定这次连哪个企业/账号。它随「切换/重启会话」带给后端,在登录后 export 到宿主 shell;留空不放行 —— 空着连会沿用机器登录默认,容易连错企业'}
                 className="h-6 min-w-0 flex-1 px-1.5 font-mono text-xs" />
             </div>
-            {/* 只在**有内容可说**时才起这一行(填了值 / 已连上且读到了实际企业)。
-                从前留空时也硬写一句"未指定;将沿用机器登录的企业(不推荐)" —— 那时输入框
-                本身就是灰的、填不进去,这句话既无效又自相矛盾,所以整句删掉。 */}
-            {(ent.trim() || entShell) && (
-              <div className="px-2.5 pb-1 text-[11px] text-muted-foreground">
-                {ent.trim()
-                  ? (entShell && entShell === ent.trim()
-                    ? '当前会话正在用这个企业'
-                    : `${sessionId ? '下次「重启/切换会话」生效' : '建立会话时生效'}${entShell ? `;当前 shell 实际为 ${entShell}` : ''}`)
-                  : `当前 shell 实际为 ${entShell}`}
-              </div>
-            )}
           </div>
         )}
 
