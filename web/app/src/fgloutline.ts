@@ -51,7 +51,7 @@ const RE_END = new RegExp(
 
 /** `{ }` 是 BDL 的块注释(不可嵌套),与高亮规则保持一致。 */
 const CH_LF = 10, CH_HASH = 35, CH_SQ = 39, CH_DQ = 34, CH_BT = 96, CH_BS = 92, CH_CR = 13
-const CH_DASH = 45, CH_LB = 123, CH_RB = 125
+const CH_DASH = 45, CH_LB = 123, CH_RB = 125, CH_BOM = 0xfeff
 
 /**
  * BDL 数据类型关键字。用来把 RECORD 里的字段声明与块开头区分开:
@@ -177,12 +177,19 @@ function maskLines(text: string): { code: string[]; disp: string[] } {
   let d = ''
   let quote = 0
   let inBrace = false
+  let inCond = false // `--#{ … --#}` 块注释(见下)
 
   const both = (s: string): void => { c += s; d += s }
 
   for (let i = 0, n = text.length; i < n; i++) {
     const ch = text[i]
     const cc = text.charCodeAt(i)
+
+    // UTF-8 BOM:编辑器把它当行 1 的第一个字符,而它挡在行首会让结构匹配的
+    // "行首 + 可选空白" 落空 —— 表现是**文件第一行**块开头看不见(实测:
+    // 编辑器里明明写着 FUNCTION,大纲说"无可识别节点")。抹成一个空格:
+    // 两份副本仍然逐字符对齐,行 1 之后一个字都不受影响。
+    if (cc === CH_BOM) { both(' '); continue }
 
     if (cc === CH_LF) { code.push(c); disp.push(d); c = ''; d = ''; continue }
 
@@ -193,6 +200,20 @@ function maskLines(text: string): { code: string[]; disp: string[] } {
     if (cc === CH_CR) {
       if (text.charCodeAt(i + 1) === CH_LF) continue // CRLF:丢掉 \r,由下一轮的 \n 断行
       code.push(c); disp.push(d); c = ''; d = ''     // 孤立 \r:断行
+      continue
+    }
+
+    // `--#{ … --#}`：条件编译块，整段当注释（与词法器同一口径，见 fglTokens.ts 的 `@cmt`）。
+    // 不认它的话，块里的假函数会进大纲、而宿主块的 endLine 会被里面的 END 截断 ——
+    // 词法器说"这是注释"、大纲说"这是代码"，两边对同一段文本给出两个答案（实测差异就在这）。
+    if (inCond) {
+      if (cc === CH_DASH && text.charCodeAt(i + 1) === CH_DASH && text.charCodeAt(i + 2) === CH_HASH) {
+        both(' '); both(' '); both(' ')
+        i += 2
+        inCond = false
+        continue
+      }
+      both(' ')
       continue
     }
 
@@ -229,12 +250,28 @@ function maskLines(text: string): { code: string[]; disp: string[] } {
 
     if (cc === CH_SQ || cc === CH_DQ || cc === CH_BT) { quote = cc; both(ch); continue }
     if (cc === CH_LB) { inBrace = true; both(' '); continue }
+    // `--#{` 开条件注释块：**必须排在 `--` 之前**判（与词法器同一条顺序纪律）。
+    if (cc === CH_DASH && text.charCodeAt(i + 1) === CH_DASH && text.charCodeAt(i + 2) === CH_HASH
+      && text.charCodeAt(i + 3) === CH_LB) {
+      both(' '); both(' '); both(' '); both(' ')
+      i += 3
+      inCond = true
+      continue
+    }
     // `--` 与 `#` 同为行注释。不认 `--` 的后果很隐蔽:注释里的撇号会开启**跨行**
     // 字符串状态,其后整片代码被掩成空格 —— 只漏节点、不造幻影。实测一条形如
     // `--   ,field ='",var,"',` 的注释就让一个模块丢掉成片函数与整个 DIALOG 容器。
+    //
+    // 跳过时**必须同时认 `\r`**：只认 `\n` 的话，一个孤立 `\r` 的文件里第一条行注释
+    // 会把**后面所有行**一起吞掉（循环一直找到字符串末尾），整个大纲空掉（实测
+    // `parseOutline('# c\rFUNCTION f()\rEND FUNCTION\r')` → []）。
     if (cc === CH_HASH || (cc === CH_DASH && text.charCodeAt(i + 1) === CH_DASH)) {
       both(' ')
-      while (i + 1 < n && text.charCodeAt(i + 1) !== CH_LF) { both(' '); i++ }
+      while (i + 1 < n) {
+        const nx = text.charCodeAt(i + 1)
+        if (nx === CH_LF || nx === CH_CR) break
+        both(' '); i++
+      }
       continue
     }
     both(ch)
