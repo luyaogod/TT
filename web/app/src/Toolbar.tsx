@@ -65,8 +65,11 @@ function FloatingToolbar({ children }: { children: ReactNode }) {
     window.addEventListener('mouseup', up)
   }
 
-  // 默认:代码编辑器右上角(避开右侧栏 40px 的右侧 sheet 图标栏;右侧栏收起时贴视口右缘)。
+  // 默认:代码编辑器右上角(避开右侧栏自己的宽度;右侧栏收起时贴视口右缘)。
   // top 40 = 页签栏的 32 + 一点余量 —— 落在编辑器自己的右上角,不压住页签栏右端的收展按钮。
+  // 那个 64 = 右侧栏宽度之外,还要让开**视图图标栏**那 40px 竖条与几处间隙 ——
+  // 图标栏只是换了图标、位置没变(仍在主面板外面),所以这个数照旧,别按"图标栏取消了"去减 40:
+  // 减掉就会让浮动工具条压到右侧栏头上(实测截图里正是这样,盖住了侧栏顶部那行 sheet 图标)。
   const panelW = Number(localStorage.getItem('tt.panelW')) || 320
   const style = pos
     ? { top: pos.top, left: pos.left }

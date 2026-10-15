@@ -47,7 +47,7 @@ interface Store {
   // UI 面板显隐
   showRight: boolean
   showBottom: boolean
-  rightView: 'debug' | 'outline' | 'session' // 右侧边栏当前 sheet(会话/调试面板/大纲),默认落「会话」
+  rightView: 'debug' | 'outline' // 调试视图右侧边栏当前 sheet(调试面板/大纲);会话已独立成左侧一列
   // 调用栈/自动变量面板「自动」开关(手风琴头部图标,默认关):停站后是否自动抓取该数据
   // (两者都要经调试会话逐条发命令,自动调度越多步进越卡;关掉后仅手动/开关开启时取)
   stackAuto: boolean
@@ -119,7 +119,7 @@ interface Store {
   toggleAutovarsAuto: () => void
   // 接口日志重放启动(wslogs「调试此调用」与重放会话「重新开始」共用同一上下文)
   replayStart: (rowid: string, request?: string) => Promise<void>
-  setRightView: (v: 'debug' | 'outline' | 'session') => void
+  setRightView: (v: 'debug' | 'outline') => void
   pushRaw: (line: string) => void
   sendRaw: (cmd: string) => Promise<void>
   pushTimeline: (item: Omit<TimelineItem, 'time'>) => void
@@ -326,8 +326,9 @@ export const useStore = create<Store>((set, get) => ({
   stackAuto: localStorage.getItem('tt.stackAuto') === '1',
   autovarsAuto: localStorage.getItem('tt.autovarsAuto') === '1',
   lastReplayRowid: null, lastReplayRequest: '',
-  // 右侧边栏默认落在「会话」(先选环境再调试);Tab 顺序见 App.tsx 右侧切换栏,不做持久化
-  rightView: 'session',
+  // 调试视图右侧边栏默认落在「调试面板」(会话已在左侧独立一列、不再是这里的 sheet);
+  // sheet 顺序见 App.tsx 侧边栏顶部那行图标,不做持久化
+  rightView: 'debug',
   breakpoints: [], adjustedBps: {}, frames: [], watches: [], autovars: [], selectedFrame: -1, backendDead: '',
   mode: 'solo' as 'solo' | 'collab', inflight: null,
   timeline: [], rawLog: [],

@@ -171,6 +171,20 @@ export function App() {
     const v = Number(localStorage.getItem('tt.panelW'))
     return v >= 240 && v <= 640 ? v : 320
   })
+  // 左侧会话栏的宽度:与右侧栏同一套口径(同一档 clamp),只是记忆键与缺省值不同 ——
+  // 会话面板要列出环境名与状态,300 比 320 让代码区多留一点。
+  const [sessionW, setSessionW] = useState(() => {
+    const v = Number(localStorage.getItem('tt.sessionW'))
+    return v >= 240 && v <= 640 ? v : 300
+  })
+  // 会话栏的展开/收起:只由左侧那个图标按钮驱动,直接读 localStorage 而不是进 store ——
+  // 因为它没有第二个消费者,进 store 只会多一层。默认展开(只有明确关过才是 '0')。
+  const [showSession, setShowSession] = useState(() => localStorage.getItem('tt.sessionOpen') !== '0')
+  // 下方面板(操作时间线/协议流)高度拖拽(记忆到 localStorage)
+  const [bottomH, setBottomH] = useState(() => {
+    const v = Number(localStorage.getItem('tt.bottomH'))
+    return v >= 120 && v <= 600 ? v : 192
+  })
   // keep-alive 视图切换下,Monaco 容器被 display:none 期间 ResizeObserver 会拿到 0 尺寸;
   // 切回调试视图后补一次 layout(),确保编辑器渲染与视口不残留错位
   useEffect(() => {
@@ -200,11 +214,38 @@ export function App() {
     window.addEventListener('mouseup', up)
   }
 
+  // 左侧会话栏的宽度拖拽:与上面那条同源(mousemove 跟手 + mouseup 落盘),
+  // 唯一的差别是方向 —— 会话栏在分隔线**左侧**,所以往右拖 = 变宽(取 clientX - startX)。
+  const onSessionResizeDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const el = e.currentTarget
+    el.classList.add('dragging')
+    const startX = e.clientX
+    const startW = sessionW
+    let latest = startW
+    const move = (ev: MouseEvent) => {
+      latest = Math.min(640, Math.max(240, startW + (ev.clientX - startX)))
+      setSessionW(latest)
+    }
+    const up = () => {
+      el.classList.remove('dragging')
+      localStorage.setItem('tt.sessionW', String(latest))
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+
+  // 会话栏的显示开关:active 态即"面板此刻可见"。写进 localStorage 让折叠意图跨刷新保持
+  // (与宽度、面板显隐同一档持久化口径)。
+  const toggleSession = () => {
+    setShowSession((v) => {
+      localStorage.setItem('tt.sessionOpen', v ? '0' : '1')
+      return !v
+    })
+  }
   // 下方面板(操作时间线/协议流)高度拖拽(记忆到 localStorage)
-  const [bottomH, setBottomH] = useState(() => {
-    const v = Number(localStorage.getItem('tt.bottomH'))
-    return v >= 120 && v <= 600 ? v : 192
-  })
   const onBottomResizeDown = (e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault()
     const el = e.currentTarget
@@ -227,8 +268,19 @@ export function App() {
     window.addEventListener('mouseup', up)
   }
 
-  // 布局:上一条与状态栏同高的留白 / 下一条状态栏;中部 = 活动栏 + 主内容面板 + 右侧栏,
-  // 三块各自成块、彼此留间隙,面板带边线与圆角。
+  // 布局:上一条与状态栏同高的留白 / 下一条状态栏;中部从左往右 = 活动栏 → 会话栏 →
+  // 主内容面板 → 视图图标栏,各自成块、彼此留间隙,面板带边线与圆角。
+  //
+  // 会话栏为什么**单独一列**(而不是继续挂在调试视图的右侧栏里):
+  //   · 会话是"干活前的那个动作"(选环境 / 重启 / 结束),四个视图都要用到它 ——
+  //     挂在调试页的 sheet 里,别的视图就够不着;
+  //   · 它必须是**全站同一份**:一旦跟着右侧栏切换卸载重挂,手风琴展开态与 TOPENT
+  //     输入会当场丢,所以它挂在 app 外壳这一层、不挂进任何一个 ViewPane;
+  //   · 放左边还有个好处:它与右侧栏的宽度拖拽互不抢位置,左右各自独立收展。
+  // 而**设置页不显示它**:设置页自己是"先配环境才能干活"的地方,一个列环境与会话的
+  // 面板在那里只是重复(环境就在设置页里管),徒占一列宽度;右侧那四个图标栏同理。
+  // 左侧活动栏本身(设置 / 会话)是常驻的 —— 它是这一屏唯一的收展开关,不能被自己藏掉。
+  //
   // (顶层那条横栏已撤掉:它只剩两个面板收展按钮,而那两个只管这一屏,
   //  现在钉在调试页签栏右端;浮动调试工具条归调试视图,所以跟着挪进 ViewPane)
   return (
@@ -261,17 +313,35 @@ export function App() {
           看上去按钮贴着窗口而离面板远。底部 8px 与状态栏隔开。 */}
       <div className="flex min-h-0 flex-1 gap-1 px-1 pb-2">
         {/* VS Code 经典活动栏:栏与内容各自成块,靠间隙分开,不再用分割线。
+            只有两个图标:入口(设置)与干活前的那一个动作(会话)。四个视图容器
+            已经挪到右边的图标栏(顺序与"先配后干"无关,所以不再需要靠位置表达主次);
             顺序:**设置排第一** —— 首次进来落在设置页(见 store 的初始 view 与
             下面那条"没有环境就跳设置"),入口与落点排在同一侧才不用回头找。 */}
         <div className="flex w-10 shrink-0 flex-col items-center gap-1 py-2">
           <ActivityIcon icon={Settings} label="设置(站点 / 数据字典 / DEBUG / 应用)" active={view === 'settings'} onClick={() => setView('settings')} />
-          <ActivityIcon icon={Bug} label="调试" active={view === 'debug'} onClick={() => setView('debug')} />
-          <ActivityIcon icon={Globe} label="接口日志" active={view === 'wslogs'} onClick={() => setView('wslogs')} />
-          <ActivityIcon icon={FlaskConical} label="服务测试" active={view === 'wstest'} onClick={() => setView('wstest')} />
-          {/* 录制排在最后:它是"有环境之后"才干的事(列/起/停一轮录制),与设置那种前置动作分开 */}
-          <ActivityIcon icon={Video} label="录制" active={view === 'record'} onClick={() => setView('record')} />
+          {/* active 即"会话栏此刻可见":它是个收展开关,不是视图切换 —— 所以不跟 view 走。
+              设置页也留着它:折叠意图此时仍要能表达,切回其它视图时才不会是意外状态。 */}
+          <ActivityIcon icon={Server} label={showSession ? '收起会话面板' : '展开会话面板'} active={showSession} onClick={toggleSession} />
         </div>
-        {/* 主内容面板:五套视图都装在这一个带边线的圆角面板里,四周与活动栏/右侧栏/状态栏留出间隙。
+        {/* 会话栏:活动栏的右邻,自己一列(宽度可拖,与右侧栏同一套 clamp 口径)。
+            min-w-0 + overflow-hidden:面板内部是 auto 滚动区,不给这两条的话
+            里面的长环境名会把整列顶宽,再挤主面板 —— 就是"宽度反馈环"那条老账。
+            它不挂在任何一个 ViewPane 里,所以接口日志/服务测试/录制/调试之间切换时
+            一次都不重挂:手风琴展开态与 TOPENT 输入跟着一直在(那正是"为什么要单独一列")。
+            设置页整列不渲染:设置是"先配环境"的地方,环境就在它自己页里管,
+            一列列环境与会话的面板在那里只是重复,还白占宽度。 */}
+        {view !== 'settings' && showSession && (
+          <>
+            <div style={{ width: sessionW }} className="flex min-h-0 min-w-0 shrink-0 flex-col overflow-hidden rounded-ui border border-border">
+              <SessionPanel />
+            </div>
+            {/* 分割条放在会话栏**右边**:它是这一列真正的边(和右侧栏那条一样,分割线始终
+                贴着被拖的那条边)。放在左边的话,往右拖时面板变宽、而把手留在原地,
+                光标与那条 1px 线当场分家。 */}
+            <div className="col-resizer" onMouseDown={onSessionResizeDown} title="拖拽调整会话面板宽度" />
+          </>
+        )}
+        {/* 主内容面板:五套视图都装在这一个带边线的圆角面板里,四周与活动栏/会话栏/图标栏/状态栏留出间隙。
             overflow-hidden 让四个圆角真正裁掉里面的直角内容(页签栏、编辑器底色)。 */}
         <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-ui border border-border">
           {/* 五个视图全部 keep-alive:首次访问后常驻挂载,切换仅改 display */}
@@ -297,16 +367,26 @@ export function App() {
               {showRight && (
                 <>
                   <div className="col-resizer" onMouseDown={onResizeDown} title="拖拽调整代码区与侧边栏宽度" />
-                  <div style={{ width: panelW }} className="min-h-0 shrink-0">
-                    {/* 多 sheet keep-alive:切换仅改 display,保留手风琴展开/监视输入等本地状态 */}
-                    <div className={rightView === 'session' ? 'h-full min-h-0 w-full' : 'hidden'}>
-                      <SessionPanel />
+                  <div style={{ width: panelW }} className="flex min-h-0 shrink-0 flex-col overflow-hidden">
+                    {/* 侧边栏内部的 sheet 切换行:横排、钉在栏顶,与代码区仍在同一个面板里
+                        (它切的是这一列的内容,不是整屏的视图 —— 所以不做成第二条活动栏)。
+                        只有两个 sheet:会话已经搬到左边独立一列(见上面的布局注释),
+                        留在这里等于同一份会话有两处入口,状态还得互相对齐。 */}
+                    <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border px-1">
+                      <ActivityIcon icon={BugPlay} label="调试面板" active={rightView === 'debug'} onClick={() => setRightView('debug')} />
+                      <ActivityIcon icon={ListTree} label="大纲" active={rightView === 'outline'} onClick={() => setRightView('outline')} />
                     </div>
-                    <div className={rightView === 'debug' ? 'h-full min-h-0 w-full' : 'hidden'}>
-                      <RightPanels />
-                    </div>
-                    <div className={rightView === 'outline' ? 'h-full min-h-0 w-full' : 'hidden'}>
-                      <OutlinePanel />
+                    {/* 多 sheet keep-alive:切换仅改 display,保留手风琴展开/监视输入等本地状态。
+                        两个 sheet 必须包在一层 flex 项里:panel 自己的类里有 flex-1
+                        (占满剩余宽高),直接做列容器的子项会被上面那行图标挤着算高度 ——
+                        包一层后这一层才是"图标行下面的剩余高度",panel 在它里面照旧占满。 */}
+                    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                      <div className={rightView === 'debug' ? 'h-full min-h-0 w-full' : 'hidden'}>
+                        <RightPanels />
+                      </div>
+                      <div className={rightView === 'outline' ? 'h-full min-h-0 w-full' : 'hidden'}>
+                        <OutlinePanel />
+                      </div>
                     </div>
                   </div>
                 </>
@@ -326,14 +406,17 @@ export function App() {
             <SettingsView />
           </ViewPane>
         </div>
-        {/* 右侧 sheet 切换栏(仿左侧活动栏):与右侧边栏一同受折叠按钮控制
-            —— 顺序即主次:会话(选环境/看状态)→ 调试面板 → 大纲。
-            它是这一屏的栏、不是视图内容,所以留在面板外面做面板的右邻。 */}
-        {view === 'debug' && showRight && (
+        {/* 右侧视图图标栏(仿左侧活动栏,竖排):调试 / 接口日志 / 服务测试 / 录制 ——
+            就是"主区域里放哪一个容器",与左侧的入口(设置)和前置动作(会话)分开两边。
+            顺序即主次:调试是主场,其余三个按"有环境之后"的常用度排下去。
+            它就是"这一屏放哪个视图",不是视图内容,所以留在主面板外面做它的右邻;
+            设置页整条不渲染 —— 设置不是这四个容器之一,它自己占满主区域。 */}
+        {view !== 'settings' && (
           <div className="flex w-10 shrink-0 flex-col items-center gap-1 py-2">
-            <ActivityIcon icon={Server} label="会话" active={rightView === 'session'} onClick={() => setRightView('session')} />
-            <ActivityIcon icon={BugPlay} label="调试面板" active={rightView === 'debug'} onClick={() => setRightView('debug')} />
-            <ActivityIcon icon={ListTree} label="大纲" active={rightView === 'outline'} onClick={() => setRightView('outline')} />
+            <ActivityIcon icon={Bug} label="调试" active={view === 'debug'} onClick={() => setView('debug')} />
+            <ActivityIcon icon={Globe} label="接口日志" active={view === 'wslogs'} onClick={() => setView('wslogs')} />
+            <ActivityIcon icon={FlaskConical} label="服务测试" active={view === 'wstest'} onClick={() => setView('wstest')} />
+            <ActivityIcon icon={Video} label="录制" active={view === 'record'} onClick={() => setView('record')} />
           </div>
         )}
       </div>

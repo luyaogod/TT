@@ -392,28 +392,28 @@ export function RecordView() {
             {/* table-fixed:列宽交给表头/单元格上的 w-* ,留空的那列吃剩余宽度;
                 container=false 不套 shadcn Table 默认的 overflow-x-auto(它会让 th 的 sticky 失效);
                 border-separate + 单元格只留"右+下"框线,理由与接口日志页列表相同。
-                详情面板打开时列表变窄,所以列也要跟着收(与日志页的 COLS_COMPACT 同一个道理):
-                时间/体积/指纹/归属 四项在右侧面板里都看得到,这里先让位,免得列被切一半。 */}
+                详情面板打开时列表只剩一半宽,所以列要跟着收(与日志页的 COLS_COMPACT 同一个道理):
+                面板里已经逐项列着的(环境·区域·ENT / 时间 / 体积 / 指纹)在这里让位,只留
+                "这是哪一份"的四项 + 操作 —— 不然固定列宽加起来就吃掉整张表,操作列会被挤成 0 宽。
+                宽度也随之压一档,让剩下的列还有地方放(每格都 truncate,不会撑破)。 */}
             <Table container={false} className="table-fixed border-separate border-spacing-0 text-xs">
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
-                  <TableHead className={`sticky top-0 z-10 border-t-0 border-l-0 bg-background ${sel ? 'w-44' : 'w-52'}`}
+                  <TableHead className={`sticky top-0 z-10 border-t-0 border-l-0 bg-background ${sel ? 'w-40' : 'w-48'}`}
                     title="录制 ID:命令行 `tt fep rec show/rm/reproduce <ID>` 用的就是它">录制 ID</TableHead>
-                  <TableHead className="sticky top-0 z-10 w-16 border-t-0 border-l-0 bg-background"
+                  <TableHead className={`sticky top-0 z-10 border-t-0 border-l-0 bg-background ${sel ? 'w-14' : 'w-16'}`}
                     title="长期库:不自动清理,可在详情里手动删;缓存:可再生的中间数据,随统一清理框架按年龄删">住哪</TableHead>
-                  <TableHead className="sticky top-0 z-10 w-24 border-t-0 border-l-0 bg-background"
+                  <TableHead className={`sticky top-0 z-10 border-t-0 border-l-0 bg-background ${sel ? 'w-20' : 'w-24'}`}
                     title="这一次作业是怎么起来的。回放闸门按它比对:路径不同的录像不能用">启动路径</TableHead>
-                  <TableHead className="sticky top-0 z-10 w-32 border-t-0 border-l-0 bg-background">作业</TableHead>
-                  <TableHead className="sticky top-0 z-10 w-44 border-t-0 border-l-0 bg-background"
-                    title="环境 / 区域 / ENT(企业编号)">环境/区域/ENT</TableHead>
+                  <TableHead className={`sticky top-0 z-10 border-t-0 border-l-0 bg-background ${sel ? 'w-24' : 'w-32'}`}>作业</TableHead>
                   {!sel && (
                     <>
-                      <TableHead className="sticky top-0 z-10 w-40 border-t-0 border-l-0 bg-background">时间</TableHead>
-                      <TableHead className="sticky top-0 z-10 w-20 border-t-0 border-l-0 bg-background">体积</TableHead>
                       <TableHead className="sticky top-0 z-10 w-44 border-t-0 border-l-0 bg-background"
+                        title="环境 / 区域 / ENT(企业编号)">环境/区域/ENT</TableHead>
+                      <TableHead className="sticky top-0 z-10 w-36 border-t-0 border-l-0 bg-background">时间</TableHead>
+                      <TableHead className="sticky top-0 z-10 w-20 border-t-0 border-l-0 bg-background">体积</TableHead>
+                      <TableHead className="sticky top-0 z-10 w-40 border-t-0 border-l-0 bg-background"
                         title="编号表摘要:sha256 前 16 位(条数)。整体比对用它,不看数字也不看声明顺序">指纹</TableHead>
-                      <TableHead className="sticky top-0 z-10 w-24 border-t-0 border-l-0 bg-background"
-                        title="这份录制是谁录的(用户主动 / 系统自动)。留住哪由归属推默认:用户主动的进长期库,系统自动的进缓存">归属</TableHead>
                     </>
                   )}
                   <TableHead className="sticky top-0 z-10 border-t-0 border-l-0 bg-background">操作</TableHead>
@@ -428,27 +428,27 @@ export function RecordView() {
                       onClick={() => setSel(r)}
                       title={selected ? undefined : '点击在右侧查看这份录制的身份(启动路径/作业/ENT/编号表/连接清单)'}
                       className="h-7 cursor-pointer hover:bg-accent/40 data-[state=selected]:bg-sky-500/10">
-                      <TableCell className={`border-t-0 border-l-0 px-2 py-0 font-mono ${sel ? 'w-44' : 'w-52'}`} title={r.id}>
+                      <TableCell className={`border-t-0 border-l-0 px-2 py-0 font-mono ${sel ? 'w-40' : 'w-48'}`} title={r.id}>
                         <span className="block truncate font-mono">{r.id}</span>
                       </TableCell>
-                      <TableCell className="border-t-0 border-l-0 px-2 py-0" title={r.where}>
+                      <TableCell className={`border-t-0 border-l-0 px-2 py-0 ${sel ? 'w-14' : 'w-16'}`} title={r.where}>
                         <span className="block truncate">{r.where || '-'}</span>
                       </TableCell>
-                      <TableCell className="border-t-0 border-l-0 px-2 py-0"
+                      <TableCell className={`border-t-0 border-l-0 px-2 py-0 ${sel ? 'w-20' : 'w-24'}`}
                         title={PATH_LABEL[r.path || ''] || (r.path || '身份里没写路径')}>
                         <span className="block truncate font-mono text-muted-foreground">{r.path || '-'}</span>
                       </TableCell>
-                      <TableCell className="border-t-0 border-l-0 px-2 py-0" title={r.prog || ''}>
+                      <TableCell className={`border-t-0 border-l-0 px-2 py-0 ${sel ? 'w-24' : 'w-32'}`} title={r.prog || ''}>
                         <span className="block truncate text-sky-600 dark:text-sky-400">{r.prog || '-'}</span>
-                      </TableCell>
-                      <TableCell className="border-t-0 border-l-0 px-2 py-0"
-                        title={`环境 ${r.env || '-'} · 区域 ${r.zone || '-'} · ENT ${r.ent || '-'}`}>
-                        <span className="block truncate font-mono text-[11px] text-muted-foreground">
-                          {r.env || '-'}/{r.zone || '-'}/{r.ent || '-'}
-                        </span>
                       </TableCell>
                       {!sel && (
                         <>
+                          <TableCell className="border-t-0 border-l-0 px-2 py-0"
+                            title={`环境 ${r.env || '-'} · 区域 ${r.zone || '-'} · ENT ${r.ent || '-'}`}>
+                            <span className="block truncate font-mono text-[11px] text-muted-foreground">
+                              {r.env || '-'}/{r.zone || '-'}/{r.ent || '-'}
+                            </span>
+                          </TableCell>
                           <TableCell className="border-t-0 border-l-0 px-2 py-0" title={r.started || '身份里没记时间'}>
                             <span className="block truncate font-mono text-[11px] text-muted-foreground">{fmtTime(r.started)}</span>
                           </TableCell>
@@ -460,10 +460,6 @@ export function RecordView() {
                               ? `编号表 ${r.fingerprint.total} 条;sha256 前 16 位 ${r.fingerprint.hash}`
                               : '这一轮没录到界面(作业没连上来,或刚起来就断了)'}>
                             <span className="block truncate font-mono text-[11px] text-muted-foreground">{fmtFP(r.fingerprint)}</span>
-                          </TableCell>
-                          <TableCell className="border-t-0 border-l-0 px-2 py-0"
-                            title={`${ORIGIN_LABEL[r.origin || ''] || '身份里没说谁录的'} · ${RETENTION_LABEL[r.retention || ''] || '身份里没说留哪'}${r.note ? ` · ${r.note}` : ''}`}>
-                            <span className="block truncate text-muted-foreground">{ORIGIN_LABEL[r.origin || ''] || '-'}</span>
                           </TableCell>
                         </>
                       )}
