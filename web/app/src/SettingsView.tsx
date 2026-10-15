@@ -541,8 +541,12 @@ export function SettingsView() {
     const cur = sshs[selSsh]
     if (!cur?.db) return
     const account = addAcct.account.trim()
-    if (!account) return
-    patchDb(selSsh, { accounts: [...cur.db.accounts, { account, password: addAcct.password }] })
+    // 账号与密码都必须填。**不再**"留空则口令同账号" —— 那会把"漏填密码"和
+    // "口令恰好与账号相同"变成同一个动作,后者是极少数场景,而前者是漏填。
+    // 按钮那边已经 disabled,这里是第二道(回车键也走这条路)。
+    const password = addAcct.password.trim()
+    if (!account || !password) return
+    patchDb(selSsh, { accounts: [...cur.db.accounts, { account, password }] })
     setAddAcct({ account: '', password: '' })
   }
   const addSsh = () => { setSelSsh(sshs.length); setSshs([...sshs, blankSsh()]); markDirty('hosts') }
@@ -1179,7 +1183,7 @@ export function SettingsView() {
                                 <TableHeader>
                                   <TableRow className="hover:bg-transparent">
                                     <TableHead className="sticky top-0 z-10 w-1/2 bg-muted">账号(schema)</TableHead>
-                                    <TableHead className="sticky top-0 z-10 bg-muted">密码(缺省 = 账号)</TableHead>
+                                    <TableHead className="sticky top-0 z-10 bg-muted">密码</TableHead>
                                     <TableHead className="sticky top-0 z-10 w-16 bg-muted">操作</TableHead>
                                   </TableRow>
                                 </TableHeader>
@@ -1191,12 +1195,17 @@ export function SettingsView() {
                                         onKeyDown={(e) => { if (e.key === 'Enter') pushAcct() }} />
                                     </TableCell>
                                     <TableCell className={CELL_EDITING}>
-                                      <input className="cell-input font-mono" placeholder="留空 = 与账号相同" value={addAcct.password}
+                                      <input className="cell-input font-mono" placeholder="新增密码…" value={addAcct.password}
                                         onChange={(e) => setAddAcct((s) => ({ ...s, password: e.target.value }))}
                                         onKeyDown={(e) => { if (e.key === 'Enter') pushAcct() }} />
                                     </TableCell>
                                     <TableCell className="text-center">
-                                      <Button variant="ghost" size="sm" title="添加账号" disabled={!addAcct.account.trim()} onClick={pushAcct}>
+                                      {/* 账号与密码**都必须填**才能添加:留空的口令会被当成"与账号相同",
+                                          于是"没填"和"故意用同名口令"变成同一个动作 —— 前者是漏填,
+                                          后者是极少数场景,混在一起的结果是悄悄存下一个不是本意的口令。
+                                          disabled 只是第一道;pushAcct 里还有一道(见那里)。 */}
+                                      <Button variant="ghost" size="sm" title="添加账号(账号与密码都要填)"
+                                        disabled={!addAcct.account.trim() || !addAcct.password.trim()} onClick={pushAcct}>
                                         <Plus className="h-3.5 w-3.5" />
                                       </Button>
                                     </TableCell>
