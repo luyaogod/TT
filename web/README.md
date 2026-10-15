@@ -1,12 +1,13 @@
 # web — 前端
 
-一套单页应用 + 一套共享设计件。用 npm 的工作区组织（根是 `web/`，唯一成员是 `app/`）。
+一套单页应用 + 一套共享设计件 + 一个 UI 决策演示台。用 npm 的工作区组织（根是 `web/`，workspace 唯一成员是 `app/`）。
 
 ```
 web/
 ├─ package.json        工作区根：构建与检查的入口脚本
 ├─ app/                唯一 SPA（调试工作台 + 统一设置页）
-└─ shared/             设计系统与共享件，被 app 以相对路径引用
+├─ shared/             设计系统与共享件，被 app 以相对路径引用
+└─ showcase/           UI 决策演示台：独立包（**不进球 workspace**），自己的依赖与产物
 ```
 
 ## 与后端的关系
@@ -38,6 +39,7 @@ tt serve                       # 后端
 ```bash
 cd web && npm run check:app     # 三项检查：词法 / 大纲 / 状态容器
 cd web && npm run build         # 含类型检查
+cd web/showcase && npm run check:render  # 演示台：渲染检查（含类型检查的是它的 build）
 ```
 
 ## 细节去哪
@@ -45,4 +47,5 @@ cd web && npm run build         # 含类型检查
 - SPA 的构建配置与脚本 → [app/README.md](./app/README.md)
 - 应用源码的结构 → [app/src/README.md](./app/src/README.md)
 - 设计系统与共享件 → [shared/README.md](./shared/README.md)
+- UI 决策演示台（独立包，不进产品产物）→ [showcase/README.md](./showcase/README.md)
 - Node 侧的检查脚本与夹具 → [app/scripts/README.md](./app/scripts/README.md)
