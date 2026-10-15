@@ -3,6 +3,7 @@ package fep
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -172,5 +173,50 @@ func TestJobLaunchCmdKeepsOneCommandPerLine(t *testing.T) {
 	lines := strings.Split(strings.TrimSuffix(got, "\r\n"), "\r\n")
 	if len(lines) != 3 {
 		t.Fatalf("应是 3 行（TOPENT / FGLSERVER / r.r），实际 %d 行: %q", len(lines), got)
+	}
+}
+
+// 默认那一组端口不通时该**自动换一组**（三个端口的相对关系不能变：画面接线里那个数值
+// 恒等于代理端口 − 6400），并把换端口这件事写进日志；调用方点名要的端口则照旧只报错。
+//
+// 为什么值得钉住：Windows 会把成片的端口划给 Hyper-V/WSL 保留（excludedportrange），
+// 落在里面的端口 bind 直接 WSAEACCES，**没有进程在监听也一样失败** —— 实测 7899 落在
+// 7809–7908 里，Get-NetTCPConnection 看是"空闲"，而默认那组端口因此整组不可用。
+func TestPickPortsFallsBackWhenDefaultUnusable(t *testing.T) {
+	// 占住默认那组的第一个端口（模拟"用不了"）
+	ln, err := net.Listen("tcp", "127.0.0.1:7400")
+	if err != nil {
+		t.Skipf("7400 起不来（这台机器本身就占着）: %v", err)
+	}
+	defer ln.Close()
+
+	cfg := OpenConfig{GDCPort: 7400, ProxyPort: 7600, InjectPort: 7899}
+	var logged []string
+	logf := func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) }
+	if err := pickPorts(&cfg, false, logf); err != nil {
+		t.Fatalf("默认端口不通时该自动换一组: %v", err)
+	}
+	if cfg.GDCPort == 7400 {
+		t.Fatalf("7400 被占着，不该还挑它: %+v", cfg)
+	}
+	if cfg.ProxyPort-cfg.GDCPort != fepPortOffsets[1] || cfg.InjectPort-cfg.GDCPort != fepPortOffsets[2] {
+		t.Fatalf("三个端口的相对关系必须成套（代理−6400 就是画面接线里那个数值）: %+v", cfg)
+	}
+	for _, p := range []int{cfg.GDCPort, cfg.ProxyPort, cfg.InjectPort} {
+		if err := portFree(p); err != nil {
+			t.Fatalf("换出来的 %d 还是不能用: %v", p, err)
+		}
+	}
+	if len(logged) == 0 {
+		t.Fatal("换了端口就得说一声（日志里要能看见）")
+	}
+
+	// 点名要的端口：不通就报错，不许自作主张换
+	pinned := OpenConfig{GDCPort: 7400, ProxyPort: 7600, InjectPort: 7899}
+	if err := pickPorts(&pinned, true, logf); err == nil {
+		t.Fatal("调用方点名要的端口不通时该报错，而不是偷偷换一组")
+	}
+	if pinned.GDCPort != 7400 {
+		t.Fatalf("报错路径也不该改动调用方给的端口: %+v", pinned)
 	}
 }

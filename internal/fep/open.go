@@ -166,6 +166,8 @@ func nopLog(string, ...any) {}
 // Open runs the whole start-up sequence, registering the session *before*
 // anything is opened so an interrupted run can always be collected.
 func Open(ctx context.Context, cfg OpenConfig, logf func(string, ...any)) (*Runtime, error) {
+	// "端口是不是调用方点名要的"必须在 fillDefaults **之前**看（它会把 0 填成默认值）
+	portsPinned := cfg.GDCPort != 0 || cfg.ProxyPort != 0 || cfg.InjectPort != 0
 	cfg.fillDefaults()
 	if logf == nil {
 		logf = nopLog
@@ -183,10 +185,8 @@ func Open(ctx context.Context, cfg OpenConfig, logf func(string, ...any)) (*Runt
 	if err := preflightElevation(cfg.GDCExe); err != nil {
 		return nil, err
 	}
-	for _, p := range []int{cfg.GDCPort, cfg.ProxyPort, cfg.InjectPort} {
-		if err := portFree(p); err != nil {
-			return nil, err
-		}
+	if err := pickPorts(&cfg, portsPinned, logf); err != nil {
+		return nil, err
 	}
 
 	r := &Runtime{cfg: cfg, reg: NewRegistry(cfg.DataDir), logf: logf, jobDone: make(chan struct{})}
@@ -682,6 +682,64 @@ func portFree(port int) error {
 	}
 	ln.Close()
 	return nil
+}
+
+// fepPortOffsets 是一组端口里三个端口的相对关系（gdc / proxy / inject）。
+//
+// 必须成套：画面接线里那个数值恒等于**代理端口 - 6400**（见 open.go 里算 FGLSERVER 的那段），
+// 所以换端口时三个一起换、偏移保持不变，服务端才能连回本机的代理。
+var fepPortOffsets = [3]int{0, 200, 499}
+
+// maxPortTries 是自动换端口时最多试几组（每组错开 1000）。
+const maxPortTries = 8
+
+// pickPorts 决定这一轮用哪三个端口。
+//
+// 为什么不是"检查一遍默认端口、不通就报错"：端口是 OS 层面的稀缺资源，而 Windows 会把
+// **成片**的端口划给 Hyper-V/WSL 保留（`excludedportrange`）—— 落在里面的端口 bind 直接
+// WSAEACCES，没有进程在监听也一样失败（实测 7899 落在 7809–7908 里，`Get-NetTCPConnection`
+// 看是"空闲"）。这种时候默认那一组就整组不可用，而它跟我们的代码没半点关系。
+//
+// 所以：**调用方点名要的端口**（非 0）照旧尊重，不通就报错；否则默认那一组不通时，
+// 自动往前挪 1000 再试（最多 maxPortTries 组），并把换端口这件事写进日志。
+func pickPorts(cfg *OpenConfig, pinned bool, logf func(string, ...any)) error {
+	ports := func(base int) [3]int {
+		return [3]int{base + fepPortOffsets[0], base + fepPortOffsets[1], base + fepPortOffsets[2]}
+	}
+	want := ports(cfg.GDCPort)
+	if pinned {
+		for _, p := range want {
+			if err := portFree(p); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	var firstErr error
+	for i := 0; i < maxPortTries; i++ {
+		try := ports(cfg.GDCPort + i*1000)
+		busy := -1
+		for _, p := range try {
+			if err := portFree(p); err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				busy = p
+				break
+			}
+		}
+		if busy >= 0 {
+			continue
+		}
+		if i > 0 {
+			logf("默认端口 %d/%d/%d 用不了：这一轮改用 %d/%d/%d（画面接线端口 = 代理端口 - 6400）",
+				want[0], want[1], want[2], try[0], try[1], try[2])
+		}
+		cfg.GDCPort, cfg.ProxyPort, cfg.InjectPort = try[0], try[1], try[2]
+		return nil
+	}
+	return fmt.Errorf("%w: 从 %d 起连着 %d 组端口都用不了：%v",
+		ErrPortBusy, want[0], maxPortTries, firstErr)
 }
 
 func waitPort(port int, timeout time.Duration) error {
