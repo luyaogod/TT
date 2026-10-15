@@ -41,6 +41,7 @@ import {
   Tabs, TabsContent, TabsList, TabsTrigger,
 } from '../../shared/ui-radix'
 import { Card, Field, InfoRow, SectionTitle, SettingRow } from '../../shared/settings'
+import { useToast } from './toast'
 import { useStore, type ThemeMode } from './store'
 import { cn } from '../../shared/utils'
 import { SETTINGS_SECTIONS, settingsHash } from './routing'
@@ -358,6 +359,9 @@ export function SettingsView() {
   const setSection = useStore((s) => s.setSettingsSection)
   const theme = useStore((s) => s.theme)
   const setTheme = useStore((s) => s.setTheme)
+  // 本页所有"动作结果"都从这里出去(见 toast.tsx 的判据)。原先它们是内联在各张卡片里的
+  // 彩色段落 —— 出现/消失会顶动卡片高度,而这一页卡片多、表格多,串动尤其明显。
+  const toast = useToast()
 
   const [envTab, setEnvTab] = useState<'ssh' | 'db'>('ssh')
   const [cfg, setCfg] = useState<HostsView | null>(null)
@@ -372,21 +376,20 @@ export function SettingsView() {
   const [status, setStatus] = useState<ConfigStatus | null>(null)
   const [meta, setMeta] = useState<ConfigMeta | null>(null)
   const [installBusy, setInstallBusy] = useState(false)
-  const [installNote, setInstallNote] = useState('')
   const [cacheBusy, setCacheBusy] = useState(false)
-  const [cacheNote, setCacheNote] = useState('')
   // tt 自身的更新:状态靠 /api/update 读(不联网),查/装都是人去点才动作
   const [upd, setUpd] = useState<UpdateState | null>(null)
   const [updBusy, setUpdBusy] = useState('')
-  const [updNote, setUpdNote] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   // 源码镜像 / 字典同步的运行态:它们是**动作**(长跑任务 + 进度),不再是独立页面,
   // 就住在「数据字典」分区的对应卡片里。目标环境不再是这里的一份 state ——
   // 它由表格里被点的那一行给出(原先那份 state 只是"下拉里选中的那个",改成表格后没有了)。
   const [mirror, setMirror] = useState<MirrorResp | null>(null)
   const [sync, setSync] = useState<DBSyncResp | null>(null)
   const [opBusy, setOpBusy] = useState('')
-  // 源码镜像 / 字典同步的失败提示。**没有成功态** —— 成功由进度块自己表达(见 doMirror 的注释)。
-  const [opNote, setOpNote] = useState<{ kind: 'err'; text: string } | null>(null)
+
+  // 源码镜像 / 字典同步等长跑动作的结果,统一走 toast(见 toast.tsx 的判据):
+  // 失败原来是一段内联在卡片里的红字 —— 它出现/消失会顶动卡片高度,
+  // 而这段话往往很长(带原因与下一步),内联时还会把下面的表格挤下去。
 
   // 需要二次确认的动作(全量重建 / 开始同步 / 升级 tt)。
   // 这几个动作原先用 window.confirm:它是浏览器原生弹窗,样式与本界面无关、
@@ -398,7 +401,6 @@ export function SettingsView() {
   } | null>(null)
 
   const [selSsh, setSelSsh] = useState(0)
-  const [err, setErr] = useState('')
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle')
   // 脏标记按**配置节**记。保存时只提交改过的节 —— 设置页的各张卡片共用 /api/hosts,
   // 把没改的节一起发过去就是用陈旧快照覆盖别张卡片刚改好的节。
@@ -418,10 +420,10 @@ export function SettingsView() {
   const isDirty = (...keys: ConfigKey[]) => keys.some((k) => dirtyRef.current[k])
 
   const [showPwd, setShowPwd] = useState(false)
-  // 数据库页操作状态
+  // 数据库页操作状态。accProbe 只记"哪一行、什么状态"用于行内图标;
+  // 具体文案走 toast(见 verifyAcct)。
   const [busy, setBusy] = useState<string>('')
-  const [note, setNote] = useState<{ kind: 'ok' | 'err' | 'info'; text: string } | null>(null)
-  const [accProbe, setAccProbe] = useState<{ i: number; state: 'testing' | 'ok' | 'err'; msg: string } | null>(null)
+  const [accProbe, setAccProbe] = useState<{ i: number; state: 'testing' | 'ok' | 'err' } | null>(null)
   const [addAcct, setAddAcct] = useState({ account: '', password: '' })
   const [delTarget, setDelTarget] = useState<number | null>(null) // 待删除环境的下标(弹窗确认)
 
@@ -461,8 +463,8 @@ export function SettingsView() {
         bdldocDir: c.bdldoc?.dir || '',
       })
       setListen(c.listen || '')
-      cleanDirty(); setSaveState('idle'); setErr('')
-    }).catch((e) => setErr(e.message))
+      cleanDirty(); setSaveState('idle')
+    }).catch((e) => toast.error('读取配置失败', { description: e?.message || String(e) }))
     // 派生状态与元信息:取不到不影响主流程(它们在卡片里只是提示)
     void api.configStatus().then(setStatus).catch(() => { /* 静默:提示性信息 */ })
     void api.configMeta().then(setMeta).catch(() => { /* 静默:提示性信息 */ })
@@ -502,7 +504,7 @@ export function SettingsView() {
     // 刻意不提交 sync 节:字典库的落点这一页不可编辑,交出去只会把服务端算好的值覆盖掉。
     // 后端约定"省略的节保持原样",所以不写它才是保留原值。
     if (keys.includes('bdldoc')) body.bdldoc = { dir: dict.bdldocDir.trim() }
-    setErr(''); setSaveState('saving')
+    setSaveState('saving')
     try {
       const next = await api.saveSettings(body)
       setCfg(next)
@@ -512,8 +514,11 @@ export function SettingsView() {
       void api.configStatus().then(setStatus).catch(() => { /* 提示性信息,取不到不影响 */ })
     } catch (ex: any) {
       // 服务端是校验的权威(环境名重复 / 端口越界 / 至少要有一个环境…),
-      // 它给的中文说明原样显示,不要用本地判断把它盖掉
-      setErr(ex.message || String(ex)); setSaveState('idle')
+      // 它给的中文说明原样显示,不要用本地判断把它盖掉。
+      // 走 toast 且**不自动关**:保存被拒是"必须看见"的失败,而这段说明往往有多行
+      // (后端会把该怎么改一并写出来),塞在标题右侧只能截断成一行看不全。
+      setSaveState('idle')
+      toast.error('保存失败', { description: ex?.message || String(ex), duration: 0 })
     }
   }
 
@@ -664,9 +669,9 @@ export function SettingsView() {
   const fetchFromServer = async () => {
     const s = sshs[selSsh]
     const d = s?.db
-    if (!s?.host || !s?.user) { setNote({ kind: 'err', text: '请先填写 SSH 主机与账号' }); return }
+    if (!s?.host || !s?.user) { toast.error('请先填写 SSH 主机与账号'); return }
     if (!d) return
-    setBusy('fetch'); setNote(null)
+    setBusy('fetch')
     try {
       const r = await api.probeDB({ host: s.host, port: s.port || 22, user: s.user, password: s.password, zone: s.zone, type: d.type || 'oracle' })
       const patch: Partial<SshDb> = {}
@@ -679,22 +684,22 @@ export function SettingsView() {
       if (r.type === 'kingbase') {
         if (r.database) patch.database = r.database
         if (r.port) patch.port = r.port
-        setNote(r.note
-          ? { kind: 'info', text: r.note }
-          : { kind: 'ok', text: `获取成功:金仓 ${r.database || '?'} @ ${hostVal || '?'}:${r.port || '?'}(主机地址按 SSH 主机回填,如需从别处连库请手工调整)` })
+        // 结果的三种语气分开报:note 是"获取到了但有话要说"(信息),没有 note 才是干净成功。
+        if (r.note) toast.info('获取完成,但有一处要确认', { description: r.note })
+        else toast.success(`已获取金仓库信息:${r.database || '?'} @ ${hostVal || '?'}:${r.port || '?'}`, {
+          description: '主机地址按 SSH 主机回填;如需从别处连库请手工调整。',
+        })
       } else {
         if (r.service || r.tns) patch.service = r.service || r.tns || ''
         if (r.port) patch.port = r.port
         const inner = probedHost && !isIP ? `(服务器内部名 ${probedHost} 客户端多半不可达,已改用 SSH 主机)` : ''
-        setNote({
-          kind: r.note ? 'err' : 'info',
-          text: (r.note ? r.note + ';' : '') +
-            `服务器解析地址 ${probedHost || '未知'}:${r.port || '?'}(service ${r.service || r.tns || '?'});主机地址已回填 ${hostVal || '?'}${inner}`,
-        })
+        const detail = `服务器解析地址 ${probedHost || '未知'}:${r.port || '?'}(service ${r.service || r.tns || '?'});主机地址已回填 ${hostVal || '?'}${inner}`
+        if (r.note) toast.error('获取到的信息需要确认', { description: r.note + ';' + detail })
+        else toast.success('已从服务器获取库连接要素', { description: detail })
       }
       if (Object.keys(patch).length) patchDb(selSsh, patch)
     } catch (ex: any) {
-      setNote({ kind: 'err', text: '获取失败: ' + (ex.message || String(ex)) })
+      toast.error('从服务器获取失败', { description: ex?.message || String(ex) })
     } finally { setBusy('') }
   }
   // 附加账号行验证:服务器侧以 账号+密码 连当前环境的显式目标库
@@ -703,10 +708,10 @@ export function SettingsView() {
     const s = sshs[i]
     const d = s?.db
     const row = d?.accounts?.[j]
-    if (!s?.host || !s?.user) { setAccProbe({ i: j, state: 'err', msg: '请先填写 SSH 主机与账号' }); return }
-    if (!d?.host.trim()) { setAccProbe({ i: j, state: 'err', msg: '请先填写数据库主机地址' }); return }
-    if (!row?.account.trim()) { setAccProbe({ i: j, state: 'err', msg: '账号不能为空' }); return }
-    setAccProbe({ i: j, state: 'testing', msg: '' })
+    if (!s?.host || !s?.user) { toast.error('请先填写 SSH 主机与账号'); return }
+    if (!d?.host.trim()) { toast.error('请先填写数据库主机地址'); return }
+    if (!row?.account.trim()) { toast.error('账号不能为空'); return }
+    setAccProbe({ i: j, state: 'testing' })
     try {
       await api.dbAccVerify({
         host: s.host, port: s.port || 22, user: s.user, password: s.password, zone: s.zone,
@@ -714,16 +719,20 @@ export function SettingsView() {
         dbHost: d.host.trim(), dbPort: d.port || 0,
         ...(d.type === 'kingbase' ? { dbDatabase: d.database.trim() } : { dbSvc: d.service.trim() }),
       })
-      setAccProbe({ i: j, state: 'ok', msg: '连接正常 ✓' })
+      // 行内只留状态(图标/禁用),文案走 toast —— 那行字原来内联在账号表格下面,
+      // 出现与消失都会顶动下面所有内容。
+      setAccProbe({ i: j, state: 'ok' })
+      toast.success(`账号 ${row.account.trim()} 连接正常`)
     } catch (ex: any) {
-      setAccProbe({ i: j, state: 'err', msg: ex.message || String(ex) })
+      setAccProbe({ i: j, state: 'err' })
+      toast.error(`账号 ${row.account.trim()} 验证失败`, { description: ex?.message || String(ex) })
     }
   }
   // 客户端直连测试:验证「本机 → 库」这条链路真的通(与服务器侧验证互补)
   const testConn = async () => {
     const d = sshs[selSsh]?.db
-    if (!d?.host.trim()) { setNote({ kind: 'err', text: '请先填写数据库主机地址' }); return }
-    setBusy('conn'); setNote(null)
+    if (!d?.host.trim()) { toast.error('请先填写数据库主机地址'); return }
+    setBusy('conn')
     try {
       const r = await api.connTest({
         type: d.type || 'oracle', host: d.host.trim(), port: d.port || 0,
@@ -731,38 +740,46 @@ export function SettingsView() {
         accounts: d.accounts.map((a) => ({ account: a.account.trim(), password: a.password })).filter((a) => a.account),
       })
       const ver = (r.serverVersion || '').split('\n')[0]
-      setNote({ kind: r.ok ? 'ok' : 'err', text: r.ok ? `连接正常:${ver}` : `${r.stage === 'version' ? '取版本失败' : '连接失败'}:${r.error}` })
+      if (r.ok) toast.success(`连接正常:${ver}`)
+      else toast.error(r.stage === 'version' ? '取版本失败' : '连接失败', { description: r.error })
     } catch (ex: any) {
-      setNote({ kind: 'err', text: '连接失败: ' + (ex.message || String(ex)) })
+      toast.error('连接失败', { description: ex?.message || String(ex) })
     } finally { setBusy('') }
   }
 
   // ---- 命令行集成(用户 PATH) ----
   const doInstall = async (add: boolean) => {
-    setInstallBusy(true); setInstallNote('')
+    setInstallBusy(true)
     try {
       const st = add ? await api.installAdd() : await api.installRemove()
       setStatus((prev) => (prev ? { ...prev, install: st } : prev))
-      setInstallNote(add ? `已把 ${st.exeDir} 加入用户 PATH,新开的终端即可直接敲 tt` : `已从用户 PATH 移除 ${st.exeDir}`)
+      // 成功要提醒的是"下一步动作"(新开终端才生效)——一句话,放 toast 里正合适。
+      toast.success(add
+        ? `已把 ${st.exeDir} 加入用户 PATH`
+        : `已从用户 PATH 移除 ${st.exeDir}`, {
+        description: add ? '新开的终端即可直接敲 tt。' : undefined,
+      })
     } catch (ex: any) {
-      setInstallNote('操作失败: ' + (ex.message || String(ex)))
+      toast.error('修改用户 PATH 失败', { description: ex?.message || String(ex) })
     } finally { setInstallBusy(false) }
   }
 
   // ---- tt 自身的更新 ----
   // 查:人去点才联网(服务不轮询——见 internal/web/update.go 的三条纪律)。
   const doUpdateCheck = async () => {
-    setUpdBusy('check'); setUpdNote(null)
+    setUpdBusy('check')
     try {
       const r = await api.updateCheck()
       if (!r.ok) {
-        setUpdNote({ kind: 'err', text: (r.error || '检查未成') + (r.where ? `（${r.where}）` : '') })
+        toast.error(r.error || '检查未成', { description: r.where })
         return
       }
       setUpd((prev) => (prev ? { ...prev, check: r.check, hint: r.hint } : prev))
-      setUpdNote({ kind: 'ok', text: r.check?.newer ? (r.hint || `有新版本 ${r.check?.latest}`) : `已是最新（${r.check?.latest}）` })
+      // 有新版是"信息"(用户可能不急),已是最新是"成功" —— 语气不同,但都不该顶动卡片。
+      if (r.check?.newer) toast.info(r.hint || `有新版本 ${r.check?.latest}`)
+      else toast.success(`已是最新(${r.check?.latest})`)
     } catch (ex: any) {
-      setUpdNote({ kind: 'err', text: '检查失败: ' + (ex.message || String(ex)) })
+      toast.error('检查更新失败', { description: ex?.message || String(ex) })
     } finally { setUpdBusy('') }
   }
 
@@ -778,12 +795,14 @@ export function SettingsView() {
     })
   }
   const applyUpdate = async () => {
-    setUpdBusy('apply'); setUpdNote(null)
+    setUpdBusy('apply')
     try {
       const r = await api.updateApply()
-      setUpdNote({ kind: 'ok', text: r.note || `更新器已接手（pid ${r.pid}）` })
+      // 用 duration:0 —— 这条之后本服务会被更新器停掉、页面随即断开,
+      // 信息必须留在屏幕上让用户看到(默认 8 秒可能还没读完页面就断了)。
+      toast.success(r.note || `更新器已接手(pid ${r.pid})`, { duration: 0 })
     } catch (ex: any) {
-      setUpdNote({ kind: 'err', text: '交棒失败: ' + (ex.message || String(ex)) })
+      toast.error('交棒给更新器失败', { description: ex?.message || String(ex) })
     } finally { setUpdBusy('') }
   }
 
@@ -791,15 +810,15 @@ export function SettingsView() {
   // 只删可再生的中间数据(后端只认 internal/config 那份清单);config.json 不碰。
   // 后端把清完的状态一起回,所以这里不必再打一次 configStatus。
   const doClearCache = async () => {
-    setCacheBusy(true); setCacheNote('')
+    setCacheBusy(true)
     try {
       const r = await api.cacheClear()
       setStatus((prev) => (prev ? { ...prev, cache: r.cache } : prev))
-      setCacheNote(r.removed > 0
+      toast.success(r.removed > 0
         ? `已清理 ${r.removed} 个文件,释放 ${fmtBytes(r.freed)}`
         : '没有可清理的文件')
     } catch (ex: any) {
-      setCacheNote('清理失败: ' + (ex.message || String(ex)))
+      toast.error('清理缓存失败', { description: ex?.message || String(ex) })
     } finally { setCacheBusy(false) }
   }
 
@@ -850,7 +869,7 @@ export function SettingsView() {
     })
   }
   const doMirror = async (full: boolean, env: string) => {
-    setOpBusy('mirror'); setOpNote(null)
+    setOpBusy('mirror')
     try {
       await api.mirrorPull(env, full)
       await refreshMirror()
@@ -858,7 +877,7 @@ export function SettingsView() {
       // 全量/增量与进行中状态 —— 同一件事在一屏里说两遍就是噪音。
       // (失败才留提示:失败原因只有它能说清,见下面的 catch。)
     } catch (ex: any) {
-      setOpNote({ kind: 'err', text: '拉取失败: ' + (ex.message || String(ex)) })
+      toast.error('拉取源码镜像失败', { description: ex?.message || String(ex) })
     } finally { setOpBusy('') }
   }
   /**
@@ -871,7 +890,7 @@ export function SettingsView() {
       await api.mirrorStop()
       await refreshMirror()
     } catch (ex: any) {
-      setOpNote({ kind: 'err', text: '停止失败: ' + (ex.message || String(ex)) })
+      toast.error('停止失败', { description: ex?.message || String(ex) })
     }
   }
   const runSync = (env: string) => {
@@ -884,13 +903,13 @@ export function SettingsView() {
     })
   }
   const doSync = async (env: string) => {
-    setOpBusy('sync'); setOpNote(null)
+    setOpBusy('sync')
     try {
       await api.dbsyncRun(env)
       await refreshSync()
       // 成功不给提示,理由同 doMirror(进度块随后就把这件事说清了)
     } catch (ex: any) {
-      setOpNote({ kind: 'err', text: '同步失败: ' + (ex.message || String(ex)) })
+      toast.error('同步字典数据失败', { description: ex?.message || String(ex) })
     } finally { setOpBusy('') }
   }
   /** 停止正在跑的同步(理由同 stopMirror:不二次确认,异步取消不等待)。 */
@@ -899,11 +918,12 @@ export function SettingsView() {
       await api.dbsyncStop()
       await refreshSync()
     } catch (ex: any) {
-      setOpNote({ kind: 'err', text: '停止失败: ' + (ex.message || String(ex)) })
+      toast.error('停止失败', { description: ex?.message || String(ex) })
     }
   }
 
-  if (!cfg) return <div className="p-6 text-sm text-muted-foreground">{err || '加载配置中…'}</div>
+  // 读配置失败会由 loadSettings 弹 toast,这里只留一句占位(不再有 err 文本)。
+  if (!cfg) return <div className="p-6 text-sm text-muted-foreground">加载配置中…</div>
   const cur = sshs[selSsh]
   const curDb = cur?.db
   // 设计器清单里有、TT 里也有的名字 —— 用于在「发现环境」弹窗里标注"已存在"。
@@ -972,14 +992,14 @@ export function SettingsView() {
                 没有未保存修改时才可点 —— 也就是说它唯一能覆盖的场景是"人一直停在本页、
                 同时在命令行改了配置",代价却是每个分区标题右侧都常驻一个用不上的图标。 */}
             <span className="flex min-w-0 items-center gap-2">
-              {err && <span className="truncate text-[11px] text-red-600 dark:text-red-400" title={err}>{err}</span>}
-              {!err && (
-                <span className={cn('text-[11px]',
-                  saveState === 'saved' ? 'text-emerald-600 dark:text-emerald-400'
-                    : dirty ? 'text-amber-600 dark:text-amber-400' : '')}>
-                  {saveState === 'saving' ? '保存中…' : saveState === 'saved' ? '已保存 ✓' : dirty ? '有未保存的修改' : ''}
-                </span>
-              )}
+              {/* 这里原先还有一格 `err`(截断成一行、title 里挂全文的红色错误)。
+                  保存/读取的错误改走统一 toast 了 —— 那里能完整显示多行说明,
+                  也不再把这一行挤得忽宽忽窄(见 toast.tsx 的判据)。 */}
+              <span className={cn('text-[11px]',
+                saveState === 'saved' ? 'text-emerald-600 dark:text-emerald-400'
+                  : dirty ? 'text-amber-600 dark:text-amber-400' : '')}>
+                {saveState === 'saving' ? '保存中…' : saveState === 'saved' ? '已保存 ✓' : dirty ? '有未保存的修改' : ''}
+              </span>
             </span>
           </div>
 
@@ -1153,14 +1173,9 @@ export function SettingsView() {
                               <Zap className={cn('h-3.5 w-3.5', busy === 'conn' && 'animate-spin')} />测试连接
                             </Button>
                           </div>
-                          {note && (
-                            <p className={cn('mt-2 border-l-2 px-2 py-1 text-[11px]',
-                              note.kind === 'ok' ? 'border-emerald-500/50 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300'
-                                : note.kind === 'err' ? 'border-red-500/50 bg-red-500/5 text-red-700 dark:text-red-300'
-                                  : 'border-sky-500/50 bg-sky-500/5 text-muted-foreground')}>
-                              {note.text}
-                            </p>
-                          )}
+                          {/* 这里原先是一块「从服务器获取 / 测试连接」的结果条(左边一道彩条 +
+                              带底色的段落)。它一出现就把下面的账号列表整块往下推 ——
+                              而那正是用户最常看的一张表。现在结果走统一 toast。 */}
 
                           <div className="mt-4">
                             <div className="mb-1 text-[11px] text-muted-foreground">
@@ -1227,13 +1242,8 @@ export function SettingsView() {
                                 </TableBody>
                               </Table>
                             </div>
-                            {accProbe && (
-                              <p className={cn('mt-1 text-[11px]',
-                                accProbe.state === 'ok' ? 'text-emerald-600 dark:text-emerald-400'
-                                  : accProbe.state === 'err' ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground')}>
-                                {accProbe.msg || '验证中…'}
-                              </p>
-                            )}
+                            {/* accProbe 的结果文案已改走 toast;这里只留行内那个转圈图标
+                                (在「验证」按钮上),不再因为一段文字把表格顶下去。 */}
                           </div>
                         </>
                       )}
@@ -1279,12 +1289,10 @@ export function SettingsView() {
                     它必须留在这张卡里 —— 上面选了「本地」就等于声明"我读本地那份",
                     而本地那份正是这张表同步出来的。 */}
                 <SectionTitle>数据同步(写入本地 SQLite)</SectionTitle>
-                {/* 只显示**失败**:成功不需要提示 —— 进度块随后就会写明环境、全量/增量
-                    与进行中状态,再挂一句"已开始…"是把同一件事说两遍。
-                    失败必须留:原因只有这里能说清(进度块只显示状态,不含错误详情)。 */}
-                {opNote?.kind === 'err' && (
-                  <p className="text-[11px] text-red-600 dark:text-red-400">{opNote.text}</p>
-                )}
+                {/* 这里原先内联一段失败红字(拉取/同步/停止失败),已改走统一 toast:
+                    它出现与消失都会顶动这张卡的高度,而错误详情往往好几行。
+                    保留在卡片里的只有**说明性**的一行(下面那条"没有可同步的环境"),
+                    那是"当前状态"而不是"刚才那次动作的结果"。 */}
                 {sync && sync.envs.length === 0 && (
                   <p className="text-[11px] text-muted-foreground">
                     没有可同步的环境 —— 需要先在「站点管理」为环境挂上数据库连接。
@@ -1555,9 +1563,6 @@ export function SettingsView() {
                 {!status?.install.supported && status?.install.manual && (
                   <pre className="overflow-x-auto border border-border bg-muted/30 p-2 text-[11px]">{status.install.manual}</pre>
                 )}
-                {installNote && (
-                  <p className="text-[11px] text-muted-foreground">{installNote}</p>
-                )}
               </Card>
 
               <Card id="card-app-info" title="运行信息">
@@ -1605,9 +1610,6 @@ export function SettingsView() {
                     </span>
                   )}
                 </div>
-                {updNote && (
-                  <p className={`text-[11px] ${updNote.kind === 'ok' ? 'text-muted-foreground' : 'text-destructive'}`}>{updNote.text}</p>
-                )}
               </Card>
 
               <Card id="card-app-cache" title="缓存">
@@ -1634,7 +1636,6 @@ export function SettingsView() {
                     <Trash2 className="mr-1 h-3.5 w-3.5" />
                     {cacheBusy ? '清理中…' : '清除缓存'}
                   </Button>
-                  {cacheNote && <span className="text-[11px] text-muted-foreground">{cacheNote}</span>}
                 </div>
                 <p className="text-[11px] text-muted-foreground">
                   tt serve 启动时会自动清理超过{' '}

@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import { api, API_BASE, type Event, type StopInfo, type Breakpoint, type Frame, type VarItem, type WSLogItem, type WSLogContent, type WSLogQuery, type WSTestResult, type InflightInfo } from './api'
 import { THEME_KEY, applyDark, readStoredTheme, resolveDark, watchSystemTheme, type ThemeMode } from '../../shared/theme'
+// 统一消息出口(零依赖的那个文件,见 toastBus.ts 的说明:store 要能在裸 Node 里加载)
+import { toast } from './toastBus'
 // 只取类型:routing.ts 里有 DOM 相关逻辑,虽然都在函数体内,这里也只导入类型
 // —— 打包后可确保 store 与路由模块之间没有运行时依赖(check:store 在 Node 里跑)。
 import type { SettingsSectionKey } from './routing'
@@ -662,7 +664,9 @@ export const useStore = create<Store>((set, get) => ({
       const { result } = await api.wsTest(st.wsTestMode, st.wsTestUrl, st.wsTestBody, st.wsTestSoap)
       set({ wsTestResult: result })
     } catch (e: any) {
-      set({ wsTestErr: e.message || String(e) })
+      // 走统一消息出口:原先这段错误内联在服务测试页的顶栏下面,一出现就把
+      // 请求/响应两个编辑区整体下推(见 WsTestView 原先那条 err 横幅)。
+      toast.error('服务测试失败', { description: e?.message || String(e) })
     } finally {
       set({ wsTestRunning: false })
     }
@@ -674,7 +678,9 @@ export const useStore = create<Store>((set, get) => ({
       const r = await api.wsLogs(q)
       set({ wsLogs: r.items || [], wsLogsHasMore: !!r.hasMore, wsLogsPage: q.page ?? 1, wsLogSel: null, wsLogContent: null })
     } catch (e: any) {
-      set({ wsLogErr: e.message || String(e), wsLogs: [] })
+      // 走统一 toast:原先这条错误内联在日志页顶部,会把列表整体下推。
+      toast.error('查询接口日志失败', { description: e?.message || String(e) })
+      set({ wsLogs: [] })
     } finally {
       set({ wsLogsLoading: false })
     }
@@ -691,7 +697,9 @@ export const useStore = create<Store>((set, get) => ({
       // 期间可能已切到别的行:只在仍是当前选中时写回
       if (get().wsLogSel?.rowid === item.rowid) set({ wsLogContent: content })
     } catch (e: any) {
-      if (get().wsLogSel?.rowid === item.rowid) set({ wsLogErr: e.message || String(e) })
+      if (get().wsLogSel?.rowid === item.rowid) {
+        toast.error('读取报文详情失败', { description: e?.message || String(e) })
+      }
     }
   },
 
@@ -747,6 +755,10 @@ export const useStore = create<Store>((set, get) => ({
       pollUntilStopped(set, get)
     } catch (e: any) {
       cancelRetire()
+      // 启动失败原先是一条**占据一整行的红色横幅**(App.tsx 里那个横条 + 一个关闭按钮):
+      // 它一出现就把整个工作台往下压,而它说的只是一句失败原因。改走统一消息出口,
+      // 并**不自动关**(duration:0)—— 启动失败必须看见,不能 3 秒后自己溜走。
+      toast.error('启动失败', { description: e?.message || String(e), duration: 0 })
       set({ wsLogErr: e.message || String(e), state: '', launchError: `启动失败: ${e.message}`, sessionId: null, loadingSource: false, stop: null })
     } finally {
       endRetire()

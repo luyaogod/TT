@@ -404,9 +404,8 @@ export function WsLogView() {
         </div>
       </div>
 
-      {err && (
-        <div className="mb-2 shrink-0 border border-red-500/20 bg-red-500/10 px-3 py-1.5 text-xs text-red-600 dark:text-red-600 dark:text-red-400">{err}</div>
-      )}
+      {/* 查询失败原先顶在这里一条红条,会把下面的列表整体下推。已改走统一 toast
+          (在 store 的 wslog 查询 action 里发)。 */}
 
       {/* 左右分配:左侧列表 flex-1 吃掉剩余宽度,右侧详情按占比取宽 + 5px 分隔条。
           min-w-0/overflow-hidden 锁住容器宽度:面板是 shrink-0,不加锁会把容器一路撑宽

@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import { App } from './App'
 import { editorRef } from './SourceView'
 import { useStore } from './store'
+import { ToastProvider } from './toast'
 import { applyDark, readStoredTheme, resolveDark } from '../../shared/theme'
 import './index.css'
 
@@ -12,7 +13,10 @@ applyDark(resolveDark(readStoredTheme()))
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    {/* 统一消息出口挂在最外层:全站任何组件都能 useToast(),而 toast 只渲染一次。 */}
+    <ToastProvider>
+      <App />
+    </ToastProvider>
   </React.StrictMode>,
 )
 

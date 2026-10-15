@@ -10,10 +10,10 @@ import { ArrowRightLeft, RefreshCw, RotateCcw, Power } from 'lucide-react'
 import { useStore } from './store'
 import { api } from './api'
 import { Input } from '../../shared/ui'
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '../../shared/ui-radix'
+import { useToast } from './toast'
 
 const STATE_LABEL: Record<string, string> = {
   idle: '空闲', loading: '连接中…', stopped: '已停站', running: '运行中', exit: '已断开',
@@ -61,7 +61,8 @@ export function SessionPanel() {
 
   const [envNames, setEnvNames] = useState<string[]>([])
   const [busy, setBusy] = useState<string | null>(null)
-  const [err, setErr] = useState('')
+  // 失败提示统一走 toast(见 runOp / entMissing),这里不再留"面板级错误"的 state。
+  const toast = useToast()
 
   // 两个可折叠区域(默认展开,仿 debug 运行区)
   const [open, setOpen] = useState({ session: true, env: true })
@@ -95,12 +96,13 @@ export function SessionPanel() {
 
   const runOp = async (op: 'close' | 'restart' | 'switch', env?: string) => {
     setBusy(`${op}:${env || ''}`)
-    setErr('')
     try {
       // ENT 随操作带走:环境配置里已不存企业编号,不给就是"沿用登录 shell 的 $TOPENT"。
       await sessionOp(op, env, ent.trim())
     } catch (e: any) {
-      setErr(e.message || String(e))
+      // 会话操作的失败原先内联在这个窄面板里(一行小红字),会把下面的环境列表挤动。
+      const label = op === 'close' ? '结束会话' : op === 'restart' ? '重启会话' : '切换会话'
+      toast.error(label + '失败', { description: e?.message || String(e) })
     } finally {
       setBusy(null)
     }
@@ -112,16 +114,20 @@ export function SessionPanel() {
   // 登录脚本里的 $TOPENT 决定 —— 而"用错了企业"的表现是查不到数据,跟"数据不存在"
   // 一模一样。所以宁可不放行,也不替用户接受一个来路不明的默认值。
   // (仅对"要建立/重建连接"的操作生效;close 随时可做。)
+  //
+  // 拦下来时说清原因:走统一消息出口(原先是在输入框下面挤一行红字,
+  // 会把下面的环境列表顶下去)。按钮本身也已经显灰禁用,这里是第二道。
   const entMissing = () => {
     if (ent.trim()) return false
-    setEntErr('请先填 ENT(企业编号):它决定这次连哪个企业/账号,留空会沿用机器登录默认,容易连错企业')
+    toast.error('请先填 ENT(企业编号)', {
+      description: '它决定这次连哪个企业/账号。留空会沿用机器登录默认,容易连错企业。',
+    })
     return true
   }
 
   const doOp = (op: 'close' | 'restart' | 'switch', env?: string) => {
     // close 只是断开,不需要 ENT;switch/restart 都会重新登录,必须点名企业。
     if (op !== 'close' && entMissing()) return
-    setEntErr('')
     const hasRun = !!sessionId && state !== 'idle' && state !== '' && state !== 'exit'
     const envLabel = env || curEnv || ''
     const entLabel = ent.trim() ? `(ENT ${ent.trim()})` : ''
@@ -154,7 +160,6 @@ export function SessionPanel() {
   // entShell  = 当前会话登录后回读到的真实 $TOPENT(没给 ENT 时它就是实际生效值)。
   const [ent, setEnt] = useState('')
   const [entShell, setEntShell] = useState('')
-  const [entErr, setEntErr] = useState('')
   const mode = useStore((s) => s.mode)
 
   // **输入框永远可编辑。**
@@ -191,7 +196,7 @@ export function SessionPanel() {
               <span className="w-[52px] shrink-0 text-xs text-muted-foreground"
                 title="TOPENT(企业编号):T100 运行时的企业环境,作业运行与数据库连接以此为准">TOPENT</span>
               <Input value={ent} disabled={entLocked}
-                onChange={(e) => { setEnt(e.target.value); setEntErr('') }}
+                onChange={(e) => setEnt(e.target.value)}
                 placeholder="必填,如 99"
                 title={entLocked
                   ? '协作模式下企业编号归 AI(它会直接改会话的企业编号);要自己填请先切回纯人工模式'
@@ -210,7 +215,6 @@ export function SessionPanel() {
                   : `当前 shell 实际为 ${entShell}`}
               </div>
             )}
-            {entErr && <div className="px-2.5 pb-1 text-[11px] text-red-600 dark:text-red-400">{entErr}</div>}
           </div>
         )}
 
@@ -280,7 +284,6 @@ export function SessionPanel() {
                 </div>
               )
             })}
-            {err && <div className="px-2.5 pb-1 text-[11px] text-red-600 dark:text-red-400">{err}</div>}
           </div>
         )}
       </div>

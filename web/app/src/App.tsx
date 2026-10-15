@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { RotateCcw, WifiOff, Bug, BugPlay, Globe, FlaskConical, Settings, X, ListTree, Server, type LucideIcon } from 'lucide-react'
+import { RotateCcw, WifiOff, Bug, BugPlay, Globe, FlaskConical, Settings, ListTree, Server, type LucideIcon } from 'lucide-react'
 import { connectWS, useStore } from './store'
 import { Toolbar } from './Toolbar'
 import { SourceView, editorRef } from './SourceView'
@@ -154,8 +154,8 @@ export function App() {
   const setRightView = useStore((s) => s.setRightView)
   const view = useStore((s) => s.view)
   const setView = useStore((s) => s.setView)
-  const launchError = useStore((s) => s.launchError)
-  const setLaunchError = useStore((s) => s.setLaunchError)
+  // launchError 不再在这里渲染(改走统一 toast);store 那个字段仍由启动失败写入,
+  // 供别处/调试读取,应用外壳不再订阅它 —— 订阅了也只会白白多一次重渲染。
   const backendDead = useStore((s) => s.backendDead)
   const wsConnected = useStore((s) => s.wsConnected)
   const launching = useStore((s) => s.launching)
@@ -234,16 +234,10 @@ export function App() {
     <div className="flex h-screen flex-col bg-background text-foreground">
       {/* 顶部留白,高度取状态栏那一份:内容不贴着窗口上沿,上下留白也就对称了 */}
       <div className={`${STATUS_BAR_H} shrink-0`} />
-      {/* 启动失败横幅:显眼红色,可关闭;下次启动/下次成功时自动清除 */}
-      {launchError && (
-        <div className="flex shrink-0 items-center gap-2 border-b border-red-500/20 bg-red-500/10 px-3 py-1.5 text-xs text-red-600 dark:text-red-400">
-          <span className="min-w-0 flex-1 truncate" title={launchError}>{launchError}</span>
-          <button onClick={() => setLaunchError('')} title="关闭"
-            className="p-0.5 transition-colors hover:bg-red-500/20">
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      )}
+      {/* 「启动失败」原先是这里一条整行红色横幅(还把整个工作台往下压)。
+          已改走统一 toast,并且**不自动关**:启动失败必须看见(见 store 的 launch catch)。
+          下面那条「后端断开」保留在这里 —— 它不是一次性消息,而是**持续状态** + 一个动作
+          (重新启动按钮),那类东西不该做成会自己消失的 toast。 */}
       {banner && (
         <div className="flex shrink-0 items-center gap-2 border-b border-red-500/20 bg-red-500/10 px-3 py-1.5 text-xs text-red-600 dark:text-red-600 dark:text-red-400">
           <WifiOff className="h-3.5 w-3.5" />

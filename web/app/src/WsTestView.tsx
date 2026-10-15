@@ -24,7 +24,7 @@ export function WsTestView() {
   const soap = useStore((s) => s.wsTestSoap)
   const result = useStore((s) => s.wsTestResult)
   const running = useStore((s) => s.wsTestRunning)
-  const err = useStore((s) => s.wsTestErr)
+  // 失败提示走统一 toast(在 store 的 runWsTest 里发),这里不再读 wsTestErr。
   const setWsTest = useStore((s) => s.setWsTest)
   const runWsTest = useStore((s) => s.runWsTest)
   const wsLogSel = useStore((s) => s.wsLogSel)
@@ -90,7 +90,8 @@ export function WsTestView() {
         </div>
       </div>
 
-      {err && <div className="shrink-0 border border-red-500/20 bg-red-500/10 px-3 py-1.5 text-xs text-red-600 dark:text-red-600 dark:text-red-400">{err}</div>}
+      {/* 失败提示已改走统一 toast(见 store 的 runWsTest):那条横幅原先顶在这里,
+          一出现就把请求/响应两个编辑区整体下推。 */}
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         {/* 请求报文:竖排时下缘分割线,横排时右缘分割线(与响应区紧贴相连)。
             背景交给 Monaco 主题(editor.background,与源码编辑器同色),故这里不再铺 bg。 */}
