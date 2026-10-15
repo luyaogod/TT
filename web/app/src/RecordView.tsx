@@ -39,6 +39,23 @@ const RETENTION_LABEL: Record<string, string> = {
   cache: '缓存目录(随统一清理按年龄删)',
 }
 
+// 会话登记里那一轮**该怎么称呼**。
+//
+// 为什么要分四种:登记文件比进程活得久 —— 「回放」是另起一个进程 `rec reproduce --no-wait`,
+// 它发完事件就退,留下的是"登记还在 + 一个还开着的窗口"(用户要看最后那一屏)。把这种残留
+// 说成"正在录"是错的(用户 2026-10-15 撞上过:面板写着"正在录:fep-x",可那一轮其实是回放),
+// 于是按 用途(录/回放) × 起它的进程还在不在 分四种说法,并且都指向同一个收工按钮。
+function curLabel(cur: RecordingCurrent): string {
+  const stale = !!cur.stale
+  if (cur.kind === 'replay') return stale ? '回放留下的窗口' : '正在回放'
+  return stale ? '上一轮录制没收干净' : '正在录'
+}
+
+// 收工按钮上的字:回放那一轮谈不上"停止录制"(它早就发完了),留住的是那个窗口。
+function stopLabel(cur: RecordingCurrent | null): string {
+  return cur?.kind === 'replay' ? '收工(关窗口)' : '停止录制'
+}
+
 // 详情面板的宽度分配:与接口日志页同一套做法(拖分割条改占比、占比记在本地)。
 // 三个数是那边同一份口径,量很小,先各留一份;哪天有第三处再抽出去。
 const RATIO_MIN = 0.25
@@ -46,17 +63,28 @@ const RATIO_MAX = 0.75
 const RESIZER_W = 1 // .col-resizer 的宽度(见 index.css:1px 线 + 透明溢出命中区)
 
 // 体积:与设置页那份同一口径(那边是视图内的本地函数,没有导出,这里照抄一份)。
+// 1024 进位:1048575 字节要说 "1023.9 KB" 而不是 "1024.0 KB"(先算到哪一档、再取整)。
 function fmtBytes(n: number): string {
   if (!n) return '0 B'
   if (n >= 1 << 30) return (n / (1 << 30)).toFixed(2) + ' GB'
-  if (n >= 1 << 20) return (n / (1 << 20)).toFixed(1) + ' MB'
-  if (n >= 1 << 10) return (n / (1 << 10)).toFixed(1) + ' KB'
+  if (n >= 1 << 20) {
+    const mb = n / (1 << 20)
+    // 四舍五入到一位后正好封顶 1024 的（1048575 这种），按 MB 说
+    return (mb >= 1023.95 ? '1.0 MB' : mb.toFixed(1) + ' MB')
+  }
+  if (n >= 1 << 10) {
+    const kb = n / (1 << 10)
+    return (kb >= 1023.95 ? '1.0 MB' : kb.toFixed(1) + ' KB')
+  }
   return n + ' B'
 }
 
 // 时间:RFC3339 → 本地时间。空 = 身份里没记时间(老件/没收到),不猜。
 function fmtTime(s?: string): string {
-  if (!s) return '-'
+  // Go 的零值时间(`0001-01-01T00:00:00Z`)是**照实**出现在 JSON 里的(结构体字段的
+  // omitempty 管不到 time.Time):那不是"时间",是"没记"。渲染成 1/1/1 07:36:42 只会让人
+  // 以为真有个一千年前的会话(实测单测抓到这个)。`fmtFinished` 早就有这道护栏,这里补上。
+  if (!s || s.startsWith('0001-')) return '-'
   const d = new Date(s)
   if (Number.isNaN(d.getTime())) return s
   return d.toLocaleString('zh-CN', { hour12: false })
@@ -99,6 +127,8 @@ export function RecordView() {
   const [rows, setRows] = useState<RecordingRow[]>([])
   const [cur, setCur] = useState<RecordingCurrent | null>(null)
   const [loading, setLoading] = useState(false)
+  // 列表读取失败的原因（非空 = 界面要给"读不到"而不是"没有"）。
+  const [loadErr, setLoadErr] = useState('')
   const [busy, setBusy] = useState<'' | 'start' | 'stop'>('')
   // 复制反馈只记一行(局部 ok/fail,1.5s 复位),照接口日志页的 copyRowID
   const [copied, setCopied] = useState<{ id: string; state: 'ok' | 'fail' } | null>(null)
@@ -123,10 +153,14 @@ export function RecordView() {
       const next = list.recordings || []
       setRows(next)
       setCur(now.recording || null)
+      setLoadErr('')
       // 选中项跟着列表走:还在就换成新的那行(体积/指纹可能刚更新),不在就关掉详情。
       // 用函数式写法读最新列表,免得把 sel 写进依赖、每次刷新都重拉一遍。
       setSel((s) => (s ? next.find((x) => x.id === s.id && x.where === s.where) || null : null))
     } catch (e: any) {
+      // 错误要留在界面上（loadErr），不能只发一条会消失的 toast：否则列表区会显示成
+      // "还没有录制件"——那是一个**事实判断**，与"这次没读到"完全不是一回事（实测）。
+      setLoadErr(e?.message || String(e))
       toast.error('读取录制失败', { description: e?.message || String(e) })
     } finally {
       setLoading(false)
@@ -140,6 +174,31 @@ export function RecordView() {
     if (view !== 'record') return
     void load(sessionEnv)
   }, [view, sessionEnv, tick, load])
+
+  // 「正在录/正在回放」这条状态要**自己收敛**。
+  //
+  // 为什么需要轮询：会话可能被界面之外的东西收掉（`tt fep session close`、别的进程、CLI）。
+  // 那时 `.tt-fep.json` 已经没了、`/api/recordings/current` 已经是 null，而面板什么都不点
+  // 就永远挂着"正在录:fep-x"（实测：外部收掉后 25 秒纹丝不动，0 个新请求）。
+  // 只在**有会话**时轮询，且只问那个便宜端点（读登记，不列文件）；状态真的变了才动界面，
+  // 会话消失时顺带把列表重拉一次（那一轮已经收工落库了）。
+  useEffect(() => {
+    if (view !== 'record' || !cur) return
+    const t = window.setInterval(() => {
+      void (async () => {
+        try {
+          const now = await api.recordingCurrent()
+          const next = now.recording || null
+          const same = !!next && next.id === cur.id
+            && !!next.stale === !!cur.stale && (next.kind || '') === (cur.kind || '')
+          if (same) return
+          setCur(next)
+          if (!next) void load(sessionEnv)
+        } catch { /* 轮询失败不动界面:下一拍再试 */ }
+      })()
+    }, 5000)
+    return () => window.clearInterval(t)
+  }, [view, cur, load, sessionEnv])
 
   // 点开一行就取它的身份。取不到(没有 .meta.json 的老件)照实说,不假装有。
   useEffect(() => {
@@ -228,6 +287,15 @@ export function RecordView() {
   // 企业编号读会话自己的 TOPENT(读取失败就不带 —— 那就等于沿用登录 shell 的 $TOPENT,
   // 与服务端 "空 = 沿用 $TOPENT" 的口径一致)。
   const onStart = async () => {
+    // 三道闸门在这里**再走一遍**，而不是只靠按钮的 disabled：
+    // 作业名那个输入框的回车也走这条路（实测：按钮已经禁用并写着"已经在录了"时，
+    // 在框里按回车照样把请求发出去；同一个任务里连按两次回车会发出 2 个 POST）。
+    // 按钮的 disabled 只是**界面**上的闸门，状态检查必须落在动作里。
+    if (busy) return
+    if (cur && !cur.stale) {
+      toast.error('已经在录了', { description: `当前这一轮是 ${cur.id}（${cur.prog || '-'}）：先${stopLabel(cur)}再起新的（两个会话会抢同一组端口与调试会话）。` })
+      return
+    }
     if (!sessionEnv) {
       toast.error('还没有会话环境', { description: '先在左侧「会话」面板连一个环境 —— 录制落在哪个环境、用哪个企业,都跟着它走。' })
       return
@@ -264,11 +332,14 @@ export function RecordView() {
   // 收工是异步的,所以刷新后可能还看不到那一件 —— 这是正常的,再点一次刷新即可。
   const onStop = async () => {
     setBusy('stop')
+    const replay = cur?.kind === 'replay'
     try {
       const r = await api.recordingStop()
       const id = r.stopped?.id || ''
-      toast.success(`已停止录制:${id}`, {
-        description: `${r.stopped?.prog || ''} 已收工,录制件落到长期库/缓存(稍等再点刷新)`,
+      toast.success(replay ? `已收工:${id}` : `已停止录制:${id}`, {
+        description: replay
+          ? '回放留下的那个窗口已经关掉,会话登记也清了'
+          : `${r.stopped?.prog || ''} 已收工,录制件落到长期库/缓存(稍等再点刷新)`,
       })
       await load(sessionEnv)
     } catch (e: any) {
@@ -337,12 +408,14 @@ export function RecordView() {
         />
         <button
           onClick={() => void onStart()}
-          disabled={!!busy || !sessionEnv || !prog.trim() || !!cur}
-          title={cur
+          disabled={!!busy || !sessionEnv || !prog.trim() || (!!cur && !cur.stale)}
+          title={cur && !cur.stale
             ? `已经在录了(${cur.id}):先停掉它再起新的(两个会话会抢同一组端口)`
-            : !sessionEnv
-              ? '先在左侧「会话」面板连一个环境 —— 录制落在哪个环境跟着它走'
-              : `起一轮录制(环境 ${sessionEnv}):服务端会另起一个脱离的进程,等它登记(秒级到几十秒)`}
+            : cur && cur.stale
+              ? `登记里还留着上一轮(${cur.id}),但起它的进程已经不在了 —— 可以直接起新的;那个窗口若还开着,点「${stopLabel(cur)}」收掉`
+              : !sessionEnv
+                ? '先在左侧「会话」面板连一个环境 —— 录制落在哪个环境跟着它走'
+                : `起一轮录制(环境 ${sessionEnv}):服务端会另起一个脱离的进程,等它登记(秒级到几十秒)`}
           className="inline-flex shrink-0 items-center gap-1 border border-emerald-500/20 px-2 py-0.5 text-xs text-emerald-600 hover:bg-emerald-500/10 disabled:pointer-events-none disabled:opacity-40 dark:text-emerald-400">
           <Play className="h-3.5 w-3.5" />
           {busy === 'start' ? '正在起…' : '开始录制'}
@@ -350,10 +423,14 @@ export function RecordView() {
         <button
           onClick={() => void onStop()}
           disabled={!!busy || !cur}
-          title={cur ? `停止并收工:${cur.id}(它会落身份并搬进长期库)` : '现在没有在录的会话'}
+          title={cur
+            ? (cur.kind === 'replay'
+              ? `收工:关掉回放留下的那个窗口(${cur.id},起它的回放进程早就退场了)`
+              : `停止并收工:${cur.id}(它会落身份并搬进长期库)`)
+            : '现在没有在录的会话'}
           className="inline-flex shrink-0 items-center gap-1 border border-border px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40">
           <Square className="h-3.5 w-3.5" />
-          {busy === 'stop' ? '正在停…' : '停止录制'}
+          {busy === 'stop' ? '正在停…' : stopLabel(cur)}
         </button>
         <button onClick={onRefresh} disabled={loading} title="重新拉列表与「在录吗」"
           className="p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40">
@@ -365,10 +442,18 @@ export function RecordView() {
           {sessionEnv ? `环境 ${sessionEnv}` : '未连会话:列全部环境'}
         </span>
         {cur && (
-          <span className="flex min-w-0 items-center gap-1 text-xs text-amber-600 dark:text-amber-400"
-            title={`这一轮还活着(会话登记里有它)。停止录制会让它收工并落身份:${PATH_LABEL[cur.path || ''] || cur.path || ''}`}>
+          <span className={`flex min-w-0 items-center gap-1 text-xs ${cur.stale
+            ? 'text-muted-foreground'
+            : 'text-amber-600 dark:text-amber-400'}`}
+            title={cur.kind === 'replay'
+              ? (cur.stale
+                ? `这是一轮回放留下的窗口(${cur.id}):回放进程发完事件就退场了,登记与那个窗口还在。「${stopLabel(cur)}」会收掉它`
+                : `正在回放 ${cur.id}:进程还在(它会等停站)`)
+              : (cur.stale
+                ? `登记里还留着 ${cur.id},但起它的进程已经不在了(那一轮没收干净)。「${stopLabel(cur)}」可以收掉它留下的窗口`
+                : `这一轮还活着(会话登记里有它)。${stopLabel(cur)}会让它收工并落身份:${PATH_LABEL[cur.path || ''] || cur.path || ''}`)}>
             <Video className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate">正在录:{cur.id}({cur.prog || '-'})</span>
+            <span className="truncate">{curLabel(cur)}:{cur.id}({cur.prog || '-'})</span>
           </span>
         )}
       </div>
@@ -460,13 +545,26 @@ export function RecordView() {
               </TableBody>
             </Table>
             {rows.length === 0 && !loading && (
-              <div className="space-y-1 p-4 text-center text-xs text-muted-foreground">
-                <div>{sessionEnv ? `环境 ${sessionEnv} 下还没有录制件。` : '还没有录制件。'}</div>
-                <div>填好上方的作业名,点「开始录制」录一轮;录完收工后它就会出现在这里。</div>
-                {!sessionEnv && (
-                  <div>起录需要一个环境:先在左侧「会话」面板连一个(环境与企业编号都跟着它走)。</div>
-                )}
-              </div>
+              // 失败 ≠ 没有录制件。原来这里不分青红皂白地说"还没有录制件"，把一次接口失败
+              // 说成了一个事实判断（实测：CDP 拦掉 /api/recordings* 后，界面照样宣称"还没有录制件"）。
+              loadErr ? (
+                <div className="flex flex-col items-center gap-2 p-4 text-center text-xs">
+                  <div className="text-red-600 dark:text-red-400">读取录制列表失败</div>
+                  <div className="max-w-2xl whitespace-pre-wrap text-muted-foreground">{loadErr}</div>
+                  <button onClick={onRefresh}
+                    className="rounded-ui border border-border px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground">
+                    重试
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-1 p-4 text-center text-xs text-muted-foreground">
+                  <div>{sessionEnv ? `环境 ${sessionEnv} 下还没有录制件。` : '还没有录制件。'}</div>
+                  <div>填好上方的作业名,点「开始录制」录一轮;录完收工后它就会出现在这里。</div>
+                  {!sessionEnv && (
+                    <div>起录需要一个环境:先在左侧「会话」面板连一个(环境与企业编号都跟着它走)。</div>
+                  )}
+                </div>
+              )
             )}
             {rows.length === 0 && loading && (
               <div className="p-4 text-center text-xs text-muted-foreground">加载中…</div>
@@ -581,7 +679,10 @@ function InfoBody({ row, meta, loading }: { row: RecordingRow; meta: RecordingMe
     ['开始时间', fmtTime(meta?.started || row.started)],
     ['结束时间', fmtFinished(meta?.finished), '收工那一刻(它同时也是身份落盘的时刻)'],
     ['时长(秒)', dur ? String(dur) : '-'],
-    ['体积', `${fmtBytes(row.bytes)}（${row.bytes} 字节）`, '逐连接的 rt2gdc / gdc2rt / timeline 三个文件之和'],
+    ['体积', `${fmtBytes(row.bytes)}（${row.bytes} 字节）`,
+      // 口径要与服务端一致（`rowFromMeta`：`BytesRT + BytesFE`）。原来这里写着"三个文件之和"，
+      // 而 timeline 并不在内 —— tooltip 说了假话（实测：一份 47647 字节的件界面报 37202）。
+      '逐连接的两个方向之和（rt2gdc + gdc2rt）；timeline 是排障用的旁证，不计入'],
     ['连接数', String(row.conns), '闸门按**连接**比对:一条对得上就算同一棵界面树'],
     ['指纹', fmtFP(row.fingerprint),
       row.fingerprint?.hash

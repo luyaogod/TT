@@ -12,7 +12,8 @@ import { RecordView } from './RecordView'
 import { SettingsView } from './SettingsView'
 import { StatusBar, STATUS_BAR_H } from './StatusBar'
 import { api } from './api'
-import { parseHash, type ViewKey } from './routing'
+import { parseHash, viewHash, type ViewKey } from './routing'
+import { ErrorBoundary } from './ErrorBoundary'
 
 // 视图键 → 中文名(只给 tooltip 用:界面上的说法要与右侧图标栏、README 一致)。
 const VIEW_LABEL: Partial<Record<ViewKey, string>> = {
@@ -45,13 +46,16 @@ function ActivityIcon({ icon: Icon, label, active, onClick }: {
 // 单页面应用 keep-alive:视图首次访问后常驻挂载,切换只改 display,不卸载重挂。
 // 编辑器(Monaco)实例、源码页签、表单输入、滚动位置等状态全部保留,切换零闪烁、
 // 零重载——这正是"切换页面不像网页那样重新加载"的实现。
-function ViewPane({ show, children }: { show: boolean; children: ReactNode }) {
+//
+// 每个视图各包一层错误边界(见 ErrorBoundary.tsx):某个视图崩了,会话栏、工具条、
+// 其余视图都还在,切走就能继续干活 —— 而不是整页白屏(实测过,2026-10-15)。
+function ViewPane({ show, label, children }: { show: boolean; label: string; children: ReactNode }) {
   const [mounted, setMounted] = useState(show)
   useEffect(() => { if (show) setMounted(true) }, [show])
   if (!mounted) return null
   return (
     <div className={`min-h-0 min-w-0 flex-1 ${show ? 'flex' : 'hidden'}`}>
-      {children}
+      <ErrorBoundary what={`视图「${label}」`}>{children}</ErrorBoundary>
     </div>
   )
 }
@@ -161,6 +165,33 @@ export function App() {
   const setRightView = useStore((s) => s.setRightView)
   const view = useStore((s) => s.view)
   const setView = useStore((s) => s.setView)
+  const settingsSection = useStore((s) => s.settingsSection)
+  // 视图/分区变化 → **把片段写回去**。这是"刷新后还在这一页"的唯一保证（见 routing.ts 的 viewHash）：
+  // 只读片段、不写回去的话，点图标切到别的视图时 URL 还停在旧视图上，一刷新就把人弹回旧页
+  // （实测：在 `#debug` 里点「设置」，界面是设置页而 URL 仍是 `#debug`）。
+  //
+  // 首跑让一次：URL 已经指着某个视图时，那是深链接，而上面那条 mount effect 正在把它解析成
+  // store 状态 —— 这一刻的 view/section 还是**初始渲染快照**，照写会把深链接覆盖成默认页
+  // （SettingsView 里那条分区同步 effect 让的是同一件事）。
+  // 往后每换一次才写，且用 replace：push 会让浏览器后退要一格一格走遍所有视图。
+  const hashWroteRef = useRef(false)
+  useEffect(() => {
+    if (!hashWroteRef.current) {
+      hashWroteRef.current = true
+      // 首跑：片段已经指着某个视图时，**URL 是权威**（那是深链接），而这一刻的 store 还是
+      // 初始渲染快照（mount 那条 effect 正把它解析出来）—— 所以目标按**片段自己**算：
+      // 合法片段一个字节都不改；写法不规范（`#settings/site` 单数、`#settings` 没带分区）
+      // 就顺手改成规范的，免得地址栏长期留着一个界面并不使用的值。
+      const r = parseHash(window.location.hash)
+      if (r.view) {
+        const want0 = viewHash(r.view, r.section || useStore.getState().settingsSection)
+        if (window.location.hash !== want0) window.history.replaceState(null, '', want0)
+        return
+      }
+    }
+    const want = viewHash(view, settingsSection)
+    if (window.location.hash !== want) window.history.replaceState(null, '', want)
+  }, [view, settingsSection])
   // launchError 不再在这里渲染(改走统一 toast);store 那个字段仍由启动失败写入,
   // 供别处/调试读取,应用外壳不再订阅它 —— 订阅了也只会白白多一次重渲染。
   const backendDead = useStore((s) => s.backendDead)
@@ -172,11 +203,11 @@ export function App() {
   const banner = backendDead || (sessionId && !wsConnected ? '服务连接断开,自动重连中…' : '') 
   const restart = useStore((s) => s.restart)
 
-  // 侧边栏/代码区宽度拖拽(记忆到 localStorage)
-  const [panelW, setPanelW] = useState(() => {
-    const v = Number(localStorage.getItem('tt.panelW'))
-    return v >= 240 && v <= 640 ? v : 320
-  })
+  // 侧边栏/代码区宽度拖拽(记忆到 localStorage)。
+  // 宽度放 **store**：浮动调试工具条要按它算默认落点，而 localStorage 只在 mouseup 时才写 ——
+  // 组件本地 state 的话工具条读不到拖拽中的值，会一直停在旧位置压住右栏（实测重叠 184px）。
+  const panelW = useStore((s) => s.panelW)
+  const setPanelW = useStore((s) => s.setPanelW)
   // 左侧会话栏的宽度:与右侧栏同一套口径(同一档 clamp),只是记忆键与缺省值不同 ——
   // 会话面板要列出环境名与状态,300 比 320 让代码区多留一点。
   const [sessionW, setSessionW] = useState(() => {
@@ -357,20 +388,26 @@ export function App() {
             它不挂在任何一个 ViewPane 里,所以四个容器之间切换时一次都不重挂:
             手风琴展开态与 TOPENT 输入跟着一直在(那正是"为什么要单独一列")。 */}
         <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-ui border border-border">
+          {/* 会话栏:收起时 / 在设置页上**只隐藏、不卸载**。
+              原来写的是 `view !== 'settings' && showSession && <SessionPanel/>` —— 一进设置页
+              整块被卸载，于是 TOPENT 输入与手风琴折叠态当场丢（实测：填好 XYZ9 + 折叠「环境变量」
+              → 点设置 → 从设置页回来，两样都没了），而这与上面那句"挂一次就一直在"的承诺相反。
+             现在只有 display 在变，组件与它的本地状态一直在。 */}
+          <div style={{ width: sessionW }}
+            className={view !== 'settings' && showSession
+              ? 'flex min-h-0 min-w-0 shrink-0 flex-col overflow-hidden'
+              : 'hidden'}>
+            <SessionPanel />
+          </div>
+          {/* 分割条放在会话栏**右边**:它是这一列真正的边(和右侧栏那条一样,分割线始终
+              贴着被拖的那条边)。放在左边的话,往右拖时面板变宽、而把手留在原地,
+              光标与那条 1px 线当场分家。 */}
           {view !== 'settings' && showSession && (
-            <>
-              <div style={{ width: sessionW }} className="flex min-h-0 min-w-0 shrink-0 flex-col overflow-hidden">
-                <SessionPanel />
-              </div>
-              {/* 分割条放在会话栏**右边**:它是这一列真正的边(和右侧栏那条一样,分割线始终
-                  贴着被拖的那条边)。放在左边的话,往右拖时面板变宽、而把手留在原地,
-                  光标与那条 1px 线当场分家。 */}
-              <div className="col-resizer" onMouseDown={onSessionResizeDown} title="拖拽调整会话面板宽度" />
-            </>
+            <div className="col-resizer" onMouseDown={onSessionResizeDown} title="拖拽调整会话面板宽度" />
           )}
           {/* 五个视图全部 keep-alive:首次访问后常驻挂载,切换仅改 display。
               它们与上面的会话栏是同一层的兄弟,只是同时只有一个不是 display:none。 */}
-          <ViewPane show={view === 'debug'}>
+          <ViewPane show={view === 'debug'} label="调试">
             <Toolbar />
             {/* 面板紧贴(VS Code 经典密度):无外边距,仅靠 sash 分割线分区
                min-w-0 + overflow-hidden:Monaco 会给编辑器写内联像素宽度,
@@ -390,7 +427,8 @@ export function App() {
                     )}
                     <div style={bottomMax ? undefined : { height: bottomH }}
                       className={bottomMax ? 'min-h-0 flex-1' : 'shrink-0'}>
-                      <TimelinePanel />
+                      {/* 下方面板单独一层边界:时间线崩了不该把代码区一起带走 */}
+                      <ErrorBoundary what="下方面板（操作时间线）"><TimelinePanel /></ErrorBoundary>
                     </div>
                   </div>
                 )}
@@ -412,11 +450,13 @@ export function App() {
                         (占满剩余宽高),直接做列容器的子项会被上面那行图标挤着算高度 ——
                         包一层后这一层才是"图标行下面的剩余高度",panel 在它里面照旧占满。 */}
                     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                      {/* 右侧栏单独一层边界:变量树/大纲崩了,代码区与工具条都还在
+                          （实测过一次:一个畸形变量值把整页打成白屏）。 */}
                       <div className={rightView === 'debug' ? 'h-full min-h-0 w-full' : 'hidden'}>
-                        <RightPanels />
+                        <ErrorBoundary what="调试面板（变量/断点/调用栈）"><RightPanels /></ErrorBoundary>
                       </div>
                       <div className={rightView === 'outline' ? 'h-full min-h-0 w-full' : 'hidden'}>
-                        <OutlinePanel />
+                        <ErrorBoundary what="大纲面板"><OutlinePanel /></ErrorBoundary>
                       </div>
                     </div>
                   </div>
@@ -424,16 +464,16 @@ export function App() {
               )}
             </div>
           </ViewPane>
-          <ViewPane show={view === 'wslogs'}>
+          <ViewPane show={view === 'wslogs'} label="接口日志">
             <WsLogView />
           </ViewPane>
-          <ViewPane show={view === 'wstest'}>
+          <ViewPane show={view === 'wstest'} label="服务测试">
             <WsTestView />
           </ViewPane>
-          <ViewPane show={view === 'record'}>
+          <ViewPane show={view === 'record'} label="录制">
             <RecordView />
           </ViewPane>
-          <ViewPane show={view === 'settings'}>
+          <ViewPane show={view === 'settings'} label="设置">
             <SettingsView />
           </ViewPane>
         </div>

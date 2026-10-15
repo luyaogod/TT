@@ -50,6 +50,8 @@ interface Store {
   // 下方面板是否「最大化」(占满代码区那一列,编辑器整块让位)。
   // 与 showRight/showBottom 同一档:纯界面状态,只活在这一次会话里,不落盘 ——
   // 「最大化」是一次临时的"我要专看这段协议流",刷新后回到常规分栏才是预期。
+  panelW: number
+  setPanelW: (w: number) => void
   bottomMax: boolean
   rightView: 'debug' | 'outline' // 调试视图右侧边栏当前 sheet(调试面板/大纲);会话已独立成左侧一列
   // 调用栈/自动变量面板「自动」开关(手风琴头部图标,默认关):停站后是否自动抓取该数据
@@ -89,7 +91,6 @@ interface Store {
   wsTestSoap: boolean
   wsTestResult: WSTestResult | null
   wsTestRunning: boolean
-  wsTestErr: string
   wsLogs: WSLogItem[]
   wsLogsLoading: boolean
   wsLogsPage: number
@@ -306,6 +307,28 @@ const wsLogContentCache = new Map<string, WSLogContent>()
 // 在途请求合并:同一 rowid 并发点击/预取只发一次(否则悬停+点击会打两次 SSH+sqlplus)
 const wsLogContentInflight = new Map<string, Promise<WSLogContent>>()
 
+// 服务测试的"请求代次":每发一次自增,回来时对不上就丢掉(慢请求不许覆盖新结果)。
+let wsTestGen = 0
+// 接口日志查询的"请求代次"。同上:翻页/改条件会叠出多个在途查询。
+let wsLogsGen = 0
+
+// 会话绑定的"代次":每次**权威地绑上一个会话**（launch / replayStart / 接管）自增。
+//
+// 为什么需要它：`syncFromSessions` 与 `adoptExisting` 都是异步的（先 api.list() 再 api.snapshot()），
+// 而在这两次 await 期间用户可能已经点了「启动调试」绑上了新会话 —— 那一轮的结果早已不新鲜，
+// 写回去就是把刚绑上的会话抹成 null（实测：慢一拍的 list() 让新会话看起来"没起来"）。
+// 判据只有一条：进函数时记下代次，每个 await 之后比一次，对不上就整轮丢掉。
+let bindEpoch = 0
+
+// isSoapMode 判这种接口方式是不是 SOAP(wsfc001 映射,与 awsq990 一致)。
+//
+// 它必须只有**一处**:服务测试页拿它决定"SOAP 勾选框显不显示",store 拿它决定
+// "换了方式要不要把勾选收回去" —— 两处各写一份,迟早会出现"界面看不见、请求里却生效"
+// 的开关(这正是实测踩到的那个 bug)。
+export function isSoapMode(mode: string): boolean {
+  return mode === '1' || mode === '2' || mode === '5'
+}
+
 function loadWsLogContent(item: WSLogItem): Promise<WSLogContent> {
   const hit = wsLogContentCache.get(item.rowid)
   if (hit) return Promise.resolve(hit)
@@ -334,6 +357,12 @@ export const useStore = create<Store>((set, get) => ({
   // 调试视图右侧边栏默认落在「调试面板」(会话已在左侧独立一列、不再是这里的 sheet);
   // sheet 顺序见 App.tsx 侧边栏顶部那行图标,不做持久化
   rightView: 'debug',
+  // 右侧栏宽度(像素,夹取 240~640)。初值取持久化的那份,越界或没记过就用 320。
+  // 放在 store 而不是某个组件的本地 state:浮动工具条按它算默认落点(见 Toolbar.tsx)。
+  panelW: (() => {
+    const v = Number(localStorage.getItem('tt.panelW'))
+    return v >= 240 && v <= 640 ? v : 320
+  })(),
   breakpoints: [], adjustedBps: {}, frames: [], watches: [], autovars: [], selectedFrame: -1, backendDead: '',
   mode: 'solo' as 'solo' | 'collab', inflight: null,
   timeline: [], rawLog: [],
@@ -349,7 +378,7 @@ export const useStore = create<Store>((set, get) => ({
   wsLogs: [], wsLogsLoading: false, wsLogsPage: 1, wsLogsHasMore: false,
   wsLogSel: null, wsLogContent: null, wsLogTab: 'info', wsLogErr: '',
   wsTestMode: '3', wsTestUrl: '', wsTestBody: '', wsTestSoap: false,
-  wsTestResult: null, wsTestRunning: false, wsTestErr: '',
+  wsTestResult: null, wsTestRunning: false,
   sourceContent: '', sourcePath: '', sourceDVM: '', sourceMissing: false, currentLine: 0, loadingSource: false, lineOffset: 0,
   tabs: [], activeTab: 'debug', revealReq: null,
 
@@ -358,8 +387,16 @@ export const useStore = create<Store>((set, get) => ({
   toggleBottom: () => set((st) => ({ showBottom: !st.showBottom, bottomMax: false })),
   // 最大化/还原下方面板。收起下方面板时顺带解除最大化(否则再展开会以一个"占满整列"的
   // 面板回来,而用户要的是常规分栏)。
+  //
+  // 反过来也要成立:最大化**必须**把下方面板打开 —— 否则 `toggleBottom`（收起）之后
+  // 再 `toggleBottomMax` 会得到 `showBottom=false && bottomMax=true` 这种自相矛盾的状态。
+  // 界面上的可达路径走不到那里（穷举 87 条序列 0 违规），但 store 的不变量不该靠"用户点不到"来维持。
+  toggleBottomMax: () => set((st) => ({
+    bottomMax: !st.bottomMax,
+    showBottom: st.bottomMax ? st.showBottom : true,
+  })),
 
-  toggleBottomMax: () => set((st) => ({ bottomMax: !st.bottomMax })),
+  setPanelW: (w) => set({ panelW: Math.min(640, Math.max(240, Math.round(w))) }),
 
   // 调用栈面板「自动」开关(默认关):开 → 停站后自动抓调用栈,已停站时立即抓一次
   toggleStackAuto: () => {
@@ -660,7 +697,14 @@ export const useStore = create<Store>((set, get) => ({
 
   setWsTest: (p) => {
     const patch: Partial<Store> = {}
-    if (p.mode !== undefined) patch.wsTestMode = p.mode
+    if (p.mode !== undefined) {
+      patch.wsTestMode = p.mode
+      // 换了接口方式就把 SOAP 勾选**收回去**（只在 SOAP 那几种方式下它才有意义）。
+      // 不收的后果实测过:勾上 SOAP → 切回 RESTful（勾选框从界面消失）→ 执行，
+      // 请求仍被包成 SOAP 信封（Content-Type: text/xml + SOAPAction）打到 RESTful 端点，
+      // 而界面上一点痕迹都没有。状态里不许存在"看不见却生效"的开关。
+      if (!isSoapMode(p.mode)) patch.wsTestSoap = false
+    }
     if (p.url !== undefined) patch.wsTestUrl = p.url
     if (p.body !== undefined) patch.wsTestBody = p.body
     if (p.soap !== undefined) patch.wsTestSoap = p.soap
@@ -670,30 +714,51 @@ export const useStore = create<Store>((set, get) => ({
 
   runWsTest: async () => {
     const st = get()
-    set({ wsTestRunning: true, wsTestErr: '' })
+    // 并发闸:一次执行只允许在途一次。按钮上有 disabled,但它挡不住"同一个事件循环里
+    // 连点两次"(实测会真发两个请求),也挡不住以后新加的快捷键/自动触发。
+    if (st.wsTestRunning) return
+    // 请求代次:先发出去的那次回来时,若已经又发了一轮,就**不许**覆盖新结果
+    // （慢请求盖掉快请求的现场,用户看到的是一次并不存在的响应）。
+    const gen = ++wsTestGen
+    // 开跑就把上一次的响应清掉:失败时界面还挂着上一次的 HTTP 200 与旧报文,
+    // 看着像"这次也是成功的"(实测),而错误只在一条 8 秒后消失的 toast 里。
+    set({ wsTestRunning: true, wsTestResult: null })
     try {
       const { result } = await api.wsTest(st.wsTestMode, st.wsTestUrl, st.wsTestBody, st.wsTestSoap)
-      set({ wsTestResult: result })
+      if (gen === wsTestGen) set({ wsTestResult: result ?? null })
     } catch (e: any) {
       // 走统一消息出口:原先这段错误内联在服务测试页的顶栏下面,一出现就把
       // 请求/响应两个编辑区整体下推(见 WsTestView 原先那条 err 横幅)。
-      toast.error('服务测试失败', { description: e?.message || String(e) })
+      if (gen === wsTestGen) toast.error('服务测试失败', { description: e?.message || String(e) })
     } finally {
-      set({ wsTestRunning: false })
+      // 只有"最新那一轮"才许把 running 清零:否则先回来的旧请求会把还在跑的新请求
+      // 标成"已完成",按钮随之解禁(实测)。
+      if (gen === wsTestGen) set({ wsTestRunning: false })
     }
   },
 
   loadWsLogs: async (q: WSLogQuery) => {
+    // 请求代次:翻页/改条件时会有多个查询在途,先发的慢响应回来时**不许**覆盖后发的结果。
+    // 实测过一次:慢查询（空结果）落地把已经拿到的 6 行冲成 0 条 +「暂无日志记录」，
+    // 而输入框里写着的是新条件 —— 用户看到的是一次并不存在的查询。
+    const gen = ++wsLogsGen
     set({ wsLogsLoading: true, wsLogErr: '' })
     try {
       const r = await api.wsLogs(q)
+      if (gen !== wsLogsGen) return
       set({ wsLogs: r.items || [], wsLogsHasMore: !!r.hasMore, wsLogsPage: q.page ?? 1, wsLogSel: null, wsLogContent: null })
     } catch (e: any) {
-      // 走统一 toast:原先这条错误内联在日志页顶部,会把列表整体下推。
-      toast.error('查询接口日志失败', { description: e?.message || String(e) })
-      set({ wsLogs: [] })
+      if (gen !== wsLogsGen) return
+      // 失败**不清上一次的结果**：那条路会让界面显示成"暂无日志记录"，与"确实没有数据"
+      // 一字不差（实测真 500 现场）。也不动选中行/明细面板 —— 成功清、失败留，两副面孔最费解。
+      // 错误必须**留在界面上**（wsLogErr），不能只发一条 8 秒后消失的 toast。
+      const msg = e?.message || String(e)
+      set({ wsLogErr: msg })
+      toast.error('查询接口日志失败', { description: msg })
     } finally {
-      set({ wsLogsLoading: false })
+      // 只有最新那一轮才许把 loading 关掉:否则慢请求还在途时转圈就没了，
+      // 用户以为查完了，接着点，叠出更多竞态。
+      if (gen === wsLogsGen) set({ wsLogsLoading: false })
     }
   },
 
@@ -762,6 +827,7 @@ export const useStore = create<Store>((set, get) => ({
         sessionId: r.sessionId, module: mod, prog: r.prog || rp,
         runProg: rp, state: 'loading', sourceDVM: '', sourceMissing: false, currentLine: 0, loadingSource: true,
       })
+      bindEpoch++ // 权威绑定:在途的 list/snapshot 结果从此作废(见 bindEpoch 的说明)
       // 入口停站前保持加载态,源码由会话路径加载并定位 MAIN
       pollUntilStopped(set, get)
     } catch (e: any) {
@@ -790,6 +856,7 @@ export const useStore = create<Store>((set, get) => ({
       const mod = r.module || module
       const rp = r.runProg || prog
       set({ sessionId: r.sessionId, module: mod, prog, runProg: rp, state: 'loading' })
+      bindEpoch++ // 权威绑定:在途的 list/snapshot 结果从此作废(见 bindEpoch 的说明)
       get().pushTimeline({ origin: 'human', kind: 'command', text: `启动调试会话 ${mod}/${prog}` })
       alignAutoPrefs(set, get) // 自动变量开关下发到新会话(求值在服务端做)
       // 轮询直到入口停站(源码由会话路径加载并定位 MAIN)
@@ -1171,6 +1238,9 @@ export const useStore = create<Store>((set, get) => ({
 
   // 会话被替换/关闭后,按服务端现状对齐本地绑定(源码保留便于浏览)
   syncFromSessions: async () => {
+    // 代次守卫:await 期间若有人权威地绑了新会话(launch/replayStart),这一轮结果作废
+    // —— 否则慢一拍的 list() 会把刚绑上的会话抹成 null（见 bindEpoch 的说明）。
+    const epoch = bindEpoch
     if (snapTimer) { clearInterval(snapTimer); snapTimer = undefined }
     stopHoldTimer()
     const clearRun = {
@@ -1179,6 +1249,7 @@ export const useStore = create<Store>((set, get) => ({
     }
     try {
       const { sessions } = await api.list()
+      if (epoch !== bindEpoch) return
       const s0 = sessions[0]
       if (!s0) {
         // 会话全部断开
@@ -1195,6 +1266,7 @@ export const useStore = create<Store>((set, get) => ({
       }
       if (s0.state === 'stopped') {
         const snap = await api.snapshot(s0.id)
+        if (epoch !== bindEpoch) return
         set({ stop: snap.stop, breakpoints: snap.breakpoints || [], started: !!snap.started, holdingSeconds: snap.holdingSeconds || 0 })
         // 有停站就去取源码。入口停站可能不带文件名(WS 服务程序在 gzzz_t 里解析不到
         // 实体程序),refreshSource 会按「模块_程序.4gl」兜底合成 —— 这是它已有的能力。

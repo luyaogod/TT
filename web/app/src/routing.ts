@@ -47,3 +47,14 @@ export function parseHash(hash: string): { view?: ViewKey; section?: SettingsSec
 export function settingsHash(section: SettingsSectionKey): string {
   return `#settings/${section}`
 }
+
+/**
+ * 当前视图对应的 hash。设置页要带上分区(它自己分成四个分区),别的视图就是视图名。
+ *
+ * 写片段这件事必须**双向**(读进来 + 写回去):只读不写的话,点图标切到别的视图时 URL
+ * 还停在旧视图上,一刷新就把人弹回旧页(实测:在 `#debug` 里点「设置」,界面是设置页而
+ * URL 仍是 `#debug`,刷新回调试页)。两处(外壳与设置页)共用这一份拼法,免得各写一遍。
+ */
+export function viewHash(view: ViewKey, section: SettingsSectionKey): string {
+  return view === 'settings' ? settingsHash(section) : `#${view}`
+}

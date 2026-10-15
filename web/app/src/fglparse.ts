@@ -38,11 +38,21 @@ function splitTop(content: string): string[] {
   return parts
 }
 
+// 解析深度上限。
+//
+// 为什么必须有：`parseGroup ⇄ parseValue` 是**递归**的，而值文本来自 fgldb 的输出 ——
+// 一个畸形的（或恶意的）值 `'{'.repeat(20000)` 就能把调用栈打爆成 RangeError。
+// 实测这个异常发生在渲染期，于是没有错误边界时**整个工作台白屏**（2026-10-15）。
+// 真实 RECORD/ARRAY 的嵌套很少超过几层，32 已经宽得离谱；到顶之后按**文本**展示剩下的部分 ——
+// 宁可少折叠一层，也不要让一个值把界面打死。
+// （姊妹模块 fgloutline.ts 的做法更彻底：那边一律用显式栈，压根不递归。）
+const MAX_PARSE_DEPTH = 32
+
 // 解析一段值文本:大括号结构 → 子树,否则原样作为叶子
-function parseValue(text: string): { value?: string; children?: TNode[] } {
+function parseValue(text: string, depth: number): { value?: string; children?: TNode[] } {
   const s = text.trim()
-  if (s.startsWith('{') && s.endsWith('}')) {
-    const kids = parseGroup(s.slice(1, -1))
+  if (depth < MAX_PARSE_DEPTH && s.startsWith('{') && s.endsWith('}')) {
+    const kids = parseGroup(s.slice(1, -1), depth + 1)
     if (kids.length > 0) return { children: kids }
     return { value: '{}' }
   }
@@ -52,19 +62,19 @@ function parseValue(text: string): { value?: string; children?: TNode[] } {
 const fieldRe = /^([A-Za-z_][\w.]*)\s*=\s*([\s\S]*)$/
 
 // 解析 {} 内的内容:全是 name=value → record 字段;否则按数组元素编号
-function parseGroup(content: string): TNode[] {
+function parseGroup(content: string, depth: number): TNode[] {
   const parts = splitTop(content)
   if (parts.length === 0) return []
   const trimmed = parts.map((p) => p.trim())
   const allFields = trimmed.every((p) => fieldRe.test(p))
   if (!allFields) {
     // 单一匿名大括号层 = record/数组的包装,塌缩后重析
-    if (trimmed.length === 1) {
+    if (trimmed.length === 1 && depth < MAX_PARSE_DEPTH) {
       const t = trimmed[0]
-      if (t.startsWith('{') && t.endsWith('}')) return parseGroup(t.slice(1, -1))
+      if (t.startsWith('{') && t.endsWith('}')) return parseGroup(t.slice(1, -1), depth + 1)
     }
     return trimmed.map((t, i) => {
-      const v = parseValue(t)
+      const v = parseValue(t, depth)
       const kids = v.children
       return {
         name: `[${i + 1}]`,
@@ -77,7 +87,7 @@ function parseGroup(content: string): TNode[] {
   }
   return trimmed.map((t) => {
     const m = t.match(fieldRe)!
-    const v = parseValue(m[2])
+    const v = parseValue(m[2], depth)
     const kids = v.children
     return {
       name: m[1],
@@ -93,7 +103,7 @@ function parseGroup(content: string): TNode[] {
 export function parseFglTree(text: string): TNode[] | null {
   const s = (text ?? '').trim()
   if (!s.startsWith('{') || !s.endsWith('}')) return null
-  const kids = parseGroup(s.slice(1, -1))
+  const kids = parseGroup(s.slice(1, -1), 1)
   if (kids.length === 0) return null
   return kids
 }

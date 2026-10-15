@@ -34,10 +34,21 @@ export function ToolIcon({ icon: Icon, label, onClick, disabled, color = 'text-s
 // 浮动工具条容器:脱离文档流,拖左侧手柄移动,位置记忆到 localStorage
 function FloatingToolbar({ children }: { children: ReactNode }) {
   const showRight = useStore((s) => s.showRight)
+  // 右侧栏宽度从 **store** 读(不再渲染期读 localStorage):拖宽右栏时写的是 store,
+  // 而 localStorage 要到 mouseup 才更新 —— 渲染期读它，工具条就会一直停在旧位置，
+  // 直到下一次重渲染才归位（实测拖到 640 后还压着右栏 184px，点一下别的才跳过去）。
+  const panelW = useStore((s) => s.panelW)
   const [pos, setPos] = useState(() => {
     try {
       const v = JSON.parse(localStorage.getItem('tt.toolbarPos') || '')
-      if (typeof v?.top === 'number' && typeof v?.left === 'number') return v
+      if (typeof v?.top === 'number' && typeof v?.left === 'number') {
+        // 视口夹取:位置是在**当时那个窗口**里拖出来的。换个小屏/小窗口打开时，
+        // 一个合法的旧位置可能整个落在视口外 —— 那套"继续/步过/结束调试"就此消失，
+        // 而用户没有任何归位入口（只能清 localStorage）。这里按当前视口夹回可见范围。
+        const top = Math.max(4, Math.min(Math.max(4, window.innerHeight - 60), v.top))
+        const left = Math.max(4, Math.min(Math.max(4, window.innerWidth - 120), v.left))
+        return { top, left }
+      }
     } catch { /* 忽略 */ }
     return null // null = 默认定位(代码编辑器右上角,由 CSS 类给值)
   })
@@ -70,7 +81,6 @@ function FloatingToolbar({ children }: { children: ReactNode }) {
   // 那个 64 = 右侧栏宽度之外,还要让开**视图图标栏**那 40px 竖条与几处间隙 ——
   // 图标栏只是换了图标、位置没变(仍在主面板外面),所以这个数照旧,别按"图标栏取消了"去减 40:
   // 减掉就会让浮动工具条压到右侧栏头上(实测截图里正是这样,盖住了侧栏顶部那行 sheet 图标)。
-  const panelW = Number(localStorage.getItem('tt.panelW')) || 320
   const style = pos
     ? { top: pos.top, left: pos.left }
     : { top: 40, right: showRight ? panelW + 64 : 8 }

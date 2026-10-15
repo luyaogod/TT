@@ -106,6 +106,9 @@
   position: relative;
   background: var(--card);
   border: 1px solid var(--border);
+  /* 圆角取设计系统那唯一一个半径 token(--radius-ui):卡片、按钮、面板都是它,
+     全站只有这一个半径(用户 2026-10-15 指出这张卡还是直角)。 */
+  border-radius: var(--radius-ui);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
   width: max-content;
   min-width: 140px;
@@ -126,6 +129,7 @@
   z-index: 1;
   display: inline-flex;
   align-items: center;
+  border-radius: var(--radius-ui);
   padding: 2px 4px;
   color: var(--muted-foreground);
   background: var(--card);

@@ -186,10 +186,19 @@ export function WsLogView() {
     void loadWsLogs({ ...appliedRef.current, onlyFail: onlyFailRef.current, page: 1, startFrom: from, endTo: to })
   }, [loadWsLogs, hasSession, from, to])
 
-  // 提交查询:Enter / 点刷新 / 翻页都走这里(翻页沿用已提交条件,不读 draft)
+  // 提交查询:Enter / 点刷新走这里（把草稿变成已提交条件）。
   const doLoad = (p = 1) => {
     setApplied(draft)
     void loadWsLogs({ ...draft, onlyFail, page: p, startFrom: from, endTo: to })
+  }
+  // 翻页/勾「仅失败」**沿用已提交条件**，不读 draft。
+  //
+  // 原来它们也调 doLoad，于是"输入框里刚敲了半个条件、没回车"会被当成正式条件发出去：
+  // 实测在服务名称里敲 `bom` 不回车直接点【下一页】，发出去的是 `service=bom&page=2` 的
+  // **另一个查询**的第 2 页，列表变 0 条 —— 看着像"翻页把数据翻没了"。
+  // 草稿只在回车/刷新那一下生效，这条边界必须守住。
+  const loadPage = (p: number) => {
+    void loadWsLogs({ ...appliedRef.current, onlyFail: onlyFailRef.current, page: p, startFrom: from, endTo: to })
   }
   const onEnter = (e: React.KeyboardEvent) => { if (e.key === 'Enter') doLoad(1) }
 
@@ -279,7 +288,6 @@ export function WsLogView() {
   }, [wsLogs, sort])
 
   // ---- 报文复制(Request / Response 两个页面的右上角按钮) ----
-  const payloadText = tab === 'request' ? content?.request : tab === 'response' ? content?.response : ''
   const [copyState, setCopyState] = useState<'ok' | 'fail' | null>(null)
   // 换页签/换记录后不残留上一次的"已复制"反馈
   useEffect(() => { setCopyState(null) }, [tab, sel?.rowid])
@@ -327,6 +335,14 @@ export function WsLogView() {
   const [reqDraft, setReqDraft] = useState('')
   useEffect(() => { setReqDraft(content?.request ?? '') }, [content?.request, sel?.rowid])
   const reqDirty = !!content && reqDraft !== content.request
+
+  // 报文复制(Request / Response 两个页签的右上角按钮)。
+  // Request 页签复制的是**编辑器里现在的内容**（改过就是草稿），不是原始报文：
+  // 同屏写着"改了入参可以按它重放"，复制出去的却是旧的那份，用户会把错的报文贴给别人（实测）。
+  // Response 页签没有草稿，照旧复制原始响应。
+  const payloadText = tab === 'request'
+    ? (reqDraft || content?.request || '')
+    : tab === 'response' ? (content?.response || '') : ''
 
   // 未连接会话:没有可查的数据源,只给一句引导,不渲染工具条/列表/详情
   if (!hasSession) {
@@ -407,10 +423,10 @@ export function WsLogView() {
               onCheckedChange={(v) => {
                 // 立即生效:显式传新值查询。原先靠 setTimeout(doLoad) 复用闭包里的旧 onlyFail,
                 // 首次勾选实际发的是旧值(勾上了但结果没变),这里一并修掉。
+                // 条件只取**已提交**的那份:输入框里的草稿要等回车才算数(见 loadPage 的说明)。
                 const on = v === true
                 setOnlyFail(on)
-                setApplied(draft)
-                void loadWsLogs({ ...draft, onlyFail: on, page: 1, startFrom: from, endTo: to })
+                void loadWsLogs({ ...appliedRef.current, onlyFail: on, page: 1, startFrom: from, endTo: to })
               }} />
             <label htmlFor="wslog-onlyfail" className="cursor-pointer select-none">仅失败</label>
           </div>
@@ -418,12 +434,12 @@ export function WsLogView() {
           {/* 分页 */}
           <div className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
             <span>{wsLogs.length} 条</span>
-            <button onClick={() => doLoad(page - 1)} disabled={loading || page <= 1} title="上一页"
+            <button onClick={() => loadPage(page - 1)} disabled={loading || page <= 1} title="上一页"
               className="p-1 hover:bg-accent hover:text-foreground disabled:opacity-30">
               <ChevronLeft className="h-4 w-4" />
             </button>
             <span className="whitespace-nowrap font-mono">第 {page} 页</span>
-            <button onClick={() => doLoad(page + 1)} disabled={loading || !hasMore} title="下一页"
+            <button onClick={() => loadPage(page + 1)} disabled={loading || !hasMore} title="下一页"
               className="p-1 hover:bg-accent hover:text-foreground disabled:opacity-30">
               <ChevronRight className="h-4 w-4" />
             </button>
@@ -431,8 +447,16 @@ export function WsLogView() {
         </div>
       </div>
 
-      {/* 查询失败原先顶在这里一条红条,会把下面的列表整体下推。已改走统一 toast
-          (在 store 的 wslog 查询 action 里发)。 */}
+      {/* 查询失败:错误留在界面上（有上一次结果时也不许只发一条会消失的 toast ——
+          否则界面上只剩"上一次的数据"，看不出这次其实失败了）。列表整体下推的毛病由
+          这条**常驻一行**解决：它不闪、不遮列表，出事就在那儿。 */}
+      {err && rows.length > 0 && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-red-500/20 bg-red-500/10 px-2 py-1 text-xs text-red-600 dark:text-red-400">
+          <span className="shrink-0 font-medium">查询失败</span>
+          <span className="min-w-0 truncate" title={err}>{err}</span>
+          <span className="ml-auto shrink-0 text-muted-foreground">下面是上一次的结果</span>
+        </div>
+      )}
 
       {/* 左右分配:左侧列表 flex-1 吃掉剩余宽度,右侧详情按占比取宽 + 5px 分隔条。
           min-w-0/overflow-hidden 锁住容器宽度:面板是 shrink-0,不加锁会把容器一路撑宽
@@ -492,7 +516,21 @@ export function WsLogView() {
               </TableBody>
             </Table>
             {rows.length === 0 && !loading && (
-              <div className="p-4 text-center text-xs text-muted-foreground">暂无日志记录</div>
+              // 失败与"确实没有数据"必须分得开：失败时**结果没被清掉**（store 那条），
+              // 所以这里只在真的空列表上说话；有错就照实把错误说出来，并留一个重试出口
+              // （原来错误只在右下角活 8 秒，之后界面上再也找不到这次失败的任何痕迹）。
+              err ? (
+                <div className="flex flex-col items-center gap-2 p-4 text-center text-xs">
+                  <div className="text-red-600 dark:text-red-400">查询失败，没有拿到日志</div>
+                  <div className="max-w-2xl whitespace-pre-wrap text-muted-foreground">{err}</div>
+                  <button onClick={() => void loadWsLogs({ ...appliedRef.current, onlyFail: onlyFailRef.current, page: 1, startFrom: from, endTo: to })}
+                    className="rounded-ui border border-border px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground">
+                    重试
+                  </button>
+                </div>
+              ) : (
+                <div className="p-4 text-center text-xs text-muted-foreground">暂无日志记录</div>
+              )
             )}
           </div>
         </div>

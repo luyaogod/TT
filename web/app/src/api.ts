@@ -327,7 +327,9 @@ export interface RecordingRow {
   fingerprint: { total: number; hash: string }
   note?: string
 }
-// 正在录的那一轮(来自会话登记 .tt-fep.json,不是录制件 —— 件要收工才落身份)
+// 会话登记里的那一轮(来自 .tt-fep.json,不是录制件 —— 件要收工才落身份)。
+// kind/stale 是"这一轮到底是什么"的两个事实:kind 分数录(rec)与回放(replay),
+// stale=起它的进程已经不在了(回放发完就退会留下这种:只剩一个还开着的窗口)。
 export interface RecordingCurrent {
   id: string
   env?: string
@@ -336,6 +338,8 @@ export interface RecordingCurrent {
   prog?: string
   path?: string
   started?: string
+  kind?: string // rec | replay
+  stale?: boolean
 }
 // 一份录制件的**完整身份**(详情面板用;形状见 internal/fep/meta.go 的 RecordingMeta)。
 // 列表里的一行是它的摘要,这里多出连接清单(回放闸门按连接比对,所以要看得见每条连接)、
@@ -545,7 +549,7 @@ export const api = {
   // 回放:服务端**另起一个进程**跑 `tt fep rec reproduce <ID> --no-wait` —— 按身份起调试线
   // 会话、过指纹闸、把事件原样发出去。**不等停站**(面板不带断点,等下去只会等到超时),
   // 会话留着给 AI 接着取证;进度看返回的日志文件,界面这边不轮询。
-  // 两种情形服务端直接拒(409):r.r 录的件、以及已经有一轮录制在跑。
+  // 两种情形服务端直接拒(409):r.r 录的件、以及已经有一轮录制在跑(过期登记不算"在跑")。
   recordingReplay: (id: string) =>
     req<{ ok: boolean; id: string; pid: number; log: string; note: string }>(
       `/api/recordings/${encodeURIComponent(id)}/replay`, { method: 'POST' }),

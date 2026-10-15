@@ -46,6 +46,24 @@
 解析**先挂载**（React 子 effect 先于父 effect），所以它首跑时若片段已经指着某个视图就一个字
 都不写 —— 否则 `#record`、`#wstest`、`#settings/data-dict` 都会被改写成 `#settings/sites`。
 
+**两处都要让这一次**：外壳那条「视图 → 片段」同步（`App.tsx`，用 `viewHash`）首跑时也只
+**规范化**片段（非法分区名写成规范的、合法片段一个字节都不改），不按 store 的初始快照去写。
+只读不写同样是错的：点图标切视图时 URL 会停在旧视图上，一刷新就落回旧页（实测）。
+
+## 渲染期异常：错误边界
+
+前端有一批「把远端文本解析成界面结构」的地方（变量树、大纲、报文渲染）。解析器出一次未捕获
+异常，React 会卸载整棵根 —— 用户看到整页白屏，且没有任何可读原因（实测：一个两万层嵌套的
+变量值就能做到）。
+
+两道防线：
+
+- **解析器自己设上限**（`fglparse.ts` 的 `MAX_PARSE_DEPTH`）：到顶就按文本展示。这是正解。
+- **`ErrorBoundary`**：根上一层（`main.tsx`）＋ 每个视图/右侧栏/下方面板各一层（`App.tsx`）。
+  它不替代修 bug，只保证「一处坏掉」不把整个工作台带走，并把报错原文摆在界面上。
+
+新加组件的渲染期解析要问一句：**这个输入有上限吗**？没有上限的递归就是白屏的入场券。
+
 ## 状态：一个容器
 
 全部前端状态在一个容器里（连接、会话、面板显隐、数据、主题、视图）。字段按用途分组，
@@ -93,7 +111,7 @@
 
 | 类别 | 文件 |
 |---|---|
-| 外壳与布局 | `App.tsx`、`main.tsx`、`StatusBar.tsx`、`Toolbar.tsx` |
+| 外壳与布局 | `App.tsx`、`main.tsx`、`ErrorBoundary.tsx`、`StatusBar.tsx`、`Toolbar.tsx` |
 | 视图 | `SettingsView.tsx`、`WsLogView.tsx`、`WsTestView.tsx`、`RecordView.tsx`、`SourceView.tsx` |
 | 面板 | `Panels.tsx`、`SessionPanel.tsx`、`OutlinePanel.tsx`、`VarTreeUi.tsx` |
 | 编辑器 | `monacoSetup.ts`、`PayloadEditor.tsx` |

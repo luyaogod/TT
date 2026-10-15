@@ -93,7 +93,12 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         ))}
         <ToastPrimitive.Viewport
           // 右下角:那里通常没有可交互的主内容,不容易挡住用户正在看的表格/编辑器。
-          className="fixed right-3 bottom-3 z-[100] flex max-h-[calc(100vh-2rem)] w-80 flex-col gap-2 outline-none"
+          //
+          // bottom 要**让开状态栏**(h-7 = 28px):状态栏右端有一排可点的 chip(接管 / 会话空闲 /
+          // 作业名…),toast 压在它们上面时 elementFromPoint 命中的是 toast —— 那些按钮点不动
+          // (实测重叠 320×16px)。这里用 28+12 的固定值,不引 StatusBar 的常量:
+          // 引进来会让组件层多一条反向依赖,而"状态栏多高"是那一行自己写死的事。
+          className="fixed right-3 bottom-10 z-[100] flex max-h-[calc(100vh-3rem)] w-80 flex-col gap-2 outline-none"
         />
       </ToastPrimitive.Provider>
     </ToastCtx.Provider>

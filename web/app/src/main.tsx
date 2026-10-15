@@ -1,6 +1,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { App } from './App'
+import { ErrorBoundary } from './ErrorBoundary'
 import { editorRef } from './SourceView'
 import { useStore } from './store'
 import { ToastProvider } from './toast'
@@ -13,10 +14,15 @@ applyDark(resolveDark(readStoredTheme()))
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    {/* 统一消息出口挂在最外层:全站任何组件都能 useToast(),而 toast 只渲染一次。 */}
-    <ToastProvider>
-      <App />
-    </ToastProvider>
+    {/* 根上那道错误边界:任何漏出去的渲染期异常都只吃掉"这一屏"，
+        不能再变成整页白屏(实测一个畸形变量值就能做到，见 ErrorBoundary.tsx)。
+        它在 ToastProvider 外层:连消息出口自己崩了也还有人接住。 */}
+    <ErrorBoundary what="工作台">
+      {/* 统一消息出口挂在最外层:全站任何组件都能 useToast(),而 toast 只渲染一次。 */}
+      <ToastProvider>
+        <App />
+      </ToastProvider>
+    </ErrorBoundary>
   </React.StrictMode>,
 )
 
