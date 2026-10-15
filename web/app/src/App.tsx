@@ -53,8 +53,10 @@ function ViewPane({ show, label, children }: { show: boolean; label: string; chi
   const [mounted, setMounted] = useState(show)
   useEffect(() => { if (show) setMounted(true) }, [show])
   if (!mounted) return null
+  // min-w-[320px]:主内容有个下限,窄窗口下宁可让工作区出横向滚动条,也不把自己压成 0 宽
+  // (实测 360 宽的窗口里编辑器列宽恰好 0:面板还在、内容没了,而且没有滚动条能到达它)。
   return (
-    <div className={`min-h-0 min-w-0 flex-1 ${show ? 'flex' : 'hidden'}`}>
+    <div className={`min-h-0 min-w-[320px] flex-1 ${show ? 'flex' : 'hidden'}`}>
       <ErrorBoundary what={`视图「${label}」`}>{children}</ErrorBoundary>
     </div>
   )
@@ -226,6 +228,25 @@ export function App() {
     const v = Number(localStorage.getItem('tt.bottomH'))
     return v >= 120 && v <= 600 ? v : 192
   })
+  // 视口变窄时按运行时上限收窄两侧面板 —— **不写回持久化**：窗口拉大就恢复原宽度。
+  //
+  // 为什么需要：两侧面板都是 shrink-0 + 固定像素宽，而工作区是 overflow-hidden。
+  // 窗口一窄（实测 360×640，或 800 宽配两个 640 的面板），主内容会被压成 0～61px、
+  // 右侧栏被裁在视口外，且没有任何滚动条能到达它们 —— 静默裁剪，用户连"编辑器去哪了"
+  // 都看不出来。这里按"视口 − 图标栏 − 间隙 − 主内容下限(320)"给两侧一个总预算，
+  // 超了按比例收（各自不低于 240）；窗口再窄到连下限都放不下时，由工作区的横向滚动兜底。
+  const [vw, setVw] = useState(() => window.innerWidth)
+  useEffect(() => {
+    const onResize = () => setVw(window.innerWidth)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+  const sideRoom = Math.max(480, vw - 40 - 8 - 320)
+  const sideWanted = (showSession ? sessionW : 0) + (showRight ? panelW : 0)
+  const sideK = sideWanted > sideRoom ? sideRoom / sideWanted : 1
+  const sessionWEff = showSession ? Math.max(240, Math.round(sessionW * sideK)) : sessionW
+  const panelWEff = showRight ? Math.max(240, Math.round(panelW * sideK)) : panelW
+
   // keep-alive 视图切换下,Monaco 容器被 display:none 期间 ResizeObserver 会拿到 0 尺寸;
   // 切回调试视图后补一次 layout(),确保编辑器渲染与视口不残留错位
   useEffect(() => {
@@ -387,13 +408,13 @@ export function App() {
             长环境名会把整列顶宽、再挤主内容(就是"宽度反馈环"那条老账)。
             它不挂在任何一个 ViewPane 里,所以四个容器之间切换时一次都不重挂:
             手风琴展开态与 TOPENT 输入跟着一直在(那正是"为什么要单独一列")。 */}
-        <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-ui border border-border">
+        <div className="flex min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-hidden rounded-ui border border-border">
           {/* 会话栏:收起时 / 在设置页上**只隐藏、不卸载**。
               原来写的是 `view !== 'settings' && showSession && <SessionPanel/>` —— 一进设置页
               整块被卸载，于是 TOPENT 输入与手风琴折叠态当场丢（实测：填好 XYZ9 + 折叠「环境变量」
               → 点设置 → 从设置页回来，两样都没了），而这与上面那句"挂一次就一直在"的承诺相反。
              现在只有 display 在变，组件与它的本地状态一直在。 */}
-          <div style={{ width: sessionW }}
+          <div style={{ width: sessionWEff }}
             className={view !== 'settings' && showSession
               ? 'flex min-h-0 min-w-0 shrink-0 flex-col overflow-hidden'
               : 'hidden'}>
@@ -436,7 +457,7 @@ export function App() {
               {showRight && (
                 <>
                   <div className="col-resizer" onMouseDown={onResizeDown} title="拖拽调整代码区与侧边栏宽度" />
-                  <div style={{ width: panelW }} className="flex min-h-0 shrink-0 flex-col overflow-hidden">
+                  <div style={{ width: panelWEff }} className="flex min-h-0 shrink-0 flex-col overflow-hidden">
                     {/* 侧边栏内部的 sheet 切换行:横排、钉在栏顶,与代码区仍在同一个面板里
                         (它切的是这一列的内容,不是整屏的视图 —— 所以不做成第二条活动栏)。
                         只有两个 sheet:会话已经搬到左边独立一列(见上面的布局注释),

@@ -343,7 +343,7 @@ export function AlertDialog(props: React.ComponentProps<typeof AlertDialogPrimit
   return <AlertDialogPrimitive.Root {...props} />
 }
 
-export function AlertDialogContent({ className, children, ...props }:
+export function AlertDialogContent({ className, children, onEscapeKeyDown, ...props }:
   React.ComponentProps<typeof AlertDialogPrimitive.Content>) {
   return (
     <AlertDialogPrimitive.Portal>
@@ -353,6 +353,11 @@ export function AlertDialogContent({ className, children, ...props }:
           'fixed top-1/2 left-1/2 z-50 flex w-full max-w-sm -translate-x-1/2 -translate-y-1/2 flex-col gap-2 border border-border bg-card p-4 text-xs text-card-foreground shadow-lg outline-none',
           className,
         )}
+        // Esc **不关**：AlertDialog 的语义是"用户必须做一次选择"（与下面 Dialog 那条注释
+        // 同一件事）。实测 Radix 只默认拦了点遮罩与外部交互，Esc 这一路照旧关 ——
+        // 于是"点错了删除"与"随手按一下 Esc"都会静默取消，与注释说的不是一回事。
+        // 要关就点「取消」：那是一次明确的选择。
+        onEscapeKeyDown={(e) => { e.preventDefault(); onEscapeKeyDown?.(e) }}
         {...props}
       >
         {children}

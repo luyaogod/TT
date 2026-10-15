@@ -216,15 +216,17 @@ export function RecordView() {
     return () => { alive = false }
   }, [sel, toast])
 
-  // Esc 关闭详情(仅在本视图可见时生效)
+  // Esc 关闭详情(仅在本视图可见时生效)。
+  // 有对话框开着时**不抢**这个 Esc：删除的二次确认自己会处理按键，而两处都响应会让
+  // 一次 Esc 关掉两层（对话框 + 详情面板，实测）。
   useEffect(() => {
-    if (!sel || view !== 'record') return
+    if (!sel || view !== 'record' || pendingDel) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { e.preventDefault(); setSel(null) }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [sel, view])
+  }, [sel, view, pendingDel])
 
   // ---- 宽度分配:列表吃剩余宽度,详情按占比取宽 + 5px 分隔条(同接口日志页) ----
   const splitRef = useRef<HTMLDivElement>(null)

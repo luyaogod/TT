@@ -377,6 +377,8 @@ export function SettingsView() {
   const toast = useToast()
 
   const [envTab, setEnvTab] = useState<'ssh' | 'db'>('ssh')
+  // 读配置失败的原因（非空 = 这一页要显示失败态而不是"加载配置中…"）。
+  const [loadErr, setLoadErr] = useState('')
   const [cfg, setCfg] = useState<HostsView | null>(null)
   const [sshs, setSshs] = useState<SshItem[]>([])
   const [dbg, setDbg] = useState<DebugForm>({ watchdogSeconds: 0 })
@@ -452,8 +454,14 @@ export function SettingsView() {
         bdldocDir: c.bdldoc?.dir || '',
       })
       setListen(c.listen || '')
+      setLoadErr('')
       cleanDirty(); setSaveState('idle')
-    }).catch((e) => toast.error('读取配置失败', { description: e?.message || String(e) }))
+    }).catch((e) => {
+      // 读不到配置要**留在界面上**（loadErr），不能只发一条会自己消失的 toast：
+      // 那会让人永远停在"加载配置中…"，看着像还在读，其实早就失败了（实测）。
+      setLoadErr(e?.message || String(e))
+      toast.error('读取配置失败', { description: e?.message || String(e) })
+    })
     // 派生状态与元信息:取不到不影响主流程(它们在卡片里只是提示)
     void api.configStatus().then(setStatus).catch(() => { /* 静默:提示性信息 */ })
     void api.configMeta().then(setMeta).catch(() => { /* 静默:提示性信息 */ })
@@ -958,8 +966,26 @@ export function SettingsView() {
     }
   }
 
-  // 读配置失败会由 loadSettings 弹 toast,这里只留一句占位(不再有 err 文本)。
-  if (!cfg) return <div className="p-6 text-sm text-muted-foreground">加载配置中…</div>
+  // 还没读到配置：失败就给失败态 + 重试，别让人永远停在"加载配置中…"
+  // （实测：挡住 /api/hosts 后这一页永久转圈，恢复网络也不会自己回来 —— 只有切走再回来才重新拉）。
+  if (!cfg) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-6 text-center text-xs">
+        {loadErr ? (
+          <>
+            <div className="text-sm text-red-600 dark:text-red-400">读取配置失败</div>
+            <div className="max-w-2xl whitespace-pre-wrap text-muted-foreground">{loadErr}</div>
+            <button onClick={() => loadSettings()}
+              className="rounded-ui border border-border px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground">
+              重试
+            </button>
+          </>
+        ) : (
+          <div className="text-muted-foreground">加载配置中…</div>
+        )}
+      </div>
+    )
+  }
   const cur = sshs[selSsh]
   const curDb = cur?.db
   // 设计器清单里有、TT 里也有的名字 —— 用于在「发现环境」弹窗里标注"已存在"。

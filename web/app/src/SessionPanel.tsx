@@ -60,6 +60,8 @@ export function SessionPanel() {
   const sessionOp = useStore((s) => s.sessionOp)
 
   const [envNames, setEnvNames] = useState<string[]>([])
+  // 环境清单**没读到**的原因（非空 = 面板要说"读不到"，而不是"一个都没配"）。
+  const [envErr, setEnvErr] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   // 失败提示统一走 toast(见 runOp / entMissing),这里不再留"面板级错误"的 state。
   const toast = useToast()
@@ -75,7 +77,12 @@ export function SessionPanel() {
         .map((e: any) => e.name || `${e.host || ''}-${e.zone || ''}`.replace(/-$/, ''))
         .filter(Boolean)
       setEnvNames(names)
-    }).catch(() => {})
+      setEnvErr('')
+    }).catch((e: any) => {
+      // 「读不到环境清单」与「一个环境都没配」是两件事：原来都走静默 catch，于是面板把
+      // 一次读失败说成"尚未配置环境"，还引导用户去加一个**已经存在**的环境（实测）。
+      setEnvErr(e?.message || String(e))
+    })
   }, [])
   useEffect(() => { load() }, [load])
   // 连接中 loading→idle 等状态跟随;每 3s 轻量刷新一次
@@ -214,10 +221,22 @@ export function SessionPanel() {
         {open.session && (
           <div className="py-1">
             {rows.length === 0 && (
-              <div className="space-y-1 p-2 text-xs text-muted-foreground">
-                <div>尚未配置环境(设置 → 环境)。</div>
-                <div>加一个环境后在这里点名连接(需先填上方 TOPENT)。</div>
-              </div>
+              // 读不到清单 ≠ 一个都没配（原来两者都显示"尚未配置环境"，把读失败说成一个事实）。
+              envErr ? (
+                <div className="space-y-1 p-2 text-xs">
+                  <div className="text-red-600 dark:text-red-400">读取环境清单失败</div>
+                  <div className="break-all text-muted-foreground">{envErr}</div>
+                  <button onClick={load}
+                    className="rounded-ui border border-border px-2 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground">
+                    重试
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-1 p-2 text-xs text-muted-foreground">
+                  <div>尚未配置环境(设置 → 环境)。</div>
+                  <div>加一个环境后在这里点名连接(需先填上方 TOPENT)。</div>
+                </div>
+              )
             )}
             {rows.map((name) => {
               const connected = connectedEnv.length > 0 && name === curEnv
