@@ -1,0 +1,345 @@
+package web
+
+// /api/recordings —— 「录制」面板的服务端。
+//
+// 三件事：列（按环境 + ENT）、看一份、起一轮/停一轮。
+//
+// 为什么"起一轮"是**另起一个进程**（`winproc.SpawnDetached`）而不是在 serve 里起：
+// 一轮录制 = 一个隔离 GDC + 一条代理 + 一个常驻 Runtime，它天然属于**一个前台进程**
+// （`tt fep rec start` 就是这么活的）。让 serve 兼着管它会牵出两件麻烦事：
+// serve 一重启录制就断，且它登记的是自己那个 pid（`tt fep session close` 会去杀 serve）。
+// 这与 `tt update` 那条按钮的做法一致（api/update.go 的 hUpdateApply）。
+//
+// 会话怎么被发现：子进程起来就往 `.tt-fep.json` 写登记 —— 面板据此拿到**录制 ID**与端口，
+// 命令行那一侧看到的是同一份登记（`tt fep session ps` / `session close` 都能用它收工）。
+
+import (
+	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"tt/internal/config"
+	"tt/internal/fep"
+	"tt/internal/winproc"
+)
+
+// registerRecordings 挂上录制面板的接口。
+func (s *Server) registerRecordings(m *http.ServeMux) {
+	m.HandleFunc("GET /api/recordings", s.hRecordingsList)
+	m.HandleFunc("GET /api/recordings/current", s.hRecordingsCurrent)
+	m.HandleFunc("GET /api/recordings/{id}", s.hRecordingShow)
+	m.HandleFunc("POST /api/recordings", s.hRecordingStart)
+	m.HandleFunc("POST /api/recordings/stop", s.hRecordingStop)
+	m.HandleFunc("DELETE /api/recordings/{id}", s.hRecordingDelete)
+}
+
+// recRow 是列表里的一行（前端直接照着渲染）。
+type recRow struct {
+	ID          string          `json:"id"`
+	Where       string          `json:"where"` // 长期库 / 缓存
+	Dir         string          `json:"dir"`
+	Path        fep.LaunchPath  `json:"path,omitempty"`
+	Prog        string          `json:"prog,omitempty"`
+	Env         string          `json:"env,omitempty"`
+	Zone        string          `json:"zone,omitempty"`
+	Ent         string          `json:"ent,omitempty"`
+	Origin      fep.Origin      `json:"origin,omitempty"`
+	Retention   fep.Retention   `json:"retention,omitempty"`
+	Started     string          `json:"started,omitempty"`
+	Bytes       int64           `json:"bytes"`
+	Conns       int             `json:"conns"`
+	Fingerprint fep.Fingerprint `json:"fingerprint"`
+	Note        string          `json:"note,omitempty"`
+}
+
+// recDirs 是录制件可能住的两处：长期库与缓存（见 internal/fep/retention.go）。
+func (s *Server) recDirs() (dataDir, cacheDir string, lib *fep.Library, err error) {
+	cfgPath, err := s.configPath(true)
+	if err != nil {
+		return "", "", nil, err
+	}
+	dataDir = filepath.Dir(cfgPath)
+	cacheDir = config.CacheDir(dataDir, "fep")
+	if cacheDir == "" {
+		return "", "", nil, fmt.Errorf("缓存目录没解析出来（配置路径 %s）", cfgPath)
+	}
+	return dataDir, cacheDir, fep.NewLibrary(dataDir), nil
+}
+
+// hRecordingsList GET /api/recordings?env=&ent=
+//
+// 两处都列（长期库 + 缓存），按环境/ENT 过滤 —— 面板的第一屏就是它。
+// 过滤按**身份里的值**（不是目录名）：库里那些确实按环境分层，但缓存里那些还没入库，
+// 只能从身份里读；两边用同一套判据，前端不必知道"它住哪"。
+func (s *Server) hRecordingsList(w http.ResponseWriter, r *http.Request) {
+	_, cacheDir, lib, err := s.recDirs()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	env := strings.TrimSpace(r.URL.Query().Get("env"))
+	ent := strings.TrimSpace(r.URL.Query().Get("ent"))
+
+	var rows []recRow
+	if items, lerr := lib.List(); lerr == nil {
+		for _, it := range items {
+			if it.Meta == nil {
+				continue
+			}
+			row := rowFromMeta("长期库", it.Dir, it.Meta)
+			if rowMatches(row, env, ent) {
+				rows = append(rows, row)
+			}
+		}
+	}
+	if ids, cerr := fep.ListIDs(cacheDir); cerr == nil {
+		for _, id := range ids {
+			mt, merr := fep.ReadMeta(cacheDir, id)
+			if merr != nil {
+				continue // 还在录（身份是收工时落的）：不列半份
+			}
+			row := rowFromMeta("缓存", cacheDir, mt)
+			if rowMatches(row, env, ent) {
+				rows = append(rows, row)
+			}
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].Started > rows[j].Started })
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "env": env, "ent": ent, "recordings": rows})
+}
+
+// hRecordingShow GET /api/recordings/{id}
+func (s *Server) hRecordingShow(w http.ResponseWriter, r *http.Request) {
+	_, cacheDir, lib, err := s.recDirs()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("没给录制 ID"))
+		return
+	}
+	if it, found, lerr := lib.Find(id); lerr == nil && found && it.Meta != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "recording": rowFromMeta("长期库", it.Dir, it.Meta), "meta": it.Meta})
+		return
+	}
+	if mt, merr := fep.ReadMeta(cacheDir, id); merr == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "recording": rowFromMeta("缓存", cacheDir, mt), "meta": mt})
+		return
+	}
+	writeErr(w, http.StatusNotFound, fmt.Errorf("找不到录制 %s（长期库与缓存都没有）", id))
+}
+
+// hRecordingsCurrent GET /api/recordings/current —— 现在有没有在录。
+//
+// 判据是**会话登记**（`.tt-fep.json`）：它是"这一轮还活着"的唯一权威，
+// 而录制件本身要等收工才落身份，看文件只会在录到一半时给出"没有"。
+func (s *Server) hRecordingsCurrent(w http.ResponseWriter, r *http.Request) {
+	dataDir, _, _, err := s.recDirs()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	sess, lerr := fep.NewRegistry(dataDir).Load()
+	if lerr != nil || sess == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "recording": nil})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "recording": map[string]any{
+		"id": sess.Tag, "env": sess.Env, "zone": sess.Zone, "ent": sess.Ent,
+		"prog": sess.Prog, "path": sess.Path, "started": sess.Started,
+	}})
+}
+
+// recStartReq 是"开始录一轮"的请求体。
+type recStartReq struct {
+	Env       string `json:"env"`
+	Prog      string `json:"prog"`
+	Ent       string `json:"ent"`
+	Module    string `json:"module"`
+	BinaryRef string `json:"binaryRef"`
+}
+
+// hRecordingStart POST /api/recordings
+//
+// 起一个脱离的 `tt fep rec start`（见文件头注释），等它把登记写出来，返回录制 ID。
+// 用户此时**不会**被带到任何调试器面前：那一侧走的是我们自己的 fgldb（`rec start` 里那段）。
+func (s *Server) hRecordingStart(w http.ResponseWriter, r *http.Request) {
+	cfgPath, err := s.configPath(true)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	var req recStartReq
+	if derr := decodeBody(r, &req); derr != nil {
+		writeErr(w, http.StatusBadRequest, derr)
+		return
+	}
+	if strings.TrimSpace(req.Env) == "" || strings.TrimSpace(req.Prog) == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("环境与作业都要给（作业落在哪个企业只由 ENT 决定，作业名不能空）"))
+		return
+	}
+	dataDir := filepath.Dir(cfgPath)
+	// 已经在录了就不要再起一个：两个会话会抢同一组端口（7400/7600/7899），
+	// 而且用户看到的是"点了一下没反应"。
+	if sess, lerr := fep.NewRegistry(dataDir).Load(); lerr == nil && sess != nil {
+		writeErr(w, http.StatusConflict,
+			fmt.Errorf("已经在录了（%s，%s）：先停掉它再起新的", sess.Tag, sess.Prog))
+		return
+	}
+	exe, eerr := os.Executable()
+	if eerr != nil {
+		writeErr(w, http.StatusInternalServerError, eerr)
+		return
+	}
+	// 日志落缓存目录，SpawnDetached 只 OpenFile 不建目录：全新装好、还没录过一轮时
+	// 这个目录**不存在**，不建就会以"系统找不到指定的路径"起不来。
+	cacheDir := config.CacheDir(dataDir, "fep")
+	if merr := os.MkdirAll(cacheDir, 0o755); merr != nil {
+		writeErr(w, http.StatusInternalServerError, merr)
+		return
+	}
+	logPath := filepath.Join(cacheDir, "rec-start-"+time.Now().Format("20060102-150405")+".log")
+	args := []string{"fep", "rec", "start", "--env", req.Env, "--prog", req.Prog, "--config", cfgPath}
+	if e := strings.TrimSpace(req.Ent); e != "" {
+		args = append(args, "--ent", e)
+	}
+	if m := strings.TrimSpace(req.Module); m != "" {
+		args = append(args, "--module", m)
+	}
+	if b := strings.TrimSpace(req.BinaryRef); b != "" {
+		args = append(args, "--binary-ref", b)
+	}
+	if _, perr := winproc.SpawnDetached(exe, args, logPath); perr != nil {
+		writeErr(w, http.StatusInternalServerError, fmt.Errorf("起录制进程失败: %w", perr))
+		return
+	}
+	// 等它登记（登记是它能干活之前的第一件事，所以这就是"就绪"的信号）
+	reg := fep.NewRegistry(dataDir)
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if sess, lerr := reg.Load(); lerr == nil && sess != nil {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "recording": map[string]any{
+				"id": sess.Tag, "env": sess.Env, "prog": sess.Prog, "ent": sess.Ent, "path": sess.Path,
+			}, "log": logPath})
+			return
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	writeErr(w, http.StatusGatewayTimeout,
+		fmt.Errorf("录制进程起来了但 30 秒内没登记：看日志 %s", logPath))
+}
+
+// hRecordingStop POST /api/recordings/stop
+//
+// 收工 = 请常驻进程自己退（它会落身份 + 搬进长期库）+ 收掉调试会话。
+// 与命令行的 `tt fep session close` 同一件事，只是由面板触发。
+func (s *Server) hRecordingStop(w http.ResponseWriter, r *http.Request) {
+	dataDir, _, _, err := s.recDirs()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	reg := fep.NewRegistry(dataDir)
+	sess, lerr := reg.Load()
+	if lerr != nil || sess == nil {
+		writeErr(w, http.StatusConflict, fmt.Errorf("现在没有在录的会话"))
+		return
+	}
+	stopped, serr := reg.Stop()
+	if serr != nil {
+		writeErr(w, http.StatusInternalServerError, serr)
+		return
+	}
+	// 调试线那一侧也要收（这一轮是 path=debug 起的）：只收代理会让它在服务里留成一个
+	// 开着的会话，下一轮 `debug topent` 就设不上去。
+	if stopped.Path == fep.PathDebug {
+		// 用**真的那份**配置文件（`--config` 可能指向别处，不猜 dataDir/config.json）；
+		// 日志目录同起录那条路，缺了先建。
+		if cfgPath, cerr := s.configPath(true); cerr == nil {
+			if exe, eerr := os.Executable(); eerr == nil {
+				if cacheDir := config.CacheDir(filepath.Dir(cfgPath), "fep"); cacheDir != "" {
+					if merr := os.MkdirAll(cacheDir, 0o755); merr == nil {
+						logPath := filepath.Join(cacheDir, "rec-stop-"+time.Now().Format("20060102-150405")+".log")
+						_, _ = winproc.SpawnDetached(exe, []string{"debug", "quit", "--config", cfgPath}, logPath)
+					}
+				}
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "stopped": map[string]any{
+		"id": stopped.Tag, "env": stopped.Env, "prog": stopped.Prog,
+	}})
+}
+
+// hRecordingDelete DELETE /api/recordings/{id}?confirm=1
+//
+// 删**长期库**里的那一份（前端"手动清除"）。必须显式 confirm：录制不可再生
+// （用户再报一次 bug、再操作一遍才有这一份），与命令行那条 `rec rm --yes` 同一口径。
+func (s *Server) hRecordingDelete(w http.ResponseWriter, r *http.Request) {
+	_, cacheDir, lib, err := s.recDirs()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if r.URL.Query().Get("confirm") != "1" {
+		writeErr(w, http.StatusBadRequest,
+			fmt.Errorf("删录制要二次确认（?confirm=1）：这份录制不可再生"))
+		return
+	}
+	item, found, lerr := lib.Find(id)
+	if lerr != nil {
+		writeErr(w, http.StatusInternalServerError, lerr)
+		return
+	}
+	if !found {
+		// 在缓存里？如实说它归统一清理框架管
+		if files, ferr := fep.RecordingFilesFor(cacheDir, id); ferr == nil && len(files) > 0 {
+			writeErr(w, http.StatusConflict,
+				fmt.Errorf("%s 在缓存目录，归统一清理框架管（tt cache clear / 启动清理按年龄删）", id))
+			return
+		}
+		writeErr(w, http.StatusNotFound, fmt.Errorf("长期库里没有 %s", id))
+		return
+	}
+	files, bytes, rerr := lib.Remove(item)
+	if rerr != nil {
+		writeErr(w, http.StatusInternalServerError, rerr)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": id, "files": files, "bytes": bytes})
+}
+
+// rowFromMeta 把身份摊成列表里的一行（体积现算：它就在手边，而"这份多大"是用户会看的）。
+func rowFromMeta(where, dir string, mt *fep.RecordingMeta) recRow {
+	row := recRow{
+		ID: mt.ID, Where: where, Dir: dir,
+		Path: mt.Path, Prog: mt.Prog, Env: mt.Env, Zone: mt.Zone, Ent: mt.Ent,
+		Origin: mt.Origin, Retention: mt.Retention, Fingerprint: mt.Fingerprint,
+		Conns: len(mt.Conns), Note: mt.Note,
+	}
+	if !mt.Started.IsZero() {
+		row.Started = mt.Started.Format(time.RFC3339)
+	}
+	for _, c := range mt.Conns {
+		row.Bytes += c.BytesRT + c.BytesFE
+	}
+	return row
+}
+
+// rowMatches 按环境/ENT 过滤（空条件 = 不过滤）。大小写不敏感：环境名是人打的。
+func rowMatches(row recRow, env, ent string) bool {
+	if env != "" && !strings.EqualFold(strings.TrimSpace(row.Env), env) {
+		return false
+	}
+	if ent != "" && strings.TrimSpace(row.Ent) != ent {
+		return false
+	}
+	return true
+}

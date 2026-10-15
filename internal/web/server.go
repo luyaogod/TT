@@ -150,6 +150,9 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/dbprobe", s.hDBProbe)
 	m.HandleFunc("POST /api/dbaccverify", s.hDBAccVerify)
 	m.HandleFunc("POST /api/conntest", s.hConnTest)
+	// ---- 录制面板：列/看/起录/停录/删（见 recordings.go）----
+	s.registerRecordings(m)
+
 	m.HandleFunc("GET /api/config/meta", s.hConfigMeta)
 	m.HandleFunc("GET /api/config/status", s.hConfigStatus)
 	m.HandleFunc("POST /api/cache/clear", s.hCacheClear)

@@ -12,6 +12,9 @@
 | `/api/dbprobe` / `/api/dbaccverify` / `/api/conntest` | 从服务器探测连接要素、验证账号、测试连接 |
 | `/api/config/meta` / `/api/config/status` | 配置的元信息与**派生状态** |
 | `/api/cache/clear` | 清缓存 |
+| `/api/recordings` GET / POST | **录制面板**：按 环境+ENT 列录制（长期库与缓存两处）／起一轮录制（**另起一个进程**跑 `tt fep rec start`，照 `tt update` 那条先例） |
+| `/api/recordings/current` · `/api/recordings/stop` | 现在在录吗（看会话登记，不看文件）／停一轮（= `session close` + 收掉调试会话） |
+| `/api/recordings/{id}` GET / DELETE | 看一份（含身份）／删一份（**必须 `?confirm=1`**：录制不可再生） |
 | `/api/install` GET / POST / DELETE | 把 tt 加进 / 移出用户 PATH |
 | `/api/update` / `/api/update/check` / `/api/update/apply` | tt 自身的更新：读状态（不联网）/ 人去点才查一次 / 交棒给更新器 |
 | `/api/shutdown` | 停止服务（仅在有停止回调时挂） |

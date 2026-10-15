@@ -5,7 +5,8 @@ import { THEME_KEY, applyDark, readStoredTheme, resolveDark, watchSystemTheme, t
 import { toast } from './toastBus'
 // 只取类型:routing.ts 里有 DOM 相关逻辑,虽然都在函数体内,这里也只导入类型
 // —— 打包后可确保 store 与路由模块之间没有运行时依赖(check:store 在 Node 里跑)。
-import type { SettingsSectionKey } from './routing'
+// 视图键也取自这里:键只有一份定义(见 routing.ts 与本目录 README),别在这儿再列一遍。
+import type { SettingsSectionKey, ViewKey } from './routing'
 export type { ThemeMode }
 
 // timeline 条目(人/AI/系统 的操作与事件,可审计)
@@ -71,7 +72,7 @@ interface Store {
   rawLog: string[]
   runProg: string // gzzz_t 解析出的实体程序(源码命名/预取用);空 = 与 prog 相同
   // 视图与接口日志(VS Code 活动栏切换)
-  view: 'debug' | 'wslogs' | 'wstest' | 'settings'
+  view: ViewKey
   // 设置页当前分区(站点管理/数据字典/DEBUG/应用设置)。放在 store 而不是 SettingsView 局部
   // 是因为 App 的首屏深链接解析要写它。写在这里的是"纯状态",URL 片段由 SettingsView 同步。
   settingsSection: SettingsSectionKey
@@ -125,7 +126,7 @@ interface Store {
   onEvent: (ev: Event) => void
   // WS 开场补发:只把历史填进时间线,不触发任何副作用
   onReplay: (ev: Event) => void
-  setView: (v: 'debug' | 'wslogs' | 'wstest' | 'settings') => void
+  setView: (v: ViewKey) => void
   setSettingsSection: (s: SettingsSectionKey) => void
   setLaunchError: (msg: string) => void
   setTheme: (t: ThemeMode) => void

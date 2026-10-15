@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { RotateCcw, WifiOff, Bug, BugPlay, Globe, FlaskConical, Settings, ListTree, Server, type LucideIcon } from 'lucide-react'
+import { RotateCcw, WifiOff, Bug, BugPlay, Globe, FlaskConical, Video, Settings, ListTree, Server, type LucideIcon } from 'lucide-react'
 import { connectWS, useStore } from './store'
 import { Toolbar } from './Toolbar'
 import { SourceView, editorRef } from './SourceView'
@@ -8,6 +8,7 @@ import { OutlinePanel } from './OutlinePanel'
 import { SessionPanel } from './SessionPanel'
 import { WsLogView } from './WsLogView'
 import { WsTestView } from './WsTestView'
+import { RecordView } from './RecordView'
 import { SettingsView } from './SettingsView'
 import { StatusBar, STATUS_BAR_H } from './StatusBar'
 import { api } from './api'
@@ -267,11 +268,13 @@ export function App() {
           <ActivityIcon icon={Bug} label="调试" active={view === 'debug'} onClick={() => setView('debug')} />
           <ActivityIcon icon={Globe} label="接口日志" active={view === 'wslogs'} onClick={() => setView('wslogs')} />
           <ActivityIcon icon={FlaskConical} label="服务测试" active={view === 'wstest'} onClick={() => setView('wstest')} />
+          {/* 录制排在最后:它是"有环境之后"才干的事(列/起/停一轮录制),与设置那种前置动作分开 */}
+          <ActivityIcon icon={Video} label="录制" active={view === 'record'} onClick={() => setView('record')} />
         </div>
-        {/* 主内容面板:四套视图都装在这一个带边线的圆角面板里,四周与活动栏/右侧栏/状态栏留出间隙。
+        {/* 主内容面板:五套视图都装在这一个带边线的圆角面板里,四周与活动栏/右侧栏/状态栏留出间隙。
             overflow-hidden 让四个圆角真正裁掉里面的直角内容(页签栏、编辑器底色)。 */}
         <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-ui border border-border">
-          {/* 四个视图全部 keep-alive:首次访问后常驻挂载,切换仅改 display */}
+          {/* 五个视图全部 keep-alive:首次访问后常驻挂载,切换仅改 display */}
           <ViewPane show={view === 'debug'}>
             <Toolbar />
             {/* 面板紧贴(VS Code 经典密度):无外边距,仅靠 sash 分割线分区
@@ -315,6 +318,9 @@ export function App() {
           </ViewPane>
           <ViewPane show={view === 'wstest'}>
             <WsTestView />
+          </ViewPane>
+          <ViewPane show={view === 'record'}>
+            <RecordView />
           </ViewPane>
           <ViewPane show={view === 'settings'}>
             <SettingsView />

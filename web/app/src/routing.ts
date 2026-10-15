@@ -20,15 +20,15 @@ export const SETTINGS_SECTIONS: { key: SettingsSectionKey; label: string }[] = [
 
 export const DEFAULT_SETTINGS_SECTION: SettingsSectionKey = 'sites'
 
-/** 活动栏的四个视图(设置页是其中之一) */
-export type ViewKey = 'debug' | 'wslogs' | 'wstest' | 'settings'
+/** 活动栏的五个视图(设置页是其中之一,录制面板是最后加的那个) */
+export type ViewKey = 'debug' | 'wslogs' | 'wstest' | 'record' | 'settings'
 
 export function isSettingsSection(v: string): v is SettingsSectionKey {
   return SETTINGS_SECTIONS.some((s) => s.key === v)
 }
 
 function isViewKey(v: string): v is ViewKey {
-  return v === 'debug' || v === 'wslogs' || v === 'wstest' || v === 'settings'
+  return v === 'debug' || v === 'wslogs' || v === 'wstest' || v === 'record' || v === 'settings'
 }
 
 /** 解析 location.hash。认不出来的一律返回空对象(不猜,让调用方走默认)。 */

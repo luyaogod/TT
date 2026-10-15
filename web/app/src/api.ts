@@ -307,6 +307,37 @@ export interface ConfigMeta {
   supportedTypes: string[]
 }
 
+// ---- 录制面板:共享端点 /api/recordings(顶层,无前缀)的读写形状 ----
+// 服务端一件一名(见 internal/web/recordings.go):列表里的一行就是一份录制件的身份摊开,
+// 体积/指纹/归属都是收工那一刻落下的,不是现算的。
+export interface RecordingRow {
+  id: string
+  where: string // 长期库 | 缓存
+  dir: string
+  path?: string // r.r | debug | r.d | none(这是"这一次作业怎么起来的",闸门靠它比对)
+  prog?: string
+  env?: string
+  zone?: string
+  ent?: string
+  origin?: string // user | auto
+  retention?: string // library | cache
+  started?: string // RFC3339;空 = 身份里没记时间
+  bytes: number
+  conns: number
+  fingerprint: { total: number; hash: string }
+  note?: string
+}
+// 正在录的那一轮(来自会话登记 .tt-fep.json,不是录制件 —— 件要收工才落身份)
+export interface RecordingCurrent {
+  id: string
+  env?: string
+  zone?: string
+  ent?: string
+  prog?: string
+  path?: string
+  started?: string
+}
+
 export interface Event {
   type: string; sessionId: string; time: string
   state?: string; stop?: StopInfo; vars?: VarItem[]; text?: string
@@ -457,4 +488,33 @@ export const api = {
     }),
   sourcePreview: (module: string, prog: string) =>
     req<{ source: { path: string; content: string; dvmFile?: string } }>(`${API_BASE}/source-preview?module=${encodeURIComponent(module)}&prog=${encodeURIComponent(prog)}`),
+
+  // ---- 录制面板(共享端点:**不带** /debug 前缀,与本文件头注释里那类顶层端点一致)----
+  //
+  // 起一轮/停一轮都是服务端**另起进程**(`tt fep rec start` 那一条),所以这里的每次调用
+  // 都可能要等几秒到几十秒;起录在已经有会话时会回 409 与一句中文原因,原样抛给界面。
+  // 列表的 env/ent 是**过滤条件**(空 = 不过滤):库里按环境分层,缓存里只能读身份,两边同一套判据。
+  recordings: (env: string, ent: string) => {
+    const p = new URLSearchParams()
+    if (env.trim()) p.set('env', env.trim())
+    if (ent.trim()) p.set('ent', ent.trim())
+    const qs = p.toString()
+    return req<{ ok: boolean; env: string; ent: string; recordings: RecordingRow[] }>(
+      `/api/recordings${qs ? `?${qs}` : ''}`)
+  },
+  // 现在在录吗(null = 没有)。判据是会话登记:录制件要收工才落身份,看文件会在录到一半时说"没有"。
+  recordingCurrent: () => req<{ ok: boolean; recording: RecordingCurrent | null }>('/api/recordings/current'),
+  recordingShow: (id: string) =>
+    req<{ ok: boolean; recording: RecordingRow; meta: any }>(`/api/recordings/${encodeURIComponent(id)}`),
+  recordingStart: (body: { env: string; prog: string; ent?: string; module?: string; binaryRef?: string }) =>
+    req<{ ok: boolean; recording: RecordingCurrent; log: string }>('/api/recordings', {
+      method: 'POST', body: JSON.stringify(body),
+    }),
+  recordingStop: () =>
+    req<{ ok: boolean; stopped: { id: string; env: string; prog: string } }>('/api/recordings/stop', { method: 'POST' }),
+  // 删长期库里的那一份。**必须带 confirm=1**:录制不可再生(用户再报一次 bug、再操作一遍才有),
+  // 不带后端直接 400。缓存里那类不归它管(服务端会回一句"归统一清理框架管")。
+  recordingDelete: (id: string) =>
+    req<{ ok: boolean; id: string; files: number; bytes: number }>(
+      `/api/recordings/${encodeURIComponent(id)}?confirm=1`, { method: 'DELETE' }),
 }
