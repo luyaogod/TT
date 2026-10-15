@@ -51,10 +51,10 @@ var sessionPsCmd = &cobra.Command{
 			}
 		}
 		return printJSONOrText(view, func() {
-			fmt.Printf("会话    : %s (环境 %s / 区域 %s)\n", s.Prog, s.Env, s.Zone)
+			fmt.Printf("会话    : %s (环境 %s / 区域 %s / 启动路径 %s / %s)\n", s.Prog, s.Env, s.Zone, s.Path, entText(s.Ent))
 			fmt.Printf("GDC     : pid %d 端口 %d  %s\n", s.GDCPID, s.GDCPort, aliveText(alive))
 			fmt.Printf("代理    : 监听 %d → 127.0.0.1:%d（注入口 %d）\n", s.ProxyPort, s.GDCPort, s.InjectPort)
-			fmt.Printf("录制件  : %s\n", s.Tag)
+			fmt.Printf("录制 ID : %s\n", s.Tag)
 			fmt.Printf("起始    : %s（启动者 pid %d）\n", s.Started.Format(time.RFC3339), s.OwnerPID)
 			if e, eerr := fep.CheckElevation(s.GDCPID); eerr == nil && !e.OK {
 				fmt.Printf("⚠ %s\n", e.Advice)
@@ -84,6 +84,17 @@ var sessionCloseCmd = &cobra.Command{
 		if serr != nil {
 			return fail(exitFailed, "%v", serr)
 		}
+		// 调试线起的会话，调试那一侧也要收：只收代理会让它在 tt serve 里留成一个开着的会话，
+		// 下一轮 `debug topent` 就设不上去（服务端只允许空闲时设）。
+		// 放在**这里**而不是常驻进程的收尾里：那边有 8 秒宽限，超了会被 session close 杀掉，
+		// 表现是"收尾做到一半、进程退 1"。
+		if stopped.Path == fep.PathDebug {
+			if qerr := runSelf(cmd, "debug", "quit"); qerr != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "· 调试会话没收干净（可手工 tt debug quit）：%v\n", qerr)
+			} else {
+				fmt.Fprintln(cmd.ErrOrStderr(), "· 调试会话已收（tt debug quit）")
+			}
+		}
 		return printJSONOrText(map[string]any{"stopped": stopped.Prog, "gdcPid": stopped.GDCPID, "wasAlive": alive, "registryCleared": true}, func() {
 			if alive {
 				fmt.Printf("已收会话 %s：GDC pid %d 已结束，登记已清\n", stopped.Prog, stopped.GDCPID)
@@ -99,4 +110,15 @@ func aliveText(alive bool) string {
 		return "运行中"
 	}
 	return "已不在（登记过期）"
+}
+
+// entText 这个会话跑在哪个企业上。
+//
+// 没给 --ent 时要**如实说**"沿用登录 shell 的"，不能留空或写个 `-`：
+// 留空读起来像"这个会话没有企业"，而"我没指定"与"没有"是两件事。
+func entText(ent string) string {
+	if ent == "" {
+		return "ENT 沿用登录 shell 的 $TOPENT"
+	}
+	return "ENT " + ent
 }

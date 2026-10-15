@@ -17,26 +17,35 @@ var (
 	replaySkip     []string
 	replayInterval time.Duration
 	replayDryRun   bool
+	replayNoGate   bool
 )
 
 var recReplayCmd = &cobra.Command{
 	Use:   "replay",
-	Short: "回放一轮录制下来的动作（白名单 + AUI 安全闸 + 可停在第 N 步）",
+	Short: "回放一轮录制下来的动作（指纹闸 + 白名单 + AUI 安全闸 + 可停在第 N 步）",
 	Long: `把录制件里真人做过的一轮动作重新发一遍。
 
 与 rec steps 不是一回事：steps 给人看（丢导航、只要语义），replay 求保真（多带状态）。
 白名单的边界是实测出来的 —— ConfigureEvent{currentRow/currentColumn}（前端回抱“当前行/列”）
 **必须**回放（它就是“选中哪一行”），tabIndex/bufferSize/pageSize 才该丢。
 
-三道保险：
-  1. 白名单外的一律不发；
-  2. AUI 安全闸：对象不在**当次界面**里就跳过（每一步都重新读界面，不用旧模型）；
-  3. --dry-run 只出计划一个字节都不发；--stop-at 让人先跑一半看效果。
+四道保险：
+  1. 指纹闸：录制件的编号表必须和**当前界面**对得上（实测跨启动路径共同编号 0 条相同，
+     而旧的安全闸拦不住它 —— 6/6 会安静地点到别的控件上）；
+  2. 白名单外的一律不发；
+  3. AUI 安全闸：对象不在**当次界面**里就跳过（每一步都重新读界面，不用旧模型）；
+  4. --dry-run 只出计划一个字节都不发；--stop-at 让人先跑一半看效果。
 
-每一步都写审计。执行前会先把计划（要发什么、跳了什么、为什么）打出来 —— 先看得见再动手。`,
+每一步都写审计。执行前会先把闸门判决与计划（要发什么、跳了什么、为什么）打出来 —— 先看得见再动手。`,
 	Args: noArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		events, err := loadEvents(uiFrom)
+		// ① 录制件那一面（离线，读文件）
+		t, terr := resolveRecording(uiFrom, recID)
+		if terr != nil {
+			return terr
+		}
+		rec := t.multi()
+		events, err := t.events()
 		if err != nil {
 			return err
 		}
@@ -45,6 +54,34 @@ var recReplayCmd = &cobra.Command{
 		client, cerr := newClient()
 		if cerr != nil && !replayDryRun {
 			return cerr
+		}
+		// ② 指纹闸：先比"这份录制配不配得上现在这个界面"，再谈发什么
+		if !replayNoGate {
+			live, ok, lerr := liveMulti(client)
+			if lerr != nil {
+				return fail(exitFailed, "%v", lerr)
+			}
+			if !ok {
+				if replayDryRun {
+					fmt.Fprintln(cmd.ErrOrStderr(), "· 没有会话在跑：闸门跳过（--dry-run 只出计划）")
+				} else {
+					return fail(exitNoSession, "没有登记中的会话，指纹闸无从比对（先跑 tt fep session open）")
+				}
+			} else {
+				v := fep.GateReplay(rec, live)
+				fmt.Fprint(cmd.ErrOrStderr(), v.Report())
+				if !v.OK {
+					if replayDryRun {
+						fmt.Fprintln(cmd.ErrOrStderr(), "· --dry-run：只出计划，不拦")
+					} else {
+						code := exitState
+						if v.Code == fep.GateNoLive {
+							code = exitNoSession
+						}
+						return fail(code, "指纹闸不过：%s", v.Reason)
+					}
+				}
+			}
 		}
 		// 计划阶段**不做** AUI 判断：那会把“后面才出现的按钮”（确定/审核/是）提前剔掉，
 		// 实测导致保存与审核那几步根本没发。AUI 安全闸只放在发之前那一刻（RunReplay 里逐条判）。
@@ -119,11 +156,14 @@ func truncate(s string, n int) string {
 
 func init() {
 	recReplayCmd.Flags().StringVar(&uiFrom, "from", "", "录制件：单个 .log 或存放它的目录（默认 fep 缓存目录）")
+	recReplayCmd.Flags().StringVar(&recID, "id", "", "录制 ID：去默认落点找这一份（与 --from 二选一）")
 	recReplayCmd.Flags().IntVar(&replayConn, "conn", 0, "连接号（多窗口作业必给；给了 --window 就按窗口路由）")
 	recReplayCmd.Flags().StringVar(&replayWindow, "window", "", "按窗口名路由连接")
 	recReplayCmd.Flags().IntVar(&replayStopAt, "stop-at", 0, "只回放到第 N 条（含），用于先跑一半看效果")
 	recReplayCmd.Flags().StringArrayVar(&replaySkip, "skip", nil, "命中这段子串的事件就跳过（可重复）")
 	recReplayCmd.Flags().DurationVar(&replayInterval, "interval", 300*time.Millisecond, "每条之间等多久（太快会让上一屏还没建好）")
 	recReplayCmd.Flags().BoolVar(&replayDryRun, "dry-run", false, "只出计划，一个字节都不发")
+	recReplayCmd.Flags().BoolVar(&replayNoGate, "no-gate", false,
+		"跳过指纹闸（只给「我知道自己在做什么」的排障用：跨启动路径回放会安静地点到别的控件上）")
 	recCmd.AddCommand(recReplayCmd)
 }

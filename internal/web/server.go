@@ -23,6 +23,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -30,6 +31,7 @@ import (
 	"tt/internal/dbconfig"
 	"tt/internal/designer"
 	"tt/internal/erpdb"
+	"tt/internal/fep"
 	"tt/internal/host"
 )
 
@@ -330,6 +332,10 @@ func (s *Server) hHostsPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 环境被删掉时要**级联清掉它的录制库**（用户定的策略：用户主动录的长期留着，
+	// 但环境没了它们就是没人认领的字节）。名字在写配置前记下来、写成功之后再删 ——
+	// 删文件不能放进 config.Edit 的事务里：事务回滚不了已经删掉的文件。
+	var removedEnvs []string
 	err = config.Edit(path, nil, func(root map[string]any) error {
 		if req.Hosts != nil {
 			if err := validateHosts(req.Hosts); err != nil {
@@ -338,6 +344,9 @@ func (s *Server) hHostsPut(w http.ResponseWriter, r *http.Request) {
 			sec, err := structToSection(*req.Hosts)
 			if err != nil {
 				return err
+			}
+			if oldHosts, ok := root["hosts"].(map[string]any); ok {
+				removedEnvs = lostNames(envNamesIn(oldHosts), envNamesIn(sec))
 			}
 			// 保留前端表单不管理的 db 字段（目前是 viaSsh）。
 			// 配置页只编辑 type/host/port/service/database/readonlySql/accounts，
@@ -406,6 +415,22 @@ func (s *Server) hHostsPut(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
+	// 级联清理：被删掉的那些环境，把它们的录制库一起收掉。
+	// 失败只记日志：配置已经落盘成功，但必须让用户看见 —— 否则就成了
+	// "以为清了、其实还留着几十 MB 业务数据"。
+	if len(removedEnvs) > 0 {
+		lib := fep.NewLibrary(filepath.Dir(path))
+		for _, name := range removedEnvs {
+			files, bytes, derr := lib.RemoveEnv(name)
+			if derr != nil {
+				log.Printf("[tt] 环境 %s 已移除，但它的录制库没清干净: %v", name, derr)
+				continue
+			}
+			if files > 0 {
+				log.Printf("[tt] 环境 %s 已移除：级联删掉它名下 %d 份录制文件（%d 字节）", name, files, bytes)
+			}
+		}
+	}
 	// 通知持有配置内存态的子系统（如调试服务）重新加载。
 	// 失败只记日志：配置已经落盘成功，重新加载失败不该把一个成功的写报成失败，
 	// 但必须让用户看见 —— 否则就成了"保存成功但没生效"。
@@ -418,6 +443,37 @@ func (s *Server) hHostsPut(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.hHostsGet(w, r)
+}
+
+// envNamesIn 取一个 hosts 节里的环境名（`sshs` 里每条的 `name`，没有名字的略过）。
+func envNamesIn(hostsSec map[string]any) []string {
+	list, _ := hostsSec["sshs"].([]any)
+	var out []string
+	for _, e := range list {
+		m, _ := e.(map[string]any)
+		if m == nil {
+			continue
+		}
+		if n, _ := m["name"].(string); n != "" {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// lostNames 返回"旧的里有、新的里没有"的那几个名字（环境被删掉的就是它们）。
+func lostNames(old, cur []string) []string {
+	keep := make(map[string]bool, len(cur))
+	for _, n := range cur {
+		keep[n] = true
+	}
+	var out []string
+	for _, n := range old {
+		if !keep[n] {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // preserveUngovernedFields 把旧配置里、配置页表单不管理的字段补进新节。

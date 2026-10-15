@@ -105,6 +105,16 @@ T100 作业调试的核心：经 SSH 驱动服务器上的 4GL 调试协议，�
 放行之后什么都不弹、启动段也不报错，所以每轮启动都在事件流与快照里报一句画面去向
 （`ScreenTarget`：端口 = 前端监听端口 - 6400）。
 
+## 起作业的路径
+
+会话起的作业是 `fglrun -d <LaunchRef>.42r <LaunchArgs>`（`session.go:668`）：`LaunchRef` 取自
+T100 元数据（gzza004 的启动引用，如 `$ASFi/bsft001_wf`），`LaunchArgs` 是配置模板
+（默认 `config.DefaultLaunchArgs`，`{prog}` 换成作业名）。这条路径**直接跑目标程序**，
+不经过 T100 自己的启动器（`r.r` 的 `azzp000`、`r.d` 的 `gendbg`/`fgldeb`）。
+
+运行期分配的 AUI id 是**启动历史的函数**：三条路径互不相同。所以录制与回放必须走同一条
+路径 —— 路径表、跨路径的实测后果与判据见 [../fep/README.md](../fep/README.md)。
+
 ## 判据
 
 ```bash

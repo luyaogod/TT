@@ -1,0 +1,203 @@
+package fep
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"tt/internal/cli/common"
+	"tt/internal/config"
+	"tt/internal/debug"
+	"tt/internal/fep"
+)
+
+// recSession 是"起一轮调试线录制会话"要的那些参数。
+//
+// 抽出来是因为有两个调用方：`rec start`（人开始录一轮）与 `rec reproduce`
+// （把一份录制在断点下重放出来）。谁起的会话谁负责收 —— 这里只负责起。
+type recSession struct {
+	Ctx    context.Context
+	Env    string
+	Prog   string
+	Ent    string
+	Module string
+	// Breaks 是**放行前**要下好的断点（`file:line`、`函数名`，见 tt debug exec 的 break）。
+	// 顺序要紧：程序停在入口时下断点才有意义；放行之后再下，那一段已经跑过去了。
+	Breaks []string
+	// NoContinue 只下断点、不放行（给人自己下断点用：`rec start --no-continue`）。
+	NoContinue bool
+	Origin     fep.Origin
+}
+
+// openDebugRecording 起隔离实例 + 代理，再把调试线的作业挂到这条代理上。
+//
+// 顺序不能换：代理先起来（画面得有地方去），再让调试线把作业挂上去（`--fglserver` 指到代理）。
+// 中间任何一步失败都把已经起来的代理收掉 —— 不然会留下一个占着三个端口的空会话。
+// 返回的 Runtime 归调用方：它决定什么时候 Wait/Close（`rec reproduce` 就是故意不收，
+// 好让 AI 停在断点上取证）。
+func openDebugRecording(cmd *cobra.Command, s recSession) (*fep.Runtime, string, error) {
+	cfgPath, err := common.ResolveConfig(true)
+	if err != nil {
+		return nil, "", err
+	}
+	dcfg, err := debug.LoadConfig(cfgPath)
+	if err != nil {
+		return nil, "", fail(exitFailed, "%v", err)
+	}
+	name, rerr := openEnvName(dcfg.SSHs, s.Env)
+	if rerr != nil {
+		return nil, "", fail(exitUsage, "%v", rerr)
+	}
+	clone := dcfg.CloneEnv(name)
+	if clone == nil {
+		return nil, "", fail(exitUsage, "环境 %q 不存在（见 tt env list）", name)
+	}
+	dcfg = clone
+	if dcfg.SSH.Host == "" {
+		return nil, "", fail(exitPreflight, "环境 %q 没配 SSH host", name)
+	}
+	loc := config.LocationsAt(cfgPath)
+	recDir := loc.CacheDir("fep")
+	if recDir == "" {
+		return nil, "", fail(exitPreflight, "缓存目录没解析出来（检查配置路径）")
+	}
+	if err := os.MkdirAll(recDir, 0o755); err != nil {
+		return nil, "", fail(exitFailed, "建录制目录失败: %v", err)
+	}
+	// 上一轮可能还挂着一个调试会话（程序释放了、宿主会话还在）：那种状态下 TOPENT 设不上去
+	// （服务端只允许空闲时设）。这一轮要的是**自己的**会话，所以先把它收掉。
+	// 不收的后果实测过：`rec reproduce` 在 `debug topent` 那一步退 1，白起一个代理。
+	logf := func(format string, a ...any) {
+		fmt.Fprintf(cmd.ErrOrStderr(), "· "+format+"\n", a...)
+	}
+	if busy, _ := debugSessionOpen(cmd); busy {
+		logf("先收掉上一轮挂着的调试会话（它占着宿主会话，TOPENT 设不上）")
+		if qerr := runSelf(cmd, "debug", "quit"); qerr != nil {
+			logf("收上一轮会话时失败（继续试）：%v", qerr)
+		}
+		time.Sleep(2 * time.Second)
+	}
+	tag := "fep-" + time.Now().Format("20060102-150405")
+	rt, err := fep.Open(s.Ctx, fep.OpenConfig{
+		Env: dcfg.EnvName(), Zone: dcfg.Zone,
+		// 身份：作业是调试线起的（见 path.go）。写对了，回放前的路径比对才有双方的值。
+		Prog: s.Prog, Path: fep.PathDebug, Ent: s.Ent, Origin: s.Origin,
+		SSH: dcfg.SSH, DataDir: loc.DataDir(), RecordDir: recDir, Tag: tag,
+		GDCLog: filepath.Join(recDir, tag+"-gdc.log"),
+		NoJob:  true,
+	}, logf)
+	if err != nil {
+		return nil, "", mapOpenErr(err)
+	}
+	fgl := rt.FGLServer()
+	if fgl == "" {
+		_ = rt.Close()
+		return nil, "", fail(exitPreflight, "算不出这一轮的画面接线（FGLSERVER）：给环境配 SSH host，或用 --fgserver-ip")
+	}
+	logf("这一轮画面接线：FGLSERVER=%s（调试线按它把作业画到本代理上）", fgl)
+
+	if serr := runRecStartSteps(cmd, recStartSteps(dcfg.EnvName(), s.Ent, s.Prog, s.Module, fgl), s.Breaks, s.NoContinue); serr != nil {
+		if cerr := rt.Close(); cerr != nil {
+			logf("收代理时还有失败：%v", cerr)
+		}
+		return nil, "", serr
+	}
+	return rt, fgl, nil
+}
+
+// debugSessionOpen 报告调试服务里是不是还挂着一个会话。
+//
+// 判据取 `tt debug status --json` 的报文：它列出现存会话。这里只读它给的 JSON，
+// 不碰调试服务的内部协议 —— 那个协议的家在 internal/cli/debug。
+func debugSessionOpen(cmd *cobra.Command) (bool, error) {
+	out, err := runSelfOut(cmd, "--json", "debug", "status")
+	if err != nil {
+		return false, err
+	}
+	var st struct {
+		Sessions []struct {
+			State string `json:"state"`
+		} `json:"sessions"`
+	}
+	if jerr := json.Unmarshal(out, &st); jerr != nil {
+		return false, jerr
+	}
+	return len(st.Sessions) > 0, nil
+}
+
+// stopSpot 是"程序停在哪儿"（调试服务给的现场）。
+type stopSpot struct {
+	File   string `json:"file"`
+	Line   int    `json:"line"`
+	Func   string `json:"func"`
+	Reason string `json:"reason"`
+}
+
+func (s stopSpot) String() string {
+	if s.File == "" {
+		if s.Reason != "" {
+			return "（没说在哪个文件）原因：" + s.Reason
+		}
+		return "（没有停站信息）"
+	}
+	spot := fmt.Sprintf("%s:%d", s.File, s.Line)
+	if s.Func != "" {
+		spot += "（" + s.Func + "）"
+	}
+	if s.Reason != "" {
+		spot += " 原因：" + s.Reason
+	}
+	return spot
+}
+
+// waitStopped 等调试会话停站，并把现场读出来。
+//
+// 走 `tt debug wait --for stopped --json`（子进程，输出落临时文件再读）：
+//   - 不直接讲调试服务的 HTTP 协议 —— 那个协议只该有一份实现，它在 internal/cli/debug 里；
+//   - 不用管道接输出：沙箱里管道会被拒，而临时文件哪都能用。
+//
+// 超时**不是错误**（与 `tt debug wait` 同一口径）：返回 timedOut=true，由调用方决定怎么报。
+func waitStopped(cmd *cobra.Command, timeout time.Duration) (stopSpot, bool, error) {
+	var spot stopSpot
+	out, err := runSelfOut(cmd, "--json", "debug", "wait", "--for", "stopped,exit", "--timeout",
+		fmt.Sprintf("%d", int(timeout.Seconds())))
+	if err != nil {
+		return spot, false, err
+	}
+	spot, timedOut, err := parseWaitResult(out)
+	return spot, timedOut, err
+}
+
+// parseWaitResult 读 `tt debug wait --json` 的报文。
+//
+// 报文的形状（实测，别按直觉猜）：`event` 是**对象**不是字符串，而停站现场在
+// 顶层的 `stop` 里也在 `event.stop` 里各有一份 —— 第一次写成 `Event string` 时，
+// 断点明明命中了却报"读不懂等待结果"。
+func parseWaitResult(out []byte) (stopSpot, bool, error) {
+	var spot stopSpot
+	var payload struct {
+		Event struct {
+			Type string    `json:"type"`
+			Stop *stopSpot `json:"stop"`
+		} `json:"event"`
+		TimedOut bool      `json:"timedOut"`
+		State    string    `json:"state"`
+		Stop     *stopSpot `json:"stop"`
+	}
+	if jerr := json.Unmarshal(out, &payload); jerr != nil {
+		return spot, false, fmt.Errorf("读不懂调试服务的等待结果: %w（原文 %s）", jerr, strings.TrimSpace(string(out)))
+	}
+	if payload.Stop != nil {
+		spot = *payload.Stop
+	} else if payload.Event.Stop != nil {
+		spot = *payload.Event.Stop
+	}
+	// 事件到了但没有 stop 现场（退出/掉线）：也算"没捕获到断点现场"，照实报。
+	return spot, payload.TimedOut || spot.File == "", nil
+}

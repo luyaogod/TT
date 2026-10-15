@@ -33,13 +33,22 @@ T100 前端协议（GDC 与 fglrun 之间）的**纯离线**解析层：分帧�
 
 ## 判据
 
-```
-go test ./internal/fep/...          # 全绿（14 个用例）
+```bash
+go test ./internal/fep/...          # 全绿（含真语料夹具上的不变量回归）
 go vet ./internal/fep/...           # 干净
+go test ./internal/fep -run TestGate -count=1 -v   # 指纹闸：阈值两侧各一条
 ```
 
-夹具是**手写合成**数据（`aui_test.go` 的 `node()` 构建器按真实格式生成），不含任何客户数据。
-真实录制件不入库。
+- **期望**：`TestFixtureRecordingsKeepInvariants` 在三份仓库夹具（`testdata/fep-recordings/`）上逐条过；
+  `TestTheRnInvariantHasTeeth` 把 `rn` 退化回 `un` 就得红；`TestGateRefusesTwoDifferentRealInterfaces`
+  在两份真夹具上判"拒"且给出差异条数。
+- **这一层负责证明**：协议解析与 AUI 合并在真录制件上守住不变量，且"这份录制配不配得上这个界面"
+  的判决只在**表对得上**时放行。真机行为（起作业、发事件、断点）不在这里证。
+- **故意不覆盖**：现场语料（含真实业务数据，不随仓库走）与真机 E2E —— 它们分别由
+  `TT_FEP_RECORD_DIR` 那条可选路径和 `tt debug` 那条线覆盖。
+
+夹具是**手写合成**数据（`aui_test.go` 的 `node()` 构建器按真实格式生成）与现场录制的裁剪件
+（`testdata/fep-recordings/`，裁剪方式见该目录 README）。原始录制件不入库。
 
 ## 已知边界
 
@@ -97,6 +106,23 @@ tt fep rec steps --from teach-4-gdc2rt.log  → 原始事件 52 → 语义动作
 - 等隔离实例就绪用**轮询端口**（不是固定 sleep），就绪后再加 0.7s 余量：
   渲染中途取帧会得到一张看起来很像真的半成品图。
 - 登录序列与调试线一致：等区域菜单 → 写 zone → 等 shell 提示符。
+
+#### 启动时下发的两样东西（`jobLaunchCmd`）
+
+`export TOPENT=…`（给了 `--ent` 时）→ `export FGLSERVER=…` → `r.r <作业>`，**顺序不能换**：
+两样都必须在 `r.r` 之前生效，反了作业会带着上一轮的值跑起来。
+
+- **环境必须点名**：`session open` 走 `config.Hosts.Resolve`，不给 `--env` 就报
+  「必须指定环境(--env <环境名>);可用环境: …」，与 `tt debug`/`tt dict` 同一句。
+  这里**刻意不用** `debug.Config.EnvName()` 兜底 —— 它最后一级是 `SSH.Host + "-" + Zone`，
+  环境没选中时 SSH 是零值，会拼出一个叫 `-` 的幽灵环境名，报错成了
+  「环境 "-" 不存在」（实测踩过，人看不出该补什么）。
+- **企业编号只能每次显式给**：`config.NamedSsh` 刻意没有 `topent` 字段，
+  所以配置里就算留着 `topent` 也是死键、没有任何代码读它。作业落在哪个企业只由
+  登录 shell 的 `$TOPENT` 决定 —— 不给 `--ent` 就如实回显"沿用登录 shell 自己的"，
+  不猜、也不擅自 unset。
+- 值不限数字/文本：单引号包裹**并剔除内嵌单引号**，与 `internal/debug` 的
+  `topentShellCmd` 同一套规则（两处必须一致，改一处就要改另一处）。
 
 ### 事件构造与发前校验（`event.go`，M2 第一块）
 
@@ -200,24 +226,177 @@ session close       → GDC 已结束、登记已清、进程 0、端口仅剩 T
 ## M3：回放（`replay.go`）
 
 与 `rec steps`（给人看的步骤清单）**不是一回事**：steps 丢导航、只要语义；replay 求保真。
-白名单的边界是实测出来的：
+所以回放**按事件类型整类放行**（`AllowedForReplay`：`ActionEvent` / `KeyEvent` / `ConfigureEvent`），
+不做逐属性过滤 —— 焦点（`ConfigureEvent{cursor…}`）看着像导航噪声，但运行期正靠它确认
+"光标现在在这个栏位"，滤掉它后面的动作就全打在空气上。"人做过哪几步"要用 `rec steps` 看。
 
-| 回放 | 丢 |
-|---|---|
-| `ActionEvent` / `KeyEvent` | `tabIndex` / `bufferSize` / `pageSize` |
-| `ConfigureEvent{value …}` | 纯光标事件（`cursor`/`cursor2`） |
-| **`ConfigureEvent{currentRow/currentColumn …}`** | |
-
-最后一行是当年踩过的坑：把它当噪声滤掉，回放到开窗那一步网格全空，作业还弹
-“传入的料件编号为空!” —— 那对属性就是“选中哪一行”的语义。
-
-三道保险：白名单之外不发；**AUI 安全闸**（每一步都重新读界面，对象不在当次界面里就跳过
-—— 用旧模型会误杀后面的步骤）；`--dry-run` 只出计划。`--stop-at N` 让人先跑一半看效果，
-`--skip <子串>` 绕开某几步。每一步写审计。
+三道保险：**AUI 安全闸**（每一步都重新读界面，对象不在当次界面里就跳过
+—— 用旧模型会误杀后面的步骤）；`--dry-run` 只出计划；`--stop-at N` 让人先跑一半看效果、
+`--skip <子串>` 绕开某几步。每一步写审计。在这三道之前还有一道**指纹闸**：它先判
+"这份录制配不配得上现在这个界面"，判据见下节。
 
 计划阶段全是离线的（读录制件），所以 `--dry-run` **不需要有会话** —— 先看清要发什么，
 再决定要不要开会话，这个顺序本来就该如此。实测：真机那轮教学录制件（teach-4）出 50 条计划。
 
+### 录制件的适用范围：id 是启动历史的函数
+
+AUI 的裸 id 由**运行期**按对象声明顺序分配，被 `rn` 删掉后会被后续声明**复用**。
+所以 id 只在**同一段启动历史**里有意义：换一条启动路径、换一份 `.42r`、换一个企业，
+同一批对象的编号就全变。实测同一个作业的两条路径：对象集 1556/1558 相同，
+而编号在共同条目里 **0 条相同**（偏移从 −31 到 −4274 都有，不是等量平移）。
+
+作业怎么起由 T100 自己的脚本决定，路径的编号互不相同：
+
+| 路径 | 服务器上真正执行的命令 | 在命令面上吗 |
+|---|---|---|
+| `r.r <作业>` | `fglrun $AZZ/42r/azzp000.42r <作业>`（azzp000 是 T100 的作业启动器，**不带 `-d`**） | 是（`session open`，标准运行录制） |
+| debug 线 | `fglrun -d <LaunchRef>.42r <LaunchArgs>`，见 [../debug/README.md](../debug/README.md) | 是（`tt fep rec start` / `tt debug start`） |
+| `r.d <作业>` | `$FBIN/42m/gendbg <作业>` → `$FGLDEBPATH/fgldeb <作业>.42r …`（fgldeb 是 `fglrun -d` 的前端、**T100 的调试器**） | **否**（已从命令面拿掉） |
+
+**录制走哪条**：要"录了以后在断点下重放"就必须走一条带 `-d` 的路（`r.r` 的表与它不同），
+而那条路用本仓库自己的 fgldb 就够 —— `tt fep rec start --env … --prog … [--ent …]`
+一条命令做完：起隔离实例与代理 → `tt debug start --fglserver <本轮探测到的地址>` →
+自动 `continue` 放行 → 前台常驻；用户面前**只有作业窗口**，收工落身份并入库。
+要自己先下断点就加 `--no-continue`。
+
+为什么不用 `r.d`（实测 2026-10-15，主机109）：`r.d` 起的是 **fgldeb**，而 fgldeb 自己的界面
+也走 FGLSERVER —— 它在我们的隔离 GDC 上渲染成一个普通 AUI 表单
+（`Window #9 name "fgldeb"`，297 条对象、70 个 `Action`、标题 `Debugger - …/asf_bsft001_wf.4gl`）。
+于是那个会话录下来是**两棵树**：`#1 e2f009591dc3b368（298 条，调试器）`
++ `#2 493b95ef0b0df2af（3976 条，作业界面）`。它有三个代价：画面上多一个 T100 的调试器
+（用户会误触）、录制件里混进调试器那棵树、断点台账/求值那套（我们只认 fgldb）用不上。
+顺带两条实测：fgldeb 启动时报的 `_deb_getOmIdXPath: did not find an id for //Dialog[@active="1"]`
+是它**启动顺序**上的查找失败 —— 它的 Dialog 18:04:04.384 才声明，而 AUI 流只从 18:04:02.335
+到 18:04:04.467，那条错就在这 2 秒里；界面本身建全了、点得动（实测点它的 `Run/Continue`
+就把它自己的状态栏推成 `currfunc="main()"` / `cstatus="running"`）。
+
+**关键**：`r.d` 起的作业与调试线起的作业**编号表相同**（`493b95ef0b0df2af`，3976 条）——
+两条都是 `fglrun -d <同一个 .42r> <同一套参数>`，区别只在谁当前端。所以：
+
+| 路线 | 起作业的命令 | 调试器 | 录制件里有哪些连接 |
+|---|---|---|---|
+| `r.r` | `azzp000`（无 `-d`） | 无 | 作业界面 |
+| debug 线 | `fglrun -d …` | 本仓库的 fgldb（无界面，全由 `tt debug` 驱动） | 作业界面 |
+| `r.d`（只认历史件） | `gendbg` → `fgldeb` → `fglrun -d …` | T100 原生的 fgldeb（界面也进录制） | 调试器界面 + 作业界面（两条） |
+
+⇒ 以前用 `r.d` 录的件**照样能在调试线上重放**（编号表一致）；而"录制 + 回放都用我们自己的
+调试器"只需要 debug 线一条路。`LaunchPath` 里的 `r.d` 常量因此只为**识别**那些历史件而留。
+**跨路径回放不会报错**：安全闸只判"这个 id 在不在当前界面"，而另一个会话的编号几乎总能"找到"
+—— 实测 6/6 全部落到**别的**对象上（`#327` 从「加工类型编号」变成「重测/返工否」的勾选框）。
+所以回放必须与录制走同一条路径，而"这一份录制还算不算数"由回放前的**指纹闸**回答（见下）。
+
+判据（前置：一台能连的 T100 环境 + 一个作业名；约 3 分钟）：
+
+```bash
+tt fep session open --env <环境> --prog <作业>     # 第一次
+# 约 10s 等界面稳定（tt fep fe status --ctl 127.0.0.1:7899 连续两次不变）
+tt fep ui tree > a.txt
+# 收工，再原地重复一次，得到 b.txt
+diff a.txt b.txt                                  # 期望：无差异
+```
+
+同一段启动历史必得逐条相同的编号；换成另一条路径再取一次，则与 `a.txt` **逐条不同**
+（对象集仍然相同）。
+
+### 录制件的身份与指纹闸
+
+一份录制有两样东西：**字节**（`<ID>-<连接>-{rt2gdc,gdc2rt,timeline}.log`）与**身份**
+（`<ID>.meta.json`，收工时由 `Open`/`Close` 落，见 `open.go` 的 `writeMeta`）。身份里记的是
+从字节里推不出来的那些：启动路径（`path.go`）、作业/环境/区域/ENT、画面接线（FGLSERVER）、
+编译件标识（`BinaryID`，用 `--binary-ref` 触发一次只读 `ls -ln`）、连接清单，以及收工那一刻的指纹。
+没有身份文件的录制件照样能用（指纹是**从字节复算**的），只是路径与编译件一栏空着 —— `rec show` 会这么说。
+
+**指纹 = 整张"坐标 → 编号"表**（`fingerprint.go`）：每条对象取
+`(种类, 作用域, 编号, 角色名)`，角色名取协议 `name` → `comment`，两样都没有就留空。
+它**不含业务值**（`text`/`value`）：同一路径连录两轮，单号会从 `…003` 变成 `…004`，
+拿值当签名会把能用的录制判成失效。指纹里因此也没有任何业务数据，可以随便复制流转。
+摘要（`Fingerprint.Hash`）是这条路线的身份：**同一条启动历史必得同一张表**。
+
+**闸门**（`gate.go`）在回放之前判两件事，任一不符就拒（`rec replay` 里落地）：
+
+| 判什么 | 判决 | 报文 |
+|---|---|---|
+| 两边都知道启动路径且**不是同一条** | `path` | 说出录制件是哪条路径录的、当前会话是哪条 |
+| **逐条连接**比：当前这条连接的编号表里，能在录制件的**某一条**连接里原样找到的比例 `< 99%` | `fingerprint` | 报最接近的那一对连接号、对得上/编号不同/只在一边的条数，外加前几条"录制里是哪个编号、现在这个坐标是哪个编号" |
+| 录制件里没有界面 / 当前会话还没有界面 | `no-recording` / `no-live` | 分别说清是哪一边空着（含读不动的原因） |
+
+**按连接比，不是把整个会话揉成一张表**：一个会话本来就有多条连接，而且它们可以是完全不同的
+两棵树 —— 实测 `r.d` 会话是 `#1 e2f009591dc3b368（298 条，fgldeb 调试器的界面）` +
+`#2 493b95ef0b0df2af（3976 条，作业界面）`。揉起来是 4273 条，拿它去比单连接的录制件，
+同一条路径也会判成 93% 不过。所以判据是"存在一条连接对得上"，报文里会印出比过的每一对：
+`#1↔#2 0% ／ #2↔#2 100%`。
+
+阈值是量出来的：同路径、当前会话刚起完作业（录制件的**前缀**）时是 99–100%；
+两份真界面不同的夹具（`testdata/fep-recordings/id-reuse.txt` 与 `openwin-with-dialogs.txt`）是 79%；
+换一条启动路径（同一个作业 `bsft001_wf`、同一个环境与 ENT，`r.r` 的件 vs 调试线的会话）是 0%。
+99% 落在这条空档里。判定由 `TestGateComparesPerConnection`、`TestGateReportsPerConnectionReadFailures`
+与 `TestGateRefusesTwoDifferentRealInterfaces` 钉住（阈值两侧各有一条）。
+
+现场量到的两条（主机109，2026-10-15，作业 `bsft001_wf`）：**同一条路径**上录的几份
+（五份字节各不相同的调试线录制，跨两轮 `tt serve` 重启）指纹**逐条相同**：`493b95ef0b0df2af`（3976 条）；
+同一个作业换成 `r.r` 路径录一轮就是另一张表：`d9431dc4b8f87339`（4961 条）。
+要自己复现就照上面 M3 那条配方做两轮，把 `diff a.txt b.txt` 换成 `tt fep rec show <ID>` 比指纹。
+
+`tt fep rec list` 是清单（默认把缓存与长期库都列出来，`--from` 可以指到别处），每份都当场复算指纹。
+
+### 长期库：按 环境 + ENT
+
+录制的**寿命由归属决定**（策略见 `retention.go`，用户 2026-10-15 定）：
+
+| 谁录的 | 住哪 | 怎么清 |
+|---|---|---|
+| **用户主动**录的（面板点"开始录制"、`tt fep rec start`） | 长期库 `<数据目录>/records/<环境>/<ENT>/<录制 ID>/` | **不参与自动清理**：前端手动删（`tt fep rec rm <ID>`）、环境被删时**级联清** |
+| **系统自动**录的（调试会话顺手录的上下文） | 缓存目录 `<数据目录>/fep/` | 走**统一清理框架**：`tt serve` 启动清超过 7 天的、`tt cache clear` 全清 |
+
+用"住哪"表达寿命是有意的：清理框架只认 `config.CacheSubdirs` 里列出的目录
+（`config.CleanCache`），所以"在不在那份清单里"就是"会不会被自动清"的唯一判据 ——
+多一个"过期时间"字段就会有两个判据，而它们迟早对不上。身份文件里也照写
+`origin` / `retention` 两栏，看一份录像为什么会被清掉时答案就在那儿。
+
+```
+<数据目录>/records/<环境>/<ENT>/<录制 ID>/
+├─ <录制 ID>-<连接>-rt2gdc.log      界面（回放与指纹都从它重建）
+├─ <录制 ID>-<连接>-gdc2rt.log      用户/注入的事件
+├─ <录制 ID>-<连接>-timeline.log    两个方向按时间对齐
+└─ <录制 ID>.meta.json              身份（含归属与留存）
+```
+
+**目录树就是索引**：一份录制是一个目录，环境与 ENT 是路径本身。刻意不另写一份 `index.json` ——
+那会有两个真相，而它们迟早对不上（谁的 ID 列表、谁的时间戳）。录制 ID 不带环境与 ENT，
+所以按 ID 找人是遍历三层（`Library.Find`），这个成本可以忽略，换来的是"ID 复制出去就能用"：
+`rec show <ID>` / `rec replay --id <ID>` 会在缓存与长期库两处找，`rec list` 每行标出它住哪。
+
+没给 ENT 的那一轮落 `ENT-未指定`：没给 `--ent` 表示沿用登录 shell 自己的 `$TOPENT`，
+那个值我们不知道，不能假装知道。
+
+搬的是**缓存里那一份**（`Promote`，移动不是拷贝），身份文件最后搬 —— 它是"这一份齐了"的标记。
+`rec keep <录制 ID>` 可以手工补搬（当时用了 `--no-keep`、或从别处拿回来的一份）；
+它要求身份文件在场，因为"进哪个环境、哪个 ENT 的层"只能从身份里读，猜不得。
+
+**删除**两条路（`Library.Remove` / `Library.RemoveEnv`，都走 `config.RemoveTree` ——
+逐文件自底向上删，不用 `os.RemoveAll`，理由见 `internal/config/cache.go` 的实测）：
+
+- `tt fep rec rm <ID>`：删库里的一份（前端"手动清除"落地的那一下）。传进来的不在库里就拒；
+  在缓存里的那类会提示它归统一清理框架管，不在那里删。**破坏性动作要 `--yes`**
+  （与 `tt dev tzc unlock` / `tt update` 同一条规矩：录制不可再生，AI 不得自主加）；
+- 环境被删 ⇒ 它的整段库跟着删：设置页保存环境列表时**级联**（`internal/web/server.go` 的
+  `hHostsPut`：写配置成功之后再删文件，失败只记日志），**手改 config.json** 删掉的那种走
+  `tt fep rec prune`（拿库里的环境目录名与配置里的环境列表对一遍，多出来的就是没人认领的）。
+
+这条路线的判据（约 1 分钟，要一台能连的 T100 环境）：
+
+```bash
+tt fep rec start --env <环境> --prog <作业> --ent <ENT>   # 录一轮（用户主动录的）
+tt fep session close                                       # 收工：落身份 + 自动入库
+tt fep rec list                                            # 期望：那一行标着「长期库」并带路径与指纹
+tt fep rec show <录制 ID>                                   # 期望：归属「用户主动录的」／留存「长期库」
+tt fep rec rm <录制 ID> --dry-run                           # 期望：只说要删什么，一个字节都不删
+tt fep rec rm <录制 ID>                                    # 期望：退 2 并要求 --yes（录制不可再生）
+```
+
+`config.CleanCache` 只碰 `CacheSubdirs` 里列出的目录，`records/` **不**在其中 ——
+`TestCleanCacheNeverTouchesTheLibrary` 就是这句话的牙（清缓存与按年龄清理各验一次）；
+级联那条由 `internal/web/cascade_test.go` 钉住（删环境删库、只改 host 不动库）。
 ### 真机第 3 条硬知识：输入**只能**发给 `FormField`（`-6327` 的根因）
 
 把 `ConfigureEvent{value}` 发给字段**容器本身**（实测发给了 `Edit#263`），作业进程当场停下：
@@ -425,3 +604,16 @@ tt fep src openwin q_imaf001_15 --source D:/T100/源代码/主机109
 `StageDefaultSelect`（`InputArray`→勾选 / `DisplayArray`→当前行）是**观察，不是规矩** ——
 它只在调用方显式 `--assume` 时才用，输出里标「推断·非源码」。`tt fep do lookup` 默认：
 判不出来就**停手**，并告诉你该给 `--source`。
+
+## 细节去哪
+
+- 命令面与用法（**录制 → 回放的配方**在这里）→ [`skills/tt-debug/SKILL.md`](../../skills/tt-debug/SKILL.md)
+- 服务器连接与登录后的环境 → [../host/README.md](../host/README.md)
+- 调试线的会话模型、协议锚点与画面接线 → [../debug/README.md](../debug/README.md)
+- 窗口与截图 → [../view/README.md](../view/README.md)
+
+协议的权威是录制件本身，不是这份文档；下面这条离线读一份仓库夹具：
+
+```bash
+tt fep ui tree --from testdata/fep-recordings/openwin-with-dialogs.txt
+```

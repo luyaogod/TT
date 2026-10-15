@@ -130,7 +130,7 @@ func CleanCache(dataDir string, olderThan time.Duration) (removed int, freed int
 		}
 		if cutoff.IsZero() {
 			// 全清:整个子目录删掉
-			f, b, rmErr := removeCacheDir(dir)
+			f, b, rmErr := RemoveTree(dir)
 			if rmErr != nil {
 				err = rmErr
 				continue
@@ -165,15 +165,15 @@ func removeOlderThan(dir string, cutoff time.Time) (removed int, freed int64) {
 	return removed, freed
 }
 
-// removeCacheDir 删掉一整棵缓存子树(自底向上逐个删)。
+// RemoveTree 删掉一整棵目录树(自底向上逐个删),返回删掉的文件数与字节数。
 //
 // **不用 os.RemoveAll**:在 Windows 上 %APPDATA% 可能被应用沙箱重定向成 reparse
 // point(实测 Claude 桌面版的 MSIX 容器里,tt 在它下面建的目录都成了
 // `AppData\Local\Packages\<包名>\LocalCache\Roaming\...` 的跳转),而 os.RemoveAll
 // 对这类目录报 ELOOP("too many levels of symbolic links")—— 同一个目录
 // filepath.WalkDir 走得好好的,所以这不是权限或占用问题。
-// 逐个 os.Remove 走得通,且失败时能说清是哪个文件。
-func removeCacheDir(dir string) (files int, bytes int64, err error) {
+// 逐个 os.Remove 走得通,且失败时能说清是哪个文件。\n//\n// 导出是因为"删一棵目录"不只缓存要（录制长期库的级联清理也删一棵）；两处各写一份\n// 迟早会有一处用回 os.RemoveAll,然后把那种容器里的目录删成 ELOOP。
+func RemoveTree(dir string) (files int, bytes int64, err error) {
 	var dirs []string
 	walkErr := filepath.WalkDir(dir, func(p string, d fs.DirEntry, werr error) error {
 		if werr != nil {

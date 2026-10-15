@@ -84,10 +84,13 @@ TT/
 ├─ .tt-serve.json    运行中服务的 pid 与地址，--stop 靠它寻址
 ├─ .tt-update.json   上一次升级的阶段与结果（.tt-update.log 是更新器写的日志）
 ├─ .tt-skills.json   技能装到过哪些目录、装它们的是哪个 tt 版本
-└─ 缓存：ents/ srccache/ execlog/ debug-bps/ spill/ update/   ← 清单见 config.CacheSubdirs
+├─ records/          FEP 录制件的长期库：<环境>/<ENT>/<录制 ID>/（身份与指纹跟着走）
+└─ 缓存：ents/ srccache/ execlog/ debug-bps/ spill/ update/ fep/   ← 清单见 config.CacheSubdirs
 ```
 
 清缓存只涉及上面列出的缓存目录，`config.json` 与 `.tt-serve.json` 不在其列。启动清理按年龄（7 天）删除，不整体清空——`spill/` 中可能正存放着上一条查询的完整结果。
+`records/` 也**不在**那份清单里：用户主动录的那些是"以后还要拿来重放"的东西（前端手动删、
+环境被删时级联清），而系统自动录的与收工搬走前的暂存留在 `fep/` 里，清缓存会删它们。
 
 **工作区**（`tt dev tzc export` 的产物）落在调用者指定的空目录，布局固定：
 
@@ -122,6 +125,13 @@ TT/
   ├─④ 查企业目录              企业编号 → 账号名
   └─⑤ 库地址                  来自配置，不由企业编号推导
 ```
+
+作业的**界面**走另一条通道（`FGLSERVER` → 前端进程）：缺省由 T100 按 SSH 来源 IP 指回本机 GDC，
+调试线可按轮覆盖（`--fglserver`），`tt fep` 的代理就挂在这条通道上 —— 它的两个方向的原始字节
+就是录制件。作业怎么起由 T100 的脚本决定（`r.r` 的 `azzp000`、`r.d` 的 `gendbg`/`fgldeb`，
+或调试线的 `fglrun -d`）；三条路径在运行期分配的对象 id 互不相同，见 [../internal/fep/README.md](../internal/fep/README.md)。
+一份录制除了字节还有身份（同目录的 `<录制 ID>.meta.json`：启动路径、环境/区域/ENT、
+编译件标识与指纹）—— 回放之前拿它跟当前会话比对，`tt fep rec show <ID>` 读的就是它。
 
 ## 安装与更新
 

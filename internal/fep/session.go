@@ -25,17 +25,19 @@ var ErrNoSession = errors.New("fep: no session registered")
 // Session is one running, isolated job: the GDC instance we launched, the local
 // proxy the runtime dials, and the control endpoint for injections.
 type Session struct {
-	Env        string    `json:"env"`
-	Zone       string    `json:"zone"`
-	Prog       string    `json:"prog"`
-	GDCPID     int       `json:"gdcPid"`
-	GDCPort    int       `json:"gdcPort"`
-	ProxyPort  int       `json:"proxyPort"`
-	InjectPort int       `json:"injectPort"`
-	Tag        string    `json:"tag"`       // recording prefix inside the cache dir
-	RecordDir  string    `json:"recordDir"` // where this session's recordings live
-	OwnerPID   int       `json:"ownerPid"`  // the process that started it
-	Started    time.Time `json:"started"`
+	Env        string     `json:"env"`
+	Zone       string     `json:"zone"`
+	Prog       string     `json:"prog"`
+	Path       LaunchPath `json:"path,omitempty"` // 这一次作业怎么起的（进录制身份；见 path.go）
+	Ent        string     `json:"ent,omitempty"`  // 本轮下发的企业编号（ENT）；空 = 沿用登录 shell 的 $TOPENT
+	GDCPID     int        `json:"gdcPid"`
+	GDCPort    int        `json:"gdcPort"`
+	ProxyPort  int        `json:"proxyPort"`
+	InjectPort int        `json:"injectPort"`
+	Tag        string     `json:"tag"`       // recording prefix inside the cache dir（= 录制 ID）
+	RecordDir  string     `json:"recordDir"` // where this session's recordings live
+	OwnerPID   int        `json:"ownerPid"`  // the process that started it
+	Started    time.Time  `json:"started"`
 }
 
 // PIDs lists the processes this session owns. Cleanup must only ever touch

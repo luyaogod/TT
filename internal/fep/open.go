@@ -50,6 +50,36 @@ type OpenConfig struct {
 	Zone string
 	Prog string // job program, for example axmt500_wf
 
+	// Path 是这一次作业**怎么起的**（见 path.go）。它进录制件的身份，回放前的闸门
+	// 拿它跟录制件比对。空 = 按"起没起作业"推默认（起了就是 r.r，没起就是 none）。
+	Path LaunchPath
+
+	// Ent 本次要用的企业编号（ENT）。空 = 不覆盖，沿用登录 shell 自己的 $TOPENT。
+	//
+	// 为什么必须由调用方显式给：环境配置里已经**没有**企业编号了
+	// （config.NamedSsh 刻意没有 topent 字段），而作业落在哪个企业只由登录
+	// shell 的 $TOPENT 决定。不给就无从指定；给错了的症状是"查不到数据"，
+	// 与"这个企业本来就没有数据"完全一样（见 tt debug 的「生效身份」）。
+	Ent string
+
+	// BinaryRef 是作业编译件（.42r）在服务器上的绝对路径，给了就**只读**地探一次它的
+	// 标识（大小 + 修改时间）记进录制身份。空 = 不探（走 r.r 时程序路径由登录环境决定，
+	// 我们只给了作业名，所以那条路探不到 —— 这不是失败，是照实空着）。
+	BinaryRef string
+
+	// NoKeep 收工时**不**把这一轮的录制搬进长期库（`<数据目录>/records/<环境>/<ENT>/<ID>/`）。
+	//
+	// 默认按**归属**定（见 retention.go）：用户主动录的进库、系统自动录的留缓存。
+	// 这个开关是给"用户主动起的一轮试验"用的：明知不会再用，别占库里的位置。
+	NoKeep bool
+
+	// Origin 是这一轮录制是谁发起的（`user` / `auto`）。空 = user。
+	// 它决定默认留存（见 retention.go），也写进身份文件 —— 以后看一份录像为什么
+	// 会在缓存目录里被清掉，答案就在这一栏。
+	Origin Origin
+	// Retention 是**显式**指定留在哪（空 = 按归属推默认）。`--no-keep` 走它。
+	Retention Retention
+
 	SSH host.SSHConfig
 
 	GDCExe      string
@@ -60,7 +90,7 @@ type OpenConfig struct {
 
 	DataDir   string // where the session registry lives
 	RecordDir string // where the per-connection recordings land
-	Tag       string // recording prefix
+	Tag       string // recording prefix（也是录制 ID）
 	GDCLog    string // the isolated instance's output
 
 	WaitGDC time.Duration // how long to wait for the GDC port (default 20s)
@@ -86,6 +116,22 @@ func (c *OpenConfig) fillDefaults() {
 	if c.Tag == "" {
 		c.Tag = "fep-" + strconv.FormatInt(time.Now().Unix(), 36)
 	}
+	if c.Origin == "" {
+		c.Origin = OriginUser
+	}
+	if c.NoKeep {
+		c.Retention = RetainCache
+	}
+	c.Retention = retentionFor(c.Origin, c.Retention)
+	if c.Path == "" {
+		// 默认按"起没起作业"推：起了就是标准启动器（r.r），没起就是 none。
+		// 显式给值优先 —— 调试线把作业挂到我们的代理上时，要自己声明成 debug。
+		if c.NoJob {
+			c.Path = PathNone
+		} else {
+			c.Path = PathRunnerRR
+		}
+	}
 }
 
 // Runtime is a live session. It lives in one resident process — the proxy must
@@ -101,6 +147,14 @@ type Runtime struct {
 	pty   *host.PTYSession
 	logf  func(string, ...any)
 
+	// ready 表示 Open 走完了全程。收工时只有 ready 的会话才落身份文件：
+	// 起了一半就失败的会话没有"这一轮录了什么"可言，落一份进去只会让人以为它录到了。
+	ready bool
+	// fglServer 是这一次画面接线的地址（`<本机IP>:<代理端口-6400>`），进录制身份。
+	fglServer string
+	// binary 是作业编译件的标识（探不到就是空值）。
+	binary BinaryID
+
 	jobDone chan struct{}
 	closeMu sync.Mutex
 	closed  bool
@@ -115,8 +169,9 @@ func Open(ctx context.Context, cfg OpenConfig, logf func(string, ...any)) (*Runt
 	if logf == nil {
 		logf = nopLog
 	}
-	if cfg.Prog == "" && !cfg.NoJob {
-		return nil, errors.New("fep: 没给作业程序（--prog）")
+	// 参数白名单在**起任何东西之前**：这些值会被拼进远端 shell（见 validate.go）
+	if err := validateLaunch(cfg); err != nil {
+		return nil, err
 	}
 	if !cfg.NoJob && cfg.SSH.Host == "" {
 		return nil, fmt.Errorf("%w: 没给 SSH host（环境没应用或没配）", ErrPreflight)
@@ -164,7 +219,7 @@ func Open(ctx context.Context, cfg OpenConfig, logf func(string, ...any)) (*Runt
 
 	// 3. register first, clean up later
 	sess := &Session{
-		Env: cfg.Env, Zone: cfg.Zone, Prog: cfg.Prog,
+		Env: cfg.Env, Zone: cfg.Zone, Prog: cfg.Prog, Ent: cfg.Ent, Path: cfg.Path,
 		GDCPID: pid, GDCPort: cfg.GDCPort,
 		ProxyPort: cfg.ProxyPort, InjectPort: cfg.InjectPort,
 		Tag: cfg.Tag, RecordDir: cfg.RecordDir, OwnerPID: os.Getpid(), Started: time.Now(),
@@ -192,10 +247,59 @@ func Open(ctx context.Context, cfg OpenConfig, logf func(string, ...any)) (*Runt
 			r.Close()
 			return nil, err
 		}
+		// 「用哪个企业」必须**说出来**：它决定了作业连哪个 schema，而错了的症状
+		// 是"查不到数据"，与"数据不存在"无从区分。不给就如实说"沿用登录 shell 的"。
+		if cfg.Ent != "" {
+			logf("企业编号已下发：TOPENT=%s", cfg.Ent)
+		} else {
+			logf("没给企业编号（--ent）：沿用登录 shell 自己的 $TOPENT")
+		}
 		logf("作业已打开：%s，FGLSERVER=%s:%d", cfg.Prog, ip, cfg.ProxyPort-FGLSERVEROffset)
+		// 编译件标识（只读，探不到不影响本轮）—— 录制身份里要用它发现"程序重编译过"。
+		r.binary = r.probeBinary()
+		if !r.binary.Empty() {
+			logf("编译件：%s", r.binary.FingerprintString())
+		}
+	} else {
+		// 只起代理时也要把画面接线算出来：`tt fep rec start` 就是"先起代理、再把调试线的
+		// 作业挂到它上面"，而它得知道这个地址才知道该给调试线传什么 FGLSERVER。
+		// 探测失败不算错（裸代理可以没有环境）：照实留空，由调用方决定怎么办。
+		ip := cfg.FGLServerIP
+		if ip == "" && cfg.SSH.Host != "" {
+			if got, aerr := localAddrFor(cfg.SSH); aerr == nil {
+				ip = got
+				logf("FGLSERVER 用本机地址 %s（按到 %s 的路由探测）", ip, cfg.SSH.Host)
+			}
+		}
+		if ip != "" {
+			if err := r.setFGLServer(ip); err != nil {
+				r.Close()
+				return nil, err
+			}
+		}
 	}
+	r.ready = true
 	return r, nil
 }
+
+// setFGLServer 记下"画面接到哪"：`<本机IP>:<代理端口 - FGLSERVEROffset>`。
+//
+// 端口要自己算并校验：FGLSERVER 里写的数值与代理真正监听的端口差一个固定偏移，
+// 算错的表现是**安静**的 —— 隔离实例起来了、命令也发出去了，作业那边一片空白。
+func (r *Runtime) setFGLServer(ip string) error {
+	port := r.cfg.ProxyPort - FGLSERVEROffset
+	if port <= 0 || port > 65535 {
+		return fmt.Errorf("%w: 代理端口 %d 减 %d 后不是合法端口", ErrUsage, r.cfg.ProxyPort, FGLSERVEROffset)
+	}
+	r.fglServer = fmt.Sprintf("%s:%d", ip, port)
+	return nil
+}
+
+// FGLServer 报告这一轮的画面接线（`<本机IP>:<代理端口-6400>`；算不出来时是空串）。
+//
+// 调用方拿它去告诉"谁来起作业"（调试线的 `--fglserver`）—— 实测值可以直接用，
+// 但它只在这一轮有效：换一轮就是另一个端口与另一个本机地址。
+func (r *Runtime) FGLServer() string { return r.fglServer }
 
 // Wait blocks until the session ends: the caller's context is cancelled, a
 // control client sent `quit` (`tt fep session close`), or the remote job exited.
@@ -230,7 +334,11 @@ func (r *Runtime) Close() error {
 			errs = append(errs, err.Error())
 		}
 	}
+	// 连接清单要在**停代理之前**取：代理一关，运行期连进来的那些就从表里删了，
+	// 而身份文件要如实写下"这一轮录到了几条连接、各多少字节"。
+	var conns []ConnInfo
 	if r.proxy != nil {
+		conns = r.proxy.Conns()
 		r.proxy.Close()
 	}
 	// Only ever the PIDs this session registered.
@@ -248,10 +356,92 @@ func (r *Runtime) Close() error {
 	} else {
 		r.logf("登记已清：%s", r.reg.Path)
 	}
+	// 收工落身份（见 meta.go 的为什么）。它失败要**说出来**：没有身份的录制件
+	// 以后只能靠"算指纹"用，路径与编译件都无从得知，而人会以为那份录像什么都没缺。
+	if r.ready {
+		path, err := r.writeMeta(conns)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("落录制身份失败: %v", err))
+		} else if path != "" {
+			r.logf("录制身份已落：%s", path)
+			// 入长期库（R3）：缓存目录会被清，而录制是"以后还要用"的东西。
+			// 入库失败**不**算收尾失败 —— 录制件与身份都还在缓存目录里，能用，只是会被清掉。
+			if r.cfg.Retention == RetainCache {
+				r.logf("按归属（%s）留在缓存目录：%s —— 它会随统一清理框架按年龄删", r.cfg.Origin.Label(), r.cfg.RecordDir)
+			} else if item, perr := NewLibrary(r.cfg.DataDir).Promote(r.cfg.RecordDir, r.cfg.Tag); perr != nil {
+				r.logf("没能入长期库（录制件留在缓存目录，清缓存会删它）：%v", perr)
+			} else {
+				r.logf("已入长期库：%s", item.Dir)
+			}
+		}
+	}
 	if len(errs) > 0 {
 		return fmt.Errorf("fep: 收尾有失败: %s", strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+// writeMeta 把这一轮的录制身份落成 `<录制ID>.meta.json`（与录制件同目录）。
+//
+// 指纹在这里算而不是只记路径：收工这一刻的连接与字节都还在手上，读完这一次之后
+// 谁也不必再拼一遍"这一轮到底录到了什么界面"。
+func (r *Runtime) writeMeta(conns []ConnInfo) (string, error) {
+	mt := RecordingMeta{
+		ID: r.cfg.Tag, Path: r.cfg.Path, Prog: r.cfg.Prog,
+		Origin: r.cfg.Origin, Retention: r.cfg.Retention,
+		Env: r.cfg.Env, Zone: r.cfg.Zone, Ent: r.cfg.Ent,
+		Host: r.cfg.SSH.Host, FGLServer: r.fglServer,
+		Started: r.Session.Started, Finished: time.Now(),
+		Binary: r.binary,
+	}
+	for _, c := range conns {
+		mt.Conns = append(mt.Conns, MetaConn{
+			ID: c.ID, Remote: c.Remote,
+			RT2GDC:   fmt.Sprintf("%s-%d-rt2gdc.log", r.cfg.Tag, c.ID),
+			GDC2RT:   fmt.Sprintf("%s-%d-gdc2rt.log", r.cfg.Tag, c.ID),
+			Timeline: fmt.Sprintf("%s-%d-timeline.log", r.cfg.Tag, c.ID),
+			BytesRT:  c.BytesRT, BytesFE: c.BytesFE,
+		})
+	}
+	// 指纹从**录制下来的字节**算（不是从内存里的模型）：这一份是以后要审的东西，
+	// 手上这个模型只代表"收工那一刻"。
+	if m, _, _, err := LoadModelFrom(r.cfg.RecordDir, r.cfg.Tag); err == nil {
+		mt.Fingerprint = FingerprintOf(EntriesOf(m))
+	} else {
+		mt.Note = "这一轮没读到 AUI 消息：" + err.Error()
+	}
+	return WriteMeta(r.cfg.RecordDir, mt)
+}
+
+// probeBinary 只读地取一次作业编译件的标识（大小 + 修改时间）。
+//
+// 为什么要有它：指纹能发现"界面结构变了"，但**发现不了**"程序只是重编译了一次、
+// 界面一模一样"（那种情况下编号表逐条相同）。两者合起来才是完整的"这份录制还算不算数"。
+//
+// 只读：一条 `ls -ln`。探不到就照实留空 —— 走 `r.r` 时程序路径由登录环境决定
+// （`$AZZ`/`$ASF`），我们只给了作业名，所以那条路要调用方显式给 --binary-ref。
+func (r *Runtime) probeBinary() BinaryID {
+	ref := r.cfg.BinaryRef
+	if ref == "" || r.conn == nil {
+		return BinaryID{}
+	}
+	if err := ValidateBinaryRef(ref); err != nil {
+		r.logf("编译件标识不探：%v", err)
+		return BinaryID{}
+	}
+	// 实测（主机109，2026-10-15）：GNU ls 的 --time-style=+FORMAT 可用，输出形如
+	//   -rwxrwxr-x 1 1012 1012 310855 2026-09-24T10:06:28 /u1/t35prd/erp/asf/42r/bsft001_wf.42r
+	out, err := r.conn.Output("ls -ln --time-style=+%Y-%m-%dT%H:%M:%S "+ref, 15*time.Second)
+	if err != nil {
+		r.logf("探测编译件标识失败（不影响本轮）：%v", err)
+		return BinaryID{}
+	}
+	f := strings.Fields(out)
+	if len(f) < 6 {
+		return BinaryID{}
+	}
+	size, _ := strconv.ParseInt(f[4], 10, 64)
+	return BinaryID{Ref: f[len(f)-1], Size: size, ModTime: f[5]}
 }
 
 // openJob logs in, points FGLSERVER at our proxy and starts the job client.
@@ -289,14 +479,59 @@ func (r *Runtime) openJob(ip string) error {
 	if port <= 0 || port > 65535 {
 		return fmt.Errorf("%w: 代理端口 %d 减 %d 后不是合法端口", ErrUsage, r.cfg.ProxyPort, FGLSERVEROffset)
 	}
-	cmd := fmt.Sprintf("export FGLSERVER=%s:%d\r\nr.r %s\r\n", ip, port, r.cfg.Prog)
-	if err := pty.Write(cmd); err != nil {
+	if err := r.setFGLServer(ip); err != nil {
+		return err
+	}
+	cmdLine, cerr := jobLaunchCmd(r.cfg.Path, ip, port, r.cfg.Prog, r.cfg.Ent)
+	if cerr != nil {
+		// 入口已经查过一遍（validateLaunch），走到这里说明两条路的口径不一致 ——
+		// 那就**什么都别发**：半条命令出去了比报错坏得多。
+		return fmt.Errorf("fep: 启动命令拼不出来: %w", cerr)
+	}
+	if err := pty.Write(cmdLine); err != nil {
 		return fmt.Errorf("fep: 下发作业启动命令失败: %w", err)
 	}
 	// The job client keeps running while the GUI is open; its connection ending
 	// means the job is gone.
 	go r.watchJob()
 	return nil
+}
+
+// jobLaunchCmd 拼出启动那一段 shell 命令：先把企业编号下发到登录 shell，
+// 再把画面指向我们的代理（FGLSERVER），最后启动作业。
+//
+// 顺序不能换：FGLSERVER 与 TOPENT 都必须在启动器（`r.r` / `r.d`）**之前**生效 ——
+// 反了的话作业会带着上一轮的值跑起来，而 ENT 给错的表现是"查不到数据"，与"这个企业
+// 本来就没数据"完全一样，没人能从结果里看出来。
+//
+// 返回值可能带错：`ip`、`prog` 是**裸插**进这条命令的，路径还要是已知的那几条
+// （见 validate.go）。调用方不许忽略这个错。
+func jobLaunchCmd(path LaunchPath, ip string, port int, prog, ent string) (string, error) {
+	if err := ValidateProg(prog); err != nil {
+		return "", err
+	}
+	if err := ValidateFGLServerIP(ip); err != nil {
+		return "", err
+	}
+	launch, err := launchCommand(path, prog)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	if ent != "" {
+		b.WriteString(topentExportLine(ent))
+	}
+	fmt.Fprintf(&b, "export FGLSERVER=%s:%d\r\n%s\r\n", ip, port, launch)
+	return b.String(), nil
+}
+
+// topentExportLine 拼出把企业编号下发到登录 shell 的那一行。
+//
+// 值与 tt debug 同一套规则（见 internal/debug 的 topentShellCmd）：单引号包裹
+// **并剔除内嵌单引号**。值不限数字/文本，剔除是为了防注入/拆词 ——
+// 少一个引号就能把整条命令拆开。两处规则必须一致，改一处就要改另一处。
+func topentExportLine(ent string) string {
+	return "export TOPENT='" + strings.ReplaceAll(ent, "'", "") + "'\r\n"
 }
 
 // watchJob drains the PTY and reports when the remote job is over.

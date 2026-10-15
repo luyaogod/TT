@@ -125,6 +125,22 @@ func cacheDir() (string, error) {
 	return dir, nil
 }
 
+// library 打开录制件的长期库（`<数据目录>/records/`，按 环境+ENT 分层）。
+//
+// 它与缓存同一个数据目录，但**不在** `config.CacheSubdirs` 清单里 —— 那份清单是
+// "可以删的"，而录制是"以后还要拿来重放"的东西，删了就造不回来。
+func library() (*fep.Library, error) {
+	cfgPath, err := common.ResolveConfig(true)
+	if err != nil {
+		return nil, err
+	}
+	lib := fep.NewLibrary(config.LocationsAt(cfgPath).DataDir())
+	if lib.Root == "" {
+		return nil, fail(exitPreflight, "数据目录没解析出来，长期库落点算不出来（检查配置路径）")
+	}
+	return lib, nil
+}
+
 // recordingFiles 按后缀挑录制件：--from 可以是单个 .log，也可以是存放它的目录。
 //
 // 目录模式默认只取最新的一份：一个目录里往往躺着好几轮录制，混着读会把不同会话
@@ -244,3 +260,11 @@ func exactArgs(n int) cobra.PositionalArgs {
 }
 
 var noArgs = exactArgs(0)
+
+// atMostOneArg 同 exactArgs：cobra 自带的参数错会退 1，而这条线的表里 2 = 用法错。
+func atMostOneArg(cmd *cobra.Command, args []string) error {
+	if len(args) > 1 {
+		return fail(exitUsage, "%s 最多接受 1 个参数，收到 %d 个", cmd.CommandPath(), len(args))
+	}
+	return nil
+}

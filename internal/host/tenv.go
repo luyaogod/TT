@@ -99,6 +99,13 @@ func (p *TEnvParser) Env() *RuntimeEnv { return &p.env }
 // reZone 区域代码白名单(31/35/36/39/t/36k/1 等):允许数字/字母/下划线/连字符,防注入
 var reZone = regexp.MustCompile(`^[A-Za-z0-9_-]{1,16}$`)
 
+// ZoneOK 判一个区域代码过不过白名单。
+//
+// 导出的理由:这条规则不只 tenv 用 —— 任何要把区域代码拼进远端命令或写进远端 PTY
+// 的地方都得先问它(fep 的会话登录就是直接往 PTY 里写区域代码)。规则只此一份:
+// 各写一份正则,迟早会有一处漏掉。
+func ZoneOK(zone string) bool { return reZone.MatchString(zone) }
+
 // ProbeTEnv 探测登录区域对应的 T100 环境变量。
 // 配置 zone 是「登录菜单选项号」(如甲站点 1/2/3/4、乙站点 31/35/36/39),不是 ZONE 变量字符串;
 // 因此优先「真实登录」式探测:开 PTY 等登录菜单,敲入选项号,由登录脚本完成

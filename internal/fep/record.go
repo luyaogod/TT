@@ -100,6 +100,28 @@ func RecordingFiles(dir, suffix string) ([]string, error) {
 	return out, nil
 }
 
+// RecordingFilesFor 取**某一份**录制的 AUI 侧文件（`<ID>-<连接>-rt2gdc.log`），
+// 按时间从早到晚（一份录制的界面是"一条条推上来的"，顺序就是意义）。
+//
+// 与 LoadModelFrom 的差别：它按前缀匹配（会话 tag 就长那样），这里按**切出来的 ID 精确匹配** ——
+// 拿一份录制去比对/审阅时，"前缀撞上另一个会话"是不能容忍的错答案。
+func RecordingFilesFor(dir, id string) ([]string, error) {
+	files, err := RecordingFiles(dir, "-rt2gdc.log") // 时间倒序
+	if err != nil {
+		return nil, err
+	}
+	var mine []string
+	for _, f := range files {
+		if got, ok := RecordingIDFromFile(filepath.Base(f)); ok && got == id {
+			mine = append(mine, f)
+		}
+	}
+	for i, j := 0, len(mine)-1; i < j; i, j = i+1, j-1 {
+		mine[i], mine[j] = mine[j], mine[i]
+	}
+	return mine, nil
+}
+
 // LoadModelFrom rebuilds the AUI of a session from its recordings: every frame of
 // every `<tag>*-rt2gdc.log`, oldest first (a screen is described by a stream of
 // updates, so order matters).
