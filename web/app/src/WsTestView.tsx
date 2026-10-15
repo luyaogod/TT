@@ -47,9 +47,12 @@ export function WsTestView() {
           第二行 SOAP 勾选 + 执行 + 从日志带入。字段不再拉满整行,留白更清楚。 */}
       <div className="shrink-0 border-b border-border">
         <div className="flex flex-wrap items-center gap-2 px-2 pt-2 pb-1.5">
+          {/* 字段名在左、控件在右(与日志页的 QueryField 同一口径):
+              早先把字段名写进控件的 placeholder(「接口方式」),等于标签与输入混在一件东西里。 */}
+          <span className="shrink-0 text-xs text-muted-foreground" title="接口方式(wsfc001 映射)">接口方式</span>
           <Select value={mode} onValueChange={(v) => setWsTest({ mode: v, url: '' })}>
             <SelectTrigger className="h-7 w-[200px] text-xs" title="接口方式(wsfc001 映射)">
-              <SelectValue placeholder="接口方式" />
+              <SelectValue placeholder="选择" />
             </SelectTrigger>
             <SelectContent>
               {MODES.map(([v, ep2, label]) => (
@@ -57,6 +60,7 @@ export function WsTestView() {
               ))}
             </SelectContent>
           </Select>
+          <span className="shrink-0 text-xs text-muted-foreground" title={`默认地址(区域 ${zoneName || 't35prd'})`}>地址</span>
           <input
             value={url}
             onChange={(e) => setWsTest({ url: e.target.value })}

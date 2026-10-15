@@ -111,6 +111,32 @@ const RESIZER_W = 5    // .col-resizer 固定占位
 const QUERY_INPUT = 'h-7 w-52 rounded-ui border border-border bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus:border-border focus:outline-none'
 const QUERY_INPUT_SM = 'h-7 w-36 rounded-ui border border-border bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus:border-border focus:outline-none'
 
+// 一个查询条件 = **字段名(左) + 输入框(右)**,两件东西分开。
+//
+// 早先这里把字段名塞进 placeholder(「服务端(如 T100)」),于是"说明"与"能打字的地方"挤在
+// 同一个框里 —— 分不清哪里是标签、哪里是输入(2026-10-15 用户指出)。
+// 现在 placeholder 只说"能填什么"(例子/通配说明),完整语义(字段号、匹配方式)在 title 上。
+//
+// 定义在模块级、不是组件内部:内部定义会让 React 每次渲染都当成新组件而重挂,
+// 输入一个字就丢焦点。
+function QueryField({ label, title, placeholder, value, onChange, onKeyDown, wide }: {
+  label: string; title: string; placeholder: string; value: string
+  onChange: (v: string) => void; onKeyDown: (e: React.KeyboardEvent) => void; wide?: boolean
+}) {
+  return (
+    <div className="flex items-center gap-1.5" title={title}>
+      <span className="shrink-0 text-xs text-muted-foreground">{label}</span>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={onKeyDown}
+        placeholder={placeholder}
+        className={wide ? QUERY_INPUT : QUERY_INPUT_SM}
+      />
+    </div>
+  )
+}
+
 export function WsLogView() {
   const wsLogs = useStore((s) => s.wsLogs)
   const loading = useStore((s) => s.wsLogsLoading)
@@ -316,51 +342,52 @@ export function WsLogView() {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {/* 工具条分两行(条件多,挤一行看不清):
-            第一行 = 四个查询条件(服务名称/服务端/发起端/处理结果,对齐 awsq990 QBE)+ 刷新;
+            第一行 = 五个查询条件(服务名称/作业编号/服务端/发起端/处理结果,对齐 awsq990 QBE)+ 刷新;
             第二行 = 时间范围 + 仅失败 + 条数/翻页(右对齐)。
+          每个条件都是「字段名 + 输入框」两件东西(见 QueryField),不是把字段名写进输入框里。
           下缘分割线与列表连成整体;窄了各自内部换行(flex-wrap)。
           两行之间留出间距(pt/pb),否则输入框与日期行贴在一起显得挤。 */}
       <div className="shrink-0 border-b border-border">
         <div className="flex flex-wrap items-center gap-2 px-2 pt-2 pb-1.5">
-          <input
+          <QueryField
+            label="服务名称" wide
             value={draft.service}
-            onChange={(e) => setDraft((d) => ({ ...d, service: e.target.value }))}
+            onChange={(v) => setDraft((d) => ({ ...d, service: v }))}
             onKeyDown={onEnter}
-            placeholder="服务名称(支持 * ? 通配,回车生效)"
+            placeholder="支持 * ? 通配"
             title="服务名称 wsfa001:支持 * ? 通配,如 icd.erp.wo*;回车生效"
-            className={QUERY_INPUT}
           />
-          <input
+          <QueryField
+            label="作业编号"
             value={draft.job}
-            onChange={(e) => setDraft((d) => ({ ...d, job: e.target.value }))}
+            onChange={(v) => setDraft((d) => ({ ...d, job: v }))}
             onKeyDown={onEnter}
-            placeholder="作业编号(支持 * ? 通配)"
+            placeholder="如 wssp01131"
             title="作业编号 wsfa012:支持 * ? 通配,如 wssp01131 / wssp*。服务名是 oa.schema.data.get 这类反域名,认不出是哪个作业,按作业找要用这个;回车生效"
-            className={QUERY_INPUT_SM}
           />
-          <input
+          <QueryField
+            label="服务端"
             value={draft.server}
-            onChange={(e) => setDraft((d) => ({ ...d, server: e.target.value }))}
+            onChange={(v) => setDraft((d) => ({ ...d, server: v }))}
             onKeyDown={onEnter}
-            placeholder="服务端(如 T100)"
+            placeholder="如 T100"
             title="服务端 wsfa018:等值匹配,如 T100;回车生效"
-            className={QUERY_INPUT_SM}
           />
-          <input
+          <QueryField
+            label="发起端"
             value={draft.origin}
-            onChange={(e) => setDraft((d) => ({ ...d, origin: e.target.value }))}
+            onChange={(v) => setDraft((d) => ({ ...d, origin: v }))}
             onKeyDown={onEnter}
-            placeholder="发起端(如 OA)"
+            placeholder="如 OA"
             title="发起端 wsfa013:等值匹配,如 OA / Athena;回车生效"
-            className={QUERY_INPUT_SM}
           />
-          <input
+          <QueryField
+            label="处理结果"
             value={draft.result}
-            onChange={(e) => setDraft((d) => ({ ...d, result: e.target.value }))}
+            onChange={(v) => setDraft((d) => ({ ...d, result: v }))}
             onKeyDown={onEnter}
-            placeholder="处理结果(如 000)"
+            placeholder="如 000"
             title="处理结果 wsfa006:等值匹配,如 000 成功 / 100 失败;回车生效"
-            className={QUERY_INPUT_SM}
           />
           <button onClick={() => doLoad(1)} disabled={loading} title="按当前条件重新加载(回车等效)"
             className="p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40">

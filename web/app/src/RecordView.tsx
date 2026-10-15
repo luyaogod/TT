@@ -201,14 +201,17 @@ export function RecordView() {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {/* 工具条一行(条件不多):左边 = 列表条件(环境/ENT/刷新),右边 = 起录/停录。
-          下缘分割线与列表连成整体;窄了各自内部换行(flex-wrap),与接口日志页一致。 */}
+           每个条件都是「字段名 + 控件」两件东西,字段名在左、控件在右 —— 字段名不写进
+           placeholder(那样看不出哪里是说明、哪里能打字;与接口日志页的 QueryField 同一口径)。
+           下缘分割线与列表连成整体;窄了各自内部换行(flex-wrap),与接口日志页一致。 */}
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-2 py-2">
-        <span className="text-xs text-muted-foreground">环境</span>
+        <span className="shrink-0 text-xs text-muted-foreground"
+          title="环境:列表按它过滤,起录也用它(作业落在哪台机器)">环境</span>
         {envNames.length > 0 ? (
           <Select value={q.env} onValueChange={(v) => setQ((s) => ({ ...s, env: v }))}>
             <SelectTrigger className="h-7 w-40 text-xs"
               title="环境:列表按它过滤,起录也用它(作业落在哪台机器)">
-              <SelectValue placeholder="选择环境" />
+              <SelectValue placeholder="选择" />
             </SelectTrigger>
             <SelectContent>
               {envNames.map((n) => <SelectItem key={n} value={n}>{n}</SelectItem>)}
@@ -217,13 +220,15 @@ export function RecordView() {
         ) : (
           <span className="text-xs text-muted-foreground">尚未配置环境(设置 → 站点管理)</span>
         )}
+        <span className="shrink-0 text-xs text-muted-foreground"
+          title="企业编号(ENT):起录时决定用哪个企业的账号连库;留空 = 沿用登录 shell 的 $TOPENT。作为列表条件时留空 = 不按 ENT 过滤">ENT</span>
         <Input
           value={ent}
           onChange={(e) => setEnt(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') onRefresh() }}
-          placeholder="ENT(留空 = 沿用登录 shell 的 $TOPENT)"
+          placeholder="留空 = 沿用 $TOPENT"
           title="企业编号(ENT):起录时决定用哪个企业的账号连库;留空 = 沿用登录 shell 的 $TOPENT。作为列表条件时留空 = 不按 ENT 过滤。回车生效"
-          className="h-7 w-64 text-xs"
+          className="h-7 w-40 text-xs"
         />
         <button onClick={onRefresh} disabled={loading} title="按当前环境/ENT 重新拉列表与「在录吗」"
           className="p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40">
@@ -240,12 +245,14 @@ export function RecordView() {
           </span>
         )}
         <div className="ml-auto flex items-center gap-2">
+          <span className="shrink-0 text-xs text-muted-foreground"
+            title="要录的作业编号。起录走的是服务端另起的 `tt fep rec start`,与调试会话互不干扰">作业名</span>
           <Input
             value={prog}
             onChange={(e) => setProg(e.target.value)}
-            placeholder="作业名(如 bsft001_wf)"
+            placeholder="如 bsft001_wf"
             title="要录的作业编号。起录走的是服务端另起的 `tt fep rec start`,与调试会话互不干扰"
-            className="h-7 w-44 text-xs"
+            className="h-7 w-40 text-xs"
           />
           <button
             onClick={() => void onStart()}
