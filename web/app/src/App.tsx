@@ -156,6 +156,7 @@ export function App() {
 
   const showRight = useStore((s) => s.showRight)
   const showBottom = useStore((s) => s.showBottom)
+  const bottomMax = useStore((s) => s.bottomMax)
   const rightView = useStore((s) => s.rightView)
   const setRightView = useStore((s) => s.setRightView)
   const view = useStore((s) => s.view)
@@ -376,13 +377,19 @@ export function App() {
                否则 flex 最小宽度被钉死,收起再展开时编辑区不回缩、右面板被挤出屏幕 */}
             <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
               <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-                <div className="min-h-0 flex-1 overflow-hidden bg-card">
+                {/* 编辑器:下方面板最大化时整块让位(那个"最大化"就是"我要专看这段协议流") */}
+                <div className={`min-h-0 flex-1 overflow-hidden bg-card ${bottomMax ? 'hidden' : ''}`}>
                   <SourceView />
                 </div>
                 {showBottom && (
-                  <div className="flex shrink-0 flex-col">
-                    <div className="row-resizer" onMouseDown={onBottomResizeDown} title="拖拽调整下方面板高度" />
-                    <div style={{ height: bottomH }} className="shrink-0">
+                  /* 最大化时这一列改吃整列高度(flex-1),**分割条不渲染** —— 那时高度由
+                     "最大化"接管,拖它什么也不会发生,留着只会让人以为还能拖。 */
+                  <div className={bottomMax ? 'flex min-h-0 flex-1 flex-col' : 'flex shrink-0 flex-col'}>
+                    {!bottomMax && (
+                      <div className="row-resizer" onMouseDown={onBottomResizeDown} title="拖拽调整下方面板高度" />
+                    )}
+                    <div style={bottomMax ? undefined : { height: bottomH }}
+                      className={bottomMax ? 'min-h-0 flex-1' : 'shrink-0'}>
                       <TimelinePanel />
                     </div>
                   </div>

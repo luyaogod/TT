@@ -47,6 +47,10 @@ interface Store {
   // UI 面板显隐
   showRight: boolean
   showBottom: boolean
+  // 下方面板是否「最大化」(占满代码区那一列,编辑器整块让位)。
+  // 与 showRight/showBottom 同一档:纯界面状态,只活在这一次会话里,不落盘 ——
+  // 「最大化」是一次临时的"我要专看这段协议流",刷新后回到常规分栏才是预期。
+  bottomMax: boolean
   rightView: 'debug' | 'outline' // 调试视图右侧边栏当前 sheet(调试面板/大纲);会话已独立成左侧一列
   // 调用栈/自动变量面板「自动」开关(手风琴头部图标,默认关):停站后是否自动抓取该数据
   // (两者都要经调试会话逐条发命令,自动调度越多步进越卡;关掉后仅手动/开关开启时取)
@@ -115,6 +119,7 @@ interface Store {
   setWsConnected: (b: boolean) => void
   toggleRight: () => void
   toggleBottom: () => void
+  toggleBottomMax: () => void
   toggleStackAuto: () => void
   toggleAutovarsAuto: () => void
   // 接口日志重放启动(wslogs「调试此调用」与重放会话「重新开始」共用同一上下文)
@@ -321,7 +326,7 @@ function loadWsLogContent(item: WSLogItem): Promise<WSLogContent> {
 export const useStore = create<Store>((set, get) => ({
   wsConnected: false,
   sessionId: null, module: '', prog: '', state: '', sessionEnv: '', started: false, stop: null, holdingSeconds: 0,
-  launching: false, launchError: '', showRight: true, showBottom: true,
+  launching: false, launchError: '', showRight: true, showBottom: true, bottomMax: false,
   // 面板开关默认关(localStorage tt.stackAuto / tt.autovarsAuto 持久化)
   stackAuto: localStorage.getItem('tt.stackAuto') === '1',
   autovarsAuto: localStorage.getItem('tt.autovarsAuto') === '1',
@@ -350,7 +355,11 @@ export const useStore = create<Store>((set, get) => ({
 
   setWsConnected: (b) => set({ wsConnected: b }),
   toggleRight: () => set((st) => ({ showRight: !st.showRight })),
-  toggleBottom: () => set((st) => ({ showBottom: !st.showBottom })),
+  toggleBottom: () => set((st) => ({ showBottom: !st.showBottom, bottomMax: false })),
+  // 最大化/还原下方面板。收起下方面板时顺带解除最大化(否则再展开会以一个"占满整列"的
+  // 面板回来,而用户要的是常规分栏)。
+
+  toggleBottomMax: () => set((st) => ({ bottomMax: !st.bottomMax })),
 
   // 调用栈面板「自动」开关(默认关):开 → 停站后自动抓调用栈,已停站时立即抓一次
   toggleStackAuto: () => {
