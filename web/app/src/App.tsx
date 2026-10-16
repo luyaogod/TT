@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { RotateCcw, WifiOff, Bug, BugPlay, Globe, FlaskConical, Video, Settings, ListTree, Server, type LucideIcon } from 'lucide-react'
+import { RotateCcw, WifiOff, Bug, Globe, FlaskConical, Video, Settings, Server, type LucideIcon } from 'lucide-react'
 import { connectWS, useStore } from './store'
 import { Toolbar } from './Toolbar'
 import { SourceView, editorRef } from './SourceView'
@@ -10,10 +10,12 @@ import { WsLogView } from './WsLogView'
 import { WsTestView } from './WsTestView'
 import { RecordView } from './RecordView'
 import { SettingsView } from './SettingsView'
+import { DebugHeader } from './DebugHeader'
 import { StatusBar, STATUS_BAR_H } from './StatusBar'
 import { api } from './api'
 import { parseHash, viewHash, type ViewKey } from './routing'
 import { ErrorBoundary } from './ErrorBoundary'
+import { cn } from '../../shared/utils'
 
 // 视图键 → 中文名(只给 tooltip 用:界面上的说法要与右侧图标栏、README 一致)。
 const VIEW_LABEL: Partial<Record<ViewKey, string>> = {
@@ -160,11 +162,32 @@ export function App() {
     return () => { window.removeEventListener('keydown', onKey); close() }
   }, [])
 
-  const showRight = useStore((s) => s.showRight)
+  const rightDebugOpen = useStore((s) => s.rightDebugOpen)
+  const rightTreeOpen = useStore((s) => s.rightTreeOpen)
+  const rightTop = useStore((s) => s.rightTop)
+  const rightSplit = useStore((s) => s.rightSplit)
+  const setRightSplit = useStore((s) => s.setRightSplit)
+  // 右侧那一列的"身体高度"（去掉整条 header 之后）：上下分屏的上半块按它算比例。
+  // 用一个 state 存实测值，而不是猜视口高度 —— 会话栏/状态栏/工具条都在变。
+  const rightBodyRef = useRef<HTMLDivElement | null>(null)
+  const [rightBodyH, setRightBodyH] = useState(420)
+  const showRight = rightDebugOpen || rightTreeOpen
+  const bothOpen = rightDebugOpen && rightTreeOpen
+  const topIsDebug = rightTop === 'debug'
+  // 上下分屏：上半块的高度（像素）。占比记在 store（本地持久化），夹 0.2~0.8。
+  const topH = Math.max(120, Math.round(rightBodyH * rightSplit))
   const showBottom = useStore((s) => s.showBottom)
   const bottomMax = useStore((s) => s.bottomMax)
-  const rightView = useStore((s) => s.rightView)
-  const setRightView = useStore((s) => s.setRightView)
+  // 右侧那一列的"身体高度"实测（上下分屏按它算比例）。用 ResizeObserver 而不是猜视口高度：
+  // 会话栏、状态栏、工具条、下方面板的开合都在改这块的高度。
+  useEffect(() => {
+    const el = rightBodyRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => setRightBodyH(el.clientHeight))
+    ro.observe(el)
+    setRightBodyH(el.clientHeight)
+    return () => ro.disconnect()
+  }, [showRight])
   const view = useStore((s) => s.view)
   const setView = useStore((s) => s.setView)
   const settingsSection = useStore((s) => s.settingsSection)
@@ -333,6 +356,35 @@ export function App() {
   const sessionIconLabel = view === 'settings'
     ? `会话(离开设置,回到「${VIEW_LABEL[lastViewRef.current] || lastViewRef.current}」并展开会话栏)`
     : showSession ? '收起会话面板' : '展开会话面板'
+  // 右侧那一列上下两块的**分割线**：拖它改的是"上半块占多少"（占比进 store，本地持久化）。
+  // 与下面那条下方面板的分割线同一套收尾（含"收不到 mouseup"的兜底）。
+  const onRightSplitDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const el = e.currentTarget
+    el.classList.add('dragging')
+    const startY = e.clientY
+    const startRatio = rightSplit
+    const boxH = rightBodyRef.current?.clientHeight || 420
+    let latest = startRatio
+    const move = (ev: MouseEvent) => {
+      // 分隔线跟手:向下拖 = 上半块变高
+      latest = Math.min(0.8, Math.max(0.2, startRatio + (ev.clientY - startY) / Math.max(1, boxH)))
+      setRightSplit(latest)
+    }
+    const up = () => {
+      el.classList.remove('dragging')
+      localStorage.setItem('tt.rightSplit', String(latest))
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      window.removeEventListener('blur', up)
+      document.removeEventListener('mouseleave', up)
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+    window.addEventListener('blur', up)
+    document.addEventListener('mouseleave', up)
+  }
+
   // 下方面板(操作时间线/协议流)高度拖拽(记忆到 localStorage)
   const onBottomResizeDown = (e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault()
@@ -448,6 +500,15 @@ export function App() {
               它们与上面的会话栏是同一层的兄弟,只是同时只有一个不是 display:none。 */}
           <ViewPane show={view === 'debug'} label="调试">
             <Toolbar />
+            {/* 这一层纵向容器是必须的：ViewPane 自己是**横向** flex（`min-w-[320px] flex-1 flex`），
+                直接放进去的 header 会被当成横向 item、按内容宽度压成一条 147px 的窄条（实测）。
+                包一层 flex-col 之后：header 横跨整个宽度，下面的 editor|right 分栏在它下面。 */}
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            {/* 整条 header（页签 + terminal/bug-play/list-tree 三个独立开关）横跨**整块调试区**，
+                包括右侧那一列的上方 —— 这就是"header 连成一体"（用户 2026-10-16 的定案）。
+                它必须在 editor|right 这层分栏**之外**：放进编辑器那一列的话，
+                右侧栏又要另起一行图标，"哪一行管哪一块"就得靠猜。 */}
+            <DebugHeader />
             {/* 面板紧贴(VS Code 经典密度):无外边距,仅靠 sash 分割线分区
                min-w-0 + overflow-hidden:Monaco 会给编辑器写内联像素宽度,
                否则 flex 最小宽度被钉死,收起再展开时编辑区不回缩、右面板被挤出屏幕 */}
@@ -475,32 +536,37 @@ export function App() {
               {showRight && (
                 <>
                   <div className="col-resizer" onMouseDown={onResizeDown} title="拖拽调整代码区与侧边栏宽度" />
-                  <div style={{ width: panelWEff }} className="flex min-h-0 shrink-0 flex-col overflow-hidden">
-                    {/* 侧边栏内部的 sheet 切换行:横排、钉在栏顶,与代码区仍在同一个面板里
-                        (它切的是这一列的内容,不是整屏的视图 —— 所以不做成第二条活动栏)。
-                        只有两个 sheet:会话已经搬到左边独立一列(见上面的布局注释),
-                        留在这里等于同一份会话有两处入口,状态还得互相对齐。 */}
-                    <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border px-1">
-                      <ActivityIcon icon={BugPlay} label="调试面板" active={rightView === 'debug'} onClick={() => setRightView('debug')} />
-                      <ActivityIcon icon={ListTree} label="大纲" active={rightView === 'outline'} onClick={() => setRightView('outline')} />
-                    </div>
-                    {/* 多 sheet keep-alive:切换仅改 display,保留手风琴展开/监视输入等本地状态。
-                        两个 sheet 必须包在一层 flex 项里:panel 自己的类里有 flex-1
-                        (占满剩余宽高),直接做列容器的子项会被上面那行图标挤着算高度 ——
-                        包一层后这一层才是"图标行下面的剩余高度",panel 在它里面照旧占满。 */}
-                    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                  <div ref={rightBodyRef} style={{ width: panelWEff }} className="flex min-h-0 shrink-0 flex-col overflow-hidden">
+                    {/* 右侧这一列里放两块面：调试面板（bug-play）与大纲/树（list-tree）。
+                        两者各自独立开合，**同时打开时上下分屏**：
+                          · 只开一块 → 它占满整列；
+                          · 两块都开 → 上/下各一半，中间一条可拖的分割线；
+                          · 谁在上由 store 的 rightTop 决定 —— 规则是"**后开的在下面**"
+                            （用户原话：单独激活时占满，再开另一个就"向下 split，拆出一半留给它"）。
+                        顺序用 CSS `order` 表达，而不是按顺序渲染两个分支：切成两份 DOM 树会让
+                        面板**重新挂载**，手风琴展开态与监视输入框当场丢（keep-alive 的意义就没了）。 */}
+                    <div
+                      style={bothOpen ? { order: topIsDebug ? 0 : 2, height: topH } : { order: 0 }}
+                      className={cn('flex min-h-0 min-w-0 flex-col overflow-hidden',
+                        rightDebugOpen ? (bothOpen ? 'shrink-0' : 'flex-1') : 'hidden')}>
                       {/* 右侧栏单独一层边界:变量树/大纲崩了,代码区与工具条都还在
                           （实测过一次:一个畸形变量值把整页打成白屏）。 */}
-                      <div className={rightView === 'debug' ? 'h-full min-h-0 w-full' : 'hidden'}>
-                        <ErrorBoundary what="调试面板（变量/断点/调用栈）"><RightPanels /></ErrorBoundary>
-                      </div>
-                      <div className={rightView === 'outline' ? 'h-full min-h-0 w-full' : 'hidden'}>
-                        <ErrorBoundary what="大纲面板"><OutlinePanel /></ErrorBoundary>
-                      </div>
+                      <ErrorBoundary what="调试面板（变量/断点/调用栈）"><RightPanels /></ErrorBoundary>
+                    </div>
+                    {bothOpen && (
+                      <div className="row-resizer" style={{ order: 1 }} onMouseDown={onRightSplitDown}
+                        title="拖拽调整上下两块的高度（后开的那块在下面）" />
+                    )}
+                    <div
+                      style={bothOpen ? { order: topIsDebug ? 2 : 0 } : { order: 0 }}
+                      className={cn('flex min-h-0 min-w-0 flex-col overflow-hidden',
+                        bothOpen ? 'flex-1' : (rightTreeOpen ? 'flex-1' : 'hidden'))}>
+                      <ErrorBoundary what="大纲面板"><OutlinePanel /></ErrorBoundary>
                     </div>
                   </div>
                 </>
               )}
+            </div>
             </div>
           </ViewPane>
           <ViewPane show={view === 'wslogs'} label="接口日志">

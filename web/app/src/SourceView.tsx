@@ -2,11 +2,9 @@
 // 单 Editor 实例,path 切换复用/重建 monaco model(@monaco-editor/react 自动保存恢复视口)
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Editor, { type OnMount } from '@monaco-editor/react'
-import { Bug, Loader2, X, SquareChevronDown, SquareChevronUp, SquareChevronLeft, SquareChevronRight } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import * as monaco from 'monaco-editor'
 import { useStore } from './store'
-import { ToolIcon } from './Toolbar'
-import { cn } from '../../shared/utils'
 import { attachHover, detachHover } from './fglHover'
 import { setupMonaco, monacoThemeName } from './monacoSetup'
 import { progKey } from './fglPath'
@@ -32,13 +30,6 @@ export function SourceView() {
   // 页签
   const tabs = useStore((s) => s.tabs)
   const activeTab = useStore((s) => s.activeTab)
-  const setActiveTab = useStore((s) => s.setActiveTab)
-  const closeTab = useStore((s) => s.closeTab)
-  // 下方面板 / 右侧栏的收展(按钮挂在页签栏右端,见下方注释)
-  const showBottom = useStore((s) => s.showBottom)
-  const showRight = useStore((s) => s.showRight)
-  const toggleBottom = useStore((s) => s.toggleBottom)
-  const toggleRight = useStore((s) => s.toggleRight)
 
   const active = tabs.find((t) => t.key === activeTab)
   const isDebug = !active
@@ -235,45 +226,10 @@ export function SourceView() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* 页签栏:调试页锁定第一个,浏览页可关。
-          右端钉着两个面板收展按钮 —— 它们只作用于这一屏(下方面板与右侧栏),
-          挂在调试页签栏上名副其实;原先吊在顶层工具条里,那条横栏是整站共用的,
-          切到数据字典/服务测试页时它们仍在,却对那两页毫无作用。
-          页签区自己滚(overflow-x-auto 只包页签),按钮不跟着滚走。 */}
-      <div className="flex h-8 shrink-0 items-stretch border-b border-border bg-background">
-        <div className="flex min-w-0 flex-1 items-stretch overflow-x-auto">
-          <button onClick={() => setActiveTab('debug')}
-            className={cn('flex shrink-0 items-center gap-1.5 border-r border-border px-3 text-xs transition-colors',
-              isDebug ? 'bg-card font-medium text-foreground' : 'text-muted-foreground hover:bg-accent/60')}>
-            <Bug className="h-3 w-3" />
-            {prog || '调试'}
-          </button>
-          {tabs.map((t) => (
-            <div key={t.key}
-              className={cn('group flex shrink-0 items-center border-r border-border transition-colors',
-                activeTab === t.key ? 'bg-card text-foreground' : 'text-muted-foreground hover:bg-accent/60')}>
-              <button className="max-w-45 truncate px-3 text-xs" title={t.path || t.file}
-                onClick={() => setActiveTab(t.key)}>
-                {t.loading ? <Loader2 className="mr-1 inline h-3 w-3 animate-spin" /> : null}
-                {t.file}
-                {t.missing ? ' (无源码)' : ''}
-              </button>
-              <button className="mr-1 p-0.5 opacity-40 transition-opacity hover:bg-accent hover:opacity-100"
-                onClick={() => closeTab(t.key)}>
-                <X className="h-3 w-3" />
-              </button>
-            </div>
-          ))}
-        </div>
-        <div className="flex shrink-0 items-center gap-0.5 pl-1">
-          <ToolIcon icon={showBottom ? SquareChevronDown : SquareChevronUp}
-            label={showBottom ? '收起下方面板' : '展开下方面板'} color="text-muted-foreground"
-            onClick={() => void toggleBottom()} />
-          <ToolIcon icon={showRight ? SquareChevronRight : SquareChevronLeft}
-            label={showRight ? '收起右方面板' : '展开右方面板'} color="text-muted-foreground"
-            onClick={() => void toggleRight()} />
-        </div>
-      </div>
+      {/* 页签栏与那三个面板开关已经**搬出去**了：它们现在挂在整条 header 上
+          （见 DebugHeader.tsx —— 页签在最左、terminal/bug-play/list-tree 在最右）。
+          放在这里的话，页签栏只横跨编辑器那一列，右侧栏又要另起一行，
+          "哪一行管哪一块"就得靠猜。 */}
       {/* 编辑器 */}
       <div className="relative min-h-0 flex-1">
         <Editor

@@ -1,7 +1,7 @@
 // 右侧面板:运行/调试(VS Code 风格)+ 调用栈 / 变量监视 / 断点(一体化容器,分割线分区)
 import * as React from 'react'
 import { useEffect, useRef, useState } from 'react'
-import { Eye, EyeOff, Maximize, Minimize2, Play, Ruler, SquareChevronLeft, SquareChevronRight, SquareChevronUp } from 'lucide-react'
+import { Eye, EyeOff, Maximize, Minimize2, Play, Ruler } from 'lucide-react'
 import { useStore } from './store'
 import type { Breakpoint } from './api'
 import { Input } from '../../shared/ui'
@@ -491,9 +491,6 @@ export function TimelinePanel() {
   // 最大化/还原:状态在 store 里(App 那一层要靠它决定编辑器让不让位)
   const bottomMax = useStore((s) => s.bottomMax)
   const toggleBottomMax = useStore((s) => s.toggleBottomMax)
-  const showRight = useStore((s) => s.showRight)
-  const toggleRight = useStore((s) => s.toggleRight)
-  const toggleBottom = useStore((s) => s.toggleBottom)
   // 新条目到达时自动滚动到底部(最新操作始终可见)
   useEffect(() => {
     const el = bodyRef.current
@@ -542,22 +539,7 @@ export function TimelinePanel() {
             {tab === k && <span className="absolute inset-x-0 bottom-0 h-px bg-primary" />}
           </button>
         ))}
-        {/* 最大化时把"收面板"的两个开关**搬到这里**：最大化会让编辑器那一列整块让位，
-            而「收起下方面板/收起右方面板」原来只挂在编辑器的页签行上 —— 一最大化,
-            它们就跟着不见了,用户想收面板只能先点「还原」(实测被测试者点出来)。
-            这一行在最大化时仍然在,放这里最顺手。 */}
-        {bottomMax && (
-          <>
-            <button onClick={() => void toggleBottom()} title="还原并收起下方面板"
-              className="shrink-0 p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
-              <SquareChevronUp className="h-3.5 w-3.5" />
-            </button>
-            <button onClick={() => void toggleRight()} title={showRight ? '收起右方面板' : '展开右方面板'}
-              className="shrink-0 p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
-              {showRight ? <SquareChevronRight className="h-3.5 w-3.5" /> : <SquareChevronLeft className="h-3.5 w-3.5" />}
-            </button>
-          </>
-        )}
+
         {/* 最大化 / 还原:钉在页签行右端(这一行本来右边就空着)。
             两个图标按状态二选一 —— 常规分栏时给「最大化」(Maximize),占满整列时给
             「还原」(Minimize2),不做成两个并排的按钮(那样总有一个是空点)。 */}

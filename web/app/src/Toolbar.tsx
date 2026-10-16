@@ -33,7 +33,16 @@ export function ToolIcon({ icon: Icon, label, onClick, disabled, color = 'text-s
 
 // 浮动工具条容器:脱离文档流,拖左侧手柄移动,位置记忆到 localStorage
 function FloatingToolbar({ children }: { children: ReactNode }) {
-  const showRight = useStore((s) => s.showRight)
+  // 右侧那一列只要开着（调试面板或大纲任一块）就要让开它的宽度 —— 工具条默认落在它左边。
+  //
+  // ⚠ 两个 store 订阅必须**各自独立调用**：写成 `useStore(a) || useStore(b)` 时左边为真就短路，
+  // 右边那次 hook 调用被跳过 —— 渲染次数一变 hook 数量就变，React 抛 #310
+  // （"Rendered more hooks than during the previous render"），而且只在**状态切换时**才炸
+  // （实测：开着调试面板再点开大纲，整块调试视图直接进错误边界）。值在下面合。
+  // 同一个坑 App.tsx 的 sessionId 那条注释早写过一次。
+  const rightDebugOpen = useStore((s) => s.rightDebugOpen)
+  const rightTreeOpen = useStore((s) => s.rightTreeOpen)
+  const showRight = rightDebugOpen || rightTreeOpen
   // 右侧栏宽度从 **store** 读(不再渲染期读 localStorage):拖宽右栏时写的是 store,
   // 而 localStorage 要到 mouseup 才更新 —— 渲染期读它，工具条就会一直停在旧位置，
   // 直到下一次重渲染才归位（实测拖到 640 后还压着右栏 184px，点一下别的才跳过去）。

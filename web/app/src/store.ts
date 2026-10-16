@@ -45,15 +45,28 @@ interface Store {
   launching: boolean
   launchError: string // 启动失败显眼报错(编辑器外红色横幅,空 = 正常)
   // UI 面板显隐
-  showRight: boolean
+  //
+  // 右侧那一列**不再是一个"开关"**（原来的 showRight），而是两块各自独立的开关：
+  // 调试工具面板（bug-play）与大纲/树（list-tree）。三个开关（含下方面板的 terminal）
+  // 相互独立、可同时激活 —— 所以这里没有"右侧栏显不显示"这个字段，
+  // 它是 `rightDebugOpen || rightTreeOpen` 算出来的（见 App.tsx 的 showRight）。
   showBottom: boolean
   // 下方面板是否「最大化」(占满代码区那一列,编辑器整块让位)。
-  // 与 showRight/showBottom 同一档:纯界面状态,只活在这一次会话里,不落盘 ——
+  // 与下面的开关同一档:纯界面状态,只活在这一次会话里,不落盘 ——
   // 「最大化」是一次临时的"我要专看这段协议流",刷新后回到常规分栏才是预期。
   panelW: number
   setPanelW: (w: number) => void
   bottomMax: boolean
-  rightView: 'debug' | 'outline' // 调试视图右侧边栏当前 sheet(调试面板/大纲);会话已独立成左侧一列
+  rightDebugOpen: boolean // 右侧上半/整列：调试面板（变量/断点/调用栈）
+  rightTreeOpen: boolean  // 右侧下半/整列：大纲（树）
+  // 两块同时打开时谁在上半。规则是**后开的在下面**（用户定的）：单独开一个时它占满整列，
+  // 再开另一个就拆一半给新来的（用户原话："做一个向下 split 的逻辑，拆出一半区域留给 tree 面板"）。
+  rightTop: 'debug' | 'tree'
+  // 上下两块的高度占比（上半块占多少）。记在本地，刷新后还在。
+  rightSplit: number
+  toggleRightDebug: () => void
+  toggleRightTree: () => void
+  setRightSplit: (v: number) => void
   // 调用栈/自动变量面板「自动」开关(手风琴头部图标,默认关):停站后是否自动抓取该数据
   // (两者都要经调试会话逐条发命令,自动调度越多步进越卡;关掉后仅手动/开关开启时取)
   stackAuto: boolean
@@ -118,14 +131,12 @@ interface Store {
 
   // actions
   setWsConnected: (b: boolean) => void
-  toggleRight: () => void
   toggleBottom: () => void
   toggleBottomMax: () => void
   toggleStackAuto: () => void
   toggleAutovarsAuto: () => void
   // 接口日志重放启动(wslogs「调试此调用」与重放会话「重新开始」共用同一上下文)
   replayStart: (rowid: string, request?: string) => Promise<void>
-  setRightView: (v: 'debug' | 'outline') => void
   pushRaw: (line: string) => void
   sendRaw: (cmd: string) => Promise<void>
   pushTimeline: (item: Omit<TimelineItem, 'time'>) => void
@@ -349,14 +360,19 @@ function loadWsLogContent(item: WSLogItem): Promise<WSLogContent> {
 export const useStore = create<Store>((set, get) => ({
   wsConnected: false,
   sessionId: null, module: '', prog: '', state: '', sessionEnv: '', started: false, stop: null, holdingSeconds: 0,
-  launching: false, launchError: '', showRight: true, showBottom: true, bottomMax: false,
+  launching: false, launchError: '', showBottom: true, bottomMax: false,
   // 面板开关默认关(localStorage tt.stackAuto / tt.autovarsAuto 持久化)
   stackAuto: localStorage.getItem('tt.stackAuto') === '1',
   autovarsAuto: localStorage.getItem('tt.autovarsAuto') === '1',
   lastReplayRowid: null, lastReplayRequest: '',
-  // 调试视图右侧边栏默认落在「调试面板」(会话已在左侧独立一列、不再是这里的 sheet);
-  // sheet 顺序见 App.tsx 侧边栏顶部那行图标,不做持久化
-  rightView: 'debug',
+  // 调试视图右侧那两块：默认只开调试面板（它是主场）；两块都开时上下的占比记在本地。
+  rightDebugOpen: true,
+  rightTreeOpen: false,
+  rightTop: 'debug',
+  rightSplit: (() => {
+    const v = Number(localStorage.getItem('tt.rightSplit'))
+    return v >= 0.2 && v <= 0.8 ? v : 0.5
+  })(),
   // 右侧栏宽度(像素,夹取 240~640)。初值取持久化的那份,越界或没记过就用 320。
   // 放在 store 而不是某个组件的本地 state:浮动工具条按它算默认落点(见 Toolbar.tsx)。
   panelW: (() => {
@@ -383,8 +399,18 @@ export const useStore = create<Store>((set, get) => ({
   tabs: [], activeTab: 'debug', revealReq: null,
 
   setWsConnected: (b) => set({ wsConnected: b }),
-  toggleRight: () => set((st) => ({ showRight: !st.showRight })),
   toggleBottom: () => set((st) => ({ showBottom: !st.showBottom, bottomMax: false })),
+  // 右侧那两块：各自独立开关，**后开的在下面**（单独开一个时它占满整列）。
+  // 三条规则都在这两个 action 里，界面上不需要知道顺序。
+  toggleRightDebug: () => set((st) => {
+    const open = !st.rightDebugOpen
+    return { rightDebugOpen: open, rightTop: open && st.rightTreeOpen ? 'tree' : st.rightTop }
+  }),
+  toggleRightTree: () => set((st) => {
+    const open = !st.rightTreeOpen
+    return { rightTreeOpen: open, rightTop: open && st.rightDebugOpen ? 'debug' : st.rightTop }
+  }),
+  setRightSplit: (v) => set({ rightSplit: Math.min(0.8, Math.max(0.2, v)) }),
   // 最大化/还原下方面板。收起下方面板时顺带解除最大化(否则再展开会以一个"占满整列"的
   // 面板回来,而用户要的是常规分栏)。
   //
@@ -417,8 +443,6 @@ export const useStore = create<Store>((set, get) => ({
     if (!sid) return
     void api.autovarsAuto(sid, on).catch(() => { /* 会话切换窗口:下次停站前由对齐逻辑重发 */ })
   },
-  setRightView: (v) => set({ rightView: v }),
-
   pushRaw: (line) => set((st) => {
     const log = st.rawLog.length > 3000 ? st.rawLog.slice(-2000) : st.rawLog
     return { rawLog: [...log, line] }

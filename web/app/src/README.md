@@ -28,8 +28,15 @@
 会跟着视图卸载重挂，手风琴展开态与 TOPENT 输入当场丢。设置页不显示它（环境就在设置页里管，
 一列列环境与会话的面板在那里只是重复）。
 
-调试视图的右侧边栏**顶部有一行横排图标**（调试面板 / 大纲，在栏内部、与代码区同一个面板），
-不再是主面板外的第二条图标栏。整条侧边栏的收起 / 展开与宽度拖拽（`tt.panelW`）仍是原样。
+调试视图**只有一条 header**（`DebugHeader.tsx`）：左边是源码页签，最右是三个互相独立的开关 ——
+terminal（下方面板）、bug-play（调试面板）、list-tree（大纲，树）。三者可同时激活，所以它们不是
+"当前选中哪一个"的互斥高亮，而是"这块面开着没有"的开/关。原来那套「收起下方面板 / 收起右方面板」
+两个按钮已经取消：terminal 就是前者，bug-play 与 list-tree 合起来就是后者。
+
+右侧那一列里同时放调试面板与大纲：只开一块时它占满整列，**两块都开时上下分屏**，中间一条可拖的
+分割线（占比 `tt.rightSplit`）。谁在上由 `rightTop` 决定，规则是"后开的在下面"（两个 toggle action
+里定的）。顺序用 CSS `order` 表达而不是按顺序渲染两个分支 —— 换 DOM 顺序会让面板重新挂载，
+手风琴展开态与监视输入框当场丢。整列的宽度拖拽（`tt.panelW`）仍是原样。
 
 ## 路由：哈希
 
@@ -111,7 +118,7 @@
 
 | 类别 | 文件 |
 |---|---|
-| 外壳与布局 | `App.tsx`、`main.tsx`、`ErrorBoundary.tsx`、`StatusBar.tsx`、`Toolbar.tsx` |
+| 外壳与布局 | `App.tsx`、`main.tsx`、`ErrorBoundary.tsx`、`StatusBar.tsx`、`Toolbar.tsx`、`DebugHeader.tsx` |
 | 视图 | `SettingsView.tsx`、`WsLogView.tsx`、`WsTestView.tsx`、`RecordView.tsx`、`SourceView.tsx` |
 | 面板 | `Panels.tsx`、`SessionPanel.tsx`、`OutlinePanel.tsx`、`VarTreeUi.tsx` |
 | 编辑器 | `monacoSetup.ts`、`PayloadEditor.tsx` |
