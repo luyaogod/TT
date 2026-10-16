@@ -20,10 +20,23 @@ const (
 	CodeNotFound     = "NOT_FOUND"      // 查到了,但没有这条数据
 
 	// tt fep 那条线。前端协议自己的目标族：会话、目标、体检。
-	CodeNoSession     = "NO_SESSION"      // 没有会话（未登记，或登记已过期）
+	CodeNoSession     = "NO_SESSION"     // 没有会话（未登记，或登记已过期）
 	CodeSessionState  = "SESSION_STATE"  // 会话状态不符
 	CodeTargetMissing = "TARGET_MISSING" // 目标（连接号/窗口/对象）不存在
 	CodePreflight     = "PREFLIGHT"      // 环境体检不过
+
+	// 会话寻址那条线（`.agents/plan/tt-refactor-contract.md` 4.1.1 的 code 取值表，
+	// WP4b 落地）。**加新码可以，改旧码的名字不行**（C5.13，与上面那两族同一条取向）。
+	//
+	// 它们今天落在**服务端**：HTTP 侧那三个"要一条会话"的端点（会话池里 >=2 条又没给目标）
+	// 用 `SESSION_AMBIGUOUS` + 候选清单拒绝（C5.16：409），这正是 Q4「服务端不保留隐式寻址」
+	// 的判据从"没有码的错误"变成"有码的信封"。
+	//
+	// `SESSION_STALE` / `SESSION_NAME_TAKEN` / `SESSION_TARGET_BUSY` 三个**不在本批**：
+	// 它们要 `epoch` / `name` 那几个键先成为服务端的事实（契约 C5.3 的纯新增键），
+	// 按契约 C7.1 的编排归别名与世代那一批 —— 契约的取值仍以 `internal/target` 为准。
+	CodeSessionAmbiguous = "SESSION_AMBIGUOUS" // 选择器/省略命中 >=2 条（F1/F3/F4）
+	CodeSessionNotFound  = "SESSION_NOT_FOUND" // 选择器指名的那条不存在（F5/F7/F8）
 
 	// tt update 那条线。它管的是"tt 自己"，与字典无关，所以码也自成一族。
 	CodeUpdateUsage    = "UPDATE_USAGE"    // 参数组合不成立（如非交互环境没给 --yes）

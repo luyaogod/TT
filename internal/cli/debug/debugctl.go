@@ -21,6 +21,7 @@ import (
 	"tt/internal/dbconfig"
 	"tt/internal/debug"
 	"tt/internal/output"
+	"tt/internal/target"
 
 	"github.com/spf13/cobra"
 )
@@ -48,7 +49,7 @@ var (
 
 	dbgExecMax int    // exec --max:单条命令**显示**的行数上限(0=不限;不影响本地完整副本)
 	dbgSQLFile string // sql --file:从本地文件读语句(不是远端 @)
-	dbgSQLEnt  int    // sql --ent:显式指定企业编号(默认取会话 TOPENT)
+	dbgSQLEnt  int    // sql --ent:显式指定企业编号(不给 = 用这条会话当前生效的企业编号)
 	dbgEnvFlag string // start/wsdebug --env:这次启动要连哪个环境(权威;空=回落全局 --env/当前环境)
 	// dbgFGLServer 是 start/wsdebug --fglserver:这一轮作业画面画到哪儿(FGLSERVER)。
 	// 空串有语义("本轮交回 T100 自动设置"),所以判定一律用 cmd.Flags().Changed,
@@ -148,26 +149,9 @@ func dbgJSONOut(v any) error {
 	return enc.Encode(v)
 }
 
-// dbgCurrentID 取当前活动会话 id(同一时间只有一个;取列表第一个)
-func dbgCurrentID() (string, error) {
-	data, err := dbgAPI("GET", "/api/sessions", nil)
-	if err != nil {
-		return "", err
-	}
-	var r struct {
-		Sessions []struct {
-			ID    string `json:"id"`
-			State string `json:"state"`
-		} `json:"sessions"`
-	}
-	if err := json.Unmarshal(data, &r); err != nil {
-		return "", err
-	}
-	if len(r.Sessions) == 0 {
-		return "", fmt.Errorf("没有活动会话,先运行 tt debug start <作业>")
-	}
-	return r.Sessions[0].ID, nil
-}
+// 会话 id 的来源已经换成"向目标层要目标"（见 target.go 的 dbgSessionID）：
+// 从前这里是"列一次会话、取回包数组第一项"的那个函数（契约 B10 点名的就是它）。
+// 取第一项的写法多会话下会静默跑到另一条会话上，所以它整个被取代，不留副本，
 
 // dbgWaitStopped 等待会话停站(入口停站/断点命中)。
 // 走服务端长轮询 /wait:事件一到立刻返回,不再每 2s 查一次快照。
@@ -175,7 +159,7 @@ func dbgWaitStopped(id string, timeout time.Duration) (map[string]any, error) {
 	q := url.Values{}
 	q.Set("for", "stopped,exit")
 	q.Set("timeout", strconv.Itoa(int(timeout.Seconds())))
-	data, err := dbgAPI("GET", "/api/sessions/"+id+"/wait?"+q.Encode(), nil)
+	data, err := dbgAPI("GET", dbgSessionURL(id, "/wait?"+q.Encode()), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +173,7 @@ func dbgWaitStopped(id string, timeout time.Duration) (map[string]any, error) {
 		return nil, fmt.Errorf("等待停站超时(%s)", timeout)
 	}
 	// 再取一次完整快照当返回值(调用方按 snapshot 结构解析、由 start 原样打印)
-	snap, err := dbgAPI("GET", "/api/sessions/"+id, nil)
+	snap, err := dbgAPI("GET", dbgSessionURL(id, ""), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -217,15 +201,21 @@ func dbgTargetEnv() string {
 	return strings.TrimSpace(common.Env)
 }
 
-// dbgSnapView POST /api/sessions 回包 + GET /api/sessions/{id} 快照里本文件用到的字段。
+// dbgSnapView 会话快照里 CLI 侧用到的字段。
+//
+// **字段形状从 `target.Session` 派生**（契约 C5.17 / C5.18 / C5.19：客户端不许再手抄
+// 第二份事实）：`id` / `env` / `state` / `prog` / `module` / `runProg` / `ref` /
+// `display` / `name` / `n` / `epoch` 这些键的**唯一声明处**是 `internal/target`，
+// 这里用嵌入把它们的名字与 JSON 标签都继承过来 —— 从前这里手抄过一份
+// （`dbgSnapView` 的 struct 标签），服务端加一个键就要有人记得改两处。
+//
+// 留下来的字段是**服务端有、目标层不认**的那些（目标层只认"哪条会话"，
+// 不认"这条会话现在什么样"）：`reused` 是客户端自己补的复用痕迹，
+// `zone` / `topent*` / `fglserver` / `screenTarget` / `stop` 是快照里给人看的部分。
 type dbgSnapView struct {
-	ID       string `json:"id"`
-	Env      string `json:"env"`
+	target.Session
+
 	Reused   bool   `json:"reused"`
-	Module   string `json:"module"`
-	Prog     string `json:"prog"`
-	RunProg  string `json:"runProg"`
-	State    string `json:"state"`
 	Zone     string `json:"zone"`
 	Topent   string `json:"topent"`
 	TopentCf string `json:"topentCfg"`
@@ -365,17 +355,28 @@ var debugStartCmd = &cobra.Command{
 别再去改全局配置 —— 改了之后每一次放行都不会有画面,而且启动输出不会提这件事。`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// 目标先判一次:--session 给了就在这里落位（F3–F8 的错当场报，不发那个 POST），
+		// --name 的取值纪律也在发请求之前判（F19）。
+		if err := dbgResolveSessionFlag(); err != nil {
+			return err
+		}
+		if err := dbgValidateNameFlag(); err != nil {
+			return err
+		}
 		body := map[string]any{"prog": args[0]}
 		if dbgModule != "" {
 			body["module"] = dbgModule
 		}
-		target := dbgWireOverrides(cmd, body)
+		targetEnv := dbgWireOverrides(cmd, body)
 		fglChanged := cmd.Flags().Changed("fglserver")
 		// 复用痕迹:启动前记下那个空闲会话,回包 sessionId 与它相同就是"复用了宿主"。
 		// 不标出来的话,"我并没有真正新建会话"这件事在输出里毫无痕迹(反馈 S1-④)。
+		//
+		// 这一步是**尽力而为**的（dbgAmbientSession）：它是痕迹、不是目标 —— 多会话下
+		// 落不上目标就什么都不标，绝不把一条本来能成功的 start 判失败。
 		prevID := ""
-		if sessions, err := dbgSessions(); err == nil && len(sessions) > 0 && sessions[0].State == "idle" {
-			prevID = sessions[0].ID
+		if ambient := dbgAmbientSession(); ambient != nil && ambient.State == target.StateIdle {
+			prevID = ambient.ID
 		}
 		data, err := dbgAPI("POST", "/api/sessions", body)
 		if err != nil {
@@ -411,9 +412,9 @@ var debugStartCmd = &cobra.Command{
 		if line := dbgScreenLine(snap); line != "" {
 			fmt.Println(line)
 		}
-		if !dbgVerifyEnv(target, snap) {
+		if !dbgVerifyEnv(targetEnv, snap) {
 			// 点名的环境没生效:不是"成功跑起来了" —— 调用方得知道这一轮不可信。
-			return fmt.Errorf("--env %s 未生效(实际 %s),本轮调试的环境不对", target, orPlain(snap.Env))
+			return fmt.Errorf("--env %s 未生效(实际 %s),本轮调试的环境不对", targetEnv, orPlain(snap.Env))
 		}
 		return screenErr
 	},
@@ -652,7 +653,7 @@ func dbgRawOnce(id, cmd string) (*rawOut, error) {
 	if dbgSoftWait > 0 {
 		body["wait"] = dbgSoftWait
 	}
-	data, err := dbgAPI("POST", "/api/sessions/"+id+"/raw", body)
+	data, err := dbgAPI("POST", dbgSessionURL(id, "/raw"), body)
 	if err != nil {
 		return nil, err
 	}
@@ -775,8 +776,9 @@ continue/next 这类会让程序跑起来的命令,建议加 --wait N:到点若�
 		if err != nil {
 			return err
 		}
-		// 会话 id 只取一次:批量时它本来是每条都要重取的
-		id, err := dbgCurrentID()
+		// 会话 id 只取一次:批量时它本来是每条都要重取的。
+		// 目标由目标层判（--session / 唯一就落 / 多条报错），见 target.go。
+		id, err := dbgSessionID()
 		if err != nil {
 			return err
 		}
@@ -803,11 +805,11 @@ GDC 这类 GUI 前端不会取消当前对话框。没有 DEFER INTERRUPT 时 SI
 现在只挂起是因为 fglrun -d 的调试器拦下了它 —— 所以别把探测当无代价操作频繁用。`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id, err := dbgCurrentID()
+		id, err := dbgSessionID()
 		if err != nil {
 			return err
 		}
-		data, err := dbgAPI("POST", "/api/sessions/"+id+"/why", map[string]any{
+		data, err := dbgAPI("POST", dbgSessionURL(id, "/why"), map[string]any{
 			"resume": !dbgNoResume,
 		})
 		if err != nil {
@@ -869,7 +871,7 @@ var debugWaitCmd = &cobra.Command{
 超时**不是错误**:到点返回 timedOut 并给出当前状态(退出码 0),便于脚本分支。`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id, err := dbgCurrentID()
+		id, err := dbgSessionID()
 		if err != nil {
 			return err
 		}
@@ -878,7 +880,7 @@ var debugWaitCmd = &cobra.Command{
 			q.Set("for", dbgWaitFor)
 		}
 		q.Set("timeout", strconv.Itoa(dbgTimeout))
-		data, err := dbgAPI("GET", "/api/sessions/"+id+"/wait?"+q.Encode(), nil)
+		data, err := dbgAPI("GET", dbgSessionURL(id, "/wait?"+q.Encode()), nil)
 		if err != nil {
 			return err
 		}
@@ -940,12 +942,12 @@ var debugModeCmd = &cobra.Command{
 人始终有最终控制权。`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id, err := dbgCurrentID()
+		id, err := dbgSessionID()
 		if err != nil {
 			return err
 		}
 		if len(args) == 0 {
-			data, err := dbgAPI("GET", "/api/sessions/"+id, nil)
+			data, err := dbgAPI("GET", dbgSessionURL(id, ""), nil)
 			if err != nil {
 				return err
 			}
@@ -978,7 +980,7 @@ var debugModeCmd = &cobra.Command{
 		if m != "solo" && m != "collab" {
 			return fmt.Errorf("模式只能是 solo 或 collab")
 		}
-		data, err := dbgAPI("POST", "/api/sessions/"+id+"/mode", map[string]any{"mode": m})
+		data, err := dbgAPI("POST", dbgSessionURL(id, "/mode"), map[string]any{"mode": m})
 		if err != nil {
 			return err
 		}
@@ -1013,13 +1015,13 @@ var debugStatusCmd = &cobra.Command{
 // debugQuitCmd 结束当前会话
 var debugQuitCmd = &cobra.Command{
 	Use:   "quit",
-	Short: "结束当前调试会话(作业窗口随之关闭)",
+	Short: "结束指定调试会话(作业窗口随之关闭)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id, err := dbgCurrentID()
+		id, err := dbgSessionID()
 		if err != nil {
 			return err
 		}
-		if _, err := dbgAPI("DELETE", "/api/sessions/"+id, nil); err != nil {
+		if _, err := dbgAPI("DELETE", dbgSessionURL(id, ""), nil); err != nil {
 			return err
 		}
 		fmt.Println(`{"ok":true}`)
@@ -1451,7 +1453,15 @@ var debugSQLCmd = &cobra.Command{
 		if sqlText == "" {
 			return fmt.Errorf(`需要一条查询语句(见 tt debug sql --help),或用 --file 指定语句文件`)
 		}
-		body := map[string]any{"sql": sqlText, "ent": dbgSQLEnt}
+		// 企业编号必须**显式**给服务端（WP4b / 契约 C7.1-5）：服务端那条"ent<=0 就回落
+		// 当前会话 TOPENT"的兜底已删（Q4/C8.2 硬切）。这里按**这条会话**当前生效的企业编号
+		// 填上（会话内覆盖 > 启动时显式给的值；都空就不带，由服务端按 USAGE 拒），
+		// 于是单会话行为与从前逐字相同，多会话下也不会落到别人的企业上去。
+		ent := dbgSQLEnt
+		if ent <= 0 {
+			ent = dbgSQLTopentForRun()
+		}
+		body := map[string]any{"sql": sqlText, "ent": ent}
 		if dbgTimeout > 0 {
 			body["timeout"] = dbgTimeout
 		}
@@ -1484,6 +1494,34 @@ var debugSQLCmd = &cobra.Command{
 			})
 		}
 	},
+}
+
+// dbgSQLTopentForRun 取"这条会话本轮生效的企业编号"，给只读 SQL 显式填 `ent` 用
+// （契约 C7.1-5：服务端那条"ent<=0 回落当前会话 TOPENT"的兜底已按 Q4/C8.2 删掉）。
+//
+// 判据与服务端原来的 `Session.TopentIntForDB` 同源：**会话内的 TOPENT 覆盖优先**，
+// 其次是启动时显式给的那个值（快照里的 `topentSession`），再次是登录 shell 里实际
+// 回读到的 `$TOPENT`（`topentShell` —— 用户没显式给 TOPENT 时，会话不会 export，
+// 所以"这台机器连的是哪个企业"以它为准）。
+//
+// 取不到、或不是纯数字（典型是把据点码填进了企业编号的位置）**返回 0、不猜**：
+// 那正是 `TopentIntForDB` 的注释里点名的危险现场 —— 拿错编号去查库的结果是 0 行，
+// 而 0 行会被读成"这条业务数据不存在"。返回 0 时由服务端按 USAGE 明确拒掉。
+func dbgSQLTopentForRun() int {
+	cur := dbgAmbientSession()
+	if cur == nil {
+		return 0 // 池空或多条（落不上目标）：不替调用方挑一条，让服务端报清楚
+	}
+	snap, err := dbgSnap(cur.ID)
+	if err != nil {
+		return 0
+	}
+	raw := strings.TrimSpace(firstNonEmpty(snap.Topent, snap.TopentSession, snap.TopentShell))
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
 }
 
 // debugWsdebugCmd 对指定日志发起重放调试
@@ -1519,7 +1557,14 @@ tt debug topent <企业编号> 改。`,
 		if reqOverride != "" {
 			body["request"] = reqOverride
 		}
-		target := dbgWireOverrides(cmd, body)
+		// 服务端不再自己挑"当前会话"来收口（WP4b：那五处 `Manager.Current()` 兜底全删了，
+		// Q4/C8.2 硬切）。要收掉的那一条由这边显式给（服务端原始句柄，C5.4）：
+		// 唯一就落；落不上（池空/多条）时不带这个键，由服务端按同一条规矩报
+		// 409 + `SESSION_AMBIGUOUS` + 候选清单（F1 的形状），而不是随机收掉一条别人的会话。
+		if cur := dbgAmbientSession(); cur != nil {
+			body["session"] = cur.ID
+		}
+		targetEnv := dbgWireOverrides(cmd, body)
 		fglChanged := cmd.Flags().Changed("fglserver")
 		data, err := dbgAPI("POST", "/api/wslogs/debug", body)
 		if err != nil {
@@ -1556,8 +1601,8 @@ tt debug topent <企业编号> 改。`,
 				fmt.Println(line)
 			}
 		}
-		if !dbgVerifyEnv(target, snap) {
-			return fmt.Errorf("--env %s 未生效(实际 %s),本次重放的环境不对", target, orPlain(snap.Env))
+		if !dbgVerifyEnv(targetEnv, snap) {
+			return fmt.Errorf("--env %s 未生效(实际 %s),本次重放的环境不对", targetEnv, orPlain(snap.Env))
 		}
 		return screenErr
 	},
@@ -1585,7 +1630,7 @@ func init() {
 	debugExecCmd.Flags().IntVar(&dbgExecMax, "max", 2000, "单条命令**显示**的行数上限(0=不限)。超出的部分不打印,但完整输出会落本地并给出路径")
 	debugStartCmd.Flags().IntVar(&dbgTimeout, "timeout", 120, "等待入口停站超时(秒)")
 	debugSQLCmd.Flags().StringVar(&dbgSQLFile, "file", "", "从本地文件读查询语句(长语句用)")
-	debugSQLCmd.Flags().IntVar(&dbgSQLEnt, "ent", 0, "企业编号(默认取会话的 TOPENT;结果头部的 # 注释会回显实际用的环境、企业与账号)")
+	debugSQLCmd.Flags().IntVar(&dbgSQLEnt, "ent", 0, "企业编号(不给 = 用这条会话当前生效的企业编号；服务端要求显式给，见 C7.1-5)")
 	debugSQLCmd.Flags().IntVar(&dbgTimeout, "timeout", 0, "查询超时秒数(默认 30,上限 120)")
 	debugWsdebugCmd.Flags().IntVar(&dbgTimeout, "timeout", 150, "等待入口停站超时(秒)")
 	debugWsdebugCmd.Flags().StringArrayVar(&wsDebugSet, "set", nil, "改一个入参再重放:路径=值(可重复;路径形如 digi-body.std_data.parameter.x;等号后留空即清空该字段)")
@@ -1620,6 +1665,15 @@ func init() {
 
 	debugWslogsCmd.Flags().StringVar(&wsShow, "show", "", "只看这一条:按 rowid 打印详情与请求/响应报文(不看列表)")
 	debugWslogsCmd.Flags().StringVar(&wsSaveReq, "save-request", "", "配合 --show:把请求原文存成文件(报文是 XML 时改入参只能走这条路)")
+
+	// 会话寻址的两个新标志（契约 1. 的命令角色表 / C3.1 / C3.5 / C2.5）。
+	//
+	// `--session` 只挂**会话级操作命令**：status / sql / wslogs / wsdebug **不挂**
+	// （C1.5 / C1.2 / C1.3：它们不认会话级目标，挂上去就会让 F16 那条"标志挂错命令"
+	// 的自纠提示落空）。`--name` 只挂**起会话**的命令（C3.5：别处给它就是 F17）。
+	dbgRegisterSessionFlag(debugStartCmd, debugExecCmd, debugQuitCmd, debugWhyCmd,
+		debugWaitCmd, debugModeCmd)
+	dbgRegisterNameFlag(debugStartCmd)
 	addClientURLFlag(debugStartCmd, debugExecCmd, debugStatusCmd, debugQuitCmd, debugWslogsCmd, debugSQLCmd, debugWsdebugCmd, debugWhyCmd, debugWaitCmd, debugModeCmd)
 	Group.AddCommand(debugStartCmd, debugExecCmd, debugStatusCmd, debugQuitCmd, debugWslogsCmd, debugSQLCmd, debugWsdebugCmd, debugWhyCmd, debugWaitCmd, debugModeCmd)
 }

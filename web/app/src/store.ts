@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { api, API_BASE, type Event, type StopInfo, type Breakpoint, type Frame, type VarItem, type WSLogItem, type WSLogContent, type WSLogQuery, type WSTestResult, type InflightInfo } from './api'
+import { api, API_BASE, type Event, type StopInfo, type Breakpoint, type Frame, type VarItem, type WSLogItem, type WSLogContent, type WSLogQuery, type WSTestResult, type InflightInfo, type SessionBrief } from './api'
 import { THEME_KEY, applyDark, readStoredTheme, resolveDark, watchSystemTheme, type ThemeMode } from '../../shared/theme'
 // 统一消息出口(零依赖的那个文件,见 toastBus.ts 的说明:store 要能在裸 Node 里加载)
 import { toast } from './toastBus'
@@ -35,6 +35,10 @@ interface Store {
   wsConnected: boolean
   // 会话
   sessionId: string | null
+  // 服务端的**全部**活动会话（`GET /api/sessions`，Q4 的"列全部"）。
+  // 它只用于显示与"我选的那条还在不在"的校验 —— **不参与挑会话**：
+  // 选中态是 `sessionId`，只能由人点（`selectSession`）或本页面自己发起的动作写。
+  sessionList: SessionBrief[]
   module: string
   prog: string
   state: string // loading|stopped|running|idle|exit|''
@@ -203,6 +207,9 @@ interface Store {
   adoptExisting: () => Promise<void>
   // 会话管理(右侧「会话」sheet):切换/重启/结束常驻会话(会先结束当前 debug)
   sessionOp: (op: 'close' | 'restart' | 'switch', env?: string, ent?: string) => Promise<void>
+  // 人点一条会话（Q4 的硬规矩：选中态只能由人点出来，见上面「会话绑定的取数纪律」）。
+  // 传 null = 明确回到"未选择"。
+  selectSession: (id: string | null) => Promise<void>
   syncFromSessions: () => Promise<void>
   // 停站态到了但本地不知道停在哪时的兜底(入口停站只发 state,没有 stopped 事件)
   syncStopFromSnapshot: () => Promise<void>
@@ -241,21 +248,64 @@ function modeOf(m?: string): 'solo' | 'collab' {
   return m === 'collab' ? 'collab' : 'solo'
 }
 
-// adoptFromServer 按服务端现状认领会话(单飞)。
+// ---------- 会话绑定的取数纪律（Q4 的硬规矩 / C6.3 / C8.3）----------
 //
-// 两个调用点:① 本地还没绑定,而事件带着会话 id —— 那是**别人**刚建的会话
-// (典型:AI 从 CLI 起的调试,而这个页面一直开着);② 本地绑的那个在服务端已经没了。
-// 不让调用方自己 set():绑定要连 id、状态、快照、源码、模式一起对齐,那份实现只有
-// syncFromSessions 一处,复制第二份必然与它漂移。
-let adopting = false
-function adoptFromServer() {
-  if (adopting) return
-  adopting = true
-  void useStore.getState().syncFromSessions().finally(() => { adopting = false })
+// **前端不得向服务端询问"当前是哪条会话"**：它应当**列全部 + 自己记住人点的那条**。
+// 从前那两个函数（`adoptFromServer` / `scheduleRebindCheck`）正是"靠服务端默认"的实现 ——
+// 本地没绑定时按 `GET /api/sessions` 的**第一项**认领，本地绑的那条没了也按第一项重绑。
+// 硬切之后（服务端五处 `Current()` 兜底全删）那套写法会把隐式默认从"服务端兜底"
+// 搬到"HTTP 语义"上，问题原样存在 —— 所以本批把它整个换掉：
+//
+//   - `useStore.sessionId` = **人点的那条**（`selectSession` 写入，`tt.sessionId` 持久化）；
+//   - `useStore.sessionList` = **列全部**（`refreshSessionList`），只用来显示与校验；
+//   - 本地没选 → 就是**未选择**，界面提示"选一条"，绝不替人挑一条；
+//   - 本地选的那条从服务端消失了 → **回到未选择**（清掉），也不挑下一条。
+//
+// 唯一的自动绑定是"本页面自己发起的那次会话动作"（`launch` / `replayStart` /
+// `selectSession` 的返回值），那是**人点的**、有明确目标的，不算询问服务端"当前是哪条"。
+const SESSION_KEY = 'tt.sessionId'
+
+function readStoredSessionId(): string | null {
+  const v = localStorage.getItem(SESSION_KEY)
+  return v && v.trim() ? v.trim() : null
+}
+
+// setBoundSession 是"绑定/解绑本地选中会话"的**唯一**写入口：句柄与持久化必须同源，
+// 两处各写一份必然出现"界面绑着 A、刷新后又回到 B"。
+function setBoundSession(id: string | null) {
+  if (id) localStorage.setItem(SESSION_KEY, id)
+  else localStorage.removeItem(SESSION_KEY)
+  useStore.setState({ sessionId: id })
+}
+
+// refreshSessionList 列全部会话（`GET /api/sessions`）填进 `sessionList`。
+//
+// 它**只取数、不动绑定** —— 这正是与旧 `syncFromSessions` 的分工差别：
+// 从前那个函数兼管"替人重绑一条"，而绑定现在只能由人点。
+async function refreshSessionList(): Promise<SessionBrief[] | null> {
+  try {
+    const { sessions } = await api.list()
+    useStore.setState({ sessionList: sessions || [] })
+    return sessions || []
+  } catch {
+    return null // 问不到就保持现状:重连与下一次事件还会再来
+  }
+}
+
+// checkSelectedStillThere 只问一件事：**本地选的那条还在不在**。
+//
+// 不在就**回到未选择**（而不是挑一条）。别名刻意叫 check 而不是 adopt：
+// 这个函数的全部职责就是"敢让绑定为空"，一旦它开始挑一条，Q4 那条硬规矩就废了。
+async function checkSelectedStillThere() {
+  const bound = useStore.getState().sessionId
+  const list = await refreshSessionList()
+  if (!list) return
+  if (!bound) return
+  if (!list.some((s) => s.id === bound)) setBoundSession(null)
 }
 
 // 本地绑的会话被换掉时,别每个事件都去问一次服务端(一次 list 是一次网络往返):
-// 攒到一个窗口后再问,由它决定要不要重绑。窗口内的后续事件照常进时间线,不丢信息。
+// 攒到一个窗口后再问,由它决定要不要解绑。窗口内的后续事件照常进时间线,不丢信息。
 let rebindTimer: number | undefined
 const REBIND_CHECK_MS = 1500
 
@@ -263,16 +313,66 @@ function scheduleRebindCheck() {
   if (rebindTimer) return
   rebindTimer = window.setTimeout(() => {
     rebindTimer = undefined
-    const bound = useStore.getState().sessionId
-    void api.list()
-      .then(({ sessions }) => {
-        if (!useStore.getState().sessionId) { adoptFromServer(); return }
-        // 本地绑的那个已经不在服务端了(被换掉/已断开)→ 按服务端现状重绑;
-        // 还在就什么都不做 —— 那只是收口期旧会话的迟到事件(见 isRetiringTeardown)。
-        if (!sessions.some((x) => x.id === bound)) adoptFromServer()
-      })
-      .catch(() => { /* 问不到就保持现状:重连与下一次事件还会再来 */ })
+    void checkSelectedStillThere()
   }, REBIND_CHECK_MS)
+}
+
+// alignSelected 按**人点的那条会话**（或本地恢复的那条）对齐界面：模式、状态、快照、源码。
+//
+// 它是 `selectSession` / `syncFromSessions` / `adoptExisting` 三处的**同一个落点** ——
+// 三处各写一遍必然漂（从前 `syncFromSessions` 与 `adoptExisting` 就是两份几乎一样的代码）。
+//
+// 两种取数，按顺序：
+//
+//	① `sessionList` 里有它 → 列表就够（模块/作业/状态/环境/模式），并据此判断要不要取快照；
+//	② 列表里没有（还没列过 / 刚起的会话还没刷到）→ **仍然取一次快照**：
+//	   绑定的语义是"人点了这条"，不是"列表里有这条"，所以不能因为列表没刷到就只绑一个 id
+//	   把状态留在空上（实测：那样"点一条停站的会话"会得到空白的调试页）。
+//
+// `setBoundSession` 不在这里做：绑不绑是调用方的事，这里只负责"绑上之后长什么样"。
+//
+// 它是 **async**（等那次快照落定）—— 调用方 `await` 它，于是"选中一条会话"这个动作
+// 在 Promise 落定时就已经对齐完，测试与后续逻辑都能当它是同步的。
+async function alignSelected(set: (p: Partial<Store>) => void, get: () => Store, id: string) {
+  const s = useStore.getState().sessionList.find((x) => x.id === id)
+  if (s) {
+    set({
+      module: s.module, prog: s.prog, runProg: s.runProg || s.prog,
+      state: s.state, sessionEnv: s.env || '', mode: modeOf(s.mode),
+    })
+    if (s.state === 'idle' || s.state === 'loading') {
+      // 空闲宿主(idle)：只绑定，不刷源码；等下一次启动直接复用宿主
+      set({
+        started: false, stop: null, currentLine: 0, breakpoints: [], frames: [],
+        autovars: [], selectedFrame: -1, holdingSeconds: 0, loadingSource: false,
+      })
+      return
+    }
+  }
+  try {
+    const snap: any = await api.snapshot(id)
+    if (get().sessionId !== id) return // 期间人家又点了一条:这一轮结果作废
+    set({
+      state: snap.state || get().state,
+      module: snap.module || get().module,
+      prog: snap.prog || get().prog,
+      runProg: snap.runProg || get().runProg,
+      sessionEnv: snap.env || get().sessionEnv,
+      stop: snap.stop, breakpoints: snap.breakpoints || [], started: !!snap.started,
+      currentLine: snap.stop?.line ?? 0, holdingSeconds: snap.holdingSeconds || 0,
+      // 快照里的模式比列表更新（选中期间可能刚被切换过）
+      mode: modeOf(snap.mode),
+    })
+    if (snap.state === 'stopped') {
+      // 有停站就去取源码。入口停站可能不带文件名(WS 服务程序在 gzzz_t 里解析不到实体程序),
+      // refreshSource 会按「模块_程序.4gl」兜底合成 —— 这是它已有的能力。
+      await get().refreshSource(snap.stop?.file, snap.stop?.line)
+      if (!snapTimer) startHoldTimer(set, get)
+    }
+    if (get().stackAuto) void get().refreshFrames()
+    void get().refreshWatches()
+    alignAutoPrefs(set, get) // 换会话:自动变量开关对齐 + 补拉最近一次求值结果
+  } catch { /* 会话瞬态:下一次对齐还会来 */ }
 }
 
 function now() { return new Date().toLocaleTimeString('zh-CN', { hour12: false }) }
@@ -379,7 +479,9 @@ function loadWsLogContent(item: WSLogItem): Promise<WSLogContent> {
 
 export const useStore = create<Store>((set, get) => ({
   wsConnected: false,
-  sessionId: null, module: '', prog: '', state: '', sessionEnv: '', started: false, stop: null, holdingSeconds: 0,
+  // 刷新后恢复**人上次点的那条**（`tt.sessionId`）。恢复的是"选择"，不是"问服务端要一条"：
+  // 这条会话若已经不在服务端了，`checkSelectedStillThere` 会把它清成"未选择"。
+  sessionId: readStoredSessionId(), sessionList: [], module: '', prog: '', state: '', sessionEnv: '', started: false, stop: null, holdingSeconds: 0,
   launching: false, launchError: '', showBottom: true, bottomMax: false,
   // 面板开关默认关(localStorage tt.stackAuto / tt.autovarsAuto 持久化)
   stackAuto: localStorage.getItem('tt.stackAuto') === '1',
@@ -495,24 +597,21 @@ export const useStore = create<Store>((set, get) => ({
 
   onEvent: (ev) => {
     const st = get()
-    // 本地还没绑定,而事件带着会话 id:有人(典型是 AI 从 CLI)刚建了会话。认领它 ——
-    // 不认领的话,协议流与状态栏照常动,而编辑器永远转圈、命令框永远"需停站后才能发送命令"、
-    // 会话卡也不出现:看起来只是"实时性不好",其实是根本没绑定。
+    // **本地没选中就不认领**（WP-F / Q4 的硬规矩，见上面「会话绑定的取数纪律」）。
     //
-    // 先**同步**绑上 id,再让 syncFromSessions 去对齐模式/环境/快照/源码:同一批后续事件
-    // (state/stopped)的处理都依赖 sessionId,而"停站→取源码"的落位是延迟 150ms 的回调 ——
-    // 等对齐那次网络往返回来才绑,这条路会在未绑定状态空跑,编辑器就停在空白上(实测)。
+    // 从前的写法是"事件带着会话 id 而本地还没绑定 → 认领它"，理由是"不认领的话编辑器
+    // 永远转圈"。但那条便利的代价正是本批要根除的东西：**它等于向服务端问"当前是哪条"** ——
+    // 别人（典型是 AI 从 CLI）刚建了会话，页面就自作主张绑上去；池里有多条时绑到哪一条
+    // 取决于事件先到谁，于是"我盯着 A 的现场、界面却显示 B 的停站"。
+    // 现在的口径：**列全部 + 等人点**（会话面板里点一条即选中）。
+    // 人在面板上点一条之前，协议流照常进时间线，编辑器就是空的 —— 这是"未选择"该有的样子。
     //
-    // 护栏 launching:本页面正在启动/重放时,新会话的事件常常**先于**HTTP 响应到达,
-    // 此时 sessionId 也还是 null。那种"未绑定"是启动流程的正常中间态,由 launch() 自己
-    // 收口(它点下即置 loadingSource,不能被一次对齐清掉);认领只服务"别人建的会话"。
-    if (ev.sessionId && !st.sessionId && !st.launching) {
-      set({ sessionId: ev.sessionId })
-      adoptFromServer()
-    }
+    // 唯一例外是**本页面自己发起**的那次动作（launch / replayStart）：它们由
+    // HTTP 响应权威绑定（见那两处的 set({sessionId: r.sessionId})），不经过这里。
     if (st.sessionId && ev.sessionId && ev.sessionId !== st.sessionId) {
-      // 本地绑的这个可能已经被换掉了(后端是单会话:新会话起来前旧的先收口)。
-      // 盲信本地会让界面冻在旧会话上,而协议流全是新会话的 —— 让服务端现状说话。
+      // 本地绑的这条收到的却是**另一条会话**的事件 —— 要么它已经被换掉（同目标复用宿主
+      // 时 id 会相同，所以这里多半是"别人起了新会话"），要么池里已经不止一条。
+      // 问一次服务端：**只问"我选的那条还在不在"**，不在就回到未选择（绝不挑一条）。
       scheduleRebindCheck()
       return
     }
@@ -616,7 +715,8 @@ export const useStore = create<Store>((set, get) => ({
         if (text.startsWith('启动失败')) {
           if (snapTimer) { clearInterval(snapTimer); snapTimer = undefined }
           stopHoldTimer()
-          set({ launchError: text, sessionId: null, state: '', loadingSource: false, stop: null, currentLine: 0 })
+          setBoundSession(null)
+          set({ launchError: text, state: '', loadingSource: false, stop: null, currentLine: 0 })
         }
         return
       }
@@ -871,9 +971,9 @@ export const useStore = create<Store>((set, get) => ({
     // 一进 debug 页就进加载态:后端要 SSH 登录 + 解析作业 + 重读报文才返回(秒级),
     // 若等响应回来才置 loadingSource,这段时间编辑器既没内容也不转圈,像卡住。
     // 同时清掉上一会话的调试现场,避免"加载中"的画面里残留旧的时间线/调用栈
+    setBoundSession(null) // 旧会话马上要被服务端收掉:本地当场解绑（localStorage 一起清）
     set({
       view: 'debug', wsLogErr: '', launchError: '', launching: true, state: 'loading',
-      sessionId: null,
       timeline: [], rawLog: [], watches: [], autovars: [], backendDead: '',
       selectedFrame: -1, stop: null, frames: [], breakpoints: [],
       sourceContent: '', sourcePath: '', sourceDVM: '', sourceMissing: false, currentLine: 0, lineOffset: 0,
@@ -881,11 +981,13 @@ export const useStore = create<Store>((set, get) => ({
     })
     try {
       if (old) void api.quit(old).catch(() => {})
-      const r = await api.wsLogDebug(rowid, request)
+      const r = await api.wsLogDebug(rowid, request, old || undefined)
       const mod = r.module || ''
       const rp = r.runProg || r.prog || ''
+      // 响应里的 id 是**本页面自己发起**的那条新会话 —— 权威绑定（人点的动作，不是问服务端）
+      setBoundSession(r.sessionId)
       set({
-        sessionId: r.sessionId, module: mod, prog: r.prog || rp,
+        module: mod, prog: r.prog || rp,
         runProg: rp, state: 'loading', sourceDVM: '', sourceMissing: false, currentLine: 0, loadingSource: true,
       })
       bindEpoch++ // 权威绑定:在途的 list/snapshot 结果从此作废(见 bindEpoch 的说明)
@@ -897,7 +999,8 @@ export const useStore = create<Store>((set, get) => ({
       // 它一出现就把整个工作台往下压,而它说的只是一句失败原因。改走统一消息出口,
       // 并**不自动关**(duration:0)—— 启动失败必须看见,不能 3 秒后自己溜走。
       toast.error('启动失败', { description: e?.message || String(e), duration: 0 })
-      set({ wsLogErr: e.message || String(e), state: '', launchError: `启动失败: ${e.message}`, sessionId: null, loadingSource: false, stop: null })
+      setBoundSession(null)
+      set({ wsLogErr: e.message || String(e), state: '', launchError: `启动失败: ${e.message}`, loadingSource: false, stop: null })
     } finally {
       endRetire()
       set({ launching: false })
@@ -916,7 +1019,9 @@ export const useStore = create<Store>((set, get) => ({
       // 作业编号解析:后端连 gzzz_t 后回读模块与实体程序(aint301_wf → aint302_wf)
       const mod = r.module || module
       const rp = r.runProg || prog
-      set({ sessionId: r.sessionId, module: mod, prog, runProg: rp, state: 'loading' })
+      // 同上：这是**本页面自己发起**的会话，响应里的 id 就是权威绑定（人点的动作）
+      setBoundSession(r.sessionId)
+      set({ module: mod, prog, runProg: rp, state: 'loading' })
       bindEpoch++ // 权威绑定:在途的 list/snapshot 结果从此作废(见 bindEpoch 的说明)
       get().pushTimeline({ origin: 'human', kind: 'command', text: `启动调试会话 ${mod}/${prog}` })
       alignAutoPrefs(set, get) // 自动变量开关下发到新会话(求值在服务端做)
@@ -926,7 +1031,8 @@ export const useStore = create<Store>((set, get) => ({
       // 同步失败(如 prog 缺失/配置非法):HTTP 直接报错,同样必须退出加载态
       cancelRetire()
       get().pushTimeline({ origin: 'system', kind: 'warn', text: `启动失败: ${e.message}` })
-      set({ launchError: `启动失败: ${e.message}`, sessionId: null, state: '', loadingSource: false, stop: null, currentLine: 0 })
+      setBoundSession(null)
+      set({ launchError: `启动失败: ${e.message}`, state: '', loadingSource: false, stop: null, currentLine: 0 })
       throw e
     } finally {
       endRetire()
@@ -1216,10 +1322,14 @@ export const useStore = create<Store>((set, get) => ({
     if (kept) {
       set({ state: 'idle', ...base })
     } else {
+      // 后端把会话移除了:本地绑定也解掉（走 setBoundSession，localStorage 一起清），
+      // 并刷一次列表 —— 会话面板要能立刻看出"这条没了"。
+      setBoundSession(null)
       set({
-        sessionId: null, module: '', prog: '', runProg: '', sessionEnv: '', state: '', ...base,
+        module: '', prog: '', runProg: '', sessionEnv: '', state: '', ...base,
         backendDead: '', tabs: [], activeTab: 'debug', sourceContent: '', sourcePath: '', sourceDVM: '', sourceMissing: false, lineOffset: 0,
       })
+      void refreshSessionList()
     }
   },
 
@@ -1250,41 +1360,53 @@ export const useStore = create<Store>((set, get) => ({
     }
   },
 
+  // adoptExisting 是**首屏对齐**：列全部会话 + 恢复"人上次点的那条"（若还在），
+  // **绝不替人挑一条**（WP-F / Q4）。
+  //
+  // 与从前的差别（这一处是本次的核心改动之一）：旧实现是"`sessions[0]` 认领并接管"，
+  // 也就是**把服务端列表的第一项当成"当前会话"** —— 多会话下那是随机的，
+  // 而那正是服务端五处 `Current()` 兜底被删掉的理由，前端不该把它捡回来。
+  // 现在：本地记着的那条还在 → 对齐一次（状态/模式/快照/源码）；不在 → 回到未选择。
   adoptExisting: async () => {
-    try {
-      const { sessions } = await api.list()
-      if (!sessions.length) return
-      const s = sessions[0]
-      set({ sessionId: s.id, module: s.module, prog: s.prog, runProg: s.runProg || s.prog, state: s.state, sessionEnv: s.env || '', mode: modeOf(s.mode) })
-      if (s.state === 'idle') {
-        // 空闲宿主(idle):仅接管绑定,不刷源码;等下一次启动直接复用
-        get().pushTimeline({ origin: 'system', kind: 'info', text: `会话空闲(环境 ${s.env || '默认'}),可直接启动调试` })
-        return
-      }
-      get().pushTimeline({ origin: 'system', kind: 'info', text: `接管已存在的会话 ${s.module}/${s.prog}` })
-      const snap = await api.snapshot(s.id)
-      set({
-        stop: snap.stop, breakpoints: snap.breakpoints || [],
-        started: !!snap.started,
-        currentLine: snap.stop?.line ?? 0, holdingSeconds: snap.holdingSeconds || 0,
-        // 快照里的模式比列表更新(接管期间可能刚被切换过)
-        mode: modeOf(snap.mode),
-      })
-      if (snap.state === 'stopped') {
-        await get().refreshSource(snap.stop?.file)
-        // 停着的会话接管进来也要让"停留 Xs"走起来(否则它永远停在接管那一秒)
-        if (!snapTimer) startHoldTimer(set, get)
-      }
-      if (get().stackAuto) void get().refreshFrames()
-      void get().refreshWatches()
-      alignAutoPrefs(set, get) // 重连接管:自动变量开关对齐 + 补拉最近一次求值结果
-    } catch { /* ignore */ }
+    const list = await refreshSessionList()
+    if (!list) return
+    const id = get().sessionId
+    if (!id) return // 未选择:界面提示"选一条"(见会话面板),这里什么都不做
+    if (!list.some((s) => s.id === id)) {
+      setBoundSession(null)
+      return
+    }
+    await get().selectSession(id)
   },
 
-  // 会话管理:右侧「会话」sheet 的 结束/重启/切换(后端会先结束当前 debug)
+  // selectSession 是**唯一**能"绑定一条会话"的入口（Q4：选中态只能由人点出来）。
+  //
+  // 它做三件事，而且是同一件事的三面：写进 localStorage（刷新后恢复）、写进
+  // `useStore.sessionId`（本次会话用）、按那条会话对齐状态（模式/快照/源码）。
+  // 传 null = 明确回到"未选择"（界面上仍然列着全部会话，等人再点）。
+  //
+  // 对齐走 `alignSelected` 那一处：它不要求"这条必须在 `sessionList` 里" ——
+  // 列表可能是空的（还没列过）或还没刷到这条（刚起的会话）。绑定的语义是"人点了这条"，
+  // 不是"列表里有这条"，所以取数失败也只退到"只绑 id"，绝不清掉人的选择。
+  selectSession: async (id) => {
+    if (!id) {
+      setBoundSession(null)
+      set({
+        module: '', prog: '', runProg: '', sessionEnv: '', state: '',
+        started: false, stop: null, currentLine: 0, breakpoints: [], frames: [],
+        adjustedBps: {}, autovars: [], selectedFrame: -1, holdingSeconds: 0, loadingSource: false,
+      })
+      return
+    }
+    setBoundSession(id)
+    await alignSelected(set, get, id)
+  },
+
+  // 会话管理:右侧「会话」sheet 的 结束/重启/连接(后端会先结束当前 debug)
   sessionOp: async (op, env, ent) => {
     const st = get()
-    const label = op === 'close' ? '结束会话' : op === 'restart' ? '重启会话' : '切换会话'
+    // 第三档是"连到该环境"(Q26:不是"把一个会话切到另一个环境";连上去会收掉当前那条,Q27)
+    const label = op === 'close' ? '结束会话' : op === 'restart' ? '重启会话' : '连到该环境'
     try {
       // **绝不假装成功**。原来这三条是 `if (… && st.sessionId) await …` 串起来的：
       // 条件不成立时**一个请求都不发**，却照样往时间线里记一条"结束会话 → 主机109"，
@@ -1303,7 +1425,11 @@ export const useStore = create<Store>((set, get) => ({
         await api.sessionRestart(st.sessionId, ent)
       } else {
         if (!env) throw new Error('没有点名要切到哪个环境')
-        await api.sessionSwitch(env, ent)
+        // **带上要收掉的那条会话**（WP4b / Q4 / C8.2）：服务端不再自己找"当前会话"。
+        // 这条会话会被服务端收掉（换环境 = 换连接目标），所以本地也当场解绑：
+        // 之后新会话由响应里的 sessionId 权威绑定（服务端回的是它新建的那条）。
+        await api.sessionSwitch(env, ent, st.sessionId || undefined)
+        setBoundSession(null)
       }
       st.pushTimeline({ origin: 'human', kind: 'command', text: label + (env ? ' → ' + env : '') + (ent ? ' (ENT ' + ent + ')' : '') })
     } catch (e: any) {
@@ -1313,10 +1439,18 @@ export const useStore = create<Store>((set, get) => ({
     await get().syncFromSessions()
   },
 
-  // 会话被替换/关闭后,按服务端现状对齐本地绑定(源码保留便于浏览)
+  // syncFromSessions：**只对齐"我选的那条"**，不问服务端"当前是哪条"（Q4 的硬规矩）。
+  //
+  // 从前它做的是"取列表第一项并绑上去"—— 换环境、结束会话、AI 起了新会话之后都靠它
+  // 让界面跟上，而"跟上"的方式是**替人挑一条**。现在：
+  //
+  //   ① 列全部（填 `sessionList`，会话面板显示的就是它）；
+  //   ② 本地没选 → 什么都不做（未选择就是要显示成未选择）；
+  //   ③ 本地选的那条还在 → 按它对齐状态/快照/源码；
+  //   ④ 不在了（被换掉/关掉/断开）→ **回到未选择**，绝不挑下一条。
   syncFromSessions: async () => {
-    // 代次守卫:await 期间若有人权威地绑了新会话(launch/replayStart),这一轮结果作废
-    // —— 否则慢一拍的 list() 会把刚绑上的会话抹成 null（见 bindEpoch 的说明）。
+    // 代次守卫:await 期间若有人权威地绑了新会话(launch/replayStart/selectSession),
+    // 这一轮结果作废 —— 否则慢一拍的 list() 会把刚绑上的会话抹成 null（见 bindEpoch 的说明）。
     const epoch = bindEpoch
     if (snapTimer) { clearInterval(snapTimer); snapTimer = undefined }
     stopHoldTimer()
@@ -1324,40 +1458,18 @@ export const useStore = create<Store>((set, get) => ({
       started: false, stop: null, currentLine: 0, breakpoints: [], adjustedBps: {},
       frames: [], autovars: [], selectedFrame: -1, holdingSeconds: 0,
     }
-    try {
-      const { sessions } = await api.list()
-      if (epoch !== bindEpoch) return
-      const s0 = sessions[0]
-      if (!s0) {
-        // 会话全部断开
-        set({ sessionId: null, module: '', prog: '', runProg: '', sessionEnv: '', state: '', ...clearRun, loadingSource: false })
-        return
-      }
-      set({
-        sessionId: s0.id, module: s0.module, prog: s0.prog, runProg: s0.runProg || s0.prog,
-        sessionEnv: s0.env || '', state: s0.state, mode: modeOf(s0.mode),
-      })
-      if (s0.state === 'idle' || s0.state === 'loading') {
-        set({ ...clearRun, loadingSource: false })
-        return
-      }
-      if (s0.state === 'stopped') {
-        const snap = await api.snapshot(s0.id)
-        if (epoch !== bindEpoch) return
-        set({ stop: snap.stop, breakpoints: snap.breakpoints || [], started: !!snap.started, holdingSeconds: snap.holdingSeconds || 0 })
-        // 有停站就去取源码。入口停站可能不带文件名(WS 服务程序在 gzzz_t 里解析不到
-        // 实体程序),refreshSource 会按「模块_程序.4gl」兜底合成 —— 这是它已有的能力。
-        // 以前这里要求 file 非空才加载,于是"AI 起好会话、页面再接上来"这条唯一的
-        // 接管路径永远空白(只有行号 1);同样兜底的 pollUntilStopped 传的是 undefined,
-        // 两条路径对"要不要加载"的判断不一致。统一成"有停站就加载"。
-        if (snap.stop) void get().refreshSource(snap.stop.file, snap.stop.line)
-        // 停着的会话对齐进来同样要让"停留 Xs"走起来(syncFromSessions 开头已清掉轮询)
-        startHoldTimer(set, get)
-        if (get().stackAuto) void get().refreshFrames()
-        void get().refreshWatches()
-        alignAutoPrefs(set, get) // 会话切换/重连后把自动变量开关对齐到新会话
-      }
-    } catch { /* list/snapshot 失败:保持现状 */ }
+    const list = await refreshSessionList()
+    if (epoch !== bindEpoch) return
+    if (!list) return // list 失败:保持现状
+    const id = get().sessionId
+    if (!id) return // 未选择:什么都不做（面板列着全部，等人点）
+    if (!list.some((x) => x.id === id)) {
+      // 选的那条在服务端没了:回到未选择（不是替人挑一条）
+      setBoundSession(null)
+      set({ module: '', prog: '', runProg: '', sessionEnv: '', state: '', ...clearRun, loadingSource: false })
+      return
+    }
+    await alignSelected(set, get, id)
   },
 
   // 停站态到了,但本地没有停站位置:去快照问一次,并把它落到编辑器上。
@@ -1433,7 +1545,8 @@ function pollUntilStopped(set: (p: Partial<Store>) => void, get: () => Store) {
         if (!sessions.some((x) => x.id === st.sessionId)) {
           if (snapTimer) { clearInterval(snapTimer); snapTimer = undefined }
           stopHoldTimer()
-          set({ sessionId: null, state: '', loadingSource: false, stop: null,
+          setBoundSession(null)
+          set({ state: '', loadingSource: false, stop: null,
             launchError: st.launchError || '调试会话启动失败(会话已消失),请检查作业名或服务器状态' })
         }
       } catch { /* list 也失败:保持轮询,等服务恢复 */ }

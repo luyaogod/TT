@@ -48,6 +48,20 @@ const (
 	// layPremise 测试自己构造的前提没满足。归这一类的要特别当心：
 	// 前提长期不成立 = 这条测试**静默变成空转**，与删掉它没有区别。
 	layPremise skipLayer = "前提"
+	// layPending 契约里**已冻结、但还没实现**的东西：测试先写好，等对应工作包落地。
+	//
+	// 与 layPremise 分开是因为这两件事的风险**不一样**，混在一起会让"前提长期不成立"
+	// 那条警告失效：
+	//   - layPremise 是"测试自己造的前提"，没有外部交付物，长期不成立就是静默空转；
+	//   - layPending 有**明确的交付方与交付物**（WP3 的 ref/epoch/解析器、WP4 的
+	//     `--session`/`--name`/新码），落地那天跳过会**自动变成断言**（测试里写了
+	//     "落地了就把这条改成断言"的守卫），所以它不会烂在那里。
+	//   它的文案必须写清"等哪个工作包、等它的什么东西"——写"待实现"这种空话不算。
+	//
+	// 这一层与 L3/L4 的区别也要写清：L3/L4 是"真语料/真机器不在这台机器上"，
+	// 而 layPending 是"代码还没写"——两者都不影响「全绿」这个结论，
+	// 但补救方式完全不同（前者换机器/换语料，后者写代码）。
+	layPending skipLayer = "未落地"
 )
 
 // switchNames 是"跳过时该设哪个变量"的候选名。
@@ -123,11 +137,41 @@ var skipLedger = []skipSite{
 	{file: "internal/fep/open_test.go", msg: "TokenElevation（提权检查）只在 Windows 上有意义", layer: layEnv, why: "提权检查用的是 Windows TokenElevation API；**不影响「全绿」这个结论**，但它正是 TT 永不提权的那个断言"},
 	{file: "internal/testkit/corpus.go", msg: "没有真实语料：设 TDEV_CORPUS 或 TTZS_CORPUS 指到一份，或准备 %s", layer: layL3, why: "需真实语料：开关 TDEV_CORPUS / TTZS_CORPUS"},
 	{file: "internal/testkit/corpus.go", msg: "%s 下没有 %s", layer: layL3Missing, why: "语料在，但里面没有该扩展名的文件"},
+	// ---- WP2（会话寻址重构）的契约测试：等 WP3/WP4 把冻结契约落地 ----
+	//
+	// 这一组全部归 layPending（见那一层的定义）：契约**已冻结**（WP1 交付），
+	// 测试先写好把形状钉住，等 WP3（目标层：ref/display/name/n/epoch/解析/世代）与
+	// WP4（注册 --session/--name、加新码、服务端信封加 code）落地。
+	// 每条文案都写清了"等谁、等什么"，且测试里都有一句
+	// "落地了就 t.Fatal 提醒把它改成断言"的守卫 —— 所以它们不会静默烂掉。
+	{file: "internal/debug/contract_debug_test.go", msg: "等 WP3 把 C5.3 / Q22 的新增键加进 SessionBrief，今天还缺 %v", layer: layPending, why: "等 WP3 实现 ref / display / name / ent / n / epoch 六个键（C5.3 / Q22）"},
+	{file: "internal/debug/contract_debug_test.go", msg: "等 WP3/WP4 把 4.1.1 的新码加进 internal/output/errors.go 的常量清单（C5.13）：%s", layer: layPending, why: "等 WP4 把 SESSION_AMBIGUOUS / SESSION_NOT_FOUND / SESSION_STALE / SESSION_TARGET_BUSY / SESSION_NAME_TAKEN 加进 output 的常量清单（C5.13）"},
+	// F1–F20 的**端到端**实测：WP4a 已把标志与目标层接进 CLI，还差服务端信封那一层。
+	// 守卫换成了 failureEnvelopeHasCode（问 HTTP 侧失败信封有没有 code），不再问"CLI 有没有注册 --session"。
+	{file: "internal/debug/contract_debug_test.go", msg: "等 WP4c 给 HTTP 失败信封补 code/candidates（C5.15/C5.16）后，逐条端到端跑 F1–F20（契约 2.4 的输入集 B）", layer: layPending, why: "等 WP4c 给服务端失败信封补 code / candidates（C5.15 / C5.16）：那之前端到端断言不了 F1–F20 的信封形状（目标层那几层已由 internal/target 与 internal/cli/debug 的测试断言）"},
+	{file: "internal/debug/contract_debug_test.go", msg: "等 WP3 实现 ref 字段（并同批补 name / n / epoch，契约 C5.3 / Q22）", layer: layPending, why: "等 WP3 给 SessionBrief 加 ref（同批 name / n / epoch）：在那之前信封里没有规范 id 可断言（C5.3）"},
+	{file: "internal/debug/contract_debug_test.go", msg: "等 WP3 实现 epoch 字段与世代校验后，断言 F15 的 SESSION_STALE 报错（C5.3 / C5.11）", layer: layPending, why: "等 WP3 实现 epoch 与世代校验：今天**没有「代」这个概念**（B31），F15 无从判起"},
+	{file: "internal/debug/contract_debug_test.go", msg: "等 WP4c 把 name 键加进 SessionBrief（C5.3）后，断言 Q23：空闲复用、忙碌报 SESSION_TARGET_BUSY（F20 / C1.6）", layer: layPending, why: "等 WP4c 把 name 键加进 SessionBrief（C5.3）：别名要参与寻址就得先成为服务端的一条事实；那之前 --name 只做取值校验（目标层的三种结局已由 internal/target 的 TestResolveNameIdempotency 断言）"},
+	{file: "internal/debug/contract_debug_test.go", msg: "等 WP3/WP4 落地 display 与 name 后，断言 C5.9 身份行 `会话 <display> · <name> · <state> · ENT <ent>`", layer: layPending, why: "等 WP3/WP4 落地 display 与 name：C5.9 的身份行要同时印这两样，缺一样就没法逐字断言"},
+	{file: "internal/debug/contract_debug_test.go", msg: "等 WP4 给服务端失败信封加 code 与 candidates（C5.15 / C5.16：缺目标报 409 + SESSION_AMBIGUOUS）", layer: layPending, why: "等 WP4 给服务端失败信封加 code / candidates（C5.15 / C5.16）：今天 HTTP 侧是 {ok,error} 两键（B8）"},
+	// ---- 已经**不再登记**的那一条（WP4b 交付时删掉的）----
+	//
+	// `internal/testkit/first_session_source_test.go` 的 T2.3 静态检查曾经在这里有一条
+	// layPending（"全仓「取第一个会话」基线 5 处，等 WP4b 删"）。WP4b 把服务端最后那 5 处
+	// `Manager.Current()` 兜底删掉之后，那条检查**命中数为 0、跳过消失、改成真断言** ——
+	// 于是这条台账按它的性质一起删掉：**不再跳过的东西不该留在跳过台账里**。
+	//
+	// 这一条删得对不对，由台账自己反向守着：`TestSkipLedger` 的"台账里登记了、代码里却没有"
+	// 那一半会在"删了跳过却没同步台账"时红；反过来"同步了台账却还留着跳过"也会红。
+	// 所以这里不需要另加判据 —— 台账与代码必须严格对上，这正是它的存在意义。
 }
 
 // reSkipCall 匹配 t.Skip / t.Skipf 且第一个参数是同行的字符串字面量。
 //
-// 全仓当前 38 处都长这样（实测：`t.Skip` 出现 38 次，其中 38 次同行带字面量）。
+// 已知边界（**注意**）：它匹配不到**转义过的**引号 —— 文案里写 `\"` 时，正则会在
+// 第一个 `\"` 前停下，抓到的与台账里的对不上（实测踩过：文案里的 `只排除 \"/\" 与 \"#\"`
+// 让台账当场报"多一处、少一处"）。所以跳过文案里**不要用半角双引号**，
+// 要引用就写中文引号或直接写字符（如「只排除 / 与 #」）。
 // 将来若有人写成跨行或拼接，这里会匹配不到 → 台账对不上 → 红。
 // 那时该改的是**扫描规则**，不是把台账删掉。
 var reSkipCall = regexp.MustCompile(`t\.Skipf?\(\s*"([^"]*)"`)
@@ -212,7 +256,9 @@ func TestSkipLedger(t *testing.T) {
 			"  · 属于 L3/L4 的，登记并注明**开关名**（TDEV_DEEP / TTZS_DEEP / TTZS_E2E /\n"+
 			"    TTZS_CORPUS …）—— 人看到 skip 要能知道怎么打开。\n"+
 			"  · 属于「L0-环境」的（无 git 之类），写清为什么它不影响「全绿」这个结论。\n"+
-			"  · 属于「前提」的要特别当心：前提长期不成立 = 这条测试静默变成空转。\n\n"+
+			"  · 属于「前提」的要特别当心：前提长期不成立 = 这条测试静默变成空转。\n"+
+			"  · 属于「未落地」的（契约已冻结、等某个工作包实现）**必须写清等谁、等什么**\n"+
+			"    （例：等 WP3 实现 ref 字段），并让测试里带一句「落地了就把它改成断言」的守卫。\n\n"+
 			"台账在 internal/testkit/skipledger_test.go。", b.String())
 	}
 

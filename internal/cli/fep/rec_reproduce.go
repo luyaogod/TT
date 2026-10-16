@@ -102,6 +102,9 @@ var recReproduceCmd = &cobra.Command{
 				// 这一轮是**回放**：面板据此说"正在回放"，不再把它说成"正在录"
 				// （--no-wait 退场后留下的这份登记就是这么被认出来的）。
 				Kind: fep.SessionKindReplay,
+				// RecID（T5.4 / C7.3）：跨进程传目标用的固定别名由它算出来
+				// （`fep-<录制 ID>`）——同一条录制重复回放会落到同一条会话上（Q23）。
+				RecID: t.ID,
 			})
 			if oerr != nil {
 				return oerr

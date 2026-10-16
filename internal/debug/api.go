@@ -17,6 +17,7 @@ import (
 	"github.com/coder/websocket"
 
 	"tt/internal/host"
+	"tt/internal/output"
 )
 
 // Server 本地调试服务:REST + WebSocket + Web 前端
@@ -356,20 +357,26 @@ func (s *Server) hMode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true, "mode": m})
 }
 
-// sessOfWriteGlobal 用于**不按 {id} 定位**的写操作(切环境、按日志重放):
-// 以"当前会话"的模式为准。没有当前会话时放行 —— 没有东西可保护。
-// 归因留给调用方在操作成功之后自己调 emitAction(此时才有新会话 id)。
+// sessOfWriteGlobal 是**起会话**那条路径的模式闸门（`hLaunch`）。
 //
-// 空会话同样放行:前端一连上来就会建一个还没挂程序的宿主会话,而它是 human 身份
-// 建的(→ 纯人工)。若把它也算作"要保护的一轮",AI 就被一个什么都没在跑的会话
-// 永远关在门外 —— 连自己发起调试都做不到。没有程序,就没有可被抢走的运行。
-func (s *Server) sessOfWriteGlobal(w http.ResponseWriter, r *http.Request) bool {
-	cur := s.mgr.Current()
-	if cur == nil || cur.Bare() {
+// 它为什么还叫"Global"：起会话是唯一一个"池子里还没有目标"的写操作 ——
+// 闸门要保护的是**被这一轮顶掉的那条会话**，而在 `Manager.Current()` 兜底删掉之后
+// （WP4b / Q4 / C8.2），服务端不再从池子里挑一条来判。所以：
+//
+//   - `target == nil`（池空 / 会话正在被建）→ **放行**：没有东西可保护。
+//     空会话同样放行（`cur.Bare()`）：前端一连上来就会建一个还没挂程序的宿主会话，
+//     而它是 human 身份建的（→ 纯人工）。若把它也算作"要保护的一轮"，AI 就被一个
+//     什么都没在跑的会话永远关在门外 —— 连自己发起调试都做不到。
+//   - `target != nil` → 就按**那一条**判"谁能写"（`sessOfWrite` 这一族已经在做的事）。
+//
+// 多会话下这条闸门**不再替调用方挑一条**：要按会话判就往里传那一条
+// （`hSessionSwitch` / `hWSLogDebug` 都先落位再传，见 api_target.go 的 resolveTarget）。
+func (s *Server) sessOfWriteGlobal(w http.ResponseWriter, r *http.Request, target *Session) bool {
+	if target == nil || target.Bare() {
 		return true
 	}
-	if actor := actorOf(r); !cur.MayWrite(actor) {
-		fail(w, 403, fmt.Errorf("%s", writeDeniedMsg(cur.Mode(), actor)))
+	if actor := actorOf(r); !target.MayWrite(actor) {
+		fail(w, 403, fmt.Errorf("%s", writeDeniedMsg(target.Mode(), actor)))
 		return false
 	}
 	return true
@@ -506,8 +513,11 @@ func (s *Server) hLaunch(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, err)
 		return
 	}
-	// 启动会结束当前这次调试,所以它同样受模式闸门约束(无会话或空会话放行)
-	if !s.sessOfWriteGlobal(w, r) {
+	// 启动会结束当前这次调试,所以它同样受模式闸门约束(无会话或空会话放行)。
+	// **不传目标**是刻意的:这一轮要保护的那条会话正被顶掉,而"是哪一条"由
+	// `prepareSession` 的复用/收口规则决定(它才是那条规则的家)。池里有 >=2 条时
+	// 这条闸门不再替谁挑一条 —— 它按传进来的目标判,没有目标就是"没有东西可保护"。
+	if !s.sessOfWriteGlobal(w, r, nil) {
 		return
 	}
 	sess, err := s.mgr.LaunchWith(cfg, req.Module, req.Prog)
@@ -785,16 +795,31 @@ func trimTopent(v string) string {
 	return strings.TrimSpace(v)
 }
 
-// hSessionSwitch 「切换会话」:把当前环境切到目标环境(仅内存)并按该环境重连到 idle。
+// hSessionSwitch 「连到该环境」:连上目标环境(仅内存)并按该环境重连到 idle。
 // 若已是目标环境会话则幂等返回(不改动正在进行的调试)。
 //
 // ent = 本次要用的**企业编号**(界面面板填的那个)。环境配置里已经没有企业编号了
 // (hosts.sshs[].topent 已移除),所以 ENT 只能随这次请求进来;留空 = 不覆盖,
 // 沿用登录 shell 自己的 $TOPENT(见 Session.bootHost 2.5)。
+//
+// **定稿（Q26 / Q27 / Q28 + 契约 C7.1-2）**：这个端点**不退役**，正名为「**连到该环境**」——
+// 与 `start` 同类（选环境并连上去），**不是**"把一个会话切到另一个环境"；「连到该环境」就
+// **收掉已在跑的那条**（Q27：我只想连到那个环境，收掉旧的才对），并**不新增 `--session` 参数**
+// （Q28：多会话时谁给目标靠调用方侧的固有落位 —— 唯一就落、多条报 409 并列候选，Q12）。
+//
+// 服务端不再用 `Manager.Current()` 找"当前会话"。要收掉的那一条**由请求体可选给**
+// （`session`，服务端的原始句柄 `{id}`）；落位规则照现状写死（WP4b 的安全状态即最终形状）：
+//   - 给了 → 只收那一条（找不到就 404 + `SESSION_NOT_FOUND`）；
+//   - 没给且池里**恰好一条** → 收它（C8.1"只在多会话时收紧"：唯一是确定性的）；
+//   - 没给且池里 **>=2 条** → **409 + `SESSION_AMBIGUOUS` + 候选清单**（不许替调用方挑一条 —— 这正是"随机落一条却看起来成功"的病根）。
 func (s *Server) hSessionSwitch(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Env string `json:"env"`
 		Ent string `json:"ent"`
+		// Session 是**要收掉的那条会话**的服务端原始句柄（可选，见上面那段定稿）。
+		// 只认 `{id}`（`internal/target/view.go` 的 Session.ID），不认 `ref` / `display`
+		// —— C5.4 明写"路径与句柄只认 id"，选择器的解析住在 CLI 的目标层里。
+		Session string `json:"session"`
 	}
 	if !readBody(w, r, &req) {
 		return
@@ -807,13 +832,15 @@ func (s *Server) hSessionSwitch(w http.ResponseWriter, r *http.Request) {
 	if ent := strings.TrimSpace(req.Ent); ent != "" {
 		cfg.Topent = host.EntValue(ent)
 	}
-	if !s.sessOfWriteGlobal(w, r) {
+	// 目标先落位,再判"谁能写":闸门必须按**要收掉的那一条**判,不能按池子里随便一条
+	// (从前那一处 `Manager.Current()` 就是这么判的 —— 多会话下按的是随机一条)。
+	cur, ok := s.mustTarget(w, r, req.Session, "切换会话")
+	if !ok {
 		return
 	}
 	if s.cfg.EnvName() != req.Env {
 		s.selectEnv(cfg)
 	}
-	cur := s.mgr.Current()
 	if cur != nil {
 		if cur.sameEnvAs(cfg) {
 			writeJSON(w, 200, map[string]any{"ok": true, "sessionId": cur.ID, "env": req.Env, "state": string(cur.State())})
@@ -1115,8 +1142,9 @@ func (s *Server) hRaw(w http.ResponseWriter, r *http.Request) {
 	// 而重跑会改变现场。落本地后可以随时 grep/整读,零往返。
 	// 阈值是为了别给每条小命令都留一个文件。
 	if n := len(res.Lines); n > execLogMinLines || linesBytes(res.Lines) > execLogMinBytes {
-		env := mirrorEnvSeg(s.cfg.EnvName(), s.cfg.SSH.Host, s.cfg.Zone)
-		if p := writeExecLog(s.cfg.DataDir, env, execLogName(cmd), []byte(strings.Join(res.Lines, "\n"))); p != "" {
+		// 落在这条会话自己的作用域下（缺陷 X / T5.1）:清理是按同一棵子树做的,
+		// 从前的全局 `execlog/` 会让 A 的启动顺手删掉 B 刚落下的大输出副本。
+		if p := writeExecLog(s.cfg.DataDir, sess.mirrorScope(), execLogName(cmd), []byte(strings.Join(res.Lines, "\n"))); p != "" {
 			resp["localPath"] = p
 			resp["totalLines"] = n
 		}
@@ -1595,7 +1623,7 @@ func (s *Server) hWSLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true, "items": items, "hasMore": hasMore,
-		"acct": wslogAcctFor(s.wslogTopent())})
+		"acct": wslogAcctFor(s.wslogTopent(nil))})
 }
 
 // hWSLogContent GET /api/wslogs/content?rowid=
@@ -1618,17 +1646,24 @@ func (s *Server) hWSLogContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true, "item": item, "content": content,
-		"acct": wslogAcctFor(s.wslogTopent())})
+		"acct": wslogAcctFor(s.wslogTopent(nil))})
 }
 
-// hWSLogDebug POST /api/wslogs/debug {rowid, request?} → 用该日志的报文重放调试。
+// hWSLogDebug POST /api/wslogs/debug {rowid, request?, session?} → 用该日志的报文重放调试。
 // request 非空 = 界面里改过的入参(落服务器临时文件后作为入参文件),空 = 用日志原报文。
+//
+// **本批的定稿（Q4 / C8.2 硬切 + 契约 C7.1-3）**：服务端不再用 `Manager.Current()` 找
+// "当前会话"来收口（从前那一处不经模式闸门，是五处里最隐蔽的一处 —— 见计划开头 A–E 表的 B）。
+// 要收掉的那一条由请求体可选的 `session`（服务端原始句柄 `{id}`）给出，
+// 缺目标/歧义按 `mustTarget` 的口径报 409 + `SESSION_AMBIGUOUS` + 候选清单。
 func (s *Server) hWSLogDebug(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		RowID   string `json:"rowid"`
 		Request string `json:"request"`
 		SSH     string `json:"ssh"`  // 多 SSH 配置名(环境名);空 = 当前环境
 		Zone    string `json:"zone"` // 区域覆盖(31/35/36/39/t);空 = 默认区域
+		// Session 是**要收掉的那条会话**的服务端原始句柄（可选）。只认 `{id}`（C5.4）。
+		Session string `json:"session"`
 		// FGLServer 本轮 FGLSERVER 覆盖,语义同 hLaunch(指针:给空串 = 本轮交回 T100 自动设置)。
 		FGLServer *string `json:"fglserver"`
 	}
@@ -1649,7 +1684,9 @@ func (s *Server) hWSLogDebug(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, err)
 		return
 	}
-	if !s.sessOfWriteGlobal(w, r) {
+	// 目标先落位、闸门按那一条判 —— 这两件事收在 mustTarget 里（见 api_target.go）。
+	cur, ok := s.mustTarget(w, r, req.Session, "按接口日志重放")
+	if !ok {
 		return
 	}
 	// 换环境 = 换连接目标:热生效(仅内存),后续会话与只读 SQL 都以它为准。
@@ -1676,7 +1713,10 @@ func (s *Server) hWSLogDebug(w http.ResponseWriter, r *http.Request) {
 	}
 	// 已有会话先收口:同环境(可复用空闲宿主)只结束本轮运行;不同环境直接断开。
 	// 重放调试独占调试通道,旧会话不再有用。
-	if cur := s.mgr.Current(); cur != nil {
+	//
+	// **收口对象来自上面落位的目标**（C7.1-3）：从前这里是 `s.mgr` 的 Current() ——
+	// 多会话下那等于"随机收掉一条"（B11 的第三处），而且这一处**不经模式闸门**。
+	if cur != nil {
 		if cur.sameEnvAs(s.cfg) {
 			s.mgr.emit(Event{Type: "log", SessionID: cur.ID, Text: "重放调试启动,结束当前调试(会话保留)"})
 			_ = cur.EndRun()
@@ -1713,16 +1753,20 @@ func (s *Server) hWSLogDebug(w http.ResponseWriter, r *http.Request) {
 	// 随回包一起给出去,让 CLI 能当场说清,而不是等人自己去翻事件日志。
 	writeJSON(w, 200, map[string]any{"ok": true, "sessionId": sess.ID,
 		"module": sess.Module, "prog": sess.Prog, "runProg": sess.RunProg, "warn": replayWarn,
-		"acct": wslogAcctFor(s.wslogTopent())})
+		"acct": wslogAcctFor(s.wslogTopent(cur))})
 }
 
 // wslogTopent 取"此刻的 TOPENT 是什么"。
 //
 // **只用于说明** —— 查 wsfa_t 恒用系统账号 ds(见 wslogAcctFor),这个值不影响用哪个账号。
 // 优先会话里的生效值(会话级覆盖 > 环境配置),没有会话就用环境配置。
-func (s *Server) wslogTopent() string {
-	if cur := s.mgr.Current(); cur != nil {
-		if v := cur.TopentOverride(); v != "" {
+//
+// **`sess` 由调用方给,不再从会话池里取"当前会话"**（C7.1-4 的那一处 `Manager.Current()`）：
+// 服务端不许自己挑一条（Q4/C8.2）。会话外的那两条（`hWSLogs` / `hWSLogContent`）
+// 传 nil —— 它们是服务级只读，目标本来就只有"环境"这一层（契约第 7 节的表）。
+func (s *Server) wslogTopent(sess *Session) string {
+	if sess != nil {
+		if v := sess.TopentOverride(); v != "" {
 			return v
 		}
 	}
@@ -1735,26 +1779,35 @@ func (s *Server) wslogTopent() string {
 // 而这条不碰会话、不移动程序位置,只是读库。人与 AI 都放行。
 // 它有自己的配置闸门(db.readonlySql,默认开),那才是这个能力的开关。
 //
+// **本批的定稿（Q4 / C8.2 硬切 + 契约 C7.1-5）**：`ent` **必填**。
+// 从前 `ent <= 0` 会回落 `Manager.Current()` 的 TOPENT（B11 的第五处），于是"查哪个企业"
+// 取决于池子里随机哪条会话 —— 查错 schema 的结果是 0 行，而 0 行会被读成
+// "这条业务数据不存在"（`Session.TopentIntForDB` 的注释里写着这是最危险的错误结论）。
+// 现在这个值只能由调用方显式给：`tt debug sql --ent`，CLI 侧按它会落位的那条会话填
+// （`internal/cli/debug` 的 dbgSQLTopentForRun），单会话行为因此一字不变。
+//
 // 归因用 Type=log(不是 ai_action —— 那个的语义是"AI 做了写操作",只读不该占用它),
 // 且记在**执行成功之后**,与 emitAction 的时机一致。
 func (s *Server) hDBSQL(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		SQL     string `json:"sql"`
-		Ent     int    `json:"ent"`     // 0 = 用当前会话的 TOPENT,否则配置默认
+		Ent     int    `json:"ent"`     // 必填(>0):要查哪个企业。C7.1-5 删掉了"回落当前会话"那条兜底
 		Timeout int    `json:"timeout"` // 秒
 	}
 	if !readBody(w, r, &req) {
 		return
 	}
-	// 企业编号:优先当前会话的 override(tt debug topent 设的那个),再退到配置默认。
-	// 不做成"必须挂会话"是为了让它独立可用;但只要会话在,就一定跟会话走 ——
-	// 否则会出现"调试的是这个企业、查库查的是另一个"这种最难查的错。
-	ent := req.Ent
-	if ent <= 0 {
-		if cur := s.mgr.Current(); cur != nil {
-			ent = cur.TopentIntForDB()
-		}
+	// 企业编号必须显式给（C7.1-5）。这不是"多要一个参数"：缺它的时候服务端只能去
+	// 某条会话上猜一个企业出来，而猜错的后果（0 行）与大写"数据不存在"一模一样。
+	if req.Ent <= 0 {
+		writeJSON(w, 400, failureEnvelope{
+			OK: false, Code: output.CodeUsage,
+			Error: "ent 必填(要查哪个企业编号):tt debug sql --ent <企业编号> " +
+				"（不给 --ent 时，CLI 会用这条会话当前生效的企业编号替你填）",
+		})
+		return
 	}
+	ent := req.Ent
 	conn, err := s.dialSSH()
 	if err != nil {
 		fail(w, 500, fmt.Errorf("SSH 连接失败: %w", err))

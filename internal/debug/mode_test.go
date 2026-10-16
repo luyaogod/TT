@@ -420,21 +420,26 @@ func TestEmptySessionDoesNotBlockLaunch(t *testing.T) {
 			t.Fatal("测试前提:waitTestSession 应当是个没挂程序的空会话")
 		}
 
-		ask := func() (bool, *httptest.ResponseRecorder) {
+		// WP4b 起这处闸门**不再自己从池子里挑一条**（Q4/C8.2：那五处 `Manager.Current()`
+		// 兜底全删了），第三个入参是"要保护的那一条"。测试把它显式传进去：
+		// 传 nil 就等于"没有东西可保护"，那就什么都没测到。
+		// （生产里 `hLaunch` 传的正是 nil —— 见 `sessOfWriteGlobal` 的注释；这条测试测的
+		// 是**闸门本身**在"有目标"时还认不认模式，所以这里必须给目标。）
+		ask := func(target *Session) (bool, *httptest.ResponseRecorder) {
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest("POST", "/api/sessions", nil)
 			req.Header.Set(actorHeader, "ai")
-			return srv.sessOfWriteGlobal(rec, req), rec
+			return srv.sessOfWriteGlobal(rec, req, target), rec
 		}
 
 		// 空会话:AI 一律放行 —— 没有程序,就没有可被抢走的一轮运行
-		if ok, rec := ask(); !ok {
+		if ok, rec := ask(sess); !ok {
 			t.Fatalf("%s 下的空会话不该拦住 AI 启动调试:HTTP %d %s", mode, rec.Code, rec.Body.String())
 		}
 
 		// 一旦挂上程序,闸门立刻恢复效力
 		sess.Prog, sess.Module = "bsft001_wf", "asf"
-		ok, rec := ask()
+		ok, rec := ask(sess)
 		if mode == ModeSolo && ok {
 			t.Fatal("有程序在跑时,纯人工模式必须拦住 AI 的启动")
 		}

@@ -126,7 +126,10 @@ var recStartCmd = &cobra.Command{
 		logf("这一轮画面接线：FGLSERVER=%s（调试线按它把作业画到本代理上）", fgl)
 
 		// ② 让调试线把作业挂上去 ③ 自动放行
-		if serr := runRecStartSteps(cmd, recStartSteps(dcfg.EnvName(), ent, recStartProg, recStartModule, fgl), nil, recStartNoCont); serr != nil {
+		// alias（T5.4 / C7.3）：把这一轮的录制身份当**固定别名**传进子进程 ——
+		// 子进程之后靠它落回同一条会话（Q23：别名空闲就复用），而不是靠"有会话就收"。
+		alias := recSessionAlias(tag)
+		if serr := runRecStartSteps(cmd, recStartSteps(dcfg.EnvName(), ent, recStartProg, recStartModule, fgl, alias), nil, recStartNoCont); serr != nil {
 			// 半路失败：把已经起来的代理收掉（它占着 GDC/代理/注入三个端口）
 			if cerr := rt.Close(); cerr != nil {
 				logf("收代理时还有失败：%v", cerr)
@@ -179,7 +182,13 @@ type recStep struct {
 //
 // 拆成纯函数是为了能钉住它：少一条或顺序反了，症状都是**安静**的
 // （界面不出来、或作业跑在别的企业上），而那种错在真机上才发现代价很大。
-func recStartSteps(env, ent, prog, module, fglserver string) []recStep {
+//
+// `alias`（T5.4 / 契约 C7.3）非空时拼进**起作业**那一步的 `--name`：
+// 它就是 `fep` 跨进程传给调试线的**目标**（固定别名 = 幂等键，Q23）。
+// 别名只在 `debug start` 上注册（契约 C3.5），所以其余几步不拼它 ——
+// 那几步（`quit` / `env` / `topent`）今天靠"环境"落位，多会话下的逐个点名
+// 见契约 C7.3 的落地清单（WP4c/WP6）。
+func recStartSteps(env, ent, prog, module, fglserver, alias string) []recStep {
 	// 第一步是**收口当前这一轮**：调试线只在空闲(idle)时才让设 TOPENT，而人点「开始录制」
 	// 时手上常常正停着一个会话 —— 实测 2026-10-16 用户那条：手上停着 aint302_wf 的入口停站，
 	// 录制第二步直接被拒"仅会话空闲(idle)时可设置 TOPENT(当前 已停站);请先结束调试:tt debug quit"。
@@ -192,6 +201,9 @@ func recStartSteps(env, ent, prog, module, fglserver string) []recStep {
 	start := []string{"debug", "start", prog, "--env", env, "--fglserver", fglserver}
 	if m := strings.TrimSpace(module); m != "" {
 		start = append(start, "-m", m)
+	}
+	if a := strings.TrimSpace(alias); a != "" {
+		start = append(start, "--name", a)
 	}
 	return append(steps, recStep{args: start})
 }

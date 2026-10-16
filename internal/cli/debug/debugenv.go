@@ -25,12 +25,17 @@ var (
 
 // dbgSnapshot 会话快照中本命令关心的字段。
 type dbgSnapshot struct {
-	ID          string `json:"id"`
-	Env         string `json:"env"`
-	State       string `json:"state"`
-	Topent      string `json:"topent"`      // 会话内手动设置的 TOPENT override(空=未设置)
-	TopentCfg   string `json:"topentCfg"`   // 配置级企业 TOPENT 默认(该环境 db.ent)
-	TopentShell string `json:"topentShell"` // 当前会话 shell 里的实际 TOPENT(连接时已按配置下发)
+	ID     string `json:"id"`
+	Env    string `json:"env"`
+	State  string `json:"state"`
+	Topent string `json:"topent"` // 会话内手动设置的 TOPENT override(空=未设置)
+	// TopentSession 是**启动时显式给**的 TOPENT(`tt debug start --ent` / 界面面板填的)。
+	// 它是"用户给了就 export 进 shell"的那一个；空 = 用户没给，企业由登录 shell 的
+	// $TOPENT 决定(见 TopentShell)。只读 SQL 的 `ent` 要显式填，判据就用这三个(见
+	// debugctl.go 的 dbgSQLTopentForRun)。
+	TopentSession string `json:"topentSession"`
+	TopentCfg     string `json:"topentCfg"`   // 配置级企业 TOPENT 默认(该环境 db.ent)
+	TopentShell   string `json:"topentShell"` // 当前会话 shell 里的实际 TOPENT(连接时已按配置下发)
 }
 
 // dbgEnvItem 环境清单中的一项(取自 /api/hosts 返回的环境清单)。
@@ -149,20 +154,33 @@ func dbgSessions() ([]struct {
 	return r.Sessions, nil
 }
 
+// dbgEnvNamesOf 把 `/api/hosts` 的环境清单摊成名字列表（F6 的"可用环境：…"用它）。
+//
+// 目标层要"配置里全部环境名"这一个输入；它只经由 HTTP 拿（CLI 侧不另开一条读配置的路）。
+func dbgEnvNamesOf(s *dbgSettingsView) []string {
+	if s == nil {
+		return nil
+	}
+	out := make([]string, 0, len(s.SSHs))
+	for _, e := range s.SSHs {
+		if e.Name != "" {
+			out = append(out, e.Name)
+		}
+	}
+	return out
+}
+
 // dbgEnvList 列出环境与当前生效项。
 func dbgEnvList() error {
 	s, err := dbgSettings()
 	if err != nil {
 		return err
 	}
-	sessions, err := dbgSessions()
-	if err != nil {
-		return err
-	}
-	// 会话为单一常驻会话(通常一条)
+	// "当前会话"向目标层要（唯一就落；多会话又没给 --session 时落不上 → 不假报一个）。
+	// 从前这里是取回包数组的第一项：多会话下列表顺序决定它说"当前"是哪条。
 	curEnv, curState := "", ""
-	if len(sessions) > 0 {
-		curEnv, curState = sessions[0].Env, sessions[0].State
+	if cur, err := dbgTargetSession(dbgEnvNamesOf(s), dbgRequest()); err == nil {
+		curEnv, curState = cur.Env, cur.State
 	}
 	if IsJSON() {
 		type out struct {
@@ -204,7 +222,7 @@ func dbgEnvList() error {
 	return nil
 }
 
-// dbgEnvSwitch 切换当前环境并把会话切过去(等会话回到 idle/exit)。
+// dbgEnvSwitch 「连到该环境」(Q26):连上该环境并把会话重连到 idle/exit;已在跑的那条会被收掉,这是有意的(Q27)。
 func dbgEnvSwitch(name string) error {
 	// 先校验环境存在(给出更友好的错误)
 	s, err := dbgSettings()
@@ -222,14 +240,22 @@ func dbgEnvSwitch(name string) error {
 		return fmt.Errorf("环境 %q 不存在(可先运行 tt debug env 查看已配置环境)", name)
 	}
 	// 目标不是当前会话环境、且会话不在空闲时,切换会结束当前调试——先提示(Web 端同样要求确认)
-	if sessions, e2 := dbgSessions(); e2 == nil && len(sessions) > 0 {
-		cur := sessions[0]
+	cur := dbgAmbientSession()
+	if cur != nil {
 		if cur.Env != name && cur.State != "idle" && cur.State != "exit" {
 			fmt.Printf("注意:切换会结束当前调试(会话状态 %s)并重连到 %s …\n", dbgStateLabel(cur.State), name)
 		}
 	}
 
-	data, err := dbgAPI("POST", "/api/sessions/switch", map[string]any{"env": name})
+	// 服务端不再自己挑"当前会话"（WP4b：那五处 `Manager.Current()` 兜底全删了，Q4/C8.2 硬切）。
+	// "要收掉哪一条"必须由这边显式给 —— 否则多会话下服务端只能报 409 并列候选。
+	// 这里给的是**服务端原始句柄**（C5.4：REST 只认 id），目标层的落位在 dbgAmbientSession 里做：
+	// 唯一就落（含 `--session` 点名的那些写法），池空/多条时报 null 并让服务端按同一条规矩判。
+	body := map[string]any{"env": name}
+	if cur != nil {
+		body["session"] = cur.ID
+	}
+	data, err := dbgAPI("POST", "/api/sessions/switch", body)
 	if err != nil {
 		return err
 	}
@@ -286,7 +312,7 @@ func dbgSnap(id string) (*dbgSnapshot, error) {
 	if id == "" {
 		return nil, fmt.Errorf("会话 id 为空")
 	}
-	data, err := dbgAPI("GET", "/api/sessions/"+id, nil)
+	data, err := dbgAPI("GET", dbgSessionURL(id, ""), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -297,21 +323,17 @@ func dbgSnap(id string) (*dbgSnapshot, error) {
 	return &s, nil
 }
 
-// dbgTopentShow 显示当前会话 TOPENT override 与配置默认。
+// dbgTopentShow 显示指定会话(默认唯一那条)的 TOPENT override 与配置默认。
 func dbgTopentShow() error {
-	sessions, err := dbgSessions()
+	cur, err := dbgTargetSession(nil, dbgRequest())
 	if err != nil {
 		return err
 	}
-	if len(sessions) == 0 {
-		return fmt.Errorf("没有活动会话;先运行 tt debug env <环境名> 连接,或 tt debug start 启动调试")
-	}
-	id, env, st := sessions[0].ID, sessions[0].Env, sessions[0].State
-	snap, err := dbgSnap(id)
+	snap, err := dbgSnap(cur.ID)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("会话: %s (%s)\n", env, dbgStateLabel(st))
+	fmt.Printf("会话: %s (%s)\n", cur.Env, dbgStateLabel(cur.State))
 	if snap.Topent != "" {
 		fmt.Printf("会话内 TOPENT override: %s\n", snap.Topent)
 	} else {
@@ -324,18 +346,14 @@ func dbgTopentShow() error {
 
 // dbgTopentSet 设置/清除会话 TOPENT override(仅 idle)。
 func dbgTopentSet(value string) error {
-	sessions, err := dbgSessions()
+	cur, err := dbgTargetSession(nil, dbgRequest())
 	if err != nil {
 		return err
 	}
-	if len(sessions) == 0 {
-		return fmt.Errorf("没有活动会话;先运行 tt debug env <环境名> 建立空闲会话,再设置 TOPENT")
+	if cur.State != "idle" {
+		return fmt.Errorf("仅会话空闲(idle)时可设置 TOPENT(当前 %s);请先结束调试:tt debug quit", dbgStateLabel(cur.State))
 	}
-	id, st := sessions[0].ID, sessions[0].State
-	if st != "idle" {
-		return fmt.Errorf("仅会话空闲(idle)时可设置 TOPENT(当前 %s);请先结束调试:tt debug quit", dbgStateLabel(st))
-	}
-	_, err = dbgAPI("POST", "/api/sessions/"+id+"/topent", map[string]any{"value": value})
+	_, err = dbgAPI("POST", dbgSessionURL(cur.ID, "/topent"), map[string]any{"value": value})
 	if err != nil {
 		return err
 	}
@@ -375,6 +393,9 @@ func orDefault(v, d string) string {
 func init() {
 	debugEnvCmd.Flags().IntVar(&dbgEnvTimeout, "timeout", 120, "切换等待会话空闲超时(秒)")
 	debugTopentCmd.Flags().BoolVar(&dbgTopClear, "clear", false, "清除会话级 TOPENT override(等价传空值)")
+	// env / topent 都作用在"某一条会话"上（契约 1. 的命令角色表），所以认 --session：
+	// 从前它们取列表第一个，多会话下"改的是哪条"由列表顺序决定。
+	dbgRegisterSessionFlag(debugEnvCmd, debugTopentCmd)
 	addClientURLFlag(debugEnvCmd, debugTopentCmd)
 	Group.AddCommand(debugEnvCmd, debugTopentCmd)
 }

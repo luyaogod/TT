@@ -16,6 +16,7 @@ import (
 
 	"tt/internal/cli/common"
 	"tt/internal/entdir"
+	"tt/internal/target"
 )
 
 // 环境名解析:子命令上的 --env 优先,其次根命令的持久 --env,再没有就是空(用当前环境)。
@@ -47,7 +48,7 @@ func TestDBGVerifyEnv(t *testing.T) {
 	t.Cleanup(func() { dbgEnvFlag, common.Env = oldFlag, oldGlobal })
 	dbgEnvFlag, common.Env = "", ""
 
-	snap := &dbgSnapView{Env: "测试1012", Prog: "capp115"}
+	snap := &dbgSnapView{Session: target.Session{Env: "测试1012", Prog: "capp115"}}
 	if !dbgVerifyEnv("", snap) {
 		t.Fatal("没点名环境时不该报失败")
 	}
@@ -86,7 +87,7 @@ func TestDBGIdentity(t *testing.T) {
 	common.ConfigPath = writeIdentityConfig(t)
 	t.Cleanup(func() { common.ConfigPath = oldPath })
 
-	snap := &dbgSnapView{Env: "恒烁正式区", Zone: "1", TopentCf: "9999", Reused: true}
+	snap := &dbgSnapView{Session: target.Session{Env: "恒烁正式区"}, Zone: "1", TopentCf: "9999", Reused: true}
 	got := dbgIdentity(snap)
 	for _, want := range []string{"恒烁正式区", "区域 1", "企业 9999", "172.19.93.55:54321/topprd", "复用了已登录的宿主"} {
 		if !strings.Contains(got, want) {
@@ -98,7 +99,7 @@ func TestDBGIdentity(t *testing.T) {
 		t.Errorf("没有快照时应说明为什么没有账号、并给出核对命令:\n%s", got)
 	}
 	// 三个裸字段全空时也不能打出空白:要么给值,要么写明没取到
-	if g := dbgIdentity(&dbgSnapView{Env: "恒烁正式区"}); !strings.Contains(g, "企业 (未取到)") {
+	if g := dbgIdentity(&dbgSnapView{Session: target.Session{Env: "恒烁正式区"}}); !strings.Contains(g, "企业 (未取到)") {
 		t.Errorf("企业三个字段都空时应写明未取到:\n%s", g)
 	}
 	if dbgIdentity(nil) != "" {
@@ -131,7 +132,7 @@ func TestDBGIdentityWithEntSnapshot(t *testing.T) {
 	common.ConfigPath = cfgPath
 	t.Cleanup(func() { common.ConfigPath = oldPath })
 
-	got := dbgIdentity(&dbgSnapView{Env: "恒烁正式区", Zone: "1", TopentCf: "9999"})
+	got := dbgIdentity(&dbgSnapView{Session: target.Session{Env: "恒烁正式区"}, Zone: "1", TopentCf: "9999"})
 	if !strings.Contains(got, "账号 dsdata") {
 		t.Errorf("有快照时应给出企业 9999 的账号 dsdata:\n%s", got)
 	}

@@ -33,11 +33,11 @@ var debugStopCmd = &cobra.Command{
 	Example: `  tt debug stop
   tt debug stop --json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id, err := dbgCurrentID()
+		id, err := dbgSessionID()
 		if err != nil {
 			return err
 		}
-		data, err := dbgAPI("GET", "/api/sessions/"+id, nil)
+		data, err := dbgAPI("GET", dbgSessionURL(id, ""), nil)
 		if err != nil {
 			return err
 		}
@@ -246,11 +246,11 @@ var debugLocateCmd = &cobra.Command{
 仅停站(stopped)可用;若当前不在停站态,提示先启动/继续到停站。`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id, err := dbgCurrentID()
+		id, err := dbgSessionID()
 		if err != nil {
 			return err
 		}
-		data, err := dbgAPI("POST", "/api/sessions/"+id+"/locate", map[string]any{"word": args[0]})
+		data, err := dbgAPI("POST", dbgSessionURL(id, "/locate"), map[string]any{"word": args[0]})
 		if err != nil {
 			return err
 		}
@@ -329,11 +329,11 @@ var debugInterruptCmd = &cobra.Command{
 用 exec "continue"/"run" 后程序长时间不停时,用它打断(配合 --timeout 使用)。`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id, err := dbgCurrentID()
+		id, err := dbgSessionID()
 		if err != nil {
 			return err
 		}
-		data, err := dbgAPI("POST", "/api/sessions/"+id+"/control", map[string]any{"action": "interrupt"})
+		data, err := dbgAPI("POST", dbgSessionURL(id, "/control"), map[string]any{"action": "interrupt"})
 		if err != nil {
 			return err
 		}
@@ -389,7 +389,7 @@ func printStopSite(full map[string]any) bool {
 // 返回 err 非空表示**这次查询本身失败** —— 调用方要能区分"没确认下来"与"确认没停",
 // 这两种情况在批量里处置相反。
 func dbgFetchStopSite(id string) (string, error) {
-	data, err := dbgAPI("GET", "/api/sessions/"+id, nil)
+	data, err := dbgAPI("GET", dbgSessionURL(id, ""), nil)
 	if err != nil {
 		return "", err
 	}
@@ -424,5 +424,8 @@ func init() {
 	debugLogsCmd.Flags().IntVarP(&dbgLogsTail, "tail", "n", 0, "返回最近 N 条(默认 30)")
 	debugResolveCmd.Flags().StringVarP(&dbgSourceModule, "module", "m", "", "模块目录名提示(可省)")
 	addClientURLFlag(debugStopCmd, debugSourceCmd, debugLogsCmd, debugLocateCmd, debugResolveCmd, debugInterruptCmd)
+	// 这几个命令操作的是**一条会话**（契约 1. 的命令角色表）：认 --session。
+	// source / logs / resolve 是会话外的（C1.2：logs 读全局事件流），不认它。
+	dbgRegisterSessionFlag(debugStopCmd, debugLocateCmd, debugInterruptCmd)
 	Group.AddCommand(debugStopCmd, debugSourceCmd, debugLogsCmd, debugLocateCmd, debugResolveCmd, debugInterruptCmd)
 }

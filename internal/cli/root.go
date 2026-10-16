@@ -13,6 +13,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 
@@ -163,6 +164,14 @@ func Execute(web fs.FS) {
 // 根命令只问"你报过了吗" —— 不必为了一个记号把 internal/cli/dev 的类型导出。
 type alreadyReported interface{ AlreadyReported() bool }
 
+// jsonErrorWriter 由"自己知道失败信封长什么样"的错误实现（`tt debug` 的会话寻址失败
+// 就是这一类：它的信封里除了 output.Error 那五键还要带 `candidates`，见契约 5.2 / C5.11）。
+//
+// 为什么不把 candidates 塞进 internal/output.Error：那是全仓共用的形状，给它加一个
+// "只有会话寻址才用得上"的键，等于让每个命令组成员都以为自己该填它。这里用一个
+// 只被 `tt debug` 实现的小接口把差异留在它自己包里，根命令只问"你会不会自己打"。
+type jsonErrorWriter interface{ WriteEnvelope(w io.Writer) error }
+
 // reportError 打一次错误。
 //
 // JSON 模式下错误也走 **stdout 的 JSON 信封**（与 tt dev 既有的 {"ok":false,...}
@@ -176,6 +185,16 @@ type alreadyReported interface{ AlreadyReported() bool }
 // 否则同一个失败会在 stdout 上出现两份信封，而 `jq .error.code` 会打出两行（一行是 null）。
 func reportError(err error) {
 	format := common.OutputFormat()
+	// 自己会打信封的错误（目前只有会话寻址那一族）：交给它，免得这里的形状
+	// 把它多带的键（candidates）吃掉 —— 那是 F1 这类失败的核心信息。
+	if format == output.FormatJSON {
+		var jw jsonErrorWriter
+		if errors.As(err, &jw) {
+			if werr := jw.WriteEnvelope(os.Stdout); werr == nil {
+				return
+			}
+		}
+	}
 	var oe *output.Error
 	if errors.As(err, &oe) {
 		// 错误自己带了环境信息就用它的,否则补上当前数据源的 ——

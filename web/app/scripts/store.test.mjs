@@ -176,12 +176,16 @@ for (const fn of pending.splice(0)) await fn()
 assert.equal(S().loadingSource, false, '去抖走"同文件只落光标"分支时也必须收掉加载态')
 console.log('OK 10) 停站落位不再把加载态永久留在界面上')
 
-// ---------- 11) 别人建的会话的会话必须被"开着的页面"认领 ----------
+// ---------- 11) 别人建的会话：**不认领**（Q4 的硬规矩 / C6.3），要人点 ----------
 //
-// 场景:页面一直开着,这时 AI 从 CLI 起了调试。事件带着 sessionId 一路到来,
-// 而本地 sessionId 还是 null —— 不认领的话:协议流与状态栏照常动,编辑器却永远转圈、
-// 命令框永远"需停站后才能发送命令"、会话卡也不出现。看起来只是"实时性不好",
-// 其实是根本没绑定(会话模式 collab 也跟着丢,界面会按纯人工收敛写操作)。
+// 场景:页面一直开着,这时 AI 从 CLI 起了调试。事件带着 sessionId 一路到来,而本地没选中
+// 任何会话。**从前的行为是"认领它"**,理由是"不认领的话编辑器永远转圈" —— 但那恰恰是
+// **向服务端问"当前是哪条"**:池里有多条时绑到哪一条取决于事件先到谁,于是会出现
+// "我盯着 A 的现场、界面却显示 B 的停站"。WP-F 按 Q4 把这条便利去掉:
+//
+//   · 事件**不得**把本地绑定改掉(未选择就保持未选择);
+//   · 事件**不得**因此去打一次 `GET /api/sessions`(那正是"问服务端当前是哪条"的形状);
+//   · 人要看得见会话、并且能自己点一条 —— 点击那一下才绑定,而且绑定要连状态/源码一起对齐。
 let listCalls = 0
 globalThis.fetch = async (url) => {
   const u = String(url)
@@ -220,23 +224,32 @@ globalThis.fetch = async (url) => {
 const settle = async (n = 20) => { for (let i = 0; i < n; i++) await Promise.resolve() }
 
 useStore.setState({
-  sessionId: null, state: '', mode: 'solo', stop: null, currentLine: 0, launching: false,
+  sessionId: null, sessionList: [], state: '', mode: 'solo', stop: null, currentLine: 0, launching: false,
   sourceDVM: '', sourceMissing: false, sourceContent: '', loadingSource: false,
 })
 
-// 同一批到来的三个事件(启动 → 停站):本地还没绑定,必须只对齐一次(单飞)
+// 同一批到来的三个事件(启动 → 停站):本地没选中任何会话 —— **一个绑定都不该发生**
+listCalls = 0
 S().onEvent({ type: 'ai_action', sessionId: 'sess-ai', action: 'session.launch', text: '启动调试 ain/aint302_wf' })
 S().onEvent({ type: 'state', sessionId: 'sess-ai', state: 'stopped' })
 S().onEvent({ type: 'stopped', sessionId: 'sess-ai', stop: { reason: 'breakpoint', file: 'cin_aint302_wf.4gl', line: 24014 } })
 await settle()
 
-assert.equal(S().sessionId, 'sess-ai', '开着页面上出现的会话必须被认领(否则编辑器永远转圈、命令框永远不可用)')
+assert.equal(S().sessionId, null,
+  '事件不得替人选中会话(Q4/C6.3:前端不得向服务端询问"当前是哪条")—— 未选择就是未选择')
+assert.equal(listCalls, 0,
+  '更不能为了"认领"去打 GET /api/sessions —— 那正是"问服务端当前是哪条"的形状')
+console.log('OK 11a) 事件不认领会话:未选择保持未选择,且不多打一次列表请求')
+
+// **人点一条**才绑定(会话面板里点的那一下),而且绑定要连状态/模式/源码一起对齐
+await S().selectSession('sess-ai')
+await settle(30)
+assert.equal(S().sessionId, 'sess-ai', '人点了就必须绑上(否则编辑器永远转圈、命令框永远不可用)')
 assert.equal(S().state, 'stopped')
 assert.equal(S().mode, 'collab', '协作模式要跟着会话进来(否则界面按纯人工放开写操作)')
 assert.equal(S().stop?.line, 24014)
-assert.equal(S().sourceContent, 'MAIN\nEND MAIN', '认领要把源码一起对齐,不是只填一个 id')
-assert.equal(listCalls, 1, '同一批事件只对齐一次,别每个事件都打一次服务端')
-console.log('OK 11) 开着页面上别人建的会话被认领:id/状态/模式/源码一起对齐,且只对齐一次')
+assert.equal(S().sourceContent, 'MAIN\nEND MAIN', '选中要把源码一起对齐,不是只填一个 id')
+console.log('OK 11b) 人点一条会话即选中:id/状态/模式/源码一起对齐')
 
 // ---------- 12) 入口停站只有 state=stopped,位置要从快照补 ----------
 //

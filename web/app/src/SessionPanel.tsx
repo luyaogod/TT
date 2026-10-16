@@ -58,6 +58,10 @@ export function SessionPanel() {
   const sessionEnv = useStore((s) => s.sessionEnv)
   const state = useStore((s) => s.state)
   const sessionOp = useStore((s) => s.sessionOp)
+  // 会话绑定（WP-F / Q4）：**列全部 + 自己记住人点的那条**。
+  // 这个列表就是"列全部"那一半；点一行 = 选中它（写进 localStorage，刷新后恢复）。
+  const sessionList = useStore((s) => s.sessionList)
+  const selectSession = useStore((s) => s.selectSession)
 
   const [envNames, setEnvNames] = useState<string[]>([])
   // 环境清单**没读到**的原因（非空 = 面板要说"读不到"，而不是"一个都没配"）。
@@ -112,7 +116,7 @@ export function SessionPanel() {
       await sessionOp(op, env, ent.trim())
     } catch (e: any) {
       // 会话操作的失败原先内联在这个窄面板里(一行小红字),会把下面的环境列表挤动。
-      const label = op === 'close' ? '结束会话' : op === 'restart' ? '重启会话' : '切换会话'
+      const label = op === 'close' ? '结束会话' : op === 'restart' ? '重启会话' : '连到该环境'
       toast.error(label + '失败', { description: e?.message || String(e) })
     } finally {
       setBusy(null)
@@ -136,6 +140,21 @@ export function SessionPanel() {
     return true
   }
 
+  // pickSession 是"人点一条会话"那一下（Q4 的硬规矩：选中态只能由人点出来，见 store.ts 的
+  // 「会话绑定的取数纪律」）。它只做一件事 —— 把选择交给 store（那里负责对齐状态与源码），
+  // 失败原因照旧走 toast，不假装成功。
+  const pickSession = async (id: string) => {
+    if (busy) return
+    setBusy(`select:${id}`)
+    try {
+      await selectSession(id)
+    } catch (e: any) {
+      toast.error('选择会话失败', { description: e?.message || String(e) })
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const doOp = (op: 'close' | 'restart' | 'switch', env?: string) => {
     // close 只是断开,不需要 ENT;switch/restart 都会重新登录,必须点名企业。
     if (op !== 'close' && entMissing()) return
@@ -147,7 +166,9 @@ export function SessionPanel() {
     } else if (op === 'restart') {
       setPending({ op, env, title: `重启会话「${envLabel}」?`, desc: `将断开并重新连接该环境,会先结束当前调试。${entLabel}` })
     } else if (op === 'switch' && hasRun) {
-      setPending({ op, env, title: `切换会话到「${envLabel}」?`, desc: `会先结束当前调试并断开当前连接。${entLabel}` })
+      // op 'switch' = 「连到该环境」（Q26：不是"把一个会话切到另一个环境"）。连上去之前，
+      // 已在跑的那条会话会被服务端收掉 —— 那是有意的（Q27），所以这里先讲清楚会发生什么。
+      setPending({ op, env, title: `连到环境「${envLabel}」?`, desc: `会先结束当前调试并收掉当前会话(已在跑的那条会被断开),再连上该环境。${entLabel}` })
     } else {
       void runOp(op, env) // 空闲态切换无需确认
     }
@@ -284,7 +305,7 @@ export function SessionPanel() {
                       <button
                         title={needEnt
                           ? '请先在上方填 TOPENT(企业编号)才能连接该环境'
-                          : `切换会话到 ${name}(结束当前 debug 并连接该环境)`}
+                          : `连到环境 ${name}(会先结束当前 debug、收掉当前会话,再连上该环境)`}
                         disabled={!!busy || needEnt}
                         onClick={() => void doOp('switch', name)}
                         className="p-1 text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-30">
@@ -295,6 +316,45 @@ export function SessionPanel() {
                 </div>
               )
             })}
+
+            {/* ---- 活动会话：**列全部 + 人点一条**（WP-F / Q4）----
+                这一段是"我自己记住人点的那条"在界面上的落点：
+                  · 列出服务端当前**全部**会话（`sessionList` ← GET /api/sessions）；
+                  · 点一行 = 选中它（store.selectSession → 写 localStorage + 对齐状态/源码）；
+                  · 一条都没选时**明说"未选择"** —— 绝不替人挑一条（这正是硬切要的）。 */}
+            <div className="mt-1 border-t border-border pt-1">
+              <div className="flex items-center px-2.5 py-0.5 text-[11px] text-muted-foreground">
+                <span className="min-w-0 flex-1 truncate">活动会话（点一条即选中）</span>
+                {!sessionId && sessionList.length > 0 && (
+                  <span className="shrink-0 text-amber-600 dark:text-amber-400">未选择</span>
+                )}
+              </div>
+              {sessionList.length === 0 && (
+                <div className="px-2.5 py-0.5 text-[11px] text-muted-foreground">
+                  服务端当前没有会话。选一个环境「连到该环境」后可在这里选中它。
+                </div>
+              )}
+              {sessionList.map((s) => {
+                const active = s.id === sessionId
+                const st = s.state || ''
+                const label = `${s.env || '(未知环境)'} · ${s.module || ''}/${s.prog || ''}`.replace(/ · \/$/, '')
+                return (
+                  <button key={s.id} onClick={() => void pickSession(s.id)}
+                    disabled={!!busy}
+                    title={active
+                      ? `已选中 · ${STATE_LABEL[st] || st}（${s.id}）`
+                      : `选中这条会话 · ${STATE_LABEL[st] || st}（${s.id}）`}
+                    className={`group flex h-7 w-full items-center gap-1.5 px-2.5 text-left text-xs transition-colors disabled:pointer-events-none disabled:opacity-60 ${
+                      active ? 'bg-accent/40' : 'hover:bg-accent/30'
+                    }`}>
+                    <span className={`h-2 w-2 shrink-0 rounded-full ${STATE_DOT[st] || 'bg-muted-foreground/25'}`} />
+                    <span className="min-w-0 flex-1 truncate">{label}</span>
+                    <span className="shrink-0 text-[11px] text-muted-foreground">{STATE_LABEL[st] || st}</span>
+                    {active && <span className="shrink-0 text-[11px] text-sky-600 dark:text-sky-400">当前</span>}
+                  </button>
+                )
+              })}
+            </div>
           </div>
         )}
       </div>

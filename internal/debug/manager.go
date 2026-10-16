@@ -40,8 +40,14 @@ type Manager struct {
 
 	// 会话外源码读取共用的连接(见 srcmirror.go):
 	// 每次 tt debug source/grep 重新握手太贵,按 SSH 目标缓存一条长连接。
+	//
+	// 按 key 分开存（缺陷 Z / T5.3）:从前只有一条 + 一把全局锁,
+	// 换目标即换连接 ⇒ 两个环境不可能同时在读源码。
 	srcMu sync.Mutex
-	src   *srcConn
+	src   map[string]*srcConn
+	// srcKeyLocks 每个连接 key 一把锁:不同目标真正并行,同一目标排队（见 withSrcConn）。
+	srcLocksMu  sync.Mutex
+	srcKeyLocks map[string]*sync.Mutex
 
 	// 企业目录(ENT→账号):只读 SQL / 接口日志都要先问一次 gzou_t,
 	// 同一个环境(主机+账号+区域+库)下缓存 10 分钟,并落一份快照供离线使用。
@@ -63,6 +69,7 @@ func NewManager(cfg *Config) *Manager {
 		sessions: map[string]*Session{},
 		subs:     map[chan Event]string{},
 		envCache: map[string]cachedEnv{},
+		src:      map[string]*srcConn{},
 		// cfg.DataDir 可能为空(单测里的 NewManager(&Config{})):那一档只走内存不落盘
 		ents:  NewEntCatalog(cfg.DataDir),
 		Epoch: strconv.FormatInt(time.Now().UnixNano(), 36),
@@ -72,6 +79,11 @@ func NewManager(cfg *Config) *Manager {
 // getRuntimeEnv 取 T100 动态环境:缓存命中直接返回;未命中(或过期)探针一次并缓存。
 // 失败返回错误(不缓存),调用方须报错,无静态配置可回退。key 按 服务器+账号+区域 区分
 // (用连接的真实 host,覆盖/多环境时不受 active 环境影响),换环境互不污染。
+//
+// **它只返回,不写任何配置**（缺陷 Y / T5.2 的修法）:动态路径是"这一次连接"算出来的事实,
+// 由调用方放进**自己那一份**配置里（本轮请求克隆出来的、或会话自己持有的那一份）;
+// 从前 `ensureRuntimeEnv` 把它写回 `m.cfg.Runtime` —— 而 `m.cfg` 是**共享**的,
+// 于是"哪条会话先启动"决定了另一条看到的 TOP/ERP,两条会话的动态路径互相污染。
 func (m *Manager) getRuntimeEnv(conn *host.SSHConn, zone string) (*host.RuntimeEnv, error) {
 	cc := conn.Cfg()
 	key := cc.Host + "|" + cc.User + "|" + zone
@@ -91,21 +103,30 @@ func (m *Manager) getRuntimeEnv(conn *host.SSHConn, zone string) (*host.RuntimeE
 	return env, nil
 }
 
-// ensureRuntimeEnv 确保 cfg.Runtime 有动态路径(探针+缓存);失败返回错误,无静态兜底。
-func (m *Manager) ensureRuntimeEnv(conn *host.SSHConn) error {
-	if m.cfg.Runtime != nil && m.cfg.Runtime.Valid() {
-		return nil
+// zoneOf 生效登录区域:空 = 默认 36（与既有行为一致）。
+func zoneOf(cfg *Config) string {
+	if cfg == nil || cfg.Zone == "" {
+		return "36"
 	}
-	zone := m.cfg.Zone
-	if zone == "" {
-		zone = "36"
+	return cfg.Zone
+}
+
+// ensureRuntimeEnvOn 确保**这一份** cfg 有动态路径(探针+缓存),写进 cfg 自己而不是共享配置。
+//
+// 它是 `ensureRuntimeEnv` 的替代:后者写的是 `m.cfg.Runtime`（共享字段,缺陷 Y）。
+// cfg 必须是调用方自己那一份（本轮的克隆 / 会话持有的快照）—— 传 `m.cfg` 进来
+// 就是把这个缺陷原样搬个地方。
+func (m *Manager) ensureRuntimeEnvOn(conn *host.SSHConn, cfg *Config) (*host.RuntimeEnv, error) {
+	if cfg.Runtime != nil && cfg.Runtime.Valid() {
+		return cfg.Runtime, nil
 	}
+	zone := zoneOf(cfg)
 	env, err := m.getRuntimeEnv(conn, zone)
 	if err != nil {
-		return fmt.Errorf("无法获取环境 %s(zone %s)的 T100 路径: %w", m.cfg.EnvName(), zone, err)
+		return nil, fmt.Errorf("无法获取环境 %s(zone %s)的 T100 路径: %w", cfg.EnvName(), zone, err)
 	}
-	m.cfg.Runtime = env
-	return nil
+	cfg.Runtime = env
+	return env, nil
 }
 
 // Subscribe 订阅事件流(WS 用),返回取消函数
@@ -222,7 +243,12 @@ func (m *Manager) launchWith(cfg *Config, module, prog string) (*Session, error)
 	// 那种失败不该顺手毁掉正在跑的那一轮的副本。
 	// 两件事必须成对:清了目录还要清会话的"已镜像"记录,否则复用的宿主会话
 	// 会以为文件早就镜像过,新一轮再也落不下副本。
-	clearMirror(cfg.DataDir)
+	//
+	// 清的是**这条会话自己的**那棵子树（缺陷 X / T5.1）:从前的 `clearMirror(cfg.DataDir)`
+	// 删的是全局 `srccache/`,并发下 A 的启动会销毁 B 刚拉下来的镜像。
+	// 复用的宿主会话要连"已镜像"那份记录一起继承（见 inheritMirrorState）。
+	sess.inheritMirrorState()
+	clearMirrorForSession(cfg.DataDir, sess.mirrorScope())
 	sess.resetMirrored()
 	if runProg != "" && runProg != prog {
 		sess.emitEvent(Event{Type: "log", Text: fmt.Sprintf("作业编号 %s → 实体程序 %s(gzzz_t)", prog, runProg)})
@@ -287,7 +313,11 @@ func (m *Manager) prepareSession(cfg *Config, module, prog, runProg, launchRef, 
 // 返回 (模块, 实体程序, err):err 仅在 SSH 连接/动态路径探测失败时非 nil;
 // 未配置 db/查询失败/未命中 → ("","","","", nil),由调用方回退文件搜索。
 func (m *Manager) resolveJob(module, job string) (mod, prog, launchRef, extra string, err error) {
-	return m.resolveJobWith(m.cfg, module, job)
+	// 传一份**副本**（缺陷 Y / T5.2）:`resolveJobWith` 会把探到的动态路径写进它拿到的
+	// 那一份 cfg,而这一条路拿到的正是共享的 `m.cfg` —— 一次作业解析就会把
+	// "当前生效环境"的 Runtime 改掉,另一条会话随后读到的是别人的路径。
+	cc := *m.cfg
+	return m.resolveJobWith(&cc, module, job)
 }
 
 // resolveJobWith 同 resolveJob,但按传入 cfg(多 SSH/多区域克隆)解析。
@@ -300,19 +330,12 @@ func (m *Manager) resolveJobWith(cfg *Config, module, job string) (mod, prog, la
 		return "", "", "", "", fmt.Errorf("SSH 连接失败: %w", err)
 	}
 	defer conn.Close()
-	zone := cfg.Zone
-	if zone == "" {
-		zone = "36"
-	}
 	// 动态路径(登录区域 → 环境脚本):按本次启动的区域探针+缓存(覆盖/多环境时不用
-	// 全局 active 区域),结果写入 cfg.Runtime——预会话模块解析/42r 校验直接用真实路径。
+	// 全局 active 区域),结果写进**调用方自己那一份** cfg（缺陷 Y / T5.2:
+	// 不再落到共享的 `m.cfg.Runtime` 上）——预会话模块解析/42r 校验直接用真实路径。
 	// 失败即报错:T100 路径只来自登录动态获取,无静态配置可回退
-	if cfg.Runtime == nil || !cfg.Runtime.Valid() {
-		env, perr := m.getRuntimeEnv(conn, zone)
-		if perr != nil {
-			return "", "", "", "", fmt.Errorf("无法获取环境 %s(zone %s)的 T100 路径: %w", cfg.EnvName(), zone, perr)
-		}
-		cfg.Runtime = env
+	if _, err := m.ensureRuntimeEnvOn(conn, cfg); err != nil {
+		return "", "", "", "", err
 	}
 	// 显式连接(SSH 页 dbConn 引用)连库解析作业;失败静默,由调用方回退文件搜索
 	d, err := resolveDBRun(conn, cfg)
@@ -395,7 +418,9 @@ func (m *Manager) LaunchReplay(item *WSLogItem, content *WSLogContent, reqOverri
 	}
 	// 新的一轮运行:清空上一轮攒下的源码副本(见 srcmirror.go);
 	// "已镜像"记录必须跟着一起清(复用的宿主会话会把它带进下一轮)。
-	clearMirror(cfg.DataDir)
+	// 同 launchWith:只清**这条会话自己的**那棵子树（缺陷 X / T5.1）。
+	sess.inheritMirrorState()
+	clearMirrorForSession(cfg.DataDir, sess.mirrorScope())
 	sess.resetMirrored()
 	// 用了入库的截断文本重放:说清楚,别让人把"程序一路退出"当成 bug 去查
 	if replayWarn != "" {
@@ -521,15 +546,21 @@ func (m *Manager) CreateSessionOn(cfg *Config) (*Session, error) {
 
 // SourcePreview 会话建立前预取源码:读母版消除前端启动期空白,顺带落本地镜像。
 // module 为空(留待会话内自动解析)时直接跳过。
+//
+// 它跑在会话之前,所以作用域只能是**目标**（环境段,`srcConnScopeSeg`）——
+// 与从前的落点逐字相同;会话建起来之后由该会话自己的作用域接着落（见 mirrorScope）。
 func (m *Manager) SourcePreview(module, prog string) (*SourceFile, error) {
 	if module == "" {
 		return nil, fmt.Errorf("module 为空,跳过源码预取")
 	}
 	dvmFile := module + "_" + prog + ".4gl"
+	// 一次调用只认一份配置快照:下面几处都用它,免得中途被别的请求改掉的共享态混进来。
+	cfg := m.sourceCfg()
+	scope := srcConnScopeSeg(cfg)
 	var out *SourceFile
-	err := m.withSrcConn(func(_ *host.SSHConn, cl *sftp.Client) error {
+	err := m.withSrcConn(cfg, func(_ *host.SSHConn, cl *sftp.Client) error {
 		var lastErr error
-		for _, p := range sourceCandidatePaths(m.cfg.ModuleRootsActual(), module, dvmFile) {
+		for _, p := range sourceCandidatePaths(cfg.ModuleRootsActual(), module, dvmFile) {
 			f, err := cl.Open(p)
 			if err != nil {
 				lastErr = err
@@ -547,8 +578,7 @@ func (m *Manager) SourcePreview(module, prog string) (*SourceFile, error) {
 			}
 			out = &SourceFile{
 				DVMFile: dvmFile, Path: p, Content: string(data), ModTime: mt,
-				LocalPath: writeMirror(m.cfg.DataDir,
-					mirrorEnvSeg(m.cfg.EnvName(), m.cfg.SSH.Host, m.cfg.Zone), p, data),
+				LocalPath: writeMirrorScoped(cfg.DataDir, scope, p, data),
 			}
 			return nil
 		}
@@ -558,6 +588,15 @@ func (m *Manager) SourcePreview(module, prog string) (*SourceFile, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// sourceCfg 取"会话外读取"要用的那份配置快照（缺陷 Y / T5.2）。
+//
+// 为什么是副本而不是 `m.cfg` 本身:探针会把动态路径写进拿到的那一份 cfg,
+// 而 `m.cfg` 是**共享**的 —— 一条会话的启动或一次源码读取都会改掉另一条看到的路径。
+func (m *Manager) sourceCfg() *Config {
+	cc := *m.cfg
+	return &cc
 }
 
 // ---------- 会话外只读能力(AI/CLI 信息通道;不经会话,独立短连接,白名单限登录区源码目录) ----------
@@ -588,8 +627,12 @@ func (m *Manager) ReadSourceStandalone(module, file, path string, from, to int) 
 		data []byte
 		mt   time.Time
 	)
-	err := m.withSrcConn(func(_ *host.SSHConn, cl *sftp.Client) error {
-		roots := m.cfg.ModuleRootsActual()
+	// 一次调用只认一份配置快照（缺陷 Y / T5.2）:探到的动态路径写在这一份上,
+	// 共享的 `m.cfg` 一字不动。
+	cfg := m.sourceCfg()
+	scope := srcConnScopeSeg(cfg)
+	err := m.withSrcConn(cfg, func(_ *host.SSHConn, cl *sftp.Client) error {
+		roots := cfg.ModuleRootsActual()
 		if len(roots) == 0 {
 			return fmt.Errorf("登录区源码目录未知(环境路径解析失败)")
 		}
@@ -644,8 +687,7 @@ func (m *Manager) ReadSourceStandalone(module, file, path string, from, to int) 
 		return nil, err
 	}
 	// 镜像落的是**整份**源码(在下面的行段裁剪与大小截断之前),本地副本要能整读
-	mirrorPath := writeMirror(m.cfg.DataDir,
-		mirrorEnvSeg(m.cfg.EnvName(), m.cfg.SSH.Host, m.cfg.Zone), path, data)
+	mirrorPath := writeMirrorScoped(cfg.DataDir, scope, path, data)
 	if len(data) > maxSourceFileBytes {
 		data = data[:maxSourceFileBytes]
 	}
@@ -702,8 +744,10 @@ func (m *Manager) ResolveJob(module, prog string) *JobInfo {
 		out.Note = "作业名非标准标识符,跳过库解析"
 		return out
 	}
-	// resolveJobWith 内部含 连库→gzzz_t→42r 校验;动态路径/连接失败(err)或解析失败(空串)都提示
-	mod, run, ref, extra, rerr := m.resolveJobWith(m.cfg, module, prog)
+	// resolveJobWith 内部含 连库→gzzz_t→42r 校验;动态路径/连接失败(err)或解析失败(空串)都提示。
+	// 传副本（缺陷 Y / T5.2）:它会把探到的动态路径写进拿到的那一份 cfg。
+	cfg := m.sourceCfg()
+	mod, run, ref, extra, rerr := m.resolveJobWith(cfg, module, prog)
 	if rerr != nil {
 		out.Note = "无法获取该环境 T100 路径: " + rerr.Error()
 		return out

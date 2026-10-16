@@ -1,6 +1,7 @@
 package debug
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"testing/fstest"
 
 	"tt/internal/host"
+	"tt/internal/target"
 )
 
 // 五个"动作型"端点的**错误半边**：POST /api/wstest、POST /api/wslogs/debug、
@@ -26,20 +28,52 @@ import (
 //      路由里有一条 catch-all，Go 的 mux 就不会自己产生 405 了。见 hStatic 的注释）
 //   4. **入参校验在拨号之前** —— hWSLogDebug 里那处注释专门说过的顺序性质
 //      （"非法请求不该先把当前会话收口"）。今天没有任何东西守着它。
+//
+// WP4b 追加第 5 类：**"要一条会话却落不上目标" → 按契约 4.1.1 的码报错并给候选**
+// （见 TestActionEndpointsRequireExplicitTarget）。
 
 // errTestNoDial 是注入进去的拨号失败。文案刻意与真实失败不同，
 // 这样测试断言里出现它就说明**确实走进了被测的那条分支**，而不是碰巧撞上别的错。
 var errTestNoDial = errors.New("测试：不拨号")
 
-// actionTestServer 起一个不拨真机的调试服务。
+// actionTestDebugServer 起一个不拨真机的调试服务，并**返回那个 Server**
+// （有些用例要往会话池里放一条会话：WP4b 起"切环境 / 按日志重放"要求能落一条目标，见 api_target.go）。
 // 复用 mode_test.go 的 doReq / respError 发请求收错误文案。
-func actionTestServer(t *testing.T) *httptest.Server {
+func actionTestDebugServer(t *testing.T) (*httptest.Server, *Server) {
 	t.Helper()
 	s := NewServer(&Config{Listen: "127.0.0.1:0"}, nil, "")
 	s.dial = func(host.SSHConfig) (*host.SSHConn, error) { return nil, errTestNoDial }
 	hs := httptest.NewServer(s.Handler())
 	t.Cleanup(hs.Close)
+	return hs, s
+}
+
+// actionTestServer 是只要一个 URL 的那一半（不往池里放会话）。
+func actionTestServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	hs, _ := actionTestDebugServer(t)
 	return hs
+}
+
+// actionTestServerWithSession 起服务并往池里放**一条**空宿主会话（`StateIdle`），
+// 返回它的句柄。用途：让"要一条目标"的那些端点能走到拨号那一层。
+func actionTestServerWithSession(t *testing.T) (*httptest.Server, string) {
+	t.Helper()
+	hs, s := actionTestDebugServer(t)
+	sess := fakeIdleSession("s-one", "h1", "36")
+	s.mgr.sessions[sess.ID] = sess
+	return hs, sess.ID
+}
+
+// giveServerNamedEnv 给测试服务配一个**具名环境**（`config.json` 的 `hosts.sshs[].name`）。
+//
+// 为什么需要：`hSessionSwitch` 的判定顺序是"先校验环境存在（404）→ 再落目标"，
+// 所以在一个没有任何环境的服务上测"缺目标"只会测到环境那条错（实测踩过）。
+func giveServerNamedEnv(s *Server, name, hostAddr, zone string) {
+	e := host.NamedSsh{Name: name, SSHConfig: host.SSHConfig{Host: hostAddr, Port: 22, User: "u"}, Zone: zone}
+	s.cfg.SSHs = append(s.cfg.SSHs, e)
+	s.cfg.fillDefaults()
+	s.cfg.SSH, s.cfg.Zone = e.SSHConfig, zone
 }
 
 // TestActionEndpointsRejectMalformedBody 请求体不是 JSON → 400，
@@ -62,12 +96,19 @@ func TestActionEndpointsRejectMalformedBody(t *testing.T) {
 // TestActionEndpointsReportDialFailure 拨号失败 → 500，信封是 {"ok":false,"error":…}。
 //
 // 这条钉的是信封形状：前端与 CLI 都按它解析，改了形状它们会静默拿不到错误原因。
+//
+// **WP4b 之后这两条请求体必须各带一个前置条件**（否则它们会被更早的那道闸门拦下，
+// 测不到拨号那一层）：
+//
+//   - `/api/wslogs/debug` 现在要求"能落一条会话"（`mustTarget`：池空 → 409 + `NO_SESSION`）。
+//     所以服务里**先放一条**空宿主会话（`actionTestServerWithSession`），请求体带上它的句柄。
+//   - `/api/dbsql` 现在要求 `ent` 必填（C7.1-5），给 0 会被 400 拦在拨号之前。
 func TestActionEndpointsReportDialFailure(t *testing.T) {
-	hs := actionTestServer(t)
+	hs, sid := actionTestServerWithSession(t)
 	cases := []struct{ method, path, body string }{
 		{"POST", "/api/wstest", "{}"},
-		{"POST", "/api/wslogs/debug", "{}"},
-		{"POST", "/api/dbsql", "{}"},
+		{"POST", "/api/wslogs/debug", `{"rowid":"1","session":"` + sid + `"}`},
+		{"POST", "/api/dbsql", `{"sql":"select 1 from dual","ent":99}`},
 		{"GET", "/api/wslogs", ""},
 		{"GET", "/api/wslogs/content?rowid=1", ""},
 	}
@@ -84,6 +125,110 @@ func TestActionEndpointsReportDialFailure(t *testing.T) {
 			// 注入的那句话必须出现在里面 —— 证明走的是我们替换的那个 dial。
 			if !strings.Contains(msg, errTestNoDial.Error()) {
 				t.Errorf("该是由注入的 dial 报的错（否则这条测试没测到它），得 %q", msg)
+			}
+		})
+	}
+}
+
+// TestActionEndpointsRequireExplicitTarget 是 WP4b 加的那一类：**要一条会话却落不上目标**。
+//
+// 契约依据：Q4「服务端不保留隐式寻址」/ C8.2（"唯一就落"只住在 CLI 里）/ C7.1-2 / C7.1-3 /
+// C7.1-5 / C5.15 / C5.16 / 4.1.1 的 code 取值表。
+//
+// 从前这几条路静默取"当前会话"（`Manager.Current()` 取的是 map 里**任意一条**），
+// 多会话下就是"随机落一条而输出看起来成功"。现在它们必须报错、且信封里带稳定 `code`：
+//
+//	① 池空 + 不带目标          → 409 + NO_SESSION
+//	② 池里 2 条 + 不带目标      → 409 + SESSION_AMBIGUOUS + 候选清单（F1 的形状）
+//	③ 点名了一条不在池里的会话   → 404 + SESSION_NOT_FOUND
+//	④ /api/dbsql 不给 ent       → 400 + USAGE（C7.1-5：不再回落会话的 TOPENT）
+//
+// 为什么断言 `code` 而不是状态码：Q15 写死了「Agent 读 `code`，不读数字」。
+func TestActionEndpointsRequireExplicitTarget(t *testing.T) {
+	// ① 池空
+	hsEmpty, _ := actionTestDebugServer(t)
+	// ② 池里两条（并给它一个具名环境：切环境那条会把"环境不存在"判在"缺目标"之前）
+	hsTwo, sTwo := actionTestDebugServer(t)
+	giveServerNamedEnv(sTwo, "h1", "127.0.0.1", "36")
+	for _, id := range []string{"s-a", "s-b"} {
+		sTwo.mgr.sessions[id] = fakeIdleSession(id, "h1", "36")
+	}
+	// ③ 池空 + **配了环境**：`hSessionSwitch` 先校验环境存在（404），所以"缺目标"这一条
+	//    要在一个配了环境的服务上验，否则测到的是环境那条错。
+	hsEmptyWithEnv, sEmptyWithEnv := actionTestDebugServer(t)
+	giveServerNamedEnv(sEmptyWithEnv, "h1", "127.0.0.1", "36")
+
+	cases := []struct {
+		name     string
+		hs       *httptest.Server
+		path     string
+		body     string
+		status   int
+		code     string
+		candLen  int
+		wantText string
+	}{
+		{"池空 + 切环境", hsEmptyWithEnv, "/api/sessions/switch", `{"env":"h1","ent":"99"}`,
+			http.StatusConflict, target.CodeNoSession, -1, "没有 SSH 会话"},
+		{"池空 + 按日志重放", hsEmpty, "/api/wslogs/debug", `{"rowid":"1"}`,
+			http.StatusConflict, target.CodeNoSession, -1, "没有 SSH 会话"},
+		{"两条 + 切环境（歧义）", hsTwo, "/api/sessions/switch", `{"env":"h1","ent":"99"}`,
+			http.StatusConflict, target.CodeAmbiguous, 2, "无法确定你要哪一条"},
+		{"两条 + 按日志重放（歧义）", hsTwo, "/api/wslogs/debug", `{"rowid":"1"}`,
+			http.StatusConflict, target.CodeAmbiguous, 2, "无法确定你要哪一条"},
+		{"点名了一条不存在的会话", hsTwo, "/api/wslogs/debug", `{"rowid":"1","session":"s-没了"}`,
+			http.StatusNotFound, target.CodeNotFound, -1, "会话不存在"},
+		{"只读 SQL 不给 ent", hsTwo, "/api/dbsql", `{"sql":"select 1 from dual"}`,
+			http.StatusBadRequest, debugContractCodeUsage, -1, "ent 必填"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			resp := doReq(t, "POST", c.hs.URL+c.path, "", c.body)
+			if resp.StatusCode != c.status {
+				t.Fatalf("该退 %d，得 %d（%s）", c.status, resp.StatusCode, respError(t, resp))
+			}
+			var raw map[string]any
+			if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+				t.Fatalf("失败信封不是合法 JSON：%v", err)
+			}
+			// C5.15：`ok` 与 `error` 的形状一个字都不改，只在上面**增加** code / candidates。
+			if raw["ok"] != false {
+				t.Errorf("ok 必须是 false（C5.15），实得 %v", raw["ok"])
+			}
+			if s, _ := raw["error"].(string); strings.TrimSpace(s) == "" {
+				t.Errorf("error 必须非空（C5.15），实得 %v", raw["error"])
+			}
+			if got := raw["code"]; got != c.code {
+				t.Errorf("code = %v，契约 4.1.1 要求 %q\n    信封：%v", got, c.code, raw)
+			}
+			if c.code == "" {
+				return
+			}
+			if msg, _ := raw["error"].(string); c.wantText != "" && !strings.Contains(msg, c.wantText) {
+				t.Errorf("文案里该有一句 %q，实得 %q", c.wantText, msg)
+			}
+			// C5.11：候选清单只在"歧义/指名不存在"那几种码下出现，且必须是九键的投影。
+			cands, hasCands := raw["candidates"]
+			if c.candLen < 0 {
+				if hasCands {
+					t.Errorf("这个码下不该有 candidates（C5.11），实得 %v", cands)
+				}
+				return
+			}
+			if !hasCands {
+				t.Fatalf("这个码下**必须**有 candidates（C5.11），实得 %v", raw)
+			}
+			list, ok := cands.([]any)
+			if !ok || len(list) != c.candLen {
+				t.Fatalf("candidates 该是 %d 条，实得 %v", c.candLen, cands)
+			}
+			for _, one := range list {
+				row, _ := one.(map[string]any)
+				for _, k := range []string{"id", "ref", "display", "name", "env", "ent", "n", "prog", "state"} {
+					if _, ok := row[k]; !ok {
+						t.Errorf("候选行少了 %q 键（C5.12 的九键），实得 %v", k, row)
+					}
+				}
 			}
 		})
 	}

@@ -36,6 +36,11 @@ type recSession struct {
 	// Kind 是这一轮会话的用途（`rec` / `replay`）：只进会话登记，让面板能分清
 	// "人还在录"与"回放发完留下的窗口"（见 internal/fep/session.go 那一栏的说明）。
 	Kind string
+	// RecID 这一轮录制对应的**录制 ID**（= 代理落盘用的 tag）。它同时是**跨进程传目标的
+	// 来源**：`recSessionAlias` 由它算出固定别名（T5.4 / 契约 C7.3），别名随 `--name`
+	// 进 `debug start` 子进程，之后取证命令用同一个别名点回同一条会话。
+	// 空 = 由本函数按本轮 tag 现算（`rec start` 那条路就是这样：tag 由它自己生成）。
+	RecID string
 }
 
 // openDebugRecording 起隔离实例 + 代理，再把调试线的作业挂到这条代理上。
@@ -79,14 +84,20 @@ func openDebugRecording(cmd *cobra.Command, s recSession) (*fep.Runtime, string,
 	logf := func(format string, a ...any) {
 		fmt.Fprintf(cmd.ErrOrStderr(), "· "+format+"\n", a...)
 	}
-	if busy, _ := debugSessionOpen(cmd); busy {
-		logf("先收掉上一轮挂着的调试会话（它占着宿主会话，TOPENT 设不上）")
+	if why, err := staleSessionToCollect(cmd, s, dcfg.EnvName()); err == nil && why != "" {
+		logf("先收掉上一轮挂着的调试会话（它占着宿主会话，TOPENT 设不上）：%s", why)
 		if qerr := runSelf(cmd, "debug", "quit"); qerr != nil {
 			logf("收上一轮会话时失败（继续试）：%v", qerr)
 		}
 		time.Sleep(2 * time.Second)
 	}
+	alias := recSessionAlias(s.RecID)
 	tag := "fep-" + time.Now().Format("20060102-150405")
+	if alias == "" {
+		// 调用方没给录制 ID（老调用方）：这一轮的 tag 就是它的录制 ID，
+		// 别名按同一个来源现算 —— 两条路算出同一个名字（T5.4 / C7.3）。
+		alias = recSessionAlias(tag)
+	}
 	rt, err := fep.Open(s.Ctx, fep.OpenConfig{
 		Env: dcfg.EnvName(), Zone: dcfg.Zone,
 		// 身份：作业是调试线起的（见 path.go）。写对了，回放前的路径比对才有双方的值。
@@ -105,7 +116,7 @@ func openDebugRecording(cmd *cobra.Command, s recSession) (*fep.Runtime, string,
 	}
 	logf("这一轮画面接线：FGLSERVER=%s（调试线按它把作业画到本代理上）", fgl)
 
-	if serr := runRecStartSteps(cmd, recStartSteps(dcfg.EnvName(), s.Ent, s.Prog, s.Module, fgl), s.Breaks, s.NoContinue); serr != nil {
+	if serr := runRecStartSteps(cmd, recStartSteps(dcfg.EnvName(), s.Ent, s.Prog, s.Module, fgl, alias), s.Breaks, s.NoContinue); serr != nil {
 		if cerr := rt.Close(); cerr != nil {
 			logf("收代理时还有失败：%v", cerr)
 		}
@@ -114,24 +125,115 @@ func openDebugRecording(cmd *cobra.Command, s recSession) (*fep.Runtime, string,
 	return rt, fgl, nil
 }
 
-// debugSessionOpen 报告调试服务里是不是还挂着一个会话。
+// recSessionAlias 这一轮跨进程传目标用的**固定别名**（T5.4 / 契约 C7.3）。
 //
-// 判据取 `tt debug status --json` 的报文：它列出现存会话。这里只读它给的 JSON，
-// 不碰调试服务的内部协议 —— 那个协议的家在 internal/cli/debug。
-func debugSessionOpen(cmd *cobra.Command) (bool, error) {
+// 别名由**录制身份**算出来，调用方不必给：同一条录制（同一个 tag）在 rec start 与
+// rec reproduce 两条路上算出同一个名字。它随 `--name` 进 `debug start` 子进程，
+// 之后（WP4c 把别名变成服务端事实之后）取证命令用 `--session <同一个别名>` 点回同一条会话。
+//
+// 为什么是"录制 ID"而不是"临时起的随机名"：Q23 的别名是**幂等键**——
+// 重发同一条命令必须落回同一条会话，随机名每次都算新会话，等于没有幂等键。
+//
+// tag 为空（老调用方只填 Env/Prog）时返回空串：那种情况下不拼 `--name`，
+// 既有行为一字不变（H2）。
+func recSessionAlias(tag string) string {
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return ""
+	}
+	return "fep-" + tag
+}
+
+// staleSessionToCollect 判断"上一轮挂着的调试会话"里有没有**属于本次录制**的那一条。
+//
+// 返回 (人话说明, error)；没有该收的就返回 ("", nil)。
+//
+// **这是缺陷 D（T5.5）的落点**：从前这里只看"有没有会话在跑"——
+//
+//	if busy, _ := debugSessionOpen(cmd); busy { runSelf(cmd, "debug", "quit") }
+//
+// 多会话之后，B 开始录制会把正在跑断点的 A 的会话一枪 `quit` 掉，而 A 那边
+// 看起来只是"会话莫名其妙没了"。所以判据先按**环境**收窄（T5.5 的第一半），
+// 再按**录制身份**收窄（第二半：只能收自己那条）。
+//
+// 环境这一半今天就能做，而且是**定向**的那一半：`rec start --env X` 起会话时
+// 服务端只会连到 X，所以上一轮挂着的、该收口的就只可能是 X 上的会话。
+// 别人的会话（别的环境）**一条都不碰**。
+func staleSessionToCollect(cmd *cobra.Command, s recSession, env string) (string, error) {
+	sessions, err := debugSessions(cmd)
+	if err != nil {
+		return "", err
+	}
+	for _, sess := range sessions {
+		if !recSessionOwned(sess, s, env) {
+			continue
+		}
+		why := sess.Env + " 上的调试会话"
+		if sess.Prog != "" {
+			why += "（作业 " + sess.Prog + "）"
+		}
+		return why, nil
+	}
+	return "", nil
+}
+
+// recSessionOwned 判一条会话是不是"本次录制该收的那一条"。
+//
+// 判据（按**先在的先判**）：
+//  1. **环境必须点名且相等** —— 环境不明的会话一律不认领（宁可多留一条，也不误杀
+//     别人正在跑断点的会话，缺陷 D 的验收就是这条）；
+//  2. **录制身份**（今天能拿到的部分 = 作业）：给了 `--prog` 而对方的作业不同，
+//     那就不是我们起的那一条，跳过。
+func recSessionOwned(sess dbgSessionView, s recSession, env string) bool {
+	if env == "" || sess.Env == "" || sess.Env != env {
+		return false
+	}
+	if prog := strings.TrimSpace(s.Prog); prog != "" && sess.Prog != "" && sess.Prog != prog {
+		return false
+	}
+	return true
+}
+
+// dbgSessionView 是 `tt debug status --json` 里我们认得出的那几栏。
+//
+// 只读它给的 JSON，不碰调试服务的内部协议 —— 那个协议的家在 internal/cli/debug。
+// `name`（别名）服务端今天还没吐（C5.3 的五个键是 WP4c 的活），所以这里也不依赖它；
+// 等它有了，`recSessionOwned` 再加一条"别名相同"的判据即可（见契约 C7.3）。
+type dbgSessionView struct {
+	ID    string `json:"id"`
+	Env   string `json:"env"`
+	Prog  string `json:"prog"`
+	State string `json:"state"`
+	Name  string `json:"name"`
+}
+
+// debugSessions 取调试服务里的会话列表（`tt debug status --json`）。
+//
+// 它可以被测试替换（包级变量）:判据函数与"要不要收口"这一步必须能一起被钉住，
+// 而真起一个调试服务 + 真 SSH 不在单测的范围里。
+var debugSessions = debugSessionsReal
+
+// debugSessionsReal 是生产实现:走子进程读 JSON。
+func debugSessionsReal(cmd *cobra.Command) ([]dbgSessionView, error) {
 	out, err := runSelfOut(cmd, "--json", "debug", "status")
 	if err != nil {
-		return false, err
+		return nil, err
 	}
+	return parseDebugSessions(out)
+}
+
+// parseDebugSessions 读 `tt debug status --json` 的报文。
+//
+// 形状（实测）：一个 `{"sessions":[…]}` 文档。从前这里的 struct 只声明了 `state`，
+// 于是"这条会话是谁的"这件事**在客户端根本没有材料**—— 那就是缺陷 D 能成立的原因之一。
+func parseDebugSessions(out []byte) ([]dbgSessionView, error) {
 	var st struct {
-		Sessions []struct {
-			State string `json:"state"`
-		} `json:"sessions"`
+		Sessions []dbgSessionView `json:"sessions"`
 	}
 	if jerr := json.Unmarshal(out, &st); jerr != nil {
-		return false, jerr
+		return nil, jerr
 	}
-	return len(st.Sessions) > 0, nil
+	return st.Sessions, nil
 }
 
 // stopSpot 是"程序停在哪儿"（调试服务给的现场）。

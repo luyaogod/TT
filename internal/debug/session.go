@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"tt/internal/host"
 
@@ -269,7 +270,16 @@ type Session struct {
 	srcCache        map[string]srcCacheEntry
 	// mirrored 已经发起过镜像落盘的 DVM 源名(见 mirrorStopFile):
 	// 同一个文件反复停站不重复拉取。尽力而为的标记 —— 失败的不会重试。
+	//
+	// 它必须与**镜像落盘的目录**同一个作用域（缺陷 X / T5.1）:标记是会话内的,
+	// 所以落盘目录也得按会话分开,否则 A 拉过的文件在共享目录里,B 永远看不到。
+	// 作用域由 runScope 决定（见 mirrorScope）。
 	mirrored map[string]bool
+	// runScope 本条会话在本地镜像/命令输出目录里的**运行作用域**:
+	// 按会话唯一（NewSession 分配）、跨轮不变（复用的宿主会话继承上一轮的,见
+	// inheritMirrorState）。它让"清空本会话的镜像"与"别的会话的镜像"互不相干 ——
+	// 从前清的是全局 `srccache/`,并发启动互删（缺陷 X）。
+	runScope string
 
 	stopTimer *time.Timer
 	kaStop    func() // 停止 SSH 心跳(主动关闭连接前调用,避免误报掉线)
@@ -329,7 +339,7 @@ func NewSession(cfg *Config, module, prog, runProg, launchRef, extraArgs string,
 	}
 	cc := *cfg
 	s := &Session{
-		ID:        fmt.Sprintf("s%d", time.Now().UnixMilli()),
+		ID:        nextSessionID(),
 		Module:    module,
 		Prog:      prog,
 		RunProg:   runProg,
@@ -349,6 +359,10 @@ func NewSession(cfg *Config, module, prog, runProg, launchRef, extraArgs string,
 		envName:  cfg.EnvName(),
 		bps:      map[int]*Breakpoint{},
 		srcCache: map[string]srcCacheEntry{},
+		// 运行作用域按会话唯一（缺陷 X / T5.1:镜像与命令输出按会话分开,
+		// 并发启动互删不了）。它是**内部标识**,不出现在命令输出里（会话可见的
+		// ID 仍是上面那个 `s<毫秒>` 的既有形状）。
+		runScope: nextRunScope(),
 		emit:     emit,
 		lines:    make(chan string, 1024),
 		done:     make(chan struct{}),
@@ -2660,7 +2674,7 @@ func (s *Session) setStop(stop *StopInfo) {
 	s.mirrorStopFile(stop)
 }
 
-// resetMirrored 清掉"已镜像"记录,必须与 clearMirror 成对调用。
+// resetMirrored 清掉"已镜像"记录,必须与 clearMirrorForSession 成对调用。
 //
 // 复用的宿主会话(idle 复用免重登录)会把这份记录带进下一轮运行,
 // 而镜像目录在启动时已经清空了 —— 不同步清掉,新一轮就再也不会
@@ -2669,6 +2683,95 @@ func (s *Session) resetMirrored() {
 	s.mu.Lock()
 	s.mirrored = map[string]bool{}
 	s.mu.Unlock()
+}
+
+// mirrorScope 本条会话在本地镜像/命令输出目录里的目标作用域（缺陷 X / T5.1）:
+// 环境段（测试区/正式区隔离,与从前一致）+ 运行作用域（会话之间隔离）。
+//
+// 两条纪律:
+//   - **同一个作用域**同时决定"文件落到哪"（mirrorWrite / writeExecLog）
+//     与"新一轮清哪棵子树"（clearMirrorForSession）——两件事分家就会出现
+//     "清了 A 的目录、标记说 B 的文件已经镜像过"这种找不到副本的状态;
+//   - runScope 为空（手工造的会话）时退化成只有环境段,与从前的路径逐字相同。
+func (s *Session) mirrorScope() string {
+	if s == nil {
+		return ""
+	}
+	s.mu.Lock()
+	scope := s.runScope
+	envSeg := s.mirrorEnvSegNow()
+	s.mu.Unlock()
+	return mirrorScopeOf(envSeg, scope)
+}
+
+// mirrorEnvSegNow 环境段（调用方持有 s.mu）。
+func (s *Session) mirrorEnvSegNow() string {
+	env := s.envName
+	host, zone := "", ""
+	if s.cfg != nil {
+		if env == "" {
+			env = s.cfg.EnvName()
+		}
+		host, zone = s.cfg.SSH.Host, s.cfg.Zone
+	}
+	return mirrorEnvSeg(env, host, zone)
+}
+
+// nextSessionID 会话的可见 ID（既有形状 `s<毫秒>`）+ **进程内唯一**保证。
+//
+// 从前是裸的 `time.Now().UnixMilli()`:同一个毫秒里起的第二条会话会拿到同一个 ID,
+// 于是 `m.sessions[id]` 把第一条**顶掉**（并发放开之后这就是"另一条会话莫名其妙没了"）。
+//
+// 这里把它做成**单调计数器**:候选值 = 当前毫秒,但必须严格大于上一次发出去的值。
+// 于是
+//   - 形状不变（H2:仍是 `s<数字>`,数量级仍是毫秒时间戳,老脚本与用户照抄的 ID 不作废）;
+//   - 同一毫秒里连起两条 → 第二条拿到"前一毫秒"的下一个数,**不撞**;
+//   - 时钟回拨也不会撞（计数器只增不减）。
+func nextSessionID() string {
+	for {
+		last := sessionSeq.Load()
+		next := time.Now().UnixMilli()
+		if next <= last {
+			next = last + 1
+		}
+		if sessionSeq.CompareAndSwap(last, next) {
+			return "s" + strconv.FormatInt(next, 10)
+		}
+	}
+}
+
+var (
+	// sessionSeq 上一次发出去的会话 ID 数值（见 nextSessionID）。
+	sessionSeq atomic.Int64
+	// runScopeSeq 运行作用域的单调序号（见 nextRunScope）。
+	runScopeSeq atomic.Int64
+)
+
+// nextRunScope 分配一个进程内唯一的运行作用域（镜像/命令输出的目录段,见 mirrorScope）。
+// 只做路径段,不面向用户:*不*放进任何输出去改既有形状。
+func nextRunScope() string {
+	return "run" + strconv.FormatInt(runScopeSeq.Add(1), 10)
+}
+
+// inheritMirrorState 复用的宿主会话进入新一轮时,把上一轮的镜像作用域与"已镜像"记录
+// 一起接过来（缺陷 X / T5.1）。
+//
+// 为什么两个都要接:
+//   - 作用域:复用的宿主会话要清的是**自己上一轮**那棵子树（clearMirrorForSession 按它算）,
+//     另起一个新作用域就等于把上一轮的副本留在盘上（"只活一轮"这条语义会丢）;
+//   - 记录:新一轮会重新落副本（Manager 随后调 resetMirrored）,但在此之前
+//     `mirrorStopFile` 可能已经在别的路径上判过"这个文件镜像过了"。
+//
+// 新建的会话（NewSession）本来就有自己的作用域,这里什么都不做。
+func (s *Session) inheritMirrorState() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.runScope == "" {
+		s.runScope = nextRunScope()
+	}
+	if s.mirrored == nil {
+		s.mirrored = map[string]bool{}
+	}
 }
 
 // mirrorStopFile 把停站文件的源码落进本地镜像。
@@ -2807,10 +2910,16 @@ type SourceFile struct {
 	LocalPath string `json:"localPath,omitempty"`
 }
 
-// mirrorWrite 会话内读路径的镜像落盘(与会话外 ReadSourceStandalone 共用同一目录)
+// mirrorWrite 会话内读路径的镜像落盘(与会话外 ReadSourceStandalone 共用同一目录口径)
+//
+// 落点用**本会话的作用域**（缺陷 X / T5.1）:从前是环境段一个路径段,
+// 同环境下两条会话共用一个目录 —— A 拉过的文件 B 的 `mirrored` 标记里没有,
+// 但盘上已经有了,于是"B 永远拉不到 A 拉过的文件"这个状态同时成立。
 func (s *Session) mirrorWrite(serverPath string, data []byte) string {
-	return writeMirror(s.cfg.DataDir,
-		mirrorEnvSeg(s.envName, s.cfg.SSH.Host, s.cfg.Zone), serverPath, data)
+	if s.cfg == nil {
+		return ""
+	}
+	return writeMirrorScoped(s.cfg.DataDir, s.mirrorScope(), serverPath, data)
 }
 
 type srcCacheEntry struct {

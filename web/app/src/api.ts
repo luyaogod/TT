@@ -678,9 +678,15 @@ export const api = {
       `${API_BASE}/sessions/${id}/restart`, { method: 'POST', body: JSON.stringify({ ent: ent || '' }), timeoutMs: 90000 }),
   sessionClose: (id: string) =>
     req<any>(`${API_BASE}/sessions/${id}/close`, { method: 'POST', timeoutMs: 90000 }),
-  sessionSwitch: (env: string, ent?: string) =>
+  // 连到该环境（Q26：与 `start` 同类"选环境并连上去"，**不是**"把一个会话切到另一个环境"）。
+  // 连上去之前，**已在跑的那条会话会被服务端收掉** —— 这是有意的（Q27：我只想连到那个环境）。
+  // 所以这里**必须带上"要收掉的那条会话"**（WP4b / Q4 / C8.2）：服务端那五处"没给目标就取当前
+  // 会话"的兜底已经全删了，不带目标时池里有多条会话就会回 409 + SESSION_AMBIGUOUS（而不是替前端挑
+  // 一条）；**不新增参数**（Q28：前端照旧自己记住人点的那条，并在请求里说明要收掉它）。
+  // 传的是**服务端原始句柄**（C5.4：路径与句柄只认 id，不认 ref/display）。
+  sessionSwitch: (env: string, ent?: string, sessionId?: string) =>
     req<{ sessionId: string; env?: string; state?: string }>(
-      `${API_BASE}/sessions/switch`, { method: 'POST', body: JSON.stringify({ env, ent: ent || '' }), timeoutMs: 90000 }),
+      `${API_BASE}/sessions/switch`, { method: 'POST', body: JSON.stringify({ env, ent: ent || '', session: sessionId || '' }), timeoutMs: 90000 }),
   // 空闲态重新设置会话 TOPENT(空值 = 清除覆盖并重新下发配置默认)
   topent: (id: string, value: string) => req<{ topent: string }>(`${API_BASE}/sessions/${id}/topent`, { method: 'POST', body: JSON.stringify({ value }) }),
   bpAdd: (id: string, location: string) =>
@@ -736,11 +742,13 @@ export const api = {
   },
   wsLogContent: (rowid: string) =>
     req<{ item: WSLogItem; content: WSLogContent }>(`${API_BASE}/wslogs/content?rowid=${encodeURIComponent(rowid)}`),
-  // 重放调试:request 非空 = 用界面里改过的入参(后端落临时文件后作为入参文件)
-  wsLogDebug: (rowid: string, request?: string) =>
+  // 重放调试:request 非空 = 用界面里改过的入参(后端落临时文件后作为入参文件)。
+  // **必须带上"要收掉的那条会话"**（WP4b / Q4 / C8.2）：服务端不再自己找当前会话，
+  // 池里多条又不带目标时回 409 + SESSION_AMBIGUOUS，不会随机收掉别人的会话。
+  wsLogDebug: (rowid: string, request?: string, sessionId?: string) =>
     req<{ sessionId: string; module?: string; prog?: string; runProg?: string }>(`${API_BASE}/wslogs/debug`, {
       method: 'POST',
-      body: JSON.stringify(request ? { rowid, request } : { rowid }),
+      body: JSON.stringify({ rowid, ...(request ? { request } : {}), ...(sessionId ? { session: sessionId } : {}) }),
     }),
   sourcePreview: (module: string, prog: string) =>
     req<{ source: { path: string; content: string; dvmFile?: string } }>(`${API_BASE}/source-preview?module=${encodeURIComponent(module)}&prog=${encodeURIComponent(prog)}`),
