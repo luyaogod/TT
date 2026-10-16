@@ -23,18 +23,24 @@ import {
   type AxisMode, type Domain,
 } from './recordingTime'
 
-/** 泳道:按 kind/方向分。顺序就是显示顺序(上=运行期,下=缓存)。 */
+/** 泳道:按 kind/方向分。顺序就是显示顺序(上=运行期,下=缓存)。
+ *
+ * 颜色语义**写在每一道的 tooltip 里**（用户 2026-10-16 要求去掉屏上的图例）：
+ * 常驻图例占一整行、而它的信息只在"第一次看"时有用 —— 悬停能看到就够了。 */
 const LANES: { key: string; label: string; hint: string; match: (f: RecordingFrame) => boolean }[] = [
   {
-    key: 'rt', label: '运行期 → 前端', hint: '界面状态与回应(om / un / rn):界面变成什么样,都在这条线上',
+    key: 'rt', label: '运行期 → 前端',
+    hint: '界面状态与回应：om（绿）/ un（深绿）/ rn（红，删节点）/ 握手（紫）。界面变成什么样都在这条线上',
     match: (f) => f.d === 1 && !isOther(f),
   },
   {
-    key: 'fe', label: '前端 → 运行期', hint: '用户/注入的事件(event _om):"谁点了什么"在这条线上',
+    key: 'fe', label: '前端 → 运行期',
+    hint: '用户/注入的事件（蓝）：event _om。"谁点了什么"在这条线上',
     match: (f) => f.d === 0 && !isOther(f),
   },
   {
-    key: 'other', label: '缓存 / 其它', hint: '图片缓存(type=5)与没认出来的帧:不是消息、不解析、不重放,但占时间',
+    key: 'other', label: '缓存 / 其它',
+    hint: '图片缓存（type=5，灰）与没认出来的帧：不是消息、不解析、不重放，但占时间',
     match: (f) => isOther(f),
   },
 ]
@@ -62,12 +68,8 @@ function kindClass(k: string): string {
 }
 
 const LANE_H = 26 // 每条泳道的高度(px)
-const RULER_H = 18
 /** 悬停多久才出精确信息(毫秒)。照 DSH 的做法:鼠标扫过时不弹。 */
 const HOVER_DELAY = 500
-/** 静默带的判据:两个方向都没有帧、且间隔超过这个比例(相对整段跨度)。 */
-const SILENT_FRAC = 0.02
-const SILENT_MIN_MS = 300
 
 export interface StripSelection {
   c: number
@@ -181,34 +183,25 @@ export function RecordingOverview(p: Props) {
     }
   }, [bounds, p, plotW, valueAt])
 
-  // 静默带:两个方向都没有帧的区间。只在时间轴上有意义(字节轴上"间隔"不存在)。
-  const silents = useMemo(() => {
-    if (p.mode !== 'time') return []
-    const ts = p.items.filter((f) => f.t > 0).map((f) => f.t).sort((a, b) => a - b)
-    if (ts.length < 2) return []
-    const minGap = Math.max(SILENT_MIN_MS, (ts[ts.length - 1] - ts[0]) * SILENT_FRAC)
-    const out: { from: number; to: number }[] = []
-    for (let i = 1; i < ts.length; i++) {
-      if (ts[i] - ts[i - 1] >= minGap) out.push({ from: ts[i - 1], to: ts[i] })
-    }
-    return out
-  }, [p.items, p.mode])
+  // 静默带**不画**（用户 2026-10-16 定）：两个方向都没有字节的那一段，留空就是最清楚的表达 ——
+  // 斜纹既抢眼又没有新信息（"这里没东西"一眼就看得出来）。原来那段代码连同一个 useMemo 一起删掉了。
 
   const selX = p.sel ? x(axisValue(p.sel, dom.mode)) : null
   const cursorX = p.cursor > 0 || dom.mode === 'bytes' ? x(p.cursor) : null
 
   return (
     <div className="border-b border-border bg-card/40">
-      {/* 工具条:轴口径 + 缩放。轴口径要**写出来** —— "横轴是时间还是字节序"是这一屏的前提。 */}
+      {/* 工具条只留"能做的事":复位 / 这一刻 / 缩放。
+          刻意**不写**"概览""453 帧""横轴:时刻"这类字 —— 位置与含义一眼就看得出来，
+          而"横轴是时间还是字节序"只有在**不是时间**时才必须说（那时它是警告，不是标签）。 */}
       <div className="flex h-7 items-center gap-2 px-2 text-[11px] text-muted-foreground">
-        <span className="text-foreground/80">概览</span>
-        <span className="rounded-ui border border-border px-1.5 py-0.5"
-          title={p.mode === 'time'
-            ? '横轴 = 帧首块时刻(帧级精度)。可以滚轮缩放、右键拖动平移、右键单击复位'
-            : '横轴 = 各方向文件里的**字节序** —— 这一份没有帧级时间(索引缺失或由老件重建),所以位置不是时间'}>
-          {p.mode === 'time' ? '横轴:时刻' : '横轴:字节序(无帧级时间)'}
-        </span>
-        <span>{p.items.length} 帧</span>
+        {p.mode !== 'time' && (
+          <span className="rounded-ui border border-amber-500/40 px-1.5 py-0.5 text-amber-600 dark:text-amber-400"
+            title="这一份没有帧级时间（索引缺失，或者它是老件重建出来的）：横轴是**各方向文件里的字节序** ——
+位置不是时间，只表示'在第几个字节'。想要帧级时间轴得用新版本重录一轮。">
+            横轴:字节序（无帧级时间）
+          </span>
+        )}
         {zoomed && (
           <button onClick={() => p.onDomain(bounds)} className="flex items-center gap-0.5 rounded-ui border border-border px-1.5 py-0.5 hover:bg-accent"
             title="复位到全览(也可以右键单击条带)">
@@ -230,7 +223,11 @@ export function RecordingOverview(p: Props) {
         </span>
       </div>
 
+      {/* 操作说明**不在屏上占一行**，挪进这条 tooltip（要用的人会去悬停，不用的人不该被它占视线）。 */}
       <div ref={boxRef} className="relative select-none pb-1"
+        title={p.mode === 'time'
+          ? '左键拖动=移游标 · 滚轮=缩放 · 右键拖动=平移 · 右键单击=复位'
+          : '左键拖动=移游标（横轴是字节序，不能缩放成时间）'}
         onMouseDown={onDown}
         onContextMenu={(e) => {
           // 右键:单击 = 清选区 + 复位缩放(拖动平移由 mousedown/mousemove 处理)
@@ -255,21 +252,8 @@ export function RecordingOverview(p: Props) {
                 {lane.label}
               </div>
               <div className="relative min-w-0 flex-1 border-b border-border/40">
-                {/* 静默带:通高斜纹 + 一句"多久没有字节"。它比空白更有信息量 —— 
-                    空白既可能是"没流量",也可能是我没画出来。 */}
-                {silents.map((s) => {
-                  const a = x(s.from), b = x(s.to)
-                  if (b < 0 || a > plotW) return null
-                  const left = Math.max(0, a), w = Math.max(1, Math.min(plotW, b) - left)
-                  return (
-                    <div key={s.from} className="absolute inset-y-0 border-x border-dashed border-border/70 text-muted-foreground/30"
-                      style={{
-                        left, width: w,
-                        backgroundImage: 'repeating-linear-gradient(45deg, currentColor 0 1px, transparent 1px 5px)',
-                      }}
-                      title={`${((s.to - s.from) / 1000).toFixed(1)} s 静默（两个方向都没有字节）`} />
-                  )
-                })}
+                {/* 静默段**留空**（用户定）：两个方向都没有字节的那一段不画任何东西 ——
+                    "这里没东西"一眼就看得出来，斜纹只会抢走注意力。 */}
                 {frames.map((f) => {
                   const v = axisValue(f, dom.mode)
                   let cx = x(v)
@@ -321,19 +305,6 @@ export function RecordingOverview(p: Props) {
         )}
       </div>
 
-      {/* 图例:颜色与"一根游标"的含义。不写图例的话,三色块就是装饰。 */}
-      <div className="flex flex-wrap items-center gap-3 px-2 pb-1 text-[10px] text-muted-foreground">
-        {[['event', '事件'], ['om', 'om'], ['un', 'un'], ['rn', 'rn'], ['meta', '握手'], ['cache', '图片缓存']].map(([k, label]) => (
-          <span key={k} className="flex items-center gap-1">
-            <span className={`inline-block h-2 w-2 rounded-[1px] ${kindClass(k)}`} />{label}
-          </span>
-        ))}
-        <span className="ml-auto">
-          {p.mode === 'time'
-            ? '左键拖动=移游标 · 滚轮=缩放 · 右键拖动=平移 · 右键单击=复位'
-            : '左键拖动=移游标（横轴是字节序,不能缩放成时间）'}
-        </span>
-      </div>
     </div>
   )
 }

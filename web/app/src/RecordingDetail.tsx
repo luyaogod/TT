@@ -418,21 +418,24 @@ export function RecordingDetail({ id, onBack }: Props) {
 
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" style={{ flexDirection: narrow ? 'column' : 'row' }}>
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              {/* 页签:两个。左边给"看哪一层",右边给计数 —— 数字照实来自服务端。 */}
+              {/* 页签:两个。计数只给**一个数** —— 头里已经有"帧/事件/步"三层的全貌，
+                  这里只需要说明"这一页有多少行"。哪一层是什么，页签名与行本身说得清。 */}
               <div className="flex h-7 shrink-0 items-center gap-1 border-b border-border px-1 text-[11px]">
                 {([['steps', '分层记录'], ['stream', '全文流']] as const).map(([k, label]) => (
                   <button key={k} onClick={() => setTab(k)}
                     className={`rounded-ui px-2 py-0.5 ${tab === k ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/50'}`}
                     title={k === 'steps'
-                      ? '一个语义动作一行：回答"用户做了什么、运行期回没回"'
+                      ? '一个语义动作一行：回答"用户做了什么、运行期回没回"。同一行里可展开看回应'
                       : '一帧一行（含图片缓存）：回答"这条线上到底过了什么字节"'}>
                     {label}
                   </button>
                 ))}
                 <span className="ml-2 truncate text-[10px] text-muted-foreground">
                   {tab === 'steps'
-                    ? `共 ${actions.length} 步；同一行里可展开看回应。图片缓存与没归属的帧在「全文流」里`
-                    : `共 ${streamTotal || ov.items.length} 帧，已加载 ${streamFrames.length}`}
+                    ? `共 ${actions.length} 步`
+                    : (streamFrames.length < (streamTotal || ov.items.length)
+                      ? `已加载 ${streamFrames.length} / ${streamTotal || ov.items.length} 帧`
+                      : `共 ${streamTotal || ov.items.length} 帧`)}
                 </span>
               </div>
               <RecordingTable

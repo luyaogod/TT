@@ -293,7 +293,11 @@ function RowView({ row, p, xOf, miniW, clock, t0, collapsed, onToggle }: {
         {row.kind === 'response' ? <CornerDownLeft size={11} className="inline" /> : f.d === 1 ? '→' : '←'}
       </div>
       <div className="w-12 shrink-0" />
-      <div className="w-[210px] shrink-0 truncate pl-1 font-mono text-[11px]">{f.r ? `#${f.r}` : f.k}</div>
+      <div className="w-[210px] shrink-0 truncate pl-1 font-mono text-[11px]">
+        {/* 只有"这条消息指向某个对象"时才填这一格。没有 idRef 的（图片缓存、批量同步）**留空** ——
+            以前这里退化成显示 kind，于是缓存行会出现"cache | cache"两遍（用户 2026-10-16 指出的）。 */}
+        {f.r ? `#${f.r}` : ''}
+      </div>
       <div className="min-w-0 flex-1 truncate pl-1 font-mono text-[11px]">
         <span className="text-foreground/70">{f.k}</span>
         {(f.q > 0 || f.k === 'event' || f.k === 'om') && <span> #{f.q}</span>}
