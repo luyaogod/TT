@@ -5,11 +5,12 @@
 // internal/web/recordings.go 的文件头注释)。界面这边能做的只有"发请求 + 拉列表",
 // 真正的活在子进程里 —— 所以起录要等它登记(秒级到几十秒),停录要等它收工落身份。
 //
-// 列表把「住哪 / 怎么起的 / 什么时候录的 / 多大 / 指纹 / 归属」一次摊开:
-// 挑一份录像回放时,前四项决定"这份能不能用"(闸门按**启动路径**比对,见
-// internal/fep/path.go),后三项决定"要不要留着"。
+// 列表只摊开**六列**（用户 2026-10-16 定的）：`ID / 时间 / 位置 / 作业 / 环境 / 体积`。
+// 挑录像时这几项够回答"这是哪一轮、在哪、多大"。原先还有「启动路径」与「指纹」两列，
+// 那两项决定"这份能不能回放"（回放闸门按启动路径与指纹比对，见 internal/fep/path.go）——
+// 它们没丢，只是搬到了**明细页的检查器**里：挑的时候不需要逐张比对指纹。
 //
-// **点一行 → 整屏换成明细页**(`#record/<id>`,见 RecordingDetail.tsx):条带 + 三层记录表
+// **点一行 → 整屏换成明细页**(`#record/<id>`,见 RecordingDetail.tsx):条带 + 全文流记录表
 // + 检查器。身份、回放、复制 ID、删除这些"看着这一份做决定"的动作也搬到了明细页的头上 ——
 // 一份录制只该有一个"我正看着它"的地方,列表只管挑。
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
@@ -103,13 +104,6 @@ function secsBetween(a?: string, b?: string): number {
   if (!a || !b || b.startsWith('0001-')) return 0
   const d = (new Date(b).getTime() - new Date(a).getTime()) / 1000
   return Number.isFinite(d) && d > 0 ? Math.round(d) : 0
-}
-
-// 指纹:hash(条数)。hash 空 = 这一轮根本没录到界面(作业没连上来 / 刚起来就断了),
-// 那不是"少了几个字",而是"这份录像没有可回放的界面"。
-function fmtFP(fp?: { total: number; hash: string }): string {
-  if (!fp || !fp.hash) return '-'
-  return `${fp.hash}(${fp.total} 条)`
 }
 
 export function RecordView() {
@@ -376,20 +370,21 @@ export function RecordView() {
                 行只负责"点开看",不摆按钮(与接口日志页的列表同一形态)。 */}
             <Table container={false} className="table-fixed border-separate border-spacing-0 text-xs">
               <TableHeader>
+                {/* 表头**有底色**（用户 2026-10-16）：它是 sticky 的，滚动时下面要有东西把它
+                    与行分开；顺带一眼看出"这一栏是表头不是数据"。列这时只剩六条（用户定的：
+                    ID / 时间 / 位置 / 作业 / 环境 / 体积）—— 原先的「启动路径」与「指纹」两列去掉了，
+                    它们都还在：指纹与启动路径在**明细页的检查器**里（回放闸门照样按它们比对，
+                    只是不再占列表的一列）。 */}
                 <TableRow className="hover:bg-transparent">
-                  <TableHead className="sticky top-0 z-10 w-48 border-t-0 border-l-0 bg-background"
-                    title="录制 ID:命令行 `tt fep rec show/rm/reproduce <ID>` 用的就是它">录制 ID</TableHead>
-                  <TableHead className="sticky top-0 z-10 w-16 border-t-0 border-l-0 bg-background"
-                    title="长期库:不自动清理,可在明细页里手动删;缓存:可再生的中间数据,随统一清理框架按年龄删">住哪</TableHead>
-                  <TableHead className="sticky top-0 z-10 w-24 border-t-0 border-l-0 bg-background"
-                    title="这一次作业是怎么起来的。回放闸门按它比对:路径不同的录像不能用">启动路径</TableHead>
-                  <TableHead className="sticky top-0 z-10 w-32 border-t-0 border-l-0 bg-background">作业</TableHead>
-                  <TableHead className="sticky top-0 z-10 w-36 border-t-0 border-l-0 bg-background"
-                    title="环境 / 区域 / ENT(企业编号)">环境/区域/ENT</TableHead>
-                  <TableHead className="sticky top-0 z-10 w-36 border-t-0 border-l-0 bg-background">时间</TableHead>
-                  <TableHead className="sticky top-0 z-10 w-20 border-t-0 border-l-0 bg-background">体积</TableHead>
-                  <TableHead className="sticky top-0 z-10 w-48 border-t-0 border-l-0 bg-background"
-                    title="编号表摘要:sha256 前 16 位(条数)。整体比对用它,不看数字也不看声明顺序">指纹</TableHead>
+                  <TableHead className="sticky top-0 z-10 w-52 border-t-0 border-l-0 bg-muted"
+                    title="录制 ID:命令行 `tt fep rec show/rm/reproduce <ID>` 用的就是它">ID</TableHead>
+                  <TableHead className="sticky top-0 z-10 w-44 border-t-0 border-l-0 bg-muted">时间</TableHead>
+                  <TableHead className="sticky top-0 z-10 w-20 border-t-0 border-l-0 bg-muted"
+                    title="长期库:不自动清理,可在明细页里手动删;缓存:可再生的中间数据,随统一清理框架按年龄删">位置</TableHead>
+                  <TableHead className="sticky top-0 z-10 w-40 border-t-0 border-l-0 bg-muted">作业</TableHead>
+                  <TableHead className="sticky top-0 z-10 border-t-0 border-l-0 bg-muted"
+                    title="环境 / 区域 / ENT(企业编号)">环境</TableHead>
+                  <TableHead className="sticky top-0 z-10 w-20 border-t-0 border-l-0 bg-muted">体积</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -399,17 +394,18 @@ export function RecordView() {
                       onClick={() => openDetail(r)}
                       title="点开这一份的明细(条带 + 三层记录表 + 检查器):看它录到了什么、回放前核对身份"
                       className="h-7 cursor-pointer hover:bg-accent/40">
-                      <TableCell className="w-48 border-t-0 border-l-0 px-2 py-0 font-mono" title={r.id}>
+                      <TableCell className="w-52 border-t-0 border-l-0 px-2 py-0 font-mono" title={r.id}>
                         <span className="block truncate font-mono">{r.id}</span>
                       </TableCell>
-                      <TableCell className="w-16 border-t-0 border-l-0 px-2 py-0" title={r.where}>
+                      {/* 时间放第二列：挑录像时"这是哪一轮"往往比"住哪"更先要看 */}
+                      <TableCell className="w-44 border-t-0 border-l-0 px-2 py-0" title={r.started || '身份里没记时间'}>
+                        <span className="block truncate font-mono text-[11px] text-muted-foreground">{fmtTime(r.started)}</span>
+                      </TableCell>
+                      <TableCell className="w-20 border-t-0 border-l-0 px-2 py-0"
+                        title={`${r.where || '-'}｜长期库:不自动清理,在明细页里手动删;缓存:可再生的中间数据,随统一清理框架按年龄删`}>
                         <span className="block truncate">{r.where || '-'}</span>
                       </TableCell>
-                      <TableCell className="w-24 border-t-0 border-l-0 px-2 py-0"
-                        title={PATH_LABEL[r.path || ''] || (r.path || '身份里没写路径')}>
-                        <span className="block truncate font-mono text-muted-foreground">{r.path || '-'}</span>
-                      </TableCell>
-                      <TableCell className="w-32 border-t-0 border-l-0 px-2 py-0" title={r.prog || ''}>
+                      <TableCell className="w-40 border-t-0 border-l-0 px-2 py-0" title={r.prog || ''}>
                         <span className="block truncate text-sky-600 dark:text-sky-400">{r.prog || '-'}</span>
                       </TableCell>
                       <TableCell className="border-t-0 border-l-0 px-2 py-0"
@@ -418,17 +414,8 @@ export function RecordView() {
                           {r.env || '-'}/{r.zone || '-'}/{r.ent || '-'}
                         </span>
                       </TableCell>
-                      <TableCell className="border-t-0 border-l-0 px-2 py-0" title={r.started || '身份里没记时间'}>
-                        <span className="block truncate font-mono text-[11px] text-muted-foreground">{fmtTime(r.started)}</span>
-                      </TableCell>
-                      <TableCell className="border-t-0 border-l-0 px-2 py-0" title={`${r.bytes} 字节`}>
+                      <TableCell className="w-20 border-t-0 border-l-0 px-2 py-0" title={`${r.bytes} 字节`}>
                         <span className="font-mono text-[11px] text-muted-foreground">{fmtBytes(r.bytes)}</span>
-                      </TableCell>
-                      <TableCell className="border-t-0 border-l-0 px-2 py-0"
-                        title={r.fingerprint?.hash
-                          ? `编号表 ${r.fingerprint.total} 条;sha256 前 16 位 ${r.fingerprint.hash}`
-                          : '这一轮没录到界面(作业没连上来,或刚起来就断了)'}>
-                        <span className="block truncate font-mono text-[11px] text-muted-foreground">{fmtFP(r.fingerprint)}</span>
                       </TableCell>
                     </TableRow>
                   )
