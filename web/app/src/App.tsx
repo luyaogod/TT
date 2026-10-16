@@ -523,12 +523,10 @@ export function App() {
             <RecordView />
           </ViewPane>
           <ViewPane show={view === 'settings'} label="设置">
-            {/* 设置页不渲染右侧那四个（依赖会话的）视图图标，于是它需要一个说清"回哪儿"的
-                回程入口 —— 由外壳按"上一个非设置视图"给它（那个 ref 在进设置时不会被改写）。 */}
-            <SettingsView
-              onBack={() => setView(lastViewRef.current)}
-              backLabel={VIEW_LABEL[lastViewRef.current] || lastViewRef.current}
-            />
+            {/* 设置页的出口只有左侧那一列图标（会话/设置/字典…）。原来这里还给过一个
+                「返回「录制」」的回程按钮，用户 2026-10-16 要求去掉：设置是"先配环境"的地方，
+                它不该猜你想回哪一件活儿 —— 换视图点左边那列图标就是了。 */}
+            <SettingsView />
           </ViewPane>
         </div>
         {/* 右侧视图图标栏(仿左侧活动栏,竖排):调试 / 接口日志 / 服务测试 / 录制 ——

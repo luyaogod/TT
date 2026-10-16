@@ -290,6 +290,11 @@ export function RecordView() {
           于是这一行只留:作业名 + 起录/停录 + 刷新,并且**靠左**(不再 ml-auto 顶到右边:
           左边的条件没了,再把人赶到右边纯属浪费)。
           字段名在左、控件在右,不写进 placeholder(与接口日志页的 QueryField 同一口径)。 */}
+      {/* 录制工具条（作业名 / 开始 / 停止 / 环境过滤 / 在录吗）**只在列表那一屏出现**
+          （用户 2026-10-16："明细页面不应该显示录制区域"）：它是"起一轮、挑一份"的东西，
+          而明细页是"看某一份"——那里已经有自己的头（`← 列表 | ID | 作业名 | 回放/复制/删除/刷新`），
+          再顶一条"开始录制"只会让人以为在这一屏也能起录。 */}
+      {!recordId && (
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-2 py-2">
         <span className="shrink-0 text-xs text-muted-foreground"
           title="要录的作业编号。起录走的是服务端另起的 `tt fep rec start`,与调试会话互不干扰">作业名</span>
@@ -352,6 +357,7 @@ export function RecordView() {
           </span>
         )}
       </div>
+      )}
 
       {/* 查询/操作失败一律走 toast(与接口日志页同口径),列表区不内联错误行 —— 那会把表格挤动 */}
 

@@ -19,7 +19,7 @@
 // 一整套默认值写回去 —— 那会在配置里凭空写出 `termWidth: 200` 这种用户从没设过的值)。
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
-  AlertCircle, ArrowLeft, CheckCircle2, Copy, Download, Eye, EyeOff,
+  AlertCircle, CheckCircle2, Copy, Download, Eye, EyeOff,
   Monitor, Plus, RefreshCw, Search, Sun, Moon,
   Terminal, Trash2, Zap,
 } from 'lucide-react'
@@ -367,9 +367,10 @@ function sshsFormOf(c: HostsView): SshItem[] {
   })
 }
 
-// onBack / backLabel 由外壳给（它知道「上一个非设置视图」是哪个）。两个都是可选的：
-// 不传只是少一个回程按钮，不该崩。
-export function SettingsView({ onBack, backLabel = '' }: { onBack?: () => void; backLabel?: string } = {}) {
+// 没有 `onBack` / `backLabel` 了（用户 2026-10-16 要求去掉那个「返回「录制」」按钮）：
+// 设置页的出口只有左侧那一列视图图标。原来那个按钮的用意是"设置页不渲染右侧那四个依赖会话
+// 的图标，得给一条回程路" —— 但设置是"先配环境"的地方，它不该猜你想回哪一件活儿。
+export function SettingsView() {
   const section = useStore((s) => s.settingsSection)
   const setSection = useStore((s) => s.setSettingsSection)
   const theme = useStore((s) => s.theme)
@@ -1105,17 +1106,6 @@ export function SettingsView({ onBack, backLabel = '' }: { onBack?: () => void; 
                   : anyDirty ? 'text-amber-600 dark:text-amber-400' : '')}>
                 {saveState === 'saving' ? '保存中…' : saveState === 'saved' ? '已保存 ✓' : anyDirty ? '有未保存的修改' : ''}
               </span>
-              {/* 回程入口。设置页**不渲染**右侧那四个图标(它们都依赖会话,设置页是"先配环境"
-                  的地方),于是这一页唯一的出口是左侧那个「会话」图标 —— 它既不带"返回"的意思,
-                  还会顺带展开会话栏。这里补一个说清去哪的按钮:去哪儿由外壳按"上一个非设置视图"给。 */}
-              {onBack && (
-                <button onClick={onBack}
-                  title={`离开设置,回到「${backLabel}」。设置页不显示那四个依赖会话的视图图标 —— 这是回程入口之一,另一个是左侧的「会话」图标`}
-                  className="inline-flex shrink-0 items-center gap-1 rounded-ui border border-border px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
-                  <ArrowLeft className="h-3 w-3" />
-                  返回「{backLabel}」
-                </button>
-              )}
             </span>
           </div>
 
@@ -1880,3 +1870,4 @@ export function SettingsView({ onBack, backLabel = '' }: { onBack?: () => void; 
     </div>
   )
 }
+
