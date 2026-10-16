@@ -18,6 +18,46 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// createNoWindow 是 Windows 的 CREATE_NO_WINDOW：给**控制台程序**起一个没有控制台的子进程。
+// 注意它只能"不给控制台"，不能把已有的窗口藏起来（SpawnDetached 那边用的是 DETACHED_PROCESS）。
+const createNoWindow = 0x08000000
+
+// HasConsole 报告本进程是不是挂着一个控制台。
+//
+// 判据是 kernel32 的 GetConsoleWindow()（没有控制台时返回 0）。x/sys/windows 没包这个函数，
+// 所以自己取一次过程地址。它要回答的场景见 HideConsole。
+func HasConsole() bool {
+	h, _, _ := procGetConsoleWindow.Call()
+	return h != 0
+}
+
+var (
+	kernel32             = windows.NewLazySystemDLL("kernel32.dll")
+	procGetConsoleWindow = kernel32.NewProc("GetConsoleWindow")
+)
+
+// HideConsole 让**控制台子程序**不要在父进程没有控制台时弹出一个新的控制台窗口。
+//
+// 为什么需要它（用户实测：点「开始录制」一下弹出一大堆终端窗口/标签页）：
+// `tt serve` 起录制走的是 winproc.SpawnDetached（DETACHED_PROCESS）—— 那个 `tt fep rec start`
+// **没有控制台**。而它内部用 runSelf/runSelfOut 起的是一串控制台程序（`tt debug start`、
+// `tt debug exec`、`tt debug quit`…）：父进程没有控制台时，Windows 会给**每一个**子进程
+// **新分配一个控制台**，于是每起一个子进程就多一个窗口（Windows Terminal 下是多一个标签页）。
+//
+// 父进程**已经有**控制台时不加这个标志：那时子进程照旧继承同一个控制台 ——
+// 用户在自己终端里跑 `tt fep rec start` 时，交互与输出一点都不变。
+//
+// 只动 CreationFlags 的这一个位，别的位（调用方可能已经设了 DETACHED_PROCESS 之类）原样保留。
+func HideConsole(c *exec.Cmd) {
+	if HasConsole() {
+		return
+	}
+	if c.SysProcAttr == nil {
+		c.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	c.SysProcAttr.CreationFlags |= createNoWindow
+}
+
 // SpawnDetached 启动一个脱离子进程（不等待），返回 pid。输出追加到 logPath，stdin 是空设备。
 // extraEnv 追加在 os.Environ() 之后（同名后者胜），用来把工作区之类的设置传给子进程。
 //

@@ -18,6 +18,7 @@ import (
 	"tt/internal/config"
 	"tt/internal/debug"
 	"tt/internal/fep"
+	"tt/internal/winproc"
 )
 
 var (
@@ -234,6 +235,9 @@ func runSelf(cmd *cobra.Command, args ...string) error {
 	c.Stdout = cmd.ErrOrStderr()
 	c.Stderr = cmd.ErrOrStderr()
 	c.Stdin = os.Stdin
+	// 父进程没有控制台时（`tt serve` 里那条脱离的 rec start）别让每个子进程弹一个新的
+	// 控制台窗口 —— 用户实测点一下「开始录制」弹出一大堆终端标签页（见 winproc.HideConsole）。
+	winproc.HideConsole(c)
 	if err := c.Run(); err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
@@ -269,6 +273,7 @@ func runSelfOut(cmd *cobra.Command, args ...string) ([]byte, error) {
 	c.Stdout = f
 	c.Stderr = cmd.ErrOrStderr()
 	c.Stdin = os.Stdin
+	winproc.HideConsole(c) // 同上：没有控制台的父进程下，别让子进程弹控制台窗口
 	runErr := c.Run()
 	cerr := f.Close()
 	if runErr != nil {

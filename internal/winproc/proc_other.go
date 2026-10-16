@@ -13,6 +13,13 @@ import (
 	"syscall"
 )
 
+// HasConsole 报告本进程是不是挂着一个终端。非 Windows 上"控制台窗口"这件事不成立
+// （子进程不会因为父进程没有终端就弹窗），恒返回 true，于是 HideConsole 是空操作。
+func HasConsole() bool { return true }
+
+// HideConsole 在非 Windows 上是空操作（见 HasConsole 与 Windows 版那份注释）。
+func HideConsole(c *exec.Cmd) {}
+
 // SpawnDetached 启动一个脱离子进程（不等待），返回 pid。语义与 Windows 版一致。
 func SpawnDetached(exe string, args []string, logPath string, extraEnv ...string) (int, error) {
 	logf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
