@@ -24,6 +24,18 @@ var wsEndpoints = map[string]string{
 	"5": "awsp930", // OpenApi Web service
 }
 
+// wsURLPrefix 是服务测试默认地址的前缀：出貨區(topprd)走 `/ws`，其余区走 `/w`。
+//
+// 单独抽出来是给 `/api/status` 用的（前端要拿它拼占位符地址）—— 这条规则只有这一份实现，
+// 两边各写一遍的后果是"界面上的默认地址与真正发出去的地址不一致"（实测 zone=t 时
+// 前端给 /wtopprd、后端给 /wstopprd，而这种偏差在本机 zone=36 时看不出来）。
+func wsURLPrefix(zone string) string {
+	if host.ZoneTNSName(zone) == "topprd" {
+		return "/ws"
+	}
+	return "/w"
+}
+
 // WSDefaultURLFor 按接口方式与登录区域(→ T100 服务别名)生成默认 URL。
 // 前缀口径与 awsq990 一致:出貨區(ZONE=topprd)是 /ws<ZONE>,其余区是 /w<ZONE>。
 func WSDefaultURLFor(cfg *Config, mode string) string {
@@ -31,12 +43,7 @@ func WSDefaultURLFor(cfg *Config, mode string) string {
 	if ep == "" {
 		ep = "awsp920"
 	}
-	zone := host.ZoneTNSName(cfg.Zone)
-	prefix := "/w"
-	if zone == "topprd" {
-		prefix = "/ws"
-	}
-	return "http://127.0.0.1" + prefix + zone + "/ws/r/" + ep
+	return "http://127.0.0.1" + wsURLPrefix(cfg.Zone) + host.ZoneTNSName(cfg.Zone) + "/ws/r/" + ep
 }
 
 // stripWSDLSuffix 去掉 ?wsdl 查询后缀(原生:URL 匹配 http://*?wsdl 即去掉,

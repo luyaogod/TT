@@ -406,6 +406,10 @@ func (s *Server) hStatus(w http.ResponseWriter, r *http.Request) {
 		"ssh":      s.cfg.SSH.Host,
 		"zone":     s.cfg.Zone,
 		"zoneName": host.ZoneTNSName(s.cfg.Zone), // 区域代码 → T100 服务别名(如 36→t35prd;服务测试默认地址要用)
+		// wsPrefix:服务测试默认地址的前缀。出貨區(topprd)是 `/ws`,其余区是 `/w` ——
+		// 这条规则只有后端一份实现(WSDefaultURLFor),前端要抄就得抄对:两边不一致时
+		// 界面上的占位符地址是错的(实测 zone=t 时前端给 /wtopprd、后端给 /wstopprd)。
+		"wsPrefix": wsURLPrefix(s.cfg.Zone),
 		"listen":   s.ListenAddr(),
 		"watchdog": s.cfg.WatchdogSeconds,
 	}

@@ -497,9 +497,26 @@ export function SettingsView({ onBack, backLabel = '' }: { onBack?: () => void; 
   }, [])
 
   useEffect(() => { loadSettings() }, [loadSettings])
+  // 有未保存的修改时，刷新/关标签页要说一声（浏览器原生那一下）。
+  //
+  // 判据用渲染期现算的值（见 baselineRef 的说明），所以把它提到这里算一次、下面复用。
+  // 只在本页**可见**时才拦：本页是 keep-alive 常驻的，别的视图上刷新时弹出
+  // "设置页有未保存的修改"会让人莫名其妙。
+  const anyDirty = dirtyRefAny()
+  const view = useStore((s) => s.view)
+  const settingsVisible = view === 'settings'
+  useEffect(() => {
+    if (!settingsVisible || !anyDirty) return
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = '' // 现代浏览器只认这一句（文案由浏览器自己给，不能自定义）
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [settingsVisible, anyDirty])
+
   // 本页被 keep-alive 常驻挂载(切走只是 display:none),所以**不能轮询** ——
   // 改为"每次切回本页、且没有未保存修改时"回读一次,拿别处(命令行)改过的值。
-  const view = useStore((s) => s.view)
   // 初值取"挂载那一刻可不可见":本页是 store 的初始视图,若从 false 起步,第一条 effect
   // 已经拉过一次 /api/hosts,这一条又会把同一次挂载当成"刚从别处切回来"再拉一次
   // （CDP 抓到两次同源调用，实测）。判据是"可见性**变化**"，不是"现在可见"。
@@ -1019,8 +1036,7 @@ export function SettingsView({ onBack, backLabel = '' }: { onBack?: () => void; 
   // 表格里那些行级动作的共用禁用条件:别的操作在跑、或这个动作自身在跑
   const mirrorBusy = mirrorRunning || opBusy !== ''
   const syncBusy = syncRunning || opBusy !== ''
-  // 渲染期现算:任何 state 变化都会重渲染,所以它跟着表单内容走(见 baselineRef 的说明)
-  const anyDirty = dirtyRefAny()
+  // 渲染期现算的 anyDirty 已在上面算过（它同时给"刷新确认"那条 effect 用），这里不再重复
   const mirrorDirOk = !!dict.mirrorDir.trim() && !isDirty('mirror')
 
   // 卡片的保存按钮:只在真的有改动时才出现。
@@ -1185,7 +1201,8 @@ export function SettingsView({ onBack, backLabel = '' }: { onBack?: () => void; 
                             <Input className={input} value={cur.host} onChange={(e) => patchSsh(selSsh, { host: e.target.value })} />
                           </Field>
                           <Field label="端口">
-                            <Input className={input} type="number" value={cur.port || ''}
+                            {/* min/max 让浏览器先挡一道最明显的手误；真正的权威仍是服务端的 validateHosts */}
+                            <Input className={input} type="number" min={1} max={65535} value={cur.port || ''}
                               onChange={(e) => patchSsh(selSsh, { port: Number(e.target.value) || 22 })} />
                           </Field>
                           <Field label="登录区域">
@@ -1240,7 +1257,7 @@ export function SettingsView({ onBack, backLabel = '' }: { onBack?: () => void; 
                                 onChange={(e) => patchDb(selSsh, { host: e.target.value })} />
                             </Field>
                             <Field label="端口">
-                              <Input className={input} type="number" value={curDb.port || ''}
+                              <Input className={input} type="number" min={0} max={65535} value={curDb.port || ''}
                                 placeholder={curDb.type === 'kingbase' ? '54321' : '1521'}
                                 onChange={(e) => patchDb(selSsh, { port: Number(e.target.value) || 0 })} />
                             </Field>

@@ -1,6 +1,9 @@
-// 服务测试视图:复刻 awsq990「集成服务测试」——接口方式/网址/请求报文,直接执行看响应,
-// 并用一张常驻表格记录每次执行(起始时间/HTTP code/运行结果/处理时间(秒),与原生 g_wsfa2_d 同列)。
+// 服务测试视图:复刻 awsq990「集成服务测试」——接口方式/网址/请求报文,直接执行看响应。
 // 后端经 SSH 在服务器上以 curl 调用(与 awsq990 同网络位置)。
+//
+// 这里**没有**执行历史表:早先的注释说"用一张常驻表格记录每次执行(与原生 g_wsfa2_d 同列)",
+// 而界面上从来没有那张表(实测被测试者点出来过)。要留历史得先想清楚它归谁管(会话?
+// 数据目录?)—— 在那之前不要用注释把不存在的东西说成存在。
 import { useEffect, useState } from 'react'
 import { Play } from 'lucide-react'
 import { isSoapMode, useStore } from './store'
@@ -31,15 +34,22 @@ export function WsTestView() {
   const toast = useToast()
   const wsLogSel = useStore((s) => s.wsLogSel)
   const wsLogContent = useStore((s) => s.wsLogContent)
-  // 默认地址里的区域别名(36→t35prd):取自 /api/status,避免占位符写死某一个区
+  // 默认地址里的区域别名(36→t35prd)与**前缀**(出貨區走 /ws、其余区走 /w)都取自
+  // /api/status:这条拼法只有后端一份实现(WSDefaultURLFor),前端自己再推一遍容易漏掉
+  // 「topprd 走 /ws」那一档 —— 实测 zone=t 时前端给 /wtopprd、后端给 /wstopprd,
+  // 而本机 zone=36 时这个偏差看不出来。
   const [zoneName, setZoneName] = useState('')
+  const [wsPrefix, setWsPrefix] = useState('/w')
   useEffect(() => {
-    void api.status().then((s: any) => setZoneName(s.zoneName || '')).catch(() => {})
+    void api.status().then((s: any) => {
+      setZoneName(s.zoneName || '')
+      if (s.wsPrefix) setWsPrefix(s.wsPrefix)
+    }).catch(() => {})
   }, [])
 
   const isSoap = isSoapMode(mode)
   const ep = MODES.find((m) => m[0] === mode)?.[1] || 'awsp920'
-  const defaultUrl = `http://127.0.0.1/w${zoneName || 't35prd'}/ws/r/${ep}`
+  const defaultUrl = `http://127.0.0.1${wsPrefix}${zoneName || 't35prd'}/ws/r/${ep}`
 
   const doRun = () => void runWsTest()
 

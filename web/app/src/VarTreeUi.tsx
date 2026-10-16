@@ -3,8 +3,17 @@
 import { useState } from 'react'
 import type { TNode } from './fglparse'
 
+// 一层节点一次最多渲染多少行。
+//
+// 为什么要有上限:一个 ARRAY 有 3000 个子节点时,展开它就直接铺出 3001 行 DOM
+// (实测 ~450ms 且滚动发涩)。超出的部分**不是把数据藏起来**,而是先不渲染 + 一个
+// 「再显示 N 项」—— 点一下多铺一屏,用户想看多久都行,DOM 不会一次爆掉。
+const PAGE = 200
+
 function NodeRow({ node, depth, toggle }: { node: TNode; depth: number; toggle: (n: TNode) => void }) {
   const expandable = !!node.children?.length
+  const [shown, setShown] = useState(PAGE)
+  const total = node.children?.length ?? 0
   return (
     <>
       <div
@@ -24,9 +33,19 @@ function NodeRow({ node, depth, toggle }: { node: TNode; depth: number; toggle: 
         )}
         {node.type && <span className="ml-1 shrink-0 text-muted-foreground">{node.type}</span>}
       </div>
-      {node.open && node.children?.map((c, j) => (
+      {node.open && node.children?.slice(0, shown).map((c, j) => (
         <NodeRow key={j} node={c} depth={depth + 1} toggle={toggle} />
       ))}
+      {node.open && total > shown && (
+        <button
+          className="block text-muted-foreground hover:text-foreground"
+          style={{ paddingLeft: (depth + 1) * 14 + 4 }}
+          onClick={(e) => { e.stopPropagation(); setShown((n) => n + PAGE) }}
+          title={`这一层共 ${total} 项，已铺 ${shown} 项 —— 一次全铺出来会让 DOM 卡住`}
+        >
+          再显示 {Math.min(PAGE, total - shown)} 项（共 {total} 项）
+        </button>
+      )}
     </>
   )
 }
