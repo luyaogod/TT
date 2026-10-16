@@ -106,17 +106,30 @@ export function RecordingDetail({ id, onBack, onChanged }: Props) {
   const progressTick = useStore((s) => s.recProgressTick)
   const progressID = useStore((s) => s.recProgressID)
   const [rp, setRp] = useState<{ steps: ReplayStep[]; progress: Progress; running: boolean; note?: string; hasLog: boolean } | null>(null)
+  // 说明：`hasLog` 仍然读进来（"这一份回过放没有"是服务端的事实），只是界面不再用它决定显示 ——
+  // 显示与否只看"现在跑不跑"（见下面那条 `rp?.running`）。留着它是为了 toast 只在真有日志时说话。
   const rpSince = useRef(0)
+  // 上一拍"还在跑吗"。用来抓"跑完了"那一次跳变 —— 进度条跑完就整行撤掉（用户 2026-10-16），
+  // 不撤的话屏幕上会永久留一行 `完成 73/73` 的死信息；结果改由一条 toast 说一次。
+  const wasRunning = useRef(false)
   const readProgress = useCallback(async (watch: boolean) => {
     try {
       const r = await api.replaySteps(id, 0, watch) // 每次整份读:几十到几千行,比"补页"少一类错
       rpSince.current = r.count || 0
+      const pr = r.progress || emptyProgress()
+      // 跑完的那一次：报一次结果（失败数不为 0 时用 error 的样式，让人一眼看出该去看日志）
+      if (wasRunning.current && !r.running) {
+        const said = `已确认 ${pr.sent} · 无应答 ${pr.noResp}${pr.suspect ? `（可疑 ${pr.suspect}）` : ''} · 跳过 ${pr.skipped}`
+        if (pr.failed > 0) toast.error(`回放结束：${pr.done}/${pr.total}，失败 ${pr.failed}`, { description: said, duration: 0 })
+        else toast.success(`回放完成：${pr.done}/${pr.total}`, { description: said })
+      }
+      wasRunning.current = !!r.running
       setRp({
-        steps: r.states || [], progress: r.progress || emptyProgress(), running: !!r.running,
+        steps: r.states || [], progress: pr, running: !!r.running,
         note: r.note, hasLog: !!r.hasLog,
       })
     } catch { /* 读进度失败不动界面:它只是旁证,下一拍再试 */ }
-  }, [id])
+  }, [id, toast])
   // 进页面就带上 watch=1（让服务端开始推），并每隔一会儿兜底读一次。
   useEffect(() => {
     rpSince.current = 0
@@ -410,8 +423,12 @@ export function RecordingDetail({ id, onBack, onChanged }: Props) {
 
       {ov && (
         <>
-          {/* 回放进度：只有回过放才出现（没回过放 = 这一块整块收起来，不是显示一条空进度）。 */}
-          {rp?.hasLog && (
+          {/* 回放进度条**只在回放跑着的时候存在**（用户 2026-10-16 要求移除它）：
+              跑完就整行撤掉 —— 否则屏幕上会永久留一行 `完成 73/73` 的死信息，而它答不了
+              任何当下问题。这一行同时是**唯一的回放控制台**（暂停/单步/停止、走到第几步、
+              正在等的那一步、已等 N ms），所以"跑着的时候"必须留着；
+              跑完的结果由 `readProgress` 里那一次跳变发一条 toast 说，每步的徽标仍在表里对应行上。 */}
+          {rp?.running && (
             <ReplayProgressBar
               id={id} progress={rp.progress} steps={rp.steps} running={rp.running} note={rp.note}
               onCtl={(c) => void onCtl(c)} />
