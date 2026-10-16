@@ -228,7 +228,15 @@ type Session struct {
 	bps      map[int]*Breakpoint
 	quitReq  bool
 	startAt  time.Time // 进入 stopped 时刻(看门狗/停留计时)
+
+	// quitting/quitDone：收口（结束调试/关闭会话）的"执行者与等待者"协议。
+	//
+	// 为什么要有 quitDone：原来 `quitting` 为真时后来者**立刻 return nil** —— 报"成功"，
+	// 可那一次收口还在跑，会话仍是 running。调用方于是紧接着做下一步（设 TOPENT / 切环境），
+	// 撞上"仅会话空闲(idle)时可设置 TOPENT(当前 运行中)"。实测 2026-10-16：录制收工那一枪
+	// 与回放第一步的 quit 撞在一起，回放就这么静默失败了。现在后来者**等这一次收口做完**。
 	quitting bool
+	quitDone chan struct{}
 
 	runningSince time.Time // 进入 running 时刻(回答"跑了多久")
 	lastOutputAt time.Time // 最近一次有协议输出的时刻(回答"静默了多久")
@@ -1204,14 +1212,17 @@ func modHas42r(conn *host.SSHConn, topDir, mod, prog string) bool {
 // 运行中先中断拿回控制权,再向 fgldb 发 quit 回到 shell,连接不释放。
 // 若拿不回控制权(卡死)或状态异常,降级为整体断开 Close()。
 func (s *Session) EndRun() error {
-	s.mu.Lock()
-	if s.quitting || s.state == StateExit || s.state == StateIdle {
-		s.mu.Unlock()
+	if s.State() == StateExit || s.State() == StateIdle {
 		return nil
 	}
-	st := s.state
-	s.mu.Unlock()
+	// 已经有一次收口在跑就**等它**（见 quitDone 的注释）；否则我当执行者。
+	done, mine := s.beginQuit()
+	if !mine {
+		return s.waitQuit(done)
+	}
+	defer close(done)
 
+	st := s.State()
 	if st == StateRunning {
 		_ = s.Interrupt()
 		deadline := time.Now().Add(20 * time.Second)
@@ -1224,7 +1235,7 @@ func (s *Session) EndRun() error {
 	}
 	if s.State() != StateStopped {
 		// running 拿不回控制权 / loading 启动中:没有可保留的干净宿主,整体断开
-		return s.Close()
+		return s.closeNow()
 	}
 	r, err := s.exec("other", "quit", waitPrompt, 20*time.Second)
 	if err != nil || !r.SawShell {
@@ -1233,24 +1244,59 @@ func (s *Session) EndRun() error {
 			err = fmt.Errorf("quit 后未回到 shell")
 		}
 		s.emitEvent(Event{Type: "log", Text: "结束本轮调试异常,改为断开会话: " + err.Error()})
-		return s.Close()
+		return s.closeNow()
 	}
 	s.markShellReady()
 	s.enterIdle("结束调试:本轮运行已结束,会话保留(可直接再次启动)")
 	return nil
 }
 
+// beginQuit 抢占"收口执行者"这个角色。
+// mine=true 表示本次调用是执行者（拿到做了要 close 的 done）；false 表示已有人在收口，
+// 调用方应当 waitQuit(done) 等它做完 —— 而不是立刻回"成功"（见 quitDone 的注释）。
+func (s *Session) beginQuit() (chan struct{}, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.quitting {
+		return s.quitDone, false
+	}
+	s.quitting = true
+	s.quitDone = make(chan struct{})
+	return s.quitDone, true
+}
+
+// waitQuit 等一次在飞的收口做完，并把"做完之后状态是否真的可以干活"如实报出来。
+func (s *Session) waitQuit(done chan struct{}) error {
+	if done == nil {
+		return nil
+	}
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		return fmt.Errorf("等待上一次结束调试超时(30s)")
+	}
+	// 收口做完了：调用方要看到真实状态（idle / stopped / exit 都算结束，running / loading 不算）
+	if st := s.State(); st == StateRunning || st == StateLoading {
+		return fmt.Errorf("结束调试没有生效(当前 %s)", st)
+	}
+	return nil
+}
+
 // Close 彻底结束会话并释放 SSH(切换环境/重启会话/服务退出/异常兜底用):
 // 必要时先中断,再向 fgldb quit,最后关闭连接。
 func (s *Session) Close() error {
-	s.mu.Lock()
-	if s.quitting {
-		s.mu.Unlock()
-		return nil
+	done, mine := s.beginQuit()
+	if !mine {
+		return s.waitQuit(done)
 	}
-	s.quitting = true
-	st := s.state
-	s.mu.Unlock()
+	defer close(done)
+	return s.closeNow()
+}
+
+// closeNow 是 Close 的实体：**不带**"已有人在收口"的前置判断。
+// 拆出来是因为 EndRun 已经当过执行者了，它的兜底路径要能直接断开而不自锁。
+func (s *Session) closeNow() error {
+	st := s.State()
 
 	if st == StateRunning {
 		s.Interrupt()

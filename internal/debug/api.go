@@ -737,6 +737,10 @@ func (s *Server) hSessionRestart(w http.ResponseWriter, r *http.Request) {
 		fail(w, 502, err)
 		return
 	}
+	// 与 hLaunch / hSessionSwitch / hWSLogDebug 同一条规则：模式由**发起方**定。
+	// 这里也漏过（同一类 bug，见 hSessionSwitch 那段注释）：重启出来的会话若保留
+	// NewSession 的初始值，业主授权（aiTakeover）时它就是 collab，随后"人"的写操作全被拒。
+	ns.SetMode(launchModeFor(r))
 	s.mgr.emit(Event{Type: "log", Text: fmt.Sprintf("重启会话:重新连接 %s …", cfg.EnvName())})
 	s.emitAction(r, ns, "session.restart", "重新开始调试")
 	go s.bootToIdle(ns, r.Context())
@@ -824,6 +828,14 @@ func (s *Server) hSessionSwitch(w http.ResponseWriter, r *http.Request) {
 		fail(w, 502, err)
 		return
 	}
+	// 模式由**发起方**决定 —— 与 hLaunch / hWSLogDebug 同一条规则。
+	//
+	// 漏了这一句的后果（实测 2026-10-16，用户报"点回放没反应"）：切换环境新建出来的会话
+	// 保留 NewSession 的初始模式，而业主授权（config.aiTakeover=true）时那个初始值是
+	// **collab** —— 于是流水线下一步（`debug topent`）以"人"的身份被"协作模式只有 AI 能写"
+	// 拒掉，回放静默失败。launchModeFor 的注释早写过"两条启动路径必须都过这里"，
+	// 这里是漏掉的第三条（/api/sessions/switch）。
+	ns.SetMode(launchModeFor(r))
 	s.mgr.emit(Event{Type: "log", Text: fmt.Sprintf("切换会话:正在连接 %s …", req.Env)})
 	s.emitAction(r, ns, "session.switch", "切换环境到 "+req.Env)
 	go s.bootToIdle(ns, r.Context())

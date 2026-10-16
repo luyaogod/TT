@@ -323,9 +323,12 @@ func (s *Server) hRecordingStop(w http.ResponseWriter, r *http.Request) {
 // spawnAndCheck 起一个脱离的子进程，并给它一个"起手就退"的检查窗口。
 //
 // 为什么需要：这两个按钮的动作都是**另起进程**，而子进程死在第一件事上（端口用不了、
-// 配置读不到）时，界面这边什么都看不出来 —— 调用方拿到的是"已开始…"，然后永远没有下文。
-// 在这里等一小会儿看它还活着没有：活着就是正常（真干活要几十秒），已经退了就把日志尾巴
-// 带回去当错误。窗口取得很短（1.2 秒），正常路径的额外代价就是这一下等待。
+// 配置读不到、被模式闸门拦下）时，界面这边什么都看不出来 —— 调用方拿到的是"已开始…"，
+// 然后永远没有下文（实测 2026-10-16：回放点了三次都"没反应"，真因只在日志里）。
+//
+// 窗口从 1.2 秒放宽到 6 秒：真正会失败的那几步（起隔离实例 → 切环境 → 设 TOPENT → 起作业）
+// 大多在 2~5 秒内出结果，1.2 秒太短、失败被当成"已开始"返回。进程活着就立刻返回，
+// 正常路径不白等；死了就带着**日志里第一处真因**回去。
 func spawnAndCheck(exe string, args []string, logPath string) (int, error) {
 	// TT_ACTOR=human：这两个按钮都是**人在界面上点的**，而链路是"serve 起 tt 子进程 →
 	// 子进程调调试线 REST"，CLI 默认声明自己是 ai —— 在纯人工模式下会被模式闸门拦下
@@ -334,14 +337,21 @@ func spawnAndCheck(exe string, args []string, logPath string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	time.Sleep(1200 * time.Millisecond)
-	if winproc.Alive(pid) {
-		return pid, nil
+	for waited := time.Duration(0); waited < 6*time.Second; waited += 200 * time.Millisecond {
+		time.Sleep(200 * time.Millisecond)
+		if !winproc.Alive(pid) {
+			return pid, spawnFailErr(pid, logPath)
+		}
 	}
+	return pid, nil
+}
+
+// spawnFailErr 子进程起来就退时的错误文案：优先日志里**第一处** error（最早的才是真因）。
+func spawnFailErr(pid int, logPath string) error {
 	if msg := firstLogError(logPath); msg != "" {
-		return pid, fmt.Errorf("进程起来就退了（pid %d）：%s（完整日志：%s）", pid, msg, logPath)
+		return fmt.Errorf("进程起来就退了（pid %d）：%s（完整日志：%s）", pid, msg, logPath)
 	}
-	return pid, fmt.Errorf("进程起来就退了（pid %d）：%s", pid, tailOf(logPath, 300))
+	return fmt.Errorf("进程起来就退了（pid %d）：%s", pid, tailOf(logPath, 300))
 }
 
 // firstLogError 从那条日志里挑出**第一处真正的错误**（`"error": "..."`）给错误信息用。
