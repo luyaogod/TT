@@ -573,8 +573,8 @@ func (s *Server) hSnapshot(w http.ResponseWriter, r *http.Request) {
 		"topent":          sess.TopentOverride(),
 		// 本会话显式给的 TOPENT(启动 --ent / 面板输入)。**不再是"配置级"** ——
 		// 环境配置里的企业编号已移除,所以它与 topent(会话内覆盖)只在"启动给 vs 中途改"上有别。
-		"topentSession":   sess.TopentSession(),
-		"topentShell":     sess.TopentShell(),
+		"topentSession": sess.TopentSession(),
+		"topentShell":   sess.TopentShell(),
 		// 本次重放跑完后读回来的响应原文(非重放会话为空)。
 		// 以前想看它只能"停在收尾断点再 continue 到 exit"从 stdout 抓,很绕。
 		"replayResponse": sess.ReplayResponse(),
@@ -1881,6 +1881,24 @@ const wsReplayLimit = 500
 // replayTypes 只补发"时间线类"事件:state/dead 由页面自己的快照拉取与状态同步负责,
 // 混进补发批次反而可能让前端拿旧状态覆盖新状态。
 var replayTypes = map[string]bool{"stopped": true, "ai_action": true, "log": true, "watchdog": true}
+
+// PublishRecProgress 把"回放走到第几步"推给所有看着页面的客户端（Type = rec.progress）。
+//
+// 谁调它：统一层（internal/web）盯回放进程落的 jsonl 时调。本包不认识录制那一套，
+// 只负责"把这条事件发出去"—— 这正是 Options 注入的意义（见 internal/web 的说明）。
+//
+// 它**不进补发批次**（replayTypes 里没有它）：进度是"此刻的状态"，刷新页面后
+// 前端会自己拉一次 /replay-steps，补一堆历史进度只会在界面上闪一遍。
+func (s *Server) PublishRecProgress(id string, n, total int, result string) {
+	if id == "" {
+		return
+	}
+	s.mgr.emit(Event{
+		Type: "rec.progress", Actor: "system", Action: "rec.progress",
+		Text:     fmt.Sprintf("回放 %s：第 %d/%d 步 %s", id, n, total, result),
+		Progress: &RecProgress{ID: id, N: n, Total: total, Result: result},
+	})
+}
 
 func (s *Server) hWS(w http.ResponseWriter, r *http.Request) {
 	ch, replay, cancel := s.mgr.SubscribeWithReplay("ws", wsReplayLimit)

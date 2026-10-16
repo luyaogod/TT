@@ -40,6 +40,8 @@ func (s *Server) registerRecordings(m *http.ServeMux) {
 	m.HandleFunc("DELETE /api/recordings/{id}", s.hRecordingDelete)
 	// 明细页的四个读侧端点（D1）：概览条带、全文流、三层模型、原始帧。
 	s.registerRecordingDetail(m)
+	// 回放进度（D2）：读进度 + 暂停/单步/停止（读的是回放进程落的 jsonl）。
+	s.registerReplayProgress(m)
 }
 
 // recRow 是列表里的一行（前端直接照着渲染）。

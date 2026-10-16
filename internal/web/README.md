@@ -19,6 +19,8 @@
 | `/api/recordings/{id}/timeline` | 分页的帧列表：`?conn=&dir=&kind=om,event&from=&limit=`（`from` 是**页序号**，不是时间 —— 块级精度下时间全是 0） |
 | `/api/recordings/{id}/steps` | **三层模型**：语义动作 > 原始事件 > 运行期回应（`?conn=`）。读时现算，不落盘 |
 | `/api/recordings/{id}/raw` | 某一帧的原始字节（`?conn=&dir=&off=&len=`）：hex + 可打印形态；越界或单次 >8 KB 一律 400 |
+| `/api/recordings/{id}/replay-steps` | **回放进度**：`?since=N&watch=1`。读的是回放进程逐行 flush 的 jsonl（权威）；`since` 是**已拿到多少条记录行**（一行不等于一步） |
+| `/api/recordings/{id}/replay-ctl` POST | 人对回放下的命令：`{cmd: pause\|resume\|step\|stop}` → 写进 `<日志>.ctl`。非法词 400 / 没有日志 404 / 不在跑 409（**停止除外**，收尾那一下要能点） |
 | `/api/recordings/{id}/replay` POST | 回放这一份：**另起一个进程**跑 `tt fep rec reproduce <ID> --no-wait`（按身份起调试线会话 → 过指纹闸 → 发事件，**不等停站**，会话留着给 AI 取证）。r.r 录的件、以及"已经有一轮**活着**的录制在跑"，这两种情形**在起进程之前**就 409 |
 | `/api/install` GET / POST / DELETE | 把 tt 加进 / 移出用户 PATH |
 | `/api/update` / `/api/update/check` / `/api/update/apply` | tt 自身的更新：读状态（不联网）/ 人去点才查一次 / 交棒给更新器 |
@@ -50,6 +52,27 @@
   这时"这条消息指向哪个对象"没有答案（`fep.soleIDRef`）。
 - **回应归属靠时间窗**：两个方向是两条独立的字节流，序号又分属两侧，唯一的共同坐标是时间；
   窗口退化（相邻两步同一毫秒）或没有帧级时间时，照实说"归不到具体某一步"，不猜。
+
+## 回放进度：两条通道，一条权威
+
+回放跑在**另一个进程**里，所以进度是**读文件**读出来的（`replayprogress.go`）：
+它逐行 flush `<ID>-replay-<时刻>.jsonl`（格式见 [`../fep/README.md`](../fep/README.md)）。
+
+| 通道 | 地位 | 用途 |
+|---|---|---|
+| `GET /replay-steps?since=N` | **权威** | 页面刚打开、刷新、WS 断了、轮询兜底 —— 都靠它。`since` 按**行位置**切，不丢步 |
+| `WS rec.progress` | 只是**叫一声** | 让界面立刻去读一次，省掉最多一个轮询周期 |
+
+这么分是有原因的：WS 那条通道归调试子系统，而本包与它没有 import 边（见 `Options.RecProgress`）。
+把"叫一声"和"数据"分开之后，即使前端漏注册这个事件类型（**实测踩过**：自造的类型被静默丢掉，
+界面什么都不显示也不报错），退化成"晚几百毫秒"，而不是"进度永远不动"。
+
+服务端的**盯盘循环**由客户端请求启动（`?watch=1`，幂等）：没人看不推、收尾或空闲 30 秒自己退场。
+它有两个容易踩的地方，都写在代码注释里：**换日志（或同名重写）时游标必须归零** ——
+不归零的话同一份录制回放第二轮会一行都不推（实测照出来过）；**停机/测试要等它退到安全点**
+（`stopWatches`，Windows 上不等就是"文件被占用"删不掉）。
+
+`Options.RecProgress` 是唯一的接线点（`internal/cli/serve.go` 接到调试子系统的 WS 广播上）。
 
 ## 挂载决策：子系统只挂 API，页面归本层
 

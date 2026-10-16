@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -158,7 +159,47 @@ var recReproduceCmd = &cobra.Command{
 			}
 			conn = id
 		}
-		res, rerr := client.RunReplay(plan, conn, repInterval, false, logf)
+
+		// 回放遥测：逐行落 `<ID>-replay-<时刻>.jsonl`（缓存目录），并**边跑边被读**。
+		//
+		// 为什么落盘而不是只在内存里报：回放是另一个进程（面板按钮走 SpawnDetached），
+		// 界面与命令行都要看进度，唯一双方都够得着的坐标就是"缓存目录 + 录制 ID"。
+		// 落一次，三处受益：界面实时看、命令行卡住时看最后一行、事后还能复盘。
+		// 写不出来**不影响回放**（它是旁证，不是前提）。
+		var rlog *fep.ReplayLogWriter
+		if dir, derr := cacheDir(); derr == nil {
+			if w, werr := fep.NewReplayLogWriter(
+				filepath.Join(dir, fep.ReplayLogName(t.ID, time.Now())), t.ID, conn, len(plan.Events)); werr == nil {
+				rlog = w
+				fmt.Fprintf(cmd.ErrOrStderr(), "· 进度日志 %s\n", w.Path())
+			} else {
+				fmt.Fprintf(cmd.ErrOrStderr(), "· 进度日志写不出来（不影响回放）：%v\n", werr)
+			}
+		}
+		res, rerr := client.RunReplayWith(plan, fep.ReplayRunOptions{
+			Conn: conn, Settle: repInterval, Logf: logf,
+			// 每一步（含中间态）都落盘。命令行这一侧不再逐步打印 ——
+			// 63 步会把终端刷成流水，而"走到哪了"看进度日志或界面就行。
+			OnStep: func(s fep.ReplayStep) {
+				if rlog != nil {
+					rlog.Step(s)
+				}
+			},
+			// 人的命令：暂停 / 单步 / 停止（面板按钮写这个文件）。
+			Ctl: func() fep.ReplayCtl {
+				if rlog == nil {
+					return ""
+				}
+				return fep.ReadReplayCtl(rlog.Path())
+			},
+		})
+		if rlog != nil {
+			note := ""
+			if res != nil && res.Stopped {
+				note = "用户停止"
+			}
+			_ = rlog.Close(derefRes(res), note)
+		}
 		if rerr != nil {
 			return fail(exitFailed, "重放失败：%v", rerr)
 		}
@@ -237,6 +278,14 @@ func firstNonEmptyStr(vs ...string) string {
 		}
 	}
 	return ""
+}
+
+// derefRes 把可能为 nil 的回放结果折成一个空结果（落尾行时用）。
+func derefRes(r *fep.ReplayResult) fep.ReplayResult {
+	if r == nil {
+		return fep.ReplayResult{}
+	}
+	return *r
 }
 
 // MetaEnv / MetaEnt 是 recTarget 上的两个小取值器（身份里没有就是空）。

@@ -14,7 +14,7 @@
 // 步号会随 `--stop-at/--skip` 变,不是身份(H3)。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, CornerDownLeft, MousePointerClick, Type as TypeIcon } from 'lucide-react'
-import type { RecordPrecision, RecordingAction, RecordingFrame } from './api'
+import type { RecordPrecision, RecordingAction, RecordingFrame, ReplayStep } from './api'
 import { fmtBytes, fmtClock, fmtDur, fmtRel } from './recordingTime'
 
 const ROW_H = 22
@@ -52,6 +52,14 @@ interface Props {
   onSelectFrame: (f: RecordingFrame) => void
   selAction: number | null
   onSelectAction: (a: RecordingAction) => void
+  /**
+   * 这一步**回放到哪了**（按事件文本查）。
+   *
+   * 有回放日志时，动作行上会多一个结果徽标 —— 把"用户点的那一下"与"回放有没有把它发出去、
+   * 运行期回没回"对到一起看，是这一页最有用的一个交叉。没回过放时它是 undefined，
+   * 表里也就不挂徽标（**不显示"未知"** —— 没回过放不是一种状态）。
+   */
+  stepByEvent?: (ev: string) => ReplayStep | undefined
   /** 全文流那一侧当前已加载的帧(分页)与总数。 */
   streamFrames: RecordingFrame[]
   streamTotal: number
@@ -252,6 +260,19 @@ function RowView({ row, p, xOf, miniW, clock, t0, collapsed, onToggle }: {
               无回包
             </span>
           )}
+          {/* 回放结果徽标：只有回过放、而且这一步在回放计划里（按事件文本查到）才挂。
+              没查到就什么都不显示 —— "没回过放"与"回放跳过了它"是两件事，不许混成一个灰标签。 */}
+          {(() => {
+            const st = p.stepByEvent && a.events.map(p.stepByEvent).find(Boolean)
+            if (!st) return null
+            const b = stepBadge(st)
+            return (
+              <span className={`shrink-0 rounded-ui border px-1 text-[10px] ${b.cls}`}
+                title={`回放第 ${st.n} 步：${b.why}`}>
+                {b.text}
+              </span>
+            )
+          })()}
         </div>
         <div className="w-14 shrink-0 text-right font-mono text-[11px] text-muted-foreground">{fmtBytes(a.frame.n)}</div>
         <div className="w-14 shrink-0 text-right font-mono text-[11px] text-muted-foreground">{fmtDur(dur)}</div>
@@ -288,8 +309,30 @@ function RowView({ row, p, xOf, miniW, clock, t0, collapsed, onToggle }: {
   )
 }
 
-/** 迷你轴:行里那个小方块。位置来自**同一个** x()(与条带一致)。 */
-function MiniAxis({ xOf, miniW, f, cls }: { xOf: (f: RecordingFrame) => number; miniW: number; f: RecordingFrame; cls: string }) {
+/**
+ * 表里那个回放徽标。与 ReplayProgress.tsx 的 badge 是**同一套说法**，但这里只有一格宽，
+ * 所以用短词（两处的判定规则一致：`suspect` 才是黄灯的"可疑"）。
+ */
+function stepBadge(s: ReplayStep): { text: string; cls: string; why: string } {
+  switch (s.result) {
+    case 'sent':
+      return { text: '已确认', cls: 'border-emerald-500/30 text-emerald-600 dark:text-emerald-400', why: '运行期回了包' }
+    case 'no-response':
+      return s.suspect
+        ? { text: '无回包?', cls: 'border-amber-500/40 text-amber-600 dark:text-amber-400', why: '点击类事件本该有回包，8 秒内没有任何回包（可疑）' }
+        : { text: '无应答', cls: 'border-border text-muted-foreground', why: '这一步本来就没有应答' }
+    case 'skipped':
+      return { text: '跳过', cls: 'border-border text-muted-foreground', why: s.reason || '按要求跳过' }
+    case 'failed':
+      return { text: '失败', cls: 'border-red-500/30 text-red-600 dark:text-red-400', why: s.reason || '发送出错' }
+    case 'waiting':
+      return { text: '进行中', cls: 'border-sky-500/30 text-sky-600 dark:text-sky-400', why: '已发出，正在等回包（进行中不画时长）' }
+    default:
+      return { text: '已暂停', cls: 'border-border text-muted-foreground', why: '等「继续」或「单步」' }
+  }
+}
+
+/** 迷你轴:行里那个小方块。位置来自**同一个** x()(与条带一致)。 */function MiniAxis({ xOf, miniW, f, cls }: { xOf: (f: RecordingFrame) => number; miniW: number; f: RecordingFrame; cls: string }) {
   const raw = xOf(f)
   const within = raw >= 0 && raw <= miniW - 2
   const left = Math.max(0, Math.min(miniW - 2, raw))

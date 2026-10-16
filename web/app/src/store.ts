@@ -107,6 +107,13 @@ interface Store {
   // 录制明细页:纯状态(真正的说明在下面那组 action 上,见 setRecordId/setRecordTab)。
   recordId: string
   recordTab: RecordTab
+  // 回放进度:服务端每次推 `rec.progress` 就把计数器 +1(值本身没有意义,只表示"变了")。
+  //
+  // 为什么不把进度数据也存进 store:它的权威在 `/api/recordings/{id}/replay-steps`
+  // (读的是回放进程逐行 flush 的 jsonl)。WS 只是"叫一声",明细页听见了就去读一次 ——
+  // 这样即使这个事件类型被漏注册、或 WS 断了,退化成"晚几百毫秒",而不是"进度不动"。
+  recProgressTick: number
+  recProgressID: string
   theme: ThemeMode // 外观选择:暗色/亮色/跟随系统(html.dark 挂点,localStorage tt.theme 持久化)
   dark: boolean // 解析结果(system 时随系统变化);html.dark 与 Monaco 主题都按它渲染
   // 服务测试(复刻 awsq990 集成服务测试)
@@ -408,6 +415,8 @@ export const useStore = create<Store>((set, get) => ({
   settingsSection: 'sites',
   recordId: '',
   recordTab: (localStorage.getItem(RECORD_TAB_KEY) === 'stream' ? 'stream' : 'steps') as RecordTab,
+  recProgressTick: 0,
+  recProgressID: '',
   theme: initialTheme,
   dark: resolveDark(initialTheme),
   wsLogs: [], wsLogsLoading: false, wsLogsPage: 1, wsLogsHasMore: false,
@@ -619,6 +628,16 @@ export const useStore = create<Store>((set, get) => ({
         }
         return
       }
+      // 回放进度(录制明细页)。**必须在这里注册**:这个 switch 只认列出来的类型,
+      // 没注册的会被**静默丢掉**(实测:自造一个 warn 类型,前端什么都不显示、
+      // 也不报错,查了很久)。所以新增事件类型时,这一处与 Event 类型一起改。
+      //
+      // 处理方式刻意最轻:只把计数器 +1(有没有变、变了第几号),**不碰时间线**。
+      // 进度靠高频小事件刷时间线只会把它淹掉。明细页订阅这个计数器,
+      // 它一变就去读一次 /replay-steps —— 权威数据永远来自那个端点。
+      case 'rec.progress':
+        set({ recProgressTick: get().recProgressTick + 1, recProgressID: ev.progress?.id || '' })
+        return
     }
   },
 

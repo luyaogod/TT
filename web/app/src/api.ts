@@ -498,6 +498,61 @@ export interface RecordingRawSlice {
   note?: string
 }
 
+// ---- 回放进度（见 internal/fep/replaylog.go 与 internal/web/replayprogress.go）----
+//
+// 一步可能有**不止一条**记录：`waiting`（已发出、正在等回包）之后才是终态，
+// 暂停时还有 `paused`。所以界面按 `n` 取**最后一条**（服务端也用 `states` 收敛好了）。
+export type ReplayStepResult = 'waiting' | 'paused' | 'sent' | 'no-response' | 'skipped' | 'failed'
+export interface ReplayStep {
+  n: number
+  total: number
+  event: string
+  kind?: string
+  target?: number
+  /** 发出去的那一刻（Unix 毫秒）。跳过/失败/暂停时是 **null**（不是 0）。 */
+  sentAt: number | null
+  /** 运行期回包的那一刻。**null = 没有回包**，不是 0 毫秒。 */
+  respAt: number | null
+  result: ReplayStepResult
+  /** 本该有回包却没有（点击类事件）—— 界面据此把「本来无应答」与「8s 无回包（可疑）」分开。 */
+  suspect?: boolean
+  runtimeBytes?: number
+  reason?: string
+}
+export interface ReplayProgress {
+  total: number
+  done: number
+  sent: number
+  noResp: number
+  suspect: number
+  skipped: number
+  failed: number
+  pending: boolean // 有一步正在等回包
+  paused: boolean
+  running: boolean // 尾行还没落 = 这一轮还在跑
+}
+export interface ReplayStepsResp {
+  ok: boolean
+  id: string
+  hasLog: boolean
+  path?: string
+  running?: boolean
+  total?: number
+  /** 已经拿到多少条**记录行**（游标；不是步号 —— 一行不等于一步）。 */
+  since: number
+  from?: number
+  count?: number
+  progress?: ReplayProgress
+  startedAt?: number
+  finishedAt?: number
+  steps: ReplayStep[]
+  /** 按 `n` 收敛后的最新状态（界面画"每一步现在怎么样"用它）。 */
+  states?: ReplayStep[]
+  note?: string
+  bad?: number
+  ctlPath?: string
+}
+
 export interface Event {
   type: string; sessionId: string; time: string
   state?: string; stop?: StopInfo; vars?: VarItem[]; text?: string
@@ -507,6 +562,9 @@ export interface Event {
   actor?: string
   // 机器可读的动作名(bp.add / control.step / session.mode …),text 是给人看的
   action?: string
+  // 回放进度(type = rec.progress)。它是**叫一声**不是权威数据:
+  // 收到之后去读 /api/recordings/{id}/replay-steps(那份 jsonl 才是唯一真相)。
+  progress?: { id: string; n: number; total: number; result: ReplayStepResult }
 }
 
 // WS 建连时的开场补发帧:只追加时间线,不触发任何副作用
@@ -721,4 +779,15 @@ export const api = {
   recordingRaw: (id: string, p: { conn: number; dir: number; off: number; len: number }) =>
     req<RecordingRawSlice>(
       `/api/recordings/${encodeURIComponent(id)}/raw?conn=${p.conn}&dir=${p.dir}&off=${p.off}&len=${p.len}`),
+  // 回放进度:读的是回放进程逐行 flush 的 jsonl(权威)。
+  //   since —— 已经拿到多少**条记录行**(不是步号:一行不等于一步,跳过/暂停会多出行);
+  //   watch —— 顺便让服务端起一个"盯盘"循环,新行会从 WS 推过来(只是叫一声)。
+  replaySteps: (id: string, since = 0, watch = false) =>
+    req<ReplayStepsResp>(
+      `/api/recordings/${encodeURIComponent(id)}/replay-steps?since=${since}${watch ? '&watch=1' : ''}`),
+  // 人对回放下的命令(写在 `<日志>.ctl` 里,由回放进程在下一步之前读)。
+  // 服务端会拒:非法词 400、没有日志 404、不在跑 409(停止除外 —— 收尾那一下要能点)。
+  replayCtl: (id: string, cmd: 'pause' | 'resume' | 'step' | 'stop') =>
+    req<{ ok: boolean; id: string; cmd: string; ctl: string; note: string }>(
+      `/api/recordings/${encodeURIComponent(id)}/replay-ctl`, { method: 'POST', body: JSON.stringify({ cmd }) }),
 }

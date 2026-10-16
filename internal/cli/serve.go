@@ -153,6 +153,10 @@ func newServeCmd() *cobra.Command {
 					Shutdown:  stopWeb,
 					// 与字典子系统同一个值，见上面的 syncDefault
 					SyncDefaultTarget: syncDefault,
+					// 回放进度走调试子系统那条 WS（前端已经在收）：统一层盯回放进程落的
+					// jsonl，一有新行就从这里推出去。两包之间仍然没有 import 边 ——
+					// 耦合就在这一行上（见 web.Options.RecProgress 的说明）。
+					RecProgress: debugSrv.PublishRecProgress,
 				})
 
 				addr := listen

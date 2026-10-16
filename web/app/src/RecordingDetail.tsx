@@ -17,6 +17,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, ArrowLeft, Check, Fingerprint, RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
 import {
   api, type RecordingAction, type RecordingFrame, type RecordingMeta, type RecordingOverview as Ov,
+  type ReplayProgress as Progress, type ReplayStep,
 } from './api'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -28,6 +29,7 @@ import { copyText } from './clipboard'
 import { RecordingOverview } from './RecordingOverview'
 import { RecordingTable } from './RecordingTable'
 import { RecordingInspector } from './RecordingInspector'
+import { ReplayProgressBar } from './ReplayProgress'
 import { axisValue, domainOf, fmtBytes, makeScale, type AxisMode, type Domain } from './recordingTime'
 
 /** 迷你轴(表格每行里那个小方块)的宽度。 */
@@ -38,6 +40,11 @@ const INSP_MAX = 640
 /** 窄到这个宽度以下就不再左右分栏,把检查器放到底部(与录制列表页的 narrowSplit 同一个道理)。 */
 const NARROW = 760
 const STREAM_PAGE = 500
+
+/** 空进度(服务端没给 progress 时的兜底：宁可显示 0，也不显示 undefined 炸掉渲染)。 */
+function emptyProgress(): Progress {
+  return { total: 0, done: 0, sent: 0, noResp: 0, suspect: 0, skipped: 0, failed: 0, pending: false, paused: false, running: false }
+}
 
 interface Props {
   id: string
@@ -71,6 +78,60 @@ export function RecordingDetail({ id, onBack }: Props) {
   const [streamFrames, setStreamFrames] = useState<RecordingFrame[]>([])
   const [streamTotal, setStreamTotal] = useState(0)
   const streamPage = useRef(0)
+
+  // ---- 回放进度(计划 C 的 D7) ----
+  //
+  // 两条触发：**轮询**(权威，断线也能补齐) + **WS `rec.progress`**(叫一声，听见了立刻读一次)。
+  // 数据永远来自 `/replay-steps` —— 这样即使那个事件类型被漏注册，退化成"晚几百毫秒"。
+  const progressTick = useStore((s) => s.recProgressTick)
+  const progressID = useStore((s) => s.recProgressID)
+  const [rp, setRp] = useState<{ steps: ReplayStep[]; progress: Progress; running: boolean; note?: string; hasLog: boolean } | null>(null)
+  const rpSince = useRef(0)
+  const readProgress = useCallback(async (watch: boolean) => {
+    try {
+      const r = await api.replaySteps(id, 0, watch) // 每次整份读:几十到几千行,比"补页"少一类错
+      rpSince.current = r.count || 0
+      setRp({
+        steps: r.states || [], progress: r.progress || emptyProgress(), running: !!r.running,
+        note: r.note, hasLog: !!r.hasLog,
+      })
+    } catch { /* 读进度失败不动界面:它只是旁证,下一拍再试 */ }
+  }, [id])
+  // 进页面就带上 watch=1（让服务端开始推），并每隔一会儿兜底读一次。
+  useEffect(() => {
+    rpSince.current = 0
+    setRp(null)
+    void readProgress(true)
+  }, [id, readProgress, tick])
+  useEffect(() => {
+    if (!rp) return
+    // 还在跑:1s 兜底轮询(WS 一般会更快地叫我们);结束了:停掉,别空转。
+    if (!rp.running) return
+    const t = window.setInterval(() => void readProgress(false), 1000)
+    return () => window.clearInterval(t)
+  }, [rp, readProgress])
+  // WS 叫一声:只认自己这一份的进度(可能同时有别的回放在跑)。
+  useEffect(() => {
+    if (!progressTick) return
+    if (progressID && progressID !== id) return
+    void readProgress(false)
+  }, [progressTick, progressID, id, readProgress])
+  const onCtl = async (cmd: 'pause' | 'resume' | 'step' | 'stop') => {
+    try {
+      const r = await api.replayCtl(id, cmd)
+      toast.success('已下达命令', { description: r.note })
+      void readProgress(false)
+    } catch (e: any) {
+      toast.error('命令没生效', { description: e?.message || String(e) })
+    }
+  }
+  // 事件文本 → 步（表里那些"有动作的帧"据此挂上每一步的结果徽标）。
+  // 用文本当键：回放计划与界面的动作都来自同一份 `event _om` 帧，文本是逐字相同的。
+  const stepByEvent = useMemo(() => {
+    const m = new Map<string, ReplayStep>()
+    for (const s of rp?.steps || []) m.set(s.event.trim(), s) // 同一 n 的中间态/终态已由服务端收敛
+    return (ev: string) => m.get(ev.trim())
+  }, [rp])
 
   // 拉数据:概览 + 分层动作一起(它们是同一屏的两个事实,分两次进入会看到互相矛盾的画面)。
   useEffect(() => {
@@ -310,6 +371,12 @@ export function RecordingDetail({ id, onBack }: Props) {
 
       {ov && (
         <>
+          {/* 回放进度：只有回过放才出现（没回过放 = 这一块整块收起来，不是显示一条空进度）。 */}
+          {rp?.hasLog && (
+            <ReplayProgressBar
+              id={id} progress={rp.progress} steps={rp.steps} running={rp.running} note={rp.note}
+              onCtl={(c) => void onCtl(c)} onRefresh={() => void readProgress(false)} />
+          )}
           <RecordingOverview
             items={ov.items} blocks={ov.blocks} mode={bounds.mode}
             bounds={bounds} domain={domain} onDomain={setDomain}
@@ -341,6 +408,7 @@ export function RecordingDetail({ id, onBack }: Props) {
                 xOf={xOf} miniW={MINI_W} cursor={cursor} onCursor={setCursor}
                 sel={selFrame} onSelectFrame={pick}
                 selAction={selAction} onSelectAction={pickAction}
+                stepByEvent={stepByEvent}
                 streamFrames={tab === 'stream' ? (streamFrames.length ? streamFrames : ov.items) : []}
                 streamTotal={tab === 'stream' ? (streamTotal || ov.items.length) : 0}
                 onLoadMore={loadMore} />

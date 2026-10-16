@@ -174,6 +174,20 @@ tt fep rec index --all              # 库里所有老录制一起补
 三层记录表（语义动作 > 原始事件 > 运行期回应）、检查器（原始帧的 hex、引起的回应、
 名字是怎么解出来的）。这一页是**只读**的；要发事件走 `tt fep do/act` 或回放器。
 
+### 回放走到哪了
+
+回放时每一行进度落在**缓存目录**的 `<录制 ID>-replay-<时刻>.jsonl`（命令回放与面板回放都落）：
+
+```bash
+# 卡住了？看最后一行就知道停在哪一步（`result` 是 waiting/sent/no-response/skipped/failed）
+Get-Content "$env:APPDATA\tt\fep\<录制 ID>-replay-*.jsonl" -Tail 1
+```
+
+`waiting` = 已发出、正在等运行期回包（**不等于 0 毫秒**）；`suspect:true` 是"点击类事件
+本该有回包却没有"，那才是要去看运行期/作业状态的那种。界面那一侧见上面的明细页 URL：
+顶部有进度条、每一步的结果徽标，以及**暂停 / 单步 / 停止**（写在 `<日志>.ctl` 里，
+回放进程在下一步之前读一次）。
+
 要自己先下断点再放行：加 `--no-continue`，放行前用 `tt debug exec` 下好断点再 `continue`。
 
 ### 三条录制路径(都落同一套身份与指纹)

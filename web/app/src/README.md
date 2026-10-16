@@ -98,6 +98,36 @@ terminal（下方面板）、bug-play（调试面板）、list-tree（大纲，�
 （不许画到框外）。「归不了」与「无回包」是两个徽标：前者的下一步是"这一份的时间精度不够"，
 后者是"去看回放日志"——把它们画成一个就是在冤枉运行期。
 
+## 回放进度：叫一声与权威分开
+
+回放是另一个进程干的，进度落在它逐行 flush 的 jsonl 里。界面上是明细页顶上那一条
+（`ReplayProgress.tsx`），它同时接两条通道：
+
+| 通道 | 在界面上的角色 |
+|---|---|
+| `GET /api/recordings/{id}/replay-steps`（1 秒兜底轮询 + 每次收到 WS 就叫一次） | **数据来源** |
+| WS `rec.progress` → `store.recProgressTick` | 只是"变了"的信号，**不携带数据** |
+
+**为什么不让 WS 直接带数据**：那个事件类型必须在 `store.ts` 的 `onEvent` switch 里显式注册，
+否则会被**静默丢掉**（实测：自造一个 `warn` 类型，界面什么都不显示、也不报错，查了很久）。
+分成"叫一声"之后，漏注册的后果只是"晚几百毫秒"。**新增 WS 事件类型时，`Event` 类型与那个
+switch 要一起改**。
+
+四条显示纪律：
+
+1. **进行中的步不画时长**：`waiting` 那一步显示"已等 Nms"（用 `fmtWait`，0 也要显示成
+   `0 ms`，因为"正在等"和"没有这个数"不是一回事），行里的耗时那一栏留空。
+2. **"本来无应答" ≠ "8s 无回包（可疑）"**：判定在服务端（`suspect` = 点击类事件却没回包），
+   界面只按它上色。两者的下一步完全不同。
+3. **数字来自服务端**：`progress` 那一组计数是服务端按 jsonl 收敛出来的，界面**不自己数**
+   （重连补发、暂停、跳过都会让行数与步数不等）。
+4. **跟随尾部，但用户向上滚动就停**（勾选框显示状态，滚回底部自动恢复）：不看这条的话，
+   用户往回翻历史时会被每一拍的新行拽回底部。
+
+表里的动作行还会按**事件文本**挂一个回放结果徽标（`stepByEvent`）—— 把"用户点的那一下"
+与"回放有没有把它发出去"对到一起看，是这一页最有用的交叉。没回过放时**不挂徽标**：
+"没回过放"与"回放跳过了它"是两件事。
+
 ## 已知限制（录制明细页）
 
 1. **只列有身份文件（`.meta.json`）的录制**：身份是收工那一刻落的，所以"正在录的那半份"
@@ -173,7 +203,7 @@ terminal（下方面板）、bug-play（调试面板）、list-tree（大纲，�
 |---|---|
 | 外壳与布局 | `App.tsx`、`main.tsx`、`ErrorBoundary.tsx`、`StatusBar.tsx`、`Toolbar.tsx`、`DebugHeader.tsx` |
 | 视图 | `SettingsView.tsx`、`WsLogView.tsx`、`WsTestView.tsx`、`RecordView.tsx`、`SourceView.tsx` |
-| 录制明细 | `RecordingDetail.tsx`、`RecordingOverview.tsx`、`RecordingTable.tsx`、`RecordingInspector.tsx`、`recordingTime.ts` |
+| 录制明细 | `RecordingDetail.tsx`、`RecordingOverview.tsx`、`RecordingTable.tsx`、`RecordingInspector.tsx`、`ReplayProgress.tsx`、`recordingTime.ts` |
 | 面板 | `Panels.tsx`、`SessionPanel.tsx`、`OutlinePanel.tsx`、`VarTreeUi.tsx` |
 | 编辑器 | `monacoSetup.ts`、`PayloadEditor.tsx` |
 | 4GL 语言工具 | `fglTokens.ts`、`fgloutline.ts`、`fglparse.ts`、`fglPath.ts`、`fglHover.tsx` |

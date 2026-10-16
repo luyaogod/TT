@@ -107,6 +107,23 @@ type Event struct {
 	// Action 机器可读的动作名(bp.add / control.step / session.restart),供前端按类型分支;
 	// Text 则是给人看的文案
 	Action string `json:"action,omitempty"`
+	// Progress 是"录制回放走到第几步"（Type = rec.progress）。
+	//
+	// 为什么不塞进 Text：进度要按**字段**渲染（第几步/结果/等多久），而 Text 是给人看的
+	// 一句话；把它编码成字符串再让前端解析，等于给自己造一个协议。
+	//
+	// 它是**叫一声**，不是权威数据：前端收到之后去读 /api/recordings/{id}/replay-steps
+	// （那份逐行 flush 的 jsonl 才是唯一真相）。这样即使前端漏注册这个类型
+	// （实测踩过：自造的事件类型被前端静默丢掉），退化成"晚几百毫秒"，而不是"进度不动"。
+	Progress *RecProgress `json:"progress,omitempty"`
+}
+
+// RecProgress 是一条回放进度事件（见 Event.Progress）。
+type RecProgress struct {
+	ID     string `json:"id"`
+	N      int    `json:"n"`
+	Total  int    `json:"total"`
+	Result string `json:"result"` // waiting|paused|sent|no-response|skipped|failed
 }
 
 // execResult 命令响应
