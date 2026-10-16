@@ -31,14 +31,43 @@ function isViewKey(v: string): v is ViewKey {
   return v === 'debug' || v === 'wslogs' || v === 'wstest' || v === 'record' || v === 'settings'
 }
 
-/** 解析 location.hash。认不出来的一律返回空对象(不猜,让调用方走默认)。 */
-export function parseHash(hash: string): { view?: ViewKey; section?: SettingsSectionKey } {
+/**
+ * 录制 ID 的合法形态:字母数字开头,后面允许字母数字与 `-` `_` `.`,最长 80。
+ *
+ * 为什么要白名单而不是"转义一下":这个值会进 URL 片段,而片段是**深链接**——用户会把它
+ * 粘给别人。含 `/`、`..`、空格、中文的值只可能来自手改的地址栏或坏数据,那时**丢弃**
+ * (回列表)比"猜他想看哪一份"安全:猜错了就会去打开另一个 ID 的文件。
+ * 录制 ID 本身就是代理落盘的 tag(`fep-20261016-112410`),形态固定。
+ */
+export function isRecordID(v: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(v)
+}
+
+/** 录制视图的片段:列表是 `#record`,明细是 `#record/<录制 ID>`。 */
+export function recordHash(id: string): string {
+  return id ? `#record/${id}` : '#record'
+}
+
+/**
+ * 解析 location.hash。认不出来的一律返回空对象(不猜,让调用方走默认)。
+ *
+ * `recordId` 只在**恰好两段**且第二段是合法 ID 时给出;多一段(`#record/a/b`)或形态不对
+ * 一律当"就是列表" —— 不静默截断(旧写法 `split('/', 2)` 会把 `a` 当 ID 用)。
+ */
+export function parseHash(hash: string): { view?: ViewKey; section?: SettingsSectionKey; recordId?: string } {
   const raw = (hash || '').replace(/^#/, '').trim()
   if (!raw) return {}
-  const [head, tail] = raw.split('/', 2)
+  const parts = raw.split('/')
+  const head = parts[0]
   if (!isViewKey(head)) return {}
+  if (head === 'record') {
+    if (parts.length === 2 && isRecordID(parts[1])) return { view: 'record', recordId: parts[1] }
+    if (parts.length > 2) return {}
+    return { view: 'record' }
+  }
   if (head !== 'settings') return { view: head }
   // #settings 后面可以没有分区(落到默认的第一个)
+  const tail = parts[1]
   if (tail && isSettingsSection(tail)) return { view: 'settings', section: tail }
   return { view: 'settings' }
 }
@@ -49,12 +78,16 @@ export function settingsHash(section: SettingsSectionKey): string {
 }
 
 /**
- * 当前视图对应的 hash。设置页要带上分区(它自己分成四个分区),别的视图就是视图名。
+ * 当前视图对应的 hash。设置页要带上分区(它自己分成四个分区),录制页的明细则带上录制 ID,
+ * 别的视图就是视图名。
  *
  * 写片段这件事必须**双向**(读进来 + 写回去):只读不写的话,点图标切到别的视图时 URL
  * 还停在旧视图上,一刷新就把人弹回旧页(实测:在 `#debug` 里点「设置」,界面是设置页而
- * URL 仍是 `#debug`,刷新回调试页)。两处(外壳与设置页)共用这一份拼法,免得各写一遍。
+ * URL 仍是 `#debug`,刷新回调试页)。录制明细同理:打开了第 N 份却不在片段里,
+ * 刷新就回列表、也没法把"我在看这一份"发给别人。
  */
-export function viewHash(view: ViewKey, section: SettingsSectionKey): string {
-  return view === 'settings' ? settingsHash(section) : `#${view}`
+export function viewHash(view: ViewKey, section: SettingsSectionKey, recordId?: string): string {
+  if (view === 'settings') return settingsHash(section)
+  if (view === 'record') return recordHash(recordId || '')
+  return `#${view}`
 }

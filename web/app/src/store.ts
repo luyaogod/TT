@@ -9,6 +9,18 @@ import { toast } from './toastBus'
 import type { SettingsSectionKey, ViewKey } from './routing'
 export type { ThemeMode }
 
+/**
+ * 录制明细页的页签。
+ *
+ * `steps` 是**分层记录**(语义动作 > 原始事件 > 运行期回应,一个动作一行、可展开),
+ * `stream` 是**全文流**(所有帧,一帧一行,含图片缓存)。两者的差别不是"详略",
+ * 而是"看的是哪一层":前者回答"用户做了什么",后者回答"线上过了什么字节"。
+ */
+export type RecordTab = 'steps' | 'stream'
+
+/** 明细页页签的本地记忆键(与 tt.theme / tt.stackAuto 同一套做法)。 */
+const RECORD_TAB_KEY = 'tt.recordTab'
+
 // timeline 条目(人/AI/系统 的操作与事件,可审计)
 export interface TimelineItem {
   time: string
@@ -92,6 +104,9 @@ interface Store {
   // 设置页当前分区(站点管理/数据字典/DEBUG/应用设置)。放在 store 而不是 SettingsView 局部
   // 是因为 App 的首屏深链接解析要写它。写在这里的是"纯状态",URL 片段由 SettingsView 同步。
   settingsSection: SettingsSectionKey
+  // 录制明细页:纯状态(真正的说明在下面那组 action 上,见 setRecordId/setRecordTab)。
+  recordId: string
+  recordTab: RecordTab
   theme: ThemeMode // 外观选择:暗色/亮色/跟随系统(html.dark 挂点,localStorage tt.theme 持久化)
   dark: boolean // 解析结果(system 时随系统变化);html.dark 与 Monaco 主题都按它渲染
   // 服务测试(复刻 awsq990 集成服务测试)
@@ -142,6 +157,15 @@ interface Store {
   onReplay: (ev: Event) => void
   setView: (v: ViewKey) => void
   setSettingsSection: (s: SettingsSectionKey) => void
+  // 录制明细:非空 = 正在看这一份的明细(空 = 列表)。
+  // 为什么放在 store 而不是 RecordView 的局部状态:URL 片段是深链接的权威
+  // (`#record/<id>`,见 routing.ts),而解析片段的那条 effect 在 App 里 —— 两处必须看到
+  // 同一个值。与 view/settingsSection 完全同一套做法(store 存纯状态,片段由 App 同步)。
+  // 字段本体在文件上半部分的 Store 形状里,这里只声明动作。
+  setRecordId: (id: string) => void
+  // 明细页的页签:分层记录 / 全文流。**记在本地**(localStorage),用户回来还在那一页 ——
+  // 但**不进 URL**:片段只表达"我在看哪一份",页面内的页签是同一个人的操作习惯。
+  setRecordTab: (t: RecordTab) => void
   setLaunchError: (msg: string) => void
   setTheme: (t: ThemeMode) => void
   setActiveTab: (key: string) => void
@@ -382,6 +406,8 @@ export const useStore = create<Store>((set, get) => ({
   // 想干活点「调试」只需往下一格。深链接(#debug、#wslogs…)仍然优先,见 App.tsx 的 parseHash。
   view: 'settings',
   settingsSection: 'sites',
+  recordId: '',
+  recordTab: (localStorage.getItem(RECORD_TAB_KEY) === 'stream' ? 'stream' : 'steps') as RecordTab,
   theme: initialTheme,
   dark: resolveDark(initialTheme),
   wsLogs: [], wsLogsLoading: false, wsLogsPage: 1, wsLogsHasMore: false,
@@ -628,6 +654,13 @@ export const useStore = create<Store>((set, get) => ({
 
   setView: (v) => set({ view: v }),
   setSettingsSection: (s) => set({ settingsSection: s }),
+  // 切明细/回列表。**不在这里动 URL**:片段由 App 那条 effect 按状态写回(与 view 同一套),
+  // 于是浏览器前进/后退与深链接天然一致 —— 这里再写一次 history 就成了两个作者。
+  setRecordId: (id) => set({ recordId: id }),
+  setRecordTab: (t) => {
+    localStorage.setItem(RECORD_TAB_KEY, t)
+    set({ recordTab: t })
+  },
   setLaunchError: (msg) => set({ launchError: msg }),
   // 外观:选择 → 持久化 + 立即应用(跟随系统时 dark 取当前系统偏好)
   setTheme: (t) => {

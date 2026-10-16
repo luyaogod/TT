@@ -372,6 +372,132 @@ export interface RecordingMeta {
   note?: string
 }
 
+// ---- 录制明细页:四个读侧端点(见 internal/web/recordingdetail.go) ----
+//
+// 三层模型的三个数字**分开给**(frames/eventFrames/events/actions):它们回答的是不同的问题,
+// 合成一个数就必然误导(实测一份录制:383 帧 / 事件侧 34 帧 / 63 个原始事件 / 17 个语义动作)。
+//
+// 时间:`t` 是 Unix 毫秒,**0 = 不知道**(没有帧索引,或索引是事后重建的)。时刻**不用
+// omitempty**,所以 0 一定是显式给的 —— 界面据此走"块级精度"那一套显示,而不是画成 1970 年。
+export type RecordPrecision = 'frame' | 'block'
+/** 索引状态:complete 完整 / stale 格式过时 / incomplete 尾行缺失(被硬杀) / missing 没有。 */
+export type RecordIndexState = 'complete' | 'stale' | 'incomplete' | 'missing'
+export interface RecordingIndexInfo {
+  state: RecordIndexState
+  frames: number
+  covered: number
+  rebuilt: boolean // 事后重建的索引:位置准,时刻当时没记
+  version?: number
+  bad?: number // 读不动的行数(>0 = 索引有损)
+}
+/** 一帧。`k`(kind):om/un/rn/event/meta/cache(图片缓存)/typeN(没见过的类型)。 */
+export interface RecordingFrame {
+  o: number // 在对应 raw 文件里的字节偏移
+  n: number // 占用字节数
+  t: number // 帧首块时刻(Unix 毫秒);0 = 不知道
+  c: number // 连接号
+  d: number // 1 = 运行期→前端(>>) / 0 = 前端→运行期(<<)
+  k: string
+  q: number // 消息序号(om/un/rn 的数字、event 的 _om 号)
+  r: number // 这条消息主要指向的对象 id;0 = 没有(一批事件/om 批量同步)
+  preview?: string // 载荷预览(仅 timeline 端点给)
+}
+export interface RecordingDirection {
+  conn: number
+  dir: number
+  dirLabel: string
+  raw: string
+  bytes: number
+  frames: number
+  first?: number
+  last?: number
+  index: RecordingIndexInfo
+  noise?: { off: number; len: number }[] // 没落进任何一帧的字节(握手明文等)
+}
+export interface RecordingCounts {
+  frames: number
+  messages: number
+  cache: number
+  eventFrames: number
+  events: number
+  actions: number
+}
+/** 块级时间刻度(老件专用,来自 timeline.log):没有帧级时间时它是唯一的时间线索。 */
+export interface RecordingBlock { t: number; d: number; n?: number }
+export interface RecordingOverview {
+  ok: boolean
+  id: string
+  where: string
+  dir: string
+  prog?: string
+  started?: string
+  finished?: string
+  timePrecision: RecordPrecision
+  counts: RecordingCounts
+  directions: RecordingDirection[]
+  items: RecordingFrame[]
+  blocks?: RecordingBlock[]
+  notes?: string[]
+}
+/** 事件指向的控件。`confidence` 是硬约束:unresolved 时 `name` 必为空 —— 界面显示 `Type#id`。 */
+export interface RecordingTargetInfo {
+  id?: number
+  type?: string
+  name?: string
+  confidence: 'high' | 'low' | 'unresolved'
+  source?: string // comment-key | name-suffix | own-text | inherit#<id>
+  window?: number
+  windowName?: string
+  parents?: { id: number; type: string; name?: string; text?: string }[]
+  cycle?: boolean
+  why?: string // 定不下名字时的人话原因(不许空着)
+}
+/** 一条"被这一步引出的"运行期帧。 */
+export interface RecordingResponse {
+  o: number; n: number; t: number; c: number; k: string; q: number
+  preview?: string
+  bytes?: number
+}
+/** 三层模型的第一层:一个语义动作(= 用户眼里的"一步")。 */
+export interface RecordingAction {
+  n: number
+  kind: 'click' | 'input'
+  id: number
+  value?: string
+  conn: number
+  frame: RecordingFrame
+  frameText?: string
+  target: RecordingTargetInfo
+  events: string[] // 这一帧里的全部原始事件
+  dropped: number // 其中被语义层丢掉的(导航/状态上报)
+  responses?: RecordingResponse[]
+  responsesTotal?: number
+  /**
+   * 机器可读的那一半（徽标按它选，**不许**去匹配 responsesNote 那句人话）：
+   * attributed 有回应 / none 确实没回 / unknown **归不了**（没有帧级时间、窗口退化…）。
+   * "没回包"与"归不了"的下一步完全不同：前者看回放日志，后者是这一份的时间精度不够。
+   */
+  responsesState?: 'attributed' | 'none' | 'unknown'
+  responsesNote?: string // 归属不了时的原因(不许空着装没事)
+}
+/** /raw 的响应:那一段字节的三种形态(hex 行 / 连续 hex / 可打印)。 */
+export interface RecordingRawSlice {
+  ok: boolean
+  id: string
+  conn: number
+  dir: number
+  raw: string
+  fileBytes: number
+  off: number
+  len: number
+  inFrame: boolean // false = 这一段不是任何一帧(握手明文/没认出帧头的字节)
+  hex: string
+  hexFlat: string
+  printable: string
+  frame?: { off: number; len: number; kind: string; seq: number; idRef: number; t: number; whole: boolean }
+  note?: string
+}
+
 export interface Event {
   type: string; sessionId: string; time: string
   state?: string; stop?: StopInfo; vars?: VarItem[]; text?: string
@@ -567,4 +693,32 @@ export const api = {
   recordingDelete: (id: string) =>
     req<{ ok: boolean; id: string; files: number; bytes: number }>(
       `/api/recordings/${encodeURIComponent(id)}?confirm=1`, { method: 'DELETE' }),
+  // ---- 明细页的四个读侧端点 ----
+  //
+  // 纪律(见 internal/web/recordingread.go):位置一律从字节现场解,索引只补时刻;
+  // 语义层读时现算;解析不出名字就给 id、没有帧级时间就说块级 —— 都不猜。
+  // 四个端点都是纯读:每次请求重新解析(实测 448 KB / 383 帧的录制,overview 27ms / 28KB)。
+  recordingOverview: (id: string) =>
+    req<RecordingOverview>(`/api/recordings/${encodeURIComponent(id)}/overview`),
+  recordingSteps: (id: string, conn?: number) =>
+    req<{ ok: boolean; id: string; timePrecision: RecordPrecision; counts: RecordingCounts; actions: RecordingAction[]; notes?: string[] }>(
+      `/api/recordings/${encodeURIComponent(id)}/steps${conn ? `?conn=${conn}` : ''}`),
+  // 全文流:`from` 是**页序号**(不是时间——块级精度下时间全是 0,用它分页会永远停在第一页);
+  // `kind` 是服务端过滤(`om,event,…`),因为分页也在服务端:前端自己滤会让"这一页只剩两条"变成常态。
+  recordingTimeline: (id: string, p: { conn?: number; dir?: number; kind?: string; from?: number; limit?: number }) => {
+    const qs = new URLSearchParams()
+    if (p.conn) qs.set('conn', String(p.conn))
+    if (p.dir !== undefined) qs.set('dir', String(p.dir))
+    if (p.kind) qs.set('kind', p.kind)
+    if (p.from) qs.set('from', String(p.from))
+    if (p.limit) qs.set('limit', String(p.limit))
+    const s = qs.toString()
+    return req<{ ok: boolean; id: string; timePrecision: RecordPrecision; total: number; from: number; limit: number; frames: RecordingFrame[]; note: string }>(
+      `/api/recordings/${encodeURIComponent(id)}/timeline${s ? `?${s}` : ''}`)
+  },
+  // 取一段原始字节(检查器的「原始帧」页签)。越界与单次 >8 KB 服务端一律 400;
+  // **允许**取一帧中间的一段(一帧实测可以 269 KB,不许分段等于这一帧根本看不了)。
+  recordingRaw: (id: string, p: { conn: number; dir: number; off: number; len: number }) =>
+    req<RecordingRawSlice>(
+      `/api/recordings/${encodeURIComponent(id)}/raw?conn=${p.conn}&dir=${p.dir}&off=${p.off}&len=${p.len}`),
 }

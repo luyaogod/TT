@@ -276,4 +276,19 @@ assert.ok(S().sourceContent.length > 0, '源码内容要落到编辑器上')
 assert.equal(S().currentLine, 3, '入口停站应跳到 MAIN 首条语句(第 3 行)')
 console.log('OK 12) 入口停站(无 stopped 事件)从快照补齐位置与源码')
 
-console.log('\n全部通过: 12/12')
+// ---------- 13) 录制明细的两个状态字段(计划 C 的 D3) ----------
+// 它们是 **URL 片段**在 store 里的那一半,而片段是深链接的权威(`#record/<id>`)——
+// 所以"存得下来"这件事本身要钉住;`#record` 回列表 = 把 ID 清空,不是另设一个标志位。
+assert.equal(S().recordId, '', '默认不在明细里(空 = 列表)')
+S().setRecordId('fep-1')
+assert.equal(S().recordId, 'fep-1')
+S().setRecordId('')
+assert.equal(S().recordId, '', '回列表 = 清空 ID(一个状态,不是两个)')
+assert.ok(['steps', 'stream'].includes(S().recordTab), 'recordTab 只认两个已知值(读盘来的值可能是脏的)')
+S().setRecordTab('stream')
+assert.equal(S().recordTab, 'stream')
+S().setRecordTab('steps')
+assert.equal(S().recordTab, 'steps')
+console.log('OK 13) 录制明细:recordId 空 = 列表、recordTab 只认两个已知值')
+
+console.log('\n全部通过: 13/13')

@@ -9,20 +9,16 @@
 // 挑一份录像回放时,前四项决定"这份能不能用"(闸门按**启动路径**比对,见
 // internal/fep/path.go),后三项决定"要不要留着"。
 //
-// 点一行 → 右侧详情面板(照接口日志页那一套:窄列 + 可拖的分割条 + 页签 + 右上角动作)。
-// 面板说的是一件列表里放不下的事:**回放前自己核对一遍** —— 身份里的启动路径/作业/ENT 对不对、
-// 编号表多少条、这份录制里到底有几条连接(闸门是**按连接**比对的,一条对得上就算过)。
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Check, Fingerprint, Play, RefreshCw, RotateCcw, Square, Trash2, Video, X } from 'lucide-react'
+// **点一行 → 整屏换成明细页**(`#record/<id>`,见 RecordingDetail.tsx):条带 + 三层记录表
+// + 检查器。身份、回放、复制 ID、删除这些"看着这一份做决定"的动作也搬到了明细页的头上 ——
+// 一份录制只该有一个"我正看着它"的地方,列表只管挑。
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Play, RefreshCw, Square, Video } from 'lucide-react'
 import { useStore } from './store'
-import { api, type RecordingCurrent, type RecordingMeta, type RecordingRow } from './api'
+import { api, type RecordingCurrent, type RecordingRow } from './api'
 import { Input, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../shared/ui'
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from '../../shared/ui-radix'
 import { useToast } from './toast'
-import { copyText } from './clipboard'
+import { RecordingDetail } from './RecordingDetail'
 
 // 「这一次作业是怎么起来的」与「归谁 / 留哪」的中文名:与 Go 侧的 Label() 同一套措辞
 // (internal/fep/path.go、retention.go),照抄一份 —— 前端无 i18n,中文硬编码。
@@ -135,14 +131,24 @@ export function RecordView() {
   // 列表读取失败的原因（非空 = 界面要给"读不到"而不是"没有"）。
   const [loadErr, setLoadErr] = useState('')
   const [busy, setBusy] = useState<'' | 'start' | 'stop'>('')
-  // 复制反馈只记一行(局部 ok/fail,1.5s 复位),照接口日志页的 copyRowID
-  const [copied, setCopied] = useState<{ id: string; state: 'ok' | 'fail' } | null>(null)
-  const [pendingDel, setPendingDel] = useState<RecordingRow | null>(null)
 
-  // 详情:选中的那一行 + 它的完整身份(列表里的行只有摘要,身份要单独取)。
-  const [sel, setSel] = useState<RecordingRow | null>(null)
-  const [selMeta, setSelMeta] = useState<RecordingMeta | null>(null)
-  const [metaLoading, setMetaLoading] = useState(false)
+  // 明细页:`recordId` 非空就是"正在看这一份"(它是 store 里的状态,URL 片段由 App 同步)。
+  const recordId = useStore((s) => s.recordId)
+  const setRecordId = useStore((s) => s.setRecordId)
+
+  // 列表的滚动位置:进明细再回来时要**回到原处**(keep-alive 语义)。
+  // 两种做法都上:列表留在 DOM 里(只 display:none,浏览器一般会保住 scrollTop),
+  // 再加一份显式存取 —— 后者不受浏览器行为影响,而"回来以后滚到别处去了"是实测会被抱怨的那类小事。
+  const listScrollRef = useRef<HTMLDivElement | null>(null)
+  const savedScroll = useRef(0)
+  const openDetail = (r: RecordingRow) => {
+    savedScroll.current = listScrollRef.current?.scrollTop || 0
+    setRecordId(r.id)
+  }
+  useLayoutEffect(() => {
+    if (recordId) return
+    if (listScrollRef.current) listScrollRef.current.scrollTop = savedScroll.current
+  }, [recordId])
 
   // 列表与「现在在录吗」一起拉:它们是同一屏的两个事实,分两次进入会看到互相矛盾的画面
   // (列表里已有刚收工的件、而"正在录"还挂着;或反过来)。
@@ -159,9 +165,6 @@ export function RecordView() {
       setRows(next)
       setCur(now.recording || null)
       setLoadErr('')
-      // 选中项跟着列表走:还在就换成新的那行(体积/指纹可能刚更新),不在就关掉详情。
-      // 用函数式写法读最新列表,免得把 sel 写进依赖、每次刷新都重拉一遍。
-      setSel((s) => (s ? next.find((x) => x.id === s.id && x.where === s.where) || null : null))
     } catch (e: any) {
       // 错误要留在界面上（loadErr），不能只发一条会消失的 toast：否则列表区会显示成
       // "还没有录制件"——那是一个**事实判断**，与"这次没读到"完全不是一回事（实测）。
@@ -206,108 +209,9 @@ export function RecordView() {
   }, [view, cur, load, sessionEnv])
 
   // 点开一行就取它的身份。取不到(没有 .meta.json 的老件)照实说,不假装有。
-  useEffect(() => {
-    if (!sel) { setSelMeta(null); setMetaLoading(false); return }
-    let alive = true
-    setMetaLoading(true)
-    api.recordingShow(sel.id)
-      .then((r) => { if (alive) setSelMeta(r.meta || null) })
-      .catch((e: any) => {
-        if (!alive) return
-        setSelMeta(null)
-        toast.error('读取录制身份失败', { description: e?.message || String(e) })
-      })
-      .finally(() => { if (alive) setMetaLoading(false) })
-    return () => { alive = false }
-  }, [sel, toast])
-
-  // Esc 关闭详情(仅在本视图可见时生效)。
-  // 有对话框开着时**不抢**这个 Esc：删除的二次确认自己会处理按键，而两处都响应会让
-  // 一次 Esc 关掉两层（对话框 + 详情面板，实测）。
-  useEffect(() => {
-    if (!sel || view !== 'record' || pendingDel) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.preventDefault(); setSel(null) }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [sel, view, pendingDel])
-
-  // ---- 宽度分配:列表吃剩余宽度,详情按占比取宽 + 1px 分隔条(同接口日志页) ----
-  // 容器宽度实测。用 **callback ref**：这一块可能后出现（例如视图先以空态渲染），
-  // 挂载时读一次会读到 null，boxW 永远是 0 —— 分栏退回 50%、窄屏判断失效（实测踩到过）。
-  const splitRef = useRef<HTMLDivElement | null>(null)
-  const [splitEl, setSplitEl] = useState<HTMLDivElement | null>(null)
-  const setSplitNode = useCallback((el: HTMLDivElement | null) => { splitRef.current = el; setSplitEl(el) }, [])
-  const [boxW, setBoxW] = useState(0)
-  useEffect(() => {
-    if (!splitEl) return
-    const ro = new ResizeObserver(() => setBoxW(splitEl.clientWidth))
-    ro.observe(splitEl)
-    setBoxW(splitEl.clientWidth)
-    return () => ro.disconnect()
-  }, [splitEl])
-  const [ratio, setRatio] = useState(() => {
-    const v = Number(localStorage.getItem('tt.recordRatio'))
-    return v >= RATIO_MIN && v <= RATIO_MAX ? v : 0.5
-  })
-  const splittable = Math.max(1, boxW - RESIZER_W)
-  // 窄容器下不再左右分栏，改成"只显示明细、占满"（× 即返回列表）。
-  // 原因同接口日志页：明细宽度只由占比决定（下限 0.25），容器 300px 时它只剩 ~80px，
-  // 键值对与按钮一个字符一行（用户实测截图：目录路径竖着排、"本 信 息"拆成三行）。
-  const narrowSplit = boxW > 0 && boxW < MIN_LIST_W + MIN_DETAIL_W + RESIZER_W
-  // 分栏时明细宽度：按占比，但夹一个**绝对下限**（拖到最小也不许压到读不成，见 MIN_DETAIL_ABS）
-  const detailW = narrowSplit
-    ? splittable
-    : Math.max(MIN_DETAIL_ABS, Math.min(Math.round(splittable * ratio), splittable - MIN_LIST_W))
-  // 拖拽的占比有效下限：与上面一致，否则拖到最左会「线停住、占比还在变」
-  const ratioMin = Math.min(RATIO_MAX, Math.max(RATIO_MIN, MIN_DETAIL_ABS / splittable))
-
-  const onDetailResizeDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    const el = e.currentTarget
-    el.classList.add('dragging')
-    const startX = e.clientX
-    const startRatio = ratio
-    let latest = ratio
-    const move = (ev: MouseEvent) => {
-      // 分隔线跟手:向左拖 = 详情面板变宽(与 VS Code 侧边栏一致);只改占比,总量不变
-      const box = splitRef.current?.clientWidth || 0
-      const sp = Math.max(1, box - RESIZER_W)
-      latest = Math.min(RATIO_MAX, Math.max(ratioMin, startRatio - (ev.clientX - startX) / sp))
-      setRatio(latest)
-    }
-    const up = () => {
-      el.classList.remove('dragging')
-      localStorage.setItem('tt.recordRatio', String(latest))
-      window.removeEventListener('mousemove', move)
-      window.removeEventListener('mouseup', up)
-      // 兜住「收不到 mouseup」：鼠标在窗口外松开、或拖拽中窗口失焦 —— 否则这条 mousemove
-      // 会一直挂着，面板跟着光标跑，直到用户再点一下（读码结论；难复现，但后果难看）。
-      window.removeEventListener('blur', up)
-      document.removeEventListener('mouseleave', up)
-    }
-    window.addEventListener('mousemove', move)
-    window.addEventListener('mouseup', up)
-    window.addEventListener('blur', up)
-    document.addEventListener('mouseleave', up)
-  }
+  // 列表与明细页共用同一个「在录吗」轮询:明细页自己不再轮询 —— 那是同一件事。
 
   const onRefresh = () => setTick((t) => t + 1)
-
-  const copyRow = async (id: string) => {
-    const ok = await copyText(id)
-    setCopied({ id, state: ok ? 'ok' : 'fail' })
-    if (!ok) {
-      // 失败要留得住：原来只有按钮红 1.5 秒。ID 也显示在详情面板里（「录制 ID」那一行），
-      // 说清"可以手选复制"比反复点按钮有用。
-      toast.error('复制失败', {
-        description: `系统剪贴板不可用（多半是窗口没有焦点）；这份录制的 ID 是 ${id}，可以在下面「录制 ID」那一行选中复制。`,
-        duration: 0,
-      })
-    }
-    window.setTimeout(() => setCopied((c) => (c && c.id === id ? null : c)), ok ? 1500 : 4000)
-  }
 
   // 起一轮录制。已经在录时服务端回 409 与一句中文原因,原样弹出来 ——
   // 所以这里只把"点不了"的两种情形(没会话环境 / 没作业名)挡在前面。
@@ -375,44 +279,6 @@ export function RecordView() {
       toast.error('停止录制失败', { description: e?.message || String(e) })
     } finally {
       setBusy('')
-    }
-  }
-
-  // 删长期库里的那一份(入口在详情面板里:删除是看着这一份做的决定,不在列表里误点)。
-  // 确认这一步由 AlertDialog 承担(与「会话」面板同一个基元),确认之后才带 ?confirm=1 发出去
-  // —— 录制不可再生,不给误点留路。
-  const doDelete = async () => {
-    const row = pendingDel
-    setPendingDel(null)
-    if (!row) return
-    try {
-      const r = await api.recordingDelete(row.id)
-      toast.success(`已删除录制:${r.id}`, { description: `清除 ${r.files} 个文件,释放 ${fmtBytes(r.bytes)}` })
-      setSel(null)
-      await load(sessionEnv)
-    } catch (e: any) {
-      toast.error('删除录制失败', { description: e?.message || String(e) })
-    }
-  }
-
-  const cp = copied && sel && copied.id === sel.id ? copied.state : null
-
-  // 回放:交给服务端**另起一个进程**(见 internal/web/recordings.go 的 hRecordingReplay)——
-  // 它按身份起调试线会话、过指纹闸、把事件原样发出去,不等停站。界面这边只负责
-  // "把人送进去 + 把日志落点告诉他",不轮询进度(那是看日志的事)。
-  const [replaying, setReplaying] = useState(false)
-  const onReplay = async (row: RecordingRow) => {
-    setReplaying(true)
-    try {
-      const r = await api.recordingReplay(row.id)
-      toast.success(`已开始回放:${r.id}`, {
-        description: `后台进程 pid ${r.pid};进度看日志 ${r.log};会话留着给 AI 取证`,
-        duration: 8000, // 日志路径要看得清,别 3.5 秒就没了
-      })
-    } catch (e: any) {
-      toast.error('回放失败', { description: e?.message || String(e) })
-    } finally {
-      setReplaying(false)
     }
   }
 
@@ -489,87 +355,75 @@ export function RecordView() {
 
       {/* 查询/操作失败一律走 toast(与接口日志页同口径),列表区不内联错误行 —— 那会把表格挤动 */}
 
-      {/* 左右分配:左侧列表 flex-1 吃掉剩余宽度,右侧详情按占比取宽 + 5px 分隔条。
-          min-w-0/overflow-hidden 锁住容器宽度:面板是 shrink-0,不加锁会把容器一路撑宽
-          (宽度反馈环 → 整页横向溢出)。 */}
-      <div ref={setSplitNode} className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-        {/* 窄容器 + 选中某一行时，这一列整块让位给明细（见 narrowSplit） */}
-        {!(sel && narrowSplit) && (
+      {/* 列表与明细页:**同一时刻只看得见一个**,但两个都留在 DOM 里。
+          列表用 hidden 而不是卸载,是为了回来时滚动位置与筛选都还在(keep-alive 语义;
+          显式存取 scrollTop 见上面那条 useLayoutEffect —— 不依赖浏览器对 display:none 的处理)。 */}
+      <div className={recordId ? 'hidden' : 'flex min-h-0 min-w-0 flex-1 overflow-hidden'}>
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
-          <div className="min-h-0 flex-1 overflow-auto">
+          <div ref={listScrollRef} className="min-h-0 flex-1 overflow-auto">
             {/* table-fixed:列宽交给表头/单元格上的 w-* ,留空的那列吃剩余宽度;
                 container=false 不套 shadcn Table 默认的 overflow-x-auto(它会让 th 的 sticky 失效);
                 border-separate + 单元格只留"右+下"框线,理由与接口日志页列表相同。
-                详情面板打开时列表只剩一半宽,所以列要跟着收(与日志页的 COLS_COMPACT 同一个道理):
-                面板里已经逐项列着的(环境·区域·ENT / 时间 / 体积 / 指纹)在这里让位,只留
-                "这是哪一份"的四项。
-                没有「操作」列了(用户 2026-10-15 要求移除):复制 ID、删除、回放都在详情面板里 ——
+                列表是整屏的(明细页在另一屏),所以每一列都留得下 —— 不再有"详情面板打开时列表
+                只剩一半宽"这件事,列宽因此是固定的。
+                没有「操作」列(用户 2026-10-15 要求移除):复制 ID、删除、回放都在明细页头上 ——
                 行只负责"点开看",不摆按钮(与接口日志页的列表同一形态)。 */}
             <Table container={false} className="table-fixed border-separate border-spacing-0 text-xs">
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
-                  <TableHead className={`sticky top-0 z-10 border-t-0 border-l-0 bg-background ${sel ? 'w-40' : 'w-48'}`}
+                  <TableHead className="sticky top-0 z-10 w-48 border-t-0 border-l-0 bg-background"
                     title="录制 ID:命令行 `tt fep rec show/rm/reproduce <ID>` 用的就是它">录制 ID</TableHead>
-                  <TableHead className={`sticky top-0 z-10 border-t-0 border-l-0 bg-background ${sel ? 'w-14' : 'w-16'}`}
-                    title="长期库:不自动清理,可在详情里手动删;缓存:可再生的中间数据,随统一清理框架按年龄删">住哪</TableHead>
-                  <TableHead className={`sticky top-0 z-10 border-t-0 border-l-0 bg-background ${sel ? 'w-20' : 'w-24'}`}
+                  <TableHead className="sticky top-0 z-10 w-16 border-t-0 border-l-0 bg-background"
+                    title="长期库:不自动清理,可在明细页里手动删;缓存:可再生的中间数据,随统一清理框架按年龄删">住哪</TableHead>
+                  <TableHead className="sticky top-0 z-10 w-24 border-t-0 border-l-0 bg-background"
                     title="这一次作业是怎么起来的。回放闸门按它比对:路径不同的录像不能用">启动路径</TableHead>
-                  <TableHead className={`sticky top-0 z-10 border-t-0 border-l-0 bg-background ${sel ? 'w-24' : 'w-32'}`}>作业</TableHead>
-                  {!sel && (
-                    <>
-                      <TableHead className="sticky top-0 z-10 w-36 border-t-0 border-l-0 bg-background"
-                        title="环境 / 区域 / ENT(企业编号)">环境/区域/ENT</TableHead>
-                      <TableHead className="sticky top-0 z-10 w-36 border-t-0 border-l-0 bg-background">时间</TableHead>
-                      <TableHead className="sticky top-0 z-10 w-20 border-t-0 border-l-0 bg-background">体积</TableHead>
-                      <TableHead className="sticky top-0 z-10 w-48 border-t-0 border-l-0 bg-background"
-                        title="编号表摘要:sha256 前 16 位(条数)。整体比对用它,不看数字也不看声明顺序">指纹</TableHead>
-                    </>
-                  )}
+                  <TableHead className="sticky top-0 z-10 w-32 border-t-0 border-l-0 bg-background">作业</TableHead>
+                  <TableHead className="sticky top-0 z-10 w-36 border-t-0 border-l-0 bg-background"
+                    title="环境 / 区域 / ENT(企业编号)">环境/区域/ENT</TableHead>
+                  <TableHead className="sticky top-0 z-10 w-36 border-t-0 border-l-0 bg-background">时间</TableHead>
+                  <TableHead className="sticky top-0 z-10 w-20 border-t-0 border-l-0 bg-background">体积</TableHead>
+                  <TableHead className="sticky top-0 z-10 w-48 border-t-0 border-l-0 bg-background"
+                    title="编号表摘要:sha256 前 16 位(条数)。整体比对用它,不看数字也不看声明顺序">指纹</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {rows.map((r) => {
-                  const selected = sel?.id === r.id && sel?.where === r.where
                   return (
-                    <TableRow key={`${r.where}:${r.id}`} data-state={selected ? 'selected' : undefined}
-                      onClick={() => setSel(r)}
-                      title={selected ? undefined : '点击在右侧查看这份录制的身份(启动路径/作业/ENT/编号表/连接清单)'}
-                      className="h-7 cursor-pointer hover:bg-accent/40 data-[state=selected]:bg-sky-500/10">
-                      <TableCell className={`border-t-0 border-l-0 px-2 py-0 font-mono ${sel ? 'w-40' : 'w-48'}`} title={r.id}>
+                    <TableRow key={`${r.where}:${r.id}`}
+                      onClick={() => openDetail(r)}
+                      title="点开这一份的明细(条带 + 三层记录表 + 检查器):看它录到了什么、回放前核对身份"
+                      className="h-7 cursor-pointer hover:bg-accent/40">
+                      <TableCell className="w-48 border-t-0 border-l-0 px-2 py-0 font-mono" title={r.id}>
                         <span className="block truncate font-mono">{r.id}</span>
                       </TableCell>
-                      <TableCell className={`border-t-0 border-l-0 px-2 py-0 ${sel ? 'w-14' : 'w-16'}`} title={r.where}>
+                      <TableCell className="w-16 border-t-0 border-l-0 px-2 py-0" title={r.where}>
                         <span className="block truncate">{r.where || '-'}</span>
                       </TableCell>
-                      <TableCell className={`border-t-0 border-l-0 px-2 py-0 ${sel ? 'w-20' : 'w-24'}`}
+                      <TableCell className="w-24 border-t-0 border-l-0 px-2 py-0"
                         title={PATH_LABEL[r.path || ''] || (r.path || '身份里没写路径')}>
                         <span className="block truncate font-mono text-muted-foreground">{r.path || '-'}</span>
                       </TableCell>
-                      <TableCell className={`border-t-0 border-l-0 px-2 py-0 ${sel ? 'w-24' : 'w-32'}`} title={r.prog || ''}>
+                      <TableCell className="w-32 border-t-0 border-l-0 px-2 py-0" title={r.prog || ''}>
                         <span className="block truncate text-sky-600 dark:text-sky-400">{r.prog || '-'}</span>
                       </TableCell>
-                      {!sel && (
-                        <>
-                          <TableCell className="border-t-0 border-l-0 px-2 py-0"
-                            title={`环境 ${r.env || '-'} · 区域 ${r.zone || '-'} · ENT ${r.ent || '-'}`}>
-                            <span className="block truncate font-mono text-[11px] text-muted-foreground">
-                              {r.env || '-'}/{r.zone || '-'}/{r.ent || '-'}
-                            </span>
-                          </TableCell>
-                          <TableCell className="border-t-0 border-l-0 px-2 py-0" title={r.started || '身份里没记时间'}>
-                            <span className="block truncate font-mono text-[11px] text-muted-foreground">{fmtTime(r.started)}</span>
-                          </TableCell>
-                          <TableCell className="border-t-0 border-l-0 px-2 py-0" title={`${r.bytes} 字节`}>
-                            <span className="font-mono text-[11px] text-muted-foreground">{fmtBytes(r.bytes)}</span>
-                          </TableCell>
-                          <TableCell className="border-t-0 border-l-0 px-2 py-0"
-                            title={r.fingerprint?.hash
-                              ? `编号表 ${r.fingerprint.total} 条;sha256 前 16 位 ${r.fingerprint.hash}`
-                              : '这一轮没录到界面(作业没连上来,或刚起来就断了)'}>
-                            <span className="block truncate font-mono text-[11px] text-muted-foreground">{fmtFP(r.fingerprint)}</span>
-                          </TableCell>
-                        </>
-                      )}
+                      <TableCell className="border-t-0 border-l-0 px-2 py-0"
+                        title={`环境 ${r.env || '-'} · 区域 ${r.zone || '-'} · ENT ${r.ent || '-'}`}>
+                        <span className="block truncate font-mono text-[11px] text-muted-foreground">
+                          {r.env || '-'}/{r.zone || '-'}/{r.ent || '-'}
+                        </span>
+                      </TableCell>
+                      <TableCell className="border-t-0 border-l-0 px-2 py-0" title={r.started || '身份里没记时间'}>
+                        <span className="block truncate font-mono text-[11px] text-muted-foreground">{fmtTime(r.started)}</span>
+                      </TableCell>
+                      <TableCell className="border-t-0 border-l-0 px-2 py-0" title={`${r.bytes} 字节`}>
+                        <span className="font-mono text-[11px] text-muted-foreground">{fmtBytes(r.bytes)}</span>
+                      </TableCell>
+                      <TableCell className="border-t-0 border-l-0 px-2 py-0"
+                        title={r.fingerprint?.hash
+                          ? `编号表 ${r.fingerprint.total} 条;sha256 前 16 位 ${r.fingerprint.hash}`
+                          : '这一轮没录到界面(作业没连上来,或刚起来就断了)'}>
+                        <span className="block truncate font-mono text-[11px] text-muted-foreground">{fmtFP(r.fingerprint)}</span>
+                      </TableCell>
                     </TableRow>
                   )
                 })}
@@ -602,150 +456,13 @@ export function RecordView() {
             )}
           </div>
         </div>
-        )}
-
-        {/* 详情(右列,仅选中一行后出现):贴右缘整高嵌入,左侧 1px 分割线即拖拽把手。
-            窄容器下不渲染列表、自己占满（那时也没得拖，分割条不渲染）。 */}
-        {sel && (
-          <>
-            {!narrowSplit && (
-              <div className="col-resizer self-stretch" onMouseDown={onDetailResizeDown} title="拖拽分配宽度" />
-            )}
-            <div style={narrowSplit ? undefined : { width: boxW ? detailW : '50%' }}
-              className={narrowSplit
-                ? 'flex min-w-0 flex-1 flex-col overflow-hidden bg-card'
-                : 'flex shrink-0 flex-col overflow-hidden bg-card'}>
-              <div className="flex h-8 shrink-0 items-center gap-1 overflow-x-auto whitespace-nowrap border-b border-border px-2">
-                <button onClick={() => setSel(null)} title={narrowSplit ? '返回列表(Esc)' : '关闭详情(Esc)'}
-                  className="p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
-                  <X className="h-3.5 w-3.5" />
-                </button>
-                {/* 只剩「基本信息」一个页签(用户 2026-10-15 要求去掉 连接 / 身份文件):
-                    连接清单与原始 JSON 在命令行那边看得到(`tt fep rec show`),这一页只留
-                    人选录像时要核对的那些字段。页签样式留着,免得这一行看不出是"面板头"。 */}
-                <span className="inline-flex items-center gap-1 bg-accent px-2 py-0.5 text-xs text-foreground">基本信息</span>
-                {/* 回放:这一份能不能重放,闸门看的是"启动路径"(r.r 那条路不带 -d,
-                    编号表与调试线不是同一张),所以 r.r 的件直接禁用并说清原因。 */}
-                <button
-                  onClick={() => void onReplay(sel)}
-                  disabled={replaying || sel.path === 'r.r'}
-                  title={sel.path === 'r.r'
-                    ? '这份是 r.r 录的:编号表与调试线不是同一张,重放会点错控件(要回放请用「开始录制」录的那份)'
-                    : '把这份录制在调试器下重放出来:服务端另起一个进程,按身份起调试线会话、过指纹闸、把事件原样发出去(不等停站);会话留着给 AI 取证,进度看日志'}
-                  className="ml-auto inline-flex shrink-0 items-center gap-1 border border-emerald-500/20 px-2 py-0.5 text-xs text-emerald-600 transition-colors hover:bg-emerald-500/10 disabled:pointer-events-none disabled:opacity-40 dark:text-emerald-400">
-                  <RotateCcw className="h-3.5 w-3.5" />
-                  {replaying ? '正在起…' : '回放'}
-                </button>
-                {/* 把这行的 ID 交给 AI:AI 用 tt fep rec reproduce <ID> 重放这一份 */}
-                <button
-                  onClick={() => void copyRow(sel.id)}
-                  title="复制这份录制的 ID。把它发给 AI,AI 就能用 tt fep rec reproduce <ID> 重放这一份"
-                  className={`inline-flex shrink-0 items-center gap-1 border px-2 py-0.5 text-xs transition-colors ${
-                    cp === 'fail'
-                      ? 'border-red-500/20 text-red-600 dark:text-red-400'
-                      : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground'
-                  }`}>
-                  {cp === 'ok' ? <Check className="h-3.5 w-3.5" /> : <Fingerprint className="h-3.5 w-3.5" />}
-                  {cp === 'ok' ? '已复制' : cp === 'fail' ? '复制失败' : '复制 ID'}
-                </button>
-                {/* 删除只对长期库里的那些开放:缓存里的那份归统一清理框架管(服务端会拒),
-                    放在这里只会得到一个 409。 */}
-                {sel.where === '长期库' && (
-                  <button
-                    onClick={() => setPendingDel(sel)}
-                    title="从长期库里删掉这一份。录制不可再生,会先弹二次确认"
-                    className="inline-flex shrink-0 items-center gap-1 border border-red-500/20 px-2 py-0.5 text-xs text-red-600 transition-colors hover:bg-red-500/10 dark:text-red-400">
-                    <Trash2 className="h-3.5 w-3.5" />
-                    删除
-                  </button>
-                )}
-              </div>
-              {/* 没录到界面的那一份要先说清:回放闸门会拒(没有编号表可比) */}
-              {!sel.fingerprint?.hash && (
-                <div className="shrink-0 border-b border-border bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-600 dark:text-amber-400">
-                  这一轮没录到界面(作业没连上来,或刚起来就断了):没有编号表,回放时闸门会拒。
-                </div>
-              )}
-              <div className="min-h-0 flex-1 overflow-auto">
-                <InfoBody row={sel} meta={selMeta} loading={metaLoading} narrow={narrowSplit} />
-              </div>
-            </div>
-          </>
-        )}
       </div>
 
-      {/* 删除的二次确认(与「会话」面板同一个基元:shadcn AlertDialog) */}
-      <AlertDialog open={pendingDel !== null} onOpenChange={(o) => { if (!o) setPendingDel(null) }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>删除录制「{pendingDel?.id || ''}」?</AlertDialogTitle>
-            <AlertDialogDescription>
-              将从长期库里删掉这一份({pendingDel?.prog || '未知作业'},{fmtBytes(pendingDel?.bytes ?? 0)})。
-              录制不可再生 —— 要再拿到同一份,得重现一次问题再录一遍;此操作不可撤销。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void doDelete()}>确定删除</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
-  )
-}
-
-// 基本信息:两列键值(与接口日志页的 InfoBody 同款;字段名在左、值在右)。
-// 值的口径与 Go 侧身份文件一一对应(internal/fep/meta.go),缺的那一项照实显示 '-',
-// 不补默认值 —— "身份里没记"本身就是回放时要看的一条信息。
-// narrow = 面板本身很窄时改成上下两行（字段名一行、值一行）：左右两列在窄面板里会把值
-// 挤到几十像素，长值就被一个字符一行地掰断（用户实测截图：目录路径竖着排）。
-function InfoBody({ row, meta, loading, narrow }: { row: RecordingRow; meta: RecordingMeta | null; loading: boolean; narrow?: boolean }) {
-  const bin = meta?.binary
-  const binText = bin && (bin.ref || bin.size || bin.modTime)
-    ? [bin.ref, bin.size ? `${bin.size} 字节` : '', bin.modTime || ''].filter(Boolean).join(' / ')
-    : '（没探到）'
-  const dur = secsBetween(meta?.started || row.started, meta?.finished)
-  const rows: [string, string, string?][] = [
-    ['录制 ID', row.id, '命令行 tt fep rec show / rm / reproduce <ID> 用的就是它'],
-    ['住哪', row.where, RETENTION_LABEL[row.retention || ''] || '身份里没说留哪'],
-    ['目录', row.dir, '这份录制文件的落点(长期库按 环境/ENT 分层)'],
-    ['启动路径', row.path || '-', PATH_LABEL[row.path || ''] || '身份里没写启动路径'],
-    ['作业', row.prog || '-'],
-    ['环境', row.env || '-'],
-    ['区域', row.zone || '-'],
-    ['企业编号(ENT)', row.ent || '-', '空 = 起录时沿用登录 shell 的 $TOPENT'],
-    ['SSH 主机', meta?.host || '-', '不含账号与端口'],
-    ['画面接线', meta?.fglserver || '-', 'FGLSERVER:这一轮的界面画到哪(本机 IP:代理端口-6400)'],
-    ['开始时间', fmtTime(meta?.started || row.started)],
-    ['结束时间', fmtFinished(meta?.finished), '收工那一刻(它同时也是身份落盘的时刻)'],
-    ['时长(秒)', dur ? String(dur) : '-'],
-    ['体积', `${fmtBytes(row.bytes)}（${row.bytes} 字节）`,
-      // 口径要与服务端一致（`rowFromMeta`：`BytesRT + BytesFE`）。原来这里写着"三个文件之和"，
-      // 而 timeline 并不在内 —— tooltip 说了假话（实测：一份 47647 字节的件界面报 37202）。
-      '逐连接的两个方向之和（rt2gdc + gdc2rt）；timeline 是排障用的旁证，不计入'],
-    ['连接数', String(row.conns), '闸门按**连接**比对:一条对得上就算同一棵界面树'],
-    ['指纹', fmtFP(row.fingerprint),
-      row.fingerprint?.hash
-        ? `编号表 ${row.fingerprint.total} 条;sha256 前 16 位 ${row.fingerprint.hash}`
-        : '没有编号表(这一轮没录到界面)'],
-    ['编译件', binText, '作业 .42r 的大小与修改时间;走 r.r 时无从探测,照实空着'],
-    ['归属', ORIGIN_LABEL[row.origin || ''] || '-', '用户主动录的进长期库,系统自动录的进缓存'],
-    ['备注', meta?.note || '-'],
-  ]
-  return (
-    <div className="p-2 text-xs">
-      {rows.map(([k, v, tip]) => (
-        <div key={k} className={narrow ? 'border-b border-border/60 py-1' : 'flex gap-2 border-b border-border/60 py-1'} title={tip}>
-          <span className={narrow ? 'block text-muted-foreground' : 'w-28 shrink-0 text-muted-foreground'}>{k}</span>
-          {/* break-words 而不是 break-all：目录那种长路径要能断行，但普通文本不该被从单词中间掰开 */}
-          <span className={narrow
-            ? 'mt-0.5 block break-words text-foreground'
-            : 'min-w-0 flex-1 break-words text-foreground'}>
-            {v || '-'}
-            {k === '连接数' && loading && <span className="text-muted-foreground">（读身份中…）</span>}
-          </span>
-        </div>
-      ))}
+      {/* 明细页:整屏换过去(列表留在 DOM 里、只 display:none,见上面的 wrapper)。
+          它是"录制"视图内部的一级 —— 活动栏那五个图标不变、也不新增视图。 */}
+      {recordId && (
+        <RecordingDetail id={recordId} onBack={() => setRecordId('')} />
+      )}
     </div>
   )
 }

@@ -118,6 +118,8 @@ export function App() {
     if (r.view) {
       useStore.getState().setView(r.view)
       if (r.view === 'settings' && r.section) useStore.getState().setSettingsSection(r.section)
+      // 明细深链接(#record/<id>):列表那边看到的是"我要打开这一份"。
+      useStore.getState().setRecordId(r.view === 'record' ? r.recordId || '' : '')
       return
     }
     // 兜底:还没有任何服务器环境时(首次运行,或本地还没配过)落到「设置 → 站点管理」。
@@ -137,6 +139,9 @@ export function App() {
       const st = useStore.getState()
       st.setView(r.view)
       if (r.view === 'settings' && r.section) st.setSettingsSection(r.section)
+      // 回列表(#record,没有 ID)与进明细走的是同一条路:片段是权威。
+      // 用户按浏览器后退从明细回列表时,靠的就是这一句。
+      st.setRecordId(r.view === 'record' ? r.recordId || '' : '')
     }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
@@ -169,7 +174,8 @@ export function App() {
   const view = useStore((s) => s.view)
   const setView = useStore((s) => s.setView)
   const settingsSection = useStore((s) => s.settingsSection)
-  // 视图/分区变化 → **把片段写回去**。这是"刷新后还在这一页"的唯一保证（见 routing.ts 的 viewHash）：
+  const recordId = useStore((s) => s.recordId)
+  // 视图/分区/明细 → **把片段写回去**。这是"刷新后还在这一页"的唯一保证（见 routing.ts 的 viewHash）：
   // 只读片段、不写回去的话，点图标切到别的视图时 URL 还停在旧视图上，一刷新就把人弹回旧页
   // （实测：在 `#debug` 里点「设置」，界面是设置页而 URL 仍是 `#debug`）。
   //
@@ -177,6 +183,9 @@ export function App() {
   // store 状态 —— 这一刻的 view/section 还是**初始渲染快照**，照写会把深链接覆盖成默认页
   // （SettingsView 里那条分区同步 effect 让的是同一件事）。
   // 往后每换一次才写，且用 replace：push 会让浏览器后退要一格一格走遍所有视图。
+  //
+  // 录制明细进了依赖：点一行 → `#record/<id>`，返回列表 → `#record`。这样"在看哪一份"
+  // 与地址栏永远一致，粘给别人就是深链接（见 RecordView 的 onOpen）。
   const hashWroteRef = useRef(false)
   useEffect(() => {
     if (!hashWroteRef.current) {
@@ -187,14 +196,14 @@ export function App() {
       // 就顺手改成规范的，免得地址栏长期留着一个界面并不使用的值。
       const r = parseHash(window.location.hash)
       if (r.view) {
-        const want0 = viewHash(r.view, r.section || useStore.getState().settingsSection)
+        const want0 = viewHash(r.view, r.section || useStore.getState().settingsSection, r.recordId)
         if (window.location.hash !== want0) window.history.replaceState(null, '', want0)
         return
       }
     }
-    const want = viewHash(view, settingsSection)
+    const want = viewHash(view, settingsSection, recordId)
     if (window.location.hash !== want) window.history.replaceState(null, '', want)
-  }, [view, settingsSection])
+  }, [view, settingsSection, recordId])
   // launchError 不再在这里渲染(改走统一 toast);store 那个字段仍由启动失败写入,
   // 供别处/调试读取,应用外壳不再订阅它 —— 订阅了也只会白白多一次重渲染。
   const backendDead = useStore((s) => s.backendDead)

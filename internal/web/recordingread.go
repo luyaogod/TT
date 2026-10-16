@@ -119,6 +119,15 @@ type recAction struct {
 	Responses []recResponse `json:"responses,omitempty"`
 	// ResponsesTotal 是**一共**有多少帧落在这个窗口里（列表最多列 20 条，数字照实给）。
 	ResponsesTotal int `json:"responsesTotal,omitempty"`
+	// ResponsesState 是机器可读的那一半（界面据此选徽标，**不许**去匹配下面那句人话）：
+	//
+	//	attributed —— 窗口有效,有回应（看 ResponsesTotal）
+	//	none       —— 窗口有效,运行期确实没回（"本来就没应答"或"没处理"）
+	//	unknown    —— **归不了**:没有帧级时间、窗口退化、或这条连接没录到界面侧
+	//
+	// 为什么把 none 与 unknown 分开:它们的**下一步**完全不同 —— "没回包"要去看回放日志与作业
+	// 状态,"归不了"是这一份录制的时间精度不够。把它们都画成"无回包"就是在冤枉运行期。
+	ResponsesState string `json:"responsesState"`
 	// ResponsesNote 是"回应归属不了"时的原因（没有帧级时间、窗口退化等）。**不许**留空装没事。
 	ResponsesNote string `json:"responsesNote,omitempty"`
 }
@@ -407,12 +416,14 @@ func targetOf(d *recRead, conn, id int) fep.TargetInfo {
 func attributeResponses(d *recRead) {
 	if d.Precision != "frame" {
 		for _, a := range d.Actions {
+			a.ResponsesState = "unknown"
 			a.ResponsesNote = "这一份没有帧级时间（索引缺失或由老件重建）：回答归不到具体某一步，不猜"
 		}
 		return
 	}
 	for i, a := range d.Actions {
 		if a.Frame.T == 0 {
+			a.ResponsesState = "unknown"
 			a.ResponsesNote = "这一帧没有时刻（索引里缺这一条）：回答归不到它，不猜"
 			continue
 		}
@@ -425,12 +436,14 @@ func attributeResponses(d *recRead) {
 			}
 		}
 		if to <= from {
+			a.ResponsesState = "unknown"
 			a.ResponsesNote = "这一步与下一步的时刻相同（帧时间是块级打点，精度 1 ms）：" +
 				"这段时间里的回包属于哪一步分不出来，不猜"
 			continue
 		}
 		rd := d.dirOf(a.Conn, fep.DirRuntime)
 		if rd == nil {
+			a.ResponsesState = "unknown"
 			a.ResponsesNote = fmt.Sprintf("这条连接（#%d）没有录到界面侧：没有可归属的回应", a.Conn)
 			continue
 		}
@@ -452,7 +465,10 @@ func attributeResponses(d *recRead) {
 			})
 		}
 		if a.ResponsesTotal == 0 {
+			a.ResponsesState = "none"
 			a.ResponsesNote = "这一步之后运行期没有回包（本来就没应答，还是没处理 —— 看回放日志）"
+		} else {
+			a.ResponsesState = "attributed"
 		}
 	}
 }
