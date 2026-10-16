@@ -116,7 +116,7 @@
 | 面板 | `Panels.tsx`、`SessionPanel.tsx`、`OutlinePanel.tsx`、`VarTreeUi.tsx` |
 | 编辑器 | `monacoSetup.ts`、`PayloadEditor.tsx` |
 | 4GL 语言工具 | `fglTokens.ts`、`fgloutline.ts`、`fglparse.ts`、`fglPath.ts`、`fglHover.tsx` |
-| 数据与状态 | `api.ts`、`store.ts`、`routing.ts` |
+| 数据与状态 | `api.ts`、`store.ts`、`routing.ts`、`clipboard.ts` |
 | 样式 | `index.css`（只放调试视图专属的样式；主题与基元在共享层） |
 
 ## 判据
