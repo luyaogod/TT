@@ -10,6 +10,7 @@
 // 一条硬纪律贯穿四个页签:**解不出来就说解不出来**。名字那一栏在 `unresolved` 时显示
 // `Type#id` 加一句为什么,而不是留空让人以为是界面坏了(实测 17 个动作里只有 6 个能解出名字)。
 import { useEffect, useState } from 'react'
+import { X } from 'lucide-react'
 import { api, type RecordingAction, type RecordingFrame, type RecordingMeta } from './api'
 import { fmtBytes, fmtClock, fmtDur, fmtRel } from './recordingTime'
 
@@ -34,6 +35,8 @@ interface Props {
   meta: RecordingMeta | null
   /** 身份**问过了**(false = 还在读)。它与"这份没有身份文件"是两件事,不许合并。 */
   metaLoaded: boolean
+  /** 关掉这一栏(按钮在**左边缘**：这一栏贴右缘,关闭入口放左上角是它唯一自然的位置)。 */
+  onClose?: () => void
 }
 
 export function RecordingInspector(p: Props) {
@@ -52,6 +55,13 @@ export function RecordingInspector(p: Props) {
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col bg-card">
       <div className="flex h-7 shrink-0 items-center gap-1 overflow-x-auto whitespace-nowrap border-b border-border px-1 text-[11px]">
+        {/* 关闭按钮在**最左**：这一栏贴右缘，左边缘是它唯一自然的出口（用户 2026-10-16 要求）。 */}
+        {p.onClose && (
+          <button onClick={p.onClose} className="shrink-0 rounded-ui p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            title="关闭明细面板（Esc 也可以）">
+            <X size={12} />
+          </button>
+        )}
         {tabs.map((t) => (
           <button key={t.key} onClick={() => setTab(t.key)}
             className={`rounded-ui px-2 py-0.5 ${tab === t.key ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/50'}`}>
@@ -347,3 +357,4 @@ function ruleText(source: string): string {
     default: return '没有命中任何规则（R1–R4 都试过）'
   }
 }
+

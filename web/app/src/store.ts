@@ -9,18 +9,6 @@ import { toast } from './toastBus'
 import type { SettingsSectionKey, ViewKey } from './routing'
 export type { ThemeMode }
 
-/**
- * 录制明细页的页签。
- *
- * `steps` 是**分层记录**(语义动作 > 原始事件 > 运行期回应,一个动作一行、可展开),
- * `stream` 是**全文流**(所有帧,一帧一行,含图片缓存)。两者的差别不是"详略",
- * 而是"看的是哪一层":前者回答"用户做了什么",后者回答"线上过了什么字节"。
- */
-export type RecordTab = 'steps' | 'stream'
-
-/** 明细页页签的本地记忆键(与 tt.theme / tt.stackAuto 同一套做法)。 */
-const RECORD_TAB_KEY = 'tt.recordTab'
-
 // timeline 条目(人/AI/系统 的操作与事件,可审计)
 export interface TimelineItem {
   time: string
@@ -104,15 +92,14 @@ interface Store {
   // 设置页当前分区(站点管理/数据字典/DEBUG/应用设置)。放在 store 而不是 SettingsView 局部
   // 是因为 App 的首屏深链接解析要写它。写在这里的是"纯状态",URL 片段由 SettingsView 同步。
   settingsSection: SettingsSectionKey
-  // 录制明细页:纯状态(真正的说明在下面那组 action 上,见 setRecordId/setRecordTab)。
+  // 录制明细页:纯状态(真正的说明在下面那组 action 上,见 setRecordId/setRecordAt)。
   recordId: string
   // 区间深链接里的那一刻(`#record/<id>?t=<Unix 毫秒>`;0 = 不定位)。
   //
   // 它是**只读的入参**:页面打开时用它把游标与可视窗口落到那一刻,之后就由用户在条带上的
   // 操作接管(不再回写)。为什么只读:滚动/缩放是连续动作,每一步都进 URL 会让地址栏
-  // 变成一条疯跑的记录;而"把这一刻发给别人"只需要点一次那个按钮(条带的「复制链接」)。
+  // 变成一条疯跑的记录;而"把这一刻发给别人"只需要点一次那个按钮(条带的「这一刻」)。
   recordAt: number
-  recordTab: RecordTab
   // 回放进度:服务端每次推 `rec.progress` 就把计数器 +1(值本身没有意义,只表示"变了")。
   //
   // 为什么不把进度数据也存进 store:它的权威在 `/api/recordings/{id}/replay-steps`
@@ -178,8 +165,6 @@ interface Store {
   setRecordId: (id: string) => void
   setRecordAt: (ms: number) => void
   // 明细页的页签:分层记录 / 全文流。**记在本地**(localStorage),用户回来还在那一页 ——
-  // 但**不进 URL**:片段只表达"我在看哪一份",页面内的页签是同一个人的操作习惯。
-  setRecordTab: (t: RecordTab) => void
   setLaunchError: (msg: string) => void
   setTheme: (t: ThemeMode) => void
   setActiveTab: (key: string) => void
@@ -422,7 +407,6 @@ export const useStore = create<Store>((set, get) => ({
   settingsSection: 'sites',
   recordId: '',
   recordAt: 0,
-  recordTab: (localStorage.getItem(RECORD_TAB_KEY) === 'stream' ? 'stream' : 'steps') as RecordTab,
   recProgressTick: 0,
   recProgressID: '',
   theme: initialTheme,
@@ -685,10 +669,6 @@ export const useStore = create<Store>((set, get) => ({
   // 于是浏览器前进/后退与深链接天然一致 —— 这里再写一次 history 就成了两个作者。
   setRecordId: (id) => set({ recordId: id }),
   setRecordAt: (ms) => set({ recordAt: ms > 0 ? ms : 0 }),
-  setRecordTab: (t) => {
-    localStorage.setItem(RECORD_TAB_KEY, t)
-    set({ recordTab: t })
-  },
   setLaunchError: (msg) => set({ launchError: msg }),
   // 外观:选择 → 持久化 + 立即应用(跟随系统时 dark 取当前系统偏好)
   setTheme: (t) => {

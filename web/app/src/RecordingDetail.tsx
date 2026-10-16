@@ -27,13 +27,12 @@ import { useStore } from './store'
 import { useToast } from './toast'
 import { copyText } from './clipboard'
 import { RecordingOverview } from './RecordingOverview'
-import { RecordingTable } from './RecordingTable'
+import { RecordingTable, frameKey } from './RecordingTable'
 import { RecordingInspector } from './RecordingInspector'
 import { ReplayProgressBar } from './ReplayProgress'
-import { axisValue, clampDomain, domainOf, fmtBytes, makeScale, type AxisMode, type Domain } from './recordingTime'
+import { axisValue, clampDomain, domainOf, fmtBytes, type AxisMode, type Domain } from './recordingTime'
 
 /** 迷你轴(表格每行里那个小方块)的宽度。 */
-const MINI_W = 72
 const INSP_W_KEY = 'tt.recordInspW'
 const INSP_MIN = 260
 const INSP_MAX = 640
@@ -52,8 +51,6 @@ interface Props {
 }
 
 export function RecordingDetail({ id, onBack }: Props) {
-  const tab = useStore((s) => s.recordTab)
-  const setTab = useStore((s) => s.setRecordTab)
   const toast = useToast()
 
   const [ov, setOv] = useState<Ov | null>(null)
@@ -68,11 +65,21 @@ export function RecordingDetail({ id, onBack }: Props) {
   const [confirmDel, setConfirmDel] = useState(false)
   const [copied, setCopied] = useState<'ok' | 'fail' | null>(null)
 
-  // 选中:语义动作(分层)与帧(全文流/条带)各一个。点一个会清掉另一个 ——
-  // 否则检查器不知道该显示谁(两个都非空时以动作为准,但那种状态本身就不该存在)。
-  const [selAction, setSelAction] = useState<number | null>(null)
+  // 选中：只认**帧**。语义动作不再是一个独立的选中态（没有"分层"那一页了）——
+  // 它由帧推出来（`actionOfFrame`），这样"点一行 → 右侧显示这一行是什么"只有一个入口。
   const [selFrame, setSelFrame] = useState<RecordingFrame | null>(null)
   const [cursor, setCursor] = useState(0)
+  // 被选中那一帧对应的语义动作（没有就是 undefined：缓存帧、批量同步帧都不是用户动作）
+  const selActionObj = useMemo(
+    () => (selFrame ? actions.find((a) => frameKey(a.frame) === frameKey(selFrame)) || null : null),
+    [actions, selFrame])
+  // 帧 → 语义动作。event 帧才可能命中（动作只从事件帧里长出来）。
+  const actionByKey = useMemo(() => {
+    const m = new Map<string, RecordingAction>()
+    for (const a of actions) m.set(frameKey(a.frame), a)
+    return m
+  }, [actions])
+  const actionOfFrame = useCallback((f: RecordingFrame) => actionByKey.get(frameKey(f)), [actionByKey])
 
   // 区间深链接(`?t=`):**只读的入参**,进页面时把游标落到那一刻并放大到它周围。
   // 只认一次(它一变就把用户自己拖出来的窗口覆盖掉,那是最烦人的一种"自动纠正")。
@@ -143,7 +150,6 @@ export function RecordingDetail({ id, onBack }: Props) {
     let alive = true
     setLoading(true)
     setErr('')
-    setSelAction(null)
     setSelFrame(null)
     setCursor(0)
     streamPage.current = 0
@@ -229,10 +235,10 @@ export function RecordingDetail({ id, onBack }: Props) {
       })
       .catch((e: any) => setErr(e?.message || String(e)))
   }, [id, streamTotal])
+  // 只有一页了：进页面就拉第一页（不用等"切到全文流"）。
   useEffect(() => {
-    if (tab === 'stream' && streamPage.current === 0) loadMore()
-  }, [tab, loadMore])
-
+    if (streamPage.current === 0) loadMore()
+  }, [loadMore])
   // 容器宽度:决定"右侧检查器"还是"底部检查器"。
   const rootRef = useRef<HTMLDivElement | null>(null)
   const [rootW, setRootW] = useState(0)
@@ -269,20 +275,25 @@ export function RecordingDetail({ id, onBack }: Props) {
     window.addEventListener('blur', up)
   }
 
-  // Esc 返回列表。有对话框开着时不抢(与列表页同一条规矩:删除的二次确认自己在别处)。
+  // Esc：**先关明细面板，再退列表**（面板是"点出来的东西"，用户预期是先收它）。
+  // 正在选文本时不抢 ESC（那时它该是"取消选择"用）。用 ref 读最新的选中帧，
+  // 免得把 selFrame 写进依赖、每点一行都重挂一次监听。
+  const selFrameRef = useRef<RecordingFrame | null>(null)
+  selFrameRef.current = selFrame
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
       const sel = window.getSelection()?.toString()
-      if (sel) return // 正在选文本:ESC 先当"取消选择"用
+      if (sel) return
       e.preventDefault()
+      if (selFrameRef.current) { setSelFrame(null); return }
       onBack()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onBack])
 
-  // **唯一**的轴域:条带与表格迷你轴共用它。
+  // **唯一**的轴域:条带与表格共用它。
   const mode: AxisMode = ov?.timePrecision === 'frame' ? 'time' : 'bytes'
   const totalBytes = useMemo(
     () => (ov?.directions || []).reduce((s, d) => s + d.bytes, 0) || 1,
@@ -300,20 +311,9 @@ export function RecordingDetail({ id, onBack }: Props) {
   // 换一份录制 / 轴口径变了 → 复位(带着上一份的缩放窗口去画这一份,看到的会是空白)
   useEffect(() => { setDomain(bounds) }, [bounds, id])
 
-  const xOf = useMemo(() => {
-    const x = makeScale(domain, MINI_W)
-    return (f: RecordingFrame) => x(axisValue(f, domain.mode))
-  }, [domain])
-
   const pick = (f: RecordingFrame) => {
-    setSelAction(null)
     setSelFrame(f)
     setCursor(axisValue(f, domain.mode))
-  }
-  const pickAction = (a: RecordingAction) => {
-    setSelAction(a.n)
-    setSelFrame(a.frame)
-    setCursor(axisValue(a.frame, domain.mode))
   }
 
   const firstT = ov?.items.find((f) => f.t > 0)?.t || 0
@@ -418,49 +418,41 @@ export function RecordingDetail({ id, onBack }: Props) {
 
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" style={{ flexDirection: narrow ? 'column' : 'row' }}>
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              {/* 页签:两个。计数只给**一个数** —— 头里已经有"帧/事件/步"三层的全貌，
-                  这里只需要说明"这一页有多少行"。哪一层是什么，页签名与行本身说得清。 */}
-              <div className="flex h-7 shrink-0 items-center gap-1 border-b border-border px-1 text-[11px]">
-                {([['steps', '分层记录'], ['stream', '全文流']] as const).map(([k, label]) => (
-                  <button key={k} onClick={() => setTab(k)}
-                    className={`rounded-ui px-2 py-0.5 ${tab === k ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/50'}`}
-                    title={k === 'steps'
-                      ? '一个语义动作一行：回答"用户做了什么、运行期回没回"。同一行里可展开看回应'
-                      : '一帧一行（含图片缓存）：回答"这条线上到底过了什么字节"'}>
-                    {label}
-                  </button>
-                ))}
-                <span className="ml-2 truncate text-[10px] text-muted-foreground">
-                  {tab === 'steps'
-                    ? `共 ${actions.length} 步`
-                    : (streamFrames.length < (streamTotal || ov.items.length)
-                      ? `已加载 ${streamFrames.length} / ${streamTotal || ov.items.length} 帧`
-                      : `共 ${streamTotal || ov.items.length} 帧`)}
-                </span>
-              </div>
+              {/* 没有页签了（用户 2026-10-16 定的形态）：**一屏一条全文流**。
+                  计数只在"还没加载完"时才说一句 —— 头上那行已经有帧/事件/步的全貌。 */}
+              {streamFrames.length < streamTotal && streamTotal > 0 && (
+                <div className="flex h-6 shrink-0 items-center border-b border-border px-2 text-[10px] text-muted-foreground">
+                  已加载 {streamFrames.length} / {streamTotal} 帧，滚动到底继续加载
+                </div>
+              )}
               <RecordingTable
                 key={id}
-                tab={tab} actions={actions} frames={ov.items} precision={ov.timePrecision}
-                xOf={xOf} miniW={MINI_W} cursor={cursor} onCursor={setCursor}
-                sel={selFrame} onSelectFrame={pick}
-                selAction={selAction} onSelectAction={pickAction}
+                frames={streamFrames.length ? streamFrames : ov.items}
+                precision={ov.timePrecision}
+                cursor={cursor} onCursor={setCursor}
+                sel={selFrame} onSelect={pick}
+                actionOf={actionOfFrame}
                 stepByEvent={stepByEvent}
-                streamFrames={tab === 'stream' ? (streamFrames.length ? streamFrames : ov.items) : []}
-                streamTotal={tab === 'stream' ? (streamTotal || ov.items.length) : 0}
+                total={streamTotal || ov.items.length}
                 onLoadMore={loadMore} />
             </div>
 
-            {!narrow && <div className="col-resizer self-stretch" onMouseDown={onResizeDown} title="拖拽分配宽度" />}
+            {/* 明细面板：**默认不显示**（用户定的），点一行才出现；左边缘一个关闭按钮。
+                窄容器下它落到下面（整屏只剩这一条流时，下面的面板仍然可读）。 */}
+            {selFrame && !narrow && <div className="col-resizer self-stretch" onMouseDown={onResizeDown} title="拖拽分配宽度" />}
 
-            <div className={narrow
-              ? 'h-56 shrink-0 overflow-hidden border-t border-border'
-              : 'flex shrink-0 flex-col overflow-hidden border-l border-border'}
-              style={{ width: narrow ? undefined : inspW }}>
-              <RecordingInspector
-                id={id} sel={selFrame} action={actions.find((a) => a.n === selAction) || null}
-                precision={ov.timePrecision} counts={ov.counts} notes={ov.notes}
-                directions={ov.directions} firstT={firstT} meta={meta} metaLoaded={metaLoaded} />
-            </div>
+            {selFrame && (
+              <div className={narrow
+                ? 'h-56 shrink-0 overflow-hidden border-t border-border'
+                : 'flex shrink-0 flex-col overflow-hidden border-l border-border'}
+                style={{ width: narrow ? undefined : inspW }}>
+                <RecordingInspector
+                  id={id} sel={selFrame} action={selActionObj}
+                  precision={ov.timePrecision} counts={ov.counts} notes={ov.notes}
+                  directions={ov.directions} firstT={firstT} meta={meta} metaLoaded={metaLoaded}
+                  onClose={() => setSelFrame(null)} />
+              </div>
+            )}
           </div>
         </>
       )}
@@ -485,3 +477,5 @@ export function RecordingDetail({ id, onBack }: Props) {
     </div>
   )
 }
+
+
