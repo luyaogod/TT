@@ -19,10 +19,12 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"tt/internal/config"
+	"tt/internal/debug"
 	"tt/internal/fep"
 	"tt/internal/winproc"
 )
@@ -263,9 +265,15 @@ func (s *Server) hRecordingStart(w http.ResponseWriter, r *http.Request) {
 		}
 		time.Sleep(300 * time.Millisecond)
 	}
-	// 超时要**把日志尾巴带回去**：真正的原因（端口被占、隔离实例起不来、TOPENT 设不上…）
-	// 都写在那条日志里，只说一句"看日志"等于把查的人赶去别处（实测：真因是
-	// "端口被占：隔离实例在 20s 内没在 8400 端口监听"，而文案却说"进程起来了"，与实际相反）。
+	// 超时要**把真因带回去**：真正的原因（端口被占、隔离实例起不来、TOPENT 设不上、
+	// 被模式闸门拦下…）都写在那条日志里，只说一句"看日志"等于把查的人赶去别处
+	// （实测：真因是"端口被占：隔离实例在 20s 内没在 8400 端口监听"，而文案却说"进程起来了"，
+	// 与实际相反）。优先挑日志里**第一处** error（最早的才是真因），挑不到才退回尾巴。
+	if msg := firstLogError(logPath); msg != "" {
+		writeErr(w, http.StatusGatewayTimeout,
+			fmt.Errorf("录制进程 30 秒内没登记（它多半已经退了）：%s（完整日志：%s）", msg, logPath))
+		return
+	}
 	writeErr(w, http.StatusGatewayTimeout,
 		fmt.Errorf("录制进程 30 秒内没登记（它多半已经退了）：%s", tailOf(logPath, 400)))
 }
@@ -301,7 +309,7 @@ func (s *Server) hRecordingStop(w http.ResponseWriter, r *http.Request) {
 				if cacheDir := config.CacheDir(filepath.Dir(cfgPath), "fep"); cacheDir != "" {
 					if merr := os.MkdirAll(cacheDir, 0o755); merr == nil {
 						logPath := filepath.Join(cacheDir, "rec-stop-"+time.Now().Format("20060102-150405")+".log")
-						_, _ = winproc.SpawnDetached(exe, []string{"debug", "quit", "--config", cfgPath}, logPath)
+						_, _ = winproc.SpawnDetached(exe, []string{"debug", "quit", "--config", cfgPath}, logPath, debug.ActorEnv+"=human")
 					}
 				}
 			}
@@ -319,7 +327,10 @@ func (s *Server) hRecordingStop(w http.ResponseWriter, r *http.Request) {
 // 在这里等一小会儿看它还活着没有：活着就是正常（真干活要几十秒），已经退了就把日志尾巴
 // 带回去当错误。窗口取得很短（1.2 秒），正常路径的额外代价就是这一下等待。
 func spawnAndCheck(exe string, args []string, logPath string) (int, error) {
-	pid, err := winproc.SpawnDetached(exe, args, logPath)
+	// TT_ACTOR=human：这两个按钮都是**人在界面上点的**，而链路是"serve 起 tt 子进程 →
+	// 子进程调调试线 REST"，CLI 默认声明自己是 ai —— 在纯人工模式下会被模式闸门拦下
+	// （实测 2026-10-16：点「开始录制」直接报"纯人工模式:AI 不可操作"）。
+	pid, err := winproc.SpawnDetached(exe, args, logPath, debug.ActorEnv+"=human")
 	if err != nil {
 		return 0, err
 	}
@@ -327,7 +338,37 @@ func spawnAndCheck(exe string, args []string, logPath string) (int, error) {
 	if winproc.Alive(pid) {
 		return pid, nil
 	}
+	if msg := firstLogError(logPath); msg != "" {
+		return pid, fmt.Errorf("进程起来就退了（pid %d）：%s（完整日志：%s）", pid, msg, logPath)
+	}
 	return pid, fmt.Errorf("进程起来就退了（pid %d）：%s", pid, tailOf(logPath, 300))
+}
+
+// firstLogError 从那条日志里挑出**第一处真正的错误**（`"error": "..."`）给错误信息用。
+//
+// 为什么不直接甩日志尾巴：那条日志里通常有**两个** JSON（内层某一步的失败 + 最外层的汇总），
+// 400 字的尾巴把两个都塞进弹窗，读起来是两段互相打架的话 —— 实测 2026-10-16 用户看到的是
+// "没能入长期库…" 打头、真因（"纯人工模式:AI 不可操作"）埋在中间。挑第一处，
+// 它就是最早、也就是真正的原因。
+func firstLogError(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	for _, ln := range strings.Split(string(b), "\n") {
+		s := strings.TrimSpace(ln)
+		if !strings.HasPrefix(s, `"error":`) {
+			continue
+		}
+		v := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(strings.TrimPrefix(s, `"error":`)), ","))
+		if u, uerr := strconv.Unquote(v); uerr == nil {
+			v = u
+		}
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // tailOf 取日志末尾若干字符（只给错误信息用；读不到就照实说）。

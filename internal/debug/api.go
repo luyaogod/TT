@@ -269,6 +269,15 @@ func (s *Server) sessOf(w http.ResponseWriter, r *http.Request) *Session {
 // 只能靠声明:CLI 统一带 X-Actor: ai,浏览器带 human(不带也按 human 算)。
 const actorHeader = "X-Actor"
 
+// ActorEnv 是"这次调用算谁的动作"的环境变量开关，由**发起方**在起子进程时设置。
+//
+// 为什么需要它：录制/回放那条链路是"人点界面按钮 → serve 起 tt 子进程 → 子进程再调
+// 调试线 REST"，而 CLI 默认声明 X-Actor: ai（命令行本来是 AI 的接口）。于是纯人工模式下
+// 点「开始录制」会被自己设的模式闸门拦下（实测 2026-10-16：录制失败信息里躺着
+// "纯人工模式:AI 不可操作"）。serve 起这条链路时把 TT_ACTOR=human 传下去，
+// 子进程逐层继承（exec.Command 默认继承环境）。
+const ActorEnv = "TT_ACTOR"
+
 func actorOf(r *http.Request) string {
 	if strings.EqualFold(strings.TrimSpace(r.Header.Get(actorHeader)), "ai") {
 		return "ai"

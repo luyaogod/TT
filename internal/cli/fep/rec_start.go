@@ -165,21 +165,35 @@ var recStartCmd = &cobra.Command{
 	},
 }
 
+// recStep 一条要跑的调试线命令。
+//
+// optional = 失败不算失败。用于**清理类**动作：`debug quit` 在没有会话时会报
+// "没有活动会话,先运行 tt debug start <作业>" —— 那对"先把台面收干净"这件事来说是正常结果。
+type recStep struct {
+	args     []string
+	optional bool
+}
+
 // recStartSteps 是"把作业挂到代理上"要跑的调试线命令。**顺序不能换**：
-// 先点名环境（否则可能挂到上一次的环境上），再点名企业，最后起作业。
+// 先收口上一轮，再点名环境（否则可能挂到上一次的环境上），再点名企业，最后起作业。
 //
 // 拆成纯函数是为了能钉住它：少一条或顺序反了，症状都是**安静**的
 // （界面不出来、或作业跑在别的企业上），而那种错在真机上才发现代价很大。
-func recStartSteps(env, ent, prog, module, fglserver string) [][]string {
-	steps := [][]string{{"debug", "env", env}}
+func recStartSteps(env, ent, prog, module, fglserver string) []recStep {
+	// 第一步是**收口当前这一轮**：调试线只在空闲(idle)时才让设 TOPENT，而人点「开始录制」
+	// 时手上常常正停着一个会话 —— 实测 2026-10-16 用户那条：手上停着 aint302_wf 的入口停站，
+	// 录制第二步直接被拒"仅会话空闲(idle)时可设置 TOPENT(当前 已停站);请先结束调试:tt debug quit"。
+	// 收口用 quit（结束本轮运行、宿主会话保留、不重连），没有会话时它的失败由 optional 吃掉。
+	steps := []recStep{{args: []string{"debug", "quit"}, optional: true}}
+	steps = append(steps, recStep{args: []string{"debug", "env", env}})
 	if strings.TrimSpace(ent) != "" {
-		steps = append(steps, []string{"debug", "topent", ent})
+		steps = append(steps, recStep{args: []string{"debug", "topent", ent}})
 	}
 	start := []string{"debug", "start", prog, "--env", env, "--fglserver", fglserver}
 	if m := strings.TrimSpace(module); m != "" {
 		start = append(start, "-m", m)
 	}
-	return append(steps, start)
+	return append(steps, recStep{args: start})
 }
 
 // runRecStartSteps 依次跑这些命令，再（默认）放行。
@@ -187,10 +201,14 @@ func recStartSteps(env, ent, prog, module, fglserver string) [][]string {
 // 为什么走子进程而不是 import 调试那个包：调试服务的协议（HTTP API、apiBase 前缀、
 // X-Actor 头）只该有一份实现，它在 internal/cli/debug 里；跨命令组 import 会把那份实现
 // 变成两处共用、谁都不敢改的东西。代价是每条命令一次进程启动（毫秒级）。
-func runRecStartSteps(cmd *cobra.Command, steps [][]string, breaks []string, noContinue bool) error {
+func runRecStartSteps(cmd *cobra.Command, steps []recStep, breaks []string, noContinue bool) error {
 	for _, st := range steps {
-		if err := runSelf(cmd, st...); err != nil {
-			return fail(exitFailed, "调试线这一步失败（%s）：%v", strings.Join(st, " "), err)
+		if err := runSelf(cmd, st.args...); err != nil {
+			if st.optional {
+				fmt.Fprintf(cmd.ErrOrStderr(), "· 这一步跳过（可忽略）：%s —— %v\n", strings.Join(st.args, " "), err)
+				continue
+			}
+			return fail(exitFailed, "调试线这一步失败（%s）：%v", strings.Join(st.args, " "), err)
 		}
 	}
 	// 断点必须在**放行之前**下：程序停在入口时下才有意义，放行之后那一段已经跑过去了。

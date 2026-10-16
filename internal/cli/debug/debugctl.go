@@ -86,6 +86,16 @@ func joinAPIBase(url, prefix string) string {
 	return u + prefix
 }
 
+// actorSelf 这次调用算谁的动作：TT_ACTOR 环境变量优先（serve 起"人点的按钮"那条链路时
+// 会传 human），否则按 ai 算 —— 命令行本来就是 AI 的接口。取值与 internal/debug 的
+// actorHeader 同一套词汇（ai / human）。
+func actorSelf() string {
+	if v := strings.TrimSpace(os.Getenv(debug.ActorEnv)); v != "" {
+		return v
+	}
+	return "ai"
+}
+
 // dbgAPI 调 serve REST;非 2xx 时解析 {"error": ...} 返回错误
 func dbgAPI(method, path string, body any) ([]byte, error) {
 	base := dbgAPIBase()
@@ -104,9 +114,12 @@ func dbgAPI(method, path string, body any) ([]byte, error) {
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	// 声明自己是 AI:服务端靠这个区分"谁在驱动"(人从浏览器发,不带此头)。
-	// 模式闸门与操作时间线的归属都依赖它。
-	req.Header.Set("X-Actor", "ai")
+	// 声明自己是谁：服务端靠这个区分"谁在驱动"，模式闸门与操作时间线的归属都依赖它。
+	//
+	// 默认 ai（命令行本来是 AI 的接口），但**人从界面发起的动作**会带 TT_ACTOR=human 进来：
+	// 录制/回放那条链路是"人点按钮 → serve 起 tt 子进程 → 子进程调这里"，不认这个开关的话
+	// 纯人工模式下点「开始录制」会被自己的闸门拦下（实测 2026-10-16）。
+	req.Header.Set("X-Actor", actorSelf())
 	cli := &http.Client{Timeout: 5 * time.Minute}
 	resp, err := cli.Do(req)
 	if err != nil {
