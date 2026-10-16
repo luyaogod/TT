@@ -193,7 +193,13 @@ func recStartSteps(env, ent, prog, module, fglserver, alias string) []recStep {
 	// 时手上常常正停着一个会话 —— 实测 2026-10-16 用户那条：手上停着 aint302_wf 的入口停站，
 	// 录制第二步直接被拒"仅会话空闲(idle)时可设置 TOPENT(当前 已停站);请先结束调试:tt debug quit"。
 	// 收口用 quit（结束本轮运行、宿主会话保留、不重连），没有会话时它的失败由 optional 吃掉。
-	steps := []recStep{{args: []string{"debug", "quit"}, optional: true}}
+	//
+	// **但收口也必须点名**（WP6）：多会话下不带目标的 `quit` 会被服务端按 F1 报 409 并列候选，
+	// 这一步就白白跳过了 —— 而它跳过的后果正是上面那段实测（TOPENT 设不上去）。
+	// 点的是**本轮的固定别名**（同一个字符串也随 `--name` 给 `debug start`，C7.3 / Q23）：
+	// 于是"收口只收自己那条"由名字保证，不会打到别人的会话上（缺陷 D / T5.5）。
+	// 别名取不到（老调用方）时留空 = 今天的行为（H2）。
+	steps := []recStep{{args: recQuitArgs(alias), optional: true}}
 	steps = append(steps, recStep{args: []string{"debug", "env", env}})
 	if strings.TrimSpace(ent) != "" {
 		steps = append(steps, recStep{args: []string{"debug", "topent", ent}})

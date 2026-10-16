@@ -304,6 +304,21 @@ func FailureTargetBusy(name string, occupant Session) *Failure {
 	return f
 }
 
+// NewFailure 按 4.1.1 的码造一条失败（`code` → `Exit` 同源，C4.1）。
+//
+// 它给**服务端**那一侧的调用方用（WP6：`internal/debug` 的会话准备要报 F1 的歧义，
+// 而那个包不重写一句码表 / 退出码表）。判据与默认口径与包内的 `newFailure` 一致：
+//
+//   - `NewScenario` **不置位**（false）：调用方要"这是新场景"必须自己说清 ——
+//     免得服务端拿一个默认的 true 把老路径的退出码档位悄悄改掉（Q15 的分档判据）；
+//   - 退出码取自 `CodeExits`（表外的现行码归"运行失败"档）。
+//
+// **不造候选清单**：候选是"会话池里长什么样"的结论，只有拿得到池子的调用方拼得出来
+// （C5.12 的九键只有一处定义：`Candidate` + `Session.Candidate()`）。
+func NewFailure(code, format string, a ...any) *Failure {
+	return newFailure(code, format, a...)
+}
+
 // ---------------------------------------------------------------------------
 // 层级校验（契约第 7 节 / `tt-target-levels.md` (b) 的报错文案）
 // ---------------------------------------------------------------------------

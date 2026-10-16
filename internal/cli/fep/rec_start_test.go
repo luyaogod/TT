@@ -65,6 +65,12 @@ func TestRecStartStepsCarryAlias(t *testing.T) {
 			t.Fatalf("--name 只该挂在起会话那一步：%v", st.args)
 		}
 	}
+	// **WP6**：别名给了，收口那一步也要点名（`--session <同一个别名>`）。
+	// 不带目标的 `debug quit` 在多会话下会被服务端按 F1 报 409 并列候选 —— 那一步是
+	// optional，于是"跳过"看起来正常，而后果是 TOPENT 设不上去、整轮录制白起一个代理。
+	if got := strings.Join(steps[0].args, " "); got != "debug quit --session fep-fep-20261016-120000" {
+		t.Fatalf("给了别名时收口那一步必须点名收自己那条：%q", got)
+	}
 	// 同一个录制身份算出的别名必须**同一个**（否则"重发同一条命令"会另起一条会话，
 	// Q23 的幂等键就失效了）
 	if recSessionAlias("fep-20261016-120000") != recSessionAlias("fep-20261016-120000") {

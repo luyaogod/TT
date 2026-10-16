@@ -17,8 +17,11 @@ package debug
 // 断言一律写成"今天是这样 + 改了要改这里"，不写成"这样是对的"。
 
 import (
+	"errors"
 	"strings"
 	"testing"
+
+	"tt/internal/target"
 )
 
 // sameTarget 的两条**还没被钉住**的语义。
@@ -263,11 +266,15 @@ func TestPrepareSessionSingleSessionAssumption(t *testing.T) {
 		}
 	})
 
-	t.Run("多会话时它只认一条（今天的行为，多会话后必须重做）", func(t *testing.T) {
-		// 这是一个表征判据：只要池里有 >=1 条 live，prepareSession 就不会返回
-		// "没有会话"那种错 —— 它必从"复用"或"忙碌"两支里出一支。
-		// map 遍历顺序随机，所以**两条会话里挑中哪一条不确定**；这里只断言"不会是第三种结果"。
-		const rounds = 100
+	t.Run("多会话时不再只认一条（WP6 改写：本条原来钉的是「取唯一 live」）", func(t *testing.T) {
+		// **改写说明（WP6，2026-10-16）**：这条子用例原来钉的是"池里有 >=2 条 live 时
+		// `prepareSession` 必从复用/忙碌两支里出一支"—— 那正是**要被改掉**的单例假设
+		// （文件头写着"WP6 才放开多会话"）。
+		//
+		// WP6 把它改成本批要的行为：同环境两条候选 ⇒ **F1 的歧义**（`SESSION_AMBIGUOUS`
+		// + 退 3 + 候选九键），**绝不替调用方挑一条**（C8.1 / Q2 / 契约 1. 的 §1）。
+		// 逐条的判据（0 / 1 / ≥2 三条分支、单会话放行 / 多会话拒绝）在
+		// `wp6_multisession_test.go` 里，这里只留"入口不再是随机挑一条"这一条。
 		cfg := cfgFor("h1", "36")
 		m := NewManager(cfg)
 		a := fakeIdleSession("sA", "h1", "36")
@@ -277,19 +284,21 @@ func TestPrepareSessionSingleSessionAssumption(t *testing.T) {
 		m.sessions["sB"] = b
 		m.mu.Unlock()
 
-		for i := 0; i < rounds; i++ {
-			got, err := m.prepareSession(cfgFor("h1", "36"), "m1", "p1", "", "", "", "", "")
-			switch {
-			case err == nil:
-				if got != a && got != b {
-					t.Fatalf("第 %d 轮：复用了池外的会话 %v", i, got)
-				}
-			case strings.Contains(err.Error(), "已存在调试会话"):
-				// 忙碌那一支，符合今天的语义
-			default:
-				t.Fatalf("第 %d 轮：报了一个既不是「复用」也不是「忙碌」的错：%v\n"+
-					"    池里有两条 live，今天的行为只有这两支。出现第三种说明有人改了入口逻辑。", i, err)
-			}
+		got, err := m.prepareSession(cfgFor("h1", "36"), "m1", "p1", "", "", "", "", "")
+		if err == nil {
+			t.Fatalf("同环境两条候选时该报歧义（C8.1 / Q2），却放行并落到 %v —— "+
+				"map 遍历顺序随机，那就是「挑一条」", got.ID)
+		}
+		var f *target.Failure
+		if !errors.As(err, &f) || f.Code != target.CodeAmbiguous {
+			t.Fatalf("该报 %s（F1），实得 %T: %v", target.CodeAmbiguous, err, err)
+		}
+		if len(f.Candidates) != 2 {
+			t.Errorf("F1 必须带候选清单（C5.11：那五种码下必须出现），实得 %d 条", len(f.Candidates))
+		}
+		// 一条都不许动：报错就是报错，不许顺手收掉谁。
+		if n := len(m.Snapshot()); n != 2 {
+			t.Errorf("报歧义时不许改动会话池，实得 %d 条", n)
 		}
 	})
 }

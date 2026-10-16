@@ -84,9 +84,15 @@ func openDebugRecording(cmd *cobra.Command, s recSession) (*fep.Runtime, string,
 	logf := func(format string, a ...any) {
 		fmt.Fprintf(cmd.ErrOrStderr(), "· "+format+"\n", a...)
 	}
-	if why, err := staleSessionToCollect(cmd, s, dcfg.EnvName()); err == nil && why != "" {
+	if why, _, err := staleSessionToCollect(cmd, s, dcfg.EnvName()); err == nil && why != "" {
+		alias := recSessionAlias(s.RecID)
 		logf("先收掉上一轮挂着的调试会话（它占着宿主会话，TOPENT 设不上）：%s", why)
-		if qerr := runSelf(cmd, "debug", "quit"); qerr != nil {
+		// **必须点名收哪一条**：多会话放开（WP6）之后不带目标的 `debug quit` 会被
+		// 服务端按 F1 报 409 并列候选 —— 而这里只想收自己那条。
+		// 传的是**这次会话自己算出来的那个固定别名**（T5.4 / C7.3），与起会话时
+		// 随 `--name` 传下去的是同一个字符串：它正是"收口对象是不是本次录制该收的那条"
+		// 的机器判据（C1.6 的幂等键），比拿一个可能已经过期的句柄去点更稳。
+		if qerr := runSelf(cmd, recQuitArgs(alias)...); qerr != nil {
 			logf("收上一轮会话时失败（继续试）：%v", qerr)
 		}
 		time.Sleep(2 * time.Second)
@@ -126,10 +132,10 @@ func openDebugRecording(cmd *cobra.Command, s recSession) (*fep.Runtime, string,
 }
 
 // recSessionAlias 这一轮跨进程传目标用的**固定别名**（T5.4 / 契约 C7.3）。
-//
 // 别名由**录制身份**算出来，调用方不必给：同一条录制（同一个 tag）在 rec start 与
 // rec reproduce 两条路上算出同一个名字。它随 `--name` 进 `debug start` 子进程，
-// 之后（WP4c 把别名变成服务端事实之后）取证命令用 `--session <同一个别名>` 点回同一条会话。
+// 而 **WP6 起这个别名是服务端可寻址的事实**：收口那一步用 `--session <同一个别名>`
+// 点回同一条会话（`recQuitArgs`）。
 //
 // 为什么是"录制 ID"而不是"临时起的随机名"：Q23 的别名是**幂等键**——
 // 重发同一条命令必须落回同一条会话，随机名每次都算新会话，等于没有幂等键。
@@ -144,9 +150,28 @@ func recSessionAlias(tag string) string {
 	return "fep-" + tag
 }
 
+// recQuitArgs 拼"收掉自己上一轮那条会话"的子进程参数（T5.4 + WP6）。
+//
+// 为什么要单独一个函数：**必须带目标**。多会话放开之后，不带目标的 `debug quit`
+// 在多会话下会被服务端按 F1 报 409 + `SESSION_AMBIGUOUS` 并列候选，于是收口静默失败
+// （下一句 `debug topent` 也随之被拒 —— 那正是这条收口存在的理由）。
+//
+// 目标优先用**固定别名**（`--session <别名>`，contract 1. 的命令角色表 + C3.7）：
+// 它由录制 ID 算出、跨进程可复现，而且**只有自己那条会话叫这个名字**（Q23 的幂等键），
+// 天然不会打到别人的会话上（缺陷 D 的验收）。别名取不到（老调用方没给 RecID）时留空，
+// 那一条是"今天的行为"（H2）—— 多会话下它会失败，但那是旧调用方本来就有的形状。
+func recQuitArgs(alias string) []string {
+	args := []string{"debug", "quit"}
+	if a := strings.TrimSpace(alias); a != "" {
+		args = append(args, "--session", a)
+	}
+	return args
+}
+
 // staleSessionToCollect 判断"上一轮挂着的调试会话"里有没有**属于本次录制**的那一条。
 //
-// 返回 (人话说明, error)；没有该收的就返回 ("", nil)。
+// 返回 (人话说明, 那一条会话, error)；没有该收的就返回 ("", 零值, nil)。
+// 会话那一位是给**收口那一步点名用**的（WP6：多会话下必须点明收哪一条）。
 //
 // **这是缺陷 D（T5.5）的落点**：从前这里只看"有没有会话在跑"——
 //
@@ -159,10 +184,10 @@ func recSessionAlias(tag string) string {
 // 环境这一半今天就能做，而且是**定向**的那一半：`rec start --env X` 起会话时
 // 服务端只会连到 X，所以上一轮挂着的、该收口的就只可能是 X 上的会话。
 // 别人的会话（别的环境）**一条都不碰**。
-func staleSessionToCollect(cmd *cobra.Command, s recSession, env string) (string, error) {
+func staleSessionToCollect(cmd *cobra.Command, s recSession, env string) (string, dbgSessionView, error) {
 	sessions, err := debugSessions(cmd)
 	if err != nil {
-		return "", err
+		return "", dbgSessionView{}, err
 	}
 	for _, sess := range sessions {
 		if !recSessionOwned(sess, s, env) {
@@ -172,9 +197,9 @@ func staleSessionToCollect(cmd *cobra.Command, s recSession, env string) (string
 		if sess.Prog != "" {
 			why += "（作业 " + sess.Prog + "）"
 		}
-		return why, nil
+		return why, sess, nil
 	}
-	return "", nil
+	return "", dbgSessionView{}, nil
 }
 
 // recSessionOwned 判一条会话是不是"本次录制该收的那一条"。
@@ -198,8 +223,9 @@ func recSessionOwned(sess dbgSessionView, s recSession, env string) bool {
 //
 // 只读它给的 JSON，不碰调试服务的内部协议 —— 那个协议的家在 internal/cli/debug。
 // `name`（别名）从 **WP4c** 起是**服务端的一条事实**（C5.3 / Q22：`SessionBrief.name`），
-// 所以这里能读到它；`recSessionOwned` 目前仍只按环境 + 录制身份（作业）认领，
-// 要不要把"别名相同"也加进判据是后续工作（见契约 C7.3 与本文件头部的判据说明）。
+// 所以这里能读到它，而且 **WP6 已经把别名接进寻址**（`--session <别名>` 能落位）——
+// 本文件收口那一步就靠它点名（`recQuitArgs`）。判据本身（`recSessionOwned`）仍按
+// 环境 + 录制身份（作业）认领：把"别名相同"也加进去是后续工作（见契约 C7.3）。
 type dbgSessionView struct {
 	ID    string `json:"id"`
 	Env   string `json:"env"`

@@ -19,6 +19,7 @@ import (
 
 	"tt/internal/host"
 	"tt/internal/output"
+	"tt/internal/target"
 )
 
 // Server 本地调试服务:REST + WebSocket + Web 前端
@@ -577,11 +578,7 @@ func (s *Server) hLaunch(w http.ResponseWriter, r *http.Request) {
 	}
 	sess, err := s.mgr.LaunchWith(cfg, req.Module, req.Prog, name)
 	if err != nil {
-		// F18：别名在"判定 → 登记"之间被别的请求抢走。它**不是** TARGET_BUSY
-		// （4.1.1 明写退 2 不退 3），所以单独给信封。
-		var taken *ErrNameTaken
-		if errors.As(err, &taken) {
-			s.writeNameTaken(w, taken)
+		if s.writeLaunchFailure(w, err) { // F18 别名撞车 / F1 多会话歧义（见 api_target.go）
 			return
 		}
 		fail(w, 409, err)
@@ -1312,8 +1309,13 @@ func (s *Server) hWait(w http.ResponseWriter, r *http.Request) {
 		to = time.Hour
 	}
 
-	// 先订阅,后判现状:反向顺序会漏掉"订阅建立前刚发生"的事件
-	ch, cancel := s.mgr.Subscribe("wait")
+	// 先订阅,后判现状:反向顺序会漏掉"订阅建立前刚发生"的事件。
+	//
+	// **按会话订阅**（Q11 / 契约 6.6 / C7.2-2 的 E 类修正）：从前是 `Subscribe("wait")`
+	// + 客户端自己 `if ev.SessionID != sess.ID { continue }` —— 那是"客户端筛"，
+	// 与 Q11 的"发送那头筛"相反，而且别的会话的事件照样要挤进这个通道再被丢掉。
+	// 现在范围在**登记订阅**时就声明了（无会话事件也不会发给它，C6.5）。
+	ch, cancel := s.mgr.SubscribeScoped("wait", sess.ID)
 	defer cancel() // 必须 defer,否则 m.subs 泄漏
 
 	if ev, ok := waitNow(sess, want); ok {
@@ -1328,9 +1330,7 @@ func (s *Server) hWait(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return // 客户端断开:不写响应
 		case ev := <-ch:
-			if ev.SessionID != "" && ev.SessionID != sess.ID {
-				continue // 别条会话的事件
-			}
+			// 范围已经在发送那头筛过（见上面的 SubscribeScoped）—— 这里不再自己丢事件。
 			if waitMatch(ev, want) {
 				writeJSON(w, 200, waitResp(sess, &ev, false))
 				return
@@ -1808,6 +1808,11 @@ func (s *Server) hWSLogDebug(w http.ResponseWriter, r *http.Request) {
 	}
 	sess, replayWarn, err := s.mgr.LaunchReplay(item, content, req.Request, req.FGLServer)
 	if err != nil {
+		// WP6：与 hLaunch 同一条 —— 会话准备报出来的 F1（多会话 + 没点名要哪条宿主）
+		// 必须带 `code` 与候选清单，不许降级成一句散文。
+		if s.writeLaunchFailure(w, err) {
+			return
+		}
 		fail(w, 409, err)
 		return
 	}
@@ -2032,8 +2037,51 @@ func (s *Server) PublishRecProgress(id string, n, total int, result string) {
 	})
 }
 
+// wsScope 解出这次订阅的**范围**（契约 6.1 / C6.2 / C6.4 / C6.7 / Q11）。
+//
+//	?all=1               → 全部（总览台显式订阅全部）→ sessionID = ""
+//	?session=<原始句柄>  → 只看那一条 → sessionID = 那个 id
+//	两个都不给           → 等价 `all=1`：**今天的 `/api/ws` 就是"全部事件"**
+//	                       （调用点只有前端的 store.ts，它今天不带任何查询参数）。
+//
+// 「两个都不给 = 全部」这一条是**刻意的**，理由两条：
+//
+//  1. **C6.2 说这是"等价唯一就落"**（0 条或 1 条时按它筛，≥2 条报 400 + SESSION_AMBIGUOUS）。
+//     而它今天就是"全部"，且在**单会话**下"按唯一那条筛"与"全部"**恰好同解**
+//     （池里只有一条，无会话事件本来就只发给 all —— C6.5）。所以这一档**没有**可观测的行为差，
+//     而 H2 要的是"单会话下与今天逐字相同"；
+//  2. 多会话下再收紧成 400 会**当场打断已经构建好的前端包**（`web/app/src/store.ts`
+//     连的是不带参数的 `/api/ws`，而 `web/` 不在本批的可改范围里）——
+//     那不是本批要交付的东西，也不会因为服务端先收紧就自动对齐。
+//
+// 于是：新语义住在**新参数**上（`?session=` 会让它只拿那一条），旧写法原样可用；
+// 前端切到 `?all=1`（外加按选中会话的 `?session=`）是前端那一批的活（WP-F 的 ④/⑤）。
+//
+// `?session=` 收的是**服务端的原始句柄**（与 C5.4 一致：路径与句柄只认 `id`，不认
+// `ref` / `display`；选择器文法的家在 CLI 的目标层，Q12 / C8.2）。指名的会话不在池里
+// 就当场 404 + `SESSION_NOT_FOUND`（不许静默回落成"那就全部"）。
+func (s *Server) wsScope(w http.ResponseWriter, r *http.Request) (string, bool) {
+	q := r.URL.Query()
+	id := strings.TrimSpace(q.Get("session"))
+	if id == "" {
+		return "", true // ?all=1 与"什么都没给"同解：全部
+	}
+	if s.mgr.Get(id) == nil {
+		writeCandidateFailure(w, http.StatusNotFound, target.CodeNotFound,
+			"会话不存在: "+id, nil)
+		return "", false
+	}
+	return id, true
+}
+
 func (s *Server) hWS(w http.ResponseWriter, r *http.Request) {
-	ch, replay, cancel := s.mgr.SubscribeWithReplay("ws", wsReplayLimit)
+	// 范围在**升级之前**定：落不上目标要能正常回一个 JSON 失败信封（C5.16），
+	// 而升级成 WebSocket 之后就再也写不了普通响应了。
+	sessionID, ok := s.wsScope(w, r)
+	if !ok {
+		return
+	}
+	ch, replay, cancel := s.mgr.SubscribeWithReplayScoped("ws", sessionID, wsReplayLimit)
 	defer cancel()
 	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {

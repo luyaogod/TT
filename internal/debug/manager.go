@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,6 +17,16 @@ import (
 	"github.com/pkg/sftp"
 )
 
+// subscriber 是一个事件订阅者（契约 6.6 / C6.7 的"范围"维度）。
+//
+// 从前 `subs` 的 value 只有"标签"，筛选只能落在**客户端**（`hWait` 就是这么做的，
+// 契约 C7.2-2 记为 E 类）；Q11 定稿是**发送那头筛**，所以登记时要带上订阅者
+// 关心的那条会话：`sessionID == ""` = 全部（总览台显式订阅全部时用它）。
+type subscriber struct {
+	tag       string
+	sessionID string
+}
+
 // Manager 调试会话管理器:持有会话、向订阅者(WS/MCP)广播事件、保留最近事件供查询
 type Manager struct {
 	cfg *Config
@@ -24,7 +35,20 @@ type Manager struct {
 	sessions map[string]*Session
 
 	subMu sync.Mutex
-	subs  map[chan Event]string
+	subs  map[chan Event]subscriber
+
+	// auditPath 是会话操作审计行的落点（`<DataDir>/audit/sessions.jsonl`）。
+	// 空 = 不落盘（DataDir 为空：单测与未开持久化的部署，见 audit.go）。
+	auditPath string
+	// auditActor 取"谁"（缺省 `target.DefaultActor(os.Getenv)`，读 `TT_ACTOR`）。
+	// 做成字段是为了让判据测试能注入一个确定的身份，而不必去改进程环境。
+	auditActor func(string) string
+
+	// newSession 是"开一条新会话"的入口。生产路径**恒为** `NewSession`（一字不差），
+	// 做成字段只有一个理由：`NewSession` 会真拨 SSH（`host.Dial`，没有可注入的缝），
+	// 于是"多会话/单会话"那几条 HTTP 判据在无网环境里只能测到拨号失败那一层，
+	// 测不到"落位之后到底成不成功"。注入一个不拨号的实现，那些判据才测得到它们要说的事。
+	newSession func(cfg *Config, module, prog, runProg, launchRef, extraArgs string, emit func(Event)) (*Session, error)
 
 	// 最近事件环形缓冲(供 AI/日志 tail 查询;只存结构化事件,output/autovars 不入)
 	evMu sync.Mutex
@@ -69,12 +93,19 @@ func NewManager(cfg *Config) *Manager {
 	return &Manager{
 		cfg:      cfg,
 		sessions: map[string]*Session{},
-		subs:     map[chan Event]string{},
+		subs:     map[chan Event]subscriber{},
 		envCache: map[string]cachedEnv{},
 		src:      map[string]*srcConn{},
 		// cfg.DataDir 可能为空(单测里的 NewManager(&Config{})):那一档只走内存不落盘
 		ents:  NewEntCatalog(cfg.DataDir),
 		Epoch: strconv.FormatInt(time.Now().UnixNano(), 36),
+		// 会话操作审计（WP6）：<DataDir>/audit/sessions.jsonl，谁 / 哪条 / 干了什么。
+		auditPath: auditPath(cfg.DataDir),
+		// "谁"的缺省来源是 `TT_ACTOR`（与 api.go 的 actorOf 同一个开关，不另立第二个）。
+		// 包一层是因为 `target.DefaultActor` 要一个**注入的** getenv（那样它才是纯函数、可测）。
+		auditActor: func(string) string { return target.DefaultActor(os.Getenv) },
+		// 生产路径就是 NewSession：行为与从前一字不差（只有 _test.go 会替换它）。
+		newSession: NewSession,
 	}
 }
 
@@ -132,10 +163,25 @@ func (m *Manager) ensureRuntimeEnvOn(conn *host.SSHConn, cfg *Config) (*host.Run
 }
 
 // Subscribe 订阅事件流(WS 用),返回取消函数
+//
+// **签名、语义与调用点一个字不动**（Q22 / C6.7 的"纯新增"纪律）：它等价于
+// `SubscribeScoped(tag, "")` —— `sessionID == ""` 就是"全部"这个范围。
 func (m *Manager) Subscribe(tag string) (<-chan Event, func()) {
+	return m.SubscribeScoped(tag, "")
+}
+
+// SubscribeScoped 订阅事件流，并声明**只关心哪一条会话**（Q11 / 契约 C6.4 / C6.7）。
+//
+// `sessionID == ""` = 全部（总览台显式订阅全部时走它，与 Subscribe 等价）。
+// 非空时**在发送那头筛**（`emit` 里按 sub 判），不是推给客户端让它自己丢 ——
+// 这正是 `hWait` 从前那处 E 类写法（契约 C7.2-2）的定稿归属。
+//
+// 契约 C6.5：**无会话的事件**（`SessionID == ""`，如服务级 log / rec.progress）
+// 只发给"全部"订阅者；单会话订阅者收不到 —— 它拿到的每一条都必须能被它自己那条会话解释。
+func (m *Manager) SubscribeScoped(tag string, sessionID string) (<-chan Event, func()) {
 	ch := make(chan Event, 4096)
 	m.subMu.Lock()
-	m.subs[ch] = tag
+	m.subs[ch] = subscriber{tag: tag, sessionID: sessionID}
 	m.subMu.Unlock()
 	return ch, func() {
 		m.subMu.Lock()
@@ -150,21 +196,27 @@ func (m *Manager) Subscribe(tag string) (<-chan Event, func()) {
 // 这样保证**不遗漏** —— emit 的 append 先于 broadcast,窗口内产生的事件
 // 要么已经进了快照、要么会进 channel。但**仍可能重复**(emit 的 append 与
 // broadcast 之间不持锁),所以调用方必须用 Seq 去重。
+//
+// **签名、语义与调用点一个字不动**（Q22 / C6.7 的"纯新增"）：它等价于
+// `SubscribeWithReplayScoped(tag, "", n)`。
 func (m *Manager) SubscribeWithReplay(tag string, n int) (<-chan Event, []Event, func()) {
+	return m.SubscribeWithReplayScoped(tag, "", n)
+}
+
+// SubscribeWithReplayScoped 同 SubscribeWithReplay，但带上**订阅范围**（Q11 / C6.6 / C6.7）。
+//
+// 两条与范围有关的语义：
+//   - **补发也按范围过滤**（C6.6）：`sessionID` 非空时只回该会话的历史，
+//     过滤在这**一次**做掉，不在客户端做；
+//   - **`Seq` 空间不分叉**（C6.7 末段）：序号仍由 `emit` 的第一件事分配，
+//     全订阅者共享同一个序号空间 —— 补发切片被过滤后，客户端的去重游标仍然单调。
+func (m *Manager) SubscribeWithReplayScoped(tag string, sessionID string, n int) (<-chan Event, []Event, func()) {
 	ch := make(chan Event, 4096)
 	m.evMu.Lock()
 	m.subMu.Lock()
-	m.subs[ch] = tag
+	m.subs[ch] = subscriber{tag: tag, sessionID: sessionID}
 	m.subMu.Unlock()
-	var replay []Event
-	if n > 0 && len(m.evs) > 0 {
-		start := len(m.evs) - n
-		if start < 0 {
-			start = 0
-		}
-		replay = make([]Event, len(m.evs)-start)
-		copy(replay, m.evs[start:])
-	}
+	replay := replayForLocked(m.evs, sessionID, n)
 	m.evMu.Unlock()
 	cancel := func() {
 		m.subMu.Lock()
@@ -172,6 +224,41 @@ func (m *Manager) SubscribeWithReplay(tag string, n int) (<-chan Event, []Event,
 		m.subMu.Unlock()
 	}
 	return ch, replay, cancel
+}
+
+// replayForLocked 从环形缓冲尾部取最多 n 条**该范围**的历史（调用方必须持有 `m.evMu`）。
+//
+// 过滤**在取切片之前**（而不是"先取 n 条再过滤"）：后者会让单会话订阅者拿到
+// 少于 n 条的历史 —— 别的会话的事件把配额吃掉了，而那正是"补发丢历史"的表现。
+// `sessionID == ""` 时不筛，逐字等于 SubscribeWithReplay 今天的行为。
+func replayForLocked(evs []Event, sessionID string, n int) []Event {
+	if n <= 0 || len(evs) == 0 {
+		return nil
+	}
+	out := make([]Event, 0, n)
+	for i := len(evs) - 1; i >= 0 && len(out) < n; i-- {
+		if !eventInScope(sessionID, evs[i]) {
+			continue
+		}
+		out = append(out, evs[i])
+	}
+	// 倒着收集的，翻回来（补发按时间升序）。
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out
+}
+
+// eventInScope 判一条事件该不该发给某个范围的订阅者（Q11 / C6.4 / C6.5 的唯一判据）。
+//
+//	sessionID == ""  → 全部：什么都发；
+//	会话事件         → 只发给订阅了**那一条**的人；
+//	无会话事件       → 只发给"全部"（C6.5：单会话订阅者拿到的每一条都必须能被它那条会话解释）。
+func eventInScope(subSessionID string, ev Event) bool {
+	if subSessionID == "" {
+		return true
+	}
+	return ev.SessionID != "" && ev.SessionID == subSessionID
 }
 
 // emit 会话事件回调:入环形缓冲并广播给所有订阅者(非阻塞,满则丢弃)
@@ -190,7 +277,11 @@ func (m *Manager) emit(ev Event) {
 	}
 	m.subMu.Lock()
 	defer m.subMu.Unlock()
-	for ch := range m.subs {
+	for ch, sub := range m.subs {
+		// 发送那头筛（Q11 / C6.4）：范围对不上的订阅者根本不进这条事件的投递。
+		if !eventInScope(sub.sessionID, ev) {
+			continue
+		}
 		select {
 		case ch <- ev:
 		default: // 订阅者消费太慢,丢弃(前端靠 state/stopped 事件对齐,丢原始行无碍)
@@ -263,13 +354,38 @@ func (m *Manager) launchWith(cfg *Config, module, prog, name string) (*Session, 
 	return sess, nil
 }
 
-// prepareSession 启动一轮运行前的会话准备(单一常驻会话):
-//   - 已有空闲(idle)且目标环境相同**且别名不冲突**的会话 → 复用宿主,仅刷新本轮运行参数(免重新登录);
-//   - 已有空闲会话但目标环境不同(切环境/点名另一台服务器)→ 断开旧的再新建 ——
-//     "同机同区域"不等于"同一环境":同库不同企业的两个环境在这四样上完全一样,
-//     复用会让新一轮继续用旧的企业编号跑(见 Session.sameTarget);
-//   - 已有活跃运行(运行中/已停站)→ 报错(请先结束当前调试);
-//   - 无会话 → 新建。
+// prepareSession 启动一轮运行前的会话准备（**多会话**：WP6 起不再假设池里只有一条）。
+//
+// # 它现在干什么（判据只有一条：**按目标在池里找**）
+//
+// 四条造会话的路径（`Launch`/`LaunchWith`/`LaunchReplay`/`CreateSessionOn` 里的前三条
+// 都经这里）共用这一个咽喉点，把"这次落在哪条会话上"判成三档：
+//
+//   - **候选 0 条 → 起新会话**（`NewSession` + `assignIdentityLocked` 登记身份）；
+//   - **候选 1 条 → 按 `decideHost` 的判据处置**：
+//     `hostReuse` 复用宿主（`SetRun` 换代）/ `hostCollect` 收口重建 / `hostBusy` 报错；
+//   - **候选 ≥2 条 → 报歧义**：`SESSION_AMBIGUOUS` + **退 3** + C5.12 的候选清单，
+//     **绝不挑一条**（F1 / C8.1 / Q2：只在多会话时收紧，多条就是"你没说清要哪一条"）。
+//
+// # "候选"的定义
+//
+// **与本次目标同环境（`sameTarget`）的活会话** —— 判据与 `decideHost` 的复用判据
+// **同一个函数**，不另立一套：`sameTarget` 的语义（连接四元组 + 环境名）是"许不许
+// 复用这条连接"的判据，判错就是上错号（见 `Session.sameTarget` 的注释，那里有实测教训）。
+// 别名命中是**另一条精确通道**（Q23）：给了 `--name X` 就先按别名找那一条，找到就只针对它判。
+//
+// # 两条与今天**逐字一致**的行为（H2）
+//
+//   - 池里只有一条、同目标、空闲 → 复用（`SetRun` 刷新本轮参数）；
+//   - 池里只有一条、同目标、非空闲 → 报"已存在调试会话…请先结束当前调试"（不许静默再开一条）。
+//
+// # 收口的时机（本批改了一处，写在这里免得被读成漏改）
+//
+// 从前是"**先把旧会话收掉再建新的**"；现在**先建新的（`NewSession` 只拨号 + 开 PTY），
+// 建成了才 `Close` 旧的那条**。理由：`hostCollect` 原本是"一条会话的空转会毁在这一步"
+// 也不心疼，多条之后它可能收掉一条**正要紧的**会话（B 的会话被 A 的启动收掉）；先建成功
+// 再收，失败路径上**一条都不少**。收口仍走 `Close`（它会先中断在跑的那一轮），
+// 别名与序号也在它从池里消失的那一刻当场释放（C3.7b / Q19）。
 //
 // **name（`--name` 的取值）参与复用判据的第二半**（Q23 / C2.5b，见 nameCompatible）：
 // 指定了 X 而那条空闲会话叫 Y 时**不复用**它，而是按"换目标"那条路收掉旧的、开一条叫 X 的。
@@ -277,53 +393,52 @@ func (m *Manager) launchWith(cfg *Config, module, prog, name string) (*Session, 
 //
 // 返回已登记的会话,由调用方驱动 Launch 登录/启动。
 func (m *Manager) prepareSession(cfg *Config, module, prog, runProg, launchRef, extra, argsOverride, name string) (*Session, error) {
-	m.mu.Lock()
-	for id, s := range m.sessions {
-		if s.State() == StateExit {
-			delete(m.sessions, id) // 已断开(close/切换/EOF)的残留,资源已释放
-		}
-	}
-	var live *Session
-	for _, s := range m.sessions {
-		live = s
-		break
-	}
-	m.mu.Unlock()
+	cands := m.sessionCandidates(cfg, name)
 
-	if live != nil {
-		switch decideHost(live, cfg, name) {
+	// ---- 候选 ≥2：报歧义，绝不挑一条（F1 / C8.1 / Q2） ----
+	if len(cands) >= 2 {
+		f := m.failAmbiguous(cfg, cands)
+		for _, s := range cands {
+			m.audit(s, auditAmbiguous) // 每条候选都留一条审计：'谁被卷进这次歧义'要查得到
+		}
+		return nil, f
+	}
+
+	var prev *Session
+	if len(cands) == 1 {
+		prev = cands[0]
+		switch decideHost(prev, cfg, name) {
 		case hostReuse:
 			// 复用宿主跑新一轮：SetRun 会把世代换掉（F15：旧句柄当场失效），
 			// 序号与别名**不动**（它们标识的是"这条会话"，跨轮不变：C2.0 / C2.5b）。
-			live.SetRun(cfg, module, prog, runProg, launchRef, extra)
-			live.ArgsOverride = argsOverride
+			prev.SetRun(cfg, module, prog, runProg, launchRef, extra)
+			prev.ArgsOverride = argsOverride
 			// 这条宿主此前没有名字，而这次点名要 X：别名登记给它（Q23 的"起新的"落在
 			// 复用宿主上的形态）。它此前无名，所以不是改名（C2.5b 禁的是改名）。
-			if err := m.nameSession(live, name); err != nil {
+			if err := m.nameSession(prev, name); err != nil {
 				return nil, err
 			}
-			return live, nil
+			m.audit(prev, auditReuse)
+			return prev, nil
 		case hostBusy:
 			// **运行中 / 已停站：不许悄悄收掉它** —— 这与今天那句"请先结束当前调试"
 			// 是同一条取向（H2 保护的就是这句）。别名对不上也不改变这一条：
 			// 要抢名字先停掉那条会话（F20 的 hint 是这么说的）。
-			return nil, fmt.Errorf("已存在调试会话(%s 运行中/已停站),请先结束当前调试", live.Prog)
-		default: // hostCollect
-			// 收口旧会话再按新目标/新名字重建：空转的宿主没什么可丢的，
-			// 而且它从池里移除的那一刻，它的别名与序号**当场释放**（C3.7b / Q19）。
-			log.Printf("[debug] 目标切换为 %s(旧会话 %s 在 %s),断开旧会话后重建",
-				cfg.EnvName(), live.ID, live.EnvNameNow())
-			_ = live.Close()
-			m.Remove(live.ID)
+			m.audit(prev, auditBusy)
+			return nil, fmt.Errorf("已存在调试会话(%s 运行中/已停站),请先结束当前调试", prev.Prog)
+		default: // hostCollect：空闲但换了目标（环境）或换了名字 —— 收口它再按新的重建
+			// 收口**推迟到新会话建成之后**（见函数头"收口的时机"）。
 		}
 	}
 
-	// 新会话：别名先查（F18）再拨号 —— 注定要被拒的请求不该先花一次 SSH 握手。
+	// ---- 候选 0 条：起新会话 ----
+	// 别名先查（F18）再拨号 —— 注定要被拒的请求不该先花一次 SSH 握手。
 	if err := m.checkNameFree(name); err != nil {
 		return nil, err
 	}
-	sess, err := NewSession(cfg, module, prog, runProg, launchRef, extra, m.emit)
+	sess, err := m.newSession(cfg, module, prog, runProg, launchRef, extra, m.emit)
 	if err != nil {
+		// 新会话没建成，池子一个字都不动（空的宿主照旧留着 —— 它在 idle，随时可用）。
 		return nil, err
 	}
 	if argsOverride != "" {
@@ -338,7 +453,83 @@ func (m *Manager) prepareSession(cfg *Config, module, prog, runProg, launchRef, 
 	}
 	m.sessions[sess.ID] = sess
 	m.mu.Unlock()
+
+	// 新会话已登记 —— 这时才收口那条换了目标/换了名字的空闲宿主。
+	// 它是空闲的，没有在跑的活要保护；而且它从池里移除的那一刻，它的别名与序号
+	// **当场释放**（C3.7b / Q19）。
+	if prev != nil {
+		log.Printf("[debug] 目标切换为 %s(旧会话 %s 在 %s),新会话 %s 建成后断开旧会话",
+			cfg.EnvName(), prev.ID, prev.EnvNameNow(), sess.ID)
+		m.audit(prev, auditCollect)
+		_ = prev.Close()
+		m.Remove(prev.ID)
+	}
 	return sess, nil
+}
+
+// sessionCandidates 收回"这次要落的那条会话"的候选集（WP6 / Q2 / C8.1 / Q23）。
+//
+// 判据两条，按顺序：
+//
+//  1. **与本次目标同环境**（`sameTarget`：连接四元组 + 环境名）—— 这是"候选"的定义，
+//     与 `decideHost` 的复用判据同一个函数（不另立一套，见 prepareSession 的说明）；
+//  2. 池里那条会话**已经有名字**、而这个名字与 `--name` 给的对不上 → 整条不算候选
+//     （Q23 / C2.5b：别名只在创建时给一次，"要 X 却落在叫 Y 的会话上"就是静默改名）。
+//
+// **没名字的会话不受第 2 条影响** —— 它正是 Q23 的"名字不存在 → 起新的"要落的那条空闲宿主
+// （契约 C1.6 的①：别名登记给它，它此前无名，所以不是改名）。这一条与 `nameCompatible`
+// 是同一套判据的两半，两处必须同时读：`nameCompatible` 判"这条既有会话能不能充当这次要的那条"。
+//
+// 返回的切片顺序按 `id` 排（`m.sessions` 是 map，顺序随机 —— 候选块与审计行必须可比）。
+// 已断开（`StateExit`）的残留顺手清掉：它不该占候选（也不该占别名/序号，Q19）。
+//
+// **不持有 `m.mu` 返回**：`decideHost` 与 `briefOf` 都只读会话自己的锁，
+// 锁序仍是 `m.mu → s.mu` 单方向（与 `Snapshot` / `Current` 一致）。
+func (m *Manager) sessionCandidates(cfg *Config, name string) []*Session {
+	want := strings.TrimSpace(name)
+	m.mu.Lock()
+	m.sweepExitedLocked()
+	out := make([]*Session, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		if stored := s.Name(); stored != "" && !nameCompatible(stored, want) {
+			continue
+		}
+		if !s.sameTarget(cfg) {
+			continue
+		}
+		out = append(out, s)
+	}
+	m.mu.Unlock()
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// failAmbiguous 把"候选 ≥2 条"写成 F1 的失败（`SESSION_AMBIGUOUS` + 退 3 + 候选清单）。
+//
+// 文案与判据都来自**目标层那一处**（`internal/target` 的 `failureAmbiguousOmitted`，
+// 唯一出处）：服务端这一侧不另写一句"有 N 条会话"的中文，也不另拼一份候选清单 ——
+// 契约 C5.12 的九键候选只有一处定义（`sessionView(...).Candidate()`）。
+//
+// **无条件退 3**（不按"有没有打 --session"分档）：这个场景今天不存在（今天只有一条会话，
+// 多会话 + 不给目标是本批才放开的状态），F1 的判据是"**这个场景是不是新场景**"，
+// 见 `target.ExitFor` / `contract.go` 的 Failure.NewScenario。
+func (m *Manager) failAmbiguous(cfg *Config, cands []*Session) *target.Failure {
+	pool := target.Pool{
+		Environments: []string{cfg.EnvName()},
+		Sessions:     make([]target.Session, 0, len(cands)),
+	}
+	for _, s := range cands {
+		pool.Sessions = append(pool.Sessions, sessionView(m.briefOf(s)))
+	}
+	// 省略目标（Selector == nil）走 `failureAmbiguousOmitted`（F1 的文案）——
+	// 它自己的 Hint 就写着"用 --session <别名> 或 <ref> 指明"，与候选块配套。
+	if _, f := target.Resolve(pool, target.Request{}); f != nil {
+		return f
+	}
+	// 走不到：候选 ≥2 时 target.Resolve 必报歧义。留着是为了"哪天它改了"时有一个响，
+	// 而且**绝不回落成"挑一条"**。
+	return target.NewFailure(target.CodeAmbiguous,
+		"有 %d 条 SSH 会话，无法确定你要哪一条", len(cands))
 }
 
 // resolveJob 连库按 gendbg 语义解析作业编号(gzzz_t:gzzz001 → gzzz002 实体程序 + gzzz005 模块)。
@@ -619,8 +810,10 @@ func (m *Manager) briefOf(s *Session) SessionBrief {
 
 // candidatesOf 把若干条会话投影成 C5.12 的候选九键（**唯一出处**是 `internal/target`）。
 //
-// 顺序按 `id` 排：候选块是给人照着重发用的，同一个失败在两次请求里必须列出同一种顺序
-// （`m.sessions` 是 map，"顺序随机"会让报错信息没法当判据用）。
+// 顺序：先按 `id` 排一道（`m.sessions` 是 map，顺序随机），**定稿的定序规矩在
+// `internal/target` 的 `sortCandidates`**（"序号 → 原始句柄"，C5.14）—— 歧义那几条
+// 失败的候选是经 `target.Resolve` 造出来的，所以最终顺序由它说了算；这里这一道保证
+// 调用方在任何路径下拿到的都是**确定的**顺序（同一个失败两次跑出的文案必须一样）。
 func (m *Manager) candidatesOf(sessions []*Session) []target.Candidate {
 	out := make([]target.Candidate, 0, len(sessions))
 	for _, s := range sessions {
@@ -778,6 +971,9 @@ func (m *Manager) assignIdentityLocked(sess *Session, name string) error {
 		sess.epoch = nextSessionEpoch()
 	}
 	sess.mu.Unlock()
+	// 登记完就是一条**有身份的会话**：审计行在这里记（**所有**造会话的路径都过这一步，
+	// 所以"建立"只需要一个落点）。它不必等调用方把它放进池子 —— 身份齐了，ref 就定了（C2.0）。
+	m.audit(sess, auditCreate)
 	return nil
 }
 
@@ -862,7 +1058,7 @@ func (m *Manager) CreateSessionOn(cfg *Config, name string) (*Session, error) {
 	if err := m.checkNameFree(name); err != nil {
 		return nil, err
 	}
-	sess, err := NewSession(cfg, "", "", "", "", "", m.emit)
+	sess, err := m.newSession(cfg, "", "", "", "", "", m.emit)
 	if err != nil {
 		return nil, err
 	}

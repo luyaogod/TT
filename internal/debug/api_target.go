@@ -37,6 +37,7 @@ package debug
 //     谁引用它都不成环。
 
 import (
+	"errors"
 	"net/http"
 	"sort"
 	"strconv"
@@ -229,6 +230,48 @@ func writeCandidateFailure(w http.ResponseWriter, status int, code, msg string, 
 		e.Candidates = &list
 	}
 	writeJSON(w, status, e)
+}
+
+// writeLaunchFailure 是**造会话那两条路**（`hLaunch` / `hWSLogDebug`）的错误出口。
+//
+// 三种失败各给各的信封，返回是否已写（写了调用方就 return）：
+//
+//	① F18（`ErrNameTaken`）：别名在"判定 → 登记"之间被别的请求抢走。它**不是**
+//	   TARGET_BUSY（4.1.1 明写退 2 不退 3），单独一份信封；
+//	② **F1 / F20（WP6 新增的这一支）**：`prepareSession` 落不上目标 —— 多会话 + 没点名要
+//	   哪条宿主 → 歧义并列候选（`SESSION_AMBIGUOUS` + 退 3 + C5.12 九键），或者点名的别名
+//	   不可复用（`SESSION_TARGET_BUSY`）。这两条**必须**带 `code` 与候选清单，
+//	   不许降级成一句散文（C5.11：那五种码下候选**必须出现**）；
+//	③ 其余（拨号失败之类的运行失败）：维持今天那一档，由调用方的 `fail(w, 409, err)` 写。
+//
+// 收成一个函数是为了让"这两种特殊信封"只有一个落点：两条路各写一遍必然漂。
+func (s *Server) writeLaunchFailure(w http.ResponseWriter, err error) bool {
+	var taken *ErrNameTaken
+	if errors.As(err, &taken) {
+		s.writeNameTaken(w, taken)
+		return true
+	}
+	return writeTargetFailure(w, err)
+}
+
+// writeTargetFailure 把一条目标层失败写成 C5.15 / C5.16 的信封并返回 true；
+// 不是目标层失败时返回 false，由调用方按它自己那一档报。
+//
+// 用途（WP6）：**造会话那两条路**（`hLaunch` / `hWSLogDebug`）的失败从前一律是
+// "409 + 一句散文"（`fail(w, 409, err)`），调用方拿不到 `code`、更拿不到候选清单。
+// 而 `prepareSession` 现在会报 F1 的歧义（多会话 + 不给目标 → `SESSION_AMBIGUOUS`
+// + 候选九键），那条失败**必须**带候选 —— 否则调用方只知道"有 N 条会话"却不知道是哪几条，
+// C5.11 的"必须出现候选"当场落空。
+//
+// 状态码取 409（C5.16）：与"会话状态不符、缺目标、歧义"同一档 —— 请求体是合法 JSON，
+// 冲突的是**会话池当前的状态**。
+func writeTargetFailure(w http.ResponseWriter, err error) bool {
+	var f *target.Failure
+	if !errors.As(err, &f) || f == nil {
+		return false
+	}
+	writeCandidateFailure(w, http.StatusConflict, f.Code, f.Message, f.Candidates)
+	return true
 }
 
 // beginNamedLaunch 判 `--name` 的三件判定，返回"要带下去的名字"与是否放行（Q23 / C1.6 / F19）。

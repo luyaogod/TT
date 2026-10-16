@@ -1592,8 +1592,18 @@ func (s *Session) forceExit() {
 	if s.kaStop != nil {
 		s.kaStop()
 	}
-	s.pty.Close()
-	s.conn.Close()
+	// 两条 nil 判据不是"防御性冗余"：**会话池里的会话未必都开过 pty/conn** ——
+	// 单测里手工造的会话（`idleOn` / `fakeIdleSession`）就是这种形状，而 WP6 之后
+	// `prepareSession` 的收口路径（换目标/换名字时收掉一条空闲宿主）会真的走到这里
+	// （`Close` → `closeNow` → `forceExit`）。从前它只在"单会话 + 换目标"时可达，
+	// 如今那是一条常走的路（`session_reuse_test.go` 那条"别把手工造的 Session 交给
+	// prepareSession"的告诫说的就是这件事）。nil 时无资源可释放，跳过即可。
+	if s.pty != nil {
+		s.pty.Close()
+	}
+	if s.conn != nil {
+		s.conn.Close()
+	}
 }
 
 // ---------- 命令执行 ----------

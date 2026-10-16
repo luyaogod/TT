@@ -120,11 +120,11 @@ func TestStaleSessionToCollectIgnoresOtherEnvironments(t *testing.T) {
 	withFakeDebugSessions(t, fakeSessionsAOnly)
 
 	s := recSession{Env: "测试1012", Prog: "bsft001_wf"}
-	why, err := staleSessionToCollect(new(cobra.Command), s, "测试1012")
+	why, view, err := staleSessionToCollect(new(cobra.Command), s, "测试1012")
 	if err != nil {
 		t.Fatalf("列会话失败: %v", err)
 	}
-	if why != "" {
+	if why != "" || view.ID != "" {
 		t.Fatalf("B 在另一个环境起录制时收掉了别人的会话（%q）—— 那就是缺陷 D："+
 			"A 停在断点上，B 一录制就把它的会话 quit 掉，A 那边看起来只是「会话莫名其妙没了」", why)
 	}
@@ -136,7 +136,7 @@ func TestStaleSessionToCollectTakesItsOwnEnvironment(t *testing.T) {
 	withFakeDebugSessions(t, fakeSessionsSameEnv)
 
 	s := recSession{Env: "恒烁正式区", Prog: "bsft001_wf"}
-	why, err := staleSessionToCollect(new(cobra.Command), s, "恒烁正式区")
+	why, view, err := staleSessionToCollect(new(cobra.Command), s, "恒烁正式区")
 	if err != nil {
 		t.Fatalf("列会话失败: %v", err)
 	}
@@ -145,6 +145,30 @@ func TestStaleSessionToCollectTakesItsOwnEnvironment(t *testing.T) {
 	}
 	if !strings.Contains(why, "恒烁正式区") {
 		t.Fatalf("收口说明该点名是哪条会话：%q", why)
+	}
+	// WP6：收口那一步**必须拿得到要点名的那一条** —— 多会话下不带目标的
+	// `debug quit` 会被服务端按 F1 报 409 并列候选，收口就静默失败了。
+	if view.ID != "sOld" {
+		t.Fatalf("该认出自己那条会话的句柄 sOld，实得 %q —— 认不出就没法点名收它", view.ID)
+	}
+}
+
+// WP6 / T5.4：收口那一条 `debug quit` **必须带目标**（多会话下不带就被判歧义）。
+//
+// 目标用固定别名（`fep-<录制 ID>`，C7.3 / Q23）：它是本次录制自己的那条会话的名字，
+// 服务端按 Q23 的幂等键落回它，于是"收口不打到别人身上"这件事由**名字**保证。
+func TestRecQuitArgsCarryTheFixedAlias(t *testing.T) {
+	got := recQuitArgs(recSessionAlias("fep-20261016-120000"))
+	want := []string{"debug", "quit", "--session", "fep-fep-20261016-120000"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("收口参数 = %v，期望 %v —— 不带 --session 的 quit 在多会话下会被判歧义", got, want)
+	}
+	// 别名取不到（老调用方没给 RecID）时留空：那是"今天的行为"（H2），不编一个名字出来。
+	if got := recQuitArgs(""); len(got) != 2 || got[0] != "debug" || got[1] != "quit" {
+		t.Fatalf("没有别名时该原样只传 `debug quit`（H2），实得 %v", got)
+	}
+	if got := recQuitArgs("   "); len(got) != 2 {
+		t.Fatalf("只有空白的别名等同于没有别名，实得 %v", got)
 	}
 }
 
