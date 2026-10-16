@@ -247,9 +247,15 @@ export function WsLogView() {
       localStorage.setItem('tt.wslogRatio', String(latest))
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
+      // 兜住「收不到 mouseup」：鼠标在窗口外松开、或拖拽中窗口失焦 —— 否则这条 mousemove
+      // 会一直挂着，面板跟着光标跑，直到用户再点一下（读码结论；难复现，但后果难看）。
+      window.removeEventListener('blur', up)
+      document.removeEventListener('mouseleave', up)
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
+    window.addEventListener('blur', up)
+    document.addEventListener('mouseleave', up)
   }
 
   // Esc 关闭详情(仅在本视图可见时生效,避免影响编辑器/调试页)

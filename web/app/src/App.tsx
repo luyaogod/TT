@@ -271,9 +271,15 @@ export function App() {
       localStorage.setItem('tt.panelW', String(latest))
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
+      // 兜住「收不到 mouseup」：鼠标在窗口外松开、或拖拽中窗口失焦 —— 否则这条 mousemove
+      // 会一直挂着，面板跟着光标跑，直到用户再点一下（读码结论；难复现，但后果难看）。
+      window.removeEventListener('blur', up)
+      document.removeEventListener('mouseleave', up)
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
+    window.addEventListener('blur', up)
+    document.addEventListener('mouseleave', up)
   }
 
   // 左侧会话栏的宽度拖拽:与上面那条同源(mousemove 跟手 + mouseup 落盘),
@@ -294,9 +300,15 @@ export function App() {
       localStorage.setItem('tt.sessionW', String(latest))
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
+      // 兜住「收不到 mouseup」：鼠标在窗口外松开、或拖拽中窗口失焦 —— 否则这条 mousemove
+      // 会一直挂着，面板跟着光标跑，直到用户再点一下（读码结论；难复现，但后果难看）。
+      window.removeEventListener('blur', up)
+      document.removeEventListener('mouseleave', up)
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
+    window.addEventListener('blur', up)
+    document.addEventListener('mouseleave', up)
   }
 
   // 会话栏的显示开关:active 态即"面板此刻可见"。写进 localStorage 让折叠意图跨刷新保持
@@ -339,9 +351,15 @@ export function App() {
       localStorage.setItem('tt.bottomH', String(latest))
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
+      // 兜住「收不到 mouseup」：鼠标在窗口外松开、或拖拽中窗口失焦 —— 否则这条 mousemove
+      // 会一直挂着，面板跟着光标跑，直到用户再点一下（读码结论；难复现，但后果难看）。
+      window.removeEventListener('blur', up)
+      document.removeEventListener('mouseleave', up)
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
+    window.addEventListener('blur', up)
+    document.addEventListener('mouseleave', up)
   }
 
   // 布局:上一条与状态栏同高的留白 / 下一条状态栏;中部从左往右 = 活动栏 → 会话栏 →
