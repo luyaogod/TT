@@ -6,7 +6,9 @@ import { useStore } from './store'
 import type { Breakpoint } from './api'
 import { Input } from '../../shared/ui'
 import { cn } from '../../shared/utils'
-import { Accordion, AccordionChevron, AccordionContent, AccordionItem, AccordionTrigger, Checkbox } from '../../shared/ui-radix'
+import { Accordion, Checkbox } from '../../shared/ui-radix'
+import { OutlineItem } from './OutlinePanel'
+import { PanelContent, PanelHeader, PanelItem } from './PanelKit'
 import { parseFglTree, type TNode } from './fglparse'
 import { VarTreeNodes } from './VarTreeUi'
 import { progKey } from './fglPath'
@@ -85,47 +87,6 @@ function LaunchSection() {
   )
 }
 
-// 面板条目:在共享的 AccordionItem 之上加「撑满高度 + 条目间 1px 分割线」。
-// 共享件刻意做成中性的壳 —— 设置页那套手风琴是轻量树形(不撑高、无分割线),
-// 与这里的撑满布局需求相反;把任一套的样式写进共享件都会让另一套到处覆盖。
-const PanelItem = React.forwardRef<
-  React.ElementRef<typeof AccordionItem>,
-  React.ComponentPropsWithoutRef<typeof AccordionItem>
->(({ className, ...props }, ref) => (
-  <AccordionItem
-    ref={ref}
-    className={`flex min-h-0 flex-col overflow-hidden border-b border-border data-[state=closed]:flex-none last:border-b-0 ${className || ''}`}
-    {...props}
-  />
-))
-PanelItem.displayName = 'PanelItem'
-
-// 面板条目内容区:撑满剩余高度并自行滚动(共享 AccordionContent 只给了 min-h-0)
-const PanelContent = React.forwardRef<
-  React.ElementRef<typeof AccordionContent>,
-  React.ComponentPropsWithoutRef<typeof AccordionContent>
->(({ className, ...props }, ref) => (
-  <AccordionContent ref={ref} className={`min-h-0 flex-1 overflow-auto ${className || ''}`} {...props} />
-))
-PanelContent.displayName = 'PanelContent'
-
-// 面板头行:左侧固定位(自动开关或等宽占位),右侧手风琴触发区(整块点击开合)。
-// hover 底色挂在整行上(:hover 对父级同样生效),这样左侧图标位与右侧 chevron 一起变色;
-// 若各自挂 hover:bg,悬停哪块就只亮哪块,图标位会留出一条不同底色的断口,很别扭。
-function PanelHeader({ leading, children }: { leading?: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <div className="group flex h-8 shrink-0 items-stretch transition-colors hover:bg-accent/50">
-      {leading}
-      <AccordionTrigger
-        className="flex h-full min-w-0 flex-1 items-center justify-between gap-2 pr-2.5 text-xs font-medium text-muted-foreground transition-colors group-hover:text-foreground [&[data-state=open]>svg]:rotate-180"
-      >
-        <span className="min-w-0 flex-1 truncate pl-1">{children}</span>
-        <AccordionChevron />
-      </AccordionTrigger>
-    </div>
-  )
-}
-
 // 面板「自动」开关:开(实心眼)= 停站后自动抓取该面板数据(调用栈/自动变量;
 // 都要经调试会话逐条发命令,全开时步进卡)。默认关(空心眼):停站不再自动调度,
 // 需要时点开,立即生效并自动展开面板。
@@ -154,6 +115,10 @@ export function RightPanels() {
   const toggleAutovarsAuto = useStore((s) => s.toggleAutovarsAuto)
   // 协作模式下自动变量开关归 AI(它会在后台逐条发 print,占命令槽)
   const collab = useStore((s) => s.mode) === 'collab'
+  // 这一列里放哪些面（header 上两个开关各自独立控制）：调试面板（运行 + 四块）与大纲
+  const rightDebugOpen = useStore((s) => s.rightDebugOpen)
+  const rightTreeOpen = useStore((s) => s.rightTreeOpen)
+  const rightTop = useStore((s) => s.rightTop)
   // 手风琴开合(受控):默认只展开「变量监视/断点」;调用栈/自动变量随自动开关
   // 联动——开则展开(数据开始自动刷新),关(默认)则收起,需要时手动点开看存量
   const [open, setOpen] = useState<string[]>(() => {
@@ -168,24 +133,40 @@ export function RightPanels() {
   useEffect(() => {
     setOpen((o) => (autovarsAuto ? (o.includes('autovars') ? o : [...o, 'autovars']) : o.filter((x) => x !== 'autovars')))
   }, [autovarsAuto])
+  // 大纲这一块：从 header 的 list-tree 开关打开时它就**展开**（用户点它就是要看树），
+  // 关掉时把它的开合态一并清掉，免得下次打开还留着上一次的折叠状态、却没有视觉来历。
+  useEffect(() => {
+    setOpen((o) => (rightTreeOpen ? (o.includes('outline') ? o : [...o, 'outline']) : o.filter((x) => x !== 'outline')))
+  }, [rightTreeOpen])
+
+  // "后开的在下面"：两块都在时，先开的在上、后开的排在后面（用 CSS order，不换 DOM 顺序 ——
+  // 换顺序会让手风琴条目**重新挂载**，大纲的折叠集合与监视输入框当场丢）。
+  const treeFirst = rightTop === 'tree'
+  const debugOrder = treeFirst ? 1 : 0
+  const treeOrder = treeFirst ? 0 : 9
 
   return (
-    // 一体化侧栏面板(VS Code 经典):与侧栏同底色、无外框无圆角,区块间用分割线区分
+    // 一体化侧栏面板(VS Code 经典):与侧栏同底色、无外框无圆角,区块间用分割线区分。
+    // 这里**不再有上下硬分屏**：两块面是同一条手风琴的条目，谁占多少高度由内容高度与
+    // 展开状态决定（空间不够时一起收缩，各自内部滚动）。
     <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
-      <LaunchSection />
-      <Accordion type="multiple" value={open} onValueChange={setOpen} className="flex h-full min-h-0 w-full flex-col">
-        <PanelItem value="stack">
+      {rightDebugOpen && <LaunchSection />}
+      <Accordion type="multiple" value={open} onValueChange={setOpen} className="flex min-h-0 w-full flex-col">
+        {rightDebugOpen && (
+        <PanelItem value="stack" style={{ order: debugOrder }}>
           <PanelHeader leading={<AutoSwitch on={stackAuto} onToggle={() => toggleStackAuto()}
             onTip="自动刷新已开启:每次停站抓取调用栈(点击关闭,减少自动调度卡顿)"
             offTip="自动刷新已关闭(默认):停站后不再抓调用栈;点击开启" />}>
             <StackTitle />
           </PanelHeader>
-          <PanelContent>
-            <StackBody />
-          </PanelContent>
+            <PanelContent>
+              <StackBody />
+            </PanelContent>
         </PanelItem>
+        )}
 
-        <PanelItem value="autovars">
+        {rightDebugOpen && (
+        <PanelItem value="autovars" style={{ order: debugOrder }}>
           <PanelHeader leading={<AutoSwitch on={collab || autovarsAuto} onToggle={() => { if (!collab) toggleAutovarsAuto() }}
             onTip="自动求值已开启:每次停站求值源码窗变量并刷新本面板(点击关闭,减少自动调度卡顿)"
             offTip={collab ? '协作模式:自动求值开关由 AI 负责' : '自动求值已关闭(默认):停站后不再求值自动变量;点击开启'} />}>
@@ -195,8 +176,10 @@ export function RightPanels() {
             <AutovarsBody />
           </PanelContent>
         </PanelItem>
+        )}
 
-        <PanelItem value="watches">
+        {rightDebugOpen && (
+        <PanelItem value="watches" style={{ order: debugOrder }}>
           <PanelHeader leading={<span className="block w-6 shrink-0" aria-hidden />}>
             <WatchesTitle />
           </PanelHeader>
@@ -204,8 +187,10 @@ export function RightPanels() {
             <WatchesBody />
           </PanelContent>
         </PanelItem>
+        )}
 
-        <PanelItem value="bps">
+        {rightDebugOpen && (
+        <PanelItem value="bps" style={{ order: debugOrder }}>
           <PanelHeader leading={<span className="block w-6 shrink-0" aria-hidden />}>
             <BpsTitle />
           </PanelHeader>
@@ -213,6 +198,16 @@ export function RightPanels() {
             <BpsBody />
           </PanelContent>
         </PanelItem>
+        )}
+
+        {/* 大纲：与上面四块同处一条手风琴（用户 2026-10-16 要求"合并成一个手风琴组件"），
+            它自带折叠 chevron；占多少高度与其它条目同一套规则（内容高度 + 空间不够时收缩）。
+            外层用 display:contents 的壳承载 order —— 顺序规则与条目自身要不要重挂载解耦。 */}
+        {rightTreeOpen && (
+          <div style={{ order: treeOrder, display: 'contents' }}>
+            <OutlineItem />
+          </div>
+        )}
       </Accordion>
     </div>
   )

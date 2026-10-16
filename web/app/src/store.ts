@@ -62,11 +62,8 @@ interface Store {
   // 两块同时打开时谁在上半。规则是**后开的在下面**（用户定的）：单独开一个时它占满整列，
   // 再开另一个就拆一半给新来的（用户原话："做一个向下 split 的逻辑，拆出一半区域留给 tree 面板"）。
   rightTop: 'debug' | 'tree'
-  // 上下两块的高度占比（上半块占多少）。记在本地，刷新后还在。
-  rightSplit: number
   toggleRightDebug: () => void
   toggleRightTree: () => void
-  setRightSplit: (v: number) => void
   // 调用栈/自动变量面板「自动」开关(手风琴头部图标,默认关):停站后是否自动抓取该数据
   // (两者都要经调试会话逐条发命令,自动调度越多步进越卡;关掉后仅手动/开关开启时取)
   stackAuto: boolean
@@ -369,10 +366,6 @@ export const useStore = create<Store>((set, get) => ({
   rightDebugOpen: true,
   rightTreeOpen: false,
   rightTop: 'debug',
-  rightSplit: (() => {
-    const v = Number(localStorage.getItem('tt.rightSplit'))
-    return v >= 0.2 && v <= 0.8 ? v : 0.5
-  })(),
   // 右侧栏宽度(像素,夹取 240~640)。初值取持久化的那份,越界或没记过就用 320。
   // 放在 store 而不是某个组件的本地 state:浮动工具条按它算默认落点(见 Toolbar.tsx)。
   panelW: (() => {
@@ -410,7 +403,6 @@ export const useStore = create<Store>((set, get) => ({
     const open = !st.rightTreeOpen
     return { rightTreeOpen: open, rightTop: open && st.rightDebugOpen ? 'debug' : st.rightTop }
   }),
-  setRightSplit: (v) => set({ rightSplit: Math.min(0.8, Math.max(0.2, v)) }),
   // 最大化/还原下方面板。收起下方面板时顺带解除最大化(否则再展开会以一个"占满整列"的
   // 面板回来,而用户要的是常规分栏)。
   //

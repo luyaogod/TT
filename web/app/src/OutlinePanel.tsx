@@ -10,6 +10,7 @@ import { ChevronsDownUp, ChevronsUpDown } from 'lucide-react'
 import { useStore } from './store'
 import { editorRef } from './SourceView'
 import { parseOutline, type OutlineNode } from './fgloutline'
+import { PanelContent, PanelHeader, PanelItem } from './PanelKit'
 
 // 节点 key 由 path+行+label 决定,行渲染、折叠集合、全量收集共用同一算法
 // (只用到行号与标签,故不绑定完整 OutlineNode —— 索引层是它的子集)
@@ -58,7 +59,11 @@ const collectKeys = (nodes: IndexedNode[], path: string, acc: string[]) => {
   }
 }
 
-export function OutlinePanel() {
+// 大纲在右侧那条手风琴里是**一个 item**（不再是自成一块、靠自己那行标题行撑着的面板）。
+// 用户 2026-10-16 的定案：两块面合并成一条手风琴，大纲也有自己的折叠 chevron，
+// 谁占多少高度交给「内容自然高度 + 空间不够时一起收缩」，不再硬切一半。
+// 因此这里同时给出 item 的标题行与内容体：折叠状态是这一份本地 state，必须两者同住。
+export function OutlineItem() {
   const sourceContent = useStore((s) => s.sourceContent)
   const lineOffset = useStore((s) => s.lineOffset)
   const tabs = useStore((s) => s.tabs)
@@ -185,24 +190,25 @@ export function OutlinePanel() {
   }
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
-      <div className="flex h-8 shrink-0 items-center justify-between border-b border-border px-2.5">
-        <span className="text-xs font-medium text-muted-foreground">大纲</span>
-        <div className="flex items-center gap-1.5">
-          <span className="text-[11px] text-muted-foreground">{rooted.length} 个顶层节点</span>
-          <button title={allExpanded ? '全部折叠' : '全部展开'} onClick={toggleAll}
-            disabled={allKeys.length === 0}
-            className="p-0.5 text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-40">
-            {allExpanded ? <ChevronsDownUp className="h-3.5 w-3.5" /> : <ChevronsUpDown className="h-3.5 w-3.5" />}
-          </button>
-        </div>
-      </div>
-      <div className="min-h-0 flex-1 overflow-auto py-1">
+    <PanelItem value="outline">
+      {/* 「全部折叠 / 全部展开」放在标题行的**左图标位**：这里原来是各面板的"自动"开关，
+          同一个位置同一套观感；塞进右侧触发区会变成"按钮套按钮"（Radix 的 trigger 本身就是 button）。
+          右边那条计数文字（"N 个顶层节点"）已按用户要求删掉 —— 树的形状自己就说明了它有多少。 */}
+      <PanelHeader leading={
+        <button title={allExpanded ? '全部折叠' : '全部展开'} onClick={toggleAll}
+          disabled={allKeys.length === 0}
+          className="flex w-6 shrink-0 items-center justify-center text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-40">
+          {allExpanded ? <ChevronsDownUp className="h-3.5 w-3.5" /> : <ChevronsUpDown className="h-3.5 w-3.5" />}
+        </button>
+      }>
+        大纲
+      </PanelHeader>
+      <PanelContent className="py-1">
         {rooted.length === 0 && (
           <div className="p-2 text-xs text-muted-foreground">当前源码无可识别的大纲节点</div>
         )}
         {rooted.map((n) => row(n, 0, ''))}
-      </div>
-    </div>
+      </PanelContent>
+    </PanelItem>
   )
 }
