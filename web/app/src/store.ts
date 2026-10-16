@@ -1286,9 +1286,25 @@ export const useStore = create<Store>((set, get) => ({
     const st = get()
     const label = op === 'close' ? '结束会话' : op === 'restart' ? '重启会话' : '切换会话'
     try {
-      if (op === 'close' && st.sessionId) await api.sessionClose(st.sessionId)
-      else if (op === 'restart' && st.sessionId) await api.sessionRestart(st.sessionId, ent)
-      else if (op === 'switch' && env) await api.sessionSwitch(env, ent)
+      // **绝不假装成功**。原来这三条是 `if (… && st.sessionId) await …` 串起来的：
+      // 条件不成立时**一个请求都不发**，却照样往时间线里记一条"结束会话 → 主机109"，
+      // 再 sync 一次把还活着的会话又绑回来 —— 用户看到的就是"点了结束会话，什么都没发生，
+      // 也没有任何提示"（实测踩到）。所以：做不到就**说清楚为什么**，让上层的 toast 去讲。
+      if (op === 'close') {
+        if (!st.sessionId) throw new Error('界面上没有当前会话（状态可能已经过期）。点右上角刷新看真实状态；若左侧列表里还有会话，直接点它的「结束会话」')
+        await api.sessionClose(st.sessionId)
+        // 关完**核对一次**：POST 成功不等于真的关掉了（服务端异常时可能 200 而会话还在）。
+        const { sessions } = await api.list()
+        if ((sessions || []).some((s) => s.id === st.sessionId)) {
+          throw new Error('服务端还报着这个会话 —— 关闭没有真正生效，去看服务端日志（.tt-serve.log）里这一轮会话的收尾')
+        }
+      } else if (op === 'restart') {
+        if (!st.sessionId) throw new Error('界面上没有当前会话，无法重启。点右上角刷新后重试')
+        await api.sessionRestart(st.sessionId, ent)
+      } else {
+        if (!env) throw new Error('没有点名要切到哪个环境')
+        await api.sessionSwitch(env, ent)
+      }
       st.pushTimeline({ origin: 'human', kind: 'command', text: label + (env ? ' → ' + env : '') + (ent ? ' (ENT ' + ent + ')' : '') })
     } catch (e: any) {
       st.pushTimeline({ origin: 'system', kind: 'warn', text: `${label}失败: ${e.message || String(e)}` })

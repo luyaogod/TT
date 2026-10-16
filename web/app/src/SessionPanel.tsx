@@ -262,7 +262,10 @@ export function SessionPanel() {
                     <span className="shrink-0 text-[11px] text-muted-foreground">{STATE_LABEL[st] || st}</span>
                   )}
                   {connected ? (
-                    <span className={`flex shrink-0 items-center gap-0.5 ${needEnt ? 'opacity-60' : 'opacity-70 group-hover:opacity-100'}`}>
+                    // busy 时两个按钮都置灰（`disabled:pointer-events-none` → 灰按钮自己弹不出 tooltip），
+                    // 所以**把原因写在包着它的这一层**上：否则"点了没反应"连句解释都没有。
+                    <span className={`flex shrink-0 items-center gap-0.5 ${needEnt ? 'opacity-60' : 'opacity-70 group-hover:opacity-100'}`}
+                      title={busy ? `上一个会话操作还没回来（${busy}）—— 两个按钮先置灰，等它落定；若一直不动，看服务端日志` : undefined}>
                       <button
                         title={needEnt ? '请先填 TOPENT(企业编号)才能重启会话' : '重启会话(断开重连同环境)'}
                         disabled={!!busy || needEnt}

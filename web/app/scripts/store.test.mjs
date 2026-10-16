@@ -298,4 +298,20 @@ S().setRecordAt(-5)
 assert.equal(S().recordAt, 0, '非正数一律当"不定位"，不许落到 1970 年')
 console.log('OK 14) 区间深链接:recordAt 可清空、非正数一律不定位')
 
-console.log('\n全部通过: 14/14')
+// ---------- 15) 会话操作不许"假装成功" ----------
+// 原来 `sessionOp` 写成 `if (op === 'close' && st.sessionId) await api.sessionClose(...)`：
+// 条件不成立时**一个请求都不发**，却照样记一条"结束会话"到时间线、再 sync 一次 ——
+// 用户看到的是"点了结束会话，什么都没发生，也没有任何提示"（真机踩到过）。
+// 现在的契约：做不到就抛，让面板的 toast 把原因说出来。
+useStore.setState({ sessionId: null }) // 前面几条用例留了会话，这条要的是"没有会话"那一刻
+const noSid = await S().sessionOp('close').then(() => null, (e) => e)
+assert.ok(noSid && /没有当前会话/.test(noSid.message), '没有会话时 close 必须抛错（不许静默成功）')
+const noEnv = await S().sessionOp('switch').then(() => null, (e) => e)
+assert.ok(noEnv && /点名/.test(noEnv.message), '没点名环境时 switch 必须抛错')
+const warned = S().timeline.filter((t) => t.kind === 'warn').map((t) => t.text)
+assert.ok(warned.some((x) => x.includes('结束会话失败')), '失败要进时间线（kind=warn）')
+assert.ok(!S().timeline.some((t) => t.kind === 'command' && t.text.startsWith('结束会话')),
+  '什么都没发的时候，不许记一条"成功"的命令行')
+console.log('OK 15) 会话操作:做不到就抛错并记 warn，绝不假装成功')
+
+console.log('\n全部通过: 15/15')

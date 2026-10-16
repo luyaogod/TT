@@ -573,14 +573,40 @@ export interface ReplayFrame { type: 'replay'; epoch: string; events: Event[] }
 // 浏览器不声明 X-Actor —— 服务端不认这个头时一律按 human 处理(CLI 才声明 ai)。
 // 注意 headers 必须在 opts 之后合并:早先写成 { headers: 默认, ...opts } 时,
 // 调用方只要自带 headers 就会把默认头整块覆盖掉。
-async function req<T>(url: string, opts?: RequestInit): Promise<T> {
-  const r = await fetch(url, {
-    ...opts,
-    headers: { 'Content-Type': 'application/json', ...(opts?.headers || {}) },
-  })
-  const data = await r.json().catch(() => ({}))
-  if (!r.ok || data.ok === false) throw new Error(data.error || `HTTP ${r.status}`)
-  return data as T
+/**
+ * 一次请求。**可选超时**（`timeoutMs`）。
+ *
+ * 为什么要有它：没有超时的话，一个永远不回来的请求会让调用方的 `finally` 永不执行 ——
+ * 会话面板就是这么被卡死的（`runOp` 的 `busy` 一直置着 → 面板上**所有**按钮变灰、
+ * 点了没反应、也没有任何提示，用户看到的就是"前端结束不了会话"）。
+ * 超时不是"猜服务端错了"，而是把"没回来"变成一个**能说出口的事实**。
+ */
+async function req<T>(url: string, opts?: RequestInit & { timeoutMs?: number }): Promise<T> {
+  const { timeoutMs, ...init } = opts || {}
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let ac: AbortController | undefined
+  if (timeoutMs && timeoutMs > 0) {
+    ac = new AbortController()
+    init.signal = ac.signal
+    timer = setTimeout(() => ac?.abort(), timeoutMs)
+  }
+  try {
+    const r = await fetch(url, {
+      ...init,
+      headers: { 'Content-Type': 'application/json', ...(init.headers || {}) },
+    })
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok || data.ok === false) throw new Error(data.error || `HTTP ${r.status}`)
+    return data as T
+  } catch (e: any) {
+    if (ac?.signal.aborted) {
+      throw new Error(`请求超时：${Math.round((timeoutMs || 0) / 1000)} 秒没有回应。服务端可能还在忙（或那次操作卡住了）——`
+        + `点右上角刷新看现在的真实状态，别重复点`)
+    }
+    throw e
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 export const api = {
@@ -645,13 +671,16 @@ export const api = {
   // ent = 本次要用的企业编号(面板上填的那个)。环境配置里已不再存企业编号
   // (hosts.sshs[].topent 已移除),所以 ENT 必须随这次请求带上去;省略 = 不覆盖,
   // 沿用登录 shell 自己的 $TOPENT。
+  // 三个会话操作都带超时：它们要连 SSH、起进程，慢是正常的（给 90 秒），
+  // 但**不能永远不回来** —— 面板的 busy 就是靠它们的 promise 落定才解开的（见 req 的说明）。
   sessionRestart: (id: string, ent?: string) =>
     req<{ sessionId: string; env?: string; state?: string }>(
-      `${API_BASE}/sessions/${id}/restart`, { method: 'POST', body: JSON.stringify({ ent: ent || '' }) }),
-  sessionClose: (id: string) => req<any>(`${API_BASE}/sessions/${id}/close`, { method: 'POST' }),
+      `${API_BASE}/sessions/${id}/restart`, { method: 'POST', body: JSON.stringify({ ent: ent || '' }), timeoutMs: 90000 }),
+  sessionClose: (id: string) =>
+    req<any>(`${API_BASE}/sessions/${id}/close`, { method: 'POST', timeoutMs: 90000 }),
   sessionSwitch: (env: string, ent?: string) =>
     req<{ sessionId: string; env?: string; state?: string }>(
-      `${API_BASE}/sessions/switch`, { method: 'POST', body: JSON.stringify({ env, ent: ent || '' }) }),
+      `${API_BASE}/sessions/switch`, { method: 'POST', body: JSON.stringify({ env, ent: ent || '' }), timeoutMs: 90000 }),
   // 空闲态重新设置会话 TOPENT(空值 = 清除覆盖并重新下发配置默认)
   topent: (id: string, value: string) => req<{ topent: string }>(`${API_BASE}/sessions/${id}/topent`, { method: 'POST', body: JSON.stringify({ value }) }),
   bpAdd: (id: string, location: string) =>
