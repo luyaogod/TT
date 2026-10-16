@@ -119,7 +119,13 @@ export function RecordingDetail({ id, onBack, onChanged }: Props) {
       const pr = r.progress || emptyProgress()
       // 跑完的那一次：报一次结果（失败数不为 0 时用 error 的样式，让人一眼看出该去看日志）
       if (wasRunning.current && !r.running) {
-        const said = `已确认 ${pr.sent} · 无应答 ${pr.noResp}${pr.suspect ? `（可疑 ${pr.suspect}）` : ''} · 跳过 ${pr.skipped}`
+        // 描述里只说**异常**（与进度条、表里的徽标同一套口径：正常回包不报）。
+        // 全 0 就说明每一步都有回应 —— 那也要说出来，不然 toast 上什么都没有像是没跑成。
+        const bad: string[] = []
+        if (pr.noResp) bad.push(`无应答 ${pr.noResp}${pr.suspect ? `（可疑 ${pr.suspect}）` : ''}`)
+        if (pr.skipped) bad.push(`跳过 ${pr.skipped}`)
+        if (pr.failed) bad.push(`失败 ${pr.failed}`)
+        const said = bad.length ? bad.join(' · ') : '每一步都有回应'
         if (pr.failed > 0) toast.error(`回放结束：${pr.done}/${pr.total}，失败 ${pr.failed}`, { description: said, duration: 0 })
         else toast.success(`回放完成：${pr.done}/${pr.total}`, { description: said })
       }
@@ -500,6 +506,7 @@ export function RecordingDetail({ id, onBack, onChanged }: Props) {
     </div>
   )
 }
+
 
 
 

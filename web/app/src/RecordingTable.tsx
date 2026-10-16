@@ -158,19 +158,29 @@ function Row({ f, p, clock, t0, action }: {
   )
 }
 
-/** 回放结果徽标（与回放进度条同一套说法，这里只有一格宽所以用短词）。 */
+/**
+ * 回放结果徽标。**只挂异常**（用户 2026-10-16 定的：把"已确认/已回包"去掉）。
+ *
+ * 理由：一轮回放里绝大多数步都是"发出去了、运行期回了包"——那是**正常**，不是发现；
+ * 73 行全挂一个绿色徽标，只会把真正要看的那几行（跳过 / 失败 / 点了却没回包）淹掉。
+ * 所以正常回包**不画**，无应答 / 无回包? / 跳过 / 失败 / 进行中 / 已暂停 才画。
+ * "这一轮一共成了多少步"这种事去进度条与完成 toast 里看。
+ *
+ * 正常步仍然可以查：选中那一行，明细面板的「概览」里有它的流量与这一步的时序。
+ */
 function StepChip({ s }: { s: ReplayStep }) {
   const m: Record<string, { t: string; c: string; why: string }> = {
-    sent: { t: '已确认', c: 'border-emerald-500/30 text-emerald-600 dark:text-emerald-400', why: '回放发出去了，运行期回了包' },
     'no-response': { t: '无应答', c: 'border-border text-muted-foreground', why: '回放发出去了，运行期没回包（本来就没应答）' },
     skipped: { t: '跳过', c: 'border-border text-muted-foreground', why: s.reason || '回放按要求跳过' },
     failed: { t: '失败', c: 'border-red-500/30 text-red-600 dark:text-red-400', why: s.reason || '回放发送出错' },
     waiting: { t: '进行中', c: 'border-sky-500/30 text-sky-600 dark:text-sky-400', why: '已发出，正在等运行期回包' },
     paused: { t: '已暂停', c: 'border-border text-muted-foreground', why: '回放停在这一步' },
   }
+  if (s.result === 'sent') return null // 正常回包 = 无需标记（见上面那段理由）
   const x = s.suspect && s.result === 'no-response'
     ? { t: '无回包?', c: 'border-amber-500/40 text-amber-600 dark:text-amber-400', why: '点击类事件本该有回包，8 秒内没有（可疑）' }
     : (m[s.result] || { t: s.result, c: 'border-border text-muted-foreground', why: '' })
   return <span className={`shrink-0 rounded-ui border px-1 text-[10px] ${x.c}`} title={`回放第 ${s.n} 步：${x.why}`}>{x.t}</span>
 }
+
 

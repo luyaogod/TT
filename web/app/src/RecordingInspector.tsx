@@ -4,7 +4,7 @@
 //
 //	概览     类型 / 目标 / 时序 / **流量**(这一步之后运行期推了多少字节 —— 被确认的量度)
 //	原始帧   那一段字节的 hex 与可打印形态(来自 /raw,越界与超限由服务端拒)
-//	引起的回应 这一步之后、下一步之前运行期推回来的帧(归属规则见 internal/web/recordingread.go)
+//	录制时的回应 当初录制时、这一步之后下一步之前运行期推回来的帧(规则见 internal/web/recordingread.go)
 //	名字来源  这个名字是怎么来的(R1–R4 命中哪条、父链、置信度、没解出来时的原因)
 //
 // 一条硬纪律贯穿四个页签:**解不出来就说解不出来**。名字那一栏在 `unresolved` 时显示
@@ -48,7 +48,11 @@ export function RecordingInspector(p: Props) {
   const tabs: { key: Tab; label: string }[] = [
     { key: 'summary', label: '概览' },
     { key: 'raw', label: '原始帧' },
-    { key: 'responses', label: p.action ? `引起的回应 (${p.action.responsesTotal || 0})` : '引起的回应' },
+    // 「**录制时**的回应」而不是「引起的回应」：这一屏上"回应"有两个来源 ——
+    // 这一栏是**当初录制**时运行期推回来的帧（按 [本步, 下一步) 归属），
+    // 而表里那些 `已回包 / 无应答` 徽标说的是**回放**那一轮的结果。两个都叫"回应"
+    // 会让人以为是同一件事（用户 2026-10-16 问过"已确认是什么"），所以各自点明来源。
+    { key: 'responses', label: p.action ? `录制时的回应 (${p.action.responsesTotal || 0})` : '录制时的回应' },
     { key: 'name', label: '名字来源' },
   ]
 
@@ -275,7 +279,7 @@ function RawTab({ id, frame }: { id: string; frame: RecordingFrame }) {
   )
 }
 
-/** 引起的回应页签:这一步之后、下一步之前运行期推回来的帧。 */
+/** 录制时的回应页签:当初录制时、这一步之后下一步之前运行期推回来的帧。 */
 function Responses({ p }: { p: Props }) {
   const a = p.action
   if (!a) {
@@ -357,4 +361,7 @@ function ruleText(source: string): string {
     default: return '没有命中任何规则（R1–R4 都试过）'
   }
 }
+
+
+
 

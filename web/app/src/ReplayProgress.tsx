@@ -54,8 +54,11 @@ export function ReplayProgressBar(p: Props) {
         <div className="h-1.5 w-40 overflow-hidden rounded-ui bg-muted" title={`${pr.done}/${pr.total} 步已有结果`}>
           <div className={`h-full ${pr.failed ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${done}%` }} />
         </div>
+        {/* 计数里**不写"已回包"**（用户 2026-10-16：把 已确认/已回包 去掉）：
+            "成了多少步"由左边那句 `第 N/M 步` 与进度条回答，这里只报**异常**。
+            异常全是 0 的时候这一句就是"什么都没出问题"——那也是要说的话。 */}
         <span className="text-muted-foreground">
-          已确认 {pr.sent} · 无应答 {pr.noResp}{pr.suspect ? `（其中可疑 ${pr.suspect}）` : ''} · 跳过 {pr.skipped} · 失败 {pr.failed}
+          无应答 {pr.noResp}{pr.suspect ? `（其中可疑 ${pr.suspect}）` : ''} · 跳过 {pr.skipped} · 失败 {pr.failed}
         </span>
         {waiting && (
           <span className="font-mono text-sky-600 dark:text-sky-400"
@@ -119,3 +122,4 @@ function useNow(ms: number): number {
   }, [ms])
   return now
 }
+
