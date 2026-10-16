@@ -681,6 +681,224 @@ func dispWidth(s string) int {
 	return w
 }
 
+// recIndexCmd / recIndexAllCmd 是"索引"这一条（D0）。
+//
+// 帧索引（`<raw>.frames.jsonl`）记的是**帧级时间 + 字节偏移**，录制时由代理顺手落。
+// 它必须能重建，因为两条路都会走到"没有索引"：
+//   - 老录制件（那时候还没记）；
+//   - 进程被硬杀（索引带缓冲，尾行没落盘 → 读侧报"不完整"）。
+// 两条路都**不动 raw 一个字节**：索引是派生视图，raw 才是证据。
+var (
+	recIndexForce bool
+	recIndexAll   bool
+)
+
+var recIndexCmd = &cobra.Command{
+	Use:   "index [录制ID]",
+	Short: "给录制件建帧索引（帧级时间 + 字节偏移）：老件补建、索引损坏或不全时重建",
+	Long: `现场解析录制件并落一份帧索引（`+"`<raw>.frames.jsonl`"+`，与 raw 同一个干）。
+
+为什么要它：录制件里只有字节、没有时间。timeline.log 有时间，但那是**块级**的、
+而且每块截断 1500 字节 —— 拿它当索引源只能得到一个安静的错答案。明细页要的
+"这一帧在第几个字节、什么时候来的"，只有在录制那一刻记下来才准确。
+
+索引是**派生**的：raw 是唯一权威，索引随时能删、能重建。重建出来的索引
+**不带帧时间**（老件本来就没有），界面会照实标"时间精度：块级"。
+
+  --force  已有索引也重建（默认：已经是完整的就跳过）`,
+	Args: atMostOneArg,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if recIndexAll {
+			return runIndexAll(cmd)
+		}
+		id := ""
+		if len(args) == 1 {
+			id = args[0]
+		} else if recID != "" {
+			id = recID
+		}
+		t, err := resolveRecording(uiFrom, id)
+		if err != nil {
+			return err
+		}
+		rows, err := indexOne(t.Dir, t.ID)
+		if err != nil {
+			return err
+		}
+		return printJSONOrText(map[string]any{"id": t.ID, "dir": t.Dir, "indexes": rows}, func() {
+			fmt.Printf("录制 %s（%s）\n", t.ID, t.Dir)
+			for _, r := range rows {
+				fmt.Printf("  %s  %s  %d 帧 / 覆盖 %s%s\n",
+					pad(r.Name, 34), padDisp(r.Dir, 14), r.Frames, humanBytes(r.Covered), r.Note())
+			}
+		})
+	},
+}
+
+// indexRow 是"建完索引"给用户看的一行。
+type indexRow struct {
+	Name    string `json:"raw"`
+	Dir     string `json:"dir"`
+	Frames  int    `json:"frames"`
+	Bytes   int64  `json:"bytes"`
+	Covered int64  `json:"covered"`
+	Rebuilt bool   `json:"rebuilt"`
+	Err     string `json:"error,omitempty"`
+}
+
+// Note 是这一行后面那句人话（重建了 / 已经有了 / 不是帧流）。
+func (r indexRow) Note() string {
+	switch {
+	case r.Err != "":
+		return "　" + r.Err
+	case r.Frames == 0:
+		return "　（没有帧：这份可能是早期的文本形态录制件）"
+	case r.Rebuilt:
+		return "　已重建（无帧级时间）"
+	default:
+		return "　已有索引，跳过（要重建加 --force）"
+	}
+}
+
+// indexOne 给一份录制的每个方向建索引。
+func indexOne(dir, id string) ([]indexRow, error) {
+	raws, err := fep.RawFilesFor(dir, id)
+	if err != nil {
+		return nil, fail(exitFailed, "读 %s: %v", dir, err)
+	}
+	if len(raws) == 0 {
+		return nil, fail(exitTarget, "%s 里没有 %s 的录制件", dir, id)
+	}
+	rows := make([]indexRow, 0, len(raws))
+	for _, raw := range raws {
+		b, berr := fep.BuildFrameIndex(raw.Path, raw.Conn, raw.Dir, recIndexForce)
+		row := indexRow{Name: raw.Name, Dir: fep.DirLabel(raw.Dir),
+			Frames: b.Frames, Bytes: b.Bytes, Covered: b.Covered, Rebuilt: b.Rebuilt}
+		if berr != nil {
+			row.Err = "建索引失败：" + berr.Error()
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
+}
+
+// runIndexAll 给两个默认落点里的**每一份**录制建索引。
+//
+// 存在的理由：索引是这一轮才加的，库里已经攒下的那些一份都没有 —— 逐个敲 ID
+// 既慢又容易漏。它只写派生文件，不动任何录制件。
+func runIndexAll(cmd *cobra.Command) error {
+	roots, err := recordingRoots()
+	if err != nil {
+		return err
+	}
+	type one struct {
+		Where string     `json:"where"`
+		ID    string     `json:"id"`
+		Rows  []indexRow `json:"indexes"`
+	}
+	var all []one
+	for _, root := range roots {
+		ids, lerr := listAllIDs(root.Dir)
+		if lerr != nil {
+			if os.IsNotExist(lerr) {
+				continue
+			}
+			return fail(exitFailed, "读 %s: %v", root.Dir, lerr)
+		}
+		for _, entry := range ids {
+			rows, rerr := indexOne(entry.Dir, entry.ID)
+			if rerr != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "跳过 %s：%v\n", entry.ID, rerr)
+				continue
+			}
+			all = append(all, one{Where: root.Label, ID: entry.ID, Rows: rows})
+		}
+	}
+	return printJSONOrText(map[string]any{"count": len(all), "recordings": all}, func() {
+		if len(all) == 0 {
+			fmt.Println("没有录制件要建索引")
+			return
+		}
+		for _, a := range all {
+			fmt.Printf("%s %s\n", padDisp(a.Where, 6), a.ID)
+			for _, r := range a.Rows {
+				fmt.Printf("  %s  %s  %d 帧%s\n", pad(r.Name, 34), padDisp(r.Dir, 14), r.Frames, r.Note())
+			}
+		}
+	})
+}
+
+// recRef 是"一份录制住在哪个目录"（建索引的 `--all` 要遍历两处落点）。
+type recRef struct{ ID, Dir string }
+
+// listAllIDs 列出一个落点里的全部录制（缓存是平的；长期库是 环境/ENT 两层，
+// 所以要走库自己的遍历 —— 与 `rec list` 同一套判据，别在这里再写一遍）。
+func listAllIDs(root string) ([]recRef, error) {
+	if ids, err := fep.ListIDs(root); err == nil && len(ids) > 0 {
+		out := make([]recRef, 0, len(ids))
+		for _, id := range ids {
+			out = append(out, recRef{ID: id, Dir: root})
+		}
+		return out, nil
+	}
+	lib := fep.Library{Root: root}
+	items, err := lib.List()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]recRef, 0, len(items))
+	for _, it := range items {
+		out = append(out, recRef{ID: it.ID, Dir: it.Dir})
+	}
+	return out, nil
+}
+
+// indexStatus 说清"这份录制的帧索引是什么状态"，每个方向一句。
+//
+// 四种状态都要能说出来，因为它们对明细页的意义完全不同：
+//
+//	34 帧（帧级时间）        → 时间轴能画到帧
+//	34 帧（无帧级时间）      → 老件或重建过的：只能画块级
+//	34 帧（不完整，可重建）  → 多半是进程被硬杀，尾行没落盘
+//	无（可建）              → 老件，还没建过
+//
+// 一个都不许合并成"有/无"：那会让人以为"有索引"就等于"有时间精度"。
+func indexStatus(dir, id string) (string, []indexRow) {
+	raws, err := fep.RawFilesFor(dir, id)
+	if err != nil || len(raws) == 0 {
+		return "（读不到录制件）", nil
+	}
+	var parts []string
+	var rows []indexRow
+	for _, raw := range raws {
+		ix, rerr := fep.ReadFrameIndex(fep.IndexPathFor(raw.Path))
+		row := indexRow{Name: raw.Name, Dir: fep.DirLabel(raw.Dir)}
+		var text string
+		switch {
+		case rerr != nil:
+			text = "无（用 tt fep rec index 建）"
+			row.Err = "无索引"
+		case !ix.Complete() && ix.StaleFormat():
+			text = fmt.Sprintf("%d 帧（格式版本 %d 已过时，可重建）", len(ix.Recs), ix.Version)
+			row.Frames, row.Bytes, row.Covered = len(ix.Recs), ix.End, ix.Covered()
+			row.Err = "索引格式过时"
+		case !ix.Complete():
+			text = fmt.Sprintf("%d 帧（不完整，可重建）", len(ix.Recs))
+			row.Frames, row.Bytes, row.Covered = len(ix.Recs), ix.End, ix.Covered()
+			row.Err = "索引不完整"
+		case !ix.Timed():
+			text = fmt.Sprintf("%d 帧（无帧级时间：老件重建）", len(ix.Recs))
+			row.Frames, row.Bytes, row.Covered, row.Rebuilt = len(ix.Recs), ix.End, ix.Covered(), true
+		default:
+			text = fmt.Sprintf("%d 帧（帧级时间）", len(ix.Recs))
+			row.Frames, row.Bytes, row.Covered = len(ix.Recs), ix.End, ix.Covered()
+		}
+		parts = append(parts, fmt.Sprintf("#%d %s %s", raw.Conn, fep.DirLabel(raw.Dir), text))
+		rows = append(rows, row)
+	}
+	return strings.Join(parts, " ／ "), rows
+}
+
 var recShowCmd = &cobra.Command{
 	Use:   "show [录制ID]",
 	Short: "看一份录制是什么：启动路径、作业、环境·区域·ENT、编译件标识、指纹，以及现在能不能用",
@@ -707,10 +925,12 @@ var recShowCmd = &cobra.Command{
 			return err
 		}
 		snap := t.snapshot()
+		idxText, idxRows := indexStatus(t.Dir, t.ID)
 		view := map[string]any{
 			"id": t.ID, "dir": t.Dir, "files": t.Files,
 			"path": snap.Path, "prog": snap.Prog,
 			"fingerprint": snap.FP,
+			"indexes":     idxRows,
 		}
 		if t.Meta != nil {
 			view["meta"] = t.Meta
@@ -756,6 +976,7 @@ var recShowCmd = &cobra.Command{
 			}
 			fmt.Printf("连接表   : %s\n", connTables(recMulti))
 			fmt.Printf("录制件   : %d 份 AUI 文件\n", len(t.Files))
+			fmt.Printf("帧索引   : %s\n", idxText)
 			if t.Meta != nil && len(t.Meta.Conns) > 0 {
 				fmt.Println("连接     :")
 				for _, c := range t.Meta.Conns {
@@ -799,11 +1020,14 @@ func dashIfBlank(s string) string {
 }
 
 func init() {
-	recCmd.AddCommand(recListCmd, recShowCmd, recKeepCmd, recRmCmd, recPruneCmd)
-	for _, c := range []*cobra.Command{recListCmd, recShowCmd} {
+	recCmd.AddCommand(recListCmd, recShowCmd, recKeepCmd, recRmCmd, recPruneCmd, recIndexCmd)
+	for _, c := range []*cobra.Command{recListCmd, recShowCmd, recIndexCmd} {
 		c.Flags().StringVar(&uiFrom, "from", "", "录制件落点：单个 .log，或存放录制件的目录（默认缓存 + 长期库都看）")
 	}
 	recShowCmd.Flags().StringVar(&recID, "id", "", "录制 ID（与位置参数二选一）")
+	recIndexCmd.Flags().StringVar(&recID, "id", "", "录制 ID（与位置参数二选一）")
+	recIndexCmd.Flags().BoolVar(&recIndexForce, "force", false, "已有索引也重建（默认跳过完整的那些）")
+	recIndexCmd.Flags().BoolVar(&recIndexAll, "all", false, "给两个默认落点里的每一份录制都建索引")
 	recRmCmd.Flags().BoolVar(&recRmDryRun, "dry-run", false, "只说要删什么，一个字节都不删")
 	recRmCmd.Flags().BoolVar(&recRmYes, "yes", false, "确认删除（录制不可再生；AI 不得自主加）")
 	recPruneCmd.Flags().BoolVar(&recPruneDryRun, "dry-run", false, "只列该清的环境，一个字节都不删")

@@ -69,7 +69,10 @@ type conn struct {
 	bytesFE int64
 	alive   bool
 	files   []*os.File
-	mu      sync.Mutex
+	// idx 是帧索引（index.go）：[0] 运行期→前端、[1] 前端→运行期，与 files[0]/files[1]
+	// 一一对应。索引写不出来时是 nil —— 录制照样进行（raw 是权威，索引可重建）。
+	idx [2]*FrameIndexWriter
+	mu  sync.Mutex
 }
 
 // NewProxy prepares a proxy; call Start to bind the sockets.
@@ -377,6 +380,9 @@ func indexByte(b []byte, c byte) int {
 
 // write tees a chunk into the connection's recording.
 func (c *conn) write(chunk []byte, fromRuntime bool) {
+	// 时刻在**拿到这一段字节的那一刻**取，而不是等到落完盘 —— 帧索引记的是
+	// "这一帧什么时候来的"，落盘耗时不该进这个数（H8：精度是块级，不是落盘级）。
+	now := time.Now()
 	c.mu.Lock()
 	// The `_om` numbers belong to the front end, so they travel on the
 	// GDC -> runtime direction (fromRuntime == false), not the other way.
@@ -392,6 +398,10 @@ func (c *conn) write(chunk []byte, fromRuntime bool) {
 		// 有了这一行就能回答"是哪条前端事件引出运行期的那条推送"（今天卡在这里）。
 		files[2].WriteString(timelineLine(fromRuntime, chunk))
 	}
+	// 帧索引：只**找帧**并记下位置与时刻，raw 一个字节都不碰（见 index.go 的三条规矩）。
+	if i := idxSlot(fromRuntime); c.idx[i] != nil {
+		c.idx[i].Write(chunk, now)
+	}
 	c.mu.Unlock()
 	if len(files) == 0 {
 		return
@@ -405,6 +415,14 @@ func (c *conn) write(chunk []byte, fromRuntime bool) {
 	if f != nil {
 		f.Write(chunk)
 	}
+}
+
+// idxSlot 把方向映射到 conn.idx 的下标（与 files 的排法一致）。
+func idxSlot(fromRuntime bool) int {
+	if fromRuntime {
+		return 0
+	}
+	return 1
 }
 
 // trackSeq keeps the next `_om` number for this connection. The front end
@@ -430,7 +448,10 @@ func (c *conn) trackSeq(chunk []byte) {
 }
 
 // openLogs creates the per-connection recording files: index 0 is runtime->GDC,
-// index 1 is GDC->runtime (the front end's own events).
+// index 1 is GDC->runtime (the front end's own events), index 2 is the timeline.
+//
+// 每个方向再配一份**帧索引**（`<同名>.frames.jsonl`，见 index.go）。索引与 raw 同生同死：
+// 收工时 `library.Promote` 按 ID 认文件，索引名字里带着同一个 ID，所以会跟着搬走。
 func (c *conn) openLogs(dir, tag string) {
 	if dir == "" {
 		return
@@ -442,10 +463,21 @@ func (c *conn) openLogs(dir, tag string) {
 		filepath.Join(dir, fmt.Sprintf("%s-%d-gdc2rt.log", tag, c.id)),
 		filepath.Join(dir, fmt.Sprintf("%s-%d-timeline.log", tag, c.id)),
 	}
-	for _, n := range names {
-		f, err := os.Create(n)
-		if err == nil {
-			c.files = append(c.files, f)
+	// 固定三个槽位（而不是"成功一个 append 一个"）：位置就是语义（0=界面侧、1=事件侧、
+	// 2=时间线），失败一个不能让后面的顶上来 —— 那会把事件侧写成界面侧。
+	files := make([]*os.File, len(names))
+	for i, n := range names {
+		if f, err := os.Create(n); err == nil {
+			files[i] = f
+		}
+	}
+	c.files = files
+	for i, d := range []int{DirRuntime, DirFront} {
+		if files[i] == nil {
+			continue // 连 raw 都没落成，索引记了也没用
+		}
+		if w, err := NewFrameIndexWriter(IndexPathFor(names[i]), c.id, d); err == nil {
+			c.idx[i] = w
 		}
 	}
 }
@@ -495,7 +527,9 @@ func (c *conn) close() {
 	conns := c.toGDC
 	rt := c.toRT
 	files := c.files
+	idx := c.idx
 	c.files = nil
+	c.idx = [2]*FrameIndexWriter{}
 	c.mu.Unlock()
 	if conns != nil {
 		conns.Close()
@@ -503,7 +537,16 @@ func (c *conn) close() {
 	if rt != nil {
 		rt.Close()
 	}
+	// 索引先收尾（写尾行 + flush），再关 raw：这样"索引写完了"永远不晚于
+	// "raw 最后一个字节落盘"，读侧不会看到一份"raw 更长但索引已收尾"的假完整索引。
+	for _, w := range idx {
+		if w != nil {
+			w.Close()
+		}
+	}
 	for _, f := range files {
-		f.Close()
+		if f != nil {
+			f.Close()
+		}
 	}
 }

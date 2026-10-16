@@ -38,6 +38,8 @@ func (s *Server) registerRecordings(m *http.ServeMux) {
 	m.HandleFunc("POST /api/recordings/stop", s.hRecordingStop)
 	m.HandleFunc("POST /api/recordings/{id}/replay", s.hRecordingReplay)
 	m.HandleFunc("DELETE /api/recordings/{id}", s.hRecordingDelete)
+	// 明细页的四个读侧端点（D1）：概览条带、全文流、三层模型、原始帧。
+	s.registerRecordingDetail(m)
 }
 
 // recRow 是列表里的一行（前端直接照着渲染）。

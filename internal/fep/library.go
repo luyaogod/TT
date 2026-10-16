@@ -104,7 +104,8 @@ type LibraryItem struct {
 
 // Promote 把缓存目录里的一份录制搬进长期库（**移动**，不是拷贝）。
 //
-// 只搬这一份的东西：`<ID>-<连接>-{rt2gdc,gdc2rt,timeline}.log` 与 `<ID>.meta.json`。
+// 只搬这一份的东西：`<ID>-<连接>-{rt2gdc,gdc2rt,timeline}.log`、它们的帧索引
+// `<同名>.frames.jsonl` 与 `<ID>.meta.json`。
 // 先全部搬完再收尾 —— 中途失败时新的那份是不全的，所以要报错让调用方知道，
 // 且**不删源**（宁可两边都有，也不要一份半的）。
 func (l *Library) Promote(srcDir, id string) (LibraryItem, error) {
@@ -153,7 +154,7 @@ func (l *Library) Promote(srcDir, id string) (LibraryItem, error) {
 
 // recordingLogFiles 列出这一份录制的**流量文件**（不含身份文件：身份是"这一份齐了"
 // 的标记，由 Promote 在最后单独搬，见那里的注释）。三个后缀都带：回放要事件侧，
-// 排障要看 timeline。
+// 排障要看 timeline；帧索引也带（它记着帧级时间，丢了明细页就只剩块级时间）。
 func recordingLogFiles(dir, id string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

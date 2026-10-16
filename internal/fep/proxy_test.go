@@ -103,17 +103,18 @@ func TestProxyForwardsBothWaysAndRecords(t *testing.T) {
 		t.Fatalf("next sequence = %d, want 4 (the front end numbered its event 3)", infos[0].Seq)
 	}
 
-	// recordings: raw bytes (both directions, one file each) + a timestamped timeline.
+	// recordings: raw bytes (both directions, one file each) + a timestamped timeline
+	// + 每个方向一份帧索引（D0）。
 	deadline := time.Now().Add(2 * time.Second)
 	var entries []os.DirEntry
 	for time.Now().Before(deadline) {
-		if entries, _ = os.ReadDir(dir); len(entries) == 3 {
+		if entries, _ = os.ReadDir(dir); len(entries) == 5 {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if len(entries) != 3 {
-		t.Fatalf("expected three files (rt2gdc / gdc2rt / timeline), got %d", len(entries))
+	if len(entries) != 5 {
+		t.Fatalf("expected five files (rt2gdc / gdc2rt / timeline + 两份帧索引), got %d", len(entries))
 	}
 	var sawHello, sawEvent, sawTimeline bool
 	for _, e := range entries {
@@ -132,6 +133,29 @@ func TestProxyForwardsBothWaysAndRecords(t *testing.T) {
 	}
 	if !sawHello || !sawEvent || !sawTimeline {
 		t.Fatalf("recordings incomplete: runtime=%v front-end=%v timeline=%v", sawHello, sawEvent, sawTimeline)
+	}
+
+	// 帧索引：前端那一条事件（`event _om 3`）必须落进 gdc2rt 的索引里，
+	// 而且带时刻 —— 没有它，明细页就只能靠 timeline 的块级时间。
+	//
+	// 索引是**带缓冲**写的（一帧一行太碎），所以要等连接收工（尾行 + flush）才读得到。
+	// 这正是它的设计：进程被硬杀时尾行不落盘，读侧据此说"索引不完整、可重建"。
+	p.Close()
+	idx, err := ReadFrameIndex(filepath.Join(dir, "t-1-gdc2rt.frames.jsonl"))
+	if err != nil {
+		t.Fatalf("没有事件侧的帧索引：%v", err)
+	}
+	if len(idx.Recs) == 0 {
+		t.Fatal("事件侧的帧索引是空的")
+	}
+	if idx.Recs[0].Kind != "event" || idx.Recs[0].Seq != 3 || idx.Recs[0].T == 0 {
+		t.Fatalf("事件那一帧该被认出来并带时刻：%+v", idx.Recs[0])
+	}
+	if idx.Recs[0].Dir != DirFront {
+		t.Fatalf("事件侧的方向该是 DirFront：%d", idx.Recs[0].Dir)
+	}
+	if !idx.Complete() {
+		t.Fatalf("收工后的索引该是完整的：HasEnd=%v End=%d RawSize=%d", idx.HasEnd, idx.End, idx.RawSize)
 	}
 }
 

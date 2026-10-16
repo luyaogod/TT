@@ -109,6 +109,38 @@ func idRefOf(e string) (int, bool) {
 	return n, true
 }
 
+// soleIDRef 返回载荷里**唯一**的那个 `idRef "<n>"`；出现两个不同的值就回 false。
+//
+// 为什么不能"取第一个"：一条 `event _om` 帧可以带一批事件（实测 `event _om 0` 里是
+// 十来个 `{ConfigureEvent 0{{idRef "960"}{tabIndex "1005"}}}` 这类导航上报，id 各不相同）。
+// 这时"这条消息指向哪个对象"没有答案，取第一个就是**编** —— 而它会被界面当"目标"显示。
+func soleIDRef(e string) (int, bool) {
+	found, n := 0, 0
+	for i := 0; ; {
+		j := strings.Index(e[i:], `idRef "`)
+		if j < 0 {
+			break
+		}
+		rest := e[i+j+len(`idRef "`):]
+		v, _, ok := numAt(rest, 0)
+		if !ok {
+			i += j + len(`idRef "`)
+			continue
+		}
+		if found == 0 {
+			n = v
+		} else if v != n {
+			return 0, false
+		}
+		found++
+		i += j + len(`idRef "`)
+	}
+	if found == 0 {
+		return 0, false
+	}
+	return n, true
+}
+
 // attrOf extracts `key "value"` from an event text.
 func attrOf(e, key string) (string, bool) {
 	needle := key + " \""

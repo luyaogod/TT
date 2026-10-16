@@ -205,8 +205,15 @@ func RecordingIDFromFile(name string) (string, bool) {
 	return idFromStem(strings.TrimSuffix(name, "-rt2gdc.log"))
 }
 
-// RecordingIDOfAny 同上，但三个后缀都认（搬一份录制时要把事件侧与 timeline 一起带上）。
+// RecordingIDOfAny 同上，但所有"属于一份录制"的文件后缀都认：三个流量文件 + 帧索引。
+//
+// 索引（`.frames.jsonl`）必须在这里认出来，否则 `library.Promote` 只搬 raw 不搬索引 ——
+// 搬到长期库的那份看起来是完整的，其实明细页会退化成"块级时间"，而且**没人会知道为什么**
+// （索引还留在缓存目录里，等着被清缓存删掉）。
 func RecordingIDOfAny(name string) (string, bool) {
+	if raw, ok := RawOfIndex(name); ok {
+		name = raw // 索引与它的 raw 同一个干，先换回 raw 名再切 ID
+	}
 	for _, s := range []string{"-rt2gdc.log", "-gdc2rt.log", "-timeline.log"} {
 		if strings.HasSuffix(name, s) {
 			return idFromStem(strings.TrimSuffix(name, s))

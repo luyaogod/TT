@@ -13,12 +13,22 @@ import (
 // 长期库（R3）：录制件按 环境+ENT 存放，且**清缓存不碰它**。
 // 这条测的正是那个差别：缓存目录是"一轮一删也不心疼"，而录制是"以后还要拿来重放"的东西。
 
-// seedRecording 在 dir 里落一份最小可用的录制（AUI 侧 + 事件侧 + 身份）。
+// seedRecording 在 dir 里落一份最小可用的录制（AUI 侧 + 事件侧 + 时间线 + 帧索引 + 身份）。
 func seedRecording(t *testing.T, dir, id, env, ent string) {
 	t.Helper()
 	body := "om 3 {{" + demoAUI() + "}}\n"
 	for _, n := range []string{id + "-1-rt2gdc.log", id + "-1-gdc2rt.log", id + "-1-timeline.log"} {
 		if err := os.WriteFile(filepath.Join(dir, n), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 帧索引：与两份 raw 同一个干（搬库要连它一起搬，否则明细页只剩块级时间）
+	for i, d := range []int{DirRuntime, DirFront} {
+		raw := filepath.Join(dir, id+"-1-rt2gdc.log")
+		if i == 1 {
+			raw = filepath.Join(dir, id+"-1-gdc2rt.log")
+		}
+		if _, err := BuildFrameIndex(raw, 1, d, true); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -49,8 +59,9 @@ func TestPromoteMovesOneRecordingIntoEnvAndEnt(t *testing.T) {
 	if item.Dir != want {
 		t.Fatalf("落点该是 <数据目录>/records/<环境>/<ENT>/<ID>：%s", item.Dir)
 	}
-	// 三份录制件 + 身份都到了；源里那一份不留
-	for _, n := range []string{"-1-rt2gdc.log", "-1-gdc2rt.log", "-1-timeline.log", MetaSuffix} {
+	// 三份录制件 + 帧索引 + 身份都到了；源里那一份不留
+	for _, n := range []string{"-1-rt2gdc.log", "-1-gdc2rt.log", "-1-timeline.log",
+		"-1-rt2gdc.frames.jsonl", "-1-gdc2rt.frames.jsonl", MetaSuffix} {
 		if _, err := os.Stat(filepath.Join(want, "fep-20261015-170031"+n)); err != nil {
 			t.Errorf("库里少了 %s: %v", n, err)
 		}
