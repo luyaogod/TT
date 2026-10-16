@@ -2,7 +2,7 @@
 // 默认只有日志列表(全宽);点击某一行才在右侧"嵌入"详情面板(基本信息/Request/Response + 重放调试),
 // 此时列表收起为「状态 + 服务」两列给面板让位 —— 详情面板可拖拽分配宽度,也可主动关闭(✕ / Esc)。
 // 查询条件对齐 awsq990 主查询 QBE:服务名(wsfa001)+ 开始时间范围(wsfa003);仅失败为本工具扩展
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Bug, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, ChevronUp, Copy, Fingerprint, RefreshCw, Undo2, X } from 'lucide-react'
 import { useStore } from './store'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../shared/ui'
@@ -111,6 +111,13 @@ const COLS_COMPACT: Col[] = [COL_STATUS, { ...COL_SERVICE, cls: 'w-32' }, COL_JO
 const RATIO_MIN = 0.25 // 详情面板最小占比
 const RATIO_MAX = 0.75 // 详情面板最大占比
 const RESIZER_W = 1    // .col-resizer 的宽度(见 index.css:1px 线 + 透明溢出命中区)
+// 两侧各要多少才"看得成"：
+//   MIN_DETAIL_W —— 低于这个总宽就不再左右分栏（见 narrowSplit）
+//   MIN_DETAIL_ABS —— 分栏时明细的**绝对**下限：占比下限 0.25 在 690px 的容器上只有 172px，
+//     值列立刻变成一列汉字的宽度（用户实测截图里"服务名称 oa.sc he m.a dat a.get"就是它）
+const MIN_LIST_W = 280
+const MIN_DETAIL_W = 300
+const MIN_DETAIL_ABS = 240
 
 // 工具条查询输入框(四个条件共用外观;服务名称放通配,给宽一点)
 // rounded-ui:全站唯一那一档圆角,见 tokens.css 的圆角口径
@@ -210,23 +217,38 @@ export function WsLogView() {
   const onEnter = (e: React.KeyboardEvent) => { if (e.key === 'Enter') doLoad(1) }
 
   // ---- 宽度分配:左右两栏按比例分(默认 1:1),之和恒等于容器宽度 ----
-  // 容器宽度实测(窗口/侧边栏变化时跟随);拖拽改的是占比,容器再窄也不会夹到"不可拖"的死区
-  const splitRef = useRef<HTMLDivElement>(null)
+  // 容器宽度实测。用 **callback ref** 而不是"挂载时读一次"：这一块**可能后出现**
+  // （没有会话时整页是"未连接会话"的空态，split 容器根本没挂；会话一来它才挂上），
+  // 那样 boxW 会永远是 0 —— 分栏退回 50%、窄屏判断也失效（实测踩到过）。
+  const splitRef = useRef<HTMLDivElement | null>(null)
+  const [splitEl, setSplitEl] = useState<HTMLDivElement | null>(null)
+  const setSplitNode = useCallback((el: HTMLDivElement | null) => { splitRef.current = el; setSplitEl(el) }, [])
   const [boxW, setBoxW] = useState(0)
   useEffect(() => {
-    const el = splitRef.current
-    if (!el) return
-    const ro = new ResizeObserver(() => setBoxW(el.clientWidth))
-    ro.observe(el)
-    setBoxW(el.clientWidth)
+    if (!splitEl) return
+    const ro = new ResizeObserver(() => setBoxW(splitEl.clientWidth))
+    ro.observe(splitEl)
+    setBoxW(splitEl.clientWidth)
     return () => ro.disconnect()
-  }, [])
+  }, [splitEl])
   const [ratio, setRatio] = useState(() => {
     const v = Number(localStorage.getItem('tt.wslogRatio'))
     return v >= RATIO_MIN && v <= RATIO_MAX ? v : 0.5
   })
   const splittable = Math.max(1, boxW - RESIZER_W)
-  const detailW = Math.round(splittable * ratio)
+  // 窄容器下**不再左右分栏**，改成"只显示明细、占满"（× 即返回列表）。
+  //
+  // 为什么：明细宽度原来只由占比决定（下限 0.25），容器只有 300px 时它就只剩 ~80px ——
+  // 键值对与页签一个字符一行（用户实测截图里正是这样："本 信 息"竖着排、
+  // 服务名 oa.sc he m.a dat a.get）。列表那一侧也已经被挤到看不出列含义。
+  // 与其两边都不能看，不如让明细占满：它本来就是"点开一行要读的东西"。
+  const narrowSplit = boxW > 0 && boxW < MIN_LIST_W + MIN_DETAIL_W + RESIZER_W
+  // 分栏时明细宽度：按占比，但**夹一个绝对下限**（拖到最小也不许压到读不成）。
+  const detailW = narrowSplit
+    ? splittable
+    : Math.max(MIN_DETAIL_ABS, Math.min(Math.round(splittable * ratio), splittable - MIN_LIST_W))
+  // 拖拽时占比的有效下限：与上面的绝对下限一致，否则拖到最左会"线停住、占比还在变"
+  const ratioMin = Math.min(RATIO_MAX, Math.max(RATIO_MIN, MIN_DETAIL_ABS / splittable))
 
   const onDetailResizeDown = (e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault()
@@ -239,7 +261,7 @@ export function WsLogView() {
       // 分隔线跟手:向左拖 = 详情面板变宽(与 VS Code 侧边栏一致);只改占比,总量不变
       const box = splitRef.current?.clientWidth || 0
       const sp = Math.max(1, box - RESIZER_W)
-      latest = Math.min(RATIO_MAX, Math.max(RATIO_MIN, startRatio - (ev.clientX - startX) / sp))
+      latest = Math.min(RATIO_MAX, Math.max(ratioMin, startRatio - (ev.clientX - startX) / sp))
       setRatio(latest)
     }
     const up = () => {
@@ -488,8 +510,10 @@ export function WsLogView() {
       {/* 左右分配:左侧列表 flex-1 吃掉剩余宽度,右侧详情按占比取宽 + 5px 分隔条。
           min-w-0/overflow-hidden 锁住容器宽度:面板是 shrink-0,不加锁会把容器一路撑宽
           (宽度反馈环 → 整页横向溢出) */}
-      <div ref={splitRef} className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-        {/* 列表:表头与行同处一个滚动容器,横向滚动时表头跟着滚不错位 */}
+      <div ref={setSplitNode} className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+        {/* 列表:表头与行同处一个滚动容器,横向滚动时表头跟着滚不错位。
+            窄容器 + 选中某一行时整列让位给明细（见 narrowSplit）。 */}
+        {!(sel && narrowSplit) && (
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
           <div className="min-h-0 flex-1 overflow-auto">
             {/* table-fixed:列宽交给表头/单元格上的 w-* ,留空的那列吃剩余宽度。
@@ -561,14 +585,21 @@ export function WsLogView() {
             )}
           </div>
         </div>
+        )}
 
-        {/* 详情(右列,仅选中行后出现):贴右缘整高嵌入,左侧 1px 分割线即拖拽把手 */}
+        {/* 详情(右列,仅选中行后出现):贴右缘整高嵌入,左侧 1px 分割线即拖拽把手。
+            窄容器下不渲染列表、自己占满（那时也不渲染分割条 —— 没得拖）。 */}
         {sel && (
           <>
-            <div className="col-resizer self-stretch" onMouseDown={onDetailResizeDown} title="拖拽分配宽度" />
-            <div style={{ width: boxW ? detailW : '50%' }} className="flex shrink-0 flex-col overflow-hidden bg-card">
-              <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border px-2">
-                <button onClick={closeWsLogDetail} title="关闭详情(Esc)"
+            {!narrowSplit && (
+              <div className="col-resizer self-stretch" onMouseDown={onDetailResizeDown} title="拖拽分配宽度" />
+            )}
+            <div style={narrowSplit ? undefined : { width: boxW ? detailW : '50%' }}
+              className={narrowSplit
+                ? 'flex min-w-0 flex-1 flex-col overflow-hidden bg-card'
+                : 'flex shrink-0 flex-col overflow-hidden bg-card'}>
+              <div className="flex h-8 shrink-0 items-center gap-1 overflow-x-auto whitespace-nowrap border-b border-border px-2">
+                <button onClick={closeWsLogDetail} title={narrowSplit ? '返回列表(Esc)' : '关闭详情(Esc)'}
                   className="p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
                   <X className="h-3.5 w-3.5" />
                 </button>
@@ -638,7 +669,7 @@ export function WsLogView() {
               )}
               {/* 基本信息是普通内容流,需要外层滚动;报文页交给 Monaco 自己滚(嵌套滚动容器会出多余滚动条) */}
               <div className={`min-h-0 flex-1 ${tab === 'info' ? 'overflow-auto' : 'overflow-hidden'}`}>
-                {tab === 'info' && <InfoBody item={sel} />}
+                {tab === 'info' && <InfoBody item={sel} narrow={narrowSplit} />}
                 {tab === 'request' && (
                   <PayloadBody text={reqDraft} loading={!content} editable onChange={setReqDraft}
                     path={`wslog:${sel.rowid}:req`} />
@@ -655,7 +686,11 @@ export function WsLogView() {
 
 // 基本信息(DevTools Headers 风格的两列键值)
 // 字段顺序与标签对齐 T100 原生页 awsq990 的列名(见 debug/wslog.go 顶部注释)
-function InfoBody({ item }: { item: WSLogItem }) {
+//
+// narrow = 面板本身很窄时**改成上下两行**(字段名一行、值一行)：
+// 左右两列在窄面板里会把值挤到几十像素，长值就被一个字符一行地掰断（用户实测截图）。
+// 值的换行用 break-words 而不是 break-all：后者会连普通单词都从中间掰开。
+function InfoBody({ item, narrow }: { item: WSLogItem; narrow?: boolean }) {
   const rows: [string, string][] = [
     ['服务名称', item.service],
     ['作业', item.job],
@@ -676,9 +711,15 @@ function InfoBody({ item }: { item: WSLogItem }) {
   return (
     <div className="p-2 text-xs">
       {rows.map(([k, v]) => (
-        <div key={k} className="flex gap-2 border-b border-border/60 py-1">
-          <span className="w-28 shrink-0 text-muted-foreground">{k}</span>
-          <span className="min-w-0 flex-1 break-all text-foreground">{v || '-'}</span>
+        <div key={k}
+          className={narrow
+            ? 'border-b border-border/60 py-1'
+            : 'flex gap-2 border-b border-border/60 py-1'}>
+          <span className={narrow ? 'block text-muted-foreground' : 'w-28 shrink-0 text-muted-foreground'}>{k}</span>
+          <span className={narrow
+            ? 'mt-0.5 block break-words text-foreground'
+            : 'min-w-0 flex-1 break-words text-foreground'}
+            title={v || undefined}>{v || '-'}</span>
         </div>
       ))}
     </div>

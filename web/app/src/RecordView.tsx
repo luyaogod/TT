@@ -62,6 +62,10 @@ function stopLabel(cur: RecordingCurrent | null): string {
 const RATIO_MIN = 0.25
 const RATIO_MAX = 0.75
 const RESIZER_W = 1 // .col-resizer 的宽度(见 index.css:1px 线 + 透明溢出命中区)
+// 两侧各要多少才"看得成"：低于这个总宽就不再左右分栏（见 narrowSplit）。
+const MIN_LIST_W = 280
+const MIN_DETAIL_W = 300
+const MIN_DETAIL_ABS = 240
 
 // 体积:与设置页那份同一口径(那边是视图内的本地函数,没有导出,这里照抄一份)。
 // 1024 进位:1048575 字节要说 "1023.9 KB" 而不是 "1024.0 KB"(先算到哪一档、再取整)。
@@ -229,23 +233,35 @@ export function RecordView() {
     return () => window.removeEventListener('keydown', onKey)
   }, [sel, view, pendingDel])
 
-  // ---- 宽度分配:列表吃剩余宽度,详情按占比取宽 + 5px 分隔条(同接口日志页) ----
-  const splitRef = useRef<HTMLDivElement>(null)
+  // ---- 宽度分配:列表吃剩余宽度,详情按占比取宽 + 1px 分隔条(同接口日志页) ----
+  // 容器宽度实测。用 **callback ref**：这一块可能后出现（例如视图先以空态渲染），
+  // 挂载时读一次会读到 null，boxW 永远是 0 —— 分栏退回 50%、窄屏判断失效（实测踩到过）。
+  const splitRef = useRef<HTMLDivElement | null>(null)
+  const [splitEl, setSplitEl] = useState<HTMLDivElement | null>(null)
+  const setSplitNode = useCallback((el: HTMLDivElement | null) => { splitRef.current = el; setSplitEl(el) }, [])
   const [boxW, setBoxW] = useState(0)
   useEffect(() => {
-    const el = splitRef.current
-    if (!el) return
-    const ro = new ResizeObserver(() => setBoxW(el.clientWidth))
-    ro.observe(el)
-    setBoxW(el.clientWidth)
+    if (!splitEl) return
+    const ro = new ResizeObserver(() => setBoxW(splitEl.clientWidth))
+    ro.observe(splitEl)
+    setBoxW(splitEl.clientWidth)
     return () => ro.disconnect()
-  }, [])
+  }, [splitEl])
   const [ratio, setRatio] = useState(() => {
     const v = Number(localStorage.getItem('tt.recordRatio'))
     return v >= RATIO_MIN && v <= RATIO_MAX ? v : 0.5
   })
   const splittable = Math.max(1, boxW - RESIZER_W)
-  const detailW = Math.round(splittable * ratio)
+  // 窄容器下不再左右分栏，改成"只显示明细、占满"（× 即返回列表）。
+  // 原因同接口日志页：明细宽度只由占比决定（下限 0.25），容器 300px 时它只剩 ~80px，
+  // 键值对与按钮一个字符一行（用户实测截图：目录路径竖着排、"本 信 息"拆成三行）。
+  const narrowSplit = boxW > 0 && boxW < MIN_LIST_W + MIN_DETAIL_W + RESIZER_W
+  // 分栏时明细宽度：按占比，但夹一个**绝对下限**（拖到最小也不许压到读不成，见 MIN_DETAIL_ABS）
+  const detailW = narrowSplit
+    ? splittable
+    : Math.max(MIN_DETAIL_ABS, Math.min(Math.round(splittable * ratio), splittable - MIN_LIST_W))
+  // 拖拽的占比有效下限：与上面一致，否则拖到最左会「线停住、占比还在变」
+  const ratioMin = Math.min(RATIO_MAX, Math.max(RATIO_MIN, MIN_DETAIL_ABS / splittable))
 
   const onDetailResizeDown = (e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault()
@@ -258,7 +274,7 @@ export function RecordView() {
       // 分隔线跟手:向左拖 = 详情面板变宽(与 VS Code 侧边栏一致);只改占比,总量不变
       const box = splitRef.current?.clientWidth || 0
       const sp = Math.max(1, box - RESIZER_W)
-      latest = Math.min(RATIO_MAX, Math.max(RATIO_MIN, startRatio - (ev.clientX - startX) / sp))
+      latest = Math.min(RATIO_MAX, Math.max(ratioMin, startRatio - (ev.clientX - startX) / sp))
       setRatio(latest)
     }
     const up = () => {
@@ -476,7 +492,9 @@ export function RecordView() {
       {/* 左右分配:左侧列表 flex-1 吃掉剩余宽度,右侧详情按占比取宽 + 5px 分隔条。
           min-w-0/overflow-hidden 锁住容器宽度:面板是 shrink-0,不加锁会把容器一路撑宽
           (宽度反馈环 → 整页横向溢出)。 */}
-      <div ref={splitRef} className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+      <div ref={setSplitNode} className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+        {/* 窄容器 + 选中某一行时，这一列整块让位给明细（见 narrowSplit） */}
+        {!(sel && narrowSplit) && (
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
           <div className="min-h-0 flex-1 overflow-auto">
             {/* table-fixed:列宽交给表头/单元格上的 w-* ,留空的那列吃剩余宽度;
@@ -584,14 +602,21 @@ export function RecordView() {
             )}
           </div>
         </div>
+        )}
 
-        {/* 详情(右列,仅选中一行后出现):贴右缘整高嵌入,左侧 1px 分割线即拖拽把手 */}
+        {/* 详情(右列,仅选中一行后出现):贴右缘整高嵌入,左侧 1px 分割线即拖拽把手。
+            窄容器下不渲染列表、自己占满（那时也没得拖，分割条不渲染）。 */}
         {sel && (
           <>
-            <div className="col-resizer self-stretch" onMouseDown={onDetailResizeDown} title="拖拽分配宽度" />
-            <div style={{ width: boxW ? detailW : '50%' }} className="flex shrink-0 flex-col overflow-hidden bg-card">
-              <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border px-2">
-                <button onClick={() => setSel(null)} title="关闭详情(Esc)"
+            {!narrowSplit && (
+              <div className="col-resizer self-stretch" onMouseDown={onDetailResizeDown} title="拖拽分配宽度" />
+            )}
+            <div style={narrowSplit ? undefined : { width: boxW ? detailW : '50%' }}
+              className={narrowSplit
+                ? 'flex min-w-0 flex-1 flex-col overflow-hidden bg-card'
+                : 'flex shrink-0 flex-col overflow-hidden bg-card'}>
+              <div className="flex h-8 shrink-0 items-center gap-1 overflow-x-auto whitespace-nowrap border-b border-border px-2">
+                <button onClick={() => setSel(null)} title={narrowSplit ? '返回列表(Esc)' : '关闭详情(Esc)'}
                   className="p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
                   <X className="h-3.5 w-3.5" />
                 </button>
@@ -642,7 +667,7 @@ export function RecordView() {
                 </div>
               )}
               <div className="min-h-0 flex-1 overflow-auto">
-                <InfoBody row={sel} meta={selMeta} loading={metaLoading} />
+                <InfoBody row={sel} meta={selMeta} loading={metaLoading} narrow={narrowSplit} />
               </div>
             </div>
           </>
@@ -672,7 +697,9 @@ export function RecordView() {
 // 基本信息:两列键值(与接口日志页的 InfoBody 同款;字段名在左、值在右)。
 // 值的口径与 Go 侧身份文件一一对应(internal/fep/meta.go),缺的那一项照实显示 '-',
 // 不补默认值 —— "身份里没记"本身就是回放时要看的一条信息。
-function InfoBody({ row, meta, loading }: { row: RecordingRow; meta: RecordingMeta | null; loading: boolean }) {
+// narrow = 面板本身很窄时改成上下两行（字段名一行、值一行）：左右两列在窄面板里会把值
+// 挤到几十像素，长值就被一个字符一行地掰断（用户实测截图：目录路径竖着排）。
+function InfoBody({ row, meta, loading, narrow }: { row: RecordingRow; meta: RecordingMeta | null; loading: boolean; narrow?: boolean }) {
   const bin = meta?.binary
   const binText = bin && (bin.ref || bin.size || bin.modTime)
     ? [bin.ref, bin.size ? `${bin.size} 字节` : '', bin.modTime || ''].filter(Boolean).join(' / ')
@@ -708,9 +735,12 @@ function InfoBody({ row, meta, loading }: { row: RecordingRow; meta: RecordingMe
   return (
     <div className="p-2 text-xs">
       {rows.map(([k, v, tip]) => (
-        <div key={k} className="flex gap-2 border-b border-border/60 py-1" title={tip}>
-          <span className="w-28 shrink-0 text-muted-foreground">{k}</span>
-          <span className="min-w-0 flex-1 break-all text-foreground">
+        <div key={k} className={narrow ? 'border-b border-border/60 py-1' : 'flex gap-2 border-b border-border/60 py-1'} title={tip}>
+          <span className={narrow ? 'block text-muted-foreground' : 'w-28 shrink-0 text-muted-foreground'}>{k}</span>
+          {/* break-words 而不是 break-all：目录那种长路径要能断行，但普通文本不该被从单词中间掰开 */}
+          <span className={narrow
+            ? 'mt-0.5 block break-words text-foreground'
+            : 'min-w-0 flex-1 break-words text-foreground'}>
             {v || '-'}
             {k === '连接数' && loading && <span className="text-muted-foreground">（读身份中…）</span>}
           </span>
