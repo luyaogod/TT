@@ -3,6 +3,7 @@ package debug
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
@@ -243,8 +244,49 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// fail 是**所有**端点的失败出口（契约 C5.15）。
+//
+// 信封形状是"在现行 `{"ok":false,"error":…}` 上**增加** `code`"：`ok` 与 `error`
+// 一个字都不改（B8 有测试盯着它），多出来的是 `code`（**必给**）与
+// `candidates`（只在那五种"要一条会话却拿不到/拿错"的码下出现，见 api_target.go 的
+// `failureEnvelope` 与 C5.11）。
+//
+// 为什么 `code` 落在这一层而不是只给那几个端点：C5.15 的原话是"失败信封**增加** `code`（必给）" ——
+// 调用方（Agent）靠 `code` 分支，而不是靠猜 `error` 的中文（Q15 / 4.1.1）。给一半端点加，
+// 另一半就还得靠文案，那正是这次要根除的东西。
+//
+// `candidates` 不在这里：它是**会话候选清单**，只有会话寻址那几族失败才知道该列谁
+// （候选的九键是 `internal/target` 的 `Candidate`，来自会话池，不是通用错误能凭空造的）。
 func fail(w http.ResponseWriter, code int, err error) {
-	writeJSON(w, code, map[string]any{"ok": false, "error": err.Error()})
+	writeJSON(w, code, map[string]any{"ok": false, "code": codeOf(code, err), "error": err.Error()})
+}
+
+// codeOf 决定一条通用失败的 `code`（C5.15：必给）。
+//
+// 两条来源，按顺序：
+//  1. 错误自己带的码（`*output.Error`，C4.1 的"所有失败路径都带 Code + Exit"）——它是权威；
+//  2. 按 HTTP 状态码给一个**现行码**（B5 那一族），语义按 4.1.1 的表：
+//     400 = 用法错、404 = 指名的东西不存在、409 = 会话状态不符、其余 = 运行失败。
+//
+// **为什么不在这里给 SESSION_* 那几个新码**：那几个码的语义是"会话寻址"的结论
+// （歧义 / 指名不存在 / 句柄过期 / 别名撞车 / 别名指向的会话不能复用），只有真在会话池上
+// 落过位的那几族才判得出来。它们走 `failureEnvelope`（api_target.go），
+// 而通用失败按现行码给 —— 这样单会话下老脚本看到的 `code` 与退出码一档不变（H2 / Q15 分档）。
+func codeOf(status int, err error) string {
+	var oe *output.Error
+	if errors.As(err, &oe) && strings.TrimSpace(oe.Code) != "" {
+		return oe.Code
+	}
+	switch status {
+	case http.StatusBadRequest:
+		return output.CodeUsage
+	case http.StatusNotFound:
+		return output.CodeNotFound
+	case http.StatusConflict:
+		return output.CodeSessionState
+	default:
+		return output.CodeQueryFailed
+	}
 }
 
 func readBody[T any](w http.ResponseWriter, r *http.Request, out *T) bool {
@@ -495,6 +537,10 @@ func (s *Server) hLaunch(w http.ResponseWriter, r *http.Request) {
 		Prog   string `json:"prog"`
 		SSH    string `json:"ssh"`  // 多 SSH 配置名(设置页维护);空 = 默认连接
 		Zone   string `json:"zone"` // 区域覆盖(31/35/36/39/t);空 = 默认区域
+		// Name 是 `--name` 给的别名（契约 C2.5 / Q17 / C1.6）。空 = 未命名。
+		// 它**就是这条会话的幂等键**（Q23）：同名会话空闲 → 复用；正在跑 / 已停站 → 报
+		// `SESSION_TARGET_BUSY` 退 3，**不许静默再开一条**；名字不存在 → 起新会话。
+		Name string `json:"name"`
 		// FGLServer 本轮 FGLSERVER 覆盖(指针:给了就是权威,空串 = 本轮强制交回 T100 自动设置)。
 		// 存在的理由是"画面去哪"只该由这一轮决定:以前只能改全局配置,于是做一次 fep
 		// 无头前端实验就把调试的画面接线顶掉了,而且静默(见 ScreenTarget)。
@@ -513,6 +559,15 @@ func (s *Server) hLaunch(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, err)
 		return
 	}
+	// `--name` 的判定都在**建立会话之前**（C2.8 的同一条纪律：一个字节都不该白花）。
+	// 顺序是：prog（必填）→ 环境（存在性，F6）→ 别名（F19 取值纪律 + Q23 的三种结局）→
+	// 真正登记时兜住撞车（F18，竞态那一支，在 LaunchWith 里）。
+	// 为什么别名排在环境之后：它与目标层"文法 → 环境存在 → 落位"的顺序同源 ——
+	// Q23 判的是"落位"，而落位要先知道环境是哪一个。
+	name, ok := s.beginNamedLaunch(w, req.Name)
+	if !ok {
+		return
+	}
 	// 启动会结束当前这次调试,所以它同样受模式闸门约束(无会话或空会话放行)。
 	// **不传目标**是刻意的:这一轮要保护的那条会话正被顶掉,而"是哪一条"由
 	// `prepareSession` 的复用/收口规则决定(它才是那条规则的家)。池里有 >=2 条时
@@ -520,8 +575,15 @@ func (s *Server) hLaunch(w http.ResponseWriter, r *http.Request) {
 	if !s.sessOfWriteGlobal(w, r, nil) {
 		return
 	}
-	sess, err := s.mgr.LaunchWith(cfg, req.Module, req.Prog)
+	sess, err := s.mgr.LaunchWith(cfg, req.Module, req.Prog, name)
 	if err != nil {
+		// F18：别名在"判定 → 登记"之间被别的请求抢走。它**不是** TARGET_BUSY
+		// （4.1.1 明写退 2 不退 3），所以单独给信封。
+		var taken *ErrNameTaken
+		if errors.As(err, &taken) {
+			s.writeNameTaken(w, taken)
+			return
+		}
 		fail(w, 409, err)
 		return
 	}
@@ -726,6 +788,10 @@ func (s *Server) hSessionRestart(w http.ResponseWriter, r *http.Request) {
 	_ = readBody(w, r, &req)
 	env := sess.EnvName()
 	id := sess.ID
+	// 别名要在收口**之前**取下来：重启是"同一条逻辑会话重新登录"（F15 的前提正是
+	// "环境与序号都对、只是换了代"），所以旧会话从池里消失、别名当场释放的同时，
+	// 把同一个名字重新登记给新会话 —— 调用方手上的别名与 ref 因此继续有效（C3.7b / Q19）。
+	name := sess.Name()
 	// 先收口当前会话(运行中会先中断/quit),再重建连接
 	if err := sess.Close(); err != nil {
 		fail(w, 500, err)
@@ -742,8 +808,13 @@ func (s *Server) hSessionRestart(w http.ResponseWriter, r *http.Request) {
 	if ent := strings.TrimSpace(req.Ent); ent != "" {
 		cfg.Topent = host.EntValue(ent)
 	}
-	ns, err := s.mgr.CreateSessionOn(cfg)
+	ns, err := s.mgr.CreateSessionOn(cfg, name)
 	if err != nil {
+		var taken *ErrNameTaken
+		if errors.As(err, &taken) {
+			s.writeNameTaken(w, taken)
+			return
+		}
 		fail(w, 502, err)
 		return
 	}
@@ -850,8 +921,16 @@ func (s *Server) hSessionSwitch(w http.ResponseWriter, r *http.Request) {
 		_ = cur.Close()
 		s.mgr.Remove(cur.ID)
 	}
-	ns, err := s.mgr.CreateSessionOn(cfg)
+	// 「连到该环境」= 新建一条会话：别名**不继承**（C3.7b / Q19：别名随旧会话消失即释放；
+	// 要名字就在起会话时再给一次 —— 这条与 hSessionRestart 的"继承"刻意不同，后者是
+	// 同一条逻辑会话重新登录）。
+	ns, err := s.mgr.CreateSessionOn(cfg, "")
 	if err != nil {
+		var taken *ErrNameTaken
+		if errors.As(err, &taken) {
+			s.writeNameTaken(w, taken)
+			return
+		}
 		fail(w, 502, err)
 		return
 	}

@@ -137,23 +137,26 @@ var skipLedger = []skipSite{
 	{file: "internal/fep/open_test.go", msg: "TokenElevation（提权检查）只在 Windows 上有意义", layer: layEnv, why: "提权检查用的是 Windows TokenElevation API；**不影响「全绿」这个结论**，但它正是 TT 永不提权的那个断言"},
 	{file: "internal/testkit/corpus.go", msg: "没有真实语料：设 TDEV_CORPUS 或 TTZS_CORPUS 指到一份，或准备 %s", layer: layL3, why: "需真实语料：开关 TDEV_CORPUS / TTZS_CORPUS"},
 	{file: "internal/testkit/corpus.go", msg: "%s 下没有 %s", layer: layL3Missing, why: "语料在，但里面没有该扩展名的文件"},
-	// ---- WP2（会话寻址重构）的契约测试：等 WP3/WP4 把冻结契约落地 ----
+	// ---- WP2（会话寻址重构）的契约测试：等 WP3/WP4/WP4c 把冻结契约落地 ----
 	//
 	// 这一组全部归 layPending（见那一层的定义）：契约**已冻结**（WP1 交付），
-	// 测试先写好把形状钉住，等 WP3（目标层：ref/display/name/n/epoch/解析/世代）与
-	// WP4（注册 --session/--name、加新码、服务端信封加 code）落地。
-	// 每条文案都写清了"等谁、等什么"，且测试里都有一句
-	// "落地了就 t.Fatal 提醒把它改成断言"的守卫 —— 所以它们不会静默烂掉。
-	{file: "internal/debug/contract_debug_test.go", msg: "等 WP3 把 C5.3 / Q22 的新增键加进 SessionBrief，今天还缺 %v", layer: layPending, why: "等 WP3 实现 ref / display / name / ent / n / epoch 六个键（C5.3 / Q22）"},
-	{file: "internal/debug/contract_debug_test.go", msg: "等 WP3/WP4 把 4.1.1 的新码加进 internal/output/errors.go 的常量清单（C5.13）：%s", layer: layPending, why: "等 WP4 把 SESSION_AMBIGUOUS / SESSION_NOT_FOUND / SESSION_STALE / SESSION_TARGET_BUSY / SESSION_NAME_TAKEN 加进 output 的常量清单（C5.13）"},
-	// F1–F20 的**端到端**实测：WP4a 已把标志与目标层接进 CLI，还差服务端信封那一层。
-	// 守卫换成了 failureEnvelopeHasCode（问 HTTP 侧失败信封有没有 code），不再问"CLI 有没有注册 --session"。
-	{file: "internal/debug/contract_debug_test.go", msg: "等 WP4c 给 HTTP 失败信封补 code/candidates（C5.15/C5.16）后，逐条端到端跑 F1–F20（契约 2.4 的输入集 B）", layer: layPending, why: "等 WP4c 给服务端失败信封补 code / candidates（C5.15 / C5.16）：那之前端到端断言不了 F1–F20 的信封形状（目标层那几层已由 internal/target 与 internal/cli/debug 的测试断言）"},
-	{file: "internal/debug/contract_debug_test.go", msg: "等 WP3 实现 ref 字段（并同批补 name / n / epoch，契约 C5.3 / Q22）", layer: layPending, why: "等 WP3 给 SessionBrief 加 ref（同批 name / n / epoch）：在那之前信封里没有规范 id 可断言（C5.3）"},
-	{file: "internal/debug/contract_debug_test.go", msg: "等 WP3 实现 epoch 字段与世代校验后，断言 F15 的 SESSION_STALE 报错（C5.3 / C5.11）", layer: layPending, why: "等 WP3 实现 epoch 与世代校验：今天**没有「代」这个概念**（B31），F15 无从判起"},
-	{file: "internal/debug/contract_debug_test.go", msg: "等 WP4c 把 name 键加进 SessionBrief（C5.3）后，断言 Q23：空闲复用、忙碌报 SESSION_TARGET_BUSY（F20 / C1.6）", layer: layPending, why: "等 WP4c 把 name 键加进 SessionBrief（C5.3）：别名要参与寻址就得先成为服务端的一条事实；那之前 --name 只做取值校验（目标层的三种结局已由 internal/target 的 TestResolveNameIdempotency 断言）"},
-	{file: "internal/debug/contract_debug_test.go", msg: "等 WP3/WP4 落地 display 与 name 后，断言 C5.9 身份行 `会话 <display> · <name> · <state> · ENT <ent>`", layer: layPending, why: "等 WP3/WP4 落地 display 与 name：C5.9 的身份行要同时印这两样，缺一样就没法逐字断言"},
-	{file: "internal/debug/contract_debug_test.go", msg: "等 WP4 给服务端失败信封加 code 与 candidates（C5.15 / C5.16：缺目标报 409 + SESSION_AMBIGUOUS）", layer: layPending, why: "等 WP4 给服务端失败信封加 code / candidates（C5.15 / C5.16）：今天 HTTP 侧是 {ok,error} 两键（B8）"},
+	// 测试先写好把形状钉住。**WP4c 之后只剩一条** —— 其余七条等的都是
+	// "服务端把 ref / display / name / ent / n / epoch 变成事实"与"补 code / candidates"，
+	// 那些交付之后它们的守卫响了，按各自的交代**改成了真断言**，于是台账按性质删掉
+	// （不再跳过的东西不该留在跳过台账里）：
+	//
+	//   - `TestContractSessionEnvelopeKeysMatchSessionBrief`（缺键 → 判红）
+	//   - `TestContractNewCodesAreRegisteredInOutput`（缺码 → 判红）
+	//   - `TestContractRefKeyIsNotYetInSessionBrief` → `TestContractIdentityKeysAreInSessionBrief`
+	//   - `TestContractEpochStalenessIsNotYetEnforced` → `TestContractEpochStalenessIsEnforced`
+	//   - `TestContractNameIdempotencyIsNotYetEnforced` → `TestContractNameIdempotencyIsEnforced`
+	//   - `TestContractHTTPFailureCodeIsNotYetLanded` → `TestContractHTTPFailureCodeIsLanded`
+	//   - `TestContractInvalidFormsAreNotYetEnforced` → `TestContractInvalidFormsServerSideEnvelopes`
+	//     ＋ `TestContractNameTakenEnvelopeIsWritten`（服务端判得出来的那几条逐条发真请求）
+	//
+	// 留下的一条**换过等的东西**：它上一版等"服务端有没有 display/name"（那已经交付），
+	// 现在等的是"CLI 那行人话输出换不换字" —— 与 H2 直接相关，所以理由要写清。
+	{file: "internal/debug/contract_debug_test.go", msg: "C5.9 身份行还没接进 CLI：服务端已有 display 与 name（WP4c）；差的是把 internal/cli/debug 的 `生效身份: …` 那行换成 `会话 <display> · <name> · <state> · ENT <ent>` —— 那是人话输出改字，按 H2 归后续批次", layer: layPending, why: "等 CLI 换那行身份行（C5.9）：服务端数据与 target.IdentityLine 都齐了，差的是把它接进 internal/cli/debug 的人话输出 —— 那是**改字**，与本批纪律「单会话输出除新增键外逐字不变」（H2）冲突，归后续批次（契约 C8.4 登记为单会话下允许的第二处变化）"},
 	// ---- 已经**不再登记**的那一条（WP4b 交付时删掉的）----
 	//
 	// `internal/testkit/first_session_source_test.go` 的 T2.3 静态检查曾经在这里有一条

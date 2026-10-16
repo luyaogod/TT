@@ -93,7 +93,8 @@ func TestActionEndpointsRejectMalformedBody(t *testing.T) {
 	}
 }
 
-// TestActionEndpointsReportDialFailure 拨号失败 → 500，信封是 {"ok":false,"error":…}。
+// TestActionEndpointsReportDialFailure 拨号失败 → 500，信封是
+// `{"ok":false,"code":…,"error":…}`（C5.15：`code` 必给，`ok`/`error` 的形状一字不改）。
 //
 // 这条钉的是信封形状：前端与 CLI 都按它解析，改了形状它们会静默拿不到错误原因。
 //

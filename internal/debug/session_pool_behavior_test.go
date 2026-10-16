@@ -200,7 +200,7 @@ func TestPrepareSessionSingleSessionAssumption(t *testing.T) {
 		cfg.SSH.Port = 1
 		m := NewManager(cfg)
 
-		sess, err := m.prepareSession(cfg, "m1", "p1", "", "", "", "")
+		sess, err := m.prepareSession(cfg, "m1", "p1", "", "", "", "", "")
 		if err == nil {
 			t.Fatalf("池空 + 拨不通时该报错；返回了 %v —— 说明它没走「新建」这条路径", sess)
 		}
@@ -229,7 +229,7 @@ func TestPrepareSessionSingleSessionAssumption(t *testing.T) {
 		if m.Current() != live {
 			t.Fatal("前置不成立：池里只有一条时 Current() 该返回它")
 		}
-		got, err := m.prepareSession(cfgFor("h1", "36"), "m1", "p1", "", "", "", "")
+		got, err := m.prepareSession(cfgFor("h1", "36"), "m1", "p1", "", "", "", "", "")
 		if err != nil {
 			t.Fatalf("同目标空闲该复用，却报错：%v", err)
 		}
@@ -250,7 +250,7 @@ func TestPrepareSessionSingleSessionAssumption(t *testing.T) {
 			m.sessions["s1"] = live
 			m.mu.Unlock()
 
-			_, err := m.prepareSession(cfgFor("h1", "36"), "m1", "p1", "", "", "", "")
+			_, err := m.prepareSession(cfgFor("h1", "36"), "m1", "p1", "", "", "", "", "")
 			if err == nil {
 				t.Errorf("状态 %s 时该报「已存在调试会话…请先结束当前调试」，却放行了 —— "+
 					"那就是「静默再开一条」（Q23 明写不许）", st)
@@ -278,7 +278,7 @@ func TestPrepareSessionSingleSessionAssumption(t *testing.T) {
 		m.mu.Unlock()
 
 		for i := 0; i < rounds; i++ {
-			got, err := m.prepareSession(cfgFor("h1", "36"), "m1", "p1", "", "", "", "")
+			got, err := m.prepareSession(cfgFor("h1", "36"), "m1", "p1", "", "", "", "", "")
 			switch {
 			case err == nil:
 				if got != a && got != b {

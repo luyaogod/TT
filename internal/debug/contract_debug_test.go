@@ -7,8 +7,10 @@ package debug
 // 三条规矩：
 //
 //  1. **契约条款编号写进注释**（C5.1 / 4.1.1 / F7 …），让"测试 ↔ 契约"可追溯；
-//  2. 今天还没实现的那部分用 `t.Skip`，文案写清**等什么**（等 WP3 的哪个东西），
-//     并且**每一条都登记进 `internal/testkit` 的跳过台账**；
+//  2. 今天还没实现的那部分用 `t.Skip`，文案写清**等什么**，并且**每一条都登记进
+//     `internal/testkit` 的跳过台账**。**WP4c 之后这一组只剩一条**（C5.9 的身份行接进
+//     CLI —— 那是人话输出改字，按 H2 归后续批次）；其余原先的跳过都按各自的交代改成了
+//     真断言，对应的台账条目也按性质删掉了。
 //  3. 失败信息要能照做：说清期望什么、实际什么、怎么办。
 //
 // 不在这里测的：`internal/debug/session.go` 主流程（要真 SSH + 真 fgldb）——
@@ -16,6 +18,7 @@ package debug
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -91,26 +94,84 @@ func TestContractSessionEnvelopeKeysMatchSessionBrief(t *testing.T) {
 			"    要么它不该出现在信封里。别让契约与代码各说一套。", extra)
 	}
 	if len(missing) > 0 {
-		// 只允许缺 C5.3 定稿的那六个**纯新增**键（Q22）。缺了别的 = 有人改了/删了旧键，
-		// 那是 C5.2 / C5.3 明写不许的（"一个旧键都不改、不改名、不删"）。
-		newOnes := map[string]bool{}
-		for _, k := range debugContractNewSessionKeys {
-			newOnes[k] = true
+		// **WP4c 起不再跳过**：C5.3 的五个纯新增键（ref / display / name / ent / n / epoch +
+		// kind）已经落进 SessionBrief，所以"缺键"只剩一种解释 —— 有人把契约里的键
+		// 改名或删掉了，而 C5.2 / C5.3 明写「一个旧键都不改、不改名、不删」。
+		t.Errorf("契约里要求 `session` 块有、SessionBrief 上却没有这些键：%v\n"+
+			"    怎么办：C5.3 的新增键只有 %v（已全部落地），缺任何一个都说明有人删了/改名了键；\n"+
+			"    要么把键改回去，要么同步契约常量表（debugcontract_const_test.go 引的是 internal/target 那一份）。",
+			missing, debugContractNewSessionKeys)
+	}
+}
+
+// TestContractSessionEnvelopeConstantKeysAreNeverOmitted 钉住 C5.1 的**恒定出现**那半句：
+// 「`name` / `ent` 取不到时给空串，**不省键**」。
+//
+// 为什么要用**真实输出**验，而不是再看一遍 struct 标签：`omitempty` 恰好写在某个键上时，
+// 反射能看见标签、却看不见"序列化出来到底有没有这个键"。契约这句话说的是后者 ——
+// 前端与 CLI 按同一份形状解包，少一个键它们就得写第二套兜底。
+//
+// 判据取的是**最坏输入**：一条 `ref` / `display` / `name` / `ent` / `n` / `epoch` 全取不到值的
+// 会话（pool 里手工放的假会话：没走登记，所以没有序号、没有别名、没有企业编号）。
+// 十一个恒定键**一个都不许少** —— 取不到就给空串/零值。
+func TestContractSessionEnvelopeConstantKeysAreNeverOmitted(t *testing.T) {
+	srv := NewServer(cfgFor("h1", "36"), nil, "")
+	// 一条**没有身份**的会话：没走登记，所以 ref / display / n / epoch 全取不到值。
+	// 它的 envName 与 cfg 一致（与 NewSession 建出来的同形），这样 `env`（既有的、
+	// 带 omitempty 的键）有值，把"新键取不到时省不省"这件事单独暴露出来。
+	srv.mgr.sessions["s-裸"] = idleOn("s-裸", cfgFor("h1", "36"))
+	mux := http.NewServeMux()
+	srv.routes(mux)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/api/sessions", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/api/sessions 该退 200，得 %d（%s）", rec.Code, rec.Body.String())
+	}
+	var doc struct {
+		Sessions []map[string]any `json:"sessions"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatalf("/api/sessions 该回 JSON：%v", err)
+	}
+	if len(doc.Sessions) != 1 {
+		t.Fatalf("前置不成立：池里该恰好一条会话，得 %d", len(doc.Sessions))
+	}
+	for _, k := range debugContractSessionEnvelopeKeys {
+		// `env` 是**既有**键：它今天带着 omitempty（C5.2 不许改旧键的写法，本次一字不动），
+		// 所以它不在"取不到也必须在"这条断言的范围内。其余十个恒定键一个都不许少。
+		if k == "env" {
+			continue
 		}
-		var illegal []string
-		for _, k := range missing {
-			if !newOnes[k] {
-				illegal = append(illegal, k)
+		if _, ok := doc.Sessions[0][k]; !ok {
+			t.Errorf("C5.1 的恒定键 %q 没出现在 `/api/sessions` 的元素里（取不到就给空串，**不省键**）。\n"+
+				"    实得键：%v", k, keysOf(doc.Sessions[0]))
+		}
+	}
+	// 这条会话的 ref/display/name/ent/n/epoch 都取不到：它们必须是**空串/零值**，
+	// 而不是一个编出来的值（C2.0/C5.4：一个错的地址比一个空字段坏得多）。
+	if got := doc.Sessions[0]["ref"]; got != "" {
+		t.Errorf("没有身份的会话，ref 该是空串（服务端不许编地址），实得 %v", got)
+	}
+	if got := doc.Sessions[0]["n"]; got != float64(0) {
+		t.Errorf("没有身份的会话，n 该是 0，实得 %v", got)
+	}
+	// 反向：恒定键在 struct 上不许带 omitempty（带上了就等于"取不到时省键"，与本条相反）。
+	rt := reflect.TypeOf(SessionBrief{})
+	for _, k := range debugContractSessionEnvelopeKeys {
+		for i := 0; i < rt.NumField(); i++ {
+			tag := rt.Field(i).Tag.Get("json")
+			if strings.Split(tag, ",")[0] != k {
+				continue
 			}
-		}
-		if len(illegal) > 0 {
-			t.Errorf("契约里要求 `session` 块有、SessionBrief 上却没有这些键：%v\n"+
-				"    它们**不在** C5.3 的新增名单（%v）里，所以这是旧键被改名或删掉了 —— "+
-				"C5.2 / C5.3 明写「一个旧键都不改、不改名、不删」。",
-				illegal, debugContractNewSessionKeys)
-		}
-		if len(illegal) == 0 {
-			t.Skipf("等 WP3 把 C5.3 / Q22 的新增键加进 SessionBrief，今天还缺 %v", missing)
+			// `env` 是**既有**键，它今天带着 omitempty（C5.2 不许改旧键的写法，本次一字不动）；
+			// 其余恒定键一律不许带。
+			if k == "env" {
+				continue
+			}
+			if strings.Contains(tag, "omitempty") {
+				t.Errorf("恒定键 %q 的标签是 %q —— C5.1 要求「取不到就给空串、不省键」，\n"+
+					"    omitempty 恰好做的是相反的事（除既有的 env 外，恒定键都不许带它）。", k, tag)
+			}
 		}
 	}
 }
@@ -300,8 +361,13 @@ func TestContractNewCodesAreRegisteredInOutput(t *testing.T) {
 			}
 		}
 		if len(absent) > 0 {
+			// **WP4c 起不再跳过**：三个剩余的新码（STALE / NAME_TAKEN / TARGET_BUSY）
+			// 已随"别名与世代"那一批落进 output（C5.13）。缺了就是有人删了常量，
+			// 或者新加的码没进下面那份显式清单。
 			sort.Strings(absent)
-			t.Skipf("等 WP3/WP4 把 4.1.1 的新码加进 internal/output/errors.go 的常量清单（C5.13）：%s",
+			t.Errorf("契约 4.1.1 的新码不在 internal/output 的常量清单里（C5.13）：%s\n"+
+				"    怎么办：在 internal/output/errors.go 里加常量（取值见 internal/target 的 Code*），\n"+
+				"    并把新常量补进本文件的 outputHasCode 清单 —— 那份清单就是「有没有落地」的判据。",
 				strings.Join(absent, "、"))
 		}
 		// 加进来了就逐字核对取值（常量名随意，取值必须等于契约里的字符串）。
@@ -319,7 +385,7 @@ func TestContractNewCodesAreRegisteredInOutput(t *testing.T) {
 // 而不是靠人去 grep 关键字面量（关键字面量在别处也会出现，那样判不准）。
 //
 // 清单随 output 增长时要同步（多加一个码忘了同步，只影响这条测试的**严格度**：
-// 认不出的码会被当成"还没落地"而走跳过分支，不会假绿任何别的东西）。
+// 认不出的码会被当成"还没落地"而判红，不会假绿任何别的东西 —— WP4c 起不再有跳过分支）。
 func outputHasCode(want string) bool {
 	for _, v := range []string{
 		output.CodeUsage, output.CodeEnumInvalid, output.CodeEnvUnknown, output.CodeConfigBroken,
@@ -327,6 +393,10 @@ func outputHasCode(want string) bool {
 		output.CodeNotFound, output.CodeNoSession, output.CodeSessionState, output.CodeTargetMissing,
 		output.CodePreflight, output.CodeUpdateUsage, output.CodeUpdateRefused,
 		output.CodeUpdateChecksum, output.CodeUpdateNetwork, output.CodeUpdateApply,
+		// WP4b：会话寻址的前两个码（服务端那三个"要一条会话"的端点用它，C5.16）。
+		output.CodeSessionAmbiguous, output.CodeSessionNotFound,
+		// WP4c：别名与世代那三个（C5.3 的键成为服务端事实之后自己就会产的码，C5.13）。
+		output.CodeSessionStale, output.CodeSessionNameTaken, output.CodeSessionTargetBusy,
 	} {
 		if v == want {
 			return true
@@ -516,32 +586,189 @@ func TestContractInvalidFormsCodeSequence(t *testing.T) {
 	}
 }
 
-// TestContractInvalidFormsAreNotYetEnforced 是 F1–F20 里**服务端还没做的那部分**的记账。
+// TestContractInvalidFormsServerSideEnvelopes 是 F1–F20 里**服务端判得出来的那几条**的端到端实测。
 //
-// 为什么必须有一条这样的测试而不是不写：这二十条是本次重构的**验收输入集**。
-// 没有它，WP4 全部完成后没人知道"是不是真的逐条跑了"。
+// 为什么必须有一条这样的测试：这二十条是本次重构的**验收输入集**。没有它，WP4 全部完成后
+// 没人知道"是不是真的逐条跑了"。
 //
-// **WP4a 之后的现状（改这条的理由）**：
+// **WP4c 起它不再跳过**（守卫问的那件事——"服务端失败信封有没有 `code`"——已经成立，
+// C5.15 落地）。分工是写死的，逐条都有落点：
 //
-//   - 目标层（`internal/target`）已交付，且 WP4a 把它接进了 CLI ——
-//     所以"选择器文法 / 落位 / 码 / 退出码 / 候选政策"这几层**已经有真实实现**，
-//     逐条断言写在 `internal/target` 的测试里（`resolve_test.go` / `selector_test.go` /
-//     `values_test.go` 的 `TestInvalidFormTableIsComplete`）；
-//   - CLI 侧新写的那几条（F1 的"多会话不取第一项"+候选、退出码分档、会话路径只认 id）
-//     在 `internal/cli/debug` 的 `target_test.go` 里；
-//   - **还差的是"端到端"那一层**：F16 要求"标志挂错命令"的信封带 `code: USAGE`
-//     （C2.8c），而 HTTP 侧的失败信封今天只有 `{ok,error}` 两键（B8）——
-//     给 HTTP 侧补 `code` / `candidates` 是 **WP4c**（C5.15 / C5.16），本轮不许动。
-//     所以"逐条跑 F1–F20 的**实测**（真 CLI 进程 + 真服务端）"这件事仍然只能等。
+//	| 谁判 | 哪些 F | 判据在哪 |
+//	|---|---|---|
+//	| `internal/target`（纯函数） | F1/F3–F15/F18–F20 的文法、落位、码与退出码 | 那个包的 resolve_test / selector_test / values_test |
+//	| **服务端这一层（本测试）** | **F1/F2/F18/F19/F20 的 HTTP 信封**（状态码 + code + candidates） | 本测试逐条发真请求 |
+//	| `internal/cli/debug` | F1 的"多会话不取第一项"、退出码分档、标志落点（F16/F17） | 那个包的 target_test |
 //
-// 守卫换成**不再会误响**的那一个：它问"服务端的失败信封有没有 code"，
-// 而不是"CLI 有没有注册 --session"（那个问题在 WP4a 已经翻页了）。
-func TestContractInvalidFormsAreNotYetEnforced(t *testing.T) {
-	if failureEnvelopeHasCode(t) {
-		t.Fatalf("服务端失败信封已经有 code 了（C5.15 落地），请把这条跳过改成逐条跑 F1–F20 的实测。"+
-			"当前表里有 %d 条：%v", len(debugContractInvalidForms), invalidFormKeys())
+// **本测试不碰真 SSH**：它只走"落不上目标 / 别名不对"这些**在拨号之前**就判掉的分支
+// （这正是 C2.8 那条纪律：一个字节都不该白花）。要真会话才走得到的分支
+// （F3–F8 的会话级落位）在 CLI 侧由目标层断言，端到端的真机会话在真机自检里。
+func TestContractInvalidFormsServerSideEnvelopes(t *testing.T) {
+	// 一个"池里有两条会话"的服务：F1 的歧义要 >=2 条才成立。
+	hsTwo, sTwo := actionTestDebugServer(t)
+	giveServerNamedEnv(sTwo, "h1", "127.0.0.1", "36")
+	for _, id := range []string{"s-a", "s-b"} {
+		sTwo.mgr.sessions[id] = fakeIdleSession(id, "h1", "36")
 	}
-	t.Skip("等 WP4c 给 HTTP 失败信封补 code/candidates（C5.15/C5.16）后，逐条端到端跑 F1–F20（契约 2.4 的输入集 B）")
+	// 池空的服务：F2（没有会话）用它。
+	hsEmpty, _ := actionTestDebugServer(t)
+
+	// 一条**正在跑**的同名会话：F20 的"别名指向的会话不能复用"要它。
+	hsBusy, sBusy := actionTestDebugServer(t)
+	giveServerNamedEnv(sBusy, "h1", "127.0.0.1", "36")
+	busy := fakeIdleSession("s-忙", "h1", "36")
+	busy.mu.Lock()
+	busy.state = StateStopped // 已停站：不是 idle，不能复用（Q23）
+	busy.mu.Unlock()
+	sBusy.mgr.sessions[busy.ID] = busy
+	// 别名是**服务端的事实**（C5.3 的 name 键）：直接登记在会话上（生产路径见 assignIdentityLocked）。
+	sBusy.mgr.mu.Lock()
+	_ = sBusy.mgr.assignNameLocked(busy, "汇率单")
+	sBusy.mgr.mu.Unlock()
+
+	cases := []struct {
+		name    string
+		hs      *httptest.Server
+		path    string
+		body    string
+		status  int
+		fKey    string // 契约 2.4 的那一行：码与"要不要候选"都从表里取，不在测试里重抄
+		candLen int    // -1 = 这个码下不该出现 candidates（C5.11）
+	}{
+		{"F1 省略目标 + 池里两条", hsTwo, "/api/sessions/switch", `{"env":"h1","ent":"99"}`,
+			http.StatusConflict, "F1", 2},
+		{"F2 池空", hsEmpty, "/api/wslogs/debug", `{"rowid":"1"}`,
+			http.StatusConflict, "F2", -1},
+		{"F19 别名取值非法（含 /）", hsTwo, "/api/sessions", `{"prog":"apmt520","name":"不合/法"}`,
+			http.StatusBadRequest, "F19", -1},
+		{"F20 别名指向的会话不能复用", hsBusy, "/api/sessions", `{"prog":"apmt520","name":"汇率单","ssh":"h1"}`,
+			http.StatusConflict, "F20", 1},
+	}
+	byKey := map[string]debugContractInvalidForm{}
+	for _, f := range debugContractInvalidForms {
+		byKey[f.Key] = f
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			want, ok := byKey[c.fKey]
+			if !ok {
+				t.Fatalf("契约 2.4 的表里没有 %s —— 这张表是验收输入集，不许缺行", c.fKey)
+			}
+			resp := doReq(t, "POST", c.hs.URL+c.path, "", c.body)
+			if resp.StatusCode != c.status {
+				t.Fatalf("该退 %d，得 %d（%s）", c.status, resp.StatusCode, respError(t, resp))
+			}
+			var raw map[string]any
+			if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+				t.Fatalf("失败信封不是合法 JSON：%v", err)
+			}
+			// C5.15：`ok` 与 `error` 的形状一个字都不改，只**增加** code 与 candidates。
+			if raw["ok"] != false {
+				t.Errorf("ok 必须是 false（C5.15），实得 %v", raw["ok"])
+			}
+			if msg, _ := raw["error"].(string); strings.TrimSpace(msg) == "" {
+				t.Errorf("error 必须非空（C5.15），实得 %v", raw["error"])
+			}
+			if got := raw["code"]; got != want.Code {
+				t.Errorf("code = %v；契约 2.4 的 %s 行写的是 %q（4.1.1 是唯一清单）",
+					got, c.fKey, want.Code)
+			}
+			cands, hasCands := raw["candidates"]
+			if c.candLen < 0 {
+				if hasCands {
+					t.Errorf("%s（code=%s）不该带候选清单（C5.11），实得 %v", c.fKey, want.Code, cands)
+				}
+				return
+			}
+			if !hasCands {
+				t.Fatalf("%s（code=%s）**必须**带候选清单（C5.11），实得 %v", c.fKey, want.Code, raw)
+			}
+			list, okList := cands.([]any)
+			if !okList || len(list) != c.candLen {
+				t.Fatalf("candidates 该是 %d 条，实得 %v", c.candLen, cands)
+			}
+			// C5.12：候选是**九键**，唯一出处是 internal/target（C5.4b 不许手抄第二份）。
+			for _, one := range list {
+				row, _ := one.(map[string]any)
+				for _, k := range debugContractCandidateKeys {
+					if _, ok := row[k]; !ok {
+						t.Errorf("候选行少了 %q 键（C5.12 的九键），实得 %v", k, row)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestContractNameTakenEnvelopeIsWritten F18 的**信封**（`SESSION_NAME_TAKEN` + 占用者那一条）。
+//
+// F18 在生产里只剩**竞态**那一支到达（Q23 的三种结局已经把"空闲复用 / 忙碌报错"判在前头，
+// 见 C1.6 与 `FailureNameTaken` 的注释）：两个同名请求同时在飞时，晚到的那一个在登记处
+// 撞上已登记的别名。测它不必真的并发：撞车那一刻的判据是 `assignIdentityLocked`
+// （下面直接驱动它），信封由 `writeNameTaken` 写（同样直接驱动）。
+//
+// 4.1.1 明写它归"用法错"那一行（**退 2 不退 3**），所以这里把**退出码**也钉下来：
+// 服务端只给码与 HTTP 状态，退出码由调用方按 `target.ExitFor(code, ...)` 分档 ——
+// 那一位与 4.1.1 的表同源，本测试核的就是"这张表说 F18 退几，就该退几"。
+func TestContractNameTakenEnvelopeIsWritten(t *testing.T) {
+	m := NewManager(cfgFor("h1", "36"))
+	holder := fakeIdleSession("s-先到", "h1", "36")
+	m.sessions[holder.ID] = holder
+	m.mu.Lock()
+	err := m.assignIdentityLocked(holder, "汇率单")
+	m.mu.Unlock()
+	if err != nil {
+		t.Fatalf("第一条登记别名不该失败：%v", err)
+	}
+	// 第二条同名（大小写不同也算撞车：C2.5 的查重不区分大小写）。
+	challenger := fakeIdleSession("s-后到", "h1", "36")
+	m.mu.Lock()
+	err = m.assignIdentityLocked(challenger, "汇率单")
+	m.mu.Unlock()
+	var taken *ErrNameTaken
+	if !errors.As(err, &taken) {
+		t.Fatalf("第二条用同名别名登记该失败（F18），实得 %v", err)
+	}
+	if taken.Occupant != holder.ID {
+		t.Errorf("占用者该是 %s，实得 %s", holder.ID, taken.Occupant)
+	}
+	// 信封：409 + SESSION_NAME_TAKEN + 占用者那一条。
+	rec := httptest.NewRecorder()
+	srv := &Server{mgr: m}
+	srv.writeNameTaken(rec, taken)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("F18 该退 409（C5.16 同一档：请求体合法、冲突的是会话池的状态），得 %d", rec.Code)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("失败信封不是合法 JSON：%v\n%s", err, rec.Body.String())
+	}
+	if raw["code"] != debugContractCodeNameTaken {
+		t.Errorf("code = %v，F18 要求 %q", raw["code"], debugContractCodeNameTaken)
+	}
+	list, ok := raw["candidates"].([]any)
+	if !ok || len(list) != 1 {
+		t.Fatalf("F18 必须带候选清单，且只有占用者那一条（C5.11），实得 %v", raw["candidates"])
+	}
+	if row, _ := list[0].(map[string]any); row["id"] != holder.ID {
+		t.Errorf("候选该是占用者 %s，实得 %v", holder.ID, list[0])
+	}
+	// 退出码：4.1.1 的表说 F18 退 2（**不退 3**）。
+	if got := target.ExitFor(debugContractCodeNameTaken, true, true); got != byKeyExit(t, "F18") {
+		t.Errorf("F18 的退出码 = %d，契约 2.4 / 4.1.1 写的是 %d", got, byKeyExit(t, "F18"))
+	}
+}
+
+// byKeyExit 取 2.4 那张表里某一行写死的退出码（测试里不重抄这些数字）。
+func byKeyExit(t *testing.T, key string) int {
+	t.Helper()
+	for _, f := range debugContractInvalidForms {
+		if f.Key == key {
+			return f.Exit
+		}
+	}
+	t.Fatalf("契约 2.4 的表里没有 %s", key)
+	return 0
 }
 
 // TestContractFlagConflictsIsNotYetEnforced 钉住四个标志的冲突矩阵（C3.3 的四种组合）
@@ -613,77 +840,285 @@ func TestContractAliasRulesAreNotYetEnforced(t *testing.T) {
 // T2.1-e 规范 id 进出信封（C5.3 / C5.4 / F15 / Q22）
 // ---------------------------------------------------------------------------
 
-// TestContractRefKeyIsNotYetInSessionBrief 是 `ref` / `name` / `n` / `epoch` 四个新键的跳过。
+// TestContractIdentityKeysAreInSessionBrief 是 C5.3 / Q22 那五个新键（连同 `kind`）的**落地断言**。
 //
-// 它存在的意义：C5.3 说这四个键**纯新增、不改旧键**。落地之后，
-// `TestContractSessionEnvelopeKeysMatchSessionBrief` 会自动开始要求它们；
-// 在那之前，用这一条把"还差这四个键"记在案上，而不是让上面那条测试的失败信息孤零零地挂着。
-func TestContractRefKeyIsNotYetInSessionBrief(t *testing.T) {
-	if contractRefKeyLanded() {
-		t.Fatal("ref 键已经加进 SessionBrief 了，请删掉这条跳过（C5.3 的四个新键已落地）")
+// **WP4c 起它不再跳过**：`ref` / `display` / `name` / `ent` / `n` / `epoch` 已经在
+// `SessionBrief` 上，`kind` 也补上了（C5.5）。这一条只做"键在不在、键名对不对"这一件事 ——
+// "取不到时给空串而不省键"由 `TestContractSessionEnvelopeConstantKeysAreNeverOmitted`
+// 用**真实输出**钉（那是 C5.1 的另一半）。
+func TestContractIdentityKeysAreInSessionBrief(t *testing.T) {
+	wantTags := map[string]string{
+		"ref":     "ref",     // 规范 id（C2.0 恒定，C5.4）
+		"display": "display", // 人读形态（作业段是快照，C5.4）
+		"name":    "name",    // 别名（C2.5b）
+		"ent":     "ent",     // 当前企业编号（快照，C2.5c）
+		"n":       "n",       // 序号（C2.2 / Q24）
+		"epoch":   "epoch",   // 世代号（F15）
+		"kind":    "kind",    // 会话类型（C5.5：恒为 ssh）
 	}
-	t.Skip("等 WP3 实现 ref 字段（并同批补 name / n / epoch，契约 C5.3 / Q22）")
+	rt := reflect.TypeOf(SessionBrief{})
+	got := map[string]string{}
+	for i := 0; i < rt.NumField(); i++ {
+		tag := rt.Field(i).Tag.Get("json")
+		if tag == "" {
+			continue
+		}
+		got[strings.Split(tag, ",")[0]] = tag
+	}
+	for k, want := range wantTags {
+		tag, ok := got[k]
+		if !ok {
+			t.Errorf("C5.3 / Q22 要求 `SessionBrief` 上有 %q 键，实际没有。\n    实得键：%v", k, keysOfTags(got))
+			continue
+		}
+		if tag != want {
+			t.Errorf("键 %q 的标签是 %q，契约 C5.2 要求键名一字不改（%q）", k, tag, want)
+		}
+	}
+	// Q22 的"纯新增"：C5.3 明写**一个旧键都不改、不改名、不删**。旧键就在这两个常量表里，
+	// 一个都不能少（少了就是有人删了旧键 —— 那会静默打断前端与老 CLI）。
+	old := append([]string{"id", "env", "state", "prog"}, debugContractSessionOptionalKeys...)
+	for _, k := range old {
+		if _, ok := got[k]; !ok {
+			t.Errorf("旧键 %q 不见了 —— C5.3 / Q22 是**纯新增**，旧键一个都不许改、不许删", k)
+		}
+	}
 }
 
-// TestContractEpochStalenessIsNotYetEnforced 是 F15（句柄过期）的跳过。
-//
-// F15 要求"环境与序号都对，但句柄是上一代"时报 `SESSION_STALE` + 候选块。
-// 今天**没有"代"这个概念**（B31：SessionBrief 里无 epoch/generation），
-// 所以这条无从判起 —— 等 WP3/WP4 把 epoch 落进 SessionBrief 并接上校验。
-func TestContractEpochStalenessIsNotYetEnforced(t *testing.T) {
-	if contractRefKeyLanded() {
-		t.Fatal("epoch 已经落地了，请把这条跳过改成 F15 的世代校验断言")
+// keysOfTags 给失败信息用（键名排序后返回，输出必须稳定）。
+func keysOfTags(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
 	}
-	t.Skip("等 WP3 实现 epoch 字段与世代校验后，断言 F15 的 SESSION_STALE 报错（C5.3 / C5.11）")
+	sort.Strings(out)
+	return out
 }
 
-// TestContractNameIdempotencyIsNotYetEnforced 是 Q23 / F20 的记账：
-// `--name X` 的别名当幂等键 —— 空闲就复用、正在跑/已停站报 `SESSION_TARGET_BUSY` 退 3。
+// TestContractEpochStalenessIsEnforced 是 F15（句柄过期）的**落地断言**。
 //
-// **WP4a 之后还差什么（这条守卫换过了）**：`--name` 已经在 `tt debug start` 上注册，
-// 但"别名当幂等键"要的是**服务端记得住别名**（`SessionBrief.name`，C5.3 的纯新增键之一），
-// 而服务端今天不吐 `name` / `ref` / `n` / `epoch`（那是 WP4c 的活）。
-// 目标层那侧已经把三种结局实现好了（`ResolveName` → `NameFree` / `NameReuse` / `NameBusy`，
-// 断言在 `internal/target` 的 `TestResolveNameIdempotency`）。
+// 三段，缺一不可 —— 它把"服务端产出的世代号"与"目标层的失效判定"接在一起：
 //
-// 所以守卫从"CLI 有没有注册 --name"（这个已经翻页）换成"服务端记不记得别名"。
-func TestContractNameIdempotencyIsNotYetEnforced(t *testing.T) {
-	if contractRefKeyLanded() {
-		t.Fatal("SessionBrief 已经有 ref/name/n/epoch 了，请把这条跳过改成 Q23 的端到端幂等断言" +
-			"（空闲复用 / 忙碌报 SESSION_TARGET_BUSY）")
+//	① 服务端真的产 `epoch`（C5.3），且**第一次**拿到它之后手上就有一个世代号；
+//	② 同一条会话**复用宿主跑新一轮**（`SetRun`，也就是 `tt debug start` 复用空闲宿主那条路）
+//	   ⇒ 世代**换新**（本次定稿的语义见 nextSessionEpoch：建立 / 复用宿主 / 重启三处换代）；
+//	③ 拿①那个旧世代号去落位 ⇒ 目标层报 `SESSION_STALE`、退 3、带当前代那一条候选（F15 / C5.11）。
+//
+// 为什么用真 Manager 而不是拼一个假视图：契约要的是"**服务端事实**让旧句柄失效"，
+// 而①与②正是那件事的两半 —— 拼假数据只能证明目标层会算，证明不了服务端会换。
+func TestContractEpochStalenessIsEnforced(t *testing.T) {
+	m := NewManager(cfgFor("h1", "36"))
+	live := idleOn("s1", cfgFor("h1", "36"))
+	m.mu.Lock()
+	if err := m.assignIdentityLocked(live, "汇率单"); err != nil {
+		m.mu.Unlock()
+		t.Fatalf("登记身份失败：%v", err)
 	}
-	t.Skip("等 WP4c 把 name 键加进 SessionBrief（C5.3）后，断言 Q23：空闲复用、忙碌报 SESSION_TARGET_BUSY（F20 / C1.6）")
+	m.sessions["s1"] = live
+	m.mu.Unlock()
+
+	before := m.Snapshot()
+	if len(before) != 1 {
+		t.Fatalf("前置不成立：池里该恰好一条会话，得 %d", len(before))
+	}
+	// ① 服务端产世代号。
+	if strings.TrimSpace(before[0].Epoch) == "" {
+		t.Fatalf("C5.3 要求 `session.epoch` 恒定出现且非空，实得 %q", before[0].Epoch)
+	}
+	oldEpoch := before[0].Epoch
+
+	// ② 复用宿主跑新一轮 ⇒ 换代。
+	if _, err := m.prepareSession(cfgFor("h1", "36"), "m1", "p1", "", "", "", "", ""); err != nil {
+		t.Fatalf("复用空闲宿主该成功（它不拨号），实得：%v", err)
+	}
+	after := m.Snapshot()
+	if len(after) != 1 || after[0].ID != "s1" {
+		t.Fatalf("复用宿主不该换会话：实得 %+v", after)
+	}
+	if after[0].Epoch == oldEpoch {
+		t.Errorf("复用宿主跑新一轮之后 epoch 没变（%q）—— F15 的「旧句柄当场失效」就判不出来了。\n"+
+			"    换代的三个时机见 nextSessionEpoch 的注释（建立 / SetRun 复用 / 重启）。", oldEpoch)
+	}
+
+	// ③ 旧世代号 → SESSION_STALE（F15：环境与序号都对，但句柄是上一代）。
+	// `Environments` 要给：目标层第一步就校验环境存在（C2.1 不猜、不回落），
+	// 不给会先撞 ENV_UNKNOWN，测不到世代那一条。
+	pool := target.Pool{Environments: []string{"h1-36"}, Sessions: sessionViews(after)}
+	sel := selectorOf(t, "h1-36#1")
+	if _, f := target.Resolve(pool, target.Request{Selector: sel, Epoch: oldEpoch}); f == nil {
+		t.Fatalf("带上上一代的 epoch（%q）该被判失效（F15），却落上了", oldEpoch)
+	} else {
+		if f.Code != debugContractCodeStale {
+			t.Errorf("F15 的码该是 %q，实得 %q（%s）", debugContractCodeStale, f.Code, f.Message)
+		}
+		if got := target.ExitFor(f.Code, f.NewScenario, true); got != byKeyExit(t, "F15") {
+			t.Errorf("F15 的退出码 = %d，契约 2.4 写的是 %d", got, byKeyExit(t, "F15"))
+		}
+		if len(f.Candidates) != 1 {
+			t.Errorf("F15 必须带候选（C5.11），且是**当前代**那一条，实得 %d 条", len(f.Candidates))
+		}
+	}
+	// 反向判据：当前代的 epoch 带上去就该正常落位（不是"凡带 epoch 就拒"）。
+	sel2 := selectorOf(t, "h1-36#1")
+	if _, f := target.Resolve(pool, target.Request{Selector: sel2, Epoch: after[0].Epoch}); f != nil {
+		t.Errorf("当前代的 epoch（%q）该正常落位，实得 %v", after[0].Epoch, f.Message)
+	}
+}
+
+// selectorOf 解析一个选择器（测试里要按 `环境#序号` 落位；解析失败就当场判红）。
+func selectorOf(t *testing.T, raw string) *target.Selector {
+	t.Helper()
+	sel, f := target.ParseSelector(raw)
+	if f != nil {
+		t.Fatalf("选择器 %q 该合法：%v", raw, f.Message)
+	}
+	return &sel
+}
+
+// TestContractNameIdempotencyIsEnforced 是 Q23 / C1.6 的**落地断言**：别名就是幂等键。
+//
+// 三条逐条（Q23 的原文）：
+//
+//	① **同名会话空闲 → 复用它**：再来一次拿到的是**同一条会话**（同一个 id / ref / n），
+//	   不是第二条 —— 这就是"同一条命令重发不会悄悄多出一条会话"那句话的判据；
+//	② **同名会话正在跑 / 已停站 → `SESSION_TARGET_BUSY` 退 3**：服务端 409 + 码 + 占用者候选，
+//	   而且**不许静默再开一条**（判定在拨号之前，所以连 SSH 都不会去拨）；
+//	③ **名字不存在 → 起新的**：池子里没有这个名字 ⇒ 放行，并且这次给定的别名会**登记**在
+//	   结果那条会话上（否则调用方手上的别名下次就找不到了）。
+//
+// 判据全部用生产实现：①③ 在 Manager 上（复用宿主不拨号，所以测得了），②在 HTTP 信封上。
+// 上一版这条是 `t.Skip`（那时服务端还不认别名）—— WP4c 把 `name` 变成服务端事实之后，
+// 按它自己的交代改成了断言。
+func TestContractNameIdempotencyIsEnforced(t *testing.T) {
+	const alias = "复现-1"
+
+	t.Run("① 空闲 → 复用同一条（不是第二条）", func(t *testing.T) {
+		m := NewManager(cfgFor("h1", "36"))
+		// idleOn：envName 与 cfg 一致（与 NewSession 建出来的同形），否则这条会话的
+		// ref 会因为"环境名还没定下来"而算成空串，测不到 C2.0 那句"地址一个字不变"。
+		live := idleOn("s1", cfgFor("h1", "36"))
+		live.Prog = "apmt520"
+		m.mu.Lock()
+		if err := m.assignIdentityLocked(live, alias); err != nil {
+			m.mu.Unlock()
+			t.Fatalf("登记身份失败：%v", err)
+		}
+		m.sessions["s1"] = live
+		m.mu.Unlock()
+		first := m.Snapshot()[0]
+
+		// 同一条命令原样重发（网络抖了、Agent 重试）。
+		sess, err := m.LaunchWith(cfgFor("h1", "36"), "apmt520", "apmt520", alias)
+		if err != nil {
+			t.Fatalf("同名 + 空闲该复用宿主并成功，实得：%v", err)
+		}
+		if sess.ID != first.ID {
+			t.Fatalf("该复用**同一条**会话（%s），实得 %s —— 别名当幂等键的判据就是这一条", first.ID, sess.ID)
+		}
+		got := m.Snapshot()
+		if len(got) != 1 {
+			t.Fatalf("池里该仍然只有一条会话（不许静默再开一条），实得 %d 条", len(got))
+		}
+		if got[0].Ref != first.Ref || got[0].N != first.N {
+			t.Errorf("复用同一条会话时地址该一个字都不变：ref %q→%q，n %d→%d（C2.0）",
+				first.Ref, got[0].Ref, first.N, got[0].N)
+		}
+		if got[0].Name != alias {
+			t.Errorf("复用之后别名该还是 %q，实得 %q（C2.5b：生命周期内不变）", alias, got[0].Name)
+		}
+	})
+
+	t.Run("② 正在跑 / 已停站 → SESSION_TARGET_BUSY（退 3）", func(t *testing.T) {
+		hs, s := actionTestDebugServer(t)
+		giveServerNamedEnv(s, "h1", "127.0.0.1", "36")
+		busy := fakeIdleSession("s-忙", "h1", "36")
+		busy.mu.Lock()
+		busy.state = StateStopped
+		busy.mu.Unlock()
+		s.mgr.sessions[busy.ID] = busy
+		s.mgr.mu.Lock()
+		if err := s.mgr.assignNameLocked(busy, alias); err != nil {
+			s.mgr.mu.Unlock()
+			t.Fatalf("登记别名失败：%v", err)
+		}
+		s.mgr.mu.Unlock()
+
+		resp := doReq(t, "POST", hs.URL+"/api/sessions", "",
+			`{"prog":"apmt520","name":"`+alias+`","ssh":"h1"}`)
+		if resp.StatusCode != http.StatusConflict {
+			t.Fatalf("Q23：忙碌的同名会话该当场拒绝（409），得 %d（%s）", resp.StatusCode, respError(t, resp))
+		}
+		var raw map[string]any
+		if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+			t.Fatalf("失败信封不是合法 JSON：%v", err)
+		}
+		if raw["code"] != debugContractCodeTargetBusy {
+			t.Errorf("code = %v，F20 / Q23 要求 %q", raw["code"], debugContractCodeTargetBusy)
+		}
+		if got := target.ExitFor(debugContractCodeTargetBusy, true, true); got != byKeyExit(t, "F20") {
+			t.Errorf("F20 的退出码 = %d，契约 2.4 写的是 %d", got, byKeyExit(t, "F20"))
+		}
+		list, ok := raw["candidates"].([]any)
+		if !ok || len(list) != 1 {
+			t.Fatalf("F20 必须带候选（占用者那一条，C5.11），实得 %v", raw["candidates"])
+		}
+		if row, _ := list[0].(map[string]any); row["id"] != busy.ID {
+			t.Errorf("候选该是占用者 %s，实得 %v", busy.ID, list[0])
+		}
+		// 不许静默再开一条：池子里那条一动没动，也没有第二条被造出来。
+		if got := len(s.mgr.Snapshot()); got != 1 {
+			t.Errorf("忙碌的同名请求不许改动会话池（该报错就报错），实得 %d 条", got)
+		}
+	})
+
+	t.Run("③ 名字不存在 → 起新的（并把名字登记上）", func(t *testing.T) {
+		m := NewManager(cfgFor("h1", "36"))
+		unnamed := idleOn("s1", cfgFor("h1", "36"))
+		m.mu.Lock()
+		if err := m.assignIdentityLocked(unnamed, ""); err != nil {
+			m.mu.Unlock()
+			t.Fatalf("登记身份失败：%v", err)
+		}
+		m.sessions["s1"] = unnamed
+		m.mu.Unlock()
+		if got := m.Snapshot()[0].Name; got != "" {
+			t.Fatalf("前置不成立：这条会话该是无名的，实得 %q", got)
+		}
+		sess, err := m.LaunchWith(cfgFor("h1", "36"), "apmt520", "apmt520", alias)
+		if err != nil {
+			t.Fatalf("名字不存在该放行（起新的 / 落在这条宿主上），实得：%v", err)
+		}
+		if got := sess.Name(); got != alias {
+			t.Errorf("这次给的别名没登记到会话上（%q）—— 下一次用这个别名就落不了位了", got)
+		}
+		// 反向：**别名不同**时不复用那条会话（C2.5b：别名只在创建时给一次，
+		// 把 X 挂到一条已经叫 Y 的会话上就是静默改名）。
+		if nameCompatible(alias, "另一个名字") {
+			t.Errorf("一条已经叫 %q 的会话不该被复用成 %q（C2.5b）", alias, "另一个名字")
+		}
+		if !nameCompatible("", "随便什么名字") {
+			t.Errorf("没名字的宿主可以被起名（Q23 的「名字不存在 → 起新的」落在复用宿主上的形态）")
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------
 // T2.1-f 人话输出（C5.9 身份行 / C5.14 候选行）
 // ---------------------------------------------------------------------------
 
-// tryContractCandidateLine 按 C5.14 渲染一行人话候选块：
-//
-//	<ref>  <name>  <state>  ENT <ent>
-//
-// 两格缩进、字段间两个空格；`<name>` 未命名写 `(未命名)`。
-// 第一个字段是 `ref`（恒定不变的规范 id），**不是** display（C5.14 的理由：候选行是给人照抄重发的）。
-func tryContractCandidateLine(ref, name, state, ent string) string {
-	if strings.TrimSpace(name) == "" {
-		name = "(未命名)"
-	}
-	if strings.TrimSpace(ent) == "" {
-		ent = "?"
-	}
-	return fmt.Sprintf("  %s  %s  %s  ENT %s", ref, name, state, ent)
-}
-
 // TestContractCandidateLineFormat 钉住 C5.14 的候选行格式。
 //
 // 为什么值得钉：候选行的用途是"照着它重发一枪"。少一个空格、把 ref 换成 display，
 // 抄下去的就是一条会漂的写法 —— 那正是 C5.4 说的"要恒定用 ref"。
 //
-// 今天**没有渲染函数可调**（目标层还没落地），所以这里调的是上面那个按 C5.14 写死的
-// 辅助函数，并对格式本身做断言。落地后应当删掉辅助函数，改成调真实现。
+// **WP4c 起改调真实现**（`target.CandidateLine`，C5.14 的唯一实现）：这一条上一版
+// 自己带着一份手抄的渲染函数，并在注释里写明"落地后应当删掉辅助函数、改成调真实现"。
+// 现在这么做了 —— 测试验的就是生产那一份。
 func TestContractCandidateLineFormat(t *testing.T) {
-	got := tryContractCandidateLine("恒烁正式区#1", "汇率单", "已停站", "99")
+	got := target.CandidateLine(target.Candidate{
+		ID: "s1", Ref: "恒烁正式区#1", Display: "恒烁正式区/apmt520#1",
+		Name: "汇率单", Env: "恒烁正式区", Ent: "99", N: 1, Prog: "apmt520", State: "stopped",
+	})
 	want := "  恒烁正式区#1  汇率单  已停站  ENT 99"
 	if got != want {
 		t.Errorf("候选行（C5.14）= %q\n    期望 %q\n"+
@@ -693,7 +1128,7 @@ func TestContractCandidateLineFormat(t *testing.T) {
 	if strings.Contains(got, "会话 ") {
 		t.Errorf("候选行不该带 `会话 ` 前缀（C5.14 末段：那是 5.9 身份行的前缀，两行不是同一行）")
 	}
-	if got := tryContractCandidateLine("恒烁正式区#2", "", "空闲", ""); !strings.Contains(got, "(未命名)") || !strings.Contains(got, "ENT ?") {
+	if got := target.CandidateLine(target.Candidate{Ref: "恒烁正式区#2", State: "idle"}); !strings.Contains(got, "(未命名)") || !strings.Contains(got, "ENT ?") {
 		t.Errorf("未命名/取不到企业编号时要写字面量 (未命名) 与 ?（C5.14），实得 %q", got)
 	}
 	// 反向：第一个字段必须是 ref 的形态（环境#序号），不能是 display 的形态（含 /）。
@@ -704,30 +1139,57 @@ func TestContractCandidateLineFormat(t *testing.T) {
 	}
 }
 
-// TestContractIdentityLineIsNotYetLanded 是 C5.9 身份行的跳过。
+// TestContractIdentityLineIsNotYetLanded 是 C5.9 身份行的记账：**服务端那两样已经落地，
+// 还差的是 CLI 那一行**。
 //
-// C5.9 定的那一行 `会话 <display> · <name> · <state> · ENT <ent>` 要求同时印出
-// `display` 与 `name` —— 而今天这两样都不存在（C5.3 的四个新键还没落地）。
-// 落地前能测的只有 state 的中文标签，那一条已经在 T2.2 的表征测试里钉住。
+// 现状（WP4c 之后）：
+//   - 服务端**已经**产出 `display` 与 `name`（C5.3 的纯新增键，本文件上面几条已断言它们）；
+//     C5.9 那行的渲染实现也在 `internal/target`（`IdentityLine`，逐字对着契约）。
+//   - 还差的是**把它接进 CLI 的人话输出**：C5.9 要求身份行
+//     `会话 <display> · <name> · <state> · ENT <ent>` **替代** `internal/cli/debug` 今天那行
+//     `生效身份: 环境 … / 区域 … / 企业 … / 账号 … / 库 …`。
+//
+// 为什么不在本批做：本次任务的硬纪律是"单会话下的命令输出**除新增键外逐字不变**（H2）"，
+// 而换掉那一行正是**改字**（契约 C8.4 把它登记为单会话下允许的第二处变化，但那是别的批次的授权）。
+// 所以这一条**继续跳过** —— 跳过的原因是"CLI 那一行还没换"，**不是**"服务端没数据"。
 func TestContractIdentityLineIsNotYetLanded(t *testing.T) {
-	if contractRefKeyLanded() {
-		t.Fatal("display/name 已经落地了，请把这条跳过改成 C5.9 身份行的逐字断言")
+	// 能断言的那一半先断掉（免得这条跳过看起来像"什么都还没做"）。
+	m := NewManager(cfgFor("h1", "36"))
+	live := idleOn("s1", cfgFor("h1", "36"))
+	live.Prog = "apmt520"
+	m.mu.Lock()
+	if err := m.assignIdentityLocked(live, "汇率单"); err != nil {
+		m.mu.Unlock()
+		t.Fatalf("登记身份失败：%v", err)
 	}
-	t.Skip("等 WP3/WP4 落地 display 与 name 后，断言 C5.9 身份行 `会话 <display> · <name> · <state> · ENT <ent>`")
+	m.sessions["s1"] = live
+	m.mu.Unlock()
+	b := m.Snapshot()[0]
+	if b.Display == "" || b.Name == "" {
+		t.Fatalf("C5.3 要求服务端产出 display 与 name（WP4c 已落地），实得 display=%q name=%q", b.Display, b.Name)
+	}
+	// 目标层那行是现成的（C5.9 的唯一实现）：这一句证明"数据齐了、渲染也有了"。
+	line := target.IdentityLine(sessionView(b))
+	if !strings.HasPrefix(line, "会话 "+b.Display+" · "+b.Name+" · ") {
+		t.Fatalf("C5.9 的身份行该以 `会话 <display> · <name> · <state> · ENT <ent>` 开头，实得 %q", line)
+	}
+	t.Skip("C5.9 身份行还没接进 CLI：服务端已有 display 与 name（WP4c）；差的是把 internal/cli/debug 的 `生效身份: …` 那行换成 `会话 <display> · <name> · <state> · ENT <ent>` —— 那是人话输出改字，按 H2 归后续批次")
 }
 
 // ---------------------------------------------------------------------------
 // T2.1-g 端点与信封的两侧差别（C5.15 / C5.16 / 第 7 节的表）
 // ---------------------------------------------------------------------------
 
-// TestContractHTTPFailureEnvelopeKeepsItsShape 钉住 C5.15 的**现状半边**：
-// HTTP 侧的失败信封是 `{"ok":false,"error":…}`（B8），**没有** `code`，也没有 `candidates`。
+// TestContractHTTPFailureEnvelopeKeepsItsShape 钉住 C5.15 的两半：
+// **不许动的部分**（`ok` / `error` 的形状，B8）与**必给的部分**（`code`）。
 //
-// 契约要求"在这形状上**增加** `code` 与 `candidates`，`ok`/`error` 一个字都不改"。
-// 所以这一条今天必须绿（它钉住的是"不许动的部分"），而"新增的部分"由下面那条跳过盯着。
+// WP4c 之前这条只钉前半句（那时 HTTP 失败信封是 `{"ok":false,"error":…}` 两键，
+// 自己的注释里写着"加进 code 之后要一起改这里"）—— 现在按那句话改了：
+// `code` 必须在（C5.15：必给），而 `candidates` 只在 C5.11 那五种码下出现，
+// 这条请求的码（运行失败那一档）不在其中，所以这里反过来断言它**不该有**。
 //
-// 这与 CLI 侧（output.WriteError 的四键恒定）是**两套形状**，别混：
-// HTTP 侧给前端，CLI 侧给 --json 的调用方。
+// 这与 CLI 侧（`output.WriteError` 的四键恒定）是**两套形状**，别混：
+// HTTP 侧给前端与 CLI 的 `dbgAPI`，CLI 侧给人读的 `--json` 调用方。
 func TestContractHTTPFailureEnvelopeKeepsItsShape(t *testing.T) {
 	hs := actionTestServer(t)
 	resp := doReq(t, "POST", hs.URL+"/api/wstest", "", "{}")
@@ -744,27 +1206,45 @@ func TestContractHTTPFailureEnvelopeKeepsItsShape(t *testing.T) {
 	if s, _ := raw["error"].(string); strings.TrimSpace(s) == "" {
 		t.Errorf("HTTP 失败信封必须有非空的 error（B8），实得 %v", raw["error"])
 	}
-	// "一个字都不改"：今天**没有** code/candidates，所以它们不该出现。
-	// 这条断言在 WP4 加进 code 之后必须一起改 —— 那时改的是这里，不是 C5.15。
-	for _, k := range []string{"code", "candidates"} {
-		if _, ok := raw[k]; ok {
-			t.Errorf("HTTP 失败信封今天不该有 %q 键（B8 的形状是 {ok,error}）；"+
-				"C5.15 要求加它时，请连同这条断言一起改", k)
-		}
+	// C5.15：`code` **必给**（调用方靠它分支，Q15 明写"Agent 读 code，不读数字"）。
+	if code, _ := raw["code"].(string); strings.TrimSpace(code) == "" {
+		t.Errorf("HTTP 失败信封必须有非空的 code（C5.15：必给），实得 %v", raw["code"])
+	}
+	// C5.11：这个码不在"必须带候选"的五种里，所以 candidates 不该出现。
+	if _, ok := raw["candidates"]; ok {
+		t.Errorf("code=%v 不在 C5.11 那五种码里，不该有 candidates 键，实得 %v", raw["code"], raw)
 	}
 }
 
-// TestContractHTTPFailureCodeIsNotYetLanded 是 C5.15 / C5.16 的跳过：
-// HTTP 侧要增加 `code`（必给）与 `candidates`（按 C5.11），缺目标/歧义用 **409**。
-func TestContractHTTPFailureCodeIsNotYetLanded(t *testing.T) {
+// TestContractHTTPFailureCodeIsLanded 是 C5.15 / C5.16 的**落地断言**：
+// 缺目标 / 歧义 / 别名撞车那几族用 409 或 404 并带 `code` 与 `candidates`。
+//
+// 上一版这条是 `t.Skip`（那时 HTTP 侧只有 `{ok,error}` 两键）。WP4c 补上之后
+// 按它自己的交代改成断言 —— 逐条的实测在
+// `TestContractInvalidFormsServerSideEnvelopes`（F1/F2/F19/F20）与
+// `TestActionEndpointsRequireExplicitTarget`（池空 / 歧义 / 指名不存在）里，
+// 这里只钉住"这个键从此必给"这一条。
+func TestContractHTTPFailureCodeIsLanded(t *testing.T) {
 	hs := actionTestServer(t)
 	resp := doReq(t, "POST", hs.URL+"/api/wstest", "", "{}")
 	var raw map[string]any
-	_ = json.NewDecoder(resp.Body).Decode(&raw)
-	if _, ok := raw["code"]; ok {
-		t.Fatal("HTTP 失败信封已经有 code 了，请把这条跳过改成 C5.15 / C5.16 的断言")
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		t.Fatalf("HTTP 失败信封不是合法 JSON：%v", err)
 	}
-	t.Skip("等 WP4 给服务端失败信封加 code 与 candidates（C5.15 / C5.16：缺目标报 409 + SESSION_AMBIGUOUS）")
+	code, _ := raw["code"].(string)
+	if strings.TrimSpace(code) == "" {
+		t.Fatalf("HTTP 失败信封必须有 code（C5.15），实得 %v", raw)
+	}
+	// 这个码必须落在 4.1.1 那张唯一清单里（或它是现行的运行失败码）——
+	// 不许随手发明一个没人认识的字符串。
+	known := map[string]bool{output.CodeQueryFailed: true, output.CodeConnFailed: true}
+	for _, f := range debugContractInvalidForms {
+		known[f.Code] = true
+	}
+	if !known[code] {
+		t.Errorf("code = %q 既不在契约 2.4 的 F 表里，也不是现行的运行失败码 —— "+
+			"4.1.1 是**唯一清单**，加新码要走那一处", code)
+	}
 }
 
 // TestContractStatusStaysTwoDocuments 钉住 C1.5b / Q21 里**今天就不许动**的那一半：
@@ -843,6 +1323,11 @@ func invalidFormKeys() []string {
 	return out
 }
 
+// 注：`contractRefKeyLanded` / `failureEnvelopeHasCode` 两个"落地了没有"的探针
+// **WP4c 已删** —— 它们服务的跳过（"等 ref 键""等 HTTP 失败信封的 code"）都已改成
+// 真断言，留着会让人以为还有东西在等。现在"落地了没有"的判据就是那些断言本身；
+// `invalidFormKeys` 留着给失败信息列 F 键（仍在使用）。
+
 // stateLabelOf 是 B30 / C5.9 的五个会话状态取值与它们的**中文标签**的表。
 //
 // 它是"值只定义一次"这条纪律在 T2.2 那一侧的落点：`internal/cli/debug` 的
@@ -872,37 +1357,6 @@ func newTestHTTPServer(t *testing.T, h http.Handler) *httptest.Server {
 	hs := httptest.NewServer(h)
 	t.Cleanup(hs.Close)
 	return hs
-}
-
-// ---------- "落地了没有"的三个判据（全是机械的，不是凭印象） ----------
-
-// contractRefKeyLanded 问："SessionBrief 上已经有 `ref` 键了吗"（C5.3 的五个新键）。
-func contractRefKeyLanded() bool {
-	rt := reflect.TypeOf(SessionBrief{})
-	for i := 0; i < rt.NumField(); i++ {
-		if strings.Split(rt.Field(i).Tag.Get("json"), ",")[0] == "ref" {
-			return true
-		}
-	}
-	return false
-}
-
-// failureEnvelopeHasCode 问："**HTTP 侧**的失败信封已经有 `code` 键了吗"（契约 C5.15 的反面）。
-//
-// 判据是**实测一个真实的失败响应**（复用 actionTestServer 与 doReq），
-// 不是"源码里出现过 code 这个词"：这条路由今天回的是 `{"ok":false,"error":…}` 两键（B8），
-// 而 C5.15 要求它增加 `code`（必给）与 `candidates`（按 C5.11）。
-//
-// 它与 `TestContractHTTPFailureCodeIsNotYetLanded` 问的是同一件事，两处都保留是有意的：
-// 那一条是"C5.15 本身的账"，这一条是"F1–F20 端到端还差什么"的守卫。
-func failureEnvelopeHasCode(t *testing.T) bool {
-	t.Helper()
-	hs := actionTestServer(t)
-	resp := doReq(t, "POST", hs.URL+"/api/wstest", "", "{}")
-	var raw map[string]any
-	_ = json.NewDecoder(resp.Body).Decode(&raw)
-	_, ok := raw["code"]
-	return ok
 }
 
 // ---------------------------------------------------------------------------

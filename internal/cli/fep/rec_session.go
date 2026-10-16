@@ -197,8 +197,9 @@ func recSessionOwned(sess dbgSessionView, s recSession, env string) bool {
 // dbgSessionView 是 `tt debug status --json` 里我们认得出的那几栏。
 //
 // 只读它给的 JSON，不碰调试服务的内部协议 —— 那个协议的家在 internal/cli/debug。
-// `name`（别名）服务端今天还没吐（C5.3 的五个键是 WP4c 的活），所以这里也不依赖它；
-// 等它有了，`recSessionOwned` 再加一条"别名相同"的判据即可（见契约 C7.3）。
+// `name`（别名）从 **WP4c** 起是**服务端的一条事实**（C5.3 / Q22：`SessionBrief.name`），
+// 所以这里能读到它；`recSessionOwned` 目前仍只按环境 + 录制身份（作业）认领，
+// 要不要把"别名相同"也加进判据是后续工作（见契约 C7.3 与本文件头部的判据说明）。
 type dbgSessionView struct {
 	ID    string `json:"id"`
 	Env   string `json:"env"`

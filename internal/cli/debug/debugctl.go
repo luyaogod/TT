@@ -133,10 +133,15 @@ func dbgAPI(method, path string, body any) ([]byte, error) {
 	}
 	if resp.StatusCode >= 400 {
 		var e struct {
-			Error string `json:"error"`
+			// Code 是服务端失败信封的稳定机器码（契约 C5.15）。Agent 靠它分支（Q15）。
+			Code string `json:"code"`
+			// Candidates 是 C5.12 的九键候选清单（只在那五种码下出现，C5.11）。
+			// 十键的声明处是 `internal/target`（C5.17–C5.19：客户端不许手抄第二份事实）。
+			Candidates []target.Candidate `json:"candidates"`
+			Error      string             `json:"error"`
 		}
 		if json.Unmarshal(data, &e) == nil && e.Error != "" {
-			return nil, fmt.Errorf("%s", e.Error)
+			return nil, dbgServerErrorOf(e.Code, e.Error, e.Candidates)
 		}
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(data))
 	}
@@ -366,6 +371,13 @@ var debugStartCmd = &cobra.Command{
 		body := map[string]any{"prog": args[0]}
 		if dbgModule != "" {
 			body["module"] = dbgModule
+		}
+		// `--name` 是**服务端的事实**（契约 C5.3 的 `name` 键，WP4c 落地）：别名要参与寻址
+		// 与 Q23 的幂等键判定，就必须随这次起会话送过去。空串不送（服务端按未命名处理，
+		// 与今天逐字相同）。注意别名**只在创建时给一次**（C2.5b）：这里送的是"这条会话叫什么"，
+		// 不是"给已有会话改名"。
+		if n := strings.TrimSpace(dbgNameFlag); n != "" {
+			body["name"] = n
 		}
 		targetEnv := dbgWireOverrides(cmd, body)
 		fglChanged := cmd.Flags().Changed("fglserver")

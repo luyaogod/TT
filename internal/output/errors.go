@@ -32,11 +32,18 @@ const (
 	// 用 `SESSION_AMBIGUOUS` + 候选清单拒绝（C5.16：409），这正是 Q4「服务端不保留隐式寻址」
 	// 的判据从"没有码的错误"变成"有码的信封"。
 	//
-	// `SESSION_STALE` / `SESSION_NAME_TAKEN` / `SESSION_TARGET_BUSY` 三个**不在本批**：
-	// 它们要 `epoch` / `name` 那几个键先成为服务端的事实（契约 C5.3 的纯新增键），
-	// 按契约 C7.1 的编排归别名与世代那一批 —— 契约的取值仍以 `internal/target` 为准。
+	// 后三个（`SESSION_STALE` / `SESSION_NAME_TAKEN` / `SESSION_TARGET_BUSY`）**WP4c 补齐**：
+	// 它们要 `epoch` / `name` 先成为服务端的事实（契约 C5.3 的纯新增键）—— 那一批落地后，
+	// 服务端自己就会产出这三个码（起会话时的别名三种结局 + 世代失效）。
+	// 取值一律与 `internal/target` 的 `Code*` 同源（那边是契约 4.1.1 的唯一出处）。
 	CodeSessionAmbiguous = "SESSION_AMBIGUOUS" // 选择器/省略命中 >=2 条（F1/F3/F4）
 	CodeSessionNotFound  = "SESSION_NOT_FOUND" // 选择器指名的那条不存在（F5/F7/F8）
+	// CodeSessionStale 句柄是上一代（F15：环境与序号都对，但 epoch 过期）。
+	CodeSessionStale = "SESSION_STALE"
+	// CodeSessionNameTaken 别名已被占用（F18）。**退 2 不退 3**（4.1.1 明写）。
+	CodeSessionNameTaken = "SESSION_NAME_TAKEN"
+	// CodeSessionTargetBusy 别名指向的会话不能复用（F20 / Q23 / C1.6）：正在跑或已停站。
+	CodeSessionTargetBusy = "SESSION_TARGET_BUSY"
 
 	// tt update 那条线。它管的是"tt 自己"，与字典无关，所以码也自成一族。
 	CodeUpdateUsage    = "UPDATE_USAGE"    // 参数组合不成立（如非交互环境没给 --yes）

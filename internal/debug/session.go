@@ -303,6 +303,24 @@ type Session struct {
 	// 由发起方决定,之后人与 AI 都能切(界面上的接管/交给 AI 按钮,或 AI 的
 	// `tt debug mode`),两个方向都放行 —— 不做逐命令协商。
 	mode string
+
+	// ---- 会话身份（契约 C5.3 / Q22 的纯新增四键里的三个：n / name / epoch）----
+	//
+	// 三样都由 Manager 在**登记那一刻**发一次（见 assignIdentityLocked），之后不再重算：
+	//
+	//	seq   —— 序号 `n`：**同一环境下**的第 N 条 SSH 会话，从 1 起（C2.2 / Q24 / Q16）。
+	//	         企业编号不参与 —— 按（环境, 企业编号）自增会让 `环境#序号` 撞车（2.1.3）。
+	//	         它进 `ref`（`环境#序号`），所以**生命周期内一个字符都不变**（C2.0）；
+	//	         `tt debug topent 88` 改掉 ent 之后它必须照旧（改的是快照，不是地址）。
+	//	name  —— 别名（Q17 / C2.5b）：只在创建时给一次，生命周期内不变；**随会话消失即释放**
+	//	         （C3.7b / Q19）—— 它就挂在这条会话对象上，会话从池子里没了，名字自然能给别人用。
+	//	epoch —— 世代号（C5.3 / F15）：换代的时机与"为什么全进程唯一"见 nextSessionEpoch。
+	//
+	// 三个都不是"这条会话现在什么样"，而是"这条会话是哪条"（C5.1 末段：只有 id/ref/n 是身份，
+	// 其余是快照）—— 读它们一律走下面的取值器，别从别处推导。
+	seq   int
+	name  string
+	epoch string
 }
 
 const (
@@ -326,6 +344,64 @@ func (s *Session) Mode() string {
 func (s *Session) SetMode(m string) {
 	s.mu.Lock()
 	s.mode = m
+	s.mu.Unlock()
+}
+
+// ---------- 会话身份（契约 C5.3 / Q22：n / name / epoch；ref 由环境 + n 拼） ----------
+
+// Seq 是序号 `n`：**同一环境下**的第 N 条 SSH 会话，从 1 起（C2.2 / Q24）。
+//
+// 建立时由 Manager 分配一次（尚未被占用的最小正整数），之后**不再重算** —— 这正是
+// `ref` 能在生命周期内恒定不变（C2.0）的关键：`SetTopent` 改掉企业编号不会让它变。
+func (s *Session) Seq() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.seq
+}
+
+// Name 是别名（`--name` 给的那个，Q17）：空串 = 未命名。
+// 生命周期内不变（C2.5b：要改名就结束这条会话再起一条）；随会话消失即释放（C3.7b / Q19）。
+func (s *Session) Name() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.name
+}
+
+// Epoch 是世代号（C5.3 / F15）。
+//
+// 语义（本批定稿，写在这里就不必再去翻文档）：**"这条会话这一代宿主 / 这一轮运行"的令牌**。
+// 它由 nextSessionEpoch 发一个**全进程唯一**的 base36 值，换代的三个时机是：
+//  1. 会话建立（Manager 登记时）→ 第一代；
+//  2. **同一宿主跑新一轮**（SetRun：`tt debug start` 复用空闲宿主 / 按日志重放复用宿主）→ 换代；
+//  3. **会话重启/重新登录**（`/api/sessions/{id}/restart`：旧会话收掉、新会话登上来）→ 新世代。
+//
+// 调用方（F15）把上一次拿到的这个值原样带回来；与服务端当前值不等就是"手上那份是上一代"，
+// 报 `SESSION_STALE` 退 3（判据在 `internal/target` 的 `Resolve`：`Request.Epoch`）。
+func (s *Session) Epoch() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.epoch
+}
+
+// CurrentEnt 是该会话**当前**生效的企业编号（C5.3 的 `ent`，C2.5c 的快照）。
+//
+// 取值顺序：登录 shell 回读的 `$TOPENT` 优先（那是"这台机器现在连的是哪个企业"的权威值，
+// 见 TopentShell），取不到（还没登录 / 没有 Runtime）才退到本会话显式给的值（--ent 或
+// 会话内 `tt debug topent` 设的覆盖）。空 = 未取到 —— 它是**快照**，不是地址（C2.5c）。
+func (s *Session) CurrentEnt() string {
+	if v := s.TopentShell(); v != "" {
+		return v
+	}
+	return s.topentForRun()
+}
+
+// setTopentOverride 记下会话级 TOPENT 覆盖（`tt debug topent` 改的那一半）。
+//
+// 拆出来是为了让"改企业编号**不动**身份"这件事可测：SetTopent 的另一半是把值下发到宿主
+// shell（要 pty，测试里碰不得），而身份不变恰恰与那半边无关 —— 变的只有快照 `ent`。
+func (s *Session) setTopentOverride(v string) {
+	s.mu.Lock()
+	s.topentOverride = v
 	s.mu.Unlock()
 }
 
@@ -359,6 +435,9 @@ func NewSession(cfg *Config, module, prog, runProg, launchRef, extraArgs string,
 		envName:  cfg.EnvName(),
 		bps:      map[int]*Breakpoint{},
 		srcCache: map[string]srcCacheEntry{},
+		// 世代号的**第一代**（C5.3 / F15）：会话建立那一刻发一个。序号 `seq` 与别名 `name`
+		// 不在这里 —— 它们由 Manager 在**登记**时分配（要跨会话查重，见 assignIdentityLocked）。
+		epoch: nextSessionEpoch(),
 		// 运行作用域按会话唯一（缺陷 X / T5.1:镜像与命令输出按会话分开,
 		// 并发启动互删不了）。它是**内部标识**,不出现在命令输出里（会话可见的
 		// ID 仍是上面那个 `s<毫秒>` 的既有形状）。
@@ -877,6 +956,10 @@ func (s *Session) SetRun(cfg *Config, module, prog, runProg, launchRef, extra st
 	s.ExtraArgs = extra
 	s.ArgsOverride = ""
 	s.custModule = ""
+	// 复用宿主跑新一轮 = **换代**（契约 C5.3 / F15）：宿主没有重登，但"这一轮运行"是新的，
+	// 调用方手上那个旧句柄指的是上一轮 —— 换了代，它当场失效（SESSION_STALE）。
+	// 序号 `n` 与别名 `name` 不动：它们标识的是"这条会话"，跨轮不变（C2.0 / C2.5b）。
+	s.epoch = nextSessionEpoch()
 }
 
 // maxReplayRespBytes 回显重放响应时的字节上限(超了只回头部)
@@ -971,9 +1054,7 @@ func (s *Session) TopentIntForDB() int {
 // 立即 export 到 shell(清除时下发环境默认值,环境也没配才 unset),随后的各轮调试仍按
 // topentForRun 优先导出覆盖值。
 func (s *Session) SetTopent(value string) error {
-	s.mu.Lock()
-	s.topentOverride = value
-	s.mu.Unlock()
+	s.setTopentOverride(value)
 	// 清除覆盖(空值)不能简单 unset:连接时已把环境默认下发进 shell,unset 会掉回选区机器默认,
 	// 与"会话企业 = 设置页配置"不一致。这里直接下发 topentForRun()(覆盖值 || 配置企业;
 	// 都没有才是空 = unset),让宿主 shell 的 TOPENT 恒等于当前生效值。
@@ -2745,7 +2826,30 @@ var (
 	sessionSeq atomic.Int64
 	// runScopeSeq 运行作用域的单调序号（见 nextRunScope）。
 	runScopeSeq atomic.Int64
+	// sessionEpochSeq 会话世代号的单调计数（见 nextSessionEpoch）。
+	sessionEpochSeq atomic.Int64
 )
+
+// nextSessionEpoch 发一个新的**会话世代号**（契约 C5.3 的 `epoch`，F15 的判据）。
+//
+// # 语义（本批定稿）
+//
+// 世代号 = "这条会话**这一代宿主 / 这一轮运行**"的令牌，取值是**进程内单调且全进程唯一**
+// 的 base36 计数。**唯一**这一条是刻意的：令牌不重复 ⇒ 复用/重启之后**不可能**凑巧等于
+// 调用方手上的旧值，于是"旧句柄当场失效"（SESSION_STALE）不需要任何时钟比较或额外状态。
+//
+// 换代的三个时机（都在本包，改一处就够）：
+//  1. **会话建立**：Manager 登记时发第一代（`assignIdentityLocked`）；
+//  2. **同一宿主跑新一轮**：`SetRun`（复用空闲宿主 / 按日志重放复用宿主）→ 换代；
+//  3. **会话重启/重新登录**：`/api/sessions/{id}/restart` 是"收掉旧的 + 新的登上来"，
+//     新会话在登记时自然拿到新的一代（旧会话已从池里移除）。
+//
+// **与 `Manager.Epoch` 不是一回事，别混**：`manager.go` 的 `Manager.Epoch` 是**事件流游标**
+// 的进程级世代（前端靠它知道"服务重启了、`Seq` 要归零"，见 `Event.Seq` 的注释）；
+// 本条是**会话**的世代。两者同名前缀只是巧合，一个在 `Manager` 上、一个在 `Session` 上。
+func nextSessionEpoch() string {
+	return strconv.FormatInt(sessionEpochSeq.Add(1), 36)
+}
 
 // nextRunScope 分配一个进程内唯一的运行作用域（镜像/命令输出的目录段,见 mirrorScope）。
 // 只做路径段,不面向用户:*不*放进任何输出去改既有形状。

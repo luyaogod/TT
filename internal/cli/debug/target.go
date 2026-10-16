@@ -51,12 +51,13 @@ var (
 )
 
 // dbgSessionPool 列会话（`GET /api/sessions`）+ 列环境（`GET /api/hosts`），
-// 转成目标层的**只读视图**（契约 C5.1 的十键子集，见 dbgSnapView 的注释）。
+// 转成目标层的**只读视图**（契约 C5.1 的十一键，见 dbgSnapView 的注释）。
 //
 // 这是"那个薄适配"：字段名一次都不手抄 —— 声明处是 `internal/target` 的 `Session`。
-// `ref` / `display` / `name` / `n` / `epoch` 五个键服务端今天还没吐（WP4c 的活），
-// 所以它们今天是零值；`target.Session.CanonicalRef()` / `DisplayForm()` 会用
-// 环境 + 序号 + 作业现算一个，错误文案与候选块因此**今天**就有稳定的规范 id 可打。
+// `ref` / `display` / `name` / `n` / `epoch` 五个键**由服务端产出**（WP4c 落地，C5.3），
+// 所以这里的解包是直接的：服务端给什么就是什么。`target.Session.CanonicalRef()` /
+// `DisplayForm()` 仍留着兜底（服务端没给 ref 时退回原始句柄），但**正常情况下不该被用到** ——
+// 用到了就说明对面是个不认识这五个键的旧服务端。
 func dbgSessionPool() (target.Pool, error) {
 	data, err := dbgAPI("GET", "/api/sessions", nil)
 	if err != nil {
@@ -193,9 +194,11 @@ func dbgAmbientSession() *target.Session {
 
 // dbgRequest 把三个权威标志 + 调用方手上的世代号装成一次寻址请求（契约 C3.1）。
 //
-// 世代号今天**没有来源**（B31：服务端还没有 `epoch` 这个键，WP4c 补），所以留空
-// —— `target.Resolve` 对空世代是"不校验"（F15 只有在调用方真的带来一个世代号时才判）。
-// 这也是"不许为了让五个键有值去改服务端"那条边界的落点：今天它们只能是零值。
+// **世代号这一位今天仍然是空的**（F15 因此不校验），但原因变了：服务端从 WP4c 起
+// **已经产出** `session.epoch`（C5.3），缺的是 CLI 这一侧的持有方式 —— 每次 `tt` 调用
+// 都是一个新进程，没有地方存"上一次拿到的那一代"。谁要跨轮做 F15 的失效判定，
+// 就得把上一次信封里的 `session.epoch` 原样带回来填进这里（接口已经留好：
+// `target.Request.Epoch`，空 = 不校验）。**不要**为了让它有值去编一个。
 func dbgRequest() target.Request {
 	return target.Request{
 		Selector: dbgSelector(),
@@ -317,6 +320,105 @@ func (e *dbgTargetError) WriteEnvelope(w io.Writer) error {
 	})
 }
 
+// dbgServerError 是**服务端失败信封**在 CLI 这一侧的落地（契约 C5.15 / 4.1.1 / Q15）。
+//
+// 为什么要它：从 WP4c 起，服务端在**所有**失败信封上给稳定的 `code`（C5.15），
+// 而 F18（`SESSION_NAME_TAKEN`）/ F20（`SESSION_TARGET_BUSY`）这两个判据**住在服务端** ——
+// 别名是服务端的一条事实（D1：服务端是目标的唯一真相源），CLI 不能自己拍。
+// 于是退出码必须由 CLI 按 **code** 分档，而不是按"HTTP 是不是 4xx"猜一个数字。
+//
+// 分档口径与 `dbgTargetError` 同一套（Q15 的"分档生效"，判据是**场景**不是标志）：
+//
+//	① **新场景**（今天不可能发生的那些）：无条件按 4.1.1 的码表退 —— 判据是
+//	   `target.CodeRequiresCandidates(code)`，它列的那五种码恰好就是契约里
+//	   "今天不可能发生"的那五族（F1/F3–F5/F7/F8/F15/F18/F20）。多会话歧义（F1）尤其要点名：
+//	   Agent 恰恰是在**没打** `--session` 时才撞上它。
+//	② **既有场景**（0 条会话 / 环境名写错 / 参数错 / 会话状态不符 / 运行失败）：
+//	   维持今天的码（1），只有**真用了新写法**（命令行上出现了 `--session` / `--name`）
+//	   才按 4.1.1 升档（契约 4.2 的 H2 表逐行写着这两档：F2 带 `--session` → 3、
+//	   F6 写在 `--session` 里 → 2）。
+type dbgServerError struct {
+	// code 是服务端给的机器码（空 = 对面是个不认识 code 的老服务端或非信封错误）。
+	code string
+	// msg 是信封里的 `error` 正文（**不带**候选块：候选在 candidates，见 WriteEnvelope）。
+	msg string
+	// candidates 是 C5.12 的九键候选清单，服务端给什么透传什么（C5.11 的政策在服务端判）。
+	candidates []target.Candidate
+	// exit 见 dbgServerErrorOf。
+	exit int
+}
+
+// dbgServerErrorOf 把服务端失败信封转成可退出的 CLI 错误。
+func dbgServerErrorOf(code, msg string, cands []target.Candidate) error {
+	if strings.TrimSpace(code) == "" {
+		// 对面没给码（老服务端 / 非 debug 面的失败）：保持今天的行为 —— 一句散文、退 1。
+		return fmt.Errorf("%s", msg)
+	}
+	return &dbgServerError{
+		code: code, msg: msg, candidates: cands,
+		exit: target.ExitFor(code, target.CodeRequiresCandidates(code), dbgNewSyntax()),
+	}
+}
+
+// Error 是人话那一行：正文 + 候选块（照 C5.14 渲染）。
+//
+// **与信封里的 `error` 字段刻意不同**：信封只有那句正文（候选在 `candidates`），
+// 终端上没有第二个字段可放，所以人话这一路把候选块拼进同一段文字 —— 与
+// `dbgTargetError.Error()` 的形状一致（两处形状不同会让同一个失败看起来像两种）。
+func (e *dbgServerError) Error() string {
+	var b strings.Builder
+	b.WriteString(e.msg)
+	if lines := dbgCandidateLines(e.candidates); len(lines) > 0 {
+		b.WriteString("\n\n候选（照抄 <ref> 那一列重发）：\n")
+		b.WriteString(strings.Join(lines, "\n"))
+	}
+	return b.String()
+}
+
+// ExitCode 给退出码（契约 4.1.1 那一档；分档见 dbgServerErrorOf）。
+func (e *dbgServerError) ExitCode() int { return e.exit }
+
+// ErrorMessage 是信封里的 `error` 字段（只有正文）。
+func (e *dbgServerError) ErrorMessage() string { return e.msg }
+
+// WriteEnvelope 让根命令按**契约 5.2 的形状**打这条失败（`internal/cli/root.go` 的
+// `jsonErrorWriter`）：`ok` / `code` / `error` / `exitCode`，`hint` 有才出现，
+// `candidates` 只在 C5.11 那五种码下出现（判据用目标层的唯一清单，
+// **不在这里再抄一遍码表**）。
+//
+// 这样才能把服务端给的候选清单原样交给调用方：F20 的"占用者那一条"与 F1 的候选
+// 是同一件事，缺了它就只剩一句"别名指向的会话不能复用"，而那句话没法照着重发。
+func (e *dbgServerError) WriteEnvelope(w io.Writer) error {
+	return output.WriteJSONValue(w, target.FailureEnvelope{
+		OK:       false,
+		Code:     e.code,
+		Error:    e.ErrorMessage(),
+		ExitCode: e.ExitCode(),
+		Candidates: func() *[]target.Candidate {
+			if !target.CodeRequiresCandidates(e.code) {
+				return nil
+			}
+			list := e.candidates
+			if list == nil {
+				list = []target.Candidate{}
+			}
+			return &list
+		}(),
+	})
+}
+
+// dbgCandidateLines 按 C5.14 渲染人话候选块（唯一实现是 `target.CandidateLine`）。
+func dbgCandidateLines(cands []target.Candidate) []string {
+	if len(cands) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(cands))
+	for _, c := range cands {
+		out = append(out, target.CandidateLine(c))
+	}
+	return out
+}
+
 // dbgResolveSessionFlag 在**起会话**之前把 `--session` 落位一次。
 //
 // 为什么要独立一步：`debug start` 的目标是"要起的那条会话"，而 `--session` 是"落在
@@ -342,11 +444,17 @@ func dbgRegisterSessionFlag(cmds ...*cobra.Command) {
 
 // dbgRegisterNameFlag 给**起会话**的命令挂上 `--name`（契约 C3.5 / C2.4 / F19）。
 //
-// 它今天只做取值纪律的校验（非空、1–64 字符、只排除 `/` 与 `#`）：
-// 别名要参与寻址就得先成为服务端的一条事实（`SessionBrief.name`，C5.3 的新键），
-// 而那五个键（`ref`/`display`/`name`/`n`/`epoch`）是 WP4c 的活 —— 本轮不许为了
-// 让它们有值去改服务端（见本次任务的边界）。所以在服务端认它之前，这里**不假装**
-// 别名已经生效：校验照做、不发进请求体、也不报那些只有服务端才判得出的码（F18/F20）。
+// 它做两件事，顺序写死（C2.8 的同一条纪律：一个字节都不该白花）：
+//
+//  1. **取值纪律的校验**（非空、1–64 字符、只排除 `/` 与 `#`）在**发请求之前**判 ——
+//     不合法时连 POST 都不发（F19）；
+//  2. 合法就**随请求体送给服务端**（`debug start` 的 body["name"]，WP4c 落地）——
+//     别名从那一刻起是**服务端的一条事实**（`SessionBrief.name`，C5.3）：它参与寻址
+//     （`--session <别名>`）、当幂等键（Q23：空闲复用 / 忙碌报 `SESSION_TARGET_BUSY`）、
+//     随会话消失即释放（Q19）。
+//
+// 为什么不是 CLI 自己存一份映射表：D1 写死了"服务端是目标的唯一真相源"，
+// 本地缓存会漂移，而漂移的表现恰好是"静默落错"。
 func dbgRegisterNameFlag(cmds ...*cobra.Command) {
 	for _, c := range cmds {
 		c.Flags().StringVar(&dbgNameFlag, "name", "",

@@ -55,7 +55,7 @@ func TestPrepareSessionReusesIdleHost(t *testing.T) {
 	m.sessions["s1"] = live
 	m.mu.Unlock()
 
-	sess, err := m.prepareSession(cfgFor("h1", "36"), "m1", "p1", "", "", "", "")
+	sess, err := m.prepareSession(cfgFor("h1", "36"), "m1", "p1", "", "", "", "", "")
 	if err != nil {
 		t.Fatalf("prepareSession: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestPrepareSessionRejectsActiveRun(t *testing.T) {
 	m.sessions["s1"] = active
 	m.mu.Unlock()
 
-	if _, err := m.prepareSession(cfgFor("h1", "36"), "m1", "p1", "", "", "", ""); err == nil {
+	if _, err := m.prepareSession(cfgFor("h1", "36"), "m1", "p1", "", "", "", "", ""); err == nil {
 		t.Fatal("同目标活跃会话(stopped)应报错,要求先结束当前调试")
 	}
 }
