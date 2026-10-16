@@ -1,71 +1,33 @@
-// 回放进度（计划 C 的 D7）：一条进度 + 每一步的结果，长在明细页的顶上。
+// 回放进度（计划 C 的 D7）：**一行**说清"回放到哪了"。
 //
-// 用户的原话是"播放过账中我可以观察走到哪了"。所以这一块只回答三件事：
+// 用户的原话是"播放过账中我可以观察走到哪了"，后来又删掉了逐条确认清单
+// （2026-10-16："移除确认清单"）：73 行 `已确认` 是重复信息 —— 计数那一行已经说了
+// 各是多少，每步的**明细在下面全文流表里**（对应行上有同一个徽标）。
+// 所以这里只留：进度条 + 一句计数 + 正在等的那一步 + 四个命令。
 //
-//	走到第几步 / 这一步是什么 / 运行期回没回
-//
-// 四条纪律（都是实测或计划里钉过的）：
+// 三条纪律（都是实测或计划里钉过的）：
 //
 //  1. **进行中的步只画开始标记，不画时长**（D7.3）：`waiting` 那一步显示"已等 Nms"，
 //     而不是一个 0 —— 没有回包 ≠ 0 毫秒。
-//  2. **"归不了"与"无回包"分开**：`suspect=true`（点击类事件本该有回包）才是黄灯的"8s 无回包"，
-//     其余没回包的是灰灯的"本来无应答"。两者的下一步完全不同。
-//  3. **跟随尾部，但用户向上滚动就停**（D7.4）：勾选框显示当前状态，可手动恢复。
-//     不看这条的话，用户往回翻历史时会被每一拍的新行拽回底部 —— 那是没法读的。
-//  4. **数字来自服务端**（D7.5）：`progress` 那一组计数是服务端按 jsonl 收敛出来的，
+//  2. **"归不了"与"无回包"分开**：`suspect=true`（点击类事件本该有回包）才值得去看运行期，
+//     计数里也单独标出来。
+//  3. **数字来自服务端**（D7.5）：`progress` 那一组计数是服务端按 jsonl 收敛出来的，
 //     界面自己数一遍迟早两边对不上（重连补发、暂停、跳过都会让行数与步数不等）。
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Pause, Play, SkipForward, Square } from 'lucide-react'
-import type { ReplayProgress, ReplayStep, ReplayStepResult } from './api'
-import { fmtBytes, fmtDur } from './recordingTime'
-
-/** 一步的徽标：文字 + 颜色 + 说明。五种终态 + 两个中间态（照计划 D7.2）。 */
-function badge(s: ReplayStep): { text: string; cls: string; why: string } {
-  switch (s.result) {
-    case 'sent':
-      return {
-        text: '已确认', cls: 'border-emerald-500/30 text-emerald-600 dark:text-emerald-400',
-        why: '运行期回了包' + (s.respAt && s.sentAt ? `（${fmtDur(s.respAt - s.sentAt)}）` : '') +
-          (s.runtimeBytes ? `，推回 ${fmtBytes(s.runtimeBytes)}` : ''),
-      }
-    case 'no-response':
-      return s.suspect
-        ? {
-          text: '8s 无回包（可疑）', cls: 'border-amber-500/40 text-amber-600 dark:text-amber-400',
-          why: '点击类事件**通常一定有反应**，而这一步 8 秒内没有任何回包 —— 去看运行期/作业状态（' + (s.reason || '') + '）',
-        }
-        : {
-          text: '本来无应答', cls: 'border-border text-muted-foreground',
-          why: '这一步（光标/键盘/状态上报）本来就没有应答 —— 不是失败',
-        }
-    case 'skipped':
-      return { text: '跳过', cls: 'border-border text-muted-foreground', why: s.reason || '按要求跳过' }
-    case 'failed':
-      return { text: '失败', cls: 'border-red-500/30 text-red-600 dark:text-red-400', why: s.reason || '发送出错' }
-    case 'waiting':
-      return { text: '进行中', cls: 'border-sky-500/30 text-sky-600 dark:text-sky-400', why: '已发出，正在等运行期回包（**进行中不画时长**）' }
-    default:
-      return { text: '已暂停', cls: 'border-border text-muted-foreground', why: s.reason || '等「继续」或「单步」' }
-  }
-}
-
-/** 一步是不是"已经有终态"（waiting/paused 都还没定）。 */
-function settled(r: ReplayStepResult): boolean {
-  return r === 'sent' || r === 'no-response' || r === 'skipped' || r === 'failed'
-}
+import type { ReplayProgress, ReplayStep } from './api'
+import { fmtDur } from './recordingTime'
 
 interface Props {
   id: string
   /** 服务端给的计数（权威：界面不自己数） */
   progress: ReplayProgress
-  /** 按 `n` 收敛后的每一步最新状态 */
+  /** 按 `n` 收敛后的每一步最新状态（**只用来找"正在等的那一步"**） */
   steps: ReplayStep[]
   running: boolean
   note?: string
   /** 人和回放下的命令（暂停/继续/单步/停止）。失败由调用方 toast。 */
   onCtl: (cmd: 'pause' | 'resume' | 'step' | 'stop') => void
-  /** 重新读一次进度（按钮"刷新"与兜底轮询用）。 */
-  onRefresh: () => void
 }
 
 export function ReplayProgressBar(p: Props) {
@@ -76,22 +38,6 @@ export function ReplayProgressBar(p: Props) {
   const waited = waiting?.sentAt ? now - waiting.sentAt : 0
 
   const done = pr.total > 0 ? Math.min(100, Math.round((pr.done / pr.total) * 100)) : 0
-
-  // 跟随尾部：默认开；用户往上滚就关（否则每一拍新行都会把人拽回底部）。
-  const listRef = useRef<HTMLDivElement | null>(null)
-  const [follow, setFollow] = useState(true)
-  useEffect(() => {
-    if (!follow || !listRef.current) return
-    listRef.current.scrollTop = listRef.current.scrollHeight
-  }, [follow, steps.length])
-  const onScroll = () => {
-    const el = listRef.current
-    if (!el) return
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 8
-    if (!atBottom && follow) setFollow(false)
-    if (atBottom && !follow) setFollow(true)
-  }
-
   const label = pr.running
     ? (pr.paused ? '已暂停' : waiting ? `进行中 · 第 ${waiting.n}/${pr.total} 步` : `正在回放 · 第 ${pr.done}/${pr.total} 步`)
     : `完成 ${pr.done}/${pr.total} · 失败 ${pr.failed}`
@@ -140,37 +86,8 @@ export function ReplayProgressBar(p: Props) {
             </button>
           </span>
         )}
-        <span className={`${pr.running ? '' : 'ml-auto'} flex items-center gap-2 text-muted-foreground`}>
-          <label className="flex cursor-pointer items-center gap-1" title="跟随尾部：新的一步自动滚进来。你往上滚就自动关掉，滚回底部自动恢复">
-            <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} />
-            跟随
-          </label>
-          {!pr.running && <button onClick={p.onRefresh} className={btn}>刷新</button>}
-        </span>
       </div>
       {p.note && <div className="px-2 pb-1 text-[10px] text-muted-foreground">{p.note}</div>}
-
-      {/* 每一步一行。最多列最近 200 步：几千步的录制全渲染会把这一块拖死，
-          而"看走到哪了"只需要尾部（前面那些用下面的表与全文流看）。 */}
-      <div ref={listRef} onScroll={onScroll} className="max-h-28 overflow-auto border-t border-border/60 px-2 py-0.5">
-        {(steps.length > 200 ? steps.slice(steps.length - 200) : steps).map((s) => {
-          const b = badge(s)
-          return (
-            <div key={s.n} className="flex items-center gap-2 py-px font-mono text-[10px]">
-              <span className="w-10 shrink-0 text-right text-muted-foreground">#{s.n}</span>
-              <span className={`shrink-0 rounded-ui border px-1 ${b.cls}`} title={b.why}>{b.text}</span>
-              <span className="shrink-0 text-muted-foreground">{s.kind || ''}</span>
-              <span className="min-w-0 flex-1 truncate text-muted-foreground" title={s.event}>{s.event}</span>
-              <span className="shrink-0 text-muted-foreground">
-                {s.sentAt ? (settled(s.result) ? (s.respAt ? fmtDur(s.respAt - s.sentAt) : '—') : '…') : ''}
-              </span>
-            </div>
-          )
-        })}
-        {steps.length > 200 && (
-          <div className="py-px text-[10px] text-muted-foreground">（只列最近 200 步，共 {steps.length} 步）</div>
-        )}
-      </div>
     </div>
   )
 }

@@ -73,17 +73,13 @@ export function RecordingTable(p: Props) {
   const clock = (t: number) => (precision === 'frame' ? fmtClock(t) : '—')
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {/* 表头跟着一起横向滚动（列很少，窄容器下也不会要滚动条，但保持与行同一层滚动） */}
+    // 底色与右侧明细面板**同一个** `bg-card`（用户 2026-10-16）：一屏里"记录"与"明细"是
+    // 同一块面板的两半，底色不同就会看起来像两个不相干的东西。
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-card">
+      {/* 没有表头了（用户 2026-10-16 定的）：四列的含义从行本身看得出来 ——
+          类型是彩色 tag、时间是时钟、向是箭头、剩下的是文本。表头占掉 24px 却不带来新信息。 */}
       <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-auto">
         <div style={{ minWidth: 460 }}>
-          <div className="sticky top-0 z-10 flex h-6 items-center gap-2 border-b border-border bg-card px-2 text-[10px] text-muted-foreground">
-            <div className="w-[52px] shrink-0 text-right" title="帧的类别。颜色与上面条带里的块一一对应">类型</div>
-            <div className="w-[92px] shrink-0">时间</div>
-            <div className="w-4 shrink-0 text-center" title="→ 服务向前端（界面/回应） / ← 前端向服务（用户事件）">向</div>
-            <div className="min-w-0 flex-1">文本</div>
-          </div>
-
           <div style={{ height: total * ROW_H, position: 'relative' }}>
             {slice.map((f, i) => (
               <div key={frameKey(f)} style={{ position: 'absolute', top: (first + i) * ROW_H, left: 0, right: 0, height: ROW_H }}>
@@ -116,7 +112,10 @@ function Row({ f, p, clock, t0, action }: {
   const named = !!tgt && tgt.confidence !== 'unresolved' && !!tgt.name
   const step = p.stepByEvent && action ? action.events.map(p.stepByEvent).find(Boolean) : undefined
   return (
-    <div className={`flex h-[22px] cursor-pointer items-center gap-2 overflow-hidden px-2 font-mono text-[11px]
+    // 每行一条底边线（用户 2026-10-16）：固定 22px 的行里，一条 1px 的线是**唯一**能让
+    // 眼睛横着走的东西 —— 没有它，一列时间读起来会串行。
+    // 行高仍是 22px（border-box，线算在行高里），窗口化的算术不受影响。
+    <div className={`flex h-[22px] cursor-pointer items-center gap-2 overflow-hidden border-b border-border/50 px-2 font-mono text-[11px]
       ${sel ? 'bg-amber-500/10' : 'hover:bg-accent/30'}`}
       onClick={() => p.onSelect(f)}
       onMouseEnter={() => f.t > 0 && p.onCursor(f.t)}

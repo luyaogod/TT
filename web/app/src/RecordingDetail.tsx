@@ -30,7 +30,7 @@ import { RecordingOverview } from './RecordingOverview'
 import { RecordingTable, frameKey } from './RecordingTable'
 import { RecordingInspector } from './RecordingInspector'
 import { ReplayProgressBar } from './ReplayProgress'
-import { axisValue, clampDomain, domainOf, fmtBytes, type AxisMode, type Domain } from './recordingTime'
+import { axisValue, clampDomain, domainOf, fmtBytes, zoomDomain, type AxisMode, type Domain } from './recordingTime'
 
 /** 迷你轴(表格每行里那个小方块)的宽度。 */
 const INSP_W_KEY = 'tt.recordInspW'
@@ -48,9 +48,17 @@ function emptyProgress(): Progress {
 interface Props {
   id: string
   onBack: () => void
+  /**
+   * 这一页**改了列表会关心的事实**（删掉了一份录制、起了一轮回放）。
+   *
+   * 为什么要有它：列表是 keep-alive 的（只切显隐不卸载），它的重拉条件是
+   * `view / sessionEnv / tick`，而这几个动作都不改它们 —— 不报一声的话，
+   * 回到列表还看得见刚删掉的那一行。
+   */
+  onChanged?: () => void
 }
 
-export function RecordingDetail({ id, onBack }: Props) {
+export function RecordingDetail({ id, onBack, onChanged }: Props) {
   const toast = useToast()
 
   const [ov, setOv] = useState<Ov | null>(null)
@@ -181,6 +189,8 @@ export function RecordingDetail({ id, onBack }: Props) {
         description: `后台进程 pid ${r.pid};进度看日志 ${r.log};会话留着给 AI 取证`,
         duration: 8000, // 日志路径要看得清,别 3.5 秒就没了
       })
+      // 回放起了一轮会话 —— 列表上那行"正在录/正在回放"得跟着变（它在 view 不变时不会自己重拉）。
+      onChanged?.()
     } catch (e: any) {
       toast.error('回放失败', { description: e?.message || String(e) })
     } finally {
@@ -198,25 +208,15 @@ export function RecordingDetail({ id, onBack }: Props) {
     }
     window.setTimeout(() => setCopied(null), ok ? 1500 : 4000)
   }
-  // 复制"这一刻"的深链接(`?t=`):把条带上的游标位置做成一条能给别人的地址。
-  // 只在时间轴上做 —— 字节序那种坐标是"这一份文件里的第几个字节",给别人没有意义。
-  const copyMoment = async () => {
-    if (!(cursor > 0) || domain.mode !== 'time') {
-      toast.error('先把游标放到某一刻', { description: '在条带上点一下（或拖一下），再复制链接。' })
-      return
-    }
-    const url = `${location.origin}${location.pathname}#record/${id}?t=${Math.round(cursor)}`
-    const ok = await copyText(url)
-    toast[ok ? 'success' : 'error'](ok ? '已复制这一刻的链接' : '复制失败', {
-      description: ok ? `打开它会直接落到 ${new Date(Math.round(cursor)).toLocaleTimeString('zh-CN', { hour12: false })} 附近` : url,
-      duration: ok ? 4000 : 0,
-    })
-  }
   const doDelete = async () => {
     setConfirmDel(false)
     try {
       const r = await api.recordingDelete(id)
       toast.success(`已删除录制:${r.id}`, { description: `清除 ${r.files} 个文件,释放 ${fmtBytes(r.bytes)}` })
+      // 删完必须让**列表**重拉一次，否则回到列表还看得见刚删掉的那一行 ——
+      // 列表是 keep-alive 的（只切显隐不卸载），它的重拉条件是 `view/sessionEnv/tick`，
+      // 而删除只把 recordId 清空（view 仍是 record）→ 那条 effect 不会重跑（实测踩到）。
+      onChanged?.()
       onBack() // 这一份没了:明细页没有可显示的东西
     } catch (e: any) {
       toast.error('删除录制失败', { description: e?.message || String(e) })
@@ -316,8 +316,28 @@ export function RecordingDetail({ id, onBack }: Props) {
     setCursor(axisValue(f, domain.mode))
   }
 
+  // 条带上的缩放**只在键盘上**（用户 2026-10-16：把 `＋/－` 按钮拿掉，走快捷键）。
+  // 锚点选游标（"我正在看这一刻，放大它"），没有游标就锚中间。
+  // 输入框里打字不抢键（`+` 在文本框里是加号，不是缩放）。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      const el = e.target as HTMLElement | null
+      const tag = el?.tagName?.toLowerCase()
+      if (tag === 'input' || tag === 'textarea' || tag === 'select' || el?.isContentEditable) return
+      const mid = (bounds.min + bounds.max) / 2
+      const anchor = cursor > 0 ? cursor : mid
+      if (e.key === '+' || e.key === '=') setDomain((d) => zoomDomain(d, bounds, 0.7, anchor))
+      else if (e.key === '-' || e.key === '_') setDomain((d) => zoomDomain(d, bounds, 1.4, anchor))
+      else if (e.key === '0') setDomain(bounds)
+      else return
+      e.preventDefault()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [bounds, cursor])
+
   const firstT = ov?.items.find((f) => f.t > 0)?.t || 0
-  const counts = ov?.counts
   const title = ov ? `${ov.id}` : id
 
   // 深链接带来的那一刻:等数据到手再落位(那时才知道时间域)。
@@ -343,23 +363,10 @@ export function RecordingDetail({ id, onBack }: Props) {
         </button>
         <span className="shrink-0 font-mono">{title}</span>
         {ov?.prog && <span className="shrink-0 text-sky-600 dark:text-sky-400">{ov.prog}</span>}
-        {ov && (
-          <>
-            <span className="shrink-0 text-muted-foreground">{ov.where}</span>
-            {counts && (
-              <span className="shrink-0 text-muted-foreground"
-                title="三层各是一层事实：帧数（含图片缓存）/ 事件侧帧数 → 原始事件数 / 语义动作数">
-                {counts.frames} 帧 · 事件侧 {counts.eventFrames} 帧 → {counts.events} 个事件 · {counts.actions} 步
-              </span>
-            )}
-            <span className="shrink-0 rounded-ui border border-border px-1.5 py-0.5"
-              title={ov.timePrecision === 'frame'
-                ? '每帧都有首块时刻(来自帧索引)'
-                : '这一份没有帧级时间:横轴是各方向的字节序,顺序不等于时间'}>
-              {ov.timePrecision === 'frame' ? '时间:帧级' : '时间:块级'}
-            </span>
-          </>
-        )}
+        {/* 头里**只留身份**：ID 与作业名。存储位置（长期库/缓存）、三层计数（帧/事件/步）、
+            时间精度都不在这儿了（用户 2026-10-16 定为"移除"）—— 它们是「这份录制是什么样」
+            的答案，在明细面板的「概览」页签里本来就有一份（帧/事件/语义动作/时间精度四行），
+            头里再写一遍就是同一件事有两个家。横轴不是时间时，条带自己会挂一条警告。 */}
         {/* 看着这一份做决定的三个动作。它们原来在列表页的侧栏里 —— 搬到这里是因为
             "一份录制只该有一个我正看着它的地方",而这三个动作都得看着它才做得对。
             回放:r.r 录的件直接禁用(编号表与调试线不是同一张,重放会点错控件)。 */}
@@ -407,14 +414,13 @@ export function RecordingDetail({ id, onBack }: Props) {
           {rp?.hasLog && (
             <ReplayProgressBar
               id={id} progress={rp.progress} steps={rp.steps} running={rp.running} note={rp.note}
-              onCtl={(c) => void onCtl(c)} onRefresh={() => void readProgress(false)} />
+              onCtl={(c) => void onCtl(c)} />
           )}
           <RecordingOverview
             items={ov.items} blocks={ov.blocks} mode={bounds.mode}
             bounds={bounds} domain={domain} onDomain={setDomain}
             cursor={cursor} onCursor={setCursor}
-            sel={selFrame} onSelect={pick}
-            onCopyLink={() => void copyMoment()} />
+            sel={selFrame} onSelect={pick} />
 
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" style={{ flexDirection: narrow ? 'column' : 'row' }}>
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -477,5 +483,6 @@ export function RecordingDetail({ id, onBack }: Props) {
     </div>
   )
 }
+
 
 

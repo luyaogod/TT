@@ -63,40 +63,49 @@ terminal（下方面板）、bug-play（调试面板）、list-tree（大纲，�
 **规范化**片段（非法分区名写成规范的、合法片段一个字节都不改），不按 store 的初始快照去写。
 只读不写同样是错的：点图标切视图时 URL 会停在旧视图上，一刷新就落回旧页（实测）。
 
-## 录制明细页：一屏三层
+## 录制明细页：一屏一条全文流
 
-「录制」视图内部有两级：**列表** ↔ **明细**（`#record/<id>`）。明细由四块组成：
+「录制」视图内部有两级：**列表** ↔ **明细**（`#record/<id>`，可选 `?t=<毫秒>` 定位到某一刻）。
+明细由四块组成（**没有页签**：一屏就是一页，用户 2026-10-16 定的）：
 
 | 文件 | 负责 |
 |---|---|
-| `RecordingDetail.tsx` | 装配：取数（四个只读端点）、页签、返回、回放/复制/删除、**唯一的轴域** |
-| `RecordingOverview.tsx` | 概览条带：三条泳道 + 一根游标 + 时间尺（缩放/平移/悬停） |
-| `RecordingTable.tsx` | 三层记录表：语义动作 > 原始事件 > 运行期回应（或全文流），自研固定行高虚拟化 |
-| `RecordingInspector.tsx` | 检查器：概览 / 原始帧 / 引起的回应 / 名字来源 |
+| `RecordingDetail.tsx` | 装配：取数（四个只读端点）、返回、回放/复制/删除、**唯一的轴域**、键盘缩放 |
+| `RecordingOverview.tsx` | 概览条带：三条泳道（**服务 / 前端 / 其它**）+ 一根游标 + 时间尺 |
+| `RecordingTable.tsx` | 全文流：**类型 / 时间 / 向 / 文本**四列，自研固定行高虚拟化 |
+| `RecordingInspector.tsx` | 明细面板：概览 / 原始帧 / 引起的回应 / 名字来源。**默认收起**，点一行才出（左边缘 `×`） |
+| `recordingKind.ts` | 帧类别的颜色与短名（**唯一实现**）：条带的块与表里的类型 tag 都从它取 |
 | `recordingTime.ts` | 时间与位置刻度（**唯一实现**）、格式化 |
 
-**四条纪律**（都踩过或差点踩）：
+**头里只有身份**：`← 列表 | <ID> | <作业名>` + 回放 / 复制 ID / 删除 / 刷新。存储位置、
+三层计数、时间精度**不写在这里**——它们是「这份录制是什么样」的答案，在明细面板的「概览」
+页签里本来就有一份；横轴不是时间时条带自己会挂一条警告。
 
-1. **`X(t)` 只有一份**。条带上的游标与表格行里那个小方块指的是同一个东西，两处各写一遍
+**五条纪律**（都踩过或差点踩）：
+
+1. **`X(t)` 只有一份**。条带上的游标与表格行里那个位置指的是同一个东西，两处各写一遍
    `x=(v-min)/(max-min)*w` 迟早会指着不同时刻——而两个方向的录制件是两条独立的字节流、
    序号分属两侧，**时间是对得上的唯一坐标**。所以域由 `RecordingDetail` 持有，
-   条带与迷你轴各拿同一个 `Domain` 去算（`recordingTime.ts` 的 `makeScale`）。
+   条带与表各拿同一个 `Domain` 去算（`recordingTime.ts` 的 `makeScale`）。
 2. **没有帧级时间就不画时间轴**。老件（或索引是事后重建的）没有帧时刻，横轴改成**字节序**
    并在轴标签上写出来；绝不插值出假的时刻（`AxisMode` = `time` | `bytes`）。
 3. **固定行高 22px 的窗口化虚拟化**，不引第三方。行 key 一律 `连接:方向:字节偏移`——
    **不是步号**：步号随 `--stop-at/--skip` 变，不是身份。
    行的外壳**不许**自己开 `overflow-x-auto`：一轴非 visible 时另一轴的计算值也变成 auto，
    每行就变成一个滚动容器、行高 22px 而内容 24px，结果是每行都被裁掉一截（实测截图里
-   文字互相压着）。横向滚动只在表头与表体共用的那一层。
-4. **名字与置信度同屏**：`high` 才给名字（`高置信`），`low` 显示但标「低置信」，
-   `unresolved` 显示 `Type#id` + 「未解析」，tooltip 里给**为什么**（服务端算的 `why`）。
+   文字互相压着）。横向滚动只在表体那一层。每行带 1px 底线（border-box，不破坏行高算术）。
+4. **名字与置信度同屏**：`high` 才给名字，`low` 显示但标「低置信」，`unresolved` 显示
+   `Type#id` + 「未解析」，tooltip 里给**为什么**（服务端算的 `why`）。
    界面**绝不**给未解析的控件编名字——17 个动作里实测只有 6 个能解出名字（见
    `internal/web/README.md` 的三条纪律）。
+5. **明细页改了列表关心的事，必须报一声**（`onChanged`）：列表是 keep-alive 的
+   （只切显隐不卸载），它的重拉条件是 `view / sessionEnv / tick`。删除只清 `recordId`
+   （`view` 仍是 `record`），不报一声的话回到列表**还看得见刚删掉的那一行**（用户实测）。
 
 条带的交互照 `@deepseek-ai/dsh-client-ui-trajectory` 的做法：悬停 **500 ms** 才出精确时刻、
-滚轮缩放（锚在鼠标下的取值上）、右键拖动平移、右键单击复位、窗口外的块**压暗贴边**
-（不许画到框外）。「归不了」与「无回包」是两个徽标：前者的下一步是"这一份的时间精度不够"，
-后者是"去看回放日志"——把它们画成一个就是在冤枉运行期。
+滚轮或 `+`/`-` 缩放（锚在游标那一刻；`0` 复位）、右键拖动平移、右键单击复位、
+窗口外的块**压暗贴边**（不许画到框外）。操作说明只在 tooltip 里，不占屏幕。
+
 
 ## 回放进度：叫一声与权威分开
 
@@ -116,15 +125,16 @@ switch 要一起改**。
 四条显示纪律：
 
 1. **进行中的步不画时长**：`waiting` 那一步显示"已等 Nms"（用 `fmtWait`，0 也要显示成
-   `0 ms`，因为"正在等"和"没有这个数"不是一回事），行里的耗时那一栏留空。
+   `0 ms`，因为"正在等"和"没有这个数"不是一回事）。
 2. **"本来无应答" ≠ "8s 无回包（可疑）"**：判定在服务端（`suspect` = 点击类事件却没回包），
    界面只按它上色。两者的下一步完全不同。
 3. **数字来自服务端**：`progress` 那一组计数是服务端按 jsonl 收敛出来的，界面**不自己数**
    （重连补发、暂停、跳过都会让行数与步数不等）。
-4. **跟随尾部，但用户向上滚动就停**（勾选框显示状态，滚回底部自动恢复）：不看这条的话，
-   用户往回翻历史时会被每一拍的新行拽回底部。
+4. **只有一行**（用户 2026-10-16 定的）：进度条 + 一句计数 + "正在等的那一步" + 四个命令。
+   原来那列逐条确认清单删掉了——73 行 `已确认` 是重复信息（计数已经说了），
+   每一步的明细在下面的表里（对应行右侧挂着同一个徽标）。
 
-表里的动作行还会按**事件文本**挂一个回放结果徽标（`stepByEvent`）—— 把"用户点的那一下"
+表里的行还会按**事件文本**挂一个回放结果徽标（`stepByEvent`）—— 把"用户点的那一下"
 与"回放有没有把它发出去"对到一起看，是这一页最有用的交叉。没回过放时**不挂徽标**：
 "没回过放"与"回放跳过了它"是两件事。
 
@@ -203,7 +213,7 @@ switch 要一起改**。
 |---|---|
 | 外壳与布局 | `App.tsx`、`main.tsx`、`ErrorBoundary.tsx`、`StatusBar.tsx`、`Toolbar.tsx`、`DebugHeader.tsx` |
 | 视图 | `SettingsView.tsx`、`WsLogView.tsx`、`WsTestView.tsx`、`RecordView.tsx`、`SourceView.tsx` |
-| 录制明细 | `RecordingDetail.tsx`、`RecordingOverview.tsx`、`RecordingTable.tsx`、`RecordingInspector.tsx`、`ReplayProgress.tsx`、`recordingTime.ts` |
+| 录制明细 | `RecordingDetail.tsx`、`RecordingOverview.tsx`、`RecordingTable.tsx`、`RecordingInspector.tsx`、`ReplayProgress.tsx`、`recordingKind.ts`、`recordingTime.ts` |
 | 面板 | `Panels.tsx`、`SessionPanel.tsx`、`OutlinePanel.tsx`、`VarTreeUi.tsx` |
 | 编辑器 | `monacoSetup.ts`、`PayloadEditor.tsx` |
 | 4GL 语言工具 | `fglTokens.ts`、`fgloutline.ts`、`fglparse.ts`、`fglPath.ts`、`fglHover.tsx` |
@@ -223,7 +233,8 @@ cd web && npm run build         # 类型检查 + 打包
 |---|---|
 | 状态容器的形状 | 全站视图；它同时被 Node 侧的检查项加载，**顶层不能碰 DOM**。容器里删字段/删联合成员（如侧栏 sheet 去掉 `session`）时，`store.test.mjs` 用 `setState` 灌的部分状态不会有编译期保护 —— 靠 `npm run build` 的 `tsc --noEmit` 找调用点 |
 | 路由键 | 深链接与设置页分区；键只有一份定义，别在别处再列一遍 |
-| `recordingTime.ts` | 条带 + 表格迷你轴 + 检查器的所有位置与时刻都从它出；改它等于同时改三处，**只许有一个实现** |
+| `recordingTime.ts` | 条带 + 表 + 检查器的所有位置与时刻都从它出；改它等于同时改三处，**只许有一个实现** |
+| `recordingKind.ts` | 帧类别的颜色/短名：条带的块与表里的类型 tag 共用，**只许有一个实现**（两处各写一份迟早条带绿、表里蓝） |
 | 录制明细页四个端点的形状 | 三层数字、`t=0` 的含义、`responsesState`；后端在 `internal/web/recordingread.go`，那边一改这里要跟着改 |
 | 往片段里写东西的地方 | 首跑必须让深链接一次（见「路由：哈希」），否则深链接全废且不报错 |
 | 接口客户端的前缀 | 打错前缀会让请求落到同名但不同的端点上（表现是"数据不对"而不是报错） |
@@ -235,3 +246,4 @@ cd web && npm run build         # 类型检查 + 打包
 - 设计系统与主题 token → [../../shared/README.md](../../shared/README.md)
 - 构建配置与脚本 → [../README.md](../README.md)
 - 后端接口面 → [../../../internal/web/README.md](../../../internal/web/README.md)
+

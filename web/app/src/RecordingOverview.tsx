@@ -16,7 +16,6 @@
 //  2. **缩放窗口外的东西压暗贴边**,不许画到框外(否则"放大后那块去哪了"没人说得清);
 //  3. 悬停 **500 ms** 才出精确时刻与大小(照 DSH 的做法):鼠标扫过时不该满屏 tooltip。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link2, Maximize2, ZoomIn, ZoomOut } from 'lucide-react'
 import type { RecordingBlock, RecordingFrame } from './api'
 import { kindClass } from './recordingKind'
 import {
@@ -76,8 +75,6 @@ interface Props {
   /** 选中的那一帧(条带要用它的轴取值画选择线,不能只给 key —— 那还得反查一次) */
   sel: RecordingFrame | null
   onSelect: (f: RecordingFrame) => void
-  /** 复制"这一刻"的深链接(由父级拼 `#record/<id>?t=` —— 它才知道录制 ID 与光标模型)。 */
-  onCopyLink?: () => void
 }
 
 export function RecordingOverview(p: Props) {
@@ -176,42 +173,23 @@ export function RecordingOverview(p: Props) {
 
   return (
     <div className="border-b border-border bg-card/40">
-      {/* 工具条只留"能做的事":复位 / 这一刻 / 缩放。
-          刻意**不写**"概览""453 帧""横轴:时刻"这类字 —— 位置与含义一眼就看得出来，
-          而"横轴是时间还是字节序"只有在**不是时间**时才必须说（那时它是警告，不是标签）。 */}
-      <div className="flex h-7 items-center gap-2 px-2 text-[11px] text-muted-foreground">
-        {p.mode !== 'time' && (
+      {/* 工具条**平时不存在**（用户 2026-10-16：`这一刻` 与 `＋/－` 都拿掉，缩放走快捷键）。
+          只有一种情况必须占一行：横轴不是时间 —— 那时它是一条**警告**，不是标签。
+          操作说明也不在屏上，全部挪进下面条带自身的 tooltip。 */}
+      {p.mode !== 'time' && (
+        <div className="flex h-7 items-center gap-2 px-2 text-[11px] text-muted-foreground">
           <span className="rounded-ui border border-amber-500/40 px-1.5 py-0.5 text-amber-600 dark:text-amber-400"
             title="这一份没有帧级时间（索引缺失，或者它是老件重建出来的）：横轴是**各方向文件里的字节序** ——
 位置不是时间，只表示'在第几个字节'。想要帧级时间轴得用新版本重录一轮。">
             横轴:字节序（无帧级时间）
           </span>
-        )}
-        {zoomed && (
-          <button onClick={() => p.onDomain(bounds)} className="flex items-center gap-0.5 rounded-ui border border-border px-1.5 py-0.5 hover:bg-accent"
-            title="复位到全览(也可以右键单击条带)">
-            <Maximize2 size={11} /> 全览
-          </button>
-        )}
-        <span className="ml-auto flex items-center gap-1">
-          {/* 把游标所在的那一刻做成一条能给别人的地址(区间深链接,见 routing.ts 的 recordHash)。 */}
-          {p.onCopyLink && p.mode === 'time' && (
-            <button onClick={p.onCopyLink} className="flex items-center gap-0.5 rounded-ui border border-border px-1.5 py-0.5 hover:bg-accent"
-              title="复制这一刻的深链接（#record/<ID>?t=…）：打开它会直接落到游标所在的位置">
-              <Link2 size={11} /> 这一刻
-            </button>
-          )}
-          <button onClick={() => p.onDomain(zoomDomain(dom, bounds, 0.7, (dom.min + dom.max) / 2))}
-            className="rounded-ui border border-border p-0.5 hover:bg-accent" title="放大(滚轮也可以)"><ZoomIn size={11} /></button>
-          <button onClick={() => p.onDomain(zoomDomain(dom, bounds, 1.4, (dom.min + dom.max) / 2))}
-            className="rounded-ui border border-border p-0.5 hover:bg-accent" title="缩小(滚轮也可以)"><ZoomOut size={11} /></button>
-        </span>
-      </div>
+        </div>
+      )}
 
       {/* 操作说明**不在屏上占一行**，挪进这条 tooltip（要用的人会去悬停，不用的人不该被它占视线）。 */}
       <div ref={boxRef} className="relative select-none pb-1"
         title={p.mode === 'time'
-          ? '左键拖动=移游标 · 滚轮=缩放 · 右键拖动=平移 · 右键单击=复位'
+          ? '左键拖动=移游标 · 滚轮或 +/−=缩放 · 0=复位 · 右键拖动=平移 · 右键单击=复位'
           : '左键拖动=移游标（横轴是字节序，不能缩放成时间）'}
         onMouseDown={onDown}
         onContextMenu={(e) => {
@@ -293,3 +271,5 @@ export function RecordingOverview(p: Props) {
     </div>
   )
 }
+
+

@@ -461,7 +461,9 @@ export function RecordView() {
       {/* 明细页:整屏换过去(列表留在 DOM 里、只 display:none,见上面的 wrapper)。
           它是"录制"视图内部的一级 —— 活动栏那五个图标不变、也不新增视图。 */}
       {recordId && (
-        <RecordingDetail id={recordId} onBack={() => setRecordId('')} />
+        // `onChanged` = "明细页改了列表会关心的事实"（删除、起回放）→ 让列表重拉一次。
+        // 不给它的话：删除后回到列表还看得见刚删的那一行（列表 keep-alive，view 没变就不重拉）。
+        <RecordingDetail id={recordId} onBack={() => setRecordId('')} onChanged={onRefresh} />
       )}
     </div>
   )
