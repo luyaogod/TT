@@ -22,6 +22,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '../../shared/ui-radix'
 import { useToast } from './toast'
+import { copyText } from './clipboard'
 
 // 「这一次作业是怎么起来的」与「归谁 / 留哪」的中文名:与 Go 侧的 Label() 同一套措辞
 // (internal/fep/path.go、retention.go),照抄一份 —— 前端无 i18n,中文硬编码。
@@ -273,13 +274,17 @@ export function RecordView() {
   const onRefresh = () => setTick((t) => t + 1)
 
   const copyRow = async (id: string) => {
-    try {
-      await navigator.clipboard.writeText(id)
-      setCopied({ id, state: 'ok' })
-    } catch {
-      setCopied({ id, state: 'fail' })
+    const ok = await copyText(id)
+    setCopied({ id, state: ok ? 'ok' : 'fail' })
+    if (!ok) {
+      // 失败要留得住：原来只有按钮红 1.5 秒。ID 也显示在详情面板里（「录制 ID」那一行），
+      // 说清"可以手选复制"比反复点按钮有用。
+      toast.error('复制失败', {
+        description: `系统剪贴板不可用（多半是窗口没有焦点）；这份录制的 ID 是 ${id}，可以在下面「录制 ID」那一行选中复制。`,
+        duration: 0,
+      })
     }
-    window.setTimeout(() => setCopied((c) => (c && c.id === id ? null : c)), 1500)
+    window.setTimeout(() => setCopied((c) => (c && c.id === id ? null : c)), ok ? 1500 : 4000)
   }
 
   // 起一轮录制。已经在录时服务端回 409 与一句中文原因,原样弹出来 ——

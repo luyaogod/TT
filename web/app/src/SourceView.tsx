@@ -7,7 +7,7 @@ import * as monaco from 'monaco-editor'
 import { useStore } from './store'
 import { ToolIcon } from './Toolbar'
 import { cn } from '../../shared/utils'
-import { attachHover } from './fglHover'
+import { attachHover, detachHover } from './fglHover'
 import { setupMonaco, monacoThemeName } from './monacoSetup'
 import { progKey } from './fglPath'
 
@@ -56,6 +56,10 @@ export function SourceView() {
   const [editorReady, setEditorReady] = useState(false)
   const [modelTick, setModelTick] = useState(0) // 页签切换 = model 切换完成后重画装饰/滚动
   const decosRef = useRef<monaco.editor.IEditorDecorationsCollection | null>(null)
+
+  // 卸载时把悬浮卡挂在编辑器上的监听/观察者摘掉（编辑器本身由 @monaco-editor/react
+  // 卸载时销毁，但我们自己挂的那些不摘就留在那个已销毁的实例上）。
+  useEffect(() => () => detachHover(), [])
 
   const onMount: OnMount = (editor) => {
     editorRef.current = editor

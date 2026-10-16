@@ -19,7 +19,7 @@
 // 一整套默认值写回去 —— 那会在配置里凭空写出 `termWidth: 200` 这种用户从没设过的值)。
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
-  AlertCircle, CheckCircle2, Copy, Download, Eye, EyeOff,
+  AlertCircle, ArrowLeft, CheckCircle2, Copy, Download, Eye, EyeOff,
   Monitor, Plus, RefreshCw, Search, Sun, Moon,
   Terminal, Trash2, Zap,
 } from 'lucide-react'
@@ -367,7 +367,9 @@ function sshsFormOf(c: HostsView): SshItem[] {
   })
 }
 
-export function SettingsView() {
+// onBack / backLabel 由外壳给（它知道「上一个非设置视图」是哪个）。两个都是可选的：
+// 不传只是少一个回程按钮，不该崩。
+export function SettingsView({ onBack, backLabel = '' }: { onBack?: () => void; backLabel?: string } = {}) {
   const section = useStore((s) => s.settingsSection)
   const setSection = useStore((s) => s.setSettingsSection)
   const theme = useStore((s) => s.theme)
@@ -419,17 +421,41 @@ export function SettingsView() {
   const dirtyRef = useRef<Record<ConfigKey, boolean>>({
     hosts: false, debug: false, listen: false, query: false, mirror: false, bdldoc: false,
   })
-  const [dirty, setDirty] = useState(false)
+  // 基线:上一次读到 / 保存成功时那一节的表单值(序列化后的样子)。
+  //
+  // 为什么要基线:只记"碰过没有"的话,改一下再改回原值仍然显示"有未保存的修改"、
+  // 还常驻一个保存按钮(实测)。脏 = **碰过 且 现在的值与基线不同**。
+  // 判断放在渲染期算(而不是 onChange 里同步算):onChange 里此刻的 state 还是更新前那份,
+  // 差一拍会让"改回原值"晚一步才认出来。
+  const baselineRef = useRef<Partial<Record<ConfigKey, string>>>({})
+  const sectionSnap = (k: ConfigKey): string => JSON.stringify(
+    k === 'hosts' ? hostsPatchOf(sshs)
+      : k === 'debug' ? debugPatchOf(dbg)
+        : k === 'listen' ? listen.trim()
+          : k === 'query' ? { source: dict.querySource }
+            : k === 'mirror' ? { dir: dict.mirrorDir.trim() }
+              : { dir: dict.bdldocDir.trim() })
+  const dirtyRefAny = () => (Object.keys(dirtyRef.current) as ConfigKey[])
+    .some((k) => dirtyRef.current[k] && sectionSnap(k) !== baselineRef.current[k])
   const markDirty = (...keys: ConfigKey[]) => {
     keys.forEach((k) => { dirtyRef.current[k] = true })
-    setDirty(true)
   }
+  // 基线对齐**要等 state 落地之后**：在 setX 之后立刻算，读到的还是更新前那一份（差一拍），
+  // 结果是"刚读到配置就显示有未保存的修改"。所以这里只记下"要对齐哪几节"并递增一个计数，
+  // 由下面那条 effect 在提交之后把基线对齐到当下。
+  const resyncKeysRef = useRef<ConfigKey[] | null>(null)
+  const [syncTick, setSyncTick] = useState(0)
   const cleanDirty = (keys?: ConfigKey[]) => {
-    if (keys) keys.forEach((k) => { dirtyRef.current[k] = false })
-    else (Object.keys(dirtyRef.current) as ConfigKey[]).forEach((k) => { dirtyRef.current[k] = false })
-    setDirty((Object.keys(dirtyRef.current) as ConfigKey[]).some((k) => dirtyRef.current[k]))
+    resyncKeysRef.current = keys ?? null
+    setSyncTick((t) => t + 1)
   }
-  const isDirty = (...keys: ConfigKey[]) => keys.some((k) => dirtyRef.current[k])
+  useEffect(() => {
+    const ks = resyncKeysRef.current ?? (Object.keys(dirtyRef.current) as ConfigKey[])
+    ks.forEach((k) => { dirtyRef.current[k] = false; baselineRef.current[k] = sectionSnap(k) })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncTick])
+  const isDirty = (...keys: ConfigKey[]) =>
+    keys.some((k) => dirtyRef.current[k] && sectionSnap(k) !== baselineRef.current[k])
 
   const [showPwd, setShowPwd] = useState(false)
   // 数据库页操作状态。accProbe 只记"哪一行、什么状态"用于行内图标;
@@ -473,7 +499,6 @@ export function SettingsView() {
   useEffect(() => { loadSettings() }, [loadSettings])
   // 本页被 keep-alive 常驻挂载(切走只是 display:none),所以**不能轮询** ——
   // 改为"每次切回本页、且没有未保存修改时"回读一次,拿别处(命令行)改过的值。
-  const dirtyRefAny = () => (Object.keys(dirtyRef.current) as ConfigKey[]).some((k) => dirtyRef.current[k])
   const view = useStore((s) => s.view)
   // 初值取"挂载那一刻可不可见":本页是 store 的初始视图,若从 false 起步,第一条 effect
   // 已经拉过一次 /api/hosts,这一条又会把同一次挂载当成"刚从别处切回来"再拉一次
@@ -994,6 +1019,8 @@ export function SettingsView() {
   // 表格里那些行级动作的共用禁用条件:别的操作在跑、或这个动作自身在跑
   const mirrorBusy = mirrorRunning || opBusy !== ''
   const syncBusy = syncRunning || opBusy !== ''
+  // 渲染期现算:任何 state 变化都会重渲染,所以它跟着表单内容走(见 baselineRef 的说明)
+  const anyDirty = dirtyRefAny()
   const mirrorDirOk = !!dict.mirrorDir.trim() && !isDirty('mirror')
 
   // 卡片的保存按钮:只在真的有改动时才出现。
@@ -1059,9 +1086,20 @@ export function SettingsView() {
                   也不再把这一行挤得忽宽忽窄(见 toast.tsx 的判据)。 */}
               <span className={cn('text-[11px]',
                 saveState === 'saved' ? 'text-emerald-600 dark:text-emerald-400'
-                  : dirty ? 'text-amber-600 dark:text-amber-400' : '')}>
-                {saveState === 'saving' ? '保存中…' : saveState === 'saved' ? '已保存 ✓' : dirty ? '有未保存的修改' : ''}
+                  : anyDirty ? 'text-amber-600 dark:text-amber-400' : '')}>
+                {saveState === 'saving' ? '保存中…' : saveState === 'saved' ? '已保存 ✓' : anyDirty ? '有未保存的修改' : ''}
               </span>
+              {/* 回程入口。设置页**不渲染**右侧那四个图标(它们都依赖会话,设置页是"先配环境"
+                  的地方),于是这一页唯一的出口是左侧那个「会话」图标 —— 它既不带"返回"的意思,
+                  还会顺带展开会话栏。这里补一个说清去哪的按钮:去哪儿由外壳按"上一个非设置视图"给。 */}
+              {onBack && (
+                <button onClick={onBack}
+                  title={`离开设置,回到「${backLabel}」。设置页不显示那四个依赖会话的视图图标 —— 这是回程入口之一,另一个是左侧的「会话」图标`}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-ui border border-border px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+                  <ArrowLeft className="h-3 w-3" />
+                  返回「{backLabel}」
+                </button>
+              )}
             </span>
           </div>
 

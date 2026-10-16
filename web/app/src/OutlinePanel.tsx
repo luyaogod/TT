@@ -72,6 +72,18 @@ export function OutlinePanel() {
   const rooted = useMemo(() => indexTree(parseOutline(content), totalLines), [content, totalLines])
   // 折叠集合:默认全展开;key 与渲染行共用 nodeKey 算法
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  // 换了内容(切到另一个页签 / 这份源码被重新读进来)就把折叠集合清空。
+  //
+  // 为什么必须清:nodeKey 里带**行号与标签**,内容一变旧 key 一个都对不上 —— 那时
+  // collapsed 非空(所以按钮显示"全部展开")却没有一行真的折叠着,第一次点它把集合清空
+  // 也就没有任何可见变化。实测表现是"换文件后按钮文案与实际相反、点一下没反应"。
+  // 按内容本身比,而不是按引用:同一份内容重算树不该把用户的折叠态清掉。
+  const lastContentRef = useRef('')
+  useEffect(() => {
+    if (lastContentRef.current === content) return
+    lastContentRef.current = content
+    setCollapsed(new Set())
+  }, [content])
   const allKeys = useMemo(() => {
     const acc: string[] = []
     collectKeys(rooted, '', acc)

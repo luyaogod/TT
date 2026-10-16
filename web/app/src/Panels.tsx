@@ -1,7 +1,7 @@
 // 右侧面板:运行/调试(VS Code 风格)+ 调用栈 / 变量监视 / 断点(一体化容器,分割线分区)
 import * as React from 'react'
 import { useEffect, useRef, useState } from 'react'
-import { Eye, EyeOff, Maximize, Minimize2, Play, Ruler } from 'lucide-react'
+import { Eye, EyeOff, Maximize, Minimize2, Play, Ruler, SquareChevronLeft, SquareChevronRight, SquareChevronUp } from 'lucide-react'
 import { useStore } from './store'
 import type { Breakpoint } from './api'
 import { Input } from '../../shared/ui'
@@ -242,6 +242,17 @@ function BpsTitle() {
 
 // ---- 各面板内容 ----
 
+// 面板空态。原来这四个面板没数据时直接 `return null` —— 正文一片空白,与"这个面板坏了"
+// 长得一样(时间线那边倒是有一句「暂无记录」,两处口径不一致,实测被测试者点出来过)。
+// 而且要分清"还没有会话"与"有会话但此刻没有数据":前者是用户下一步该做的事,后者是等待。
+function EmptyHint({ noSession, what, need }: { noSession: boolean; what: string; need: string }) {
+  return (
+    <div className="p-2 text-xs text-muted-foreground">
+      {noSession ? `还没有调试会话：${need}` : `暂无${what}`}
+    </div>
+  )
+}
+
 function StackBody() {
   const frames = useStore((s) => s.frames)
   const selected = useStore((s) => s.selectedFrame)
@@ -251,7 +262,8 @@ function StackBody() {
   // 后果是只能看栈顶帧的变量 —— 要深入看外层帧,请在对话里让 AI 切帧。
   const collab = useStore((s) => s.mode) === 'collab'
   const canPick = stopped && !collab
-  if (frames.length === 0) return null
+  const hasSession = useStore((s) => s.sessionId)
+  if (frames.length === 0) return <EmptyHint noSession={!hasSession} what="调用栈" need="停站后这里会列出调用栈" />
   return (
     <div>
       {frames.map((f) => (
@@ -275,6 +287,29 @@ function StackBody() {
 // 条目视图构建:RECORD/ARRAY 文本解析成树,标量保持原文本(监视/自动变量共用)
 interface WatchView { expr: string; error?: string; text?: string; root?: TNode }
 
+// 把上一份的展开态搬到新一份上(按节点名对齐)。
+//
+// 为什么必须搬:展开态存在节点对象上(TNode.open),而每次数据刷新都会用 buildVarView
+// **重建整批对象** —— 不搬的话"停站抓一次 / print 一次,变量树就整片折回去",用户得
+// 一格一格重新点开(实测)。按名字对齐是稳的:record 字段名与数组元素名([1]/[2])
+// 在同一次会话里稳定;名字对不上就保持默认(收起),不猜。
+function carryOpen(next: TNode, prev?: TNode): void {
+  if (!prev) return
+  next.open = prev.open
+  if (!next.children?.length || !prev.children?.length) return
+  const byName = new Map(prev.children.map((c) => [c.name, c]))
+  for (const c of next.children) carryOpen(c, byName.get(c.name))
+}
+
+// 用上一批的展开态重建这一批(两个变量树面板共用:自动变量、变量监视)。
+function withPrevOpen(prev: WatchView[], next: WatchView[]): WatchView[] {
+  const byExpr = new Map(prev.map((v) => [v.expr, v.root]))
+  for (const v of next) {
+    if (v.root) carryOpen(v.root, byExpr.get(v.expr))
+  }
+  return next
+}
+
 function buildVarView(expr: string, value?: string, error?: string): WatchView {
   if (error) return { expr, error }
   const kids = parseFglTree(value || '')
@@ -290,11 +325,16 @@ function AutovarsBody() {
   const autovars = useStore((s) => s.autovars)
   const addWatch = useStore((s) => s.addWatch)
   const [views, setViews] = useState<WatchView[]>([])
+  // 展开态跨刷新保留（否则每次停站抓一次就整片折回去，见 carryOpen 的说明）
+  const prevViewsRef = useRef<WatchView[]>([])
   useEffect(() => {
-    setViews(autovars.map((v) => buildVarView(v.expr, v.value)))
+    const next = withPrevOpen(prevViewsRef.current, autovars.map((v) => buildVarView(v.expr, v.value)))
+    prevViewsRef.current = next
+    setViews(next)
   }, [autovars])
+  const hasSession = useStore((s) => s.sessionId)
   if (autovars.length === 0) {
-    return null
+    return <EmptyHint noSession={!hasSession} what="自动变量" need="停站后按「自动」抓一次当前源码窗的变量" />
   }
   return (
     <div>
@@ -325,12 +365,17 @@ function AutovarsBody() {
 
 function WatchesBody() {
   const watches = useStore((s) => s.watches)
+  const hasSession = useStore((s) => s.sessionId)
   const removeWatch = useStore((s) => s.removeWatch)
   const doPrint = useStore((s) => s.doPrint)
   const [expr, setExpr] = useState('')
   const [views, setViews] = useState<WatchView[]>([])
+  // 同上：展开态跨刷新保留（每次 print 都重建对象，不搬就等于每次都被折回去）
+  const prevViewsRef = useRef<WatchView[]>([])
   useEffect(() => {
-    setViews(watches.map((w) => buildVarView(w.expr, w.value, w.error)))
+    const next = withPrevOpen(prevViewsRef.current, watches.map((w) => buildVarView(w.expr, w.value, w.error)))
+    prevViewsRef.current = next
+    setViews(next)
   }, [watches])
   return (
     <div>
@@ -346,6 +391,9 @@ function WatchesBody() {
           className="h-7 flex-1 text-xs"
         />
       </div>
+      {views.length === 0 && (
+        <EmptyHint noSession={!hasSession} what="监视项" need="停站后在上面输入表达式回车，即可加入监视" />
+      )}
       {views.map((v) => (
         <div key={v.expr} className="flex items-start gap-1 border-b border-border/60 px-2 py-1 text-xs">
           <button className="shrink-0 text-muted-foreground hover:text-red-600 dark:hover:text-red-400" onClick={() => removeWatch(v.expr)}>×</button>
@@ -380,14 +428,19 @@ function BpsBody() {
   const atStop = (b: Breakpoint) =>
     stopped && !!stop?.file && !!b.file && b.line === stop.line &&
     progKey(b.file, module) === progKey(stop.file, module)
-  if (breakpoints.length === 0) return null
+  // 断点条目的位置文本。断点可能是**注入进来**的(测试夹具、或后端某条路径没带全字段),
+  // 那时 file/line 缺一个,直接拼模板会在界面上写出字面量 `undefined:undefined`(实测)。
+  const bpAt = (b: Breakpoint) => (b.file ? `${b.file}:${b.line ?? '?'}` : '(这条断点没带文件/行号)')
+  const hasSession = useStore((s) => s.sessionId)
+  const sessionId = hasSession
+  if (breakpoints.length === 0) return <EmptyHint noSession={!hasSession} what="断点" need="起一个会话后在源码行号左侧点一下即可下断点" />
   return (
     <div>
       {breakpoints.map((b) => {
         const hit = atStop(b)
         return (
           <div key={b.num}
-            title={hit ? `当前停在此断点:${b.file}:${b.line}` : undefined}
+            title={hit ? `当前停在此断点:${bpAt(b)}` : undefined}
             className={`relative flex items-center gap-2 border-b border-border/60 px-2 py-1 text-xs ${
               b.enabled ? '' : 'opacity-50'} ${hit ? 'bg-yellow-500/15' : ''}`}>
             {/* 左侧 2px 黄条:绝定位,不给该行引入布局位移(列表行不会错位) */}
@@ -395,19 +448,28 @@ function BpsBody() {
             <Checkbox
               checked={b.enabled}
               onCheckedChange={(v) => void toggleBPEnabled(b.num, v === true)}
-              className="cursor-pointer"
-              title={b.enabled ? '取消勾选禁用断点' : '勾选启用断点'}
+              disabled={!sessionId}
+              className="cursor-pointer disabled:pointer-events-none disabled:opacity-30"
+              title={!sessionId
+                ? '还没有调试会话：断点是会话上的东西，先起一个会话再改'
+                : (b.enabled ? '取消勾选禁用断点' : '勾选启用断点')}
             />
             <span
               className="min-w-0 flex-1 cursor-pointer truncate text-foreground hover:text-sky-700 dark:hover:text-sky-300 hover:underline"
-              title={`跳转到 ${b.file}:${b.line}`}
+              title={`跳转到 ${bpAt(b)}`}
               onClick={() => void jumpToBp(b)}
             >
               {b.func ? <span className="text-sky-600 dark:text-sky-400">{b.func} </span> : null}
-              {b.file}:{b.line}
+              {bpAt(b)}
               {!b.enabled && <span className="ml-1 text-[10px] text-muted-foreground">(已禁用)</span>}
             </span>
-            <button className="text-muted-foreground hover:text-red-600 dark:hover:text-red-400" onClick={() => void removeBreakpoint(b.num)}>×</button>
+            {/* 没有会话时这两个动作会静默失败（后端无会话直接拒），界面上却看不出为什么 ——
+                禁用 + 说清原因，比"点了没反应"好。 */}
+            <button
+              className="text-muted-foreground hover:text-red-600 dark:hover:text-red-400 disabled:pointer-events-none disabled:opacity-30"
+              disabled={!sessionId}
+              title={sessionId ? '删掉这条断点' : '还没有调试会话：断点是会话上的东西，先起一个会话再改'}
+              onClick={() => void removeBreakpoint(b.num)}>×</button>
           </div>
         )
       })}
@@ -429,6 +491,9 @@ export function TimelinePanel() {
   // 最大化/还原:状态在 store 里(App 那一层要靠它决定编辑器让不让位)
   const bottomMax = useStore((s) => s.bottomMax)
   const toggleBottomMax = useStore((s) => s.toggleBottomMax)
+  const showRight = useStore((s) => s.showRight)
+  const toggleRight = useStore((s) => s.toggleRight)
+  const toggleBottom = useStore((s) => s.toggleBottom)
   // 新条目到达时自动滚动到底部(最新操作始终可见)
   useEffect(() => {
     const el = bodyRef.current
@@ -477,13 +542,29 @@ export function TimelinePanel() {
             {tab === k && <span className="absolute inset-x-0 bottom-0 h-px bg-primary" />}
           </button>
         ))}
+        {/* 最大化时把"收面板"的两个开关**搬到这里**：最大化会让编辑器那一列整块让位，
+            而「收起下方面板/收起右方面板」原来只挂在编辑器的页签行上 —— 一最大化,
+            它们就跟着不见了,用户想收面板只能先点「还原」(实测被测试者点出来)。
+            这一行在最大化时仍然在,放这里最顺手。 */}
+        {bottomMax && (
+          <>
+            <button onClick={() => void toggleBottom()} title="还原并收起下方面板"
+              className="shrink-0 p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+              <SquareChevronUp className="h-3.5 w-3.5" />
+            </button>
+            <button onClick={() => void toggleRight()} title={showRight ? '收起右方面板' : '展开右方面板'}
+              className="shrink-0 p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+              {showRight ? <SquareChevronRight className="h-3.5 w-3.5" /> : <SquareChevronLeft className="h-3.5 w-3.5" />}
+            </button>
+          </>
+        )}
         {/* 最大化 / 还原:钉在页签行右端(这一行本来右边就空着)。
             两个图标按状态二选一 —— 常规分栏时给「最大化」(Maximize),占满整列时给
             「还原」(Minimize2),不做成两个并排的按钮(那样总有一个是空点)。 */}
         <button
           onClick={() => void toggleBottomMax()}
           title={bottomMax ? '还原下方面板(编辑器回到常规分栏)' : '最大化下方面板(占满代码区那一列,编辑器让位)'}
-          className="ml-auto mr-0.5 shrink-0 p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          className={`${bottomMax ? '' : 'ml-auto '}mr-0.5 shrink-0 p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground`}
         >
           {bottomMax ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize className="h-3.5 w-3.5" />}
         </button>

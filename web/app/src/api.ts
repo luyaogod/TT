@@ -500,11 +500,20 @@ export const api = {
   calibrate: (id: string) => req<{ offset: number }>(`${API_BASE}/sessions/${id}/calibrate`, { method: 'POST' }),
   wsTest: (mode: string, url: string, body: string, soap: boolean) =>
     req<{ result: WSTestResult }>(`${API_BASE}/wstest`, { method: 'POST', body: JSON.stringify({ mode, url, body, soap }) }),
-  // 条件用对象传递(参数变多后位置参数太容易错位);空值不发送
+  // 条件用对象传递(参数变多后位置参数太容易错位);空值不发送。
+  // 判空要**先 trim**：输入框里看着是空的（几个空格），不 trim 就会发一个 `service=+++`
+  // 的空白 LIKE 条件 —— 后端匹配不到，用户得到空列表且界面上没有任何提示（实测单测抓到）。
   wsLogs: (q: WSLogQuery) => {
     const p = new URLSearchParams()
     for (const [k, v] of Object.entries(q)) {
-      if (v === undefined || v === null || v === '' || v === false) continue
+      if (v === undefined || v === null || v === false) continue
+      if (typeof v === 'string') {
+        const s = v.trim()
+        if (!s) continue
+        p.set(k, s)
+        continue
+      }
+      if (v === '') continue
       p.set(k, typeof v === 'boolean' ? (v ? '1' : '0') : String(v))
     }
     p.set('onlyFail', q.onlyFail ? '1' : '0')

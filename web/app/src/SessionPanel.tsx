@@ -85,10 +85,14 @@ export function SessionPanel() {
     })
   }, [])
   useEffect(() => { load() }, [load])
-  // 连接中 loading→idle 等状态跟随;每 3s 轻量刷新一次
+  // 会话状态本身走 WebSocket（状态容器里就有），这里轮询只为"环境清单在别处被改了"
+  // 这一种低频情况 —— 没必要 3 秒拉一次**含口令的整份 hosts 配置**（实测静止页面
+  // 20 次/分钟，是整页唯一的周期请求）。改成 20 秒一次，并在窗口重新获得焦点时补一次。
   useEffect(() => {
-    const t = window.setInterval(load, 3000)
-    return () => window.clearInterval(t)
+    const t = window.setInterval(load, 20000)
+    const onFocus = () => load()
+    window.addEventListener('focus', onFocus)
+    return () => { window.clearInterval(t); window.removeEventListener('focus', onFocus) }
   }, [load])
 
   // 会话所属环境:直接取会话快照里的环境名(不再有"默认环境"这种配置项)

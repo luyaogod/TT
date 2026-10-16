@@ -263,8 +263,11 @@ func (s *Server) hRecordingStart(w http.ResponseWriter, r *http.Request) {
 		}
 		time.Sleep(300 * time.Millisecond)
 	}
+	// 超时要**把日志尾巴带回去**：真正的原因（端口被占、隔离实例起不来、TOPENT 设不上…）
+	// 都写在那条日志里，只说一句"看日志"等于把查的人赶去别处（实测：真因是
+	// "端口被占：隔离实例在 20s 内没在 8400 端口监听"，而文案却说"进程起来了"，与实际相反）。
 	writeErr(w, http.StatusGatewayTimeout,
-		fmt.Errorf("录制进程起来了但 30 秒内没登记：看日志 %s", logPath))
+		fmt.Errorf("录制进程 30 秒内没登记（它多半已经退了）：%s", tailOf(logPath, 400)))
 }
 
 // hRecordingStop POST /api/recordings/stop

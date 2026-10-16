@@ -9,6 +9,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Checkbox, DatePicker } from '../../shared/ui-radix'
 import type { WSLogItem } from './api'
 import { PayloadEditor } from './PayloadEditor'
+import { copyText } from './clipboard'
+import { useToast } from './toast'
 
 // 列表列定义:完整模式(未选中)与紧凑模式(详情展开,只留状态/服务)共用同一套渲染。
 // 每个列都给出排序键,表头点击即排序。注意:排序只作用于**当前页**——分页在后端做,
@@ -96,9 +98,13 @@ const COL_ERR: Col = {
 const COLS_FULL: Col[] = [
   COL_STATUS, COL_SERVICE, COL_JOB, COL_PID, COL_START, COL_END, COL_DUR, COL_SSO, COL_ORIGIN, COL_SERVER, COL_ERR,
 ]
-// 详情展开时:只留「状态 + 服务 + 作业 + 开始时间」(其余列在右侧详情「基本信息」里都有);
-// 服务列去掉固定宽度,让它吃掉剩余空间
-const COLS_COMPACT: Col[] = [COL_STATUS, { ...COL_SERVICE, cls: '' }, COL_JOB, COL_START]
+// 详情展开时:只留「状态 + 服务 + 作业 + 开始时间」(其余列在右侧详情「基本信息」里都有)。
+//
+// 服务列要**给它一个下限宽度**,不能让四个列都吃"剩余空间":详情面板拖到最宽时列表只剩
+// ~210px,而前三列各有固定宽度 —— 服务列分到的剩余宽度是负的,`table-fixed` 就把它压成 0,
+// 整列(含表头)当场消失,只剩一个横向滚动条(实测)。给个 w-32 + 让容器横向滚动,
+// 至少在窄列表里"能滚到看见它",而不是列没了。
+const COLS_COMPACT: Col[] = [COL_STATUS, { ...COL_SERVICE, cls: 'w-32' }, COL_JOB, COL_START]
 
 // 左右分栏按「比例」分配(默认五五分):拖拽只改比例,容器再窄也有可拖区间;
 // 窗口缩放时两栏等比跟随,不会像固定像素那样一边被夹死、拖不动
@@ -138,6 +144,7 @@ function QueryField({ label, title, placeholder, value, onChange, onKeyDown, wid
 }
 
 export function WsLogView() {
+  const toast = useToast()
   const wsLogs = useStore((s) => s.wsLogs)
   const loading = useStore((s) => s.wsLogsLoading)
   const page = useStore((s) => s.wsLogsPage)
@@ -293,13 +300,17 @@ export function WsLogView() {
   useEffect(() => { setCopyState(null) }, [tab, sel?.rowid])
   const copyPayload = async () => {
     if (!payloadText) return
-    try {
-      await navigator.clipboard.writeText(payloadText)
-      setCopyState('ok')
-    } catch {
-      setCopyState('fail')
+    const ok = await copyText(payloadText)
+    setCopyState(ok ? 'ok' : 'fail')
+    if (!ok) {
+      // 失败要留得住：原来只有按钮红 1.5 秒，用户不知道该干什么。报文就在编辑器里，
+      // 说清"可以手选复制"比反复点按钮有用。
+      toast.error('复制失败', {
+        description: '系统剪贴板不可用（多半是窗口没有焦点）；这段报文可以直接在编辑器里选中复制。',
+        duration: 0,
+      })
     }
-    window.setTimeout(() => setCopyState(null), 1500)
+    window.setTimeout(() => setCopyState(null), ok ? 1500 : 4000)
   }
 
   // ---- 唯一标识复制 ----
@@ -310,13 +321,16 @@ export function WsLogView() {
   useEffect(() => { setIdState(null) }, [sel?.rowid])
   const copyRowID = async () => {
     if (!sel?.rowid) return
-    try {
-      await navigator.clipboard.writeText(sel.rowid)
-      setIdState('ok')
-    } catch {
-      setIdState('fail')
+    const ok = await copyText(sel.rowid)
+    setIdState(ok ? 'ok' : 'fail')
+    if (!ok) {
+      // 标识本身也显示在右侧「基本信息」里，手选同样能拿到 —— 把这句话说出来。
+      toast.error('复制失败', {
+        description: `系统剪贴板不可用（多半是窗口没有焦点）；这一行的标识是 ${sel.rowid}，可以在右侧「基本信息」里选中复制。`,
+        duration: 0,
+      })
     }
-    window.setTimeout(() => setIdState(null), 1500)
+    window.setTimeout(() => setIdState(null), ok ? 1500 : 4000)
   }
 
   // 悬停预取:在行上停留 ~120ms 就开始取该行报文,点下去时通常已就绪(划过不停留则不触发)。
@@ -327,6 +341,13 @@ export function WsLogView() {
     prefetchTimer.current = window.setTimeout(() => prefetchWsLog(it), 120)
   }
   const onRowLeave = () => window.clearTimeout(prefetchTimer.current)
+  // 视图被隐藏/卸载时也要把预取定时器清掉：它只是个"悬停防抖"，留着会在用户已经离开
+  // 这一页之后还去打一次报文请求（视图是 keep-alive，所以必须显式清）。
+  useEffect(() => () => window.clearTimeout(prefetchTimer.current), [])
+  useEffect(() => {
+    if (view === 'wslogs') return
+    window.clearTimeout(prefetchTimer.current)
+  }, [view])
 
   // ---- 入参编辑(重放用) ----
   // reqDraft = 编辑器里的当前文本(草稿);与日志里的原始入参不一致即视为"改过",

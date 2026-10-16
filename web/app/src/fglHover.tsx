@@ -109,11 +109,28 @@ function writeClipboard(text: string): Promise<void> {
 }
 
 let attachedTo: monaco.editor.IStandaloneCodeEditor | null = null
+// 挂上去的那些监听/观察者的释放函数(见 detachHover)。
+// 为什么不就地丢掉:editor.onX 与 store.subscribe 都返回句柄,丢了就再也摘不掉 ——
+// 编辑器是单实例 keep-alive 的,卸载时这些回调会留在**已销毁**的编辑器上。
+let hoverDisposers: (() => void)[] = []
+
+// 摘下悬浮卡挂在编辑器/文档/状态容器上的监听与观察者(SourceView 卸载时调)。
+// 编辑器本身由 @monaco-editor/react 在卸载时销毁,但这些回调是我们自己挂的 ——
+// 不摘就留在那个已销毁的实例上,而且再也没有入口能摘掉(hoverDisposers 是模块级的)。
+export function detachHover() {
+  for (const d of hoverDisposers.reverse()) {
+    try { d() } catch { /* 释放失败不该影响卸载 */ }
+  }
+  hoverDisposers = []
+  attachedTo = null
+}
 
 // 在 SourceView onMount 里调用(单编辑器实例)
 export function attachHover(editor: monaco.editor.IStandaloneCodeEditor) {
   if (attachedTo === editor) return
+  detachHover()
   attachedTo = editor
+  const keep = <T extends { dispose(): void }>(d: T): T => { hoverDisposers.push(() => d.dispose()); return d }
 
   const dom = document.createElement('div')
   dom.style.display = 'none'
@@ -140,6 +157,9 @@ export function attachHover(editor: monaco.editor.IStandaloneCodeEditor) {
     },
   }
   editor.addContentWidget(widget)
+  // 这两样也要能摘掉：卡片内容节点是挂进编辑器的，卸载时不摘就留在已销毁的实例上。
+  hoverDisposers.push(() => { try { editor.removeContentWidget(widget) } catch { /* 编辑器已经销毁 */ } })
+  hoverDisposers.push(() => { try { root.unmount() } catch { /* 已卸载 */ } })
 
   // 滚动接管:卡片内容可滚动时,滚轮只滚卡片、不冒泡给编辑器(否则长值滚动时代码跟着滚);
   // 卡片内容不滚动时放行,滚轮仍滚代码
@@ -182,11 +202,14 @@ export function attachHover(editor: monaco.editor.IStandaloneCodeEditor) {
     const dBottom = r.bottom - (nr.top + layout.height - CARD_PAD)
     if (dBottom > 0) card.style.marginTop = `-${Math.round(Math.min(dBottom, r.top - (nr.top + CARD_PAD)))}px`
   }
-  // 窗口/面板尺寸变化(编辑器 layout 变化)后重新夹紧
-  editor.onDidLayoutChange(() => clampCard())
+  // 窗口/面板尺寸变化(编辑器 layout 变化)后重新夹紧。
+  // 句柄要留着:编辑器是单实例 keep-alive 的,监听不释放就永远挂着(挂载时泄漏一次,
+  // 且没人能再摘掉它)。下面是文件末尾 dispose 时统一释放的那一份。
+  const layoutSub = editor.onDidLayoutChange(() => clampCard())
   // 卡片是 React 渲染进 dom 的子元素,提交时机不固定(可能在首帧之后),所以再挂个
   // ResizeObserver:卡片一出现/换行导致尺寸变化就重新夹紧(幂等,尺寸稳定后不再触发)
-  new ResizeObserver(() => clampCard()).observe(dom)
+  const sizeObs = new ResizeObserver(() => clampCard())
+  sizeObs.observe(dom)
   // 真正弹卡:只在拿到求值结果后调用
   const present = (expr: string, pos: monaco.Position, data: { v?: string; e?: string }) => {
     wpos = { line: pos.lineNumber, column: pos.column }
@@ -248,7 +271,7 @@ export function attachHover(editor: monaco.editor.IStandaloneCodeEditor) {
     if (visible && !inCard(mx, my)) hide()
   }
 
-  editor.onMouseMove((e) => {
+  keep(editor.onMouseMove((e) => {
     const mx = e.event.posx
     const my = e.event.posy
     if (e.target.type !== monaco.editor.MouseTargetType.CONTENT_TEXT) { hideIfOutside(mx, my); return }
@@ -274,8 +297,8 @@ export function attachHover(editor: monaco.editor.IStandaloneCodeEditor) {
         dwell(expr, pos)
       }, HOVER_DELAY_MS),
     }
-  })
-  editor.onMouseLeave(() => hide())
+  }))
+  keep(editor.onMouseLeave(() => hide()))
   // 兜底:鼠标移出编辑器区域(右侧面板/顶栏等)也收卡——不完全依赖 Monaco 的 leave 事件
   const onDocMove = (ev: MouseEvent) => {
     if (!current) return // 无卡片也无私下求值时无需处理
@@ -286,15 +309,16 @@ export function attachHover(editor: monaco.editor.IStandaloneCodeEditor) {
     hide()
   }
   document.addEventListener('mousemove', onDocMove)
-  editor.onMouseDown((e) => {
+  hoverDisposers.push(() => document.removeEventListener('mousemove', onDocMove))
+  keep(editor.onMouseDown((e) => {
     if (e.target.type !== monaco.editor.MouseTargetType.CONTENT_TEXT) hide()
-  })
-  editor.onKeyDown((e) => { if (e.keyCode === monaco.KeyCode.Escape) hide() })
-  editor.onDidChangeModel(() => hide())
+  }))
+  keep(editor.onKeyDown((e) => { if (e.keyCode === monaco.KeyCode.Escape) hide() }))
+  keep(editor.onDidChangeModel(() => hide()))
   // 离开停站即收卡;停站行变化(步进/换帧)清缓存与负缓存,保证下次悬浮取到新值
   // (同名符号在别的函数作用域可能是变量)
   let lastStop = ''
-  useStore.subscribe((s) => {
+  hoverDisposers.push(useStore.subscribe((s) => {
     if (s.state !== 'stopped') hide()
     const k = s.stop ? `${s.stop.file}:${s.stop.line}` : ''
     if (k !== lastStop) {
@@ -302,7 +326,7 @@ export function attachHover(editor: monaco.editor.IStandaloneCodeEditor) {
       cache.clear()
       noSymbol.clear()
     }
-  })
+  }))
 
   // ---- 右键菜单:取值复制(复用悬浮的 cache / noSymbol / print 链路) ----
   const st = () => useStore.getState()

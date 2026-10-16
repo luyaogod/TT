@@ -495,7 +495,12 @@ export function App() {
             <RecordView />
           </ViewPane>
           <ViewPane show={view === 'settings'} label="设置">
-            <SettingsView />
+            {/* 设置页不渲染右侧那四个（依赖会话的）视图图标，于是它需要一个说清"回哪儿"的
+                回程入口 —— 由外壳按"上一个非设置视图"给它（那个 ref 在进设置时不会被改写）。 */}
+            <SettingsView
+              onBack={() => setView(lastViewRef.current)}
+              backLabel={VIEW_LABEL[lastViewRef.current] || lastViewRef.current}
+            />
           </ViewPane>
         </div>
         {/* 右侧视图图标栏(仿左侧活动栏,竖排):调试 / 接口日志 / 服务测试 / 录制 ——
