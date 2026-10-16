@@ -106,6 +106,12 @@ interface Store {
   settingsSection: SettingsSectionKey
   // 录制明细页:纯状态(真正的说明在下面那组 action 上,见 setRecordId/setRecordTab)。
   recordId: string
+  // 区间深链接里的那一刻(`#record/<id>?t=<Unix 毫秒>`;0 = 不定位)。
+  //
+  // 它是**只读的入参**:页面打开时用它把游标与可视窗口落到那一刻,之后就由用户在条带上的
+  // 操作接管(不再回写)。为什么只读:滚动/缩放是连续动作,每一步都进 URL 会让地址栏
+  // 变成一条疯跑的记录;而"把这一刻发给别人"只需要点一次那个按钮(条带的「复制链接」)。
+  recordAt: number
   recordTab: RecordTab
   // 回放进度:服务端每次推 `rec.progress` 就把计数器 +1(值本身没有意义,只表示"变了")。
   //
@@ -170,6 +176,7 @@ interface Store {
   // 同一个值。与 view/settingsSection 完全同一套做法(store 存纯状态,片段由 App 同步)。
   // 字段本体在文件上半部分的 Store 形状里,这里只声明动作。
   setRecordId: (id: string) => void
+  setRecordAt: (ms: number) => void
   // 明细页的页签:分层记录 / 全文流。**记在本地**(localStorage),用户回来还在那一页 ——
   // 但**不进 URL**:片段只表达"我在看哪一份",页面内的页签是同一个人的操作习惯。
   setRecordTab: (t: RecordTab) => void
@@ -414,6 +421,7 @@ export const useStore = create<Store>((set, get) => ({
   view: 'settings',
   settingsSection: 'sites',
   recordId: '',
+  recordAt: 0,
   recordTab: (localStorage.getItem(RECORD_TAB_KEY) === 'stream' ? 'stream' : 'steps') as RecordTab,
   recProgressTick: 0,
   recProgressID: '',
@@ -676,6 +684,7 @@ export const useStore = create<Store>((set, get) => ({
   // 切明细/回列表。**不在这里动 URL**:片段由 App 那条 effect 按状态写回(与 view 同一套),
   // 于是浏览器前进/后退与深链接天然一致 —— 这里再写一次 history 就成了两个作者。
   setRecordId: (id) => set({ recordId: id }),
+  setRecordAt: (ms) => set({ recordAt: ms > 0 ? ms : 0 }),
   setRecordTab: (t) => {
     localStorage.setItem(RECORD_TAB_KEY, t)
     set({ recordTab: t })

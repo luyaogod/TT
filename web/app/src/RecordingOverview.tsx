@@ -16,7 +16,7 @@
 //  2. **缩放窗口外的东西压暗贴边**,不许画到框外(否则"放大后那块去哪了"没人说得清);
 //  3. 悬停 **500 ms** 才出精确时刻与大小(照 DSH 的做法):鼠标扫过时不该满屏 tooltip。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Maximize2, ZoomIn, ZoomOut } from 'lucide-react'
+import { Link2, Maximize2, ZoomIn, ZoomOut } from 'lucide-react'
 import type { RecordingBlock, RecordingFrame } from './api'
 import {
   axisValue, clampDomain, domainOf, fmtBytes, fmtClock, fmtRel, makeScale, panDomain, ticks, zoomDomain,
@@ -89,6 +89,8 @@ interface Props {
   /** 选中的那一帧(条带要用它的轴取值画选择线,不能只给 key —— 那还得反查一次) */
   sel: RecordingFrame | null
   onSelect: (f: RecordingFrame) => void
+  /** 复制"这一刻"的深链接(由父级拼 `#record/<id>?t=` —— 它才知道录制 ID 与光标模型)。 */
+  onCopyLink?: () => void
 }
 
 export function RecordingOverview(p: Props) {
@@ -214,6 +216,13 @@ export function RecordingOverview(p: Props) {
           </button>
         )}
         <span className="ml-auto flex items-center gap-1">
+          {/* 把游标所在的那一刻做成一条能给别人的地址(区间深链接,见 routing.ts 的 recordHash)。 */}
+          {p.onCopyLink && p.mode === 'time' && (
+            <button onClick={p.onCopyLink} className="flex items-center gap-0.5 rounded-ui border border-border px-1.5 py-0.5 hover:bg-accent"
+              title="复制这一刻的深链接（#record/<ID>?t=…）：打开它会直接落到游标所在的位置">
+              <Link2 size={11} /> 这一刻
+            </button>
+          )}
           <button onClick={() => p.onDomain(zoomDomain(dom, bounds, 0.7, (dom.min + dom.max) / 2))}
             className="rounded-ui border border-border p-0.5 hover:bg-accent" title="放大(滚轮也可以)"><ZoomIn size={11} /></button>
           <button onClick={() => p.onDomain(zoomDomain(dom, bounds, 1.4, (dom.min + dom.max) / 2))}

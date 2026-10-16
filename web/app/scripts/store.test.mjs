@@ -291,4 +291,16 @@ S().setRecordTab('steps')
 assert.equal(S().recordTab, 'steps')
 console.log('OK 13) 录制明细:recordId 空 = 列表、recordTab 只认两个已知值')
 
-console.log('\n全部通过: 13/13')
+// ---------- 14) 区间深链接里那一刻是**只读入参**,不是可写状态 ----------
+// `?t=` 只在进页面时用一次(把游标落到那一刻),之后由用户在条带上的操作接管。
+// 它必须能被清空(进别的页面时 App 会把它归零),而且**不接受 0/负数/垃圾**
+// —— 一个坏数字不该让游标落到 1970 年。
+S().setRecordAt(1792132127728)
+assert.equal(S().recordAt, 1792132127728)
+S().setRecordAt(0)
+assert.equal(S().recordAt, 0, '归零 = 不定位')
+S().setRecordAt(-5)
+assert.equal(S().recordAt, 0, '非正数一律当"不定位"，不许落到 1970 年')
+console.log('OK 14) 区间深链接:recordAt 可清空、非正数一律不定位')
+
+console.log('\n全部通过: 14/14')

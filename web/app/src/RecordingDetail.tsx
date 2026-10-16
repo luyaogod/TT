@@ -30,7 +30,7 @@ import { RecordingOverview } from './RecordingOverview'
 import { RecordingTable } from './RecordingTable'
 import { RecordingInspector } from './RecordingInspector'
 import { ReplayProgressBar } from './ReplayProgress'
-import { axisValue, domainOf, fmtBytes, makeScale, type AxisMode, type Domain } from './recordingTime'
+import { axisValue, clampDomain, domainOf, fmtBytes, makeScale, type AxisMode, type Domain } from './recordingTime'
 
 /** 迷你轴(表格每行里那个小方块)的宽度。 */
 const MINI_W = 72
@@ -73,6 +73,11 @@ export function RecordingDetail({ id, onBack }: Props) {
   const [selAction, setSelAction] = useState<number | null>(null)
   const [selFrame, setSelFrame] = useState<RecordingFrame | null>(null)
   const [cursor, setCursor] = useState(0)
+
+  // 区间深链接(`?t=`):**只读的入参**,进页面时把游标落到那一刻并放大到它周围。
+  // 只认一次(它一变就把用户自己拖出来的窗口覆盖掉,那是最烦人的一种"自动纠正")。
+  const recordAt = useStore((s) => s.recordAt)
+  const atApplied = useRef(0)
 
   // 全文流的分页(服务端过滤 + 分页:自己在前端滤会让"这一页只剩两条"变成常态)。
   const [streamFrames, setStreamFrames] = useState<RecordingFrame[]>([])
@@ -186,6 +191,20 @@ export function RecordingDetail({ id, onBack }: Props) {
       })
     }
     window.setTimeout(() => setCopied(null), ok ? 1500 : 4000)
+  }
+  // 复制"这一刻"的深链接(`?t=`):把条带上的游标位置做成一条能给别人的地址。
+  // 只在时间轴上做 —— 字节序那种坐标是"这一份文件里的第几个字节",给别人没有意义。
+  const copyMoment = async () => {
+    if (!(cursor > 0) || domain.mode !== 'time') {
+      toast.error('先把游标放到某一刻', { description: '在条带上点一下（或拖一下），再复制链接。' })
+      return
+    }
+    const url = `${location.origin}${location.pathname}#record/${id}?t=${Math.round(cursor)}`
+    const ok = await copyText(url)
+    toast[ok ? 'success' : 'error'](ok ? '已复制这一刻的链接' : '复制失败', {
+      description: ok ? `打开它会直接落到 ${new Date(Math.round(cursor)).toLocaleTimeString('zh-CN', { hour12: false })} 附近` : url,
+      duration: ok ? 4000 : 0,
+    })
   }
   const doDelete = async () => {
     setConfirmDel(false)
@@ -301,6 +320,19 @@ export function RecordingDetail({ id, onBack }: Props) {
   const counts = ov?.counts
   const title = ov ? `${ov.id}` : id
 
+  // 深链接带来的那一刻:等数据到手再落位(那时才知道时间域)。
+  useEffect(() => {
+    if (!recordAt || !ov || atApplied.current === recordAt) return
+    atApplied.current = recordAt
+    setCursor(recordAt)
+    if (bounds.mode === 'time' && bounds.max > bounds.min) {
+      // 放大到"那一刻周围约 5% 宽度"的窗口：既能看清它，也不至于只剩一两帧。
+      const pad = Math.max(50, (bounds.max - bounds.min) * 0.025)
+      const next = clampDomain({ mode: 'time', min: recordAt - pad, max: recordAt + pad }, bounds)
+      setDomain(next)
+    }
+  }, [recordAt, ov, bounds])
+
   return (
     <div ref={rootRef} className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background">
       {/* 明细页的头:**返回**在最左(它是这一屏唯一的出口),右边是"这是哪一份"的关键几项。 */}
@@ -381,7 +413,8 @@ export function RecordingDetail({ id, onBack }: Props) {
             items={ov.items} blocks={ov.blocks} mode={bounds.mode}
             bounds={bounds} domain={domain} onDomain={setDomain}
             cursor={cursor} onCursor={setCursor}
-            sel={selFrame} onSelect={pick} />
+            sel={selFrame} onSelect={pick}
+            onCopyLink={() => void copyMoment()} />
 
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" style={{ flexDirection: narrow ? 'column' : 'row' }}>
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">

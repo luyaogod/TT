@@ -43,9 +43,10 @@ export function isRecordID(v: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(v)
 }
 
-/** 录制视图的片段:列表是 `#record`,明细是 `#record/<录制 ID>`。 */
-export function recordHash(id: string): string {
-  return id ? `#record/${id}` : '#record'
+/** 录制视图的片段:列表是 `#record`,明细是 `#record/<录制 ID>`,定位到某一时刻再加 `?t=<Unix 毫秒>`。 */
+export function recordHash(id: string, at?: number): string {
+  if (!id) return '#record'
+  return at && at > 0 ? `#record/${id}?t=${Math.round(at)}` : `#record/${id}`
 }
 
 /**
@@ -53,15 +54,23 @@ export function recordHash(id: string): string {
  *
  * `recordId` 只在**恰好两段**且第二段是合法 ID 时给出;多一段(`#record/a/b`)或形态不对
  * 一律当"就是列表" —— 不静默截断(旧写法 `split('/', 2)` 会把 `a` 当 ID 用)。
+ * `?t=<ms>` 是"定位到某一时刻"(区间深链接):合法就给,不合法就当没有 —— 一个坏数字
+ * 不该让整条深链接失效。
  */
-export function parseHash(hash: string): { view?: ViewKey; section?: SettingsSectionKey; recordId?: string } {
+export function parseHash(hash: string): { view?: ViewKey; section?: SettingsSectionKey; recordId?: string; at?: number } {
   const raw = (hash || '').replace(/^#/, '').trim()
   if (!raw) return {}
-  const parts = raw.split('/')
+  const qi = raw.indexOf('?')
+  const path = qi >= 0 ? raw.slice(0, qi) : raw
+  const query = qi >= 0 ? raw.slice(qi + 1) : ''
+  const parts = path.split('/')
   const head = parts[0]
   if (!isViewKey(head)) return {}
   if (head === 'record') {
-    if (parts.length === 2 && isRecordID(parts[1])) return { view: 'record', recordId: parts[1] }
+    const at = parseAt(query)
+    if (parts.length === 2 && isRecordID(parts[1])) {
+      return at > 0 ? { view: 'record', recordId: parts[1], at } : { view: 'record', recordId: parts[1] }
+    }
     if (parts.length > 2) return {}
     return { view: 'record' }
   }
@@ -70,6 +79,20 @@ export function parseHash(hash: string): { view?: ViewKey; section?: SettingsSec
   const tail = parts[1]
   if (tail && isSettingsSection(tail)) return { view: 'settings', section: tail }
   return { view: 'settings' }
+}
+
+/** 从 `t=<Unix 毫秒>` 里取时刻(没有/非法/非正数一律 0 = 不定位)。 */
+function parseAt(query: string): number {
+  if (!query) return 0
+  for (const kv of query.split('&')) {
+    const [k, v] = kv.split('=')
+    if (k !== 't') continue
+    const n = Number(v)
+    // 只认**合理的毫秒**：2001 年之后、2100 年之前。乱填的数字当没有 ——
+    // 拿它去定位会得到一个空窗口，用户看到的是"页面打开了但什么都没有"。
+    if (Number.isFinite(n) && n > 1e12 && n < 4e12) return Math.round(n)
+  }
+  return 0
 }
 
 /** 设置页某个分区的 hash(带前导 #,可直接交给 history.replaceState) */
@@ -86,8 +109,8 @@ export function settingsHash(section: SettingsSectionKey): string {
  * URL 仍是 `#debug`,刷新回调试页)。录制明细同理:打开了第 N 份却不在片段里,
  * 刷新就回列表、也没法把"我在看这一份"发给别人。
  */
-export function viewHash(view: ViewKey, section: SettingsSectionKey, recordId?: string): string {
+export function viewHash(view: ViewKey, section: SettingsSectionKey, recordId?: string, at?: number): string {
   if (view === 'settings') return settingsHash(section)
-  if (view === 'record') return recordHash(recordId || '')
+  if (view === 'record') return recordHash(recordId || '', at)
   return `#${view}`
 }
