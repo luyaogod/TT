@@ -12,6 +12,7 @@
 // **不是步号**（步号随 --stop-at/--skip 变，不是身份）。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { RecordPrecision, RecordingAction, RecordingFrame, ReplayStep } from './api'
+import { kindLabel, kindTagClass } from './recordingKind'
 import { fmtBytes, fmtClock, fmtRel } from './recordingTime'
 
 const ROW_H = 22
@@ -73,12 +74,13 @@ export function RecordingTable(p: Props) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {/* 表头跟着一起横向滚动（列只有三条，窄容器下也不会要滚动条，但保持与行同一层滚动） */}
+      {/* 表头跟着一起横向滚动（列很少，窄容器下也不会要滚动条，但保持与行同一层滚动） */}
       <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-auto">
-        <div style={{ minWidth: 420 }}>
+        <div style={{ minWidth: 460 }}>
           <div className="sticky top-0 z-10 flex h-6 items-center gap-2 border-b border-border bg-card px-2 text-[10px] text-muted-foreground">
+            <div className="w-[52px] shrink-0 text-right" title="帧的类别。颜色与上面条带里的块一一对应">类型</div>
             <div className="w-[92px] shrink-0">时间</div>
-            <div className="w-4 shrink-0 text-center" title="→ 运行期向前端（界面/回应） / ← 前端向运行期（用户事件）">向</div>
+            <div className="w-4 shrink-0 text-center" title="→ 服务向前端（界面/回应） / ← 前端向服务（用户事件）">向</div>
             <div className="min-w-0 flex-1">文本</div>
           </div>
 
@@ -101,7 +103,7 @@ export function RecordingTable(p: Props) {
   )
 }
 
-/** 一行。三列：时间 / 向 / 文本（名字、原始载荷、回放结果都内联在文本里）。 */
+/** 一行。四列：类型 / 时间 / 向 / 文本（名字、原始载荷、回放结果都内联在文本里）。 */
 function Row({ f, p, clock, t0, action }: {
   f: RecordingFrame
   p: Props
@@ -118,14 +120,19 @@ function Row({ f, p, clock, t0, action }: {
       ${sel ? 'bg-amber-500/10' : 'hover:bg-accent/30'}`}
       onClick={() => p.onSelect(f)}
       onMouseEnter={() => f.t > 0 && p.onCursor(f.t)}
-      title={`${f.k}${f.q ? ` #${f.q}` : ''} · ${f.d === 1 ? '运行期→前端' : '前端→运行期'} · 连接 ${f.c} · ${fmtBytes(f.n)} @ 偏移 ${f.o}`
+      title={`${f.k}${f.q ? ` #${f.q}` : ''} · ${f.d === 1 ? '服务→前端' : '前端→服务'} · 连接 ${f.c} · ${fmtBytes(f.n)} @ 偏移 ${f.o}`
         + (f.t > 0 ? `\n${fmtClock(f.t)}（${fmtRel(f.t, t0)}）` : '\n时刻未知（无帧索引）')}>
+      {/* 类型：与条带上的块**同一个色**（颜色只在 recordingKind.ts 里定义一次）。
+          右对齐、紧贴时间列 —— 一屏扫下来颜色成一条竖线，比看文字快。 */}
+      <div className="flex w-[52px] shrink-0 justify-end">
+        <span className={`rounded-ui px-1 text-[10px] leading-4 ${kindTagClass(f.k)}`}>{kindLabel(f.k)}</span>
+      </div>
       <div className={`w-[92px] shrink-0 ${f.t > 0 ? 'text-muted-foreground' : 'text-muted-foreground/60'}`}>{clock(f.t)}</div>
       <div className="w-4 shrink-0 text-center text-muted-foreground">{f.d === 1 ? '→' : '←'}</div>
 
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        {/* 类别与序号（短的，一眼看得出这是消息还是缓存） */}
-        <span className="shrink-0 text-muted-foreground/80">{f.k}{f.q ? ` #${f.q}` : ''}</span>
+        {/* 序号（类别已经在类型列里了，这里不重复） */}
+        {f.q ? <span className="shrink-0 text-muted-foreground/70">#{f.q}</span> : null}
 
         {/* 名字：解析出来就给名字（带类型#id），解析不出来就照实显示 id + 未解析 —— 不编名字 */}
         {action && (
@@ -167,3 +174,4 @@ function StepChip({ s }: { s: ReplayStep }) {
     : (m[s.result] || { t: s.result, c: 'border-border text-muted-foreground', why: '' })
   return <span className={`shrink-0 rounded-ui border px-1 text-[10px] ${x.c}`} title={`回放第 ${s.n} 步：${x.why}`}>{x.t}</span>
 }
+

@@ -18,28 +18,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link2, Maximize2, ZoomIn, ZoomOut } from 'lucide-react'
 import type { RecordingBlock, RecordingFrame } from './api'
+import { kindClass } from './recordingKind'
 import {
   axisValue, clampDomain, domainOf, fmtBytes, fmtClock, fmtRel, makeScale, panDomain, ticks, zoomDomain,
   type AxisMode, type Domain,
 } from './recordingTime'
 
-/** 泳道:按 kind/方向分。顺序就是显示顺序(上=运行期,下=缓存)。
+/** 泳道:按 kind/方向分。顺序就是显示顺序（上=服务推来的，下=缓存）。
  *
- * 颜色语义**写在每一道的 tooltip 里**（用户 2026-10-16 要求去掉屏上的图例）：
- * 常驻图例占一整行、而它的信息只在"第一次看"时有用 —— 悬停能看到就够了。 */
+ * 标签只有两个字（用户 2026-10-16 定的）：**谁发的**才是这三条线的区别，
+ * 方向箭头在表里每一行都有（`向` 那一列），不必在泳道名里再写一遍。
+ * 颜色语义与表里的类型 tag 共用一份（`recordingKind.ts`），tooltip 里说清楚。 */
 const LANES: { key: string; label: string; hint: string; match: (f: RecordingFrame) => boolean }[] = [
   {
-    key: 'rt', label: '运行期 → 前端',
-    hint: '界面状态与回应：om（绿）/ un（深绿）/ rn（红，删节点）/ 握手（紫）。界面变成什么样都在这条线上',
+    key: 'rt', label: '服务',
+    hint: '服务（运行期）推给前端的界面状态与回应：om（绿）/ un（深绿）/ rn（红，删节点）/ 握手（紫）。界面变成什么样都在这条线上',
     match: (f) => f.d === 1 && !isOther(f),
   },
   {
-    key: 'fe', label: '前端 → 运行期',
-    hint: '用户/注入的事件（蓝）：event _om。"谁点了什么"在这条线上',
+    key: 'fe', label: '前端',
+    hint: '前端（用户/注入）发给服务的用户事件（蓝）：event _om。"谁点了什么"在这条线上',
     match: (f) => f.d === 0 && !isOther(f),
   },
   {
-    key: 'other', label: '缓存 / 其它',
+    key: 'other', label: '其它',
     hint: '图片缓存（type=5，灰）与没认出来的帧：不是消息、不解析、不重放，但占时间',
     match: (f) => isOther(f),
   },
@@ -48,23 +50,6 @@ const LANES: { key: string; label: string; hint: string; match: (f: RecordingFra
 /** 不是消息的帧:图片缓存与没见过的类型。它们单独一条泳道(见 index.go 的规矩 3)。 */
 function isOther(f: RecordingFrame): boolean {
   return f.k === 'cache' || f.k.startsWith('type')
-}
-
-/** 帧的颜色:按消息类别分。`event` 是"人做的",`om/un/rn` 是"运行期回的",一眼要能分开。 */
-const KIND_CLASS: Record<string, string> = {
-  event: 'bg-sky-500',
-  om: 'bg-emerald-500',
-  un: 'bg-emerald-600',
-  rn: 'bg-rose-500',
-  meta: 'bg-violet-500',
-  cache: 'bg-muted-foreground/40',
-}
-const OTHER_CLASS = 'bg-muted-foreground/60'
-
-function kindClass(k: string): string {
-  if (k === 'cache') return KIND_CLASS.cache
-  if (k.startsWith('type')) return OTHER_CLASS
-  return KIND_CLASS[k] || OTHER_CLASS
 }
 
 const LANE_H = 26 // 每条泳道的高度(px)
