@@ -13,8 +13,11 @@ import (
 	"tt/internal/target"
 )
 
-// 五个"动作型"端点的**错误半边**：POST /api/wstest、POST /api/wslogs/debug、
-// POST /api/dbsql、GET /api/wslogs、GET /api/wslogs/content。
+// 四个"动作型"端点的**错误半边**：POST /api/wslogs/debug、POST /api/dbsql、
+// GET /api/wslogs、GET /api/wslogs/content。
+//
+// 从前这里是五个（还含 `POST /api/wstest`）—— 那条端点本批已**从产品里取消**
+// （仓库主人定性：它不是标准接口，是临时测试工具），实现与只测它的测试一并删掉。
 //
 // 为什么只测错误半边：它们的**快乐路径**要 `*host.SSHConn` —— 那个结构体的 `cli` 是私有
 // 字段（host/ssh.go:18），要从外部伪造得实现 8 个方法、其中三个返回不可构造的类型
@@ -80,7 +83,7 @@ func giveServerNamedEnv(s *Server, name, hostAddr, zone string) {
 // 且不能是"拨号失败"那种 500 —— 半个请求根本不该走到拨号那一步。
 func TestActionEndpointsRejectMalformedBody(t *testing.T) {
 	hs := actionTestServer(t)
-	for _, path := range []string{"/api/wstest", "/api/wslogs/debug", "/api/dbsql"} {
+	for _, path := range []string{"/api/wslogs/debug", "/api/dbsql"} {
 		t.Run(path, func(t *testing.T) {
 			resp := doReq(t, "POST", hs.URL+path, "", "{ 这不是 json")
 			if resp.StatusCode != 400 {
@@ -107,7 +110,6 @@ func TestActionEndpointsRejectMalformedBody(t *testing.T) {
 func TestActionEndpointsReportDialFailure(t *testing.T) {
 	hs, sid := actionTestServerWithSession(t)
 	cases := []struct{ method, path, body string }{
-		{"POST", "/api/wstest", "{}"},
 		{"POST", "/api/wslogs/debug", `{"rowid":"1","session":"` + sid + `"}`},
 		{"POST", "/api/dbsql", `{"sql":"select 1 from dual","ent":99}`},
 		{"GET", "/api/wslogs", ""},
@@ -257,7 +259,7 @@ func TestUnregisteredAPIPathsReturnJSON404(t *testing.T) {
 	servers := map[string]*httptest.Server{"前端未构建": actionTestServer(t), "前端已构建": built}
 
 	cases := []struct{ method, path string }{
-		{"GET", "/api/wstest"}, // 路径注册了，方法不对
+		{"GET", "/api/dbsql"}, // 路径注册了，方法是 POST
 		{"GET", "/api/根本不存在"},  // 路径压根没有
 		{"POST", "/api/根本不存在"},
 		{"GET", "/api"}, // 前缀本身

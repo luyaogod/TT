@@ -33,7 +33,8 @@ type Server struct {
 
 	// dial 是拨 SSH 的入口。抽成**字段**是为了让默认测试不拨真机
 	// （与 internal/dev/tzs 的 Dialer 接口、internal/web.Options 的函数字段同一个理由）。
-	// 五个 handler 直接调它，注入一个必然失败的实现就能测它们的 400/500 分支 ——
+	// 四个 handler 直接调它，注入一个必然失败的实现就能测它们的 400/500 分支 ——
+	// （从前是五个：那个"服务测试"端点已随 `/api/wstest` 一起取消）
 	// 那批分支里有一处**顺序**性质（入参先校验、再收口会话，见 hWSLogDebug 的注释），
 	// 改动它没有任何东西会响。
 	//
@@ -168,7 +169,7 @@ func (s *Server) ListenAddr() string {
 // 面内的路径都是**相对挂载点**的,与合并前独立起服务时一模一样:
 //
 //	/api/status /api/shutdown /api/events /api/source-file /api/jobinfo
-//	/api/sessions…(会话/断点/控制/求值/源码/接口日志)/api/wstest /api/wslogs…
+//	/api/sessions…(会话/断点/控制/求值/源码/接口日志)/api/wslogs…
 //	/api/dbsql /api/source-preview /api/ws
 //	/api/hosts(只读,见 hHostsGet)
 //	/(SPA 兜底,hStatic)
@@ -225,7 +226,6 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/sessions/{id}/breakpoints/{num}/enabled", s.hBPEnabled)
 	mux.HandleFunc("GET /api/sessions/{id}/source", s.hSource)
 	mux.HandleFunc("GET /api/source-preview", s.hSourcePreview)
-	mux.HandleFunc("POST /api/wstest", s.hWSTest)
 	mux.HandleFunc("GET /api/wslogs", s.hWSLogs)
 	mux.HandleFunc("POST /api/dbsql", s.hDBSQL)
 	mux.HandleFunc("GET /api/wslogs/content", s.hWSLogContent)
@@ -464,10 +464,10 @@ func (s *Server) hStatus(w http.ResponseWriter, r *http.Request) {
 		"server":   "tdebug-debug",
 		"ssh":      s.cfg.SSH.Host,
 		"zone":     s.cfg.Zone,
-		"zoneName": host.ZoneTNSName(s.cfg.Zone), // 区域代码 → T100 服务别名(如 36→t35prd;服务测试默认地址要用)
-		// wsPrefix:服务测试默认地址的前缀。出貨區(topprd)是 `/ws`,其余区是 `/w` ——
-		// 这条规则只有后端一份实现(WSDefaultURLFor),前端要抄就得抄对:两边不一致时
-		// 界面上的占位符地址是错的(实测 zone=t 时前端给 /wtopprd、后端给 /wstopprd)。
+		"zoneName": host.ZoneTNSName(s.cfg.Zone), // 区域代码 → T100 服务别名(如 36→t35prd)
+		// wsPrefix:服务区前缀（出貨區 topprd 是 `/ws`，其余区是 `/w`）—— 前端拼占位符地址用。
+		// 这条规则只有后端一份实现（`wsURLPrefix`，见 wsurl.go），前端要抄就得抄对：
+		// 两边不一致时界面上的占位符地址是错的（实测 zone=t 时前端给 /wtopprd、后端给 /wstopprd）。
 		"wsPrefix": wsURLPrefix(s.cfg.Zone),
 		"listen":   s.ListenAddr(),
 		"watchdog": s.cfg.WatchdogSeconds,
@@ -623,6 +623,37 @@ func (s *Server) hList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true, "sessions": s.mgr.Snapshot()})
 }
 
+// identityKeysOf 把**会话身份那一组键**从 `SessionBrief` 里搬进快照（契约 C5.1 / C5.3 / C5.4 / C5.9）。
+//
+// 为什么是这一层而不是往里抄字段：`SessionBrief`（`briefOf` 那一份投影）是这**七个**键的
+// **唯一出处**（C5.17–C5.19 正在消灭的正是"客户端/别处手抄第二份事实"）。这里只做一件事 ——
+// 把已有投影里的七个键**按键搬到 map 上**，绝不在本文件重新拼一遍 `环境#序号` / `环境/作业#序号`
+// / `ent` 的取法。谁改 `briefOf` 的取法，这里跟着变，不需要有人记得改两处。
+//
+// 为什么是**七个**（`ref` / `display` / `name` / `ent` / `n` / `kind` / `epoch`）：前六个是
+// 列表快照与寻址用的身份，而 **`ent` 是 C5.9 的身份行要的那一个** ——
+// `会话 <display> · <name> · <state> · ENT <ent>`。上一版这里漏了 `ent`，CLI 只好在自己那边
+// 从快照的 `topentSession` 兜底补一个；那等于让 `ent` 与 `topentSession` 两个近似的东西
+// 在客户端做取舍，正是这一路重构要拆掉的"第二份事实"。补上第七个键之后，
+// CLI 的 `ENT` 只有**这一个**来源（`SessionBrief.Ent` = `Session.CurrentEnt()`）。
+//
+// **恒定键（C5.1 / C5.3）取不到就给空串/零值，不省键**：`ref` 在序号还没分配时是空串、
+// `name` 未命名是空串、`ent` 取不到是空串、`epoch` 没代是空串 —— 一律照写。
+// 前端与 CLI 按这份形状解包，少一个键它们就得写第二套兜底。
+//
+// **只写这七个键，别的一概不碰**：快照的既有键（`topent` / `topentSession` / `zone` /
+// `fglserver` … 那些 `SessionBrief` 里**没有**的字段）语义一字不动（H2）——
+// `topentSession` 有它自己的含义（本会话显式给的 TOPENT），不是 `ent` 的备胎。
+func identityKeysOf(resp map[string]any, b SessionBrief) {
+	resp["ref"] = b.Ref
+	resp["display"] = b.Display
+	resp["name"] = b.Name
+	resp["ent"] = b.Ent
+	resp["n"] = b.N
+	resp["kind"] = b.Kind
+	resp["epoch"] = b.Epoch
+}
+
 func (s *Server) hSnapshot(w http.ResponseWriter, r *http.Request) {
 	sess := s.sessOf(w, r)
 	if sess == nil {
@@ -656,6 +687,9 @@ func (s *Server) hSnapshot(w http.ResponseWriter, r *http.Request) {
 		"fglserver":    sess.FGLServer(),
 		"screenTarget": ScreenTarget(sess.FGLServer()),
 	}
+	// 身份那一组键（C5.1 / C5.3 / C5.9）：从 `SessionBrief` 那一份投影搬过来，**不在这里手抄**
+	// （C5.17–C5.19）。既有键一个不动、语义一字不改（H2）—— 这七个都是**新增**键。
+	identityKeysOf(resp, s.mgr.briefOf(sess))
 	if fl := sess.Inflight(); fl != nil {
 		resp["inflight"] = fl
 	}
@@ -1610,35 +1644,14 @@ func (s *Server) hSource(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true, "source": sf})
 }
 
-// ---------- 接口服务测试(复刻 awsq990 集成服务测试) ----------
+// ---------- 接口日志(wsfa_t) ----------
 
-// hWSTest POST /api/wstest {mode,url,body,soap} → 经服务器 curl 调用接口
-func (s *Server) hWSTest(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Mode string `json:"mode"`
-		URL  string `json:"url"`
-		Body string `json:"body"`
-		Soap bool   `json:"soap"`
-	}
-	if !readBody(w, r, &req) {
-		return
-	}
-	if req.URL == "" {
-		req.URL = WSDefaultURLFor(s.cfg, req.Mode)
-	}
-	conn, err := s.dialSSH()
-	if err != nil {
-		fail(w, 500, fmt.Errorf("SSH 连接失败: %w", err))
-		return
-	}
-	defer conn.Close()
-	res, err := WSTest(conn, req.URL, req.Body, req.Soap, 60)
-	if err != nil {
-		fail(w, 400, err)
-		return
-	}
-	writeJSON(w, 200, map[string]any{"ok": true, "result": res})
-}
+// 服务测试端点（`POST /api/wstest` → `hWSTest` → `WSTest`）**本批已取消**：
+// 仓库主人定性它不是标准接口、是临时测试工具，所以从产品里去掉（不是给它加闸门）。
+// 它从前不过模式闸门、不过 `safesql`、对**任意 URL** 发 POST，还往服务器写临时文件
+// —— 是那次只读审计里"最严重的单点只靠纪律"。整个实现文件 `wstest.go` 与只测它的
+// `wstest_test.go` 一并删掉；`wsURLPrefix`（`/api/status` 的 `wsPrefix` 用它）搬到了
+// `wsurl.go`。契约与计划里的相关条目已标「已取消」。
 
 // dialSSH 是那五个"要连服务器"的端点统一走的门（拨当前生效环境）。
 //
@@ -2150,7 +2163,7 @@ func (s *Server) hWS(w http.ResponseWriter, r *http.Request) {
 // 在 internal/web（hRoot 对非 `/` 路径回 404）与 internal/dict/server
 // （TestSharedEndpointsNotServedHere）两侧都已经立过，这里是最后一处。
 //
-// 代价是方法不匹配也归到这里（`GET /api/wstest` 得 404 而不是 405）：Go 的 mux
+// 代价是方法不匹配也归到这里（`GET /api/dbsql` 得 404 而不是 405）：Go 的 mux
 // 只在**没有** catch-all 时才会自己产生 405，这里有一条，所以 405 得手写。
 // 404 与 405 对调用方是同一件事——"这个路径上你没有可用的接口"——不值得为它
 // 再维护一张注册表。

@@ -139,10 +139,9 @@ var skipLedger = []skipSite{
 	{file: "internal/testkit/corpus.go", msg: "%s 下没有 %s", layer: layL3Missing, why: "语料在，但里面没有该扩展名的文件"},
 	// ---- WP2（会话寻址重构）的契约测试：等 WP3/WP4/WP4c 把冻结契约落地 ----
 	//
-	// 这一组全部归 layPending（见那一层的定义）：契约**已冻结**（WP1 交付），
-	// 测试先写好把形状钉住。**WP4c 之后只剩一条** —— 其余七条等的都是
-	// "服务端把 ref / display / name / ent / n / epoch 变成事实"与"补 code / candidates"，
-	// 那些交付之后它们的守卫响了，按各自的交代**改成了真断言**，于是台账按性质删掉
+	// 这一组原先是 layPending（见那一层的定义）：契约**已冻结**（WP1 交付），
+	// 测试先写好把形状钉住。**现在一条都不剩了** —— 它们等的交付物全部到位，
+	// 各处的守卫响了，按各自的交代**改成了真断言**，于是台账按性质逐条删掉
 	// （不再跳过的东西不该留在跳过台账里）：
 	//
 	//   - `TestContractSessionEnvelopeKeysMatchSessionBrief`（缺键 → 判红）
@@ -153,10 +152,16 @@ var skipLedger = []skipSite{
 	//   - `TestContractHTTPFailureCodeIsNotYetLanded` → `TestContractHTTPFailureCodeIsLanded`
 	//   - `TestContractInvalidFormsAreNotYetEnforced` → `TestContractInvalidFormsServerSideEnvelopes`
 	//     ＋ `TestContractNameTakenEnvelopeIsWritten`（服务端判得出来的那几条逐条发真请求）
+	//   - `TestContractIdentityLineIsNotYetLanded` → `TestContractIdentityLineIsLanded`
+	//     （**最后一条**：C5.9 的身份行本批接进了 CLI，判据在
+	//     `internal/debug/contract_debug_test.go`（服务端数据 + C5.9 渲染）
+	//     与 `internal/cli/debug/envtarget_test.go` 的 `TestDBGIdentity*`（那一行真的被打出来））
 	//
-	// 留下的一条**换过等的东西**：它上一版等"服务端有没有 display/name"（那已经交付），
-	// 现在等的是"CLI 那行人话输出换不换字" —— 与 H2 直接相关，所以理由要写清。
-	{file: "internal/debug/contract_debug_test.go", msg: "C5.9 身份行还没接进 CLI：服务端已有 display 与 name（WP4c）；差的是把 internal/cli/debug 的 `生效身份: …` 那行换成 `会话 <display> · <name> · <state> · ENT <ent>` —— 那是人话输出改字，按 H2 归后续批次", layer: layPending, why: "等 CLI 换那行身份行（C5.9）：服务端数据与 target.IdentityLine 都齐了，差的是把它接进 internal/cli/debug 的人话输出 —— 那是**改字**，与本批纪律「单会话输出除新增键外逐字不变」（H2）冲突，归后续批次（契约 C8.4 登记为单会话下允许的第二处变化）"},
+	// 那一批的其余条目（`internal/erpdb` 等）与本次重构无关，照旧登记在上面。
+	//
+	// `layPending` 这个层本身**保留**：它是"契约已冻结、代码还没写"这一类跳过的唯一归宿，
+	// 下次再先写测试后写实现时还要用它（本批归零不等于这一层没用了）。
+	//
 	// ---- 已经**不再登记**的那一条（WP4b 交付时删掉的）----
 	//
 	// `internal/testkit/first_session_source_test.go` 的 T2.3 静态检查曾经在这里有一条
@@ -167,6 +172,16 @@ var skipLedger = []skipSite{
 	// 这一条删得对不对，由台账自己反向守着：`TestSkipLedger` 的"台账里登记了、代码里却没有"
 	// 那一半会在"删了跳过却没同步台账"时红；反过来"同步了台账却还留着跳过"也会红。
 	// 所以这里不需要另加判据 —— 台账与代码必须严格对上，这正是它的存在意义。
+	//
+	// ---- WP7（只读红线）那一条没有进来 ----
+	//
+	// `internal/erpdb` 的文本层从"前缀匹配"换成 `internal/safesql.Check` 时，
+	// 旧测试 `TestCheckReadOnlySQLIsAPrefixCheckNotAParser` 的那半句断言（"前导注释会绕过"）
+	// 当场反向。处理方式是**把它整条删掉**、判据搬进同一文件的三条新测试
+	// （`TestCheckReadOnlySQLRejectsWritesAndMultipleStatements` /
+	// `…AllowsReadOnlySelects` / `…BlocksTheReadOnlyTransactionBypass`），
+	// **没有留 t.Skip**：旧断言作废不值得在台账里长期占一行（留注释说明即可）。
+	// 于是本台账里 `layPending` 这一层现在是 **0 条** —— 它保留着以备下次"先写测试后写实现"。
 }
 
 // reSkipCall 匹配 t.Skip / t.Skipf 且第一个参数是同行的字符串字面量。

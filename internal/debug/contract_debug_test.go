@@ -1139,24 +1139,29 @@ func TestContractCandidateLineFormat(t *testing.T) {
 	}
 }
 
-// TestContractIdentityLineIsNotYetLanded 是 C5.9 身份行的记账：**服务端那两样已经落地，
-// 还差的是 CLI 那一行**。
+// TestContractIdentityLineIsLanded 是 C5.9 身份行的**落地断言**（本批交付）。
 //
-// 现状（WP4c 之后）：
-//   - 服务端**已经**产出 `display` 与 `name`（C5.3 的纯新增键，本文件上面几条已断言它们）；
-//     C5.9 那行的渲染实现也在 `internal/target`（`IdentityLine`，逐字对着契约）。
-//   - 还差的是**把它接进 CLI 的人话输出**：C5.9 要求身份行
-//     `会话 <display> · <name> · <state> · ENT <ent>` **替代** `internal/cli/debug` 今天那行
-//     `生效身份: 环境 … / 区域 … / 企业 … / 账号 … / 库 …`。
+// 上一版这条叫 `…IsNotYetLanded` 并且 `t.Skip`：服务端那时已经有 `display` 与 `name`、
+// `internal/target` 也已经有 `IdentityLine`，差的是**CLI 那行人话输出换字** ——
+// 而换字正是 H2 里"单会话输出逐字不变"的唯一例外（契约 C8.4 登记为第二处允许的变化）。
+// 本批按 C8.4 换了，于是这条跳过**按它自己的交代改成了真断言**，
+// 台账（`internal/testkit/skipledger_test.go`）里那条 `layPending` 也随之删掉
+// —— 不再跳过的东西不该留在跳过台账里。
 //
-// 为什么不在本批做：本次任务的硬纪律是"单会话下的命令输出**除新增键外逐字不变**（H2）"，
-// 而换掉那一行正是**改字**（契约 C8.4 把它登记为单会话下允许的第二处变化，但那是别的批次的授权）。
-// 所以这一条**继续跳过** —— 跳过的原因是"CLI 那一行还没换"，**不是**"服务端没数据"。
-func TestContractIdentityLineIsNotYetLanded(t *testing.T) {
-	// 能断言的那一半先断掉（免得这条跳过看起来像"什么都还没做"）。
+// 分工写清楚（免得两头都以为对方测了）：
+//   - **这里**钉"服务端产出的数据 + C5.9 的渲染"这一个组合：
+//     会话身份七键 → `sessionView` → `target.IdentityLine`，逐字对 C5.9；
+//   - **CLI 那一头**（`internal/cli/debug/envtarget_test.go` 的 `TestDBGIdentity*`）
+//     钉 `dbgIdentity` 真的把它打出来、且第二行（账号/库/区域）也在。
+//     本包 import 不了 `internal/cli/debug`（那会成环），所以那条只能在那一侧。
+//
+// 身份行按 C5.9 是**两行**（第一行四字段，第二行账号/库/区域）。这里只钉第一行 ——
+// 第二行那三样来自配置与企业快照，不是会话的身份键，由 CLI 那一侧的测试覆盖。
+func TestContractIdentityLineIsLanded(t *testing.T) {
 	m := NewManager(cfgFor("h1", "36"))
 	live := idleOn("s1", cfgFor("h1", "36"))
 	live.Prog = "apmt520"
+	live.cfg.Topent = "99" // 起会话时给的 --ent（`ent` 那一栏的来源）
 	m.mu.Lock()
 	if err := m.assignIdentityLocked(live, "汇率单"); err != nil {
 		m.mu.Unlock()
@@ -1168,17 +1173,45 @@ func TestContractIdentityLineIsNotYetLanded(t *testing.T) {
 	if b.Display == "" || b.Name == "" {
 		t.Fatalf("C5.3 要求服务端产出 display 与 name（WP4c 已落地），实得 display=%q name=%q", b.Display, b.Name)
 	}
-	// 目标层那行是现成的（C5.9 的唯一实现）：这一句证明"数据齐了、渲染也有了"。
+
+	// C5.9 的逐字格式：`会话 <display> · <name> · <state> · ENT <ent>`
+	// （分隔符是 空格 + U+00B7 + 空格；`<state>` 用现行中文标签）。
 	line := target.IdentityLine(sessionView(b))
-	if !strings.HasPrefix(line, "会话 "+b.Display+" · "+b.Name+" · ") {
-		t.Fatalf("C5.9 的身份行该以 `会话 <display> · <name> · <state> · ENT <ent>` 开头，实得 %q", line)
+	want := "会话 " + b.Display + " · " + b.Name + " · " + target.StateLabel(b.State) + " · ENT " + b.Ent
+	if line != want {
+		t.Errorf("C5.9 的身份行 = %q\n    期望 %q", line, want)
 	}
-	t.Skip("C5.9 身份行还没接进 CLI：服务端已有 display 与 name（WP4c）；差的是把 internal/cli/debug 的 `生效身份: …` 那行换成 `会话 <display> · <name> · <state> · ENT <ent>` —— 那是人话输出改字，按 H2 归后续批次")
+	// 身份行写 display（人读形态），第 1 个字段必须含 `/`（`环境/作业#序号`）——
+	// 写成 ref 就少了作业段，与 C5.9「身份行写字面量 会话 + <display>」不符。
+	if first := strings.Fields(strings.TrimPrefix(line, "会话 "))[0]; !strings.Contains(first, debugContractSelectorSep) {
+		t.Errorf("身份行第 1 个字段 %q 不含 %q —— 那不是 display（C5.9 要求写 display，对账才用 ref）",
+			first, debugContractSelectorSep)
+	}
+	// 取不到的两个字段写字面量，**不省整段**（省了字段位置就随会话漂）。
+	bare := target.IdentityLine(sessionView(SessionBrief{Env: "恒烁正式区", N: 2, Prog: "capp115", State: "idle"}))
+	if bare != "会话 恒烁正式区/capp115#2 · "+target.UnnamedPlaceholder+" · 空闲 · ENT "+target.UnknownPlaceholder {
+		t.Errorf("未命名/取不到企业编号时要写字面量 (未命名) 与 ?（C5.9），实得 %q", bare)
+	}
 }
 
 // ---------------------------------------------------------------------------
 // T2.1-g 端点与信封的两侧差别（C5.15 / C5.16 / 第 7 节的表）
 // ---------------------------------------------------------------------------
+
+// postForGenericFailure 发一条**必定走到"拨号失败"那一档**的请求，用来验通用失败信封的形状。
+//
+// 为什么是 `POST /api/wslogs/debug`：给它一条**池里的会话**（`actionTestServerWithSession`）
+// 之后，落位那一关过得去，接着就是 `dialSSH` —— 而 `actionTestServer*` 起的服务**没有生效环境**
+// （`&Config{Listen: …}`，SSH.Host 为空），于是当场 500 + 现行运行失败码。
+// 那正好是"通用失败"那一档（不是 `SESSION_*` 那几族：它们的候选清单形状另有测试盯）。
+//
+// 从前这里打的是 `POST /api/wstest`。那条端点本批已**从产品里取消**
+// （仓库主人定性：不是标准接口，是临时测试工具），所以换一个**仍然活着**的端点；
+// 两条断言的意图一个字没改 —— 测的是信封形状，不是那条端点。
+func postForGenericFailure(t *testing.T, hs *httptest.Server, sid string) *http.Response {
+	t.Helper()
+	return doReq(t, "POST", hs.URL+"/api/wslogs/debug", "", `{"rowid":"1","session":"`+sid+`"}`)
+}
 
 // TestContractHTTPFailureEnvelopeKeepsItsShape 钉住 C5.15 的两半：
 // **不许动的部分**（`ok` / `error` 的形状，B8）与**必给的部分**（`code`）。
@@ -1191,8 +1224,8 @@ func TestContractIdentityLineIsNotYetLanded(t *testing.T) {
 // 这与 CLI 侧（`output.WriteError` 的四键恒定）是**两套形状**，别混：
 // HTTP 侧给前端与 CLI 的 `dbgAPI`，CLI 侧给人读的 `--json` 调用方。
 func TestContractHTTPFailureEnvelopeKeepsItsShape(t *testing.T) {
-	hs := actionTestServer(t)
-	resp := doReq(t, "POST", hs.URL+"/api/wstest", "", "{}")
+	hs, sid := actionTestServerWithSession(t)
+	resp := postForGenericFailure(t, hs, sid)
 	if resp.StatusCode != 500 {
 		t.Fatalf("前置不成立：期望拨号失败退 500，得 %d（%s）", resp.StatusCode, respError(t, resp))
 	}
@@ -1225,8 +1258,8 @@ func TestContractHTTPFailureEnvelopeKeepsItsShape(t *testing.T) {
 // `TestActionEndpointsRequireExplicitTarget`（池空 / 歧义 / 指名不存在）里，
 // 这里只钉住"这个键从此必给"这一条。
 func TestContractHTTPFailureCodeIsLanded(t *testing.T) {
-	hs := actionTestServer(t)
-	resp := doReq(t, "POST", hs.URL+"/api/wstest", "", "{}")
+	hs, sid := actionTestServerWithSession(t)
+	resp := postForGenericFailure(t, hs, sid)
 	var raw map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
 		t.Fatalf("HTTP 失败信封不是合法 JSON：%v", err)

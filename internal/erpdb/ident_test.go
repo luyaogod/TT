@@ -1,6 +1,9 @@
 package erpdb
 
 import (
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -134,65 +137,269 @@ func TestSelectAllSQL(t *testing.T) {
 	}
 }
 
-// TestCheckReadOnlySQLIsAPrefixCheckNotAParser 钉住这道闸门的**强度**，不是它的完善度。
+// **本批已删掉的那条测试（留注释，不留代码）**：它从前叫
+// `TestCheckReadOnlySQLIsAPrefixCheckNotAParser`，钉的是"前缀匹配有多弱" ——
+// `TrimSpace`+`ToUpper` 看开头 + 看分号，其中一条断言是 `/* x */ DROP TABLE t` **会绕过**。
 //
-// 它做的事只有两件：TrimSpace+ToUpper 之后看**开头**是不是写操作、看有没有分号。
-// 所以它挡得住"手写的 INSERT/DROP 直接贴进来"这种最常见的情况，**挡不住**
-// 前面加一段注释的写法 —— 它不是解析器。
+// 本次这个位置换成了 `checkReadOnlyStatement`（委托 `internal/safesql.Check`，词法级：
+// 先剥注释，再按词边界/标识符前缀判），那一半断言当场反向 —— 整条测试按新性质重写成
+// 下面三条：
 //
-// 真正的文本闸门是 internal/safesql（`Check`，会先剥注释），这条是纵深防御的一层；
-// `live` 那条路径更是自己构造 SQL（值走 QuoteLit、表名走 ValidIdent），这里只是兜底。
-// 把它当"完善"来用才是危险的，所以下面把**它的边界**也一并钉住。
-func TestCheckReadOnlySQLIsAPrefixCheckNotAParser(t *testing.T) {
-	t.Run("拒绝：写操作开头", func(t *testing.T) {
-		for _, kw := range []string{"INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE",
-			"REPLACE", "ATTACH", "DETACH", "PRAGMA", "REINDEX", "VACUUM", "GRANT", "REVOKE"} {
-			for _, sql := range []string{
-				kw + " TABLE t",
-				strings.ToLower(kw) + " table t", // 大小写不敏感
-				"  \t" + kw + " TABLE t",         // 前面有空白
-			} {
-				if err := checkReadOnlySQL(sql); err == nil {
-					t.Errorf("%q 该被拒", sql)
+//   - `TestCheckReadOnlySQLRejectsWritesAndMultipleStatements`（该拒的都拒，含前导注释绕过）
+//   - `TestCheckReadOnlySQLAllowsReadOnlySelects`（该放的都放，宁可不误杀）
+//   - `TestCheckReadOnlyStatementBlocksTheReadOnlyTransactionBypass`（**两层合起来才成立**）
+//
+// 为什么删掉而不是留一条 `t.Skip`：跳过的测试与通过的测试在报告里长得一样无害，
+// 所以本仓有一条**跳过台账**（`internal/testkit/skipledger_test.go`）盯着每一处跳过。
+// "旧断言作废"这件事不值得在台账里长期占一行 —— 判据已经在下面三条里，留着只是噪音。
+
+// TestCheckReadOnlySQLRejectsWritesAndMultipleStatements 钉住文本层能挡住的那半边：
+// 写操作（含**前导注释**那种绕过写法）与多语句，一条都不许放过去。
+//
+// 为什么必须换掉前缀匹配：`erpdb` 的库侧只读事务是本批新加的（金仓
+// `default_transaction_read_only`、Oracle `SET TRANSACTION READ ONLY`），而它是
+// **会话级/事务级**的状态 —— 一句 `SELECT set_config('default_transaction_read_only','off',false)`
+// 就能把金仓那层拆掉。挡住那一句的**只有文本层**（见下面那条测试）。
+// 留着前缀匹配 = 给纸门加了把锁。
+func TestCheckReadOnlySQLRejectsWritesAndMultipleStatements(t *testing.T) {
+	bad := []string{
+		// ① 写操作直接贴进来（大小写不敏感、前面有空白）
+		"INSERT INTO t VALUES (1)",
+		"insert into t values (1)",
+		"  \tUPDATE t SET a = 1",
+		"DELETE FROM t",
+		"DROP TABLE t",
+		"ALTER TABLE t ADD c NUMBER",
+		"CREATE TABLE t (a NUMBER)",
+		"TRUNCATE TABLE t",
+		"MERGE INTO t USING s ON (1=1) WHEN MATCHED THEN UPDATE SET a=1",
+		"GRANT SELECT ON t TO u",
+		"REVOKE SELECT ON t FROM u",
+		"COMMIT",
+		"CALL p()",
+		"BEGIN NULL; END;",
+		"SELECT 1 INTO v FROM dual",
+		// ② **前导注释**的绕过写法：这一条是旧前缀匹配漏掉的现场
+		"/* x */ DROP TABLE t",
+		"-- x\nDELETE FROM t",
+		// ③ 多语句（中间的分号）
+		"SELECT 1; DROP TABLE t",
+		"SELECT 1; SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE",
+		// ④ 行锁与特权视图 / 带副作用的函数（只读查询不该碰）
+		"SELECT * FROM t FOR UPDATE",
+		"SELECT * FROM dba_users",
+		"SELECT pg_read_file('/etc/passwd')",
+		// ⑤ 不是查询（sqlplus 客户端命令）
+		"HOST rm -rf /tmp/x",
+	}
+	for _, sql := range bad {
+		if err := checkReadOnlyStatement(sql); err == nil {
+			t.Errorf("%q 该被拒（文本层是真检查，不是前缀匹配）", sql)
+		}
+	}
+}
+
+// TestCheckReadOnlySQLAllowsReadOnlySelects 是上面那条的**反面判据**：
+// 普通的只读查询不许被误杀 —— 误杀的代价是"字典查不出东西"，而它与"数据不存在"
+// 在输出上一模一样（`internal/safesql` 的包注释专门警告过这种静默退化）。
+//
+// 样例覆盖本包**真实**的两个调用面：`SelectAllSQL` 给 `tt dict db sync` 的
+// `SELECT * FROM <user>.<table>`，以及 `tt dict … --ent` 那条
+// `SELECT gzou001, gzou003 FROM gzou_t …`（`internal/cli/dict/entacct.go`）。
+func TestCheckReadOnlySQLAllowsReadOnlySelects(t *testing.T) {
+	good := []string{
+		"SELECT * FROM ds.dzea_t",
+		"select 1 from dual",
+		"WITH x AS (SELECT 1) SELECT * FROM x",
+		"SELECT * FROM t WHERE a = 'O''Brien'",
+		`SELECT gzou001, gzou003 FROM gzou_t WHERE gzoustus='Y' ORDER BY gzou001`,
+		// 字面量里出现禁用词不算命中（`safesql` 会先把字面量掏空再扫）——
+		// 值过 `QuoteLit` 之后长这样，误杀它会让"查一个叫 delete 的关键字"变成查不到。
+		"SELECT * FROM dzea_t WHERE dzea002 = 'delete from t'",
+		"SELECT * FROM dzea_t WHERE dzea002 = 'set_config'",
+	}
+	for _, sql := range good {
+		if err := checkReadOnlyStatement(sql); err != nil {
+			t.Errorf("%q 该放行（只读查询），实得：%v", sql, err)
+		}
+	}
+}
+
+// TestCheckReadOnlyStatementBlocksTheReadOnlyTransactionBypass 钉住**两层合起来才成立**
+// 的那一条，也是本批最要紧的一条判据：
+//
+//	SELECT set_config('default_transaction_read_only','off',false)
+//
+// 金仓那层只读是**会话级** GUC，这一句能把它改回 off —— 改完之后库侧兜底当场不存在。
+// 所以它必须被**文本层**挡住（`internal/safesql` 的禁用前缀里就有 `set_config`，
+// 注释原话："能在一条 SELECT 里把 default_transaction_read_only 改回 off，直接拆掉只读事务"）。
+//
+// 反向也一并钉住：`current_setting` 是同一个信息面，同样不许。
+//
+// 为什么这条不能只写在 README 里：它是"两层"这个说法成立与否的**唯一**机械判据 ——
+// 少一半，README 里那句"两层防线"就又变回一句空话（本次要修的正是这个）。
+func TestCheckReadOnlyStatementBlocksTheReadOnlyTransactionBypass(t *testing.T) {
+	bypasses := []struct{ sql, why string }{
+		{"SELECT set_config('default_transaction_read_only','off',false)",
+			"金仓那层只读是会话级 GUC，这一句把它关掉 = 拆掉库侧兜底"},
+		{"SELECT current_setting('default_transaction_read_only')",
+			"会话信息面，只读查询不需要它"},
+	}
+	for _, c := range bypasses {
+		err := checkReadOnlyStatement(c.sql)
+		if err == nil {
+			t.Errorf("该被拒：%s\n    %s\n    拒它的必须是文本层 —— 库侧只读事务拦不住「把自己关掉」的语句", c.sql, c.why)
+			continue
+		}
+		// 报错要点名是哪条规则（`safesql` 刻意不静默退化成空集），便于人照着改。
+		if !strings.Contains(err.Error(), "set_config") && !strings.Contains(err.Error(), "current_setting") {
+			t.Errorf("拒绝理由该点名那条受限函数，实得 %q", err.Error())
+		}
+	}
+}
+
+// TestRepoDictQueryLiteralsPassTheRealCheck 用**仓库里真实写着的**语句再验一次：
+// 换闸门之后，`internal/dict/live` 与 `internal/cli/dict` 里那些 SELECT 一条都不许被误杀。
+//
+// 为什么要扫源码而不是手抄样例：手抄的样例有一天会与生产脱节，而"闸门把真查询拒了"
+// 的现场表现是**静默**的（字典查不出东西，与"数据不存在"长得一模一样 ——
+// `internal/safesql` 的包注释专门警告过这种退化）。这条扫描是机械的：
+// 那两个目录下每一段以 `SELECT` / `WITH` 开头的**反引号字符串字面量**都要过闸门。
+//
+// 覆盖面与它的边界（如实写）：
+//   - 抓的是**整段**字面量（那正是 live 那一路的写法：`sql := \`SELECT …\``，拼值在末尾
+//     用 `+ lit(x)`），所以扫到的就是真正送进 `erpdb.Query` 的那条语句；
+//   - `internal/dict/db`（本地 SQLite 镜像）不在范围内：它不走 `erpdb`，闸门也管不着它；
+//   - 反面判据在下面：扫到的条数必须够多，否则这条测试是空转。
+func TestRepoDictQueryLiteralsPassTheRealCheck(t *testing.T) {
+	root := repoRootOf(t)
+	dirs := []string{
+		filepath.Join(root, "internal", "dict", "live"),
+		filepath.Join(root, "internal", "cli", "dict"),
+	}
+	re := regexp.MustCompile("(?s)`([^`]*)`")
+	checked := 0
+	for _, dir := range dirs {
+		files, err := filepath.Glob(filepath.Join(dir, "*.go"))
+		if err != nil {
+			t.Fatalf("扫 %s 失败：%v", dir, err)
+		}
+		for _, f := range files {
+			if strings.HasSuffix(f, "_test.go") {
+				continue
+			}
+			b, err := os.ReadFile(f)
+			if err != nil {
+				t.Fatalf("读 %s 失败：%v", f, err)
+			}
+			rel, _ := filepath.Rel(root, f)
+			for _, m := range re.FindAllStringSubmatch(string(b), -1) {
+				body := strings.TrimSpace(m[1])
+				head := strings.ToUpper(firstToken(body))
+				if head != "SELECT" && head != "WITH" {
+					continue
+				}
+				checked++
+				if err := checkReadOnlyStatement(body); err != nil {
+					t.Errorf("%s 里的这条只读查询被文本层拒了：\n%q\n→ %v\n"+
+						"（闸门把真查询拒掉的现场表现是字典静默查不出东西，必须改闸门，不是改语句）",
+						filepath.ToSlash(rel), body, err)
 				}
 			}
 		}
-	})
-	t.Run("拒绝：多语句（任何位置的分号）", func(t *testing.T) {
-		for _, sql := range []string{
-			"SELECT 1; DROP TABLE t",
-			"SELECT 1;",
-			"SELECT * FROM t WHERE x = 'a;b'", // 字面量里的分号也一并拒 —— 宁可错杀
-		} {
-			if err := checkReadOnlySQL(sql); err == nil {
-				t.Errorf("%q 该被拒", sql)
-			}
+	}
+	if checked < 10 {
+		t.Fatalf("只扫到 %d 条 SELECT/WITH 字面量 —— 扫描空转了（定位或正则错了），"+
+			"这条「不误杀」的断言等于没跑", checked)
+	}
+}
+
+// firstToken 取文本的第一个词（大写由调用方做）。
+func firstToken(s string) string {
+	if i := strings.IndexAny(s, " \t\r\n("); i >= 0 {
+		return s[:i]
+	}
+	return s
+}
+
+// TestDebugPathDoesNotImportErpdb 钉住"本批改动**一个字都动不到 `tt debug sql`**"。
+//
+// `tt debug sql`（→ `POST /api/dbsql` → `internal/debug/dbsql.go` 的 `RunReadonlyQuery`）
+// 走的是**经 SSH 用服务器侧 sqlplus / ksql 的 stdin 脚本**那条路，库侧只读**已经在脚本里**
+// （`oraReadonlyScript` 的 `SET TRANSACTION READ ONLY`、`kbReadonlyScript` 的
+// `SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`）。它**不 import 本包**，
+// 所以本批给 `erpdb` 加的那两层（金仓连接参数 / Oracle 包事务）与它没有交集。
+//
+// 这条测试把上面那句散文变成断言：**`internal/debug` 里出现 `tt/internal/erpdb` 就是红的**。
+// 有人哪天把 `tt debug sql` 改成走客户端直连，这条会当场提醒他：那条通道的只读防线
+// 与超时/限行/错误文案**全都不一样**，不能顺手换。
+//
+// 反面判据在下面：扫描必须真的扫到文件，否则这条等于空转。
+func TestDebugPathDoesNotImportErpdb(t *testing.T) {
+	root := repoRootOf(t)
+	dir := filepath.Join(root, "internal", "debug")
+	files, err := filepath.Glob(filepath.Join(dir, "*.go"))
+	if err != nil {
+		t.Fatalf("扫 %s 失败：%v", dir, err)
+	}
+	if len(files) < 10 {
+		t.Fatalf("只扫到 %d 个 .go —— 定位错了，这条断言等于空转", len(files))
+	}
+	const mod = "tt/internal/erpdb"
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("读 %s 失败：%v", f, err)
 		}
-	})
-	t.Run("放行：普通的只读 SELECT", func(t *testing.T) {
-		for _, sql := range []string{
-			"SELECT * FROM ds.dzea_t",
-			"select 1 from dual",
-			"WITH x AS (SELECT 1) SELECT * FROM x",
-			"SELECT * FROM t WHERE a = 'O''Brien'",
-		} {
-			if err := checkReadOnlySQL(sql); err != nil {
-				t.Errorf("%q 该放行：%v", sql, err)
-			}
+		if !strings.Contains(string(b), `"`+mod+`"`) {
+			continue
 		}
-	})
-	t.Run("边界（它的强度就到这儿）", func(t *testing.T) {
-		// 空语句：TrimSpace 之后没有前缀、没有分号 → 放行。它拦不住，也没打算拦。
-		if err := checkReadOnlySQL(""); err != nil {
-			t.Errorf("空串会放行（它不是解析器）：%v", err)
+		rel, _ := filepath.Rel(root, f)
+		t.Errorf("%s 引用了 %s —— `tt debug sql` 走的是 SSH + sqlplus/ksql 那条路，"+
+			"它的库侧只读、超时、限行与错误文案都住在 internal/debug 自己的 dbsql.go 里。\n"+
+			"    换成客户端直连等于把那条通道的防线整套换掉，不能顺手做（要做得单独一批）。",
+			filepath.ToSlash(rel), mod)
+	}
+}
+
+// repoRootOf 从本文件所在目录上溯到含 go.mod 的那一级。
+//
+// 不 import `internal/testkit`：那会把"测试助手"依赖进这个安全关键包
+// （而这个包的生产代码只依赖标准库 + 两个驱动）。上溯十行就够了。
+func repoRootOf(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("取工作目录失败：%v", err)
+	}
+	for i := 0; i < 12; i++ {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
 		}
-		// 前面加注释就绕过了"开头是写操作"这一条 —— 这**不是**"这里发现了漏洞"，
-		// 而是"这里从来不是拦这个的地方"（safesql 会先剥注释）。
-		bypass := "/* x */ DROP TABLE t"
-		if err := checkReadOnlySQL(bypass); err != nil {
-			t.Logf("（这一条现在被拒了：%v —— 那是好事，说明它比注释里写的更严，请更新本注释）", err)
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
 		}
-	})
+		dir = parent
+	}
+	t.Fatalf("从 %s 上溯没找到 go.mod —— 扫描会扫空目录", dir)
+	return ""
+}
+
+// TestServerVersionBypassesOnlyTheTextLayer 钉住"检查只做一遍、且做在唯一那个入口上"
+// 这个刻意的例外，免得有人以为 `ServerVersion` 忘了接闸门。
+//
+// `SELECT version()` 与 `SELECT banner FROM v$version …` 都是**代码字面量**，
+// 不是调用方给的语句；而后者里的 `v$` 会被文本层当特权视图拒掉（那是对的规则，
+// 只是不适用于"服务端版本"这条例外）。所以两个 `ServerVersion` 都走不带文本检查的
+// 执行体；**库侧只读照旧生效**（Oracle 那条走的就是包事务的那个函数）。
+func TestServerVersionBypassesOnlyTheTextLayer(t *testing.T) {
+	if err := checkReadOnlyStatement("SELECT banner FROM v$version WHERE ROWNUM = 1"); err == nil {
+		t.Errorf("特权视图 `v$*` 该被文本层拒（它是跨会话的元数据面）—— 上面那个例外才有存在意义")
+	}
+	if err := checkReadOnlyStatement("SELECT version()"); err != nil {
+		t.Errorf("`SELECT version()` 是普通只读查询，不该被拒：%v", err)
+	}
 }
 
 func TestGoOraDSNEscapesEveryComponent(t *testing.T) {

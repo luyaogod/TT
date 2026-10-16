@@ -225,6 +225,15 @@ type dbgSnapView struct {
 	Topent   string `json:"topent"`
 	TopentCf string `json:"topentCfg"`
 	TopentSh string `json:"topentShell"`
+	// TopentSession 是**本会话显式给的企业编号**（`tt debug start --ent` / 面板输入；
+	// 服务端的 `topentSession` 键，见 `Session.TopentSession`）。
+	//
+	// 它**只是**快照里既有的一栏，有它自己的含义 —— **不是** `ent` 的备胎：
+	// `<ent>` 那一栏的唯一来源是快照的 `ent`（服务端 `SessionBrief.Ent`，
+	// 契约 C5.1 / C5.3），见 `dbgIdentity`。上一批这里曾经被用来兜底 `ent`
+	// （`dbgIdentityEnt`），那处兼容层已按验收判定删净：客户端不许在 `ent` 与
+	// `topentSession` 之间做取舍（C5.17–C5.19）。
+	TopentSession string `json:"topentSession"`
 	// FGLServer 本轮 FGLSERVER 覆盖值(空 = 由 T100 按 SSH 来源 IP 自动设置);
 	// ScreenTarget 是服务端给的同一件事的人话版本(见 debug.ScreenTarget)。
 	FGLServer    string `json:"fglserver"`
@@ -237,33 +246,57 @@ type dbgSnapView struct {
 	} `json:"stop"`
 }
 
-// dbgIdentity 会话的"生效身份":环境 / 区域 / 企业 / 账号 / 库。
+// dbgIdentity 会话的"我在哪儿"（契约 C5.9：**会话级命令唯一的身份行**）。
+//
+// 两行，格式逐字对着 C5.9：
+//
+//	会话 <display> · <name> · <state> · ENT <ent>
+//	  账号 <acct> · 库 <target> · 区域 <zone>
+//
+// 第一行的渲染**不在本文件**：它是 `internal/target.IdentityLine`（C5.9 的唯一实现，
+// 与候选行 `CandidateLine` 同处一个包，两者的字段规则才不会各写一遍）。
+// 本函数只负责第二行那三样 —— 它们来自配置与企业快照，不是会话的身份键。
 //
 // 为什么非要有这一行:同一台机器上可以有多个环境指向**同一个库**(只有企业编号不同),
 // 那时 topent/topentCfg/topentShell 三个裸字段要么全空、要么同值,人根本看不出这次
 // 连的是哪个账号。账号由企业编号经 gzou_t 解析而来,查不到数据时"上错号"与"配置真的
 // 缺失"在输出上一模一样 —— 这一行就是用来分开这两件事的。
 //
+// **C8.4 登记的那处单会话输出变化就是这里**：从
+// `生效身份: 环境 … / 区域 … / 企业 … / 账号 … / 库 …` 换成上面两行（H2 的那一处例外，
+// 表征测试 `TestDBGIdentity*` 同步改了）。
+//
 // 账号走 LookupEnts(Offline):只读快照、**一次网络都不发**,没有快照就只回"查不到" ——
 // 这是输出里的一句说明,不值得为它拨一次 SSH(慢时 40 秒)。查不到不算错误,
 // 但会说明为什么没有,并给出自己核对的命令。
 func dbgIdentity(snap *dbgSnapView) string {
 	if snap == nil {
-		return ""
+		return "" // 没有快照时返回空串(不能打出半行)
 	}
+	// 第一行：C5.9 的身份行。`display` 取不到时（服务端没给这个键）退回 ref/句柄，
+	// 那是 `target.Session.DisplayForm` 的兜底，不是这里再拼一遍。
+	//
+	// `<ent>` **直接用快照里的 `ent`**（服务端 `SessionBrief.Ent` = `Session.CurrentEnt()`，
+	// C5.1 / C5.3）。这里**没有第二份取值链**：客户端不在 `ent` 与 `topentSession` 之间
+	// 做取舍（C5.17–C5.19）—— 上一批那处兼容兜底已删净，`ent` 只有这一个来源。
+	line := target.IdentityLine(snap.Session)
+
+	// 第二行：账号 / 库 / 区域（`?` 与 `(未配置)` 的取舍见 C5.9 与 orPlain）。
 	env := snap.Env
 	if env == "" {
 		env = "(未知)"
 	}
-	topent := firstNonEmpty(snap.TopentSh, snap.TopentCf, snap.Topent, "(未取到)")
-	zone := orPlain(snap.Zone)
-	target, acct, acctWhy := dbgDBIdentity(env, firstNonEmpty(snap.TopentSh, snap.TopentCf, snap.Topent))
-	reuse := ""
-	if snap.Reused {
-		reuse = "  ← 复用了已登录的宿主(未重新连接)"
+	entForAcct := firstNonEmpty(snap.TopentSh, snap.TopentCf, snap.Topent)
+	tgt, acct, acctWhy := dbgDBIdentity(env, entForAcct)
+	second := fmt.Sprintf("  账号 %s · 库 %s · 区域 %s", acct, tgt, orPlain(snap.Zone))
+	if acctWhy != "" {
+		second += "  " + acctWhy
 	}
-	return fmt.Sprintf("生效身份: 环境 %s / 区域 %s / 企业 %s / 账号 %s / 库 %s%s\n  %s",
-		env, zone, topent, acct, target, reuse, acctWhy)
+	if snap.Reused {
+		// 复用痕迹挂第二行末尾：身份行是 C5.9 定死的四字段格式，不许往里塞第五段。
+		second += "  ← 复用了已登录的宿主(未重新连接)"
+	}
+	return line + "\n" + second
 }
 
 func orPlain(v string) string {

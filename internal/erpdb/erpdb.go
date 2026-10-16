@@ -3,10 +3,10 @@ package erpdb
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"tt/internal/dbconfig"
+	"tt/internal/safesql"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -58,6 +58,30 @@ func OpenKingbase(ctx context.Context, c dbconfig.Connection) (Connector, error)
 	// **string), and it also avoids Kingbase's extended-protocol quirks.
 	poolCfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
 
+	// ---------- 第一层（库侧）：**会话级**只读 ----------
+	//
+	// `default_transaction_read_only=on` 是 PostgreSQL/KingbaseES 的 **USERSET** 级 GUC
+	// （任何能连上库的普通用户都能设，不需要 DBA 角色）。写进 `RuntimeParams` 之后
+	// **池里每条连接一建立就带上**，此后这个会话上的每个事务都是只读的 ——
+	// 常规 DML 由**服务器**拒绝，与文本层怎么判无关。
+	//
+	// 为什么用会话级而不是事务级：与远端那条通道同一个理由（`internal/debug/dbsql.go`
+	// 的 `kbReadonlyScript` 写死了这条）—— **过程内一次 `COMMIT` 之后事务级设置就失效了，
+	// 会话级还在**。
+	//
+	// 对连接复用**零影响**：这是启动参数（libpq 的 `options`），在每条连接**建立时**
+	// 生效一次；`Query` 照旧走 `pool.Query`，池的复用语义一个字节没变。
+	//
+	// **这一层不是全部**（见 `checkReadOnlyStatement` 的注释）：它是会话级 GUC，
+	// 一条 `SELECT set_config('default_transaction_read_only','off',false)` 就能拆掉它
+	// —— 挡住那一句的是**文本层**（`safesql` 的禁用前缀里有 `set_config`）。
+	// 两层合起来才成立：缺了文本层，这把锁能被一句 SELECT 打开；缺了这一层，
+	// 前导注释/自治事务就绕过去了。
+	if poolCfg.ConnConfig.RuntimeParams == nil { // ParseConfig 走 DSN 合成时会给空 map，这里只是别赌它
+		poolCfg.ConnConfig.RuntimeParams = map[string]string{}
+	}
+	poolCfg.ConnConfig.RuntimeParams["default_transaction_read_only"] = "on"
+
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		return nil, fmt.Errorf("创建 Kingbase 连接池失败: %w", err)
@@ -81,7 +105,7 @@ func kingbaseDSN(c dbconfig.Connection) string {
 func (k *KingbaseConnector) Type() string { return k.typ }
 
 func (k *KingbaseConnector) ServerVersion(ctx context.Context) (string, error) {
-	_, rows, err := k.Query(ctx, "SELECT version()")
+	_, rows, err := k.queryReadOnly(ctx, "SELECT version()")
 	if err != nil {
 		return "", err
 	}
@@ -93,11 +117,22 @@ func (k *KingbaseConnector) ServerVersion(ctx context.Context) (string, error) {
 
 // Query executes a read-only SQL statement and returns columns and rows as strings.
 // NULL values are returned as empty strings.
+//
+// 这条路是 `Connector` 接口上唯一的执行口，所以**文本层那道防线就挂在这里**
+// （`checkReadOnlyStatement`）：库侧的会话级只读是兜底，它拦不住"把只读自己关掉"
+// 的那一句 —— 见那两个函数的注释。
 func (k *KingbaseConnector) Query(ctx context.Context, sql string) ([]string, [][]string, error) {
-	if err := checkReadOnlySQL(sql); err != nil {
+	if err := checkReadOnlyStatement(sql); err != nil {
 		return nil, nil, err
 	}
+	return k.queryReadOnly(ctx, sql)
+}
 
+// queryReadOnly 是不带文本层检查的执行体。
+//
+// 用它的只有 `ServerVersion`（`SELECT version()` 是**代码字面量**，不是调用方给的语句）——
+// 于是"检查只做一遍、且做在唯一那个入口上"这件事是显式的，不是靠"没人从别处调"。
+func (k *KingbaseConnector) queryReadOnly(ctx context.Context, sql string) ([]string, [][]string, error) {
 	rows, err := k.pool.Query(ctx, sql)
 	if err != nil {
 		return nil, nil, fmt.Errorf("query: %w", err)
@@ -159,18 +194,35 @@ func validIdent(s string) bool {
 	return !(s[0] >= '0' && s[0] <= '9')
 }
 
-// checkReadOnlySQL 拒绝写入类与多语句,只允许单条只读 SELECT。
-func checkReadOnlySQL(sql string) error {
-	upper := strings.ToUpper(strings.TrimSpace(sql))
-	dangerous := []string{"INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "REPLACE",
-		"ATTACH", "DETACH", "PRAGMA", "REINDEX", "VACUUM", "GRANT", "REVOKE"}
-	for _, kw := range dangerous {
-		if strings.HasPrefix(upper, kw) {
-			return fmt.Errorf("写入操作 '%s' 不被允许，仅允许 SELECT 查询", kw)
-		}
-	}
-	if strings.Contains(upper, ";") {
-		return fmt.Errorf("不允许多语句查询 (语句中含分号)，仅允许单条 SELECT 查询")
-	}
-	return nil
+// checkReadOnlyStatement 是**文本层**那道防线：把要去执行的语句交给
+// `internal.safesql.Check` 判一次，nil 才放行。
+//
+// # 为什么不是本包自己那份前缀匹配（这次换掉的就是它）
+//
+// 从前这个位置是 `checkReadOnlySQL`：`TrimSpace` + `ToUpper` 看**开头**是不是写操作、
+// 看有没有分号。它挡得住"手写的 INSERT/DROP 直接贴进来"，但**挡不住**前面加一段注释的
+// 写法（README 的旧版自己承认这一点），更挡不住这一条：
+//
+//	SELECT set_config('default_transaction_read_only','off',false)
+//
+// 那一句**能拆掉库侧的只读事务**（见 `OpenKingbase` 的注释）。`safesql` 是词法级扫描
+// （先剥注释、按词边界/标识符前缀判），`set_config` 就在它的禁用前缀表里
+// —— 原话是"能在一条 SELECT 里把 default_transaction_read_only 改回 off，直接拆掉只读事务"。
+//
+// # 与库侧只读事务的关系（**这两层合起来才成立**，缺一不可）
+//
+//   - 库侧只读事务（金仓的 `default_transaction_read_only`、Oracle 的
+//     `SET TRANSACTION READ ONLY`）是**兜底**：它不认文本，只要语句真去写数据就被库拒；
+//   - 但它拦不住"把只读这个状态本身关掉"的语句 —— 金仓那条是**会话级** GUC，
+//     一句 `set_config` 就能改回 off，改完之后这一层的兜底当场不存在；
+//   - 所以**挡住 `set_config` 的正是这一处文本层**。反过来，文本层也拦不住
+//     "披着 SELECT 的写"（自治事务、函数副作用）—— 那要靠库侧事务。
+//
+// 一句话：**文本层负责不让只读被拆掉，库侧事务负责让写真的失败**。
+// 两层各自都挡不住全部，这不是"双保险"这种客套话，是它们的分工。
+//
+// 挡不住的（如实写，别粉饰）：自治事务 / 函数副作用（`safesql` 的包注释同款）；
+// Oracle 的独立事务与 `EXECUTE IMMEDIATE` 这类"披着 SELECT 的写"。
+func checkReadOnlyStatement(sql string) error {
+	return safesql.Check(sql)
 }
