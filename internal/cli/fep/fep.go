@@ -73,6 +73,8 @@ func init() {
 
 	Group.AddCommand(sessionCmd, uiCmd, recCmd, doCmd, waitCmd, srcCmd, jobCmd, feCmd)
 	sessionCmd.AddCommand(sessionPsCmd, sessionCloseCmd)
+	// 多条登记之后 `close` 必须能点名（不点名且有多条 = 歧义，见 session.go）。
+	sessionCloseCmd.Flags().StringVar(&sessionCloseTag, "tag", "", "要收掉的那一份登记的录制 ID（多条登记时必须点名；tt fep session ps 可查）")
 	uiCmd.AddCommand(uiSnapshotCmd, uiFindCmd, uiTreeCmd, uiRolesCmd, uiStateCmd)
 	recCmd.AddCommand(recStepsCmd)
 }

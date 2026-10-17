@@ -60,7 +60,7 @@ func TestSessionPIDsOnlyListsRegistered(t *testing.T) {
 func TestRegistryStopClearsEvenWhenProcessIsGone(t *testing.T) {
 	dir := t.TempDir()
 	r := NewRegistry(dir)
-	if err := r.Save(&Session{GDCPID: 0x7fffffff}); err != nil {
+	if err := r.Save(&Session{Tag: "fep-test", GDCPID: 0x7fffffff}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.Stop(); err != nil {
@@ -68,5 +68,117 @@ func TestRegistryStopClearsEvenWhenProcessIsGone(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, SessionFileName)); !os.IsNotExist(err) {
 		t.Fatal("registry not cleared")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 多会话（P1）：登记从"一份"变成"多份"，一条都不能丢
+// ---------------------------------------------------------------------------
+
+// TestRegistryListsMultipleSessions：两条登记互不覆盖。
+func TestRegistryListsMultipleSessions(t *testing.T) {
+	r := NewRegistry(t.TempDir())
+	for _, tag := range []string{"fep-a", "fep-b"} {
+		if err := r.Save(&Session{Tag: tag, Prog: tag, GDCPID: 0x7fffffff}); err != nil {
+			t.Fatalf("save %s: %v", tag, err)
+		}
+	}
+
+	list, err := r.List()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("两条登记应都在，实得 %d 条", len(list))
+	}
+	got, err := r.LoadTag("fep-b")
+	if err != nil || got.Prog != "fep-b" {
+		t.Fatalf("按 tag 取 fep-b 失败：%v %+v", err, got)
+	}
+}
+
+// TestRegistrySaveUpsertsByTag：同一个 Tag 再存一次是**替换**，不是追加。
+func TestRegistrySaveUpsertsByTag(t *testing.T) {
+	r := NewRegistry(t.TempDir())
+	if err := r.Save(&Session{Tag: "fep-a", Prog: "old"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Save(&Session{Tag: "fep-a", Prog: "new"}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := r.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].Prog != "new" {
+		t.Fatalf("同 Tag 应替换成一条，实得 %+v", list)
+	}
+}
+
+// TestRegistryLoadIsAmbiguousWhenMultiple：多条时 `Load()` **不挑**，报歧义并列出 tag。
+//
+// 这是多会话之后最容易踩的一处：`tt fep do` 这类命令不带目标时会走 `Load()`，
+// 若它悄悄返回第一条，动作就打在了别人的界面上。
+func TestRegistryLoadIsAmbiguousWhenMultiple(t *testing.T) {
+	r := NewRegistry(t.TempDir())
+	for _, tag := range []string{"fep-a", "fep-b"} {
+		if err := r.Save(&Session{Tag: tag}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := r.Load()
+	var amb *ErrAmbiguous
+	if !errors.As(err, &amb) {
+		t.Fatalf("多条时应报 ErrAmbiguous，实得 %T: %v", err, err)
+	}
+	if len(amb.Tags) != 2 {
+		t.Fatalf("歧义要列出全部 tag，实得 %v", amb.Tags)
+	}
+}
+
+// TestRegistryReadsLegacySingleObject：旧格式（单个对象）仍可读。
+//
+// 升级不该要求用户先手工删掉 .tt-fep.json —— 一份旧登记要在新版本里照常可用。
+func TestRegistryReadsLegacySingleObject(t *testing.T) {
+	r := NewRegistry(t.TempDir())
+	legacy := `{"env":"主机109","zone":"36","prog":"axmt500_wf","gdcPid":4242,"tag":"old"}`
+	if err := os.WriteFile(r.Path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := r.Load()
+	if err != nil {
+		t.Fatalf("旧格式应能读：%v", err)
+	}
+	if got.Tag != "old" || got.Prog != "axmt500_wf" || got.GDCPID != 4242 {
+		t.Fatalf("旧格式读出来的东西不对：%+v", got)
+	}
+}
+
+// TestRegistryStopTagOnlyRemovesThatOne：收一条不许动别人的登记。
+func TestRegistryStopTagOnlyRemovesThatOne(t *testing.T) {
+	r := NewRegistry(t.TempDir())
+	for _, tag := range []string{"fep-a", "fep-b"} {
+		if err := r.Save(&Session{Tag: tag, GDCPID: 0x7fffffff}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := r.StopTag("fep-a"); err != nil {
+		t.Fatalf("stop a: %v", err)
+	}
+	list, err := r.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].Tag != "fep-b" {
+		t.Fatalf("只该剩 fep-b，实得 %+v", list)
+	}
+}
+
+// TestRegistrySaveRequiresTag：没有 Tag 的登记无法定位，存的时候就该拒。
+func TestRegistrySaveRequiresTag(t *testing.T) {
+	r := NewRegistry(t.TempDir())
+	if err := r.Save(&Session{Prog: "无标签"}); err == nil {
+		t.Fatal("缺 Tag 的登记应被拒（否则多条之后无法定位）")
 	}
 }

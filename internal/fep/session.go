@@ -1,6 +1,7 @@
 package fep
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -87,26 +88,68 @@ func NewRegistry(dataDir string) *Registry {
 	return &Registry{Path: filepath.Join(dataDir, SessionFileName)}
 }
 
-// Load reads the session file.
-func (r *Registry) Load() (*Session, error) {
+// ErrAmbiguous 报告：登记里有**多条**会话，而调用方没有点名要哪一条。
+//
+// 为什么要这个错误而不是"取第一条"：多会话之后，一个不带目标的 `tt fep do` / `replay`
+// 落到哪一条上是不可预测的 —— 而"落错了"的表现是动作打在别人的界面上、输出一切正常。
+// 与调试线那条线（`SESSION_AMBIGUOUS`）同一条规矩：**多候选不自己挑**。
+type ErrAmbiguous struct {
+	Tags []string
+}
+
+func (e *ErrAmbiguous) Error() string {
+	return "fep: 登记里有多条会话，请点名要哪一条（--tag）: " + strings.Join(e.Tags, "、")
+}
+
+// ErrSessionNotFound 报告：点名的 `Tag` 不在登记里（与"一份登记都没有"区分开）。
+var ErrSessionNotFound = errors.New("fep: 没有这份登记")
+
+// readAll 读出登记里的**全部**会话（新格式 `{"sessions":[…]}`）。
+//
+// 兼容旧格式：从前这个文件里是**单个** Session 对象（`{"tag":…,"gdcPid":…}`）。
+// 两种都认，是因为升级是渐进的 —— 一份旧登记不该让用户先手工删文件才能用新版。
+func (r *Registry) readAll() ([]*Session, error) {
 	b, err := os.ReadFile(r.Path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, ErrNoSession
+			return nil, nil
 		}
 		return nil, err
 	}
-	var s Session
-	if err := json.Unmarshal(b, &s); err != nil {
+	trimmed := bytes.TrimSpace(b)
+	if len(trimmed) == 0 {
+		return nil, nil
+	}
+	// 新格式（也可能是一个裸数组，两处都认）
+	var wrapper struct {
+		Sessions []*Session `json:"sessions"`
+	}
+	if err := json.Unmarshal(trimmed, &wrapper); err == nil && wrapper.Sessions != nil {
+		return wrapper.Sessions, nil
+	}
+	var list []*Session
+	if trimmed[0] == '[' {
+		if err := json.Unmarshal(trimmed, &list); err != nil {
+			return nil, fmt.Errorf("fep: session file %s: %w", r.Path, err)
+		}
+		return list, nil
+	}
+	// 旧格式：单个对象
+	var one Session
+	if err := json.Unmarshal(trimmed, &one); err != nil {
 		return nil, fmt.Errorf("fep: session file %s: %w", r.Path, err)
 	}
-	return &s, nil
+	return []*Session{&one}, nil
 }
 
-// Save writes the session file atomically (temp file + rename): a partially
-// written registry would be worse than none, because cleanup trusts it.
-func (r *Registry) Save(s *Session) error {
-	b, err := json.MarshalIndent(s, "", " ")
+// writeAll 原子写回全部会话（临时文件 + rename）。
+func (r *Registry) writeAll(list []*Session) error {
+	if list == nil {
+		list = []*Session{}
+	}
+	b, err := json.MarshalIndent(struct {
+		Sessions []*Session `json:"sessions"`
+	}{Sessions: list}, "", " ")
 	if err != nil {
 		return err
 	}
@@ -115,6 +158,110 @@ func (r *Registry) Save(s *Session) error {
 		return err
 	}
 	return os.Rename(tmp, r.Path)
+}
+
+// List 返回登记里的全部会话（空 = 空切片，不报错）。
+func (r *Registry) List() ([]*Session, error) {
+	return r.readAll()
+}
+
+// Tags 返回登记里的全部 Tag（给"多候选"的报错与界面列用）。
+func (r *Registry) Tags() ([]string, error) {
+	list, err := r.readAll()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(list))
+	for _, s := range list {
+		out = append(out, s.Tag)
+	}
+	return out, nil
+}
+
+// Load 读**唯一**那条登记。
+//
+// 一条 → 它；多条 → `ErrAmbiguous`（不挑）；一份都没有 → `ErrNoSession`。
+// 这条与今天的行为逐字相同（单条时代只有一个分支成立）。
+func (r *Registry) Load() (*Session, error) {
+	list, err := r.readAll()
+	if err != nil {
+		return nil, err
+	}
+	switch len(list) {
+	case 0:
+		return nil, ErrNoSession
+	case 1:
+		return list[0], nil
+	default:
+		tags := make([]string, 0, len(list))
+		for _, s := range list {
+			tags = append(tags, s.Tag)
+		}
+		return nil, &ErrAmbiguous{Tags: tags}
+	}
+}
+
+// LoadTag 读点名的那条登记（tag 空 = 等价 Load）。
+func (r *Registry) LoadTag(tag string) (*Session, error) {
+	if strings.TrimSpace(tag) == "" {
+		return r.Load()
+	}
+	list, err := r.readAll()
+	if err != nil {
+		return nil, err
+	}
+	for _, s := range list {
+		if s.Tag == tag {
+			return s, nil
+		}
+	}
+	return nil, ErrSessionNotFound
+}
+
+// Save 写回一条会话：**按 Tag upsert**（同名替换，否则追加）。
+//
+// 原子写（临时文件 + rename）：写了一半的登记比没有更糟 —— 收尾与"已经在录"的判断都信它。
+func (r *Registry) Save(s *Session) error {
+	if s == nil {
+		return errors.New("fep: Save(nil)")
+	}
+	if strings.TrimSpace(s.Tag) == "" {
+		return errors.New("fep: 登记缺少 Tag（无法定位是哪一条）")
+	}
+	list, err := r.readAll()
+	if err != nil {
+		return err
+	}
+	replaced := false
+	for i, old := range list {
+		if old.Tag == s.Tag {
+			list[i] = s
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		list = append(list, s)
+	}
+	return r.writeAll(list)
+}
+
+// Remove 从登记里摘掉一条（不存在也算成功：收尾必须幂等）。
+func (r *Registry) Remove(tag string) error {
+	list, err := r.readAll()
+	if err != nil {
+		return err
+	}
+	out := make([]*Session, 0, len(list))
+	for _, s := range list {
+		if s.Tag != tag {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return r.Clear()
+	}
+	return r.writeAll(out)
 }
 
 // Clear removes the session file (used after a successful cleanup).
@@ -130,8 +277,13 @@ func (r *Registry) Clear() error {
 //
 // 顺序很重要：先请**常驻进程**自己收工（它知道怎么关远端作业、停代理、收实例），
 // 再它没退干净时兵底杀登记的 pid。反过来的话，远端 `r.r` 作业会被留在服务器上。
-func (r *Registry) Stop() (*Session, error) {
-	s, err := r.Load()
+func (r *Registry) Stop() (*Session, error) { return r.StopTag("") }
+
+// StopTag 收掉点名的那一条（tag 空 = 唯一那条，多条则 ErrAmbiguous）。
+//
+// 只摘**这一条**：多会话之后，"收掉一条"不许把别人的登记一起清掉。
+func (r *Registry) StopTag(tag string) (*Session, error) {
+	s, err := r.LoadTag(tag)
 	if err != nil {
 		return nil, err
 	}
@@ -164,8 +316,8 @@ func (r *Registry) Stop() (*Session, error) {
 			errs = append(errs, kerr.Error())
 		}
 	}
-	if cerr := r.Clear(); cerr != nil {
-		errs = append(errs, cerr.Error())
+	if rerr := r.Remove(s.Tag); rerr != nil {
+		errs = append(errs, rerr.Error())
 	}
 	if len(errs) > 0 {
 		return s, fmt.Errorf("fep: 收尾有失败: %s", strings.Join(errs, "; "))
