@@ -65,6 +65,10 @@ func Register(root *cobra.Command) {
 		group.AddCommand(mirror(src, name))
 	}
 	root.AddCommand(group)
+	// 标志/参数解析错按这条线的表退 2（cobra 默认是普通错误 → 根命令退 1）。
+	group.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
+		return &usageErr{msg: err.Error()}
+	})
 }
 
 // mirror 复制一条命令的外观（名字/说明/参数校验/RunE/标志），但**不复制实现**。
@@ -90,3 +94,9 @@ func mirror(src *cobra.Command, use string) *cobra.Command {
 	})
 	return c
 }
+
+// usageErr 是"用法错"（退出码 2）。本包不引 cli/fep 的私有错误类型，自己一只小的。
+type usageErr struct{ msg string }
+
+func (e *usageErr) Error() string { return e.msg }
+func (e *usageErr) ExitCode() int { return 2 }

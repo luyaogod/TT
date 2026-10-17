@@ -51,6 +51,16 @@ var group = &cobra.Command{
 	},
 }
 
+// init 让**标志/参数解析错**也按这条线的表退 2。
+//
+// cobra 默认把它当普通错误 → 根命令退 1，而这张表里 1 = 运行失败、2 = 用法错。
+// 少了它，`tt session ls --bogus` 会被脚本当成"运行失败"重试。
+func init() {
+	group.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
+		return failUsage("%v", err)
+	})
+}
+
 // Register 把这一组挂到根命令上（与其它命令组同一套注册方式）。
 func Register(root *cobra.Command) { root.AddCommand(group) }
 
