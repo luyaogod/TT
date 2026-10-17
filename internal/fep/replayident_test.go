@@ -512,3 +512,23 @@ func TestConfigureEventNeedsIdentityOnlyWhenWritingValue(t *testing.T) {
 		t.Fatalf("该报 %s，实得 %v", CodeFieldNotInScope, err)
 	}
 }
+
+// TestKindForReplayEvent：事件 → `ByColName` 的动作类型。
+//
+// 这条判据决定"要不要挑一个能接受该动作的节点"。`ConfigureEvent` 里只有**写值**是输入；
+// 定位/排版（tabIndex/bufferSize/pageSize）不限类型 —— 否则落在网格列上的那几条会被
+// `FIELD_NOT_ACTIONABLE` 一并拒掉（真机现场：回放卡在第 1 步，imaa001@TableColumn）。
+func TestKindForReplayEvent(t *testing.T) {
+	cases := []struct{ ev, want string }{
+		{`ActionEvent 0{{idRef "1"}}`, "click"},
+		{`ConfigureEvent 0{{idRef "1"}{ value "X"}}`, "input"},
+		{`ConfigureEvent 0{{idRef "766"}{ pageSize "9"}{ bufferSize "10"}}`, ""},
+		{`ConfigureEvent 0{{idRef "1065"}{ tabIndex "1"}}`, ""},
+		{`KeyEvent 0{{keyName "Tab"}}`, ""},
+	}
+	for _, c := range cases {
+		if got := kindForReplayEvent(c.ev); got != c.want {
+			t.Errorf("kindForReplayEvent(%s) = %q，要 %q", c.ev, got, c.want)
+		}
+	}
+}

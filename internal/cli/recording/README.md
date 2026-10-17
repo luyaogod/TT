@@ -18,7 +18,7 @@
 | `tt recording active` | 列**正在录的**（读登记 + 判本机 GDC 是否还活着） |
 | `tt recording ls` | 列录制件（缓存 + 长期库） |
 | `tt recording show <ID>` | 身份、指纹、路径、现在能不能用 |
-| `tt recording replay <ID>` | 在调试器下回放：先过身份闸，再发包，报停站位置 |
+| `tt recording replay <ID>` | 在调试器下回放：指纹闸 → 身份闸 → 发包；`--no-wait` 只发不等停站 |
 | `tt recording keep / rm / prune / index / mark-stale` | 留件 / 删件 / 清理 / 建帧索引 / 标记失效 |
 
 ## 改代码必须知道的三件事
