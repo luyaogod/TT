@@ -547,3 +547,41 @@ func TestSessionScreenStop(t *testing.T) {
 		t.Fatalf("record 别名该 200：%d", resp.StatusCode)
 	}
 }
+
+// TestSessionJobStartsOnThatSession：`POST /sessions/{id}/job` 必须**钉在那条会话上**。
+//
+// 关键不是"能不能起作业"（那要真 SSH），而是：非空闲直接拒；空闲时用的是**这条**会话当宿主
+// （`hostID`），而不是另找一个同环境的空闲宿主 —— 后者会让"会话里的作业"跑到别人那条上。
+func TestSessionJobStartsOnThatSession(t *testing.T) {
+	hs, s := actionTestDebugServer(t)
+	giveServerNamedEnv(s, "h1", "127.0.0.1", "36")
+
+	running := idleOn("s1", s.cfg.CloneEnv("h1"))
+	running.setNameInTest("A")
+	running.mu.Lock()
+	running.state = StateStopped
+	running.mu.Unlock()
+	s.mgr.sessions["s1"] = running
+	resp := doReq(t, "POST", hs.URL+"/api/sessions/s1/job", "", `{"prog":"bsft001_wf"}`)
+	if resp.StatusCode != 409 {
+		t.Fatalf("非空闲该 409，实得 %d（%s）", resp.StatusCode, respError(t, resp))
+	}
+
+	// 缺 prog：400（不拨号、不建会话）
+	idle := idleOn("s2", s.cfg.CloneEnv("h1"))
+	idle.setNameInTest("B")
+	s.mgr.sessions["s2"] = idle
+	resp = doReq(t, "POST", hs.URL+"/api/sessions/s2/job", "", `{}`)
+	if resp.StatusCode != 400 {
+		t.Fatalf("缺 prog 该 400，实得 %d（%s）", resp.StatusCode, respError(t, resp))
+	}
+
+	// 空闲 + 有 prog：拨号必然失败（测试桩），但**会话没被换掉**，且报的是拨号错
+	resp = doReq(t, "POST", hs.URL+"/api/sessions/s2/job", "", `{"prog":"bsft001_wf"}`)
+	if resp.StatusCode < 500 {
+		t.Fatalf("拨号失败该 5xx，实得 %d（%s）", resp.StatusCode, respError(t, resp))
+	}
+	if got := s.mgr.Get("s2"); got == nil {
+		t.Fatal("起作业失败不该把宿主会话删掉（它还是那条空闲会话）")
+	}
+}

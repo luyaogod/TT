@@ -517,3 +517,31 @@ func (f *Failure) WriteEnvelope(w io.Writer) error {
 	enc.SetIndent("", "  ")
 	return enc.Encode(payload)
 }
+
+// StartJob 在**指定的空闲会话**里起一个作业（`POST /api/sessions/{id}/job`）。
+//
+// 与 Launch 的分工：Launch 是"建会话（可顺带起作业）"；这条是"会话已经在了，只在它里面起作业"。
+// 返回的 sessionId 就是传进去的那一条（宿主不会被换掉）。
+func (c *Client) StartJob(id, prog, module, ent string) (string, error) {
+	body := map[string]any{"prog": prog}
+	if m := strings.TrimSpace(module); m != "" {
+		body["module"] = m
+	}
+	if e := strings.TrimSpace(ent); e != "" {
+		body["ent"] = e
+	}
+	data, err := c.Do(http.MethodPost, "/api/sessions/"+id+"/job", body)
+	if err != nil {
+		return "", err
+	}
+	var out struct {
+		SessionID string `json:"sessionId"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil {
+		return "", fmt.Errorf("debugclient: 起作业应答解析失败: %w", err)
+	}
+	if out.SessionID == "" {
+		return "", fmt.Errorf("debugclient: 起作业没回 sessionId")
+	}
+	return out.SessionID, nil
+}

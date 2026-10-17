@@ -211,6 +211,8 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/sessions/{id}", s.hQuit)
 	mux.HandleFunc("POST /api/sessions/{id}/restart", s.hSessionRestart)
 	mux.HandleFunc("POST /api/sessions/{id}/close", s.hSessionClose)
+	// 规格：在**既有会话**里起作业（会话已存在，{id} 就是宿主）
+	mux.HandleFunc("POST /api/sessions/{id}/job", s.hSessionJob)
 	mux.HandleFunc("POST /api/sessions/{id}/topent", s.hTopent)
 	mux.HandleFunc("POST /api/sessions/{id}/ent", s.hSessionEnt)
 	// 规格里的 quit 是 POST（DELETE 保留：旧调用方在用的名字）。两者同一件事。
@@ -2644,4 +2646,62 @@ func (s *Server) hSessionScreenStop(w http.ResponseWriter, r *http.Request) {
 	}
 	s.emitAction(r, sess, "screen.stop", fmt.Sprintf("收画面通道（录制 %s）", tag))
 	writeJSON(w, 200, map[string]any{"ok": true, "session": ref, "detached": true, "tag": tag})
+}
+
+// hSessionJob 在**指定的会话**里起一个作业（`POST /api/sessions/{id}/job`）。
+//
+// 与 `POST /api/sessions` 的分工：那条是"建会话（可顺带起作业）"；这条是"会话已经在了，
+// 只在它里面起作业" —— 调用方不必再拼环境/别名的匹配条件，`{id}` 就是宿主的唯一事实。
+//
+// 前置：会话必须**空闲**（作业在跑时再起一个，等于同一台 shell 上叠两个客户端）。
+func (s *Server) hSessionJob(w http.ResponseWriter, r *http.Request) {
+	sess := s.sessOfWrite(w, r)
+	if sess == nil {
+		return
+	}
+	var req struct {
+		Prog      string  `json:"prog"`
+		Module    string  `json:"module"`
+		Ent       string  `json:"ent"`
+		FGLServer *string `json:"fglserver"`
+	}
+	if !readBody(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.Prog) == "" {
+		fail(w, 400, fmt.Errorf("需要 prog：在会话里起的是哪个作业"))
+		return
+	}
+	if st := sess.State(); st != StateIdle {
+		fail(w, 409, fmt.Errorf("会话不是空闲（%s）：先结束当前这一轮，再在它里面起新作业", st))
+		return
+	}
+	cfg := s.envCfgFor(sess.EnvName())
+	if cfg == nil {
+		fail(w, 404, fmt.Errorf("环境 %q 不存在（会话登记着它，但配置里没有）", sess.EnvName()))
+		return
+	}
+	cc := *cfg
+	cfg = &cc // 只改本轮克隆：ent 覆盖不许留在内存配置里
+	if e := strings.TrimSpace(req.Ent); e != "" {
+		cfg.Topent = host.EntValue(e)
+	}
+	module := strings.TrimSpace(req.Module)
+	if module == "" {
+		module = "asf" // 与 CLI 的 -m 默认同值（T100 模块目录名）
+	}
+	// hostID = 这条会话：`prepareSessionOn` 的候选**就是它一条**，不会再挑别人。
+	ns, err := s.mgr.LaunchWith(cfg, module, strings.TrimSpace(req.Prog), "", sess.ID)
+	if err != nil {
+		fail(w, 502, err)
+		return
+	}
+	// 模式由**发起方**决定（与 hLaunch / hSessionSwitch 同一条规矩）：漏了它，业主授权时
+	// 新起的这一轮默认 collab，人在界面上的动作会被自己的闸门拒掉，而且是静默的。
+	ns.SetMode(launchModeFor(r))
+	s.emitAction(r, ns, "session.job", fmt.Sprintf("在会话里起作业 %s", req.Prog))
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"ok": true, "sessionId": ns.ID, "session": refOf(ns.EnvName(), ns.Seq()),
+		"prog": strings.TrimSpace(req.Prog), "module": module,
+	})
 }

@@ -263,6 +263,36 @@ ENT 必填：企业编号决定用哪个账号连库与据点校验，不再沿�
 		},
 	}
 
+	jobCmd := &cobra.Command{
+		Use:   "job --prog <作业>",
+		Short: "在这条会话里起一个作业（会话本来就空闲）",
+		Long: "在指定会话里起作业。\n\n" +
+			"与 `tt session new --prog` 的分工：那条是“建会话（顺带起作业）”；这条是“会话已经在了，\n" +
+			"只在它里面起作业”。典型用法是同一个宿主上换作业跑：`tt session quit` → `tt session job --prog …`。",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			prog := strings.TrimSpace(nsProg)
+			if prog == "" {
+				return failUsage("需要 --prog：在这条会话里起的是哪个作业")
+			}
+			cl, err := newClient()
+			if err != nil {
+				return err
+			}
+			b, rerr := resolve(cl, lsSession)
+			if rerr != nil {
+				return rerr
+			}
+			id, jerr := cl.StartJob(b.ID, prog, nsModule, nsEnt)
+			if jerr != nil {
+				return jerr
+			}
+			return emitFormatted(map[string]any{"ok": true, "session": b.Ref, "sessionId": id, "prog": prog}, func() {
+				fmt.Printf("已在会话 %s 里起作业 %s\n", b.Ref, prog)
+			})
+		},
+	}
+
 	execCmd := &cobra.Command{
 		Use:   "exec -- \"<fgldb 命令>\"",
 		Short: "透传一条 fgldb 命令（等价 tt debug exec）",
@@ -313,9 +343,13 @@ ENT 必填：企业编号决定用哪个账号连库与据点校验，不再沿�
 
 	quitCmd.Flags().StringVar(&lsSession, "session", "", "目标会话（ref / 别名 / 句柄）")
 	rmCmd.Flags().StringVar(&lsSession, "session", "", "目标会话（ref / 别名 / 句柄）")
+	jobCmd.Flags().StringVar(&lsSession, "session", "", "目标会话（ref / 别名 / 句柄）")
+	jobCmd.Flags().StringVar(&nsProg, "prog", "", "作业程序名（必填）")
+	jobCmd.Flags().StringVarP(&nsModule, "module", "m", "", "T100 模块目录名（留空用 asf）")
+	jobCmd.Flags().StringVar(&nsEnt, "ent", "", "企业编号（留空用会话自己的）")
 	execCmd.Flags().StringVar(&lsSession, "session", "", "目标会话（ref / 别名 / 句柄）")
 
-	group.AddCommand(newCmd, lsCmd, showCmd, entCmd, quitCmd, rmCmd, execCmd)
+	group.AddCommand(newCmd, jobCmd, lsCmd, showCmd, entCmd, quitCmd, rmCmd, execCmd)
 }
 
 // launchReq 组装"建会话 + 起作业"的请求（ENT 必填，模块可留空）。
