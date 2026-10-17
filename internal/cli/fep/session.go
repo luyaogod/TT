@@ -12,27 +12,11 @@ import (
 	"tt/internal/winproc"
 )
 
-// sessionCloseTag 是 `close --tag` 的取值：多条登记时点名叫哪一条。
-var sessionCloseTag string
 
-var sessionCmd = &cobra.Command{
-	Use:   "session",
-	Short: "会话：作业实例 + 代理 + 登记",
-	Long: `一个会话 = 一个隔离的 GDC 实例 + 一条本地代理 + 一份登记（数据目录下的 .tt-fep.json）。
 
-登记先写、清理后做：任何一步被打断，都能靠登记把这一轮起的东西收回，
-而且只收登记的 pid（绝不扫名字杀进程）。`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) == 0 {
-			return cmd.Help()
-		}
-		return fail(exitUsage, "未知子命令 %q", args[0])
-	},
-}
-
-var sessionPsCmd = &cobra.Command{
-	Use:   "ps",
-	Short: "列出已登记的会话（含 GDC 是否还活着、权限是否对得上）",
+var recActiveCmd = &cobra.Command{
+	Use:   "active",
+	Short: "列出正在进行的录制（登记里还活着的那些：含 GDC 是否还在、权限是否对得上）",
 	Args:  noArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		reg, _, err := registry()
@@ -78,15 +62,6 @@ var sessionPsCmd = &cobra.Command{
 				}
 			}
 		})
-	},
-}
-
-var sessionCloseCmd = &cobra.Command{
-	Use:   "close",
-	Short: "收掉已登记的会话（只杀登记的 pid），并清掉该条登记",
-	Args:  noArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return closeRegisteredSession(cmd, sessionCloseTag)
 	},
 }
 

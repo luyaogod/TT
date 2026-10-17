@@ -149,7 +149,7 @@ tt recording start --env <环境> --prog <作业> --ent <ENT>
 #   ↑ 它自己做完四件事：起隔离 GDC + 代理 → tt debug start（画面接到代理）→ 自动 continue 放行
 #     → 前台常驻。用户面前**只有作业窗口**，不需要会 debug。
 # —— 让用户在那个窗口里把问题复现出来 ——
-tt fep session close                           # 收工：落身份 + 自动搬进长期库
+tt recording stop <录制 ID>                    # 收工：落身份 + 自动搬进长期库
 tt recording ls                                # 拿到这一轮的「录制 ID」(形如 fep-20261015-182342)
 tt recording show <录制 ID>                       # 身份 + 指纹 + 现在能不能用
 ```
@@ -210,13 +210,13 @@ Get-Content "$env:APPDATA\tt\fep\<录制 ID>-replay-*.jsonl" -Tail 1
 tt recording replay <录制 ID> --break <文件>:<行>      # 例: --break asf_bsft001_wf.4gl:13640
 #   它读录制身份（环境/作业/ENT 不必手输）→ 起调试线会话 → 放行前下断点 → 过指纹闸
 #   → 重放 → 等停站，报出「指纹比对结果 + file:line」
-#   停站后不收拾会话：接着 tt debug exec 取证，收工 tt debug quit ; tt fep session close
+#   停站后不收拾会话：接着 tt debug exec 取证，收工 tt debug quit ; tt recording stop <录制 ID>
 ```
 
 只想把事件原样发出去、不等停站（面板那个「回放」按钮就是这么用的）就加 `--no-wait`：
 它发完就退，**留下的是一个还开着的作业窗口**（用户要看最后那一屏）与一份会话登记 ——
 那份登记里的 `ownerPid` 已经不在了，所以它**不算"还在录"**，不会挡下一轮；
-要关掉那个窗口就用 `tt fep session close`（面板上是「收工(关窗口)」）。
+要关掉那个窗口就用 `tt recording stop <录制 ID>`（先 `tt recording active` 查 ID）。
 
 ### 手工分步(要自己控制节奏时)
 

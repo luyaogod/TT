@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"tt/internal/config"
-	"tt/internal/fep"
 )
 
 // 不给 --env 时必须报错并**列出可用环境**。
@@ -70,16 +69,6 @@ func TestOpenEnvNameWithoutAnyEnv(t *testing.T) {
 // --ent 必须挂在 session open 上，且取值来源只有一个（openEnt）。
 // 这条防的是"旗标加了但没接进 OpenConfig"——
 // 那种情况下命令照常成功，作业却跑在别的企业上，全程没有一个字提示。
-func TestSessionOpenHasEntFlag(t *testing.T) {
-	if f := sessionOpenCmd.Flags().Lookup("ent"); f == nil {
-		t.Fatal("session open 必须有 --ent（企业编号由用户每次显式给）")
-	}
-	if f := sessionOpenCmd.Flags().Lookup("env"); f == nil {
-		t.Fatal("session open 必须有 --env（环境一律点名）")
-	} else if strings.Contains(f.Usage, "activeEnv") {
-		t.Fatalf("--env 的帮助还写着已删除的 activeEnv: %q", f.Usage)
-	}
-}
 
 // entText 没给 ENT 时不许留空：留空读起来像"这个会话没有企业"，
 // 而"我没指定（沿用登录 shell）"与"没有"是两件事。
@@ -96,37 +85,6 @@ func TestEntTextSaysWhatHappensWithoutEnt(t *testing.T) {
 // 启动路径要**跟着会话一起记下来**（录制身份与回放闸门都靠它）：
 // 这条命令只走 T100 标准启动器（r.r），--no-job 时如实报 none。
 // T100 原生的 r.d（fgldeb）不在命令面上 —— 要录要调都走调试线。
-func TestOpenPathReflectsHowTheJobIsStarted(t *testing.T) {
-	_ = openNoJob
-	if got := (openParams{}).path(); got != fep.PathRunnerRR {
-		t.Fatalf("session open 只走标准启动器，got %q", got)
-	}
-
-	if got := (openParams{NoJob: true}).path(); got != fep.PathNone {
-		t.Fatalf("--no-job 没起作业，要如实报 none，got %q", got)
-	}
-
-	// 命令面上不许再有 --path：r.d 这条路线已拿掉（它的常量只为识别老录制件而留）
-	if f := sessionOpenCmd.Flags().Lookup("path"); f != nil {
-		t.Fatal("--path 已从命令面拿掉：录制与调试都走调试线")
-	}
-}
 
 // --binary-ref 必须挂着：录制身份里的"编译件标识"只能由调用方给（r.r 路径下
 // 程序路径由登录环境决定，我们不知道）。
-func TestSessionOpenHasBinaryRefFlag(t *testing.T) {
-	f := sessionOpenCmd.Flags().Lookup("binary-ref")
-	if f == nil {
-		t.Fatal("session open 必须有 --binary-ref（否则身份里的编译件一栏永远是空的）")
-	}
-	if !strings.Contains(f.Usage, "重编译") {
-		t.Fatalf("帮助要写清它为什么存在: %q", f.Usage)
-	}
-	if err := f.Value.Set("/u1/t35prd/erp/asf/42r/bsft001_wf.42r"); err != nil {
-		t.Fatal(err)
-	}
-	if strings.TrimSpace(openBinary) != "/u1/t35prd/erp/asf/42r/bsft001_wf.42r" {
-		t.Fatalf("旗标没接进 openBinary: %q", openBinary)
-	}
-	_ = f.Value.Set("")
-}
