@@ -968,6 +968,12 @@ func (s *Server) hSessionSwitch(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Env string `json:"env"`
 		Ent string `json:"ent"`
+		// Name 是**这条新会话的别名**（可选）：创建即命名。
+		//
+		// 为什么需要它（多会话录制）：录制那几步要能点名"我这条"会话，而点名要有名字。
+		// 从前只能在 `debug start` 那一步用 `--name` 给，于是 `env`/`topent`/`exec` 这几步
+		// 只能裸奔 —— 多会话下要么撞歧义，要么落到别人的会话上。
+		Name string `json:"name"`
 		// Session 是**要收掉的那条会话**的服务端原始句柄（可选，见上面那段定稿）。
 		// 只认 `{id}`（`internal/target/view.go` 的 Session.ID），不认 `ref` / `display`
 		// —— C5.4 明写"路径与句柄只认 id"，选择器的解析住在 CLI 的目标层里。
@@ -998,19 +1004,59 @@ func (s *Server) hSessionSwitch(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.EnvName() != req.Env {
 		s.selectEnv(cfg)
 	}
-	if cur != nil {
-		if cur.sameEnvAs(cfg) {
-			writeJSON(w, 200, map[string]any{"ok": true, "sessionId": cur.ID, "env": req.Env, "state": string(cur.State())})
+	// 别名：取值纪律在这里判（与 `debug start` 同一套 F19），冲突由 CreateSessionOn 兜底。
+	name := strings.TrimSpace(req.Name)
+	if name != "" {
+		if f := target.ValidateAlias(name); f != nil {
+			writeCandidateFailure(w, http.StatusBadRequest, f.Code, f.Message, nil)
 			return
 		}
-		s.mgr.emit(Event{Type: "log", SessionID: cur.ID, Text: fmt.Sprintf("切换会话到 %s,断开当前会话", req.Env)})
-		_ = cur.Close()
-		s.mgr.Remove(cur.ID)
+	}
+	if cur != nil {
+		if cur.sameEnvAs(cfg) {
+			// 同环境：已经满足"这个环境里有一条能用的会话"，但**名字**要按这次的请求对齐 ——
+			// 录制那条链路（`debug env --name <别名>` → `topent --session <别名>` → `start`）
+			// 就靠这一步把"我这条"建出来：
+			//   - 没点名 / 同名  → 幂等返回；
+			//   - 它此前无名      → 把名字登记给它（C2.5b 禁的是**改名**，不是首次命名）；
+			//   - 它叫别的名字    → 那就是改名，不允许：空闲时收口重建，忙就拒。
+			switch {
+			case name == "" || cur.Name() == name:
+				writeJSON(w, 200, map[string]any{"ok": true, "sessionId": cur.ID, "env": req.Env, "state": string(cur.State())})
+				return
+			case cur.Name() == "":
+				if err := s.mgr.NameSession(cur, name); err != nil {
+					var taken *ErrNameTaken
+					if errors.As(err, &taken) {
+						s.writeNameTaken(w, taken)
+						return
+					}
+					fail(w, 409, err)
+					return
+				}
+				writeJSON(w, 200, map[string]any{"ok": true, "sessionId": cur.ID, "env": req.Env, "state": string(cur.State())})
+				return
+			default:
+				if cur.State() != StateIdle {
+					fail(w, 409, fmt.Errorf("这个环境里已有一条叫 %q 的会话，且它不在空闲（%s）；"+
+						"先 tt debug quit --session %s，或换一个 --name", cur.Name(), cur.State(), cur.Name()))
+					return
+				}
+				s.mgr.emit(Event{Type: "log", SessionID: cur.ID,
+					Text: fmt.Sprintf("切换会话到 %s：收掉旧的命名会话（%s），按 %s 重建", req.Env, cur.Name(), name)})
+				_ = cur.Close()
+				s.mgr.Remove(cur.ID)
+			}
+		} else {
+			s.mgr.emit(Event{Type: "log", SessionID: cur.ID, Text: fmt.Sprintf("切换会话到 %s,断开当前会话", req.Env)})
+			_ = cur.Close()
+			s.mgr.Remove(cur.ID)
+		}
 	}
 	// 「连到该环境」= 新建一条会话：别名**不继承**（C3.7b / Q19：别名随旧会话消失即释放；
 	// 要名字就在起会话时再给一次 —— 这条与 hSessionRestart 的"继承"刻意不同，后者是
-	// 同一条逻辑会话重新登录）。
-	ns, err := s.mgr.CreateSessionOn(cfg, "")
+	// 同一条逻辑会话重新登录）。冲突由 CreateSessionOn 在"判定 → 登记"之间兜住（F18 竞态）。
+	ns, err := s.mgr.CreateSessionOn(cfg, name)
 	if err != nil {
 		var taken *ErrNameTaken
 		if errors.As(err, &taken) {

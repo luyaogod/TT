@@ -125,7 +125,7 @@ func openDebugRecording(cmd *cobra.Command, s recSession) (*fep.Runtime, string,
 	}
 	logf("这一轮画面接线：FGLSERVER=%s（调试线按它把作业画到本代理上）", fgl)
 
-	if serr := runRecStartSteps(cmd, recStartSteps(dcfg.EnvName(), s.Ent, s.Prog, s.Module, fgl, alias), s.Breaks, s.NoContinue); serr != nil {
+	if serr := runRecStartSteps(cmd, recStartSteps(dcfg.EnvName(), s.Ent, s.Prog, s.Module, fgl, alias), s.Breaks, s.NoContinue, alias); serr != nil {
 		if cerr := rt.Close(); cerr != nil {
 			logf("收代理时还有失败：%v", cerr)
 		}

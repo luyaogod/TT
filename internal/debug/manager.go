@@ -1094,6 +1094,15 @@ func (m *Manager) assignNameLocked(sess *Session, name string) error {
 // 用途只有一处：Q23 的"名字不存在 → 起新的"在**复用宿主**形态下的落点 ——
 // 池子里没有叫 X 的会话，而恰好有一条空闲的同目标宿主，于是这一轮就落在这条宿主上，
 // X 就是"这条会话叫什么"。它此前没有名字，所以这不是改名（C2.5b 禁的是改名）。
+// NameSession 把别名登记给一条**此前无名**的会话。
+//
+// 为什么要导出：`hSessionSwitch`（`debug env --name`）也要走这条 —— 录制要能
+// "在这个环境里建一条叫 X 的空闲会话"，而池里可能已经有一条**没名字**的空闲宿主，
+// 把名字登记给它比重新登录一次便宜。它此前无名，所以不是改名（C2.5b 禁的是改名）。
+func (m *Manager) NameSession(sess *Session, name string) error {
+	return m.nameSession(sess, name)
+}
+
 func (m *Manager) nameSession(sess *Session, name string) error {
 	if strings.TrimSpace(name) == "" {
 		return nil

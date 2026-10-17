@@ -59,10 +59,15 @@ func TestRecStartStepsCarryAlias(t *testing.T) {
 	if !strings.Contains(joined, "--name fep-fep-20261016-120000") {
 		t.Fatalf("起作业那一步必须带上跨进程传目标用的固定别名：%q", joined)
 	}
-	// 别名只挂在注册了 --name 的**起会话**命令上（契约 C3.5）；其余几步今天不拼它
-	for _, st := range steps[:len(steps)-1] {
-		if strings.Contains(strings.Join(st.args, " "), "--name") {
-			t.Fatalf("--name 只该挂在起会话那一步：%v", st.args)
+	// **每一步都要点到"自己那条"会话**（P1 改正的那一处）。
+	// 从前只有起作业那一步带 `--name`，其余几步裸奔：多会话下 `debug env` / `topent` / `exec`
+	// 要么撞 `SESSION_AMBIGUOUS`，要么落到**别人**那条会话上（改它的 ENT、把断点下错地方）。
+	// 现在的规矩：创建类那一步用 `--name`（创建即命名），其余步骤用 `--session <同一个别名>`。
+	const alias = "fep-fep-20261016-120000"
+	for i, st := range steps {
+		line := strings.Join(st.args, " ")
+		if !strings.Contains(line, "--name "+alias) && !strings.Contains(line, "--session "+alias) {
+			t.Fatalf("第 %d 步没有点名自己那条会话（多会话下会落到别人身上）：%v", i, st.args)
 		}
 	}
 	// **WP6**：别名给了，收口那一步也要点名（`--session <同一个别名>`）。

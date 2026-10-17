@@ -244,7 +244,7 @@ func TestRecordingsCurrentTellsStaleFromLive(t *testing.T) {
 	if cur["stale"] != true {
 		t.Errorf("stale = %v，应为 true（起它的进程已经不在）", cur["stale"])
 	}
-	if _, busy := busySession(dataDir); busy {
+	if _, busy := busySession(dataDir, ""); busy {
 		t.Fatal("过期登记不该算「在跑」：它挡住的是一轮本来能起的录制")
 	}
 
@@ -261,7 +261,7 @@ func TestRecordingsCurrentTellsStaleFromLive(t *testing.T) {
 	if cur["stale"] != false {
 		t.Errorf("stale = %v，应为 false（进程还在）", cur["stale"])
 	}
-	sess, busy := busySession(dataDir)
+	sess, busy := busySession(dataDir, "")
 	if !busy || sess == nil || sess.Tag != "fep-live" {
 		t.Fatalf("活着的会话该算「在跑」：%v %v", busy, sess)
 	}
@@ -272,7 +272,39 @@ func TestRecordingsCurrentTellsStaleFromLive(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if sess, busy := busySession(dataDir); !busy || sess == nil {
+	if sess, busy := busySession(dataDir, ""); !busy || sess == nil {
 		t.Fatal("ownerPid 为空的登记不该被当成过期（猜错的代价是一轮录制与一组端口）")
+	}
+}
+
+// TestBusySessionIsScopedToEnv：**占用判断按环境**（P1）。
+//
+// 多会话之后"有人占着"不再等于"这个环境被占着"：一条录制占的是一个环境的一组端口与
+// 一条调试会话。从前全局判断会把别的环境的录制也算成占用，于是"在 109 录、想在另一个
+// 环境录"被无故挡下。
+func TestBusySessionIsScopedToEnv(t *testing.T) {
+	dir := t.TempDir()
+	reg := fep.NewRegistry(dir)
+
+	// 活着的登记（拿本进程当 OwnerPID：Alive 判的就是它）
+	if err := reg.Save(&fep.Session{Tag: "fep-a", Env: "主机109", OwnerPID: os.Getpid(), Started: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if s, busy := busySession(dir, "主机109"); !busy || s == nil || s.Tag != "fep-a" {
+		t.Fatalf("本环境有活登记就该公司占用：%v %v", busy, s)
+	}
+	if _, busy := busySession(dir, "测试1012"); busy {
+		t.Fatal("别的环境有录制不该挡住这个环境")
+	}
+	if _, busy := busySession(dir, ""); !busy {
+		t.Fatal("不按环境过滤时要能看见任何一条活登记")
+	}
+
+	// 过期登记（进程已不在）不算占用
+	if err := reg.Save(&fep.Session{Tag: "fep-b", Env: "测试1012", OwnerPID: 0x7fffffff}); err != nil {
+		t.Fatal(err)
+	}
+	if _, busy := busySession(dir, "测试1012"); busy {
+		t.Fatal("过期登记不该算占用（它挡住的是一轮本来能起的录制）")
 	}
 }

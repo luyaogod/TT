@@ -21,6 +21,11 @@ import (
 var (
 	dbgEnvTimeout int
 	dbgTopClear   bool
+	// dbgEnvName 是 `debug env --name`：**创建会话时一并命名**。
+	//
+	// 需要它的理由是多会话录制：录制那几步（env / topent / exec）都要能点名"我这条"会话，
+	// 而点名要有名字。从前名字只能在 `debug start` 那一步给，于是前面几步只能裸奔。
+	dbgEnvName string
 )
 
 // dbgSnapshot 会话快照中本命令关心的字段。
@@ -252,6 +257,10 @@ func dbgEnvSwitch(name string) error {
 	// 这里给的是**服务端原始句柄**（C5.4：REST 只认 id），目标层的落位在 dbgAmbientSession 里做：
 	// 唯一就落（含 `--session` 点名的那些写法），池空/多条时报 null 并让服务端按同一条规矩判。
 	body := map[string]any{"env": name}
+	// `--name`：创建即命名（多会话下前面几步才能点名到自己这条）。
+	if n := strings.TrimSpace(dbgEnvName); n != "" {
+		body["name"] = n
+	}
 	if cur != nil {
 		body["session"] = cur.ID
 	}
@@ -392,6 +401,7 @@ func orDefault(v, d string) string {
 
 func init() {
 	debugEnvCmd.Flags().IntVar(&dbgEnvTimeout, "timeout", 120, "切换等待会话空闲超时(秒)")
+	debugEnvCmd.Flags().StringVar(&dbgEnvName, "name", "", "创建会话时一并命名（多条会话下后续命令用 --session <别名> 点名；取值同 debug start --name）")
 	debugTopentCmd.Flags().BoolVar(&dbgTopClear, "clear", false, "清除会话级 TOPENT override(等价传空值)")
 	// env / topent 都作用在"某一条会话"上（契约 1. 的命令角色表），所以认 --session：
 	// 从前它们取列表第一个，多会话下"改的是哪条"由列表顺序决定。

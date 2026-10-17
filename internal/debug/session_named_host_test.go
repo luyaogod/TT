@@ -479,3 +479,94 @@ func funcBodyOf(t *testing.T, file, sig string) string {
 	}
 	return rest
 }
+
+// ---------------------------------------------------------------------------
+// 「创建即命名」：`debug env --name X` 的四种落点（P1）
+// ---------------------------------------------------------------------------
+
+// TestSwitchNamesAnUnnamedSession：池里已有一条同环境**无名**的空闲宿主 → 把名字登记给它，不重连。
+func TestSwitchNamesAnUnnamedSession(t *testing.T) {
+	hs, s := actionTestDebugServer(t)
+	giveServerNamedEnv(s, "h1", "127.0.0.1", "36")
+	live := idleOn("s-live", s.cfg.CloneEnv("h1"))
+	s.mgr.sessions[live.ID] = live
+
+	resp := doReq(t, "POST", hs.URL+"/api/sessions/switch", "", `{"env":"h1","name":"录像A"}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("无名宿主应被就地命名（不该重连）：%d（%s）", resp.StatusCode, respError(t, resp))
+	}
+	var out struct {
+		SessionID string `json:"sessionId"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	if out.SessionID != live.ID {
+		t.Fatalf("应落回原来那条（%s），实得 %s", live.ID, out.SessionID)
+	}
+	if live.Name() != "录像A" {
+		t.Fatalf("名字没登记上：%q", live.Name())
+	}
+}
+
+// TestSwitchSameNameIsIdempotent：同名再来一次 = 幂等（同一条会话）。
+func TestSwitchSameNameIsIdempotent(t *testing.T) {
+	hs, s := actionTestDebugServer(t)
+	giveServerNamedEnv(s, "h1", "127.0.0.1", "36")
+	live := idleOn("s-live", s.cfg.CloneEnv("h1"))
+	live.setNameInTest("录像A")
+	s.mgr.sessions[live.ID] = live
+
+	resp := doReq(t, "POST", hs.URL+"/api/sessions/switch", "", `{"env":"h1","name":"录像A"}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("同名应幂等：%d（%s）", resp.StatusCode, respError(t, resp))
+	}
+	if n := len(s.mgr.Snapshot()); n != 1 {
+		t.Fatalf("不该多出一条会话，实得 %d", n)
+	}
+}
+
+// TestSwitchDifferentNameRebuildsWhenIdle：叫别的名字且空闲 → 收掉旧的按新名重建。
+//
+// 新建要走拨号（测试桩必然失败），所以这里断言的是"旧的被收掉了、请求走到了新建"，
+// 而不是结果 200。
+func TestSwitchDifferentNameRebuildsWhenIdle(t *testing.T) {
+	hs, s := actionTestDebugServer(t)
+	giveServerNamedEnv(s, "h1", "127.0.0.1", "36")
+	old := idleOn("s-old", s.cfg.CloneEnv("h1"))
+	old.setNameInTest("旧名")
+	s.mgr.sessions[old.ID] = old
+
+	resp := doReq(t, "POST", hs.URL+"/api/sessions/switch", "", `{"env":"h1","name":"录像A"}`)
+	if resp.StatusCode == 200 {
+		t.Fatal("名字不同且旧会话叫别的名字：那是改名，不该成功")
+	}
+	if s.mgr.Get(old.ID) != nil {
+		t.Fatal("旧会话应被收掉（它是空闲的，收口重建）")
+	}
+}
+
+// TestSwitchDifferentNameRefusesWhenBusy：叫别的名字且**不空闲** → 409，不许悄悄收掉。
+func TestSwitchDifferentNameRefusesWhenBusy(t *testing.T) {
+	hs, s := actionTestDebugServer(t)
+	giveServerNamedEnv(s, "h1", "127.0.0.1", "36")
+	busy := idleOn("s-busy", s.cfg.CloneEnv("h1"))
+	busy.setNameInTest("旧名")
+	busy.mu.Lock()
+	busy.state = StateStopped
+	busy.mu.Unlock()
+	s.mgr.sessions[busy.ID] = busy
+
+	resp := doReq(t, "POST", hs.URL+"/api/sessions/switch", "", `{"env":"h1","name":"录像A"}`)
+	if resp.StatusCode != 409 {
+		t.Fatalf("忙会话不许被收掉重建，该 409，实得 %d（%s）", resp.StatusCode, respError(t, resp))
+	}
+	if s.mgr.Get(busy.ID) == nil {
+		t.Fatal("被拒时那条会话必须原样留着")
+	}
+}
+
+// setNameInTest 直接给会话命名（测试用）：走字段与锁，不经过服务端登记流程。
+func (s *Session) setNameInTest(name string) {
+	s.mu.Lock()
+	s.name = name
+	s.mu.Unlock()
+}

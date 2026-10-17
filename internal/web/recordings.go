@@ -157,10 +157,24 @@ func (s *Server) hRecordingsCurrent(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	sess, lerr := fep.NewRegistry(dataDir).Load()
-	if lerr != nil || sess == nil {
+	// 多条登记时这一格给**最新的一条活登记**（面板那一栏问的是"现在在录什么"）；
+	// 并发录制的完整清单在 `/api/recordings` 列表里，按 env/ent 过滤。
+	list, lerr := fep.NewRegistry(dataDir).List()
+	if lerr != nil || len(list) == 0 {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "recording": nil})
 		return
+	}
+	var sess *fep.Session
+	for _, s := range list {
+		if s == nil || s.Stale() {
+			continue
+		}
+		if sess == nil || s.Started.After(sess.Started) {
+			sess = s
+		}
+	}
+	if sess == nil { // 全是过期登记：给最后一条，至少面板能说出这是谁留下的
+		sess = list[len(list)-1]
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "recording": map[string]any{
 		"id": sess.Tag, "env": sess.Env, "zone": sess.Zone, "ent": sess.Ent,
@@ -178,21 +192,33 @@ type recStartReq struct {
 	BinaryRef string `json:"binaryRef"`
 }
 
-// busySession 读会话登记，并回答"这一轮是不是**真的还占着**"。
+// busySession 读会话登记，并回答"这个环境里是不是**真的还占着**"。
 //
 //   - (sess, true)：起它的进程还活着 —— 它占着三个端口与调试会话，不能起新的；
-//   - (sess, false) 且 sess != nil：只剩一份**过期登记**（`rec reproduce --no-wait`
-//     发完就退留下的那份），可以起新的；
-//   - (nil, false)：没有登记。
+//   - (nil, false)：没有该环境的活登记（含"只剩过期登记"的那一种）。
 //
-// 为什么要分这两件事：把过期登记也当成"已经在录"，用户看到的是"已经在录了（fep-x）：
-// 先停掉它再起新的"，可其实谁都没在录 —— 那一轮早就发完了，只剩一个还开着的 gdc 窗口。
-func busySession(dataDir string) (*fep.Session, bool) {
-	sess, err := fep.NewRegistry(dataDir).Load()
-	if err != nil || sess == nil {
+// 为什么要按环境过滤（多会话）：一条录制占的是**一个环境**的一组端口与一条调试会话。
+// 从前登记只有一条，所以"有人占着"必然就是"这个环境被占着"；多会话之后这两件事分开了 ——
+// 全局判断会把另一个环境的录制也算成占用，于是"Agent A 在 109 录、Agent B 想在同一台机器
+// 的另一个环境录"被无故挡下。
+//
+// env 为空 = 不按环境过滤（保持旧的调用语义：那些调用问的是"有没有任何一轮在跑"）。
+func busySession(dataDir, env string) (*fep.Session, bool) {
+	list, err := fep.NewRegistry(dataDir).List()
+	if err != nil {
 		return nil, false
 	}
-	return sess, !sess.Stale()
+	want := strings.TrimSpace(env)
+	for _, s := range list {
+		if s == nil || s.Stale() {
+			continue
+		}
+		if want != "" && s.Env != want {
+			continue
+		}
+		return s, true
+	}
+	return nil, false
 }
 
 // hRecordingStart POST /api/recordings
@@ -219,7 +245,7 @@ func (s *Server) hRecordingStart(w http.ResponseWriter, r *http.Request) {
 	// 而且用户看到的是"点了一下没反应"。**过期登记不算在录**（见 busySession）。
 	reg := fep.NewRegistry(dataDir)
 	prevTag := ""
-	if sess, busy := busySession(dataDir); busy {
+	if sess, busy := busySession(dataDir, req.Env); busy {
 		writeErr(w, http.StatusConflict,
 			fmt.Errorf("已经在录了（%s，%s）：先停掉它再起新的", sess.Tag, sess.Prog))
 		return
@@ -444,7 +470,7 @@ func (s *Server) hRecordingReplay(w http.ResponseWriter, r *http.Request) {
 				"要在断点下重放，请用面板「开始录制」录的那一份（走 debug 线）"))
 		return
 	}
-	if sess, busy := busySession(dataDir); busy {
+	if sess, busy := busySession(dataDir, mt.Env); busy {
 		writeErr(w, http.StatusConflict,
 			fmt.Errorf("现在有一轮录制在跑（%s，%s）：先停掉它再回放（两边要占同一组端口与调试会话）",
 				sess.Tag, sess.Prog))

@@ -153,7 +153,7 @@ var recStartCmd = &cobra.Command{
 		// alias（T5.4 / C7.3）：把这一轮的录制身份当**固定别名**传进子进程 ——
 		// 子进程之后靠它落回同一条会话（Q23：别名空闲就复用），而不是靠"有会话就收"。
 		alias := recSessionAlias(tag)
-		if serr := runRecStartSteps(cmd, recStartSteps(dcfg.EnvName(), ent, recStartProg, recStartModule, fgl, alias), nil, recStartNoCont); serr != nil {
+		if serr := runRecStartSteps(cmd, recStartSteps(dcfg.EnvName(), ent, recStartProg, recStartModule, fgl, alias), nil, recStartNoCont, alias); serr != nil {
 			// 半路失败：把已经起来的代理收掉（它占着 GDC/代理/注入三个端口）
 			if cerr := rt.Close(); cerr != nil {
 				logf("收代理时还有失败：%v", cerr)
@@ -224,9 +224,19 @@ func recStartSteps(env, ent, prog, module, fglserver, alias string) []recStep {
 	// 于是"收口只收自己那条"由名字保证，不会打到别人的会话上（缺陷 D / T5.5）。
 	// 别名取不到（老调用方）时留空 = 今天的行为（H2）。
 	steps := []recStep{{args: recQuitArgs(alias), optional: true}}
-	steps = append(steps, recStep{args: []string{"debug", "env", env}})
+	// 点名环境时**顺手命名**这条会话：后面 topent / exec 两步才有名字可点
+	// （多会话下不点名的后果是"撞歧义"或"落到别人那条上"）。
+	envArgs := []string{"debug", "env", env}
+	if a := strings.TrimSpace(alias); a != "" {
+		envArgs = append(envArgs, "--name", a)
+	}
+	steps = append(steps, recStep{args: envArgs})
 	if strings.TrimSpace(ent) != "" {
-		steps = append(steps, recStep{args: []string{"debug", "topent", ent}})
+		topArgs := []string{"debug", "topent", ent}
+		if a := strings.TrimSpace(alias); a != "" {
+			topArgs = append(topArgs, "--session", a)
+		}
+		steps = append(steps, recStep{args: topArgs})
 	}
 	start := []string{"debug", "start", prog, "--env", env, "--fglserver", fglserver}
 	// 企业编号随"起作业"那一步送下去：调试线现在**必填** ENT（不再沿用登录 shell 的 $TOPENT）。
@@ -247,7 +257,7 @@ func recStartSteps(env, ent, prog, module, fglserver, alias string) []recStep {
 // 为什么走子进程而不是 import 调试那个包：调试服务的协议（HTTP API、apiBase 前缀、
 // X-Actor 头）只该有一份实现，它在 internal/cli/debug 里；跨命令组 import 会把那份实现
 // 变成两处共用、谁都不敢改的东西。代价是每条命令一次进程启动（毫秒级）。
-func runRecStartSteps(cmd *cobra.Command, steps []recStep, breaks []string, noContinue bool) error {
+func runRecStartSteps(cmd *cobra.Command, steps []recStep, breaks []string, noContinue bool, alias string) error {
 	for _, st := range steps {
 		if err := runSelf(cmd, st.args...); err != nil {
 			if st.optional {
@@ -258,15 +268,24 @@ func runRecStartSteps(cmd *cobra.Command, steps []recStep, breaks []string, noCo
 		}
 	}
 	// 断点必须在**放行之前**下：程序停在入口时下才有意义，放行之后那一段已经跑过去了。
+	// `--session` 与上面几步同一个别名：多会话下不带目标的 exec 会被服务端按歧义拒掉。
 	for _, b := range breaks {
-		if err := runSelf(cmd, "debug", "exec", "break "+b); err != nil {
+		args := []string{"debug", "exec", "break " + b}
+		if a := strings.TrimSpace(alias); a != "" {
+			args = append(args, "--session", a)
+		}
+		if err := runSelf(cmd, args...); err != nil {
 			return fail(exitFailed, "下断点失败（break %s）：%v", b, err)
 		}
 	}
 	if noContinue {
 		return nil
 	}
-	if err := runSelf(cmd, "debug", "exec", "continue", "--wait", "20"); err != nil {
+	contArgs := []string{"debug", "exec", "continue", "--wait", "20"}
+	if a := strings.TrimSpace(alias); a != "" {
+		contArgs = append(contArgs, "--session", a)
+	}
+	if err := runSelf(cmd, contArgs...); err != nil {
 		return fail(exitFailed, "放行失败（tt debug exec continue）：%v", err)
 	}
 	return nil
