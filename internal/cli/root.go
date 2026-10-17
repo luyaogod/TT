@@ -26,6 +26,7 @@ import (
 	"tt/internal/cli/drawio"
 	"tt/internal/cli/fep"
 	"tt/internal/cli/form"
+	"tt/internal/cli/session"
 	"tt/internal/cli/view"
 	"tt/internal/output"
 )
@@ -46,6 +47,10 @@ var rootCmd = &cobra.Command{
                （tt dev tzs <动词> --args '<JSON 对象>'），由设计器自己的引擎算，不是拼 XML
   tt dict …    ERP 数据字典查询：r.t / desc / scc / r.q / prog 等，支持本地镜像与远程直查
   tt drawio …  画原型图：把 T100 组件库交给 drawio，按设计器惯例拼界面草图
+
+  tt session … 会话：建 / 列 / 看 / 改 ENT / 结束本轮 / 收掉 / 透传（会话是一级对象，
+               目标一律用 --session 点名，多条不替你挑）
+  tt fep …     前端协议：读写运行中的作业界面，录制与回放
 
   tt env …     环境管理：列出/查看/切换 SSH 环境（三个工具共用同一份环境清单）
   tt config …  配置管理：位置/查看/读写/校验
@@ -112,6 +117,7 @@ func init() {
 	dev.Register(rootCmd)
 	dict.Register(rootCmd)
 	fep.Register(rootCmd)
+	session.Register(rootCmd)
 	form.Register(rootCmd)
 	view.Register(rootCmd)
 	drawio.Register(rootCmd)

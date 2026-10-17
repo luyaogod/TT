@@ -450,3 +450,13 @@ func (c *Client) Quit(id string) error {
 	_, err := c.Do(http.MethodDelete, "/sessions/"+id, nil)
 	return err
 }
+
+// Close 收掉会话（断连接、清理资源）。与 Quit 的区别：
+//   - Quit（`DELETE /sessions/{id}`）= **结束本轮调试，会话保留**（回 idle）；
+//   - Close（`POST /sessions/{id}/close`）= **把这条会话收掉**。
+//
+// 两个动作在旧命令里都叫过"退出"，混用会留下空会话或误杀宿主 —— 所以在这里分名。
+func (c *Client) Close(id string) error {
+	_, err := c.Do(http.MethodPost, "/sessions/"+id+"/close", nil)
+	return err
+}
