@@ -35,6 +35,9 @@ func Register(root *cobra.Command) {
 		Short: "录制：列 / 看 / 留 / 删 / 清 / 建索引",
 		Long: `录制件（.raw 帧流 + 索引 + 元数据）的查看与维护。
 
+  tt recording start …       起一轮录制（旧入口：tt fep rec start）
+  tt recording stop <录制ID>  停止一轮录制：收掉代理/GDC、落身份、清登记
+  tt recording replay <录制ID> 回放一份录制（旧名 reproduce）
   tt recording ls            列出录制件（旧入口：tt fep rec list）
   tt recording show <录制ID>  看一份录制件的详情
   tt recording keep <录制ID>  标记保留（清理时跳过）

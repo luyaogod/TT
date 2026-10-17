@@ -86,6 +86,16 @@ var sessionCloseCmd = &cobra.Command{
 	Short: "收掉已登记的会话（只杀登记的 pid），并清掉该条登记",
 	Args:  noArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		return closeRegisteredSession(cmd, sessionCloseTag)
+	},
+}
+
+// closeRegisteredSession 收掉一份登记（tag 空 = 唯一那条；多条则要求点名）。
+//
+// 抽出来是因为**两个入口共用它**：`tt fep session close`（旧）与 `tt recording stop`（新）。
+// 收尾这件事里有一串容易漏的细节（先请常驻进程自退、只杀登记的 pid、调试侧按 ref 收口、
+// 最后才摘登记），复制两份必然漂 —— 而漂的那一次会留下一个跑着的代理或一条僵着的调试会话。
+func closeRegisteredSession(cmd *cobra.Command, tag string) error {
 		reg, _, err := registry()
 		if err != nil {
 			return err
@@ -99,7 +109,7 @@ var sessionCloseCmd = &cobra.Command{
 		}
 		// 多条登记必须点名：与调试线同一条规矩 —— 多候选不自己挑。
 		// 从前这里恒为"唯一那条"，多会话之后"随手收一条"就是收别人的界面。
-		tag := strings.TrimSpace(sessionCloseTag)
+		tag = strings.TrimSpace(tag)
 		if tag == "" {
 			if len(list) > 1 {
 				tags := make([]string, 0, len(list))
@@ -154,8 +164,8 @@ var sessionCloseCmd = &cobra.Command{
 				fmt.Printf("已收会话 %s（%s）：GDC pid %d 早已不在，登记已清\n", stopped.Prog, stopped.Tag, stopped.GDCPID)
 			}
 		})
-	},
 }
+
 
 func aliveText(alive bool) string {
 	if alive {
