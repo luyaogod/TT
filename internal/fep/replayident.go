@@ -131,6 +131,13 @@ func kindForReplayEvent(event string) string {
 	case "ActionEvent":
 		return "click"
 	case "ConfigureEvent":
+		// 只有"写值"才是输入动作；定位/排版（tabIndex/bufferSize/pageSize/cursor…）不限动作类型 ——
+		// 它们本来就不是"点某个控件"，按输入去要求可选性会把网格列一并拒掉（真机现场：
+		// imaa001 落在 TableColumn 上，FIELD_NOT_ACTIONABLE）。
+		if configureWritesValue(event) {
+			return "input"
+		}
+		return ""
 		return "input"
 	}
 	return ""
