@@ -301,34 +301,64 @@ var recListCmd = &cobra.Command{
 			dirs = append(dirs, r.Label+" "+r.Dir)
 		}
 		return printJSONOrText(map[string]any{"roots": dirs, "count": len(rows), "recordings": rows}, func() {
-			if len(rows) == 0 {
-				fmt.Printf("没有录制件（看过的落点：%s）\n", strings.Join(dirs, "；"))
-				return
-			}
-			for _, d := range dirs {
-				fmt.Printf("落点 %s\n", d)
-			}
-			for _, r := range rows {
-				if r.Err != "" {
-					fmt.Printf("  %s  %s  %s\n", pad(r.ID, 24), padDisp(r.Where, 8), "读不了："+r.Err)
-					continue
-				}
-				path := string(r.Path)
-				if !r.HasMeta {
-					path = "（无身份）"
-				}
-				where := r.Env
-				if r.Zone != "" {
-					where += "/" + r.Zone
-				}
-				if r.Ent != "" {
-					where += "/ENT " + r.Ent
-				}
-				fmt.Printf("  %s  %s  %s  %s  %s  %s\n", pad(r.ID, 24), padDisp(r.Where, 8),
-					padDisp(path, 12), padDisp(r.Prog, 14), padDisp(where, 22), r.Fingerprint)
-			}
+			fmt.Print(recListText(dirs, rows))
 		})
 	},
+}
+
+// recListText 是清单的**文本渲染**（抽成函数是为了可测：命令直接写 os.Stdout）。
+//
+// 标记过的录制（A24）在这一行末尾说「不可回放（需重录）」——
+// 列表是用户/agent 挑件的第一眼，那句话必须在这儿，不能只在明细里。
+func recListText(dirs []string, rows []recRow) string {
+	var b strings.Builder
+	if len(rows) == 0 {
+		fmt.Fprintf(&b, "没有录制件（看过的落点：%s）\n", strings.Join(dirs, "；"))
+		return b.String()
+	}
+	for _, d := range dirs {
+		fmt.Fprintf(&b, "落点 %s\n", d)
+	}
+	for _, r := range rows {
+		b.WriteString(recRowLine(r))
+	}
+	return b.String()
+}
+
+// recRowLine 把一行清单渲染成文本（含"标记过"那一句）。
+//
+// 标记那一句在**两条分支**上都要给：读不出指纹的老件恰恰是最需要"别拿它回放"的那一类，
+// 因为它的行本来就什么都不显示（"读不了：…"）——不加的话，标了也看不出来。
+func recRowLine(r recRow) string {
+	stale := recStaleSuffix(r)
+	if r.Err != "" {
+		return fmt.Sprintf("  %s  %s  %s%s\n", pad(r.ID, 24), padDisp(r.Where, 8), "读不了："+r.Err, stale)
+	}
+	path := string(r.Path)
+	if !r.HasMeta {
+		path = "（无身份）"
+	}
+	where := r.Env
+	if r.Zone != "" {
+		where += "/" + r.Zone
+	}
+	if r.Ent != "" {
+		where += "/ENT " + r.Ent
+	}
+	return fmt.Sprintf("  %s  %s  %s  %s  %s  %s%s\n", pad(r.ID, 24), padDisp(r.Where, 8),
+		padDisp(path, 12), padDisp(r.Prog, 14), padDisp(where, 22), r.Fingerprint, stale)
+}
+
+// recStaleSuffix 是"标记过"那一小段（没标记就回空串）。
+func recStaleSuffix(r recRow) string {
+	if !r.Stale {
+		return ""
+	}
+	out := "  " + fep.StaleNote
+	if r.StaleReason != "" {
+		out += "：" + r.StaleReason
+	}
+	return out
 }
 
 // recRow 是清单里的一行。
@@ -349,6 +379,13 @@ type recRow struct {
 	Fingerprint fep.Fingerprint `json:"fingerprint"`
 	HasMeta     bool            `json:"hasMeta"`
 	Err         string          `json:"error,omitempty"`
+
+	// A24：标记过"不可回放（需重录）"的件。`StaleNote` 是**同一句文案**（fep.StaleNote），
+	// json 里也给一份，因为默认输出形态就是 json —— 只写 bool 的话脚本与人都看不出来。
+	Stale       bool   `json:"stale,omitempty"`
+	StaleNote   string `json:"staleNote,omitempty"`
+	StaleReason string `json:"reason,omitempty"`
+	StaleAt     string `json:"staleAt,omitempty"`
 
 	Meta *fep.RecordingMeta `json:"-"`
 }
@@ -391,6 +428,15 @@ func fillFromMeta(r *recRow) {
 		r.BytesRT += c.BytesRT
 	}
 	r.Fingerprint = mt.Fingerprint
+	// A24：标记过就说出来（列表与 rec show 共用同一句文案 fep.StaleNote）。
+	if mt.IsStale() {
+		r.Stale = true
+		r.StaleNote = fep.StaleNote
+		r.StaleReason = mt.StaleReason
+		if !mt.StaleAt.IsZero() {
+			r.StaleAt = mt.StaleAt.Format(time.RFC3339)
+		}
+	}
 }
 
 var recKeepCmd = &cobra.Command{
@@ -968,6 +1014,19 @@ var recShowCmd = &cobra.Command{
 					t.Meta.Duration().Round(time.Second))
 				fmt.Printf("编译件   : %s\n", t.Meta.Binary.FingerprintString())
 				fmt.Printf("归属     : %s ／ %s\n", t.Meta.Origin.Label(), t.Meta.Retention.Label())
+				// A24：标记过就写在最显眼的位置 —— 决定"这份还能不能拿来回放"的就是它。
+				if t.Meta.IsStale() {
+					stale := fep.StaleNote
+					if t.Meta.StaleReason != "" {
+						stale += "：" + t.Meta.StaleReason
+					}
+					if !t.Meta.StaleAt.IsZero() {
+						stale += "（标于 " + t.Meta.StaleAt.Format(time.RFC3339) + "）"
+					}
+					fmt.Printf("状态     : %s\n", stale)
+				} else {
+					fmt.Printf("状态     : %s（可用，但回放仍按身份闸判：无身份的步骤会被拒）\n", "未标记")
+				}
 			}
 			// 整体（各连接合起来）的指纹：回答"这份录制一共录到了多少界面"。
 			// 判闸门用的是**按连接**的表（下面那一行），两者不是一回事。

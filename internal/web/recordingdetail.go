@@ -214,16 +214,24 @@ func (s *Server) hRecordingSteps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conn := atoiDefault(r.URL.Query().Get("conn"), 0)
-	var acts []*recAction
-	for _, a := range d.Actions {
+	// 三列「身份 vs 句柄」挂在每一行上（旧键一个不动，identity 是新键；见 identitycols.go）。
+	// 列的顺序/文案/提示也由服务端给一处，界面照它渲染，不在两处各写一套。
+	idents := identityRows(d)
+	type actionRow struct {
+		*recAction
+		Identity identityCols `json:"identity"`
+	}
+	var acts []actionRow
+	for i, a := range d.Actions {
 		if conn != 0 && a.Conn != conn {
 			continue
 		}
-		acts = append(acts, a)
+		acts = append(acts, actionRow{recAction: a, Identity: idents[i]})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "id": d.ID, "timePrecision": d.Precision,
 		"counts": countsOf(d), "actions": acts, "notes": d.Notes,
+		"identityColumns": identityColumnSpec, "identityHint": identityHint,
 	})
 }
 

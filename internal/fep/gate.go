@@ -9,27 +9,32 @@ import (
 
 // 指纹闸（R0.5）：回放之前，先回答"这份录制能不能用来驱动**现在这个界面**"。
 //
-// 为什么必须补这道闸：现有的 AUI 安全闸只判"这个 id 在不在当前界面里"，
+// 为什么必须补这道闸：AUI 安全闸只判"这个 id 在不在当前界面里"，
 // 而另一个会话的编号几乎总能"找到" —— 实测 **6/6 全部落到别的对象上**
 // （#327 从「加工类型编号」变成「重测/返工否」的勾选框）**且不报错**。
-// 它拦不住的东西，必须有另一样东西拦。
 //
-// 判据与阈值都是**量出来的**（真录制件，见 internal/fep/README 的「指纹闸」一节）：
+// **判据是契约 A21（指纹 v3，非对称覆盖）**，不是号码：
 //
-//	同一路径两次独立会话（调试线，3976 条）      · 编号表逐条相同 → 100%
-//	同一路径、录制件 4961 条 vs 起完就录 4046 条  · 4044/4046 = 99%
-//	换一条启动路径（debug 的件 vs r.r 的会话）    · 0%
-//	换一个作业（同一路径，两份不同作业的件）      · 36% / 79%
+//	通过 ⟺ ① |live| ≥ max(10, 0.5×|rec|)（证据量）
+//	      且 ② live→rec 身份覆盖 ≥ 0.98
+//	      且 ③ live→rec 边覆盖 ≥ 0.98
+//	      且 ④ live 多余身份 ≤ 2%
+//	      且 ⑤ 类型直方图差异 ≤ 2%（按 live 的身份集合收窄后比）
 //
-// 所以 99% 落在一条很宽的空档里：同路径不可能掉到 99% 以下，
-// 跨路径/跨作业不可能爬到 99% 以上。
+// 阈值写死在 `fingerprint.go`（FPEvidenceMinNodes / FPEvidenceRecShare /
+// FPIdentJaccardMin / FPEdgeIsoMin / FPTypeHistMaxDiff），既不读配置，也不留
+// "仅凭 idDigest 相等就放行"的分支 —— 那正是 v2 的误拒来源：编号是启动历史的函数，
+// 同一界面换一条启动路径，编号**一条都不相同**。
+//
+// 方向是**单向**的（live→rec）：录制件是整会话、当前只开半屏是**常态**（会话渐进），
+// 不能因此误拒；"live 有、rec 没有"才是界面真的变了。
+//
+// v2 的"门槛 99%（Same/LiveTotal）"已被 A21 取代：逐条口径（FPDiff.Same/Differ/…）
+// 保留下来**只作诊断**，判决只看上面五个判据 + 分两栏的差异清单。
 //
 // **按连接比，不是把整个会话揉成一张表**：一个会话本来就有多条连接，而且它们可以是
 // 完全不同的两棵树 —— 实测 `r.d` 会话里连接 1 是 fgldeb 调试器的界面、连接 2 是作业界面。
-// 揉在一起比等于拿"A + B"去比"B"，同一条路径也会判不过（实测 93%）。
-
-// MinLiveMatchPct 是"当前连接的编号表里，必须有多少条能在录制件的同一条连接里原样找到"。
-const MinLiveMatchPct = 99
+// 揉在一起比等于拿"A + B"去比"B"，同一条界面也会判不过。所以判据是"存在一条连接对得上"。
 
 // Snapshot 是一条连接的编号表 + 它是谁。
 //
@@ -71,12 +76,15 @@ type MultiSnapshot struct {
 // NonEmpty 报告这一面有没有能比的连接（有界面，而不是只有握手）。
 func (m MultiSnapshot) NonEmpty() bool {
 	for _, c := range m.Conns {
-		if c.FP.Total > 0 {
+		if c.FP.Total > 0 || len(c.Entries) > 0 {
 			return true
 		}
 	}
 	return false
 }
+
+// usable 报告这一条连接能不能进比对（有编号表或条目才有得比）。
+func (c ConnSnapshot) usable() bool { return c.FP.Total > 0 || len(c.Entries) > 0 }
 
 // OfSnapshot 把一个"整会话一张表"的快照当成单连接面（老调用点与单连接场景用它）。
 func OfSnapshot(s Snapshot) MultiSnapshot {
@@ -152,7 +160,7 @@ type GateCode string
 const (
 	GateOK          GateCode = "ok"
 	GatePathDiff    GateCode = "path"         // 启动路径不符
-	GateFPNoMatch   GateCode = "fingerprint"  // 编号表对不上
+	GateFPNoMatch   GateCode = "fingerprint"  // 指纹 v3 判不过（身份/引用边/类型直方图）
 	GateNoRecording GateCode = "no-recording" // 录制件里没有界面
 	GateNoLive      GateCode = "no-live"      // 当前会话还没有界面
 )
@@ -173,7 +181,7 @@ type GateVerdict struct {
 	RecPath  LaunchPath `json:"recPath,omitempty"`
 	LivePath LaunchPath `json:"livePath,omitempty"`
 	// PathChecked 报告这次到底比没比路径：两边有一边不知道路径时是 false，
-	// 这时判决完全靠指纹（**不是**"路径没比就放过"）。
+	// 这时判决完全靠指纹 v3（**不是**"路径没比就放过"）。
 	PathChecked bool `json:"pathChecked"`
 
 	// 被采用（通过）或最接近（不过）的那一对连接的编号表与连接号。
@@ -186,15 +194,23 @@ type GateVerdict struct {
 	Pairs []ConnPair `json:"pairs,omitempty"`
 	// Examples 是"坐标对得上、编号不同"的头几条（跨路径时它就是现场证据）。
 	Examples []string `json:"examples,omitempty"`
+	// Diagnostics 是"读到旧东西、已忽略"的记账（A19：旧 v2 指纹字段读到就忽略并记诊断）。
+	// 它**不影响判决**，只是别让人以为那份指纹还算数。
+	Diagnostics []string `json:"diagnostics,omitempty"`
 }
 
 // GateReplay 比对两面，给出"能不能用这份录制驱动当前界面"的判决。
 //
-// 顺序是有意的：**先判路径**（便宜、确定、报文最好懂），再按连接比指纹
-// （贵、但能发现同路径跨编译/跨作业）。任一条不符就拒 —— 这道闸的错法必须是
-// "拦住能用的"，不能是"放过不能用的"：放过的后果是安静地点错控件。
+// 顺序是有意的：**先判路径**（便宜、确定、报文最好懂），再按连接比指纹 v3
+// （贵、但能发现同路径下的另一张界面/另一张表单）。任一条不符就拒 —— 这道闸的错法
+// 必须是"拦住能用的"，不能是"放过不能用的"：放过的后果是安静地点错控件。
+//
+// **判决只看 JudgeSameInterface 的三条判据**（A19）。这里没有任何一条分支会
+// 因为 `idDigest`（`Fingerprint.Hash`）相等而放行 —— 那等于把 v2 借尸还魂。
 func GateReplay(rec, live MultiSnapshot) GateVerdict {
 	v := GateVerdict{RecPath: rec.Path, LivePath: live.Path}
+	v.Diagnostics = append(v.Diagnostics, legacyNotes(rec, "录制件")...)
+	v.Diagnostics = append(v.Diagnostics, legacyNotes(live, "当前会话")...)
 	if !rec.NonEmpty() {
 		v.Code = GateNoRecording
 		v.Reason = fmt.Sprintf("录制件 %s 里没有界面（一条带对象的 AUI 消息都没读到）—— 它多半是"+
@@ -212,8 +228,8 @@ func GateReplay(rec, live MultiSnapshot) GateVerdict {
 		if rec.Path != live.Path {
 			v.Code = GatePathDiff
 			v.Reason = fmt.Sprintf("启动路径不符：录制件是 %s 录的，当前会话是 %s。"+
-				"编号是启动历史的函数（实测跨路径共同条目 0 条相同），跨路径回放会安静地点错控件 —— "+
-				"请用同一条路径重录或重起", rec.Path.Label(), live.Path.Label())
+				"请用同一条路径重录或重起（指纹 v3 已经不拿编号判界面，路径仍是另一道独立的闸）",
+				rec.Path.Label(), live.Path.Label())
 			return v
 		}
 	}
@@ -222,16 +238,16 @@ func GateReplay(rec, live MultiSnapshot) GateVerdict {
 	best := ConnPair{Rec: -1, Live: -1}
 	bestMatched := false
 	for _, rc := range rec.Conns {
-		if rc.FP.Total == 0 {
+		if !rc.usable() {
 			continue
 		}
 		for _, lc := range live.Conns {
-			if lc.FP.Total == 0 {
+			if !lc.usable() {
 				continue
 			}
-			p := ConnPair{Rec: rc.Conn, Live: lc.Conn, Diff: CompareFP(rc.Entries, lc.Entries)}
+			diff, matched := JudgeSameInterface(rc.Entries, lc.Entries)
+			p := ConnPair{Rec: rc.Conn, Live: lc.Conn, Diff: diff}
 			v.Pairs = append(v.Pairs, p)
-			matched := p.Diff.Same > 0 && p.Diff.MatchPct() >= MinLiveMatchPct
 			if best.Rec < 0 || better(matched, p, bestMatched, best, rc, lc) {
 				best, bestMatched = p, matched
 				v.RecFP, v.LiveFP = rc.FP, lc.FP
@@ -242,27 +258,67 @@ func GateReplay(rec, live MultiSnapshot) GateVerdict {
 	v.Diff = best.Diff
 	if bestMatched {
 		v.OK, v.Code = true, GateOK
-		v.Reason = fmt.Sprintf("闸门通过：录制件 #%d 与当前界面 #%d 的编号表对得上 %d/%d 条（%d%%），路径 %s",
-			v.RecConn, v.LiveConn, v.Diff.Same, v.Diff.LiveTotal, v.Diff.MatchPct(), pathPhrase(v))
+		v.Reason = fmt.Sprintf("闸门通过（指纹 v3 · 非对称覆盖）：录制件 #%d ↔ 当前界面 #%d —— "+
+			"身份覆盖 %.4f（≥%.2f）／ 边覆盖 %.4f（≥%.2f）／ 多余身份 %.4f（≤%.2f）／ "+
+			"类型直方图差异 %.4f（≤%.2f）；当前 %d 个身份、%d 条边（录制件 %d / %d），路径 %s",
+			v.RecConn, v.LiveConn, v.Diff.LiveCoverage, FPIdentJaccardMin,
+			v.Diff.EdgeCoverage, FPEdgeIsoMin, v.Diff.ExtraShare, FPTypeHistMaxDiff,
+			v.Diff.TypeDiff, FPTypeHistMaxDiff,
+			v.Diff.IdentLive, v.Diff.EdgeLive, v.Diff.IdentRec, v.Diff.EdgeRec, pathPhrase(v))
 		return v
 	}
 	v.Code = GateFPNoMatch
 	v.Examples = TranslateEntries(recEntriesOf(rec, best.Rec), recEntriesOf(live, best.Live), 5)
-	v.Reason = fmt.Sprintf("编号表对不上：最接近的一对是录制件 #%d ↔ 当前界面 #%d，%d 条里只有 %d 条能原样找到（%d%%，要求 ≥%d%%）。"+
-		"这份录制不是这个界面录的（换了路径、换了作业，或程序重编译过）%s",
-		best.Rec, best.Live, v.Diff.LiveTotal, v.Diff.Same, v.Diff.MatchPct(), MinLiveMatchPct, connSummary(rec, live))
+	v.Reason = fmt.Sprintf("指纹 v3 判不过（非对称覆盖）：最接近的一对是录制件 #%d ↔ 当前界面 #%d —— "+
+		"身份覆盖 %.4f（要求 ≥%.2f）／ 边覆盖 %.4f（要求 ≥%.2f）／ 多余身份 %.4f（要求 ≤%.2f）／ "+
+		"类型直方图差异 %.4f（要求 ≤%.2f）；证据量 %s。%s差异清单分两栏见下%s",
+		best.Rec, best.Live, v.Diff.LiveCoverage, FPIdentJaccardMin,
+		v.Diff.EdgeCoverage, FPEdgeIsoMin, v.Diff.ExtraShare, FPTypeHistMaxDiff,
+		v.Diff.TypeDiff, FPTypeHistMaxDiff, evidencePhrase(v.Diff),
+		failPhrase(v.Diff), connSummary(rec, live))
 	return v
 }
 
-// better 挑"更好的那一对"：先看能不能过闸，再看百分比，最后同号优先。
+// evidencePhrase 说清①（证据量）这一条过没过。
+func evidencePhrase(d FPDiff) string {
+	if d.EvidenceOK {
+		return fmt.Sprintf("够（当前 %d 条／录制件 %d 条）", d.LiveTotal, d.RecTotal)
+	}
+	return fmt.Sprintf("不足（当前只有 %d 条，至少要 max(%d, %.0f%%×录制件 %d 条)）",
+		d.LiveTotal, FPEvidenceMinNodes, FPEvidenceRecShare*100, d.RecTotal)
+}
+
+// failPhrase 一句话说清"差在哪几级、差多少"（拒绝报文的第一段）。
+// 两栏口径：**意外**（live 有 rec 无）才是拒的理由；**尚未加载**只报数量，不作理由。
+func failPhrase(d FPDiff) string {
+	var bad []string
+	if !d.EvidenceOK {
+		bad = append(bad, "证据不足（界面太小，百分比没有意义）")
+	}
+	if share := d.ExtraShare; share > FPTypeHistMaxDiff {
+		bad = append(bad, fmt.Sprintf("界面多出 %d 个录制件里没有的身份（%.2f%%）", len(d.IdentUnexpected), share*100))
+	}
+	if d.EdgeCoverage < FPEdgeIsoMin {
+		bad = append(bad, fmt.Sprintf("有 %d 条边录制件里没有", len(d.EdgeUnexpected)))
+	}
+	if d.TypeDiff > FPTypeHistMaxDiff {
+		bad = append(bad, fmt.Sprintf("%d 类节点数变了", len(d.TypeChanged)))
+	}
+	if len(bad) == 0 {
+		return "（五个判据的数值都在门槛内，但不该走到这里）"
+	}
+	return strings.Join(bad, "；") + "。"
+}
+
+// better 挑"更好的那一对"：先看能不能过闸，再看三条判据里最弱的那条（Fit），最后同号优先。
 func better(matched bool, p ConnPair, bestMatched bool, best ConnPair, rc, lc ConnSnapshot) bool {
 	if matched != bestMatched {
 		return matched
 	}
-	if p.Diff.MatchPct() != best.Diff.MatchPct() {
-		return p.Diff.MatchPct() > best.Diff.MatchPct()
+	if p.Diff.Fit() != best.Diff.Fit() {
+		return p.Diff.Fit() > best.Diff.Fit()
 	}
-	// 百分比一样时，同号的那一对更像"同一个窗口"
+	// 相似度一样时，同号的那一对更像"同一个窗口"
 	return rc.Conn == lc.Conn && best.Rec != best.Live
 }
 
@@ -275,12 +331,29 @@ func recEntriesOf(m MultiSnapshot, conn int) []FPEntry {
 	return nil
 }
 
+// legacyNotes 把"这一面带着旧 v2 指纹"记成诊断（A19：读到就忽略，不许因此崩/拒/放）。
+func legacyNotes(m MultiSnapshot, side string) []string {
+	var out []string
+	for _, c := range m.Conns {
+		if n := LegacyFingerprintNotice(c.FP); n != "" {
+			out = append(out, fmt.Sprintf("%s #%d：%s", side, c.Conn, n))
+			continue
+		}
+		if c.Meta != nil {
+			if n := LegacyFingerprintNotice(c.Meta.Fingerprint); n != "" {
+				out = append(out, fmt.Sprintf("%s #%d（身份文件）：%s", side, c.Conn, n))
+			}
+		}
+	}
+	return out
+}
+
 // connSummary 把"两边各有哪些连接、各多少条"写成一句话 —— 拒绝时报文里最有用的一段。
 func connSummary(rec, live MultiSnapshot) string {
 	side := func(m MultiSnapshot) string {
 		var parts []string
 		for _, c := range m.Conns {
-			parts = append(parts, fmt.Sprintf("#%d:%d 条", c.Conn, c.FP.Total))
+			parts = append(parts, fmt.Sprintf("#%d:%d 条/%d 身份", c.Conn, c.FP.Total, c.FP.IdentN))
 		}
 		return strings.Join(parts, " ")
 	}
@@ -299,7 +372,7 @@ func (m MultiSnapshot) firstNote() string {
 
 func pathPhrase(v GateVerdict) string {
 	if !v.PathChecked {
-		return "无从比对（有一边没记路径，判决完全靠指纹）"
+		return "无从比对（有一边没记路径，判决完全靠指纹 v3）"
 	}
 	return string(v.LivePath)
 }
@@ -313,6 +386,10 @@ func emptyHint(note string) string {
 }
 
 // Report 给人读的一段（回放命令在动手之前先打它）。
+//
+// A21 要求：不通过时**必须**打差异清单，且**分两栏**——
+// **意外**（live 有、rec 无）是拒的理由；**尚未加载**（rec 有、live 无）只作信息。
+// 两栏混在一起，"半屏"就永远读不懂（这正是 A19 被改掉的原因）。
 func (v GateVerdict) Report() string {
 	var b strings.Builder
 	mark := "✓"
@@ -321,19 +398,44 @@ func (v GateVerdict) Report() string {
 	}
 	fmt.Fprintf(&b, "%s 指纹闸：%s\n", mark, v.Reason)
 	if len(v.Pairs) > 0 {
-		fmt.Fprintf(&b, "  录制件编号表 %s ／ 当前界面编号表 %s\n", v.RecFP, v.LiveFP)
-		fmt.Fprintf(&b, "  逐条：对得上 %d ／ 编号不同 %d ／ 只在当前 %d ／ 只在录制件 %d\n",
+		fmt.Fprintf(&b, "  判据（A21 冻结，单向 live→rec）：身份覆盖 %.4f（≥%.2f）／ 边覆盖 %.4f（≥%.2f）／ 多余身份 %.4f（≤%.2f）／ 类型直方图差异 %.4f（≤%.2f）／ 证据量 %s\n",
+			v.Diff.LiveCoverage, FPIdentJaccardMin, v.Diff.EdgeCoverage, FPEdgeIsoMin,
+			v.Diff.ExtraShare, FPTypeHistMaxDiff, v.Diff.TypeDiff, FPTypeHistMaxDiff,
+			evidencePhrase(v.Diff))
+		fmt.Fprintf(&b, "  录制件指纹 %s ／ 当前界面指纹 %s\n", v.RecFP, v.LiveFP)
+		fmt.Fprintf(&b, "  逐条（诊断）：对得上 %d ／ 编号不同 %d ／ 只在当前 %d ／ 只在录制件 %d\n",
 			v.Diff.Same, v.Diff.Differ, v.Diff.OnlyNew, v.Diff.OnlyRec)
 		if len(v.Pairs) > 1 {
 			var parts []string
 			for _, p := range v.Pairs {
-				parts = append(parts, fmt.Sprintf("#%d↔#%d %d%%", p.Rec, p.Live, p.Diff.MatchPct()))
+				parts = append(parts, fmt.Sprintf("#%d↔#%d 身份覆盖%.2f/边覆盖%.2f/类型差%.2f",
+					p.Rec, p.Live, p.Diff.LiveCoverage, p.Diff.EdgeCoverage, p.Diff.TypeDiff))
 			}
 			fmt.Fprintf(&b, "  比过的连接对：%s\n", strings.Join(parts, " ／ "))
 		}
+		fmt.Fprintf(&b, "  差异清单（两栏）：意外 %d 个身份 / %d 条边（有它才拒）；尚未加载 %d 个身份 / %d 条边（只作信息）\n",
+			listTrueCount(v.Diff.IdentUnexpected), listTrueCount(v.Diff.EdgeUnexpected),
+			listTrueCount(v.Diff.IdentPending), listTrueCount(v.Diff.EdgePending))
+		printList(&b, "  ［意外］身份（当前有、录制件没有 —— 拒的理由）", v.Diff.IdentUnexpected)
+		printList(&b, "  ［意外］边（当前有、录制件没有 —— 拒的理由）", v.Diff.EdgeUnexpected)
+		printList(&b, "  ［尚未加载］身份（录制件有、当前还没走到 —— 正常）", v.Diff.IdentPending)
+		printList(&b, "  ［尚未加载］边（录制件有、当前还没走到 —— 正常）", v.Diff.EdgePending)
+		printList(&b, "  ［类型变了］（按当前的身份集合比）", v.Diff.TypeChanged)
+	}
+	for _, d := range v.Diagnostics {
+		fmt.Fprintf(&b, "  · 诊断：%s\n", d)
 	}
 	for _, e := range v.Examples {
 		fmt.Fprintf(&b, "  · %s\n", e)
 	}
 	return b.String()
+}
+
+// printList 打印差异清单的一行（空列表也要说"没有"，免得人以为漏打了）。
+func printList(b *strings.Builder, label string, items []string) {
+	if len(items) == 0 {
+		fmt.Fprintf(b, "  %s：无\n", label)
+		return
+	}
+	fmt.Fprintf(b, "  %s：%s\n", label, strings.Join(items, " "))
 }

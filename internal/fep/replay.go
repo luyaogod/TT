@@ -34,9 +34,17 @@ func AllowedForReplay(ev string) bool {
 }
 
 // ReplayEvent is one event scheduled for replay.
+//
+// ColName/FieldID 是这一步的**字段身份**（契约 C3 + A18），录制/计划阶段从当步目标
+// 节点取（`IdentityOf`）。两处都**向后兼容**：旧计划没有这两个键 ⇒ 零值 = 未记录，
+// 读侧照旧按 `idRef` 走，行为一字不变（见 ResolveStepTarget）。
 type ReplayEvent struct {
 	N     int    `json:"n"`
 	Event string `json:"event"`
+	// ColName 非空 ⇒ 回放时**优先**按它重新定位（`ByColName`，每步现解析、用完即弃）。
+	ColName string `json:"colName,omitempty"`
+	// FieldID 是录制时那一帧的编号，用来按 C3.4 收窄（0 = 未记录，见 ReplayIdentity）。
+	FieldID int `json:"fieldId,omitempty"`
 }
 
 // ReplaySkip records one event that will not be replayed, and why.
@@ -55,15 +63,24 @@ type ReplayPlan struct {
 
 // ReplayOptions narrows a replay.
 //
-// 注意这里**没有** Model：计划阶段不该做 AUI 判断 —— 那会把“后面才出现的按钮”
+// 注意这里**不拿模型做取舍**：计划阶段不该做 AUI 判断 —— 那会把“后面才出现的按钮”
 // （确定/审核/是）提前剔掉（实测踩过：保存与审核那 4 步根本没发）。
 // AUI 安全闸只放在“发之前那一刻”，逐条判、逐条记原因。
+//
+// `Model` 是唯一的例外，而且它的用途被**收窄到一件事**：把字段身份（`colName`/
+// `fieldId`）**记进步骤**，好让回放时能按身份重新定位。它**不**决定某条事件进不进
+// 计划 —— 模型里没有的对象、没有 idRef 的按键事件，照样一条不少地留在计划里
+// （反证测试：TestPlanStageModelNeverDropsEvents）。nil = 不记身份（旧行为）。
 type ReplayOptions struct {
 	StopAt int      // >0：只回放到第 N 条（含），用于“跑一半看效果”
 	Skip   []string // 命中（子串）就跳过，便于绕开某一两步
+	Model  *Model   // 只用于**记身份**，不参与取舍（见上）
 }
 
 // PlanReplay turns recorded events into a replay plan.
+//
+// 录制侧写入：`opt.Model` 非 nil 时，每条带 `idRef` 的事件都去模型里取它的
+// `(colName, fieldId)` 记进步骤（`IdentityOf`；取不到就留空 = 未记录）。
 func PlanReplay(events []string, opt ReplayOptions) ReplayPlan {
 	plan := ReplayPlan{}
 	for _, ev := range events {
@@ -77,7 +94,14 @@ func PlanReplay(events []string, opt ReplayOptions) ReplayPlan {
 			plan.Skips = append(plan.Skips, ReplaySkip{Raw: ev, Reason: "按要求跳过：" + hit})
 			continue
 		}
-		plan.Events = append(plan.Events, ReplayEvent{N: len(plan.Events) + 1, Event: ev})
+		e := ReplayEvent{N: len(plan.Events) + 1, Event: ev}
+		// 身份只**补记**：拿不到（模型里没这个对象 / 事件不带 idRef）就留零值。
+		if id, ok := idRefOf(ev); ok {
+			if idn := IdentityOf(opt.Model, id); idn.ColName != "" {
+				e.ColName, e.FieldID = string(idn.ColName), int(idn.FieldID)
+			}
+		}
+		plan.Events = append(plan.Events, e)
 		if opt.StopAt > 0 && len(plan.Events) >= opt.StopAt {
 			break
 		}
@@ -100,6 +124,9 @@ type ReplayResult struct {
 	Skipped      int   `json:"skipped"`
 	Failed       int   `json:"failed"`
 	RuntimeBytes int64 `json:"runtimeBytes"`
+	// Refused 是"这一步带字段身份，但身份解析不过（四码）"的步数 —— 与 Failed 分开：
+	// 它一个字节都没发，而且**这一轮到此为止**（后面的步骤依赖它，接着发只会连错）。
+	Refused int `json:"refused,omitempty"`
 	// Stopped 是"**人**按了停止"（不是失败、也不是跑完）—— 三者在界面上的说法完全不同：
 	// 跑完是"完成"，失败要查原因，而"人停了"是正常操作。
 	Stopped bool `json:"stopped,omitempty"`
@@ -231,7 +258,41 @@ func (c *Client) RunReplayWith(plan ReplayPlan, opt ReplayRunOptions) (*ReplayRe
 			continue
 		}
 		// 每条发之前重新读界面：前面几步会改屏，用旧模型做安全闸会误杀
-		if m, _, _, err := LoadModelFrom(c.RecordDir, c.Tag); err == nil {
+		m, _, _, merr := LoadModelFrom(c.RecordDir, c.Tag)
+		if merr != nil {
+			m = nil
+		}
+		// ① 身份优先（契约 C3 + H1/H2）：步骤带 `colName` ⇒ **每步现解析、用完即弃**。
+		//    解析不过就按四码拒绝，**一个字节都不发**（裸 id 跨会话会指到别的控件上）。
+		if ColName(strings.TrimSpace(ev.ColName)) != "" {
+			tgt, terr := ResolveStepTarget(m, ev, Scope{})
+			if terr != nil {
+				step.ColName, step.FieldID = ev.ColName, ev.FieldID
+				if id, ok := idRefOf(ev.Event); ok {
+					step.Target = id
+				}
+				step.Result = ReplayRefused
+				step.Reason = refusalReason(terr)
+				if ref, ok := terr.(*Refusal); ok {
+					step.Code = ref.Code
+				}
+				emit(step)
+				logf("拒绝 #%d：%s（这一步没发）", ev.N, step.Reason)
+				res.Refused++
+				return res, terr
+			}
+			ev.Event = tgt.Event // 只换目标，其余字节原样（回放求保真）
+			step.Event, step.Target = tgt.Event, tgt.ID
+			step.ColName, step.FieldID = string(tgt.ColName), int(tgt.FieldID)
+		} else if step.Target != 0 && m != nil {
+			// 计划期没记身份：这里**只补记**日志里的身份（"录制时写入"），
+			// 不参与发送 —— 没带 colName 的步骤行为一字不变。
+			if idn := IdentityOf(m, step.Target); idn.ColName != "" {
+				step.ColName, step.FieldID = string(idn.ColName), int(idn.FieldID)
+			}
+		}
+		// ② 既有 AUI 安全闸：对象不在**当次界面**里就跳过（行为不变）
+		if m != nil {
 			if id, ok := idRefOf(ev.Event); ok {
 				if _, exists := m.Get(id); !exists {
 					logf("跳过 #%d：对象 #%d 不在当前界面", ev.N, id)

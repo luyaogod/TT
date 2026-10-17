@@ -43,12 +43,16 @@ var (
 	anyIDRe = regexp.MustCompile(`id="([^"]+)"`)
 	// cellIDRe 只在自检时用，**必须带 `<mxCell`**：整份文档里 `grid="1"` 这种属性
 	// 含有子串 `id="1"`，裸 `id="([^"]+)"` 会把它当成单元格 id，报出假的"id 重复"。
-	cellIDRe = regexp.MustCompile(`<mxCell\s+id="([^"]+)"`)
-	parentRe = regexp.MustCompile(`parent="([^"]+)"`)
+	cellIDRe  = regexp.MustCompile(`<mxCell\s+id="([^"]+)"`)
+	parentRe  = regexp.MustCompile(`parent="([^"]+)"`)
 	resizeRe  = regexp.MustCompile(`(<mxCell id="([^"]+)"[^>]*><mxGeometry) x="(-?[\d.]+)" y="(-?[\d.]+)" width="([\d.]+)" height="([\d.]+)"`)
 	partNumRe = regexp.MustCompile(`^p(\d+)$`)
 	// decoChildRe 认多页签生成的那些页签格（`p2_0`）—— 它们是装饰件，不参与拉伸。
 	decoChildRe = regexp.MustCompile(`^p\d+_`)
+	// geomBadRe 只在**几何属性**里找 NaN/undefined/Infinity。原做法是
+	// `strings.Contains(out, "NaN")`，那是把整份产物当几何看 —— 数据里恰好出现这两个词
+	// （实测 `.42f` 里真有 `<RecordView tabName="undefined">`）就会被误判成几何 bug。
+	geomBadRe = regexp.MustCompile(`\b(?:x|y|width|height)="(?:NaN|-?Infinity|undefined)"`)
 )
 
 // Compose 把一份 spec 展开成 .drawio。
@@ -552,9 +556,9 @@ func buildDiagram(cells string, spec *Spec) string {
 // 说得对，这里照做，并**多加一条**：用真 XML 解析器走一遍 token，验它良构
 // （原实现只查 NaN/undefined 与 id/parent，没验 XML 本身）。
 func selfCheck(out string) (int, error) {
-	if strings.Contains(out, "NaN") || strings.Contains(out, "undefined") {
+	if m := geomBadRe.FindString(out); m != "" {
 		return 0, &SelfCheckError{
-			Msg: "产物里出现 NaN/undefined 几何值 —— 通常是缩放或坐标计算出了 bug，请勿交付",
+			Msg: "产物里出现 NaN/undefined 几何值（" + m + "） —— 通常是缩放或坐标计算出了 bug，请勿交付",
 		}
 	}
 

@@ -114,6 +114,65 @@ type RecordingMeta struct {
 	Fingerprint Fingerprint `json:"fingerprint"`
 
 	Note string `json:"note,omitempty"` // 一句话说明（例如"没有身份文件时补写的"）
+
+	// ── A24（契约 §7 / 用户决策 D-F2）：旧件处置 = **只打标记，不加逃生门** ──
+	//
+	// 这三个键只回答一件事："这份录制**还算不算数**"。旧件（无身份 / v2 指纹）反正回放
+	// 会被拒，而录制是**不可再生**的（再报一次 bug、再操作一遍才有），所以既不许删、
+	// 也不许悄悄留着让人以为能用 —— 打上标记，列表与明细把它写在脸上。
+	//
+	// 三个键**全部 omitempty**：老身份文件里没有它们 ⇒ 读进来就是 false/零值，
+	// 不需要迁移、不许因此报错（TestOldMetaWithoutStaleFieldsReadsAsLive）。
+	Stale       bool      `json:"stale,omitempty"`   // true = 不可回放（需重录）
+	StaleReason string    `json:"reason,omitempty"`  // 为什么标它（人写的文字，可以空）
+	StaleAt     time.Time `json:"staleAt,omitempty"` // 标记的时刻
+	// 注：`staleAt` 的 `omitempty` 只对**读**有意义 —— `encoding/json` 不认识 time.Time
+	// 的零值，所以没标记的件写出去仍会带一个 `"staleAt":"0001-01-01T00:00:00Z"`
+	// （既有 `finished` 一直是这个行为，不为此引入指针/自定义 Marshaler）。
+	// **判据永远只看 `stale`**；读取方不许拿 staleAt 是否为零来判断"标记过没有"。
+}
+
+// StaleNote 是"这份录制不可回放"的**唯一文案**：列表、明细、命令回执都引它，
+// 免得同一件事在三处写成三种说法。
+const StaleNote = "不可回放（需重录）"
+
+// IsStale 报告这份录制是不是被标记为不可回放。nil 安全（没有身份文件 = 没标记）。
+//
+// 为什么用方法而不是让调用方读字段：判据将来可能变（例如"指纹是 v2 也算不可回放"），
+// 变化时要改的地方只有这一处。
+func (m *RecordingMeta) IsStale() bool { return m != nil && m.Stale }
+
+// MarkStale 给一份录制**打标记**：`stale=true` + 原因 + 时间。
+//
+// 它做的**只有**重写身份文件（`<ID>.meta.json`）：
+//
+//   - **绝不删任何文件**（录制不可再生，删了就造不回来）；
+//   - **绝不改录制内容**（`-rt2gdc.log` / `-gdc2rt.log` / `-timeline.log` 一个字节不动）；
+//   - 其它身份字段原样保留（这不是"重写身份"，只是加三件事）。
+//
+// 没有身份文件的件（收工被硬杀、极老的件）也能标记：补写一份**只有 ID 与标记**的
+// 身份文件，并在 `Note` 里照实说这是补写的 —— 那种件恰恰最需要"别拿它回放"这句话。
+//
+// 空原因不写空键（omitempty）；时间由调用方给，便于测试与"按时间排"的展示。
+func MarkStale(dir, id, reason string, at time.Time) (*RecordingMeta, error) {
+	if strings.TrimSpace(id) == "" {
+		return nil, errors.New("fep: 标记要录制 ID（录制 ID 就是录制件的前缀）")
+	}
+	m, err := ReadMeta(dir, id)
+	if err != nil {
+		if !errors.Is(err, ErrNoMeta) {
+			return nil, err
+		}
+		m = &RecordingMeta{ID: id, Note: "标记时补写的（这份录制原本没有身份文件）"}
+	}
+	m.ID = id
+	m.Stale = true
+	m.StaleReason = strings.TrimSpace(reason)
+	m.StaleAt = at
+	if _, werr := WriteMeta(dir, *m); werr != nil {
+		return nil, werr
+	}
+	return m, nil
 }
 
 // Duration 报告这一轮录了多久（没结束时返回 0）。

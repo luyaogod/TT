@@ -9,9 +9,12 @@
 
 ## 结构
 
-- `tzs.go`：`cmdTzs` 分发（export / doctor / stop / reap / help / 具名动词）+ `Usage`（命令面文本）
+- `tzs.go`：`cmdTzs` 分发（export / formcheck / doctor / stop / reap / help / 具名动词）+ `Usage`（命令面文本）
 - `tzs_engine.go`：引擎定位、manifest 拉取、动词调用、stop / reap / doctor
 - `tzs_detail.go`：把引擎错误帧的 `detail` 渲染成人读的几行（只按 JSON 类型分派，不抄 schema）
+- `tzs_formcheck.go`：`formcheck` —— **静态**比对 `.42f`（应然）↔ tzs 生成物（实然）。
+  它**不开引擎**（只读两个文件），判定口径全在 [../../../dev/tzs](../../../dev/tzs/README.md) 的
+  `CheckForm42F`，命令层只负责读文件、排版、退出码。
 
 **整条线 `DisableFlagParsing` 透传**（父包接线）：动词面由引擎 manifest 定义、
 `<动词> --help` 是**引擎**的说明书（附动词索引），所以连动词都不挂成 cobra 子命令 ——
@@ -23,10 +26,28 @@
 ## 输出与退出码
 
 `--json` 下 stdout **恰好一个对象**：查询/写动词是帧 `{id, ok, result, error, ms}`；
-export 是 `{"ok":true, …}`；失败是 `{"ok":false,"exit_code":N,"error":"…"}`
+export 是 `{"ok":true, …}`；formcheck 是校验报告（键名见
+[../../../dev/tzs/README.md](../../../dev/tzs/README.md)）；失败是 `{"ok":false,"exit_code":N,"error":"…"}`
 （实现在 [../common/scaffold.go](../common/scaffold.go)，两条线同一份）。
 退出码：`0` 成功 / `1` 引擎内部错 / `2` 参数或环境错 / `4` 设计器拒绝 / `5` 传输或环境失败
 （**没有 3**；2 也包括"manifest 拉不到"）。
+`formcheck` 多一个 `6` = **有确定差异**（借自表单契约 A13 的「体检不过」，不新造语义；
+只有"未判定"时仍是 0 —— 拿不准不计入错误）。
+
+### `formcheck` 用法（本节是基准：总帮助与命令面逐字比它）
+
+README、总帮助（[../common/usage.go](../common/usage.go)）、命令面（`tzsUsage`）三处写着同一段文案，
+`common/usage_test.go` 以**本节**为基准做双边逐行比对（只允许共同缩进不同）—— 所以改一处必须
+三处一起改，否则测试直接红。别再手抄第四份。
+
+```text
+tt dev tzs formcheck --form42f <表单.42f> --tzs <包.tzs|表单.4fd> [--json]
+        # **静态**比对：应然（.42f，编译期权威）↔ 实然（tzs 生成物里的 .4fd）
+        # 不开引擎、不连服务器、不碰工作区 —— 只读上面两个文件
+        # 差异分四组（存在性 / 编号 / 可写性 / 控件族），每条给 colName 与两侧值；
+        #   拿不准的组合进"未判定"，**不计入错误**（契约 A15）
+        # 退出码：0 一致（含只有未判定） / 2 参数或读取错 / 6 有确定差异
+```
 
 ## 判据
 
@@ -35,6 +56,10 @@ go test ./internal/cli/dev/tzs -count=1            # 默认档：合成包 + 用
 TTZS_E2E=1 go test ./internal/cli/dev/tzs -run TestE2E -count=1 -timeout 30m
                                                    # 需要真引擎（配 TTZS_EXE / TTZS_WS / TTZS_INSTALL）
 ./tt.exe dev tzs doctor                            # 环境自检：引擎 / 设计器目录 / 工作区 / 管道名
+
+# 静态校验（**不需要**引擎、工作区、会话）：
+./tt.exe dev tzs formcheck --form42f axmt500_wf.42f --tzs aapp320.tzs
+./tt.exe dev tzs formcheck --form42f axmt500_wf.42f --tzs aapp320.4fd --json
 ```
 
 用法文本漂移的机械防线也在本包：`TestUsageTextHasNoStaleAdvice` 扫 `tzsUsage` 与总帮助

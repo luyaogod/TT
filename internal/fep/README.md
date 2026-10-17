@@ -36,12 +36,13 @@ T100 前端协议（GDC 与 fglrun 之间）的**纯离线**解析层：分帧�
 ```bash
 go test ./internal/fep/...          # 全绿（含真语料夹具上的不变量回归）
 go vet ./internal/fep/...           # 干净
-go test ./internal/fep -run TestGate -count=1 -v   # 指纹闸：阈值两侧各一条
+go test ./internal/fep -run TestGate -count=1 -v   # 指纹闸（按连接比）
+go test ./internal/fep -run TestV3 -count=1 -v     # 指纹 v3（A21 非对称覆盖）：五个判据 + 两栏清单 + 反证
 ```
 
 - **期望**：`TestFixtureRecordingsKeepInvariants` 在三份仓库夹具（`testdata/fep-recordings/`）上逐条过；
   `TestTheRnInvariantHasTeeth` 把 `rn` 退化回 `un` 就得红；`TestGateRefusesTwoDifferentRealInterfaces`
-  在两份真夹具上判"拒"且给出差异条数。
+  在两份真夹具上判"拒"且给出差异清单。
 - **这一层负责证明**：协议解析与 AUI 合并在真录制件上守住不变量，且"这份录制配不配得上这个界面"
   的判决只在**表对得上**时放行。真机行为（起作业、发事件、断点）不在这里证。
 - **故意不覆盖**：现场语料（含真实业务数据，不随仓库走）与真机 E2E —— 它们分别由
@@ -306,35 +307,76 @@ diff a.txt b.txt                                  # 期望：无差异
 编译件标识（`BinaryID`，用 `--binary-ref` 触发一次只读 `ls -ln`）、连接清单，以及收工那一刻的指纹。
 没有身份文件的录制件照样能用（指纹是**从字节复算**的），只是路径与编译件一栏空着 —— `rec show` 会这么说。
 
-**指纹 = 整张"坐标 → 编号"表**（`fingerprint.go`）：每条对象取
-`(种类, 作用域, 编号, 角色名)`，角色名取协议 `name` → `comment`，两样都没有就留空。
-它**不含业务值**（`text`/`value`）：同一路径连录两轮，单号会从 `…003` 变成 `…004`，
-拿值当签名会把能用的录制判成失效。指纹里因此也没有任何业务数据，可以随便复制流转。
-摘要（`Fingerprint.Hash`）是这条路线的身份：**同一条启动历史必得同一张表**。
+**指纹 = v3 三件套**（`fingerprint.go`，契约 A19）：
 
-**闸门**（`gate.go`）在回放之前判两件事，任一不符就拒（`rec replay` 里落地）：
+| 成分 | 定义 | 参与判决 |
+|---|---|---|
+| **身份多重集** | 全部节点的 `colName#fieldId`（排序后取哈希 + 计数） | ✅ |
+| **引用边集合** | 全部父子边写成「父身份→子身份」（身份缺失时退化为 `type#角色名`／`type#~序号` 占位），排序后取哈希 | ✅ |
+| **类型直方图** | `节点类型 → 个数`（规范串 `Edit=3 TableColumn=2`，可比较、可读） | ✅ |
+| **`idDigest`** | 旧算法（整张"坐标 → 编号"表）的哈希，就是 `Fingerprint.Hash` | ❌ **只存不判**（诊断/对比用） |
+
+为什么主判据是**身份**而不是号码：会话 id 是**临时句柄**（运行期「单调计数器 + LIFO 空闲栈」发放、
+会被复用），所以 id 是**启动历史的函数** —— 同一套界面换一条启动路径，对象集几乎一样，
+共同条目的编号**一条都不相同**。而同一表单内 `colName`+`fieldId` 稳定且唯一
+（离线解析 vs 运行期语料 **509/509 = 100%**）。v2 拿号码当签名，于是把"同一界面、不同启动路径"
+判成不同 —— 跨路径回放的误拒就是这么来的。
+
+指纹里**不含业务值**（`text`/`value`）：同一路径连录两轮，单号会从 `…003` 变成 `…004`，
+拿值当签名会把能用的录制判成失效。因此指纹里没有任何业务数据，可以随便复制流转。
+
+**判决（冻结 = 契约 A21「非对称覆盖」；阈值写死在 `fingerprint.go`，不读配置）**：
+
+```
+通过 ⟺ ① 证据量足够：|live| ≥ max(10, 0.5×|rec|)
+      且 ② live→rec 身份覆盖 ≥ 0.98
+      且 ③ live→rec 边覆盖   ≥ 0.98
+      且 ④ live 的多余身份 ≤ 2%
+      且 ⑤ 类型直方图差异 ≤ 2%（按 live 的身份集合在 rec 里取对应节点后比）
+```
+
+* 方向是**单向**的（live→rec）：会话是渐进的（`an` 加 / `un` 改 / `rn` 删），
+  **录制件是整会话、当前只开半屏是常态**，不能因此误拒 —— 这正是 A21 取代 A19（双向 Jaccard）
+  的理由：A19 会把"半屏"判成两个界面，正是本轮要消灭的那类误拒。
+* ① 防的是另一头："只有 5 条残片"也能凑出 100% 覆盖，所以证据量不够就直接拒（理由写"证据不足"）。
+* ② 身份 / ③ 边都是**多重集单向覆盖**（`a 里有几条能在 b 里找到 / |a|`，重复计数）；
+  ④ 是 ② 的补（`|live\rec| / |live|`），契约分列两条、各自算。
+* ⑤ 类型直方图差异 = `½·Σ|Δ类| / max(两边节点数)`，即**变了类型的节点占比**（一个节点换类型只算一次）。
+* **没有任何一条分支会因为 `idDigest` 相等就放行**（那等于把 v2 借尸还魂）。
+
+**差异清单必须分两栏**（这是"半屏"能被读懂的关键）：
+
+| 栏 | 含义 | 是否构成拒绝 |
+|---|---|---|
+| **`意外`** | `live 有、rec 无` 的身份 / 边 | ✅ **拒的理由**（界面真的变了） |
+| **`尚未加载`** | `rec 有、live 无` 的身份 / 边 | ❌ 正常（会话还没走到那儿），**只作信息** |
+
+**闸门**（`gate.go`）在回放之前判三件事，任一不符就拒（`rec replay` 里落地）：
 
 | 判什么 | 判决 | 报文 |
 |---|---|---|
-| 两边都知道启动路径且**不是同一条** | `path` | 说出录制件是哪条路径录的、当前会话是哪条 |
-| **逐条连接**比：当前这条连接的编号表里，能在录制件的**某一条**连接里原样找到的比例 `< 99%` | `fingerprint` | 报最接近的那一对连接号、对得上/编号不同/只在一边的条数，外加前几条"录制里是哪个编号、现在这个坐标是哪个编号" |
+| 两边都知道启动路径且**不是同一条** | `path` | 说出录制件是哪条路径录的、当前会话是哪条（A21 保留：这是**独立**的拒绝理由） |
+| **逐条连接**比指纹 v3：①–⑤ 有任一条不过 | `fingerprint` | 五个判据的实测值 + **分两栏的差异清单**（意外 / 尚未加载）+ 类型变了哪些 ＋ 前几条"录制里是哪个编号、现在这个坐标是哪个编号"（诊断） |
 | 录制件里没有界面 / 当前会话还没有界面 | `no-recording` / `no-live` | 分别说清是哪一边空着（含读不动的原因） |
 
+旧录制件的 **v2 指纹字段**（只有 `total`/`hash`）读到就**忽略并记诊断**（`GateVerdict.Diagnostics`），
+既不因此崩，也不因此拒或放 —— 判决永远只用三件套。
+
 **按连接比，不是把整个会话揉成一张表**：一个会话本来就有多条连接，而且它们可以是完全不同的
-两棵树 —— 实测 `r.d` 会话是 `#1 e2f009591dc3b368（298 条，fgldeb 调试器的界面）` +
-`#2 493b95ef0b0df2af（3976 条，作业界面）`。揉起来是 4273 条，拿它去比单连接的录制件，
-同一条路径也会判成 93% 不过。所以判据是"存在一条连接对得上"，报文里会印出比过的每一对：
-`#1↔#2 0% ／ #2↔#2 100%`。
+两棵树 —— 实测 `r.d` 会话是 `#1`（298 条，fgldeb 调试器的界面）+ `#2`（3976 条，作业界面）。
+揉起来是 4273 条，拿它去比单连接的录制件，同一条界面也会判不过。所以判据是"**存在一条连接对得上**"，
+报文里会印出比过的每一对（身份覆盖 / 边覆盖 / 类型差异）。
 
-阈值是量出来的：同路径、当前会话刚起完作业（录制件的**前缀**）时是 99–100%；
-两份真界面不同的夹具（`testdata/fep-recordings/id-reuse.txt` 与 `openwin-with-dialogs.txt`）是 79%；
-换一条启动路径（同一个作业 `bsft001_wf`、同一个环境与 ENT，`r.r` 的件 vs 调试线的会话）是 0%。
-99% 落在这条空档里。判定由 `TestGateComparesPerConnection`、`TestGateReportsPerConnectionReadFailures`
-与 `TestGateRefusesTwoDifferentRealInterfaces` 钉住（阈值两侧各有一条）。
+判定由 `gate_test.go` 的 `TestV3*` 一组钉住：误拒变通过（号码全变、身份不变却通过）、
+**半屏通过**（live ⊂ rec，且列的清单在「尚未加载」栏）、证据不足拒（5 条残片）、
+意外身份拒（多出 > 2%，列在「意外」栏）、边覆盖拒（身份同、父子关系不同）、
+类型直方图拒（> 2%）、`idDigest` 不参与、旧 v2 字段只当诊断、阈值与规模下限是契约值（改一格必红）。
+**反证**已演示：去掉 ① 的规模下限 → 3 条红；把「意外 / 尚未加载」两栏合并 → 半屏 2 条红；
+退回 A19 的双向 Jaccard → 半屏 2 条红；把判决改成"看 idDigest" → 5 条红。
 
-现场量到的两条（主机109，2026-10-15，作业 `bsft001_wf`）：**同一条路径**上录的几份
-（五份字节各不相同的调试线录制，跨两轮 `tt serve` 重启）指纹**逐条相同**：`493b95ef0b0df2af`（3976 条）；
-同一个作业换成 `r.r` 路径录一轮就是另一张表：`d9431dc4b8f87339`（4961 条）。
+现场量到的两条（主机109，2026-10-15，作业 `bsft001_wf`，**号码口径**，v3 起它们只是 `idDigest`）：
+**同一条路径**上录的几份（五份字节各不相同的调试线录制，跨两轮 `tt serve` 重启）摘要**逐条相同**：
+`493b95ef0b0df2af`（3976 条）；同一个作业换成 `r.r` 路径录一轮就是另一个摘要：`d9431dc4b8f87339`（4961 条）。
 要自己复现就照上面 M3 那条配方做两轮，把 `diff a.txt b.txt` 换成 `tt fep rec show <ID>` 比指纹。
 
 `tt fep rec list` 是清单（默认把缓存与长期库都列出来，`--from` 可以指到别处），每份都当场复算指纹。
@@ -590,6 +632,30 @@ tt fep src openwin q_imaf001_15 --source D:/T100/源代码/主机109
 任何语料上都成立）、网格归属不许指向幽灵窗口（"还活着"必须是"那个 id 现在还是 Window"，
 裸 id 会被复用）、开窗窗口必须能问出它的 `s_qry` 结果网格。
 
+### `--window` 的取值口径（台账 D1，契约 A12 精确化 / A18）
+
+`--window` 与字段寻址的 `Scope.Window` **只有一个口径**：
+
+```
+候选的窗口名 = m.WindowName(m.WindowOf(候选))     ← 精确相等才算命中
+```
+
+**取值就是窗口名原样**，它可能是窗口标题形态（`单据别编号数据查询(q_ooba002_1)`），
+也可能是空串；**不是**干净的 AUI 名（那个是窗口对象的 `name` 属性，如 `w_qry_q_ooba002_1`）。
+所以别自己去拼 `w_` + 剥 `_wf/_tui/_gui` —— 那是**启发式**，只许进诊断，不参与判定（A18）。
+
+原先 `--window` 比的是**候选自身的 `text`**（`m.WindowName(o.ID)`）。`WindowName` 对非窗口
+对象回的就是它自己的 `text`（`TableColumn` 的 text 是「单据别编号」），于是这行代码实际在问
+"这个对象的文字像不像窗口名"：**选错**（某个字段的文字恰好等于窗口名）和**选不出**（一个都
+不等）都会发生 —— 这就是 D1，已改成走 `windowNamed`（与 `ByColName` 同一句判据）。
+
+不命中时错误里**列出这一屏真实存在的窗口名**（`m.WindowName` 原样、排序、带引号，可直接
+复制回 `--window`），而不是只报"没找到"：窗口名是「标题(名字)」形态，靠猜猜不对。
+
+不做任何子串/后缀/大小写匹配。回归：`do_window_test.go` 三条 —— 精确命中（并与 `ByColName`
+命中同一节点）、**不再比 text**（候选 text 与窗口名一字不差但不属于它 ⇒ 不得命中，D1 的回归）、
+不匹配时报出真实窗口名。反证：把判据改回 `m.WindowName(o.ID) != window` ⇒ 第 2 条必红。
+
 ## 地基：源码 ↔ 运行期交叉校验（`ReconcileSelect`）
 
 `OpenWinProgramFromWindow("w_qry_q_imaf001_15") == "q_imaf001_15"` —— 驱动**不需要人告诉它**
@@ -673,9 +739,11 @@ tt fep rec show fep-20261016-112410           # 「帧索引」那一行会说�
 | `event` / `kind` / `target` | 事件原文 / `ActionEvent`\|`KeyEvent`\|`ConfigureEvent` / 载荷里的 `idRef` |
 | `sentAt` | 发出去的那一刻（Unix 毫秒）。跳过/失败/暂停时是 **null** |
 | `respAt` | 运行期回包的那一刻。**null = 没有回包**（不是 0 毫秒） |
-| `result` | `waiting`（已发出、等回包）/ `paused` / `sent` / `no-response` / `skipped` / `failed` |
+| `result` | `waiting`（已发出、等回包）/ `paused` / `sent` / `no-response` / `skipped` / `refused`（带身份但解析不过，**一步都没发**）/ `failed` |
 | `suspect` | 本该有回包却没有（点击类事件）—— 界面据此把"本来无应答"与"8s 无回包（可疑）"分开 |
 | `runtimeBytes` | 这一步之后运行期推回多少字节（"被确认"的量度） |
+| `colName` / `fieldId` | 这一步的**字段身份**（见下节）。旧日志没有这两个键 ⇒ 零值 = 未记录，不是错误 |
+| `code` | 被拒时的四码（`FIELD_NOT_IN_SCOPE` / `FIELD_AMBIGUOUS` / `FORM_UNKNOWN` / `FIELD_NOT_ACTIONABLE`），只有 `refused` 会带 |
 
 头行是格式版本 + ID/连接/计划步数，尾行是结果汇总（**尾行在 = 这一轮结束了**；
 不在就是"还在跑"或者"被杀在半路"）。三条纪律：
@@ -690,6 +758,83 @@ tt fep rec show fep-20261016-112410           # 「帧索引」那一行会说�
 控制（暂停/单步/停止）走 `<日志>.ctl` 里的一个词（`pause`/`resume`/`step`/`stop`），
 由回放进程在**下一步之前**读一次 —— 不新开端口，进程死了也不留监听（见 `ReplayCtl`）。
 生效时机要说清：暂停是在当前这一步的回包之后，而那一步可能正在等运行期（最长 8 秒）。
+
+## 计划/回放步骤的字段身份（`replayident.go` + `plan.go`，2026-10-17）
+
+`idRef` 是**会话句柄**（契约 H1/H2：裸 id 会被回收复用，`rn` 之后全量失效），所以
+"把录制时的 id 再发一遍"在跨会话回放里是**安静地点到别的控件上**。稳定的只有编译期
+分配的 `(colName, fieldId)`，于是步骤结构里多记了一份身份：
+
+| 结构 | 位置 | 新键 | 谁写 |
+|---|---|---|---|
+| `PlanStep` | `plan.go`（`.4fd` 推的语义计划） | `colName`（`fieldId` 留 0） | `BuildPlan`：只带 `.4fd` 的 `colName`；**`fieldId` 绝不从 `.4fd` 取**（B5/H5，每次保存全量重排） |
+| `ReplayEvent` | `replay.go`（回放计划的一步） | `colName` / `fieldId` | `PlanReplay` 在 `ReplayOptions.Model` 非 nil 时补记（`IdentityOf`） |
+| `ReplayStep` | `replaylog.go`（回放日志的一行 = 这一轮的录制） | `colName` / `fieldId` / `code` | `RunReplayWith` 逐条写；`code` 只在 `refused` 时写 |
+
+**两条不变式**：
+
+1. **旧数据照旧**：两个键都用 `omitempty`，零值 = *未记录*。旧计划/旧回放日志读进来
+   是零值，`ResolveStepTarget` 里 `ColName == ""` 直接原样返回事件（`FromIdentity=false`），
+   行为一字不变 —— 守护测试：`TestOldReplayPlanJSONStillReads`、
+   `TestResolveStepTargetKeepsLegacyBehaviour`、`TestReplayLogCarriesIdentity`（旧日志那半）、
+   `TestPlanStepJSONOmitsUnrecordedIdentity`。
+2. **有身份就现解析**（`ResolveStepTarget`）：`ByColName(m, Scope{…, WantFieldID}, colName, kind)`
+   → 命中就把事件体里的 `idRef` 换成新 id（其余字节原样：值、空格、属性顺序都不动）；
+   解析不过 → 四码之一 + **一个字节都不发**，这一轮到此为止（后面的步骤依赖它）。
+   窗口**只收窄**（`Scope.Window` 必须是 `m.WindowName` 的原样值，A18）；回放默认不给窗口
+   （录制基线不按窗口过滤，A18③）。
+
+命名上的一致：`ReplayEvent` 用 `string`/`int`（JSON 面就是这两种），内部判定用
+`ReplayIdentity{ColName, FieldID}`；`ReplayStep` 里也是同一对 JSON 键。`FieldID == 0`
+既是"未记录"，也可能是**合法编号 0**（A10）—— 取舍写在 `ReplayIdentity` 的注释里：
+编号 0 存不下来时最坏结果是 `FIELD_AMBIGUOUS`（如实拒），**不会**指错控件。
+
+命令面：`tt fep do act|type --field <colName>` 与位置参数**互斥**（同时给 = 用法错，
+退出码 2）；解析不过按四码给非 0 并打 `Hint`。实现与测试在 `internal/cli/fep/do_field.go`
+（`resolveFieldOrRefuse` 是纯函数：不读会话、不发包）。
+
+回放这一侧的接线（E2）：`tt fep replay` 与 `tt fep rec reproduce` 走**同一条**组装路径
+`internal/cli/fep/replay.go` 的 `planReplayFor` —— 它把**这份录制自己的**界面模型
+（`-rt2gdc.log`）读出来递给 `PlanReplay`。为什么必须是"这份录制自己的"：计划里的 `idRef`
+是录制当时发出去的裸 id，拿当前界面的编号表去翻就是另一张表（与指纹闸同一条理由）。
+读不到模型（没有界面侧 / 文件读不动）⇒ `Model` 给 **nil** ⇒ 身份链自动不参与，
+不记身份、按 `idRef` 照旧发 —— **旧行为一字不变，也不因此报错**
+（`TestReplayPlanKeepsLegacyShapeWithoutModel` 钉这两半）。
+
+## A23/A24：实际发包强制身份 + 旧件只打标记（2026-10-17，用户决策 D-F1/D-F2）
+
+**A23 —— 真跑必须能说出"发给哪个字段"。** 上面那半（"没身份就照旧按 `idRef` 发"）
+在 `internal/fep` 库层保留，但**两条发包入口已经不这么用了**：
+`tt fep replay` / `tt fep rec reproduce` 都只走 `Client.RunReplayIdentity`
+（`replayident.go`），它先过 `RequirePlanIdentity`，再走原来的回放：
+
+| 情形 | 判决 | 出处 |
+|---|---|---|
+| 步骤要发**给某个对象**（事件带 `idRef`）却没有 `colName` | **拒**：`FIELD_NOT_IN_SCOPE`/5，报文写明「该录制件早于身份上线，需重录」，Hint 给三条路（重录 / `rec mark-stale` / `--dry-run`） | `RequireStepIdentity` |
+| 步骤有 `colName` | `ByColName` 现解析，失败按四码拒（5/5/1/4） | `ResolveStepTarget` |
+| **没有目标**的步骤（`KeyEvent`） | 不拦 —— 它没有对象可指，装不上身份，**重录也修不好**（语料里每条录制都有 Tab/Enter）；判据是"要发给对象却不知道是哪个" | `stepNeedsIdentity` |
+| `--dry-run` / 纯计划展示（**不发包**） | 放行，但每条无身份的步骤标 `NoIdentityNote`＝`无身份（真跑会被拒）`；文本与 json 两种输出都带 | `NoIdentitySteps` + `replayDryRunText/Report` |
+
+**拒绝发生在任何发包之前**：计划级预检（不是发包循环里的第一条判断），所以连"有身份、
+本该能发"的第 1 步也不会先发出去。守护测试：`TestRunReplayIdentityRefusesBeforeAnyByte`
+（读运行期连接 300ms 必须一个字都没有）、`TestReplayGateRefusesIdentitylessPlanBeforeAnyByte`
+（产品路径 + 注入口一条都收不到）、`TestDryRunTextMarksIdentitylessSteps`。
+反证：把 `RequireStepIdentity` 改回 `return nil`（原样走旧逻辑）⇒ 前两条当场红，
+且 `res.Sent` 从 0 变 1（"没发一个字节"确实是断言，不是文风）。
+
+**A24 —— 旧件只有两条路，不加任何跳过开关。** 没有 `--skip-gate` / `--force` 之类
+（用户明令，永不）；旧件（无身份 / v2 指纹）要么**重录**，要么只**打标记**：
+
+```go
+// meta.go：三个键全部 omitempty（老身份文件读到即 false，不需要迁移）
+Stale bool `json:"stale,omitempty"`; StaleReason string `json:"reason,omitempty"`; StaleAt time.Time `json:"staleAt,omitempty"`
+func MarkStale(dir, id, reason string, at time.Time) (*RecordingMeta, error)
+```
+
+`MarkStale` **只重写身份文件**：不删任何文件、不改录制内容（`-rt2gdc/-gdc2rt/-timeline/帧索引`
+逐字节不变 —— `TestMarkStaleMarksMetaOnly` 用 sha256 逐文件比）。没有身份文件的老件也能标：
+补写一份只有 ID + 标记的身份文件，`Note` 里写明"补写的"。文案只有一个来源
+`StaleNote＝不可回放（需重录）`，`rec list` / `rec show` / 命令回执都引它。
 
 ## 细节去哪
 

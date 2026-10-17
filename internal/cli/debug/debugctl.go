@@ -442,6 +442,11 @@ var debugStartCmd = &cobra.Command{
 		}
 		// 点了 --fglserver 就要认账(旧服务端不认这个字段时是静默忽略的)
 		screenErr := dbgScreenVerify(dbgFGLServer, fglChanged, snap)
+		// A35：**启动那一刻**就把"没接线"说清（别等他下完断点才发现程序已经退了）。
+		// 判据是快照里的 fglserver —— 那是这一轮真正导出的那一个（见 wiring.go）。
+		if snap != nil {
+			printWiringHint(dbgWiringHint(snap.FGLServer))
+		}
 		// JSON 模式:把身份字段并进同一个快照对象,不另打散的行,别破坏 jq 取字段的习惯。
 		if IsJSON() {
 			applyIdentityTo(raw, snap)
@@ -693,6 +698,10 @@ func printLines(r *rawOut) {
 }
 
 // dbgRawOnce 透传一条 fgldb 命令
+//
+// 错误统一过 `withRunningHint`（A34）：程序 running 时服务端回 400「程序运行中…」，
+// 那句话本身只说"禁止"，不说"那怎么办" —— 这里补上可执行的那一步（先 interrupt）。
+// **不重试**：第二次同样会被拒，而"静默重试"恰恰会让人以为命令发出去了。
 func dbgRawOnce(id, cmd string) (*rawOut, error) {
 	body := map[string]any{"command": cmd, "timeout": dbgTimeout}
 	if dbgSoftWait > 0 {
@@ -700,7 +709,7 @@ func dbgRawOnce(id, cmd string) (*rawOut, error) {
 	}
 	data, err := dbgAPI("POST", dbgSessionURL(id, "/raw"), body)
 	if err != nil {
-		return nil, err
+		return nil, withRunningHint(err)
 	}
 	var r rawOut
 	if err := json.Unmarshal(data, &r); err != nil {
@@ -1632,6 +1641,10 @@ tt debug topent <企业编号> 改。`,
 		snap := dbgSnapOf(raw)
 		// 点了 --fglserver 就要认账(旧服务端不认这个字段时是静默忽略的)
 		screenErr := dbgScreenVerify(dbgFGLServer, fglChanged, snap)
+		// A35：重放这条线也是"起会话 + 放行"，没接线同样在 main 之后立刻 -6300 退出。
+		if snap != nil {
+			printWiringHint(dbgWiringHint(snap.FGLServer))
+		}
 		if IsJSON() {
 			applyIdentityTo(raw, snap)
 			if err := dbgJSONOut(raw); err != nil {
@@ -1683,7 +1696,11 @@ func init() {
 	debugWaitCmd.Flags().IntVar(&dbgTimeout, "timeout", 300, "最长等待秒数(到点返回 timedOut,不是错误)")
 	debugWaitCmd.Flags().StringVar(&dbgWaitFor, "for", "stopped,exit,dead,watchdog", "等哪些事件(逗号分隔:stopped,exit,dead,watchdog)")
 	debugWhyCmd.Flags().BoolVar(&dbgNoResume, "no-resume", false, "探测完不自动放回运行(默认会自动 continue 放回)")
-	debugStartCmd.Flags().StringVarP(&dbgModule, "module", "m", "asf", "T100 模块目录名(如 asf)")
+	// 默认**不给模块**（A27/缺陷 #3）：以前默认写死 "asf"，把服务端登录后按
+	// `<作业>.42r` 在各模块目录里做的权威解析整条短路了 —— 实测 `debug start axmt500_wf`
+	// 于是报出 `asf_axmt500_wf.4gl`，而真名是 `axm_axmt500_wf.4gl`，`break asf_…:行`
+	// 必然 `No source file named`。留空 = 让会话自己解析（唯一权威来源）。
+	debugStartCmd.Flags().StringVarP(&dbgModule, "module", "m", "", debug.ModuleFlagHelp())
 	debugStartCmd.Flags().StringVar(&dbgZone, "zone", "", "区域代码覆盖(31开发/35测试/36正式;默认取配置)")
 	debugStartCmd.Flags().StringVar(&dbgSSHName, "ssh", "", "SSH 配置名(设置页配置的多 SSH;默认取配置)")
 	// --env 与全局 --env 同名同义:子命令上显式给的优先级更高(根命令那个是持久开关,

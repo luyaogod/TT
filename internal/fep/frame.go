@@ -60,6 +60,55 @@ func Encode(f Frame) []byte {
 	return out
 }
 
+// FrameTypeKnown 报 t 是不是本包**认识**的帧类型（契约 C6.3）。
+//
+// 注意 `false` 的意思：帧头第 3 字节的取值域**未穷尽**（GDC-逆向报告 §16① 与 §8.1
+// 说得很清楚：实测只有 1 与 5），所以 false = "这个值我没见过、我不知道它是什么"，
+// **不是**"这帧是坏的、可以扔"。丢弃未知帧会让后面的事件全部错位，而症状是
+// "作业一动不动"、"字节都发出去了但没反应" —— 查不到是这里吞的（H9/B12）。
+func FrameTypeKnown(t byte) bool {
+	switch t {
+	case FrameTypeAUI, FrameTypeCache:
+		return true
+	}
+	return false
+}
+
+// UnknownFrameHistory 是诊断里保留的"最近几个未知帧"的窗口上限。
+//
+// 上限的理由：这是长连接上的计数，重同步时可能在载荷噪声里碰到成千上万个看着像帧头的
+// 巧合；要回答的问题是"最近又冒出了什么没见过的类型"，不是"历史全貌"。
+const UnknownFrameHistory = 8
+
+// UnknownFrame 是一个**未知类型**帧的踪迹。
+type UnknownFrame struct {
+	Type       byte  `json:"type"`       // 帧头第 3 字节（那个没见过的值）
+	Off        int64 `json:"off"`        // 帧首字节在流里的绝对偏移（含 9 字节帧头）
+	PayloadLen int   `json:"payloadLen"` // 载荷字节数（不含结尾换行）
+}
+
+// FrameDiagnostics 是解码器的诊断账本：未知类型帧的计数 + 最近窗口。
+//
+// 它**只记账，不影响解码结果**：未知帧照样从 `Feed` 里交出来（调用方按 `Type` 自己决定
+// 怎么对待），而既有调用方的行为一个字都不变 —— `aui.go` 只吃 type=1（`ApplyFrame`
+// 里那句 `f.Type != FrameTypeAUI` 就是这层闸），`index.go` 把 type=5 记成 `kind=cache`、
+// 其它未知类型记成 `typeN`。这里加的是"看得见"，不是"拦得住"。
+type FrameDiagnostics struct {
+	UnknownCount  int            `json:"unknownCount"`
+	RecentUnknown []UnknownFrame `json:"recentUnknown,omitempty"` // 最近 UnknownFrameHistory 个，按到达顺序
+}
+
+// record 记一个未知帧（内部用；只加计数，不碰解码流程）。
+func (g *FrameDiagnostics) record(t byte, off int64, payloadLen int) {
+	g.UnknownCount++
+	g.RecentUnknown = append(g.RecentUnknown, UnknownFrame{Type: t, Off: off, PayloadLen: payloadLen})
+	if len(g.RecentUnknown) > UnknownFrameHistory {
+		// 就地搬：长连接上这个切片会被反复追加，别让底层数组一路长大。
+		n := len(g.RecentUnknown) - UnknownFrameHistory
+		g.RecentUnknown = append(g.RecentUnknown[:0], g.RecentUnknown[n:]...)
+	}
+}
+
 // ErrFrameTooLarge reports a payload longer than MaxFrameLen.
 var ErrFrameTooLarge = errors.New("fep: frame too large")
 
@@ -69,6 +118,11 @@ var ErrFrameTooLarge = errors.New("fep: frame too large")
 // a time instead of trusting a fixed offset.
 type Decoder struct {
 	buf []byte
+
+	// off 是 buf[0] 在流里的绝对偏移（诊断用：未知帧的偏移要能回原文里找）。
+	off int64
+	// diag 是未知帧类型的诊断账本（C6.3）。只看不算，绝不改变解码结果。
+	diag FrameDiagnostics
 }
 
 // NewDecoder returns an empty decoder.
@@ -86,6 +140,7 @@ func (d *Decoder) Feed(p []byte) ([]Frame, error) {
 		// payload, so this must not be fatal.
 		if n <= 0 || n != dup || n > MaxFrameLen {
 			d.buf = d.buf[1:]
+			d.off++
 			continue
 		}
 		if len(d.buf) < 9+n {
@@ -96,15 +151,37 @@ func (d *Decoder) Feed(p []byte) ([]Frame, error) {
 		// 长度字段包含结尾换行（GDC 的约定），所以载荷末尾那一个 0x0a 是帧的一部分、
 		// 不属于消息文本：读出来就切掉。旧录制（长度不含换行）切了也没副作用。
 		payload = bytes.TrimRight(payload, "\r\n")
-		out = append(out, Frame{Type: d.buf[8], Payload: payload})
+		fr := Frame{Type: d.buf[8], Payload: payload}
+		// 未知类型：**记诊断**，但帧照样返回（C6.3/B12：不丢帧，也不当 AUI 消息）。
+		if !FrameTypeKnown(fr.Type) {
+			d.diag.record(fr.Type, d.off, len(payload))
+		}
+		out = append(out, fr)
 		d.buf = d.buf[9+n:]
+		d.off += int64(9 + n)
 		// 兼容“长度不含换行”的写法：换行落在帧外时照样吃掉。
 		if len(d.buf) > 0 && d.buf[0] == '\n' {
 			d.buf = d.buf[1:]
+			d.off++
 		}
 	}
 	return out, nil
 }
+
+// Diagnostics 返回解码器的诊断快照。
+//
+// 返回的是**拷贝**（含切片拷贝）：调用方拿到的是"此刻的账本"，之后解码器继续记账
+// 也不会改到它手上的这份 —— 诊断最容易被当成"实时视图"误用，这里直接堵掉。
+func (d *Decoder) Diagnostics() FrameDiagnostics {
+	snap := d.diag
+	if len(d.diag.RecentUnknown) > 0 {
+		snap.RecentUnknown = append([]UnknownFrame(nil), d.diag.RecentUnknown...)
+	}
+	return snap
+}
+
+// UnknownCount 报解码器至今见过的**未知类型**帧数量（0 = 全是见过的类型）。
+func (d *Decoder) UnknownCount() int { return d.diag.UnknownCount }
 
 // Buffered reports how many undecoded bytes are held (diagnostics only).
 func (d *Decoder) Buffered() int { return len(d.buf) }

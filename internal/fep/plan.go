@@ -25,6 +25,19 @@ type PlanStep struct {
 	Value    string `json:"value,omitempty"`  // 建议值（来自表单定义，如勾选字面值）
 	Why      string `json:"why,omitempty"`
 	Source   string `json:"source,omitempty"`
+
+	// ── 身份（契约 C3 + A18；JSON 键名 `colName`/`fieldId`） ──────────────────
+	//
+	// 计划步骤要能"回放时重新找到这个控件"，所以除了给人看的中文名，还得记下**字段
+	// 身份**。两个字段都**向后兼容**：旧计划里没有这两个键 ⇒ 反序列化得零值
+	// （空 / 0）= "未记录"，**不是错误**，读侧照旧按名字走。
+	//
+	// ColName 来自 `.4fd` 的 `colName`（表单内稳定，可跨会话复用）。
+	ColName string `json:"colName,omitempty"`
+	// FieldID 是 `.4fd`/运行期的编号。**本层永远不填它**：`.4fd` 的 `fieldId` 每次
+	// 保存全量重排（契约 B5/H5，engine/SPEC.md:257），拿它当身份就是"看起来对、其实错"。
+	// 0 = 未记录；要填只许填**运行期证据**（回放侧 ReplayStep.FieldID 就是这么来的）。
+	FieldID int `json:"fieldId,omitempty"`
 }
 
 // OpForWidget 把 **.4fd 的控件类型**映射成**可做的操作**。
@@ -109,6 +122,9 @@ func BuildPlan(form string, fields []SrcField) []PlanStep {
 			Widget: f.Widget, Group: f.FieldType, Table: f.Table,
 			Required: f.Required, Opener: f.Opener,
 			Source: form,
+			// 身份只带 `.4fd` 里那个**稳定**的键（colName）；fieldId 见 PlanStep 的注释：
+			// 从 `.4fd` 取编号是红线上的一条（H5），所以这里**故意**不填。
+			ColName: f.ColName,
 		}
 		switch it.op {
 		case "openwin":

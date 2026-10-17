@@ -17,7 +17,7 @@
 | `/api/recordings/{id}` GET / DELETE | 看一份（含身份）／删一份（**必须 `?confirm=1`**：录制不可再生） |
 | `/api/recordings/{id}/overview` | **明细页概览**：各方向的字节/帧数/索引状态 + 条带要的帧数组（只读索引里的**时刻**，位置一律现场从字节解） |
 | `/api/recordings/{id}/timeline` | 分页的帧列表：`?conn=&dir=&kind=om,event&from=&limit=`（`from` 是**页序号**，不是时间 —— 块级精度下时间全是 0） |
-| `/api/recordings/{id}/steps` | **三层模型**：语义动作 > 原始事件 > 运行期回应（`?conn=`）。读时现算，不落盘 |
+| `/api/recordings/{id}/steps` | **三层模型**：语义动作 > 原始事件 > 运行期回应（`?conn=`）。读时现算，不落盘。每一行带 `identity`（身份 vs 句柄三列，见下节） |
 | `/api/recordings/{id}/raw` | 某一帧的原始字节（`?conn=&dir=&off=&len=`）：hex + 可打印形态；越界或单次 >8 KB 一律 400 |
 | `/api/recordings/{id}/replay-steps` | **回放进度**：`?since=N&watch=1`。读的是回放进程逐行 flush 的 jsonl（权威）；`since` 是**已拿到多少条记录行**（一行不等于一步） |
 | `/api/recordings/{id}/replay-ctl` POST | 人对回放下的命令：`{cmd: pause\|resume\|step\|stop}` → 写进 `<日志>.ctl`。非法词 400 / 没有日志 404 / 不在跑 409（**停止除外**，收尾那一下要能点） |
@@ -52,6 +52,42 @@
   这时"这条消息指向哪个对象"没有答案（`fep.soleIDRef`）。
 - **回应归属靠时间窗**：两个方向是两条独立的字节流，序号又分属两侧，唯一的共同坐标是时间；
   窗口退化（相邻两步同一毫秒）或没有帧级时间时，照实说"归不到具体某一步"，不猜。
+
+## 录制明细页的「身份 vs 句柄」三列
+
+会话 id 是**临时句柄**：运行期会复用裸 id（同一个 `3541` 前一生是工具栏项、后一生是明细列
+`formonly.check`），`rn` 之后更是全量失效 —— 光看号码，人看不出"这是哪个字段"。所以
+`/steps` 的每一行除了旧键（`target`/`frame`/`events`/…，**一个都没动**，既有前端不炸）
+之外，多带一个 `identity` 对象，三列各答一件事：
+
+| 列（`key`） | JSON 键 | 来源 | 稳不稳 | 缺失时 |
+|---|---|---|---|---|
+| `colName` | `identity.colName` | 节点的 `Attr("colName")` | **稳**（编译期分配、表单内稳定） | `"未解析"` |
+| `fieldId` | `identity.fieldId` | 节点的 `Attr("fieldId")` | **稳**（与 `colName` 成对：`<colName>#<fieldId>` 双键） | `"未解析"` |
+| `sessionId` | `identity.sessionId` | 事件里的 `idRef` | 不稳（单步句柄：LIFO 复用、`rn` 后失效） | 永远有值（`0` = 这条事件没有 idRef） |
+
+同一行还有 `identity.colNameKnown` / `identity.fieldIdKnown`（**机器可读**的那一半：界面拿它
+选样式，**不要**去匹配 `"未解析"` 这个文案）、`identity.nodeType`（这一刻那个 id 是什么类型）、
+`identity.note`（为什么未解析 / 身份是从哪儿取的）。
+
+响应体顶层另有两样，界面照抄即可（**顺序与文案只写在这一处**，别在前端再写一套）：
+
+- `identityColumns`：`[{key,label,stable,missing}]`，数组顺序 = 界面列顺序（身份在前、句柄在后）；
+- `identityHint`：那句人话（"前两列是身份…第三列是句柄，会复用"）。
+
+盘外的三条纪律（都在 [`identitycols.go`](identitycols.go) 的头注释里）：
+
+1. **只读节点属性，不拼不猜**（契约 A15/A18）：取不到就是 `"未解析"` —— 空串等于假装解出来了；
+   双键缺一半也只写那一半缺（不拿另一半顶上，也不用 `name` 后缀拼 `colName`）。
+2. **身份取"这一步发生时"的那个节点**，不是录制末尾那棵树（`id-reuse.txt` 里 `3541` 的两生就是牙：
+   拿末尾回填会把后来的 `TableColumn` 安到早先那个工具栏项的动作上）。排先后只用**帧级时间**
+   （跨方向唯一的共同坐标），单遍推进，不按动作重建模型。
+3. 没有帧级时间（索引缺失/老件重建）就退回末尾整棵树，并在 `identity.note` 里**明说**这一点 ——
+   期间若有 id 复用，显示的可能不是当时那个节点。这条连接没录到界面侧则整格 `"未解析"` +
+   原因。**永远不猜**。
+
+判据：`identitycols_test.go`（用 `testdata/fep-recordings/` 的现场增量子流当夹具，读它们走既有的
+`fep.ReadRecording`，测的是"三列都在/取自节点属性/未解析不是空串/旧键还在/id 复用后身份跟着节点走")。
 
 ## 回放进度：两条通道，一条权威
 
@@ -127,7 +163,8 @@ go test ./internal/web -count=1
 **覆盖**：路由与挂载、SPA 回落（深链接回落入口 HTML，而未知顶层路径由 `hRoot` 回 404）、
 配置端点的校验与保留字段、派生状态；**三个"动作"端点的错误半边与其中一条快乐路径**
 （`action_test.go`）；**录制明细页四个端点的三层数字、帧级/块级两种时间精度、`/raw` 的
-越界与超限**（`recordingdetail_test.go`，用真帧流 + 真索引当夹具）。
+越界与超限**（`recordingdetail_test.go`，用真帧流 + 真索引当夹具）；**「身份 vs 句柄」三列**
+（`identitycols_test.go`，夹具是 `testdata/fep-recordings/` 的现场增量子流）。
 
 **故意不覆盖**：`hDBProbe` / `hDBAccVerify` 的快乐路径（要真服务器，属 L4）；
 `hConnTest` 是三条里**唯一能测全的** —— 它的下游 `erpdb.Open` 返回的是 `Connector`

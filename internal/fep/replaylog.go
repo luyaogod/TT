@@ -47,6 +47,8 @@ const replayLogVersion = 1
 //	sent        发出去了，而且运行期回了包
 //	no-response 发出去了，运行期在超时内没回包（**不等于 0 毫秒**）
 //	skipped     没发（AUI 安全闸说对象不在当前界面 / dry-run / 用户 --skip）
+//	refused     没发：这一步带字段身份，但身份**解析不过**（四码之一）——
+//	            与 skipped 分开记：一个是"该跳"，一个是"找错了，别再往下跑"
 //	failed      发的时候出错
 const (
 	ReplayWaiting    = "waiting"
@@ -54,6 +56,7 @@ const (
 	ReplaySent       = "sent"
 	ReplayNoResponse = "no-response"
 	ReplaySkipped    = "skipped"
+	ReplayRefused    = "refused"
 	ReplayFailed     = "failed"
 )
 
@@ -76,6 +79,14 @@ type ReplayStep struct {
 	// RuntimeBytes 是这一步之后运行期推回来的字节数（"被确认"的量度）。
 	RuntimeBytes int64  `json:"runtimeBytes,omitempty"`
 	Reason       string `json:"reason,omitempty"`
+	// ── 身份（契约 C3 + A18）────────────────────────────────────────────────
+	//
+	// 录制时写入（从当步目标节点取），两个键都 `omitempty`：旧日志没有它们 ⇒ 读侧得
+	// 零值 = 未记录，**不是错误**（`ReadReplayLog` 不做任何键集校验）。
+	ColName string `json:"colName,omitempty"`
+	FieldID int    `json:"fieldId,omitempty"`
+	// Code 是这一步被拒时的四码（`FIELD_NOT_IN_SCOPE` 等）；只有 `refused` 会带。
+	Code string `json:"code,omitempty"`
 }
 
 // replayLine 是文件里一行的完整形状：步骤 + 头行/尾行的元数据（与帧索引同一套做法）。
@@ -88,6 +99,7 @@ type replayLine struct {
 	Finished int64  `json:"finished,omitempty"` // >0 = 尾行（这一轮结束了）
 	Sent     int    `json:"sent,omitempty"`
 	Skipped  int    `json:"skipped,omitempty"`
+	Refused  int    `json:"refused,omitempty"`
 	Failed   int    `json:"failed,omitempty"`
 	Note     string `json:"note,omitempty"`
 }
@@ -166,7 +178,7 @@ func (w *ReplayLogWriter) Close(res ReplayResult, note string) error {
 	if w.err == nil {
 		tail, _ := json.Marshal(replayLine{
 			Finished: time.Now().UnixMilli(), Sent: res.Sent, Skipped: res.Skipped,
-			Failed: res.Failed, Note: note,
+			Refused: res.Refused, Failed: res.Failed, Note: note,
 			ReplayStep: ReplayStep{Total: w.total, RuntimeBytes: res.RuntimeBytes},
 		})
 		if _, err := w.f.Write(append(tail, '\n')); err != nil {
@@ -228,7 +240,7 @@ func ReadReplayLog(path string) (*ReplayLog, error) {
 			out.ID, out.Conn, out.Total, out.Started = ln.ID, ln.Conn, ln.Total, ln.Started
 		case ln.Finished > 0:
 			out.Finished, out.Done, out.Note = ln.Finished, true, ln.Note
-			out.Summary = ReplayResult{Sent: ln.Sent, Skipped: ln.Skipped, Failed: ln.Failed, RuntimeBytes: ln.RuntimeBytes}
+			out.Summary = ReplayResult{Sent: ln.Sent, Skipped: ln.Skipped, Refused: ln.Refused, Failed: ln.Failed, RuntimeBytes: ln.RuntimeBytes}
 		default:
 			out.Steps = append(out.Steps, ln.ReplayStep)
 		}
@@ -279,12 +291,14 @@ func (l *ReplayLog) States() []ReplayStep {
 
 // ReplayProgress 是给界面的一行汇总（进度条与计数徽标都照它渲染）。
 type ReplayProgress struct {
-	Total   int  `json:"total"`
-	Done    int  `json:"done"`    // 已经有终态的步数
-	Sent    int  `json:"sent"`    // 发出且运行期回了包
-	NoResp  int  `json:"noResp"`  // 发出但没回包（其中 suspect 的是"可疑"）
-	Suspect int  `json:"suspect"` // 上面那些里"本该有回包却没有"的
-	Skipped int  `json:"skipped"`
+	Total   int `json:"total"`
+	Done    int `json:"done"`    // 已经有终态的步数
+	Sent    int `json:"sent"`    // 发出且运行期回了包
+	NoResp  int `json:"noResp"`  // 发出但没回包（其中 suspect 的是"可疑"）
+	Suspect int `json:"suspect"` // 上面那些里"本该有回包却没有"的
+	Skipped int `json:"skipped"`
+	// Refused 是"带身份、解析不过 ⇒ 一个字节都没发"的步数（四码之一）。
+	Refused int  `json:"refused,omitempty"`
 	Failed  int  `json:"failed"`
 	Pending bool `json:"pending"` // 有一步正在等回包（waiting）
 	Paused  bool `json:"paused"`  // 停在第 N 步（等用户按继续/单步）
@@ -319,6 +333,9 @@ func (l *ReplayLog) Progress() ReplayProgress {
 		case ReplaySkipped:
 			p.Done++
 			p.Skipped++
+		case ReplayRefused:
+			p.Done++
+			p.Refused++
 		case ReplayFailed:
 			p.Done++
 			p.Failed++

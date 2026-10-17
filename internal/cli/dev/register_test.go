@@ -31,10 +31,18 @@ func TestDevCobraRouting(t *testing.T) {
 		rErr, wErr, _ := os.Pipe()
 		os.Stdout, os.Stderr = wOut, wErr
 		done := make(chan struct{})
+		// 两条管道**同时**排干：标准输出与标准错误是两个独立的管道，各有自己的缓冲
+		// （Windows 上 os.Pipe 的默认容量 4096）。串行排（先等 stdout EOF 再读 stderr）
+		// 会与生产端互相死等：裸 `tt dev` 先把 Usage 一次写到 **stderr**，一旦这段文本
+		// 超过缓冲容量，写端就阻塞 —— 而这里正卡在"等 stdout EOF"上，stdout 的写端要等
+		// 命令返回才关。Usage 曾涨到 4.7 KB（加 `formcheck` 那一段）时踩响过。
 		go func() {
 			_, _ = io.Copy(&outBuf, rOut)
+			done <- struct{}{}
+		}()
+		go func() {
 			_, _ = io.Copy(&errBuf, rErr)
-			close(done)
+			done <- struct{}{}
 		}()
 
 		cmd := newDevCmd()
@@ -44,6 +52,7 @@ func TestDevCobraRouting(t *testing.T) {
 		os.Stdout, os.Stderr = oldOut, oldErr
 		_ = wOut.Close()
 		_ = wErr.Close()
+		<-done
 		<-done
 		return common.ExitCodeOf(err), outBuf.String(), errBuf.String()
 	}

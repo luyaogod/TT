@@ -1,8 +1,10 @@
 package fep
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -85,32 +87,33 @@ var recReplayCmd = &cobra.Command{
 		}
 		// 计划阶段**不做** AUI 判断：那会把“后面才出现的按钮”（确定/审核/是）提前剔掉，
 		// 实测导致保存与审核那几步根本没发。AUI 安全闸只放在发之前那一刻（RunReplay 里逐条判）。
-		opt := fep.ReplayOptions{StopAt: replayStopAt, Skip: replaySkip}
-		plan := fep.PlanReplay(events, opt)
+		//
+		// 但模型还是要**递进去**：它只用来**记身份**（`colName`/`fieldId`，契约 C3/A18）——
+		// 有了它，回放时每一步都能按身份重新定位，而不是把录制时的裸 id 再发一遍。
+		// 读不到模型 ⇒ 传 nil ⇒ 旧行为一字不变（见 planReplayFor）。
+		plan := planReplayFor(t, events, replayStopAt, replaySkip)
 		fmt.Fprintf(cmd.ErrOrStderr(), "· 扫到 %d 条事件 → 计划回放 %d 条，跳过 %d 条\n",
 			plan.Scanned, len(plan.Events), len(plan.Skips))
 		for _, s := range plan.Skips {
 			fmt.Fprintf(cmd.ErrOrStderr(), "· 跳过：%s（%s）\n", truncate(s.Raw, 60), s.Reason)
 		}
 		if replayDryRun {
-			type out struct {
-				DryRun  bool              `json:"dryRun"`
-				Planned int               `json:"planned"`
-				Skipped int               `json:"skipped"`
-				Events  []fep.ReplayEvent `json:"events"`
-			}
-			res := out{DryRun: true, Planned: len(plan.Events), Skipped: len(plan.Skips), Events: plan.Events}
-			return printJSONOrText(res, func() {
-				for _, ev := range plan.Events {
-					fmt.Printf("%3d. %s\n", ev.N, ev.Event)
-				}
-				fmt.Printf("（dry-run：以上 %d 条会被发出，一个字节都没发）\n", len(plan.Events))
+			// A23 的**例外**：不发包的路径放行，但每条无身份的步骤必须标出来 ——
+			// 展示得出来 ≠ 跑得动，这句话要写在输出里（文本与 json 都要，默认是 json）。
+			return printJSONOrText(replayDryRunReport(plan), func() {
+				fmt.Print(replayDryRunText(plan))
 			})
 		}
 		if client == nil {
 			if client, cerr = newClient(); cerr != nil {
 				return cerr
 			}
+		}
+
+		// A23：**真跑之前**先过身份闸。放在这里而不是发包循环里，是为了让"一个字节都没发"
+		// 成为结构上的事实（连连接路由都还没做）；dry-run 在上面已经返回，不受此限。
+		if gerr := fep.RequirePlanIdentity(plan); gerr != nil {
+			return replayGateErr(cmd, gerr)
 		}
 
 		conn := replayConn
@@ -127,7 +130,9 @@ var recReplayCmd = &cobra.Command{
 		logf := func(format string, a ...any) {
 			fmt.Fprintf(cmd.ErrOrStderr(), "· "+format+"\n", a...)
 		}
-		res, rerr := client.RunReplay(plan, conn, replayInterval, false, logf)
+		res, rerr := client.RunReplayIdentity(plan, fep.ReplayRunOptions{
+			Conn: conn, Settle: replayInterval, Logf: logf,
+		})
 		entry := fep.AuditEntry{Verb: "replay", Result: "done"}
 		if res != nil {
 			entry.Conn = conn
@@ -138,7 +143,7 @@ var recReplayCmd = &cobra.Command{
 		}
 		_ = fep.AppendAudit(filepath.Join(recDirForAudit(nil), "audit.log"), entry)
 		if rerr != nil {
-			return fail(exitFailed, "%v", rerr)
+			return replayGateErr(cmd, rerr)
 		}
 		return printJSONOrText(res, func() {
 			fmt.Printf("回放：发 %d 条 / 跳 %d 条 / 失败 %d 条；运行期 +%d 字节\n",
@@ -152,6 +157,141 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+// ── 身份接线（契约 C3/A18）：把录制的界面模型递给计划 ────────────────────────
+//
+// 两件事分开写，是为了各自可测：`replayOptionsFor` 是纯接缝（给不给模型），
+// `replayIdentityModel` 是读侧（能不能读出模型）。命令行为不因这次接线而改变。
+
+// replayOptionsFor 把命令行开关 + 录制模型折成 `fep.ReplayOptions`。
+//
+// 接缝上只有一条要钉死的判据：**给了模型 ⇒ `Model` 非 nil；没给 ⇒ nil**，
+// 且 `StopAt`/`Skip` 原样带过去（TestReplayOptionsForWiresTheModel）。
+func replayOptionsFor(stopAt int, skip []string, m *fep.Model) fep.ReplayOptions {
+	return fep.ReplayOptions{StopAt: stopAt, Skip: skip, Model: m}
+}
+
+// planReplayFor 是**两个回放入口（`rec replay` 与 `rec reproduce`）共用的一条**组装路径：
+// 命令行开关 + **这份录制自己的**界面模型 → 回放计划。
+//
+// 为什么抽成函数而不是在两处各写一行：接线最容易被漏在"另一个入口"上（这次就是这么漏的）。
+// 只留一条路径，测试对着它断言，两个命令就都不会掉队
+// （TestReplayPlanKeepsLegacyShapeWithoutModel / TestReplayCommandPathSendsToResolvedIdentity）。
+func planReplayFor(t recTarget, events []string, stopAt int, skip []string) fep.ReplayPlan {
+	return fep.PlanReplay(events, replayOptionsFor(stopAt, skip, replayIdentityModel(t)))
+}
+
+// replayIdentityModel 把一份录制的**界面侧**读成一个模型，给 `PlanReplay` 记身份用。
+//
+// 为什么必须是**这份录制自己的**模型：计划里那些 `idRef` 是录制当时发出去的裸 id，
+// 只有录制自己的 AUI 才能把它们翻成 `(colName, fieldId)`。拿"当前界面"的模型去翻，
+// 翻的是另一张编号表（跨启动路径实测共同编号 0 条相同 —— 见 internal/fep/README 的指纹闸那节）。
+//
+// `recTarget.Files` 已经是**界面侧**（`-rt2gdc.log`）；这里仍逐个核后缀：事件侧的载荷
+// 也能被 `ReadRecording` 解成文本，混进模型里就成了"凭空多出来的对象"。
+//
+// 读不到（没有界面侧 / 文件读不动 / 一条 AUI 都没有）⇒ 返回 **nil**：
+// 身份链自动不参与，回放照旧按 `idRef` 走 —— **旧行为一字不变，绝不因此报错**
+// （TestReplayIdentityModelIsNilWithoutAUISide / TestReplayPlanKeepsLegacyShapeWithoutModel）。
+func replayIdentityModel(t recTarget) *fep.Model {
+	var files []string
+	for _, f := range t.Files {
+		if strings.HasSuffix(f, "-rt2gdc.log") {
+			files = append(files, f)
+		}
+	}
+	if len(files) == 0 {
+		return nil
+	}
+	m := fep.NewModel()
+	msgs := 0
+	for _, f := range files {
+		bodies, err := fep.ReadRecording(f)
+		if err != nil {
+			return nil
+		}
+		for _, body := range bodies {
+			m.ApplyMessage(body)
+			msgs++
+		}
+	}
+	if msgs == 0 {
+		return nil
+	}
+	// 窗口归属只向下传播一层（与 `loadModel` 同一口径）；身份判定不靠它，但补上不吃亏。
+	m.Propagate()
+	return m
+}
+
+// ── A23 的两个出口（契约 §7）：拒绝要带码，展示要带标注 ───────────────────────
+
+// replayGateErr 把身份闸/回放里的 `*fep.Refusal` 翻成带退出码的失败。
+//
+// 为什么不能直接 `fail(exitFailed, …)`：契约 C4.2/A11 的四码各有退出码（5/5/1/4），
+// 一律折成 1 就等于把"没这个字段"与"网络坏了"说成同一件事（自动化排障要能分开）。
+// Hint 走 stderr：它是给人看的下一步，不该混进 json 信封的 message 里。
+func replayGateErr(cmd *cobra.Command, err error) error {
+	var ref *fep.Refusal
+	if errors.As(err, &ref) {
+		if ref.Hint != "" {
+			fmt.Fprintf(cmd.ErrOrStderr(), "· 怎么办：%s\n", ref.Hint)
+		}
+		return fail(ref.Exit, "%s（%s）", ref.Message, ref.Code)
+	}
+	return fail(exitFailed, "%v", err)
+}
+
+// dryRunStep 是干跑输出里的一步：`ReplayEvent` 原样平铺，只**多**一个 note。
+//
+// 为什么用嵌入而不是改 `fep.ReplayEvent`：有身份的步骤不多出任何键 ——
+// 既有读者（脚本、面板）一个字都不用改；没有身份的那些多一句 `note`。
+type dryRunStep struct {
+	fep.ReplayEvent
+	Note string `json:"note,omitempty"`
+}
+
+// replayDryRunReport 是 `--dry-run` 的 json 形态（默认输出就是 json，所以标注必须在）。
+func replayDryRunReport(plan fep.ReplayPlan) any {
+	noIdent := map[int]bool{}
+	for _, n := range fep.NoIdentitySteps(plan) {
+		noIdent[n] = true
+	}
+	steps := make([]dryRunStep, 0, len(plan.Events))
+	for _, ev := range plan.Events {
+		s := dryRunStep{ReplayEvent: ev}
+		if noIdent[ev.N] {
+			s.Note = fep.NoIdentityNote
+		}
+		steps = append(steps, s)
+	}
+	return struct {
+		DryRun  bool         `json:"dryRun"`
+		Planned int          `json:"planned"`
+		Skipped int          `json:"skipped"`
+		Events  []dryRunStep `json:"events"`
+	}{DryRun: true, Planned: len(plan.Events), Skipped: len(plan.Skips), Events: steps}
+}
+
+// replayDryRunText 是 `--dry-run` 的人读形态：每条无身份的步骤后面跟一句标注。
+//
+// 抽成函数只为可测（命令直接写 os.Stdout）：标注是 A23 的硬要求，
+// 而"要求写在输出里"这件事只有断言输出才守得住。
+func replayDryRunText(plan fep.ReplayPlan) string {
+	noIdent := map[int]bool{}
+	for _, n := range fep.NoIdentitySteps(plan) {
+		noIdent[n] = true
+	}
+	var b strings.Builder
+	for _, ev := range plan.Events {
+		fmt.Fprintf(&b, "%3d. %s", ev.N, ev.Event)
+		if noIdent[ev.N] {
+			fmt.Fprintf(&b, "   ← %s", fep.NoIdentityNote)
+		}
+		b.WriteString("\n")
+	}
+	fmt.Fprintf(&b, "（dry-run：以上 %d 条会被发出，一个字节都没发）\n", len(plan.Events))
+	return b.String()
 }
 
 func init() {

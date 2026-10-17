@@ -14,12 +14,14 @@
 - catalog → 给 AI 看的紧凑形状清单（markdown）
 - 表格的三层生成（容器 → 行 → 列，用 drawio 原生的 `tableLayout`）
 - **排版规格 spec → `.drawio`**（`compose.go` / `spec.go`）
+- **`.42f` → 表单原型**（`proto42f.go`：真几何 + 控件族 + 必填/只读 + RecordView 图例）
 
 **不做什么**（边界比职责更值得写）
 
 - **不落盘、不碰配置、不碰网络。** 要写文件的是命令层（`internal/cli/drawio`），落点也由它决定。
 - **不依赖引擎。** 低保真原型图不需要设计器程序集、不需要工作区、不需要活引擎。
-- **不解析输入的 XML。** 形状源是 JSON；本层唯一读的 XML 是 `shapes/raw/` 里手写的那一个片段。
+- **不解析输入的 XML。** 形状源是 JSON；`.42f` 的解析在 `internal/fep.ParseForm42F`，本层只消费它的结果。
+  本目录唯一读的 XML 是 `shapes/raw/` 里手写的那一个片段。
 
 ## 形状源
 
@@ -84,6 +86,64 @@ drawio 加载一个库走的是 `mxUtils.parseXml(data)` → `JSON.parse(mxUtils
 - **deco** —— 装饰件（页签、图例、树节点），一个像素都不动，**不被拉变形**。
 - **其余** —— 等比缩放。字段行、表格内容随尺寸走。
 
+## `.42f` → 表单原型（`proto42f.go`）
+
+编译后的表单文件是**明文 XML**，它的几何是**真实网格坐标**（已与运行期语料 509/509 对上，
+真样本 `axmt500_wf.42f` 实测 563 条字段）。原型图直接吃这份真值 —— 不再估、不再占位。
+
+```go
+func ProtoFrom42F(form, text string, opts *ProtoOptions) (*Proto, error)
+func ProtoFrom42FFile(path string, opts *ProtoOptions) (*Proto, error) // 表单名取文件名
+func (p *Proto) Field(colName string) *ProtoField                     // 按 colName 取一条
+```
+
+解析**不在本层**：`internal/fep.ParseForm42F` 负责 C1 的全部口径（字段载体四种、双键、
+跳过计数、`RecordViews`）。本层只消费它的 `F42Field`（含 `Geom{Width,Height,PosX,PosY,GridWidth}`）
+与 `RecordViews`。**fep 不反向依赖本包，没有环。**
+
+### 三条口径（改这里之前先读）
+
+| 口径 | 怎么做 | 为什么 |
+|---|---|---|
+| **几何是真值** | `posX/posY/width/height/gridWidth` 原样记进 `ProtoField`；图上坐标 = 网格值 × `CellPx`（缺省 10） | 真值不许被"估"顶掉。`CellPx` 只影响像素，不参与任何判定；要逐字节核对几何就用 `CellPx: 1` |
+| **控件族只认同名** | `WidgetShapes42F` 里十条：`Edit / ButtonEdit / ComboBox / CheckBox / DateEdit / SpinEdit / RadioGroup / TextEdit / Label / Button` | 这十条是「`.42f` 元素名与形状库形状 id **逐字相同**」，不是翻译。其余（`Completer` / `Image` / `PhantomEdit` / `DateTimeEdit` / `Aggregate`）库里没有同名图形 ⇒ **未判定**，画通用虚线矩形并在图例里点名（契约 A15：拿不准就不猜） |
+| **必填/只读落在图形上** | `required`/`notNull` → 文字带 `*` 前缀；`noEntry` → 文字带 `[只读]` 后缀 | 原型要能一眼看出哪个字段卡人、哪个不能改。文字用 `colName`（C1.8：不猜中文名），`cmt_*`/`lbl_*` 原样留在字段里 |
+
+### 两条带（别把推断说成真值）
+
+- **真实几何带** —— 文件里 `posX/posY` 任一非 0 的字段，坐标照抄（`ProtoField.Geometry=true`）。
+- **推断排布带** —— 其余字段（多为明细列 `TableColumn`：坐标由所在表格的列序决定，文件里**没有**）
+  落在图下方流式排布，`Geometry=false`，图例里有一行蓝字说明。**宽度仍是文件里的真值**，只有位置是推出来的。
+
+真样本的分布：132 条真实几何 / 431 条推断排布；未判定 38 条
+（`Aggregate×22`、`PhantomEdit×12`、`DateTimeEdit×3`、`Image×1`）。
+
+### 尺寸从哪来（`WidthSource` / `HeightSource`）
+
+`width` → `gridWidth` → 形状库默认 → `min`（1 个网格单位）。**每一级都记在字段上**，
+不静默兜底；落到 `min` 的条数汇总在 `Proto.SizeMissing`，图例里也写一行。
+
+### RecordView
+
+`Proto.Tabs` 是 `tabName → []colName`（来自 `.42f` 的 `<RecordView><Link colName=…>`），
+并回填到每条字段的 `ProtoField.TabNames`。图例里逐个 tabName 列出（长的截到 12 条 + `…共 N 条`）。
+链接指向了表单里没有的 colName ⇒ 进 `ProtoTab.Missing`，**只报不猜**；没进任何 RecordView 的字段
+单独计数，**不推测归属**。
+
+### 输出键（命令层包一层时照这个报）
+
+`form` / `fields`（条数）/ `cells` / `tabs`（tabName→条数）/ `unmapped`（未判定的控件名）/
+`legend`（图例全文，与画在图上的一致）/ `report`（compose 的定位报告）/ `skipped` / `sizeMissing` / `warnings`。
+
+### 与既有契约的关系
+
+- 映射成功的字段走 `Compose`：形状库、拉伸、`i{序号}-` 编号、自查全复用，**一行没重写**。
+- 未判定矩形、排布带标题、图例是**追加**的 `mxCell`（`u{序号}` / `lg{序号}`），
+  追加完再跑一次 `selfCheck`。形状库、catalog、mxlibrary、`tt drawio` 既有命令与键**都没动**。
+- 顺带修了 `selfCheck` 的一处误判：它原来拿 `strings.Contains(out,"NaN"|"undefined")` 扫**整份产物**，
+  真样本里 `<RecordView tabName="undefined">` 就会被当成几何 bug。现在只看**几何属性**
+  （`x/y/width/height` 的取值），判据更准，报错文案不变。
+
 ## 判据
 
 ```bash
@@ -104,6 +164,12 @@ go test ./internal/drawio -count=1
 | `TestPortEquivalence` | Go 合成结果与**原 Node 版产出的库**逐条相同（形状数、几何、样式串、XML 全文） |
 | `TestSynthShapeCounts` | controls 18 + business 9 —— 防 embed 少文件导致的**静默掉件** |
 | `TestLibraryEntriesCarryWhatDrawioNeeds` | 每条都带 `xml/w/h/title/aspect`，且 `xml` 非空 |
+| `TestProto42F_RealGeometryFrom42F` | `.42f` 夹具的每个字段都带**真实** `posX/posY/width`，且产物单元格的几何与字段记录一致（不是 0、不是形状库默认尺寸） |
+| `TestProto42F_ZeroedGeometryIsRed` | **反证**：把夹具里的几何全改成 0 再跑同一条流水线 → 上一条的断言必须红（否则它是假的） |
+| `TestProto42F_RealSample` | 真样本 `axmt500_wf.42f` 的 **563 条**全进原型、每条都有单元格；`help` 的几何与文件逐项相同；必填/只读/未判定都认得出来。样本缺失时 `t.Skipf` 并写原因（`TT_FORM_SAMPLE_DIR` 可覆盖） |
+| `TestProto42F_UnmappedWidgetGetsGenericRect` | 控件族认不出来时**不失败**：通用虚线矩形 + `[未判定 …]`，清单里点名（A15） |
+| `TestProto42F_RequiredAndNoEntryVisible` | `required` / `notNull` → `*`；`noEntry` → `[只读]`；差异要落进产物，图例要解释 |
+| `TestProto42F_DataTextIsNotGeometry` | 数据里出现 `NaN` / `undefined` 这两个词（真样本的 `tabName="undefined"`）不许被当成几何 bug |
 
 对照基线在 `testdata/drawio/`：库文件与那份 `.drawio` 都**由原 Node 实现产出**，
 搬进 TT 之后不再重新生成，所以能钉住"移植没有改变交给 drawio 的东西"。
@@ -111,6 +177,8 @@ go test ./internal/drawio -count=1
 
 **故意不覆盖**：图"好不好看"、在 drawio 里能不能拖 —— 那是人打开 drawio 看一眼的事，
 本层证不了。`TestSynthShapeCounts` 是**数数**，证明不了"每个形状的部件都画对了"。
+原型那条同理：断言的是"几何/控件族/记号是否照 `.42f` 落到位"，不是"这张图像不像那张单据"。
+真样本门控用 `TT_FORM_SAMPLE_DIR` 指到别的语料目录，路径是 `<dir>/t100/axmt500_wf.42f`。
 
 ## 细节去哪
 

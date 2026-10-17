@@ -34,7 +34,7 @@ import (
 const Usage = tzsUsage
 
 // Run 是 tzs 线的入口（父包接线用）：收**原始参数**（第一个词是动词名或
-// export/doctor/stop/reap/help），退出码契约见 tzsUsage 末尾。
+// export/formcheck/doctor/stop/reap/help），退出码契约见 tzsUsage 末尾。
 func Run(args []string, envName string) int { return cmdTzs(args, envName) }
 
 const tzsUsage = `tt dev tzs —— 表单包工具（导出只读；读写表单由一个常驻引擎跑）
@@ -44,6 +44,13 @@ const tzsUsage = `tt dev tzs —— 表单包工具（导出只读；读写表�
         # 纯解压：把 zip 原样摊到目录里，不做任何处理
         # -o 省略时默认解压到 <包所在目录>/<程序名>-unzip（身份后缀 (c)/(s) 会去掉）
         # 目标已存在且非空时拒绝，加 --force 覆盖同名文件
+
+  tt dev tzs formcheck --form42f <表单.42f> --tzs <包.tzs|表单.4fd> [--json]
+        # **静态**比对：应然（.42f，编译期权威）↔ 实然（tzs 生成物里的 .4fd）
+        # 不开引擎、不连服务器、不碰工作区 —— 只读上面两个文件
+        # 差异分四组（存在性 / 编号 / 可写性 / 控件族），每条给 colName 与两侧值；
+        #   拿不准的组合进"未判定"，**不计入错误**（契约 A15）
+        # 退出码：0 一致（含只有未判定） / 2 参数或读取错 / 6 有确定差异
 
   tt dev tzs <动词> [--form <程序名>] --args '<JSON 对象>' [--args-file <UTF-8 文件>] [--workspace <dir>] [--rpc-timeout <秒>] [--json]
         # 读写表单：**唯一**写路径，由设计器自己的引擎算，不是我们拼 XML
@@ -88,6 +95,8 @@ func cmdTzs(args []string, envName string) int {
 	switch args[0] {
 	case "export":
 		return cmdTzsExport(args[1:])
+	case "formcheck":
+		return cmdTzsFormCheck(args[1:])
 	case "doctor":
 		return cmdTzsDoctor(args[1:], envName)
 	case "stop":

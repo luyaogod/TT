@@ -109,8 +109,8 @@ var debugSourceCmd = &cobra.Command{
 仅白名单只读登录区源码目录(ERP/COM);文件不存在/越界都有明确报错)。
 
 参数:
-  文件名       如 asf_bsft001_wf.4gl(按登录区源码目录候选路径解析)
-  --module     模块目录名(帮助定位;可省,仅在公共目录搜索)
+  文件名       如 axm_axmt500_wf.4gl(按登录区源码目录候选路径解析;真名以 info breakpoints / 停站 file 字段为准)
+  --module     模块目录名(可省:留空只在公共目录搜,给错只会搜错地方,不会猜你的模块)
   --path       绝对路径(必须在登录区源码目录内,跳过文件名解析)
   --from/--to  只返回 1-based 行段(默认全文;大文件建议限行省上下文)
   --path-only  只打行数与本地副本路径,不打正文(上千行的文件先定位,再本地读那份副本)
@@ -139,6 +139,8 @@ var debugSourceCmd = &cobra.Command{
 		}
 		data, err := dbgAPI("GET", "/api/source-file?"+q.Encode(), nil)
 		if err != nil {
+			// 登录区源码目录未知这类失败，光说不行没法排障：补一段命令行视角的下一步。
+			printSourceDirHowTo(err.Error())
 			return err
 		}
 		if IsJSON() {

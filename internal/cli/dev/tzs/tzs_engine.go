@@ -293,7 +293,9 @@ func placeholder(p *tzs.Param) string {
 // 注意里面**没有** fns / manifest：那两个命令已删除（见上面的「动词索引」）。
 // 这份清单的另一处用途是 warnBuiltinCollisions —— 引擎若有同名函数，那个函数就不可达，
 // 必须看得见。
-var builtinVerbs = []string{"export", "doctor", "stop", "reap"}
+//
+// `formcheck` 是 M3 加进来的**静态**动词（不开引擎：比 `.42f` 与 tzs 生成物两份文件）。
+var builtinVerbs = []string{"export", "formcheck", "doctor", "stop", "reap"}
 
 // verbTransportFlags 是一条动词命令的**传输级**开关（不是动词参数）。
 //

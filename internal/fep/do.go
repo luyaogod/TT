@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -34,7 +35,15 @@ type Client struct {
 	InjectAddr string // 127.0.0.1:<port>
 	RecordDir  string
 	Tag        string
-	Window     string // 可选：限定在某个窗口名里找目标
+	// Window 可选：只在某个窗口里找目标（`--window`）。
+	//
+	// 取值 = 窗口名**原样**，口径就是 `m.WindowName`（契约 A12 精确化 / A18）：它可能是
+	// 窗口标题形态（`单据别编号数据查询(q_ooba002_1)`），也可能为空串 —— **不是**干净的
+	// AUI 名（那个是窗口对象的 `name` 属性，如 `w_qry_q_ooba002_1`）。
+	// 判定与 `Scope.Window` 完全同口径（identity.go 的 windowNamed）：精确相等才算命中；
+	// 不做前缀/后缀/大小写/子串模糊匹配，也不用 `w_` + 剥 `_wf/_tui/_gui` 之类的启发式
+	// ——那些只许进诊断（A18）。
+	Window string
 }
 
 // Status lists the live connections (and, per connection, the next `_om` number).
@@ -461,11 +470,15 @@ func pickConn(conns []ConnStatus, want int) (ConnStatus, error) {
 }
 
 // resolveTarget turns "客户编号" or "#272" into an object id.
-// resolveTarget turns "客户编号" or "#272" into an object id.
 //
 // 一个名字在一屏里往往命中多个对象（Label + ButtonEdit + FormField 都叫「客户编号」），
 // 这是**真实情况**而不是异常。所以按动作类型收敛：点击只认可点击的、输入只认可写的；
 // 收敛不到一个就照实报歧义让人用 #id 指定，绝不自己挑一个。
+//
+// window（`--window`）与 `Scope.Window` **同一个口径**：候选的窗口名是
+// `m.WindowName(m.WindowOf(候选))`，**精确相等**才算命中（identity.go 的 windowNamed，
+// 契约 A12 精确化 / A18）。以前这里比的是**候选自身的 text**（`m.WindowName(o.ID)`），
+// 与窗口名不是一回事 —— 台账 D1：那样会选中不属于该窗口的对象，或者一个都选不出来。
 func resolveTarget(m *Model, r *Resolver, target, window, kind string) (int, string, error) {
 	target = strings.TrimSpace(target)
 	if target == "" {
@@ -484,7 +497,9 @@ func resolveTarget(m *Model, r *Resolver, target, window, kind string) (int, str
 	// 按名字找：只认高置信度的名字，低置信一律不当依据
 	var hits, positioned []*Object
 	for _, o := range m.Objects() {
-		if window != "" && m.WindowName(o.ID) != window {
+		// A12/A18：窗口归属用 WindowOf 算、名字用 WindowName 取，与 Scope.Window 同一口径。
+		// 绝不拿 `m.WindowName(o.ID)`（= 候选自己的 text）当窗口名，也不做任何模糊匹配。
+		if window != "" && !windowNamed(m, o, window) {
 			continue
 		}
 		fn, ok := r.Resolve(o.ID)
@@ -510,8 +525,18 @@ func resolveTarget(m *Model, r *Resolver, target, window, kind string) (int, str
 		hits = positioned
 	}
 	if len(hits) == 0 {
-		return 0, "", &Refusal{Code: "TARGET_MISSING", Exit: 5,
-			Message: fmt.Sprintf("界面里没有叫 %q 且能接受该动作的目标（只认高置信度的名字）", target)}
+		msg := fmt.Sprintf("界面里没有叫 %q 且能接受该动作的目标（只认高置信度的名字）", target)
+		hint := ""
+		if window != "" {
+			// 窗口不命中时**必须**把真实存在的窗口名原样列出来（A18 的硬规之一）：
+			// 只报"没找到"会让人以为目标名写错了，实际多半是窗口名这一侧写错了
+			// —— 而窗口名是"标题(名字)"形态，靠猜不可能猜对。
+			msg += fmt.Sprintf("；--window 给的是 %q，而这一屏实际存在的窗口名是：%s", window, windowNamesDesc(m))
+			hint = "窗口名照上面那份**原样**复制（可能是「标题(名字)」形态，也可能是空串）；" +
+				"不做前缀/后缀/大小写/子串匹配（A18：启发式不参与判定）。" +
+				"也可以不经 `--window`：用 `#id` 或 `--field <colName>` 点名"
+		}
+		return 0, "", &Refusal{Code: "TARGET_MISSING", Exit: 5, Message: msg, Hint: hint}
 	}
 	if len(hits) == 1 {
 		return hits[0].ID, target, nil
@@ -547,6 +572,36 @@ func resolveTarget(m *Model, r *Resolver, target, window, kind string) (int, str
 	}
 	return 0, "", &Refusal{Code: "TARGET_MISSING", Exit: 5,
 		Message: fmt.Sprintf("%q 命中 %d 个可选目标（%v）：请用 #id 指定", target, len(hits), ids)}
+}
+
+// windowNamesDesc 把这一屏**真实存在**的窗口名写成能直接复制回 `--window` 的一串。
+//
+// 口径 = `m.WindowName` 的**原样值**（与 windowNamed / Scope.Window 同一个口径，
+// A12 精确化 / A18）：它可能是窗口标题形态（`单据别编号数据查询(q_ooba002_1)`），
+// 也可能为空串 —— 空的**不列**，因为它粘不回 `--window`，也不解释"选错了窗口"。
+// 同名窗口只列一次：这一串的用途是"照抄"，不是统计窗口个数（标题本来就会重名）。
+//
+// 只影响报错文本，**不参与任何判定**：这里一个名字都不进比较，比较只在 windowNamed 里。
+func windowNamesDesc(m *Model) string {
+	var names []string
+	seen := map[string]bool{}
+	for _, w := range m.Windows() {
+		n := m.WindowName(w.ID)
+		if n == "" || seen[n] {
+			continue
+		}
+		seen[n] = true
+		names = append(names, n)
+	}
+	if len(names) == 0 {
+		return "（这一屏没有任何窗口名：运行期没报窗口标题，`--window` 无从匹配，去掉它或改用 #id/--field）"
+	}
+	sort.Strings(names)
+	quoted := make([]string, 0, len(names))
+	for _, n := range names {
+		quoted = append(quoted, fmt.Sprintf("%q", n))
+	}
+	return strings.Join(quoted, "、")
 }
 
 // acceptableFor 判断一个类型能不能接受该动作。

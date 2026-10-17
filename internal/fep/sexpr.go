@@ -1,6 +1,10 @@
 package fep
 
-import "strings"
+import (
+	"errors"
+	"fmt"
+	"strings"
+)
 
 // Node is one object definition or update as it appears in a message body.
 //
@@ -90,6 +94,85 @@ func ParseMessage(body string) []Node {
 
 // msgVerbs are the lowercase verbs the runtime puts in front of a message.
 var msgVerbs = []string{"om", "meta", "un", "rn", "event"}
+
+// ErrUnsupportedDialect 报"这条入站消息不是我们实现的那套方言"（契约 C6.2）。
+//
+// 上游证据（three-threads.md §①）：**同一条路径上有两套方言**，由运行期全局开关
+// （`0x30c9b4`）切换：
+//
+//	{an …} {un …} {rn …} {om …}     原生 GDC —— 就是我们处理、也是本包唯一实现的这套
+//	["a" …] ["u" …] ["r" …]         数组/JSON 方言（容器 `[`、引号、`:` 分隔），
+//	                                UR/HTML5 客户端或启用 `gui.rendering` 时启用
+//
+// 第二套**不实现**（契约 C8：不做第二方言的收发），但**必须明确报错**：硬解它不会崩，
+// 只会把对象名与父链解析成垃圾 —— 于是"方言不对"和"这窗口本来就这样"在调用方眼里
+// 长得一模一样。这是计划里点名的两条**静默出错**路径之一，所以它是错误，不是降级。
+var ErrUnsupportedDialect = errors.New("fep: 未支持的入站消息方言（数组/JSON 方言：结构从 [ 开始，UR/HTML5 客户端或 gui.rendering 启用）")
+
+// ErrUnknownShape 报"这条入站文本既不是 S 表达式、也不是数组方言"（A16 增，2026-10-17）。
+//
+// 它**不是** ErrUnsupportedDialect，两者刻意不合并：方言错误说"对端换了前端"
+// （该换解析器 / 该提示用户），形状错误说"这段字节根本不是一条消息"（帧头噪声、
+// 半截载荷、别的什么东西 —— 该重取字节）。合成一个码，调用方就没得选。
+var ErrUnknownShape = errors.New("fep: 未知的入站消息形状（既不是 { 结构的 S 表达式，也不是 [ 结构的数组/JSON 方言）")
+
+// dialectEvidenceLen 是错误里附带证据片段的上限：诊断要能看懂，但不该把整条载荷
+// （窗口声明可以几万字节）抄进日志。
+const dialectEvidenceLen = 32
+
+// CheckDialect 探测一条入站消息属于哪套方言/什么形状；是我们实现的 S 表达式时返回 nil。
+//
+// 判据（A16 放宽后）：去空白后**看第一个结构字符** ——
+//
+//	空 / 纯空白        → nil（交给 ParseMessage 的既有行为：0 个节点，不报错）
+//	第一个结构字符 `{` → nil（S 表达式，放行）
+//	第一个结构字符 `[` → ErrUnsupportedDialect（数组/JSON 方言，附 32 字节证据）
+//	两者都没有         → ErrUnknownShape
+//
+// 为什么不只看首字节：S 表达式有两种**合法**写法并不以 `{` 开头 —— 带动词前缀
+// （`om 3 {{…}}`、`meta Connection {{…}}`）与从裸对象头开始（`Table 501 {{…}}`，
+// 见 ParseMessage 的文档与 TestBareObjectHeaderIsNotAVerb）。证据只支持一句话：
+// **S 表达式的结构必然从 `{` 开始**（语料 7,805 帧无一例外）。所以"谁先出现就定谁"：
+// 既堵住 A16 要堵的 `om 3 ["a",…]`（原判据只看首字节，会把它漏给 S 表达式解析器
+// 静默解成垃圾），又不会误拒上面两种合法写法。
+//
+// 属性值里的方括号（`{text "a[b"}`）不影响判据：那时 `{` 已经先出现过了。
+func CheckDialect(body string) error {
+	i := skipWS(body, 0)
+	if i >= len(body) {
+		return nil
+	}
+	for j := i; j < len(body); j++ {
+		switch body[j] {
+		case '{':
+			return nil
+		case '[':
+			return fmt.Errorf("%w：检测到数组/JSON 方言（`[\"a\",…]`/`[\"u\",…]`/`[\"r\",…]`），证据 %q",
+				ErrUnsupportedDialect, clipEvidence(body[j:], dialectEvidenceLen))
+		}
+	}
+	return fmt.Errorf("%w：证据 %q", ErrUnknownShape, clipEvidence(body[i:], dialectEvidenceLen))
+}
+
+// clipEvidence 截一段载荷当证据（超长加省略号；按字节切，诊断用不着顾字符边界）。
+func clipEvidence(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
+}
+
+// ParseMessageChecked 是**带方言探测的**解析入口：CheckDialect + ParseMessage。
+//
+// ParseMessage 本身一个字节都没改（老调用方不受影响，见 aui.go 的 ApplyMessage）；
+// 新调用方走这里：命中未支持方言就返回 nil 节点 + 包着 `ErrUnsupportedDialect` 的错误，
+// 形状不认就包着 `ErrUnknownShape`（两者都 `errors.Is` 可判），**绝不"尽力而为"地硬解**。
+func ParseMessageChecked(body string) ([]Node, error) {
+	if err := CheckDialect(body); err != nil {
+		return nil, err
+	}
+	return ParseMessage(body), nil
+}
 
 // verbEnd returns the offset just past a leading verb (and its argument), or 0
 // when the body starts with data.

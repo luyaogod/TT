@@ -273,8 +273,10 @@ var debugDBCmd = &cobra.Command{
 func printJSON(v any) error { return common.PrintJSON(v) }
 
 func init() {
-	// --module 原为 debug 父命令的持久 flag,扁平化后只挂在真正读取它的命令上
-	debugProbeCmd.Flags().StringVarP(&dbgModule, "module", "m", "asf", "T100 模块目录名(如 asf)")
+	// --module 原为 debug 父命令的持久 flag,扁平化后只挂在真正读取它的命令上。
+	// 默认留空 = 登录后按 <作业>.42r 自动解析（不再写死 "asf"：那会短路权威解析，
+	// 实测 axmt500_wf 因此被拼成 asf_axmt500_wf.4gl，真名是 axm_axmt500_wf.4gl）。
+	debugProbeCmd.Flags().StringVarP(&dbgModule, "module", "m", "", debug.ModuleFlagHelp())
 	debugProbeCmd.Flags().StringVarP(&dbgProg, "prog", "p", "bsft001_wf", "作业名(如 bsft001_wf)")
 	debugProbeCmd.Flags().IntVarP(&dbgLine, "line", "l", 4452, "探针断点行号")
 	debugServeCmd.Flags().StringVar(&dbgListen, "listen", "", "覆盖监听地址(默认取配置)")

@@ -981,17 +981,42 @@ func (s *Server) hSessionSwitch(w http.ResponseWriter, r *http.Request) {
 
 // ---------- 断点 ----------
 
+// hBPList 列出断点 —— **带当下**的命中计数（A36）。
+//
+// 修前这里是 `writeJSON(… sess.Breakpoints())`，一个字节都不重读内核；而账本只在
+// "改断点"那刻回灌（见 hRaw 的 `IsBreakpointCmd`）⇒ `命中 N 次` 反映的是**上次改断点时的
+// 计数**。2026-10-18 真机就是这么被撞破的：`bp add` 正常、`info breakpoints` 原文有
+// `breakpoint already hit 1 time`、点击后确实停站，可 `bp list` 前后都写 `命中 0 次`。
+//
+// 现在：停站态先回灌再返回；运行态**不发命令**（A34：只允许 interrupt），并如实带上
+// `fresh:false` + 一句"可能不是最新 / 先 interrupt"的说明 —— 不许拿账本冒充最新。
+//
+// 回灌发的是一条**读**命令（`info breakpoints`），不改断点集合，所以不需要过写闸门。
 func (s *Server) hBPList(w http.ResponseWriter, r *http.Request) {
 	sess := s.sessOf(w, r)
 	if sess == nil {
 		return
 	}
-	writeJSON(w, 200, map[string]any{"ok": true, "breakpoints": sess.Breakpoints()})
+	bps, fresh, note := sess.BreakpointsNow()
+	resp := map[string]any{
+		"ok":          true,
+		"breakpoints": bps,
+		"fresh":       fresh, // 这份账本是否刚从内核读回来
+		"state":       string(sess.State()),
+	}
+	if note != "" {
+		// 只在不新鲜时出现：让调用方（CLI/前端/AI）能照做，而不是以为数字是当下的
+		resp["note"] = note
+	}
+	writeJSON(w, 200, resp)
 }
 
 func (s *Server) hBPAdd(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Location string `json:"location"` // 行号 / 函数名 / file:line
+		Location string `json:"location"`         // 行号 / 函数名 / file:line
+		Cond     string `json:"cond,omitempty"`   // A20:条件表达式(空 = 无条件)
+		Ignore   int    `json:"ignore,omitempty"` // A20:忽略前 N 次命中(0 = 不忽略)
+		Kind     string `json:"kind,omitempty"`   // A20:"break" | "watch"(空 = "break")
 	}
 	if !readBody(w, r, &req) {
 		return
@@ -1000,8 +1025,16 @@ func (s *Server) hBPAdd(w http.ResponseWriter, r *http.Request) {
 	if sess == nil {
 		return
 	}
-	log.Println("[bp-add] session=" + sess.ID + " loc=" + req.Location)
-	bp, err := sess.Break(req.Location)
+	opts := BreakpointOpts{Location: req.Location, Cond: req.Cond, Ignore: req.Ignore, Kind: req.Kind}
+	// 校验放在**取会话之后、发命令之前**:错误要 400 说清是哪个字段,
+	// 而且这条路径不发任何字节(生成命令的函数是纯函数,拒绝时返回 nil)。
+	if err := opts.Validate(); err != nil {
+		fail(w, 400, err)
+		return
+	}
+	log.Printf("[bp-add] session=%s loc=%s kind=%s cond=%q ignore=%d",
+		sess.ID, opts.Location, opts.kind(), opts.Cond, opts.Ignore)
+	bp, err := sess.BreakWith(opts)
 	if err != nil {
 		fail(w, 400, err)
 		return
@@ -1239,6 +1272,16 @@ func (s *Server) hRaw(w http.ResponseWriter, r *http.Request) {
 	if IsBreakpointCmd(cmd) {
 		sess.syncBreakpoints()
 		act = "bp." + strings.ToLower(strings.Fields(cmd)[0])
+	} else if IsBreakpointReadCmd(cmd) && sess.State() == StateStopped {
+		// A36 后半：**读**命令也回灌。`info breakpoints` 读的就是内核真相（命中计数、忽略次数
+		// 都在里面），可它走的是 kind="other"，onLine 那条按 kind 分派的解析不会进 ——
+		// 不回灌的话账本照旧停在"上次改断点那刻"，`bp list` 于是报一个更旧的命中数。
+		//
+		// 只认这一条命令（`IsBreakpointReadCmd`），**不**把它塞进 `bpCmds`：那一族的语义是
+		// "会改动断点集合"，`act` 也会变成 `bp.info` —— 读命令借写命令的语义与事件名是错配，
+		// 既有测试 `TestIsBreakpointCmd` 也明确钉着 `info breakpoints` 不属于它。
+		// 状态仍是 stopped 才发（运行期 fgldb 对任何调试命令都 400，A34）。
+		sess.syncBreakpoints()
 	}
 	s.emitAction(r, sess, act, cmd)
 	resp := map[string]any{"ok": true, "lines": res.Lines}

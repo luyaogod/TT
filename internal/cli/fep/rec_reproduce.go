@@ -91,6 +91,21 @@ var recReproduceCmd = &cobra.Command{
 				"这份录制没说它是哪个环境/哪个作业（没有身份文件）：用 --env 与 --prog 指明")
 		}
 
+		// A23：**先算计划、先过身份闸**，再起会话。顺序是刻意的：
+		// 一份没有身份的旧件（早于身份上线）到这里就该被拒 ——
+		// 不该为了"等会儿会被拒"而先起一轮调试会话（那要放行作业、下断点）。
+		events, eerr := t.events()
+		if eerr != nil {
+			return eerr
+		}
+		// 身份接线（与 `rec replay` **同一条**组装路径 planReplayFor）：把这份录制自己的
+		// 界面模型递进去，计划里就会带上 `colName`/`fieldId`，重放时每一步按身份重新定位
+		// （契约 C3/A18）。读不到模型 ⇒ nil ⇒ 计划里没有身份 ⇒ 上面那道闸会拒（A23）。
+		plan := planReplayFor(t, events, repStopAt, repSkip)
+		if gerr := fep.RequirePlanIdentity(plan); gerr != nil {
+			return replayGateErr(cmd, gerr)
+		}
+
 		// ② 先把会话起起来（断点在放行前下好）
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
@@ -141,13 +156,9 @@ var recReproduceCmd = &cobra.Command{
 		if !v.OK {
 			return fail(exitState, "指纹闸不过，没发任何事件：%s", v.Reason)
 		}
-		events, eerr := t.events()
-		if eerr != nil {
-			return eerr
-		}
-		plan := fep.PlanReplay(events, fep.ReplayOptions{StopAt: repStopAt, Skip: repSkip})
-		fmt.Fprintf(cmd.ErrOrStderr(), "· 扫到 %d 条事件 → 计划回放 %d 条，跳过 %d 条\n",
-			plan.Scanned, len(plan.Events), len(plan.Skips))
+		// 计划与身份闸在上面（起会话之前）就做完了；这里只报一下规模。
+		fmt.Fprintf(cmd.ErrOrStderr(), "· 计划回放 %d 条，跳过 %d 条（身份闸已在起会话之前过）\n",
+			len(plan.Events), len(plan.Skips))
 		if repInterval == 0 {
 			repInterval = 300 * time.Millisecond
 		}
@@ -179,7 +190,7 @@ var recReproduceCmd = &cobra.Command{
 				fmt.Fprintf(cmd.ErrOrStderr(), "· 进度日志写不出来（不影响回放）：%v\n", werr)
 			}
 		}
-		res, rerr := client.RunReplayWith(plan, fep.ReplayRunOptions{
+		res, rerr := client.RunReplayIdentity(plan, fep.ReplayRunOptions{
 			Conn: conn, Settle: repInterval, Logf: logf,
 			// 每一步（含中间态）都落盘。命令行这一侧不再逐步打印 ——
 			// 63 步会把终端刷成流水，而"走到哪了"看进度日志或界面就行。
@@ -204,7 +215,7 @@ var recReproduceCmd = &cobra.Command{
 			_ = rlog.Close(derefRes(res), note)
 		}
 		if rerr != nil {
-			return fail(exitFailed, "重放失败：%v", rerr)
+			return replayGateErr(cmd, rerr)
 		}
 
 		// ④ 等停站，把现场报出来

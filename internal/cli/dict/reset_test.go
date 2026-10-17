@@ -61,12 +61,13 @@ func resetDictPackageState(t *testing.T) {
 		&sccKW, &sccLang,
 		&tableKW, &tableLang,
 		&winKW, &winLang,
+		&fieldtabRoot, &fieldtabSourceName,
 		&common.ConfigPath, &common.Env, &common.Format, &common.Version,
 	))
 	// 布尔
 	t.Cleanup(snapVars(
 		&discoverSave, &dbListSecrets, &mirrorFull, &msgFull,
-		&progSub, &tableBrief, &tableWho, &srcLocal,
+		&progSub, &tableBrief, &tableWho, &srcLocal, &fieldtabNoDict,
 		&common.JSON, &common.CSV, &common.Verbose,
 	))
 	// 整数
@@ -200,6 +201,7 @@ var dictMutableVars = []string{
 	"winKW", "winLang",
 	"dataSrc", "srcLocal", "srcTarget", "srcNotes", "srcStarted",
 	"dbCfg",
+	"fieldtabRoot", "fieldtabNoDict", "fieldtabSourceName",
 }
 
 // dictReadOnlyVars 是**只读**的包级 var：常量表、列名、预编译的 help 函数。
@@ -208,6 +210,7 @@ var dictReadOnlyVars = []string{
 	"helpCmdFamilies", "baseHelpFunc",
 	"msgTypeValues", "msgStatusValues",
 	"msgColumns", "specCSVHeaders", "tableDetailColumns",
+	"fieldtabCSVHeaders",
 }
 
 var (

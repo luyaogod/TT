@@ -76,6 +76,34 @@ type Breakpoint struct {
 	Func    string `json:"func,omitempty"`
 	Enabled bool   `json:"enabled"`
 	Note    string `json:"note,omitempty"` // 重复下断等场景的说明(返回既有断点时非空)
+	// Module 是 `info breakpoints` 里 `in <模块> at …` 的那一段（实测形如
+	// `axm_axmt500_wf.axmt500_ui_dialog`，A27）。监视点行为空。
+	Module string `json:"module,omitempty"`
+	// A20 三件套：条件 / 忽略次数 / 种类。
+	//
+	// **回显都读得回来**（A27 + A30 + A33，`info breakpoints` 的真实续行）：
+	//
+	//	\tstop only if <expr>              ⇒ Cond（条件断点的回声，A26 的 `break … if <expr>`）
+	//	\tignore next N hits               ⇒ Ignore
+	//	\tbreakpoint already hit N time(s) ⇒ Hits（命中计数，见下面的 Hits 字段）
+	//
+	// 所以 sync 时**以 fgldb 为准**：旧账本只在"这次没回显"（Cond 为空 / Ignore 为 0）
+	// 时补空缺，见 `inheritMissingBPFields`。别写成无条件覆盖 —— 那会把刚读到的
+	// `stop only if 1=1` 抹成旧值或空串（Q2 修的正是这个）。
+	Cond   string `json:"cond,omitempty"`
+	Ignore int    `json:"ignore,omitempty"`
+	Kind   string `json:"kind,omitempty"` // "break" | "watch"(空 = "break")
+	// Hits 是**命中计数**（A33，第四次真机实测）：`info breakpoints` 在命中的断点下多一行
+	//
+	//	\tbreakpoint already hit N time(s)
+	//
+	// 它才是"这条断点命中过没有"的判据 —— **`Address` 恒 `0x00000000`（命中与否都是 0），
+	// 不得用于判定断点是否装上/生效**。未命中过的断点不打印那一行 ⇒ 这里是 0。
+	//
+	// **账本兼容**：`omitempty` ⇒ 旧存档/旧报文里没有这个键时读成 0，写出去时 0 不落键；
+	// 而且它只从 fgldb 的实时回显来，**不进** `StoredBP`（`bpsstore.go` 的 JSON 契约不动），
+	// 所以老账本（没有 hits 键）照旧读、照旧恢复，零迁移成本。
+	Hits int `json:"hits,omitempty"`
 }
 
 // VarItem 变量求值项(局部变量/自动变量)
@@ -159,7 +187,11 @@ type pendingCmd struct {
 	value   strings.Builder
 	valueOn bool
 	frames  []Frame
-	bps     []Breakpoint
+	// bpRaw 是 `info breakpoints` 的**原始行**（不在这里逐行判读）。
+	// 为什么留着原始行：A27 实测一条断点会跨两行（第二行是缩进的 `ignore next N hits`），
+	// 逐行匹配会把那条 ignore 丢掉；统一交给纯函数 ParseInfoBreakpoints 处理，
+	// 解析失败时还能把原文原样带出来（不许静默吞掉）。
+	bpRaw   []string
 	errText string
 	res     chan *execResult
 
@@ -202,6 +234,31 @@ func (p *pendingCmd) addLine(ln string) {
 		return
 	}
 	p.lines = append(p.lines, ln)
+}
+
+// infoBPs 用 A27 的解析器把 `info breakpoints` 的原始行翻成断点账本。
+//
+// 解析失败时把错误写进 errText（调用方会当命令错误返回），**不静默吞掉** ——
+// 一张空断点表 + 没有任何线索，是最难查的那种现场。
+func (p *pendingCmd) infoBPs() ([]Breakpoint, string) {
+	if len(p.bpRaw) == 0 {
+		return nil, ""
+	}
+	bps, err := ParseInfoBreakpoints(p.bpRaw)
+	if err != nil {
+		return nil, err.Error()
+	}
+	return bps, ""
+}
+
+// settleBPs 算断点账本并把解析错误并入 errText（必须在构造 execResult **之前**调用，
+// 结构体字面量里 BPs 字段排在 Err 前面，正是为了让这条错误赶得上）。
+func (p *pendingCmd) settleBPs() []Breakpoint {
+	bps, e := p.infoBPs()
+	if e != "" && p.errText == "" {
+		p.errText = e
+	}
+	return bps
 }
 
 const (
@@ -265,6 +322,14 @@ type Session struct {
 	emit  func(Event)
 	lines chan string // 全量行广播(启动序列等待用)
 	done  chan struct{}
+
+	// execFn 是"发一条调试命令并拿回响应"的**可替换通道**（nil = 真实 SSH PTY）。
+	//
+	// 生产里它恒为 nil（`execOpt` 只在非 nil 时才走它）。存在的理由只有一条：A36 的两条
+	// 路径 —— `bp list` 的停站回灌、`exec "info breakpoints"` 的读后回灌 —— 必须能在
+	// **不连机器、不起会话**的前提下钉死（纪律：全部用假内核/HTTP 桩）。
+	// 与 `emit` 同类：测试注入的接缝，不参与状态机（状态翻转仍由调用方与真实泵负责）。
+	execFn func(kind, cmd string, mode int, timeout time.Duration) (*execResult, error)
 
 	sftpClientCache *sftp.Client
 	srcCache        map[string]srcCacheEntry
@@ -576,15 +641,29 @@ var (
 // 上没有监听者时，作业会在**第一次画界面**时直接退出（用户那条会话正好：`tbreak main`
 // 停在 MAIN 首条可执行语句 OPTIONS，一次单步走到初始化、要开窗口，当场退），而界面上只有
 // "程序已退出(作业窗口被关闭或正常结束)" —— 与"用户自己关了窗口"完全分不清。
+//
+// A35（第四次真机）把话说得更死：**没有接线的会话在 `main` 之后**立刻** `Fatal error -6300`
+// 退出，守卫行（`main` 之后那些行）来不及停**；接线就绪的会话则不会。所以这句既是"画面看不到"
+// 的解释，也是"断点怎么设都命不中"的解释 —— 必须给到能照做的动作（起 GDC / 用 --fglserver）。
 func ScreenWarn(fglserver string) string {
+	return ScreenWarnWith(fglserver, LocalGDCPresent())
+}
+
+// ScreenWarnWith 与 ScreenWarn 同义，但"本机有没有 GDC 在听"由调用方给。
+//
+// 为什么要这个入口（A35）：CLI 要在 `debug start` **启动那一刻**就把这句话打出来
+// （而不是只让服务端写进事件日志，人根本看不到），而探针 `gdcProbe` 是包内私有 ——
+// CLI 侧的测试没法替换它。**文案的唯一来源仍是这里**：不另抄一份，免得两处措辞各走一路。
+func ScreenWarnWith(fglserver string, gdcPresent bool) string {
 	if strings.TrimSpace(fglserver) != "" {
 		return ""
 	}
-	if LocalGDCPresent() {
+	if gdcPresent {
 		return ""
 	}
 	return "画面没接线：本轮 FGLSERVER 交回 T100 自动设置（默认发回本机 GDC），而本机 7400/6400 上" +
-		"没有 GDC 在听 —— 作业第一次画界面就会直接退出（界面只会显示「程序已退出(作业窗口被关闭或正常结束)」）。" +
+		"没有 GDC 在听 —— 这种会话在 main 之后**立刻** Fatal error -6300 退出（守卫行/断点都来不及停；" +
+		"界面上只会显示「程序已退出(作业窗口被关闭或正常结束)」）。" +
 		"先把 GDC 起起来，或用 --fglserver <ip:port> 指定去向（端口 = 前端端口 - 6400）；" +
 		"走「录制」那条路则不必自己起 GDC —— 它会带隔离实例并接管画面接线。"
 }
@@ -1625,6 +1704,10 @@ func (s *Session) exec(kind, cmd string, mode int, timeout time.Duration) (*exec
 
 // execOpt 带可选语义的 exec(见 execOpts)。21 个既有调用点走 exec,语义不变。
 func (s *Session) execOpt(kind, cmd string, mode int, timeout time.Duration, o execOpts) (*execResult, error) {
+	// 注入通道（见 Session.execFn 的注释）：nil 时才往下走真实 PTY。
+	if fn := s.execFn; fn != nil {
+		return fn(kind, cmd, mode, timeout)
+	}
 	busyDeadline := time.Now().Add(1500 * time.Millisecond)
 	var p *pendingCmd
 	for {
@@ -1891,8 +1974,27 @@ func (s *Session) Bare() bool {
 // 注意 fgldb 会把非可执行行的断点自动调整到下一条可执行语句,
 // 返回的 bp.Line 才是真实生效位置(可能与请求行号不同)。
 // 调整后与既有断点落在同一位置时,撤销新增并返回既有断点(带 Note)。
+//
+// 带条件/忽略次数/监视点的版本是 BreakWith(A20)。
 func (s *Session) Break(loc string) (*Breakpoint, error) {
-	r, err := s.exec("break", "break "+loc, waitPrompt, 20*time.Second)
+	return s.BreakWith(BreakpointOpts{Location: loc})
+}
+
+// BreakWith 下断点并追加 A20 的选项(条件 / 忽略次数 / 监视点；条件按 A26 内联进 break)。
+//
+// **校验在发命令之前**:BreakpointOpts 不过就直接返回错误 —— 这条路径上一个字节都不发
+// (生成命令的函数是纯函数,拒绝时返回 nil 切片,所以"不发"是结构保证,不是自觉)。
+//
+// 位置里的模块前缀先过 BPLocContext.ResolveLocation：现场实测 `break asf_axmt500_wf.4gl:2141`
+// 必然 `No source file named`（真名 axm_...）。修正用的是**本会话登录后解析到的模块**，
+// 事实不足就不改，而是把"怎么给"写进 Notes 里（A15 不猜）。
+func (s *Session) BreakWith(o BreakpointOpts) (*Breakpoint, error) {
+	o, locNote := s.resolveBPLocation(o)
+	first, err := o.BreakCmd()
+	if err != nil {
+		return nil, err
+	}
+	r, err := s.exec("break", first, waitPrompt, 20*time.Second)
 	if err != nil {
 		return nil, err
 	}
@@ -1902,31 +2004,108 @@ func (s *Session) Break(loc string) (*Breakpoint, error) {
 			num, _ := strconv.Atoi(m[1])
 			line, _ := strconv.Atoi(m[3])
 			bp = &Breakpoint{Num: num, File: m[2], Line: line, Enabled: true}
+		} else if m := reWatchSet.FindStringSubmatch(ln); m != nil {
+			// 监视点没有 file:line,被监视的表达式存在 Func 里(落盘/恢复都靠它)。
+			num, _ := strconv.Atoi(m[1])
+			bp = &Breakpoint{Num: num, Func: m[2], Enabled: true}
 		}
 	}
 	if bp == nil {
 		return nil, fmt.Errorf("断点设置失败: %s", strings.Join(r.Lines, " | "))
 	}
-	s.syncBreakpoints()
-	// 重复防护:fgldb 调整行号后可能与既有断点撞在同一位置
+	bp.Cond, bp.Ignore = o.Cond, o.Ignore
+	bp.Kind = o.kind()
+	if locNote != "" {
+		bp.Note = locNote
+	}
+	if err := s.syncBreakpoints(); err != nil {
+		// 账本没重建起来不致命（断点确实下了）：如实记一笔，别让调用方以为"什么都没发生"。
+		s.emitEvent(Event{Type: "log", Text: "断点已下，但账本未重建：" + err.Error()})
+	}
+	// syncBreakpoints 以 `info breakpoints` 为真相重建账本,它**不回显条件**（A27）。
+	// 所以这里把发起方给的三项**按编号挂回**账本 —— 否则条件在快照与落盘里都会凭空消失。
+	// 删除后下一次 sync 会把它从账本里自然抹掉。
 	s.mu.Lock()
-	var dup *Breakpoint
-	for _, b := range s.bps {
-		if b.Num != bp.Num && b.File == bp.File && b.Line == bp.Line {
-			dup = b
-			break
+	if cur, ok := s.bps[bp.Num]; ok {
+		cur.Cond, cur.Ignore, cur.Kind = bp.Cond, bp.Ignore, bp.Kind
+		if locNote != "" {
+			cur.Note = locNote
 		}
+	} else {
+		s.bps[bp.Num] = bp
 	}
 	s.mu.Unlock()
-	if dup != nil {
-		if err := s.DeleteBreakpoint(bp.Num); err != nil {
-			return dup, fmt.Errorf("重复断点清理失败: %w", err)
+	if err := s.applyOptCmds(bp.Num, o); err != nil {
+		// 断点本身已经下了:报错但把断点交回去,调用方才知道现状。
+		return bp, err
+	}
+	// 重复防护:fgldb 调整行号后可能与既有断点撞在同一位置(监视点没有行,跳过)
+	if bp.Kind != BPKindWatch {
+		s.mu.Lock()
+		var dup *Breakpoint
+		for _, b := range s.bps {
+			if b.Num != bp.Num && b.File == bp.File && b.Line == bp.Line {
+				dup = b
+				break
+			}
 		}
-		dup.Note = fmt.Sprintf("该位置已有断点 #%d(%s:%d),未重复添加", dup.Num, dup.File, dup.Line)
-		return dup, nil
+		s.mu.Unlock()
+		if dup != nil {
+			if err := s.DeleteBreakpoint(bp.Num); err != nil {
+				return dup, fmt.Errorf("重复断点清理失败: %w", err)
+			}
+			dup.Note = fmt.Sprintf("该位置已有断点 #%d(%s:%d),未重复添加", dup.Num, dup.File, dup.Line)
+			return dup, nil
+		}
 	}
 	s.persistBPs()
 	return bp, nil
+}
+
+// bpLocContext 收集修正断点位置所需的会话事实（登录后解析到的模块 / 客制模块 / 本会话作业名）。
+func (s *Session) bpLocContext() BPLocContext {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c := BPLocContext{Module: s.Module, CustModule: s.custModule}
+	for _, p := range []string{s.Prog, s.RunProg} {
+		if p = strings.TrimSpace(p); p != "" {
+			c.Progs = append(c.Progs, p)
+		}
+	}
+	// 入口文件可能是 `<模块>_<RunProg>.4gl` 里那个 RunProg（gzzz_t 解析出的实体程序），
+	// 也可能就是启动时给的作业名 —— 两个都收，别的作业不碰。
+	if rp := strings.TrimSpace(s.runProgName()); rp != "" {
+		c.Progs = append(c.Progs, rp)
+	}
+	return c
+}
+
+// resolveBPLocation 把位置里的模块前缀按会话已知事实修正；返回（新选项, 说明）。
+func (s *Session) resolveBPLocation(o BreakpointOpts) (BreakpointOpts, string) {
+	if s == nil || o.kind() == BPKindWatch {
+		return o, "" // 监视点的"位置"是表达式，没有文件名前缀
+	}
+	fixed, note := s.bpLocContext().ResolveLocation(o.Location)
+	if fixed == o.Location {
+		return o, note // 没改位置，但可能带一句"怎么给"的说明
+	}
+	o.Location = fixed
+	return o, note
+}
+
+// applyOptCmds 发断点落定后的追加命令（A26：只剩 ignore —— 条件已内联进 break）。
+// Ignore=0 ⇒ 这里根本没有 ignore 命令可发(OptCmds 不生成)。
+func (s *Session) applyOptCmds(num int, o BreakpointOpts) error {
+	cmds, err := o.OptCmds(num)
+	if err != nil {
+		return err
+	}
+	for _, c := range cmds {
+		if _, err := s.exec("other", c, waitPrompt, 15*time.Second); err != nil {
+			return fmt.Errorf("%s 执行失败: %w", c, err)
+		}
+	}
+	return nil
 }
 
 // DeleteBreakpoint 删除断点
@@ -1953,23 +2132,134 @@ func (s *Session) SetBPEnabled(num int, enabled bool) error {
 	return nil
 }
 
-// syncBreakpoints 用 info breakpoints 重建断点账本(fgldb 为唯一真相,杜绝漂移)
-func (s *Session) syncBreakpoints() {
-	r, err := s.exec("other", "info breakpoints", waitPrompt, 15*time.Second)
-	if err != nil {
+// inheritMissingBPFields 用旧账本给"这次没回显的字段"补空缺 —— **解析到的优先**。
+//
+// 判据（Q2，承接 A30）：
+//
+//	Cond   —— 解析到非空就用解析到的；只有解析到空才用旧账本补；
+//	Ignore —— 同上：解析到非 0 优先，解析到 0 才用旧账本补。
+//
+// 为什么必须单向：A30 之后 fgldb **真的会回显** `stop only if <expr>`。修前这里是
+// 无条件覆盖（`nbp.Cond = obp.Cond`），等于刚读到的条件被旧账本换掉，或者（旧账本
+// 没这条条件时）被抹成空串 —— 界面与落盘于是长期显示一个早就不成立的条件。
+//
+// 匹配按**位置 + 种类**（File+Line+Kind；Num 会随 delete/add 漂移，不能当键）。
+// 两条细节：
+//   - 老存档的 `Kind` 是空串（= break，见 Breakpoint.Kind 的注释），比较前先归一，
+//     否则从旧存档恢复出来的账本**永远**补不到字段（静默丢条件）；
+//   - 监视点的 File/Line 是空的（位置是表达式本身），所以监视点还要比 `Func`，
+//     否则两个不同表达式的监视点会互相串值；同一位置在旧账本里有多条时按 **Num 最小**
+//     那条取 —— 与 map 遍历顺序无关，同一份报文两次同步得到同一账本。
+func inheritMissingBPFields(parsed []Breakpoint, old map[int]*Breakpoint) {
+	if len(old) == 0 {
 		return
 	}
-	nbps := map[int]*Breakpoint{}
-	for _, ln := range r.Lines {
-		if m := reBPInfo.FindStringSubmatch(ln); m != nil {
-			num, _ := strconv.Atoi(m[1])
-			line, _ := strconv.Atoi(m[5])
-			nbps[num] = &Breakpoint{Num: num, Func: m[3], File: m[4], Line: line, Enabled: m[2] == "y"}
+	olds := make([]*Breakpoint, 0, len(old))
+	for _, o := range old {
+		if o != nil {
+			olds = append(olds, o)
 		}
 	}
+	sort.Slice(olds, func(i, j int) bool { return olds[i].Num < olds[j].Num })
+	for i := range parsed {
+		nbp := &parsed[i]
+		kind := bpKindOf(nbp.Kind)
+		for _, obp := range olds {
+			if obp.File != nbp.File || obp.Line != nbp.Line || bpKindOf(obp.Kind) != kind {
+				continue
+			}
+			if kind == BPKindWatch && obp.Func != nbp.Func {
+				continue // 监视点靠表达式定位，别的表达式不算同一条
+			}
+			if nbp.Cond == "" {
+				nbp.Cond = obp.Cond
+			}
+			if nbp.Ignore == 0 {
+				nbp.Ignore = obp.Ignore
+			}
+			break
+		}
+	}
+}
+
+// bpKindOf 把断点种类归一：空串就是 break（见 Breakpoint.Kind 的注释）。
+func bpKindOf(kind string) string {
+	if strings.TrimSpace(kind) == "" {
+		return BPKindBreak
+	}
+	return kind
+}
+
+// syncBreakpoints 用 `info breakpoints` 重建断点账本（fgldb 为唯一真相，杜绝漂移）。
+//
+// A27：解析走纯函数 ParseInfoBreakpoints —— watchpoint 行没有 `hw`、ignore 回显在第二行、
+// breakpoint 行是 `in <模块> at <文件>:<行>`。解析不出来时：**账本保持原样**（不拿空表覆盖，
+// 否则一次格式意外就会把用户手上的断点全部清空），并把"行格式不认识 + 原文"记进事件日志。
+//
+// A30/Q2：条件与忽略次数既然都读得回来，就**以 fgldb 为准**，旧账本只补空缺
+// （判据全在纯函数 `inheritMissingBPFields` 里）。
+func (s *Session) syncBreakpoints() error {
+	r, err := s.exec("other", "info breakpoints", waitPrompt, 15*time.Second)
+	if err != nil {
+		return err
+	}
+	nbps, perr := ParseInfoBreakpoints(r.Lines)
+	if perr != nil {
+		s.emitEvent(Event{Type: "log", Text: "断点账本未重建：" + perr.Error()})
+		return perr
+	}
+	ledger := make(map[int]*Breakpoint, len(nbps))
+	for i := range nbps {
+		ledger[nbps[i].Num] = &nbps[i]
+	}
 	s.mu.Lock()
-	s.bps = nbps
+	// 旧账本只补空缺：解析到的 Cond / Ignore 优先（Q2）。指针指进 nbps，所以
+	// 先建好 ledger 再合并，补上的值对 ledger 同样可见。
+	inheritMissingBPFields(nbps, s.bps)
+	s.bps = ledger
 	s.mu.Unlock()
+	return nil
+}
+
+// BreakpointsNow 交出**当下**的断点账本（A36，2026-10-18 真机冻结口径）。
+//
+// 停站态：**先** `syncBreakpoints()` 再返回 —— 用内核此刻的 `breakpoint already hit N time(s)`
+// / `ignore next N hits` 覆盖账本。修前的现场是：`info breakpoints` 原文早有
+// `already hit 1 time`、点击后确实停站，可 `bp list` 前后都写 `命中 0 次` —— 因为账本只在
+// "改断点"那刻回灌，`命中 N 次` 表达的其实是"上次改断点时的计数"。
+//
+// 非停站态（running / loading / idle / exit）：**一个字节都不发**。运行期 fgldb 对任何调试
+// 命令都回 400「程序运行中,禁止发送调试命令(仅允许中断)」（A34），而且允许的自动化只有
+// interrupt —— 所以这里退回账本副本，并**如实**给出 fresh=false 与"可能不是最新"的说明，
+// 拿一句可照做的话（先 interrupt）代替假装它是最新。
+//
+// 返回值：断点列表 / 是否已与内核同步 / 说明（fresh 为真时说明为空）。
+func (s *Session) BreakpointsNow() (bps []Breakpoint, fresh bool, note string) {
+	st := s.State()
+	if st != StateStopped {
+		return s.Breakpoints(), false, bpListStaleNote(st)
+	}
+	if err := s.syncBreakpoints(); err != nil {
+		// 读不回来就**不假装**：账本保持原样（syncBreakpoints 不拿空表覆盖），
+		// 而这份账本此刻确定不是最新 —— 说清原因比给一个漂亮数字有用。
+		// 这条路径上会话本来就在停站态，所以不劝人 interrupt，而是给"看原文"的下一步。
+		return s.Breakpoints(), false, fmt.Sprintf(
+			"账本未能从内核回灌(%v) —— 下面这份**可能不是最新**(命中次数可能落后于内核);"+
+				"先用 tt debug exec %q 看内核原文(解析不了会带「行格式不认识」并保留原文),"+
+				"再 tt debug bp list", err, "info breakpoints")
+	}
+	return s.Breakpoints(), true, ""
+}
+
+// bpListStaleNote 是"这份账本为什么不是最新 + 下一步做什么"的那句话（A36：运行态必须说）。
+func bpListStaleNote(st State) string {
+	if st == StateRunning {
+		return "程序运行中,读不到内核断点表 —— 下面这份是账本,**可能不是最新**(命中次数可能落后于内核)。" +
+			"先 tt debug interrupt 停下,再 tt debug bp list 就是内核当下的计数" +
+			"(运行期 fgldb 只受理中断)"
+	}
+	return fmt.Sprintf("会话当前状态 %s,读不到内核断点表 —— 下面这份是账本,**可能不是最新**"+
+		"(命中次数可能落后于内核);等它停下(或先 tt debug interrupt)再 tt debug bp list", st)
 }
 
 // Print 求值表达式
@@ -2608,11 +2898,9 @@ func (s *Session) onLine(ln string) {
 				s.mu.Unlock()
 			}
 		case "breakpoints":
-			if m := reBPInfo.FindStringSubmatch(ln); m != nil {
-				num, _ := strconv.Atoi(m[1])
-				line, _ := strconv.Atoi(m[5])
-				pending.bps = append(pending.bps, Breakpoint{Num: num, Func: m[3], File: m[4], Line: line, Enabled: m[2] == "y"})
-			}
+			// A27：一条断点可能占两行（第二行是缩进的 `ignore next N hits`），
+			// 所以这里只收原始行，解析统一交给 ParseInfoBreakpoints（见 settleBPs）。
+			pending.bpRaw = append(pending.bpRaw, ln)
 		}
 
 		// 完成条件
@@ -2624,7 +2912,7 @@ func (s *Session) onLine(ln string) {
 		if host.IsBarePrompt(ln) && pending.mode == waitPrompt {
 			s.completePending(&execResult{
 				Cmd: pending.cmd, Lines: pending.lines,
-				Frames: pending.frames, Value: pending.value.String(), BPs: pending.bps,
+				Frames: pending.frames, Value: pending.value.String(), BPs: pending.settleBPs(),
 				Err: pending.errText,
 			})
 			return
@@ -2717,7 +3005,7 @@ func (s *Session) onStop(stop *StopInfo, pending *pendingCmd, quitReq bool) {
 		s.emitEvent(Event{Type: "stopped", Stop: stop})
 		s.completePending(&execResult{
 			Cmd: pending.cmd, Lines: pending.lines, Stop: stop,
-			Frames: pending.frames, Value: pending.value.String(), BPs: pending.bps,
+			Frames: pending.frames, Value: pending.value.String(), BPs: pending.settleBPs(),
 			Err: pending.errText,
 		})
 		s.startWatchdog()
@@ -3429,7 +3717,8 @@ func (s *Session) persistBPs() {
 		if lines != nil && b.Line >= 1 && b.Line <= len(lines) {
 			lt = strings.TrimSpace(lines[b.Line-1])
 		}
-		stored = append(stored, StoredBP{File: b.File, Line: b.Line, Func: b.Func, Enabled: b.Enabled, LineText: lt})
+		stored = append(stored, StoredBP{File: b.File, Line: b.Line, Func: b.Func, Enabled: b.Enabled,
+			LineText: lt, Cond: b.Cond, Ignore: b.Ignore, Kind: b.Kind})
 	}
 	if err := saveBPs(s.cfg.DataDir, s.Module, s.Prog, stored); err != nil {
 		s.emitEvent(Event{Type: "log", Text: "断点保存失败: " + err.Error()})
@@ -3450,7 +3739,11 @@ func (s *Session) restoreBreakpoints() {
 	srcCache := map[string][]string{}
 	for _, sb := range st.Breakpoints {
 		loc := fmt.Sprintf("%s:%d", sb.File, sb.Line)
-		if sb.LineText != "" {
+		opts := BreakpointOpts{Location: loc, Cond: sb.Cond, Ignore: sb.Ignore, Kind: sb.Kind}
+		if opts.Kind == BPKindWatch {
+			// 监视点的"位置"就是被监视的表达式(存档在 Func 里),没有 file:line 可重定位。
+			opts.Location = sb.Func
+		} else if sb.LineText != "" {
 			lines, ok := srcCache[sb.File]
 			if !ok {
 				if sf, err := s.ResolveSource(sb.File, s.Module); err == nil {
@@ -3468,13 +3761,27 @@ func (s *Session) restoreBreakpoints() {
 				if nl != sb.Line {
 					s.emitEvent(Event{Type: "log", Text: fmt.Sprintf("断点重定位:%s %d → %d(源码已变更)", sb.File, sb.Line, nl)})
 				}
-				loc = fmt.Sprintf("%s:%d", sb.File, nl)
+				opts.Location = fmt.Sprintf("%s:%d", sb.File, nl)
 			}
 		}
-		bp, err := s.Break(loc)
+		// 存档可能被手改坏(或带了本版本拒绝的条件):降级为**纯位置断点**,
+		// 不因为一个条件表达式把整条断点丢掉。
+		//
+		// 例外：监视点 + 条件（A26 明确不支持条件监视点）。降级成"纯位置断点"会把监视点
+		// 本身丢掉（它的 Location 是表达式，不是 file:line），所以这里只丢**条件**，保住监视点。
+		if opts.Kind == BPKindWatch && strings.TrimSpace(opts.Cond) != "" {
+			s.emitEvent(Event{Type: "log", Text: fmt.Sprintf(
+				"断点恢复降级:%s 是监视点，本机 fgldb 不支持条件监视点，已丢条件只恢复监视", opts.Location)})
+			opts.Cond = ""
+		}
+		if err := opts.Validate(); err != nil {
+			s.emitEvent(Event{Type: "log", Text: fmt.Sprintf("断点恢复降级:%s 选项不合法(%v),只恢复位置", opts.Location, err)})
+			opts = BreakpointOpts{Location: loc}
+		}
+		bp, err := s.BreakWith(opts)
 		if err != nil {
 			skipped++
-			s.emitEvent(Event{Type: "log", Text: fmt.Sprintf("断点恢复失败:%s: %v", loc, err)})
+			s.emitEvent(Event{Type: "log", Text: fmt.Sprintf("断点恢复失败:%s: %v", opts.Location, err)})
 			continue
 		}
 		restored++

@@ -1,9 +1,12 @@
 package fep
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -251,16 +254,59 @@ func debugSessionsReal(cmd *cobra.Command) ([]dbgSessionView, error) {
 
 // parseDebugSessions 读 `tt debug status --json` 的报文。
 //
-// 形状（实测）：一个 `{"sessions":[…]}` 文档。从前这里的 struct 只声明了 `state`，
-// 于是"这条会话是谁的"这件事**在客户端根本没有材料**—— 那就是缺陷 D 能成立的原因之一。
+// **报文是多段的**（真机实测，A31 的起因）：`debugStatusCmd` 依次把 `/api/status` 与
+// `/api/sessions` 的原样应答各打一行（internal/cli/debug/debugctl.go:1054-1055），
+// 所以 stdout 上是「一段 JSON + 换行 + 一段 JSON」。从前这里只做**一次** json.Unmarshal ⇒
+// `invalid character '{' after top-level value` ⇒ preflight 的 session 项报"列会话失败"
+// ⇒ 服务起着也 exit 2，连带 `rec start` 必然 exit 2（path=debug 的件根本录不下来）。
+//
+// 现在的判据：用 json.Decoder 逐段 Decode 到 io.EOF，取**带 `sessions` 数组**的那一段
+// （不是"带 sessions 这个键"的那一段：状态段哪天放个计数进来，解析器不该当场躺下）。
+// 段数不是契约 —— 两段、三段、带空行、CRLF 都认。
+//
+// 一段都读不懂 / 一段也没有 sessions 数组 ⇒ 返回错误（**不许**当成"0 条会话"）：
+// 调用方据此报 unknown，而不是把它说成"你没起会话"（A31）。
 func parseDebugSessions(out []byte) ([]dbgSessionView, error) {
-	var st struct {
-		Sessions []dbgSessionView `json:"sessions"`
+	dec := json.NewDecoder(bytes.NewReader(out))
+	docs := 0
+	for {
+		var doc map[string]json.RawMessage
+		derr := dec.Decode(&doc)
+		if errors.Is(derr, io.EOF) {
+			break
+		}
+		if derr != nil {
+			return nil, fmt.Errorf("读不懂 `tt debug status --json` 的报文（第 %d 段）：%w；原文开头：%s",
+				docs+1, derr, excerptOf(out))
+		}
+		docs++
+		raw, ok := doc["sessions"]
+		if !ok {
+			continue
+		}
+		if t := bytes.TrimSpace(raw); len(t) == 0 || t[0] != '[' {
+			continue // 不是数组 ⇒ 不是会话清单那一段
+		}
+		var sessions []dbgSessionView
+		if jerr := json.Unmarshal(raw, &sessions); jerr != nil {
+			return nil, fmt.Errorf("`sessions` 那一段读不出来：%w；原文开头：%s", jerr, excerptOf(out))
+		}
+		return sessions, nil
 	}
-	if jerr := json.Unmarshal(out, &st); jerr != nil {
-		return nil, jerr
+	if docs == 0 {
+		return nil, fmt.Errorf("`tt debug status --json` 一段 JSON 都没输出（空报文）")
 	}
-	return st.Sessions, nil
+	return nil, fmt.Errorf("`tt debug status --json` 的 %d 段报文里都没有 `sessions` 数组；原文开头：%s",
+		docs, excerptOf(out))
+}
+
+// excerptOf 取报文开头一小段（one line），只用于错误里给人看现场。
+func excerptOf(b []byte) string {
+	s := strings.Join(strings.Fields(string(b)), " ")
+	if r := []rune(s); len(r) > 160 {
+		s = string(r[:160]) + "…"
+	}
+	return s
 }
 
 // stopSpot 是"程序停在哪儿"（调试服务给的现场）。

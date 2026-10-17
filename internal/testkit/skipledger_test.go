@@ -77,6 +77,11 @@ var switchNames = []string{
 	"TDEV_DEEP", "TTZS_DEEP", "TTZS_E2E", "TTZS_FNS",
 	"TTZS_CORPUS", "TDEV_CORPUS",
 	"TTZS_EXE", "TTZS_WS", "TTZS_PKG",
+	// 表单真样本那一路（见下面 `TT_FORM_*` 那一组台账条目）：
+	// 真 .42f 与真归档语料表不随仓库走，缺了就用这三个开关指过去。
+	"TT_FORM_SAMPLE_DIR", "TT_FORM_CORPUS_MAP",
+	// 现场真配对：要 .tzs 目录与 .42f **同一个现场**的那一份，两个开关得同时指对。
+	"TT_TZS_REAL_DIR", "TT_FORM_42F",
 }
 
 // skipSite 是台账里的一处跳过。
@@ -182,6 +187,38 @@ var skipLedger = []skipSite{
 	// `…AllowsReadOnlySelects` / `…BlocksTheReadOnlyTransactionBypass`），
 	// **没有留 t.Skip**：旧断言作废不值得在台账里长期占一行（留注释说明即可）。
 	// 于是本台账里 `layPending` 这一层现在是 **0 条** —— 它保留着以备下次"先写测试后写实现"。
+
+	// ---- 表单真样本那一路（`fixtures/forms/`）：TT_FORM_* 开关 + 现场真配对 ----
+	//
+	// 这一批 14 条的病因是同一个：**真 `.42f` 与真归档语料表不随仓库走**。
+	// 契约 C7.2/C7.3 的口径是"仓库内只放合成夹具，缺真样本时写明原因、
+	// 不拿合成件顶替" —— 所以跳过在这里是**对的**，但它必须登记：
+	// 否则默认档少验一整块表单解析，而报告里什么都看不出来。
+	//
+	// 分层按"怎么补救"分：
+	//   · 几乎全是 L3，开关名统一落在 TT_FORM_SAMPLE_DIR / TT_FORM_CORPUS_MAP 上；
+	//   · 三条是「L3-缺件」——语料（或仓库自带的最小语料）在，但里面没有**这一件**，
+	//     补救是换份语料/重新生成，没有开关可点名；
+	//   · `form42f_realpair_test.go` 那条要两个开关同时指对（TT_TZS_REAL_DIR +
+	//     TT_FORM_42F）：要的不是一份 .42f，而是**同一个现场**打出来的 .tzs 与 .42f。
+	//
+	// 注意这批文件的归属：`dev/tzs`、`dict`、`drawio`、`fep` 都另有切片在改。
+	// 台账只登记**当前源文件里的字面量**；那些文件里的跳过文案一改（含标点），
+	// 这里就会红 —— 那是对的：文案是"这条跳过在说什么"。
+	{file: "internal/cli/form/recording_test.go", msg: "没有真表单样本（%v）—— 设 TT_FORM_SAMPLE_DIR 指向 fixtures/forms/", layer: layL3, why: "需真表单样本：开关 TT_FORM_SAMPLE_DIR（仓库内只放合成夹具，契约 C7.2/C7.3）"},
+	{file: "internal/cli/form/verify_test.go", msg: "没有真样本（%v）—— 设 TT_FORM_SAMPLE_DIR 指向 fixtures/forms/", layer: layL3, why: "需真样本：开关 TT_FORM_SAMPLE_DIR"},
+	{file: "internal/cli/form/verify_test.go", msg: "没有归档语料表（%v）—— 设 TT_FORM_CORPUS_MAP 指向 colname-fieldid.json", layer: layL3, why: "需真归档语料表：开关 TT_FORM_CORPUS_MAP"},
+	{file: "internal/dev/tzs/form42f_check_test.go", msg: "没有真样本（%s 打不开：%v）—— 设 TT_FORM_SAMPLE_DIR 指向 fixtures/forms/", layer: layL3, why: "需真样本：开关 TT_FORM_SAMPLE_DIR"},
+	{file: "internal/dev/tzs/form42f_check_test.go", msg: "没有仓库自带的最小语料（%s：%v）—— 它是仓库本体，缺了用 `go run ./tools/tzsmini` 重新生成", layer: layL3Missing, why: "仓库自带的最小语料缺了：它是仓库本体，补救是重新生成（go run ./tools/tzsmini），没有开关可点名"},
+	{file: "internal/dev/tzs/form42f_realpair_test.go", msg: "没有现场真配对样本：%s —— 设 TT_TZS_REAL_DIR 与 TT_FORM_42F 指向真 .tzs 目录与真 .42f（契约 C7.3：缺样本写明原因，不拿合成件顶替）", layer: layL3, why: "需真现场配对样本：开关 TT_TZS_REAL_DIR + TT_FORM_42F"},
+	{file: "internal/dict/formfields/formfields_test.go", msg: "TT_FORM_SAMPLE_DIR=%s 不是目录（%v）——跳过真样本测试", layer: layL3, why: "需真样本目录：开关 TT_FORM_SAMPLE_DIR（指到的不是目录就跳）"},
+	{file: "internal/dict/formfields/formfields_test.go", msg: "真样本目录不存在（%s）——跳过：仓库内只放合成夹具（契约 C7.2/C7.3）", layer: layL3, why: "需真样本目录：开关 TT_FORM_SAMPLE_DIR（仓库内只放合成夹具）"},
+	{file: "internal/dict/formfields/formfields_test.go", msg: "样本 %s 不在（%v）——换份成果目录就跳", layer: layL3Missing, why: "成果目录在，但里面没有这个表单（换份成果目录就有）"},
+	{file: "internal/drawio/proto42f_test.go", msg: "真样本不在 %s（用 TT_FORM_SAMPLE_DIR 覆盖）；跳过：%v", layer: layL3, why: "需真样本：开关 TT_FORM_SAMPLE_DIR"},
+	{file: "internal/fep/form42f_test.go", msg: "没有真样本（%s 打不开：%v）—— 设 TT_FORM_SAMPLE_DIR 指向 fixtures/forms/", layer: layL3, why: "需真样本：开关 TT_FORM_SAMPLE_DIR"},
+	{file: "internal/fep/form42f_test.go", msg: "没有归档语料表（%v）—— 设 TT_FORM_CORPUS_MAP 指向 colname-fieldid.json", layer: layL3, why: "需真归档语料表：开关 TT_FORM_CORPUS_MAP"},
+	{file: "internal/fep/form42f_test.go", msg: "归档语料表里没有 w_axmt500（换台机器/换份语料就跳）", layer: layL3Missing, why: "归档语料表在，但里面没有 w_axmt500（换台机器/换份语料就有）"},
+	{file: "internal/fep/form42f_test.go", msg: "没有真样本（%v）", layer: layL3, why: "需真样本：开关 TT_FORM_SAMPLE_DIR"},
 }
 
 // reSkipCall 匹配 t.Skip / t.Skipf 且第一个参数是同行的字符串字面量。

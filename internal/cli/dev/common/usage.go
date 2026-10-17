@@ -34,6 +34,12 @@ const Usage = `tt dev —— T100 设计器包工具：.tzc 代码包 + .tzs 表
         #     tt dev tzs set_spec_attr --form aapp320 --args '{"path":"<p>","kind":"field","attr":"can_edit","value":"Y"}'
         #     tt dev tzs list_open --json                                   # 无参数可省 --args
         # 动词全名：tt dev tzs --help     某个动词的参数与示例：tt dev tzs <动词> --help
+  tt dev tzs formcheck --form42f <表单.42f> --tzs <包.tzs|表单.4fd> [--json]
+        # **静态**比对：应然（.42f，编译期权威）↔ 实然（tzs 生成物里的 .4fd）
+        # 不开引擎、不连服务器、不碰工作区 —— 只读上面两个文件
+        # 差异分四组（存在性 / 编号 / 可写性 / 控件族），每条给 colName 与两侧值；
+        #   拿不准的组合进"未判定"，**不计入错误**（契约 A15）
+        # 退出码：0 一致（含只有未判定） / 2 参数或读取错 / 6 有确定差异
   tt dev tzs doctor [--json]         # 环境自检（引擎 / 设计器目录 / 工作区 / 管道名）
   tt dev tzs stop                    # 停本工作区的常驻引擎（不启动）
   tt dev tzs reap [--yes]            # 清理引擎重编后停不掉的孤儿守护进程
@@ -61,4 +67,6 @@ const Usage = `tt dev —— T100 设计器包工具：.tzc 代码包 + .tzs 表
 （基线侧问题给「.tdev/base.full.4gl:<行号>」）；--json 里有 file/line/snippet 字段。
 
 退出码：0 成功 / 2 包格式错 / 3 验证失败 / 4 写入被拒 / 5 IO·环境失败
+tzs 线自己的码表是 0 / 1 / 2 / 4 / 5（没有 3）+ formcheck 的 6：
+  1 引擎内部错 / 2 参数或环境错（含 manifest 拉不到）/ 4 设计器拒绝 / 5 传输或环境失败 / 6 有确定差异
 `

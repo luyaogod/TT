@@ -59,8 +59,13 @@ var recStartCmd = &cobra.Command{
 要自己下断点就先加 --no-continue，放行前用 tt debug exec 下好再 continue。`,
 	Args: noArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if strings.TrimSpace(recStartProg) == "" {
-			return fail(exitUsage, "没给作业程序（--prog bsft001_wf）")
+		// 开跑前一次查完四项前置（目录可写 / 服务 / 会话 / 环境）。
+		//
+		// 位置在**起代理之前**：代理占三个端口，半路失败要收，收不干净就留一个空会话；
+		// 而且真机冒烟里失败信息是逐层挤出来的（先"服务没起"，起了再"没有会话"）——
+		// 每跑一次才知道下一个前置，使用者被迫来回试错。这里一次列完。
+		if err := recStartPreflight(cmd, recStartProg, recStartEnv); err != nil {
+			return err
 		}
 		ent := strings.TrimSpace(recStartEnt)
 		cfgPath, err := common.ResolveConfig(true)

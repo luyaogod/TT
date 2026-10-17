@@ -25,6 +25,7 @@ import (
 	"tt/internal/cli/dict"
 	"tt/internal/cli/drawio"
 	"tt/internal/cli/fep"
+	"tt/internal/cli/form"
 	"tt/internal/cli/view"
 	"tt/internal/output"
 )
@@ -64,6 +65,9 @@ var rootCmd = &cobra.Command{
   tt drawio     0 成功 / 1 用法或运行失败 / 2 输入错（spec 不合法、包读不出）/ 3 产物自查未通过
   tt update     0 已是最新或已交棒 / 10 有可用更新 / 2 用法错 / 3 校验失败 /
                 4 拒绝自装（源码态、认不出的布局）/ 5 出网或落盘失败
+  tt form       0 一致 / 1 取件失败（FORM_UNKNOWN：取不到表单，或它不是合法 .42f）
+                2 用法错或无基线（缺 --env/--module/--form；既没 --map 也没 --recording；
+                  语料里没有那一节窗口）/ 6 与语料逐条比对不一致（体检不过）
   顶层          0 成功 / 1 用法错（未知命令、未知开关）
 
 3 在 tzc 是"校验失败"、在 dict 是"缺表"、在 drawio 是"产物自查未通过"、在 tzs 根本不用；
@@ -108,6 +112,7 @@ func init() {
 	dev.Register(rootCmd)
 	dict.Register(rootCmd)
 	fep.Register(rootCmd)
+	form.Register(rootCmd)
 	view.Register(rootCmd)
 	drawio.Register(rootCmd)
 

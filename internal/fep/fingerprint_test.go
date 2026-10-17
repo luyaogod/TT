@@ -1,7 +1,9 @@
 package fep
 
 import (
+	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -122,10 +124,16 @@ func gate(rec, live Snapshot) GateVerdict { return GateReplay(OfSnapshot(rec), O
 // #2 才是作业界面（3976 条）。把两条揉成一张表去比单连接的录制件，
 // 同一条路径也会判成 93% 不过；按连接比，#2 对 #2 是 100%。
 func TestGateComparesPerConnection(t *testing.T) {
-	job := func(shift int) []FPEntry {
+	// 200 个带**身份**的节点：colName+fieldId 才是 v3 的判据（A19），编号只是噪音。
+	job := func(shift int, other bool) []FPEntry {
 		var out []FPEntry
 		for i := 1; i <= 200; i++ {
-			out = append(out, FPEntry{Kind: "Value", Scope: 5, ID: i + shift, Role: "f"})
+			col := fmt.Sprintf("f%03d", i)
+			if other {
+				col = fmt.Sprintf("g%03d", i) // 另一份作业：身份不同
+			}
+			out = append(out, FPEntry{Kind: "FormField", Scope: 5, ID: i + shift, Role: "demo_t.f",
+				ColName: col, FieldID: strconv.Itoa(i)})
 		}
 		return out
 	}
@@ -133,25 +141,25 @@ func TestGateComparesPerConnection(t *testing.T) {
 
 	rec := MultiSnapshot{Label: "件", Path: PathRunnerRD, Conns: []ConnSnapshot{
 		{Conn: 1, Snapshot: Snapshot{Entries: dbg, FP: FingerprintOf(dbg)}},
-		{Conn: 2, Snapshot: Snapshot{Entries: job(0), FP: FingerprintOf(job(0))}},
+		{Conn: 2, Snapshot: Snapshot{Entries: job(0, false), FP: FingerprintOf(job(0, false))}},
 	}}
 	// 当前会话只起了作业那一条连接（例如我们要在调试线上重放 r.d 录的件）
 	live := MultiSnapshot{Label: "会话", Path: PathRunnerRD, Conns: []ConnSnapshot{
-		{Conn: 2, Snapshot: Snapshot{Entries: job(0), FP: FingerprintOf(job(0))}},
+		{Conn: 2, Snapshot: Snapshot{Entries: job(500, false), FP: FingerprintOf(job(500, false))}},
 	}}
 	v := GateReplay(rec, live)
 	if !v.OK {
-		t.Fatalf("按连接比时 #2↔#2 该通过：%+v", v)
+		t.Fatalf("按连接比时 #2↔#2 该通过（编号不同、身份相同）：%s", v.Report())
 	}
 	if v.RecConn != 2 || v.LiveConn != 2 {
 		t.Fatalf("该采用 #2↔#2 那一对：rec=%d live=%d", v.RecConn, v.LiveConn)
 	}
-	// 同一条路径但作业换了（编号整体平移）⇒ 一条连接都对不上 ⇒ 拒
+	// 同一条路径但作业换了（**身份**不同）⇒ 一条连接都对不上 ⇒ 拒
 	other := MultiSnapshot{Label: "会话", Path: PathRunnerRD, Conns: []ConnSnapshot{
-		{Conn: 2, Snapshot: Snapshot{Entries: job(1000), FP: FingerprintOf(job(1000))}},
+		{Conn: 2, Snapshot: Snapshot{Entries: job(0, true), FP: FingerprintOf(job(0, true))}},
 	}}
 	if v := GateReplay(rec, other); v.OK {
-		t.Fatalf("换了作业该拒：%+v", v)
+		t.Fatalf("换了作业该拒：%s", v.Report())
 	} else if !strings.Contains(v.Reason, "录制件 #") || !strings.Contains(v.Reason, "当前连接") {
 		t.Fatalf("拒绝报文要说清比的是哪一对、两边各有哪些连接：%s", v.Reason)
 	}
@@ -159,7 +167,11 @@ func TestGateComparesPerConnection(t *testing.T) {
 
 // 一条连接读不动不该把整份录制判死，也不该静默当成"没有界面"。
 func TestGateReportsPerConnectionReadFailures(t *testing.T) {
-	good := []FPEntry{{Kind: "Window", Scope: 0, ID: 1, Role: "w"}}
+	// 12 条（A21 ① 要求 interface 至少有 max(10, 0.5×|rec|) 条才能算证据够）。
+	var good []FPEntry
+	for i := 0; i < 12; i++ {
+		good = append(good, FPEntry{Kind: "Value", Scope: 0, ID: i + 1, Role: "v"})
+	}
 	rec := MultiSnapshot{Label: "件", Conns: []ConnSnapshot{
 		{Conn: 1, Snapshot: EmptySnapshot("件 #1", "读不动：坏帧")},
 		{Conn: 2, Snapshot: Snapshot{Entries: good, FP: FingerprintOf(good)}},
@@ -199,64 +211,93 @@ func TestGateRefusesDifferentLaunchPath(t *testing.T) {
 	}
 }
 
-// 闸门：编号表对不上就拒，并给出差异条数与前几条现场。
+// 闸门：**界面不同**（身份集合差一个都对不上）就拒，并给出差异清单与前几条现场。
 func TestGateRefusesWhenTablesDiffer(t *testing.T) {
 	rec := make([]FPEntry, 0, 100)
 	live := make([]FPEntry, 0, 100)
 	for i := 1; i <= 100; i++ {
-		rec = append(rec, FPEntry{Kind: "Value", Scope: 3, ID: i, Role: "f"})
-		live = append(live, FPEntry{Kind: "Value", Scope: 3, ID: i + 500, Role: "f"}) // 另一条启动历史
+		rec = append(rec, FPEntry{Kind: "FormField", Scope: 3, ID: i, Role: "demo_t.f",
+			ColName: fmt.Sprintf("f%03d", i), FieldID: strconv.Itoa(i)})
+		live = append(live, FPEntry{Kind: "FormField", Scope: 3, ID: i + 500, Role: "demo_t.f",
+			ColName: fmt.Sprintf("g%03d", i), FieldID: strconv.Itoa(i)}) // 另一张表单的字段
 	}
 	v := gate(
 		Snapshot{Label: "件", Path: PathRunnerRR, Entries: rec, FP: FingerprintOf(rec)},
 		Snapshot{Label: "会话", Path: PathRunnerRR, Entries: live, FP: FingerprintOf(live)},
 	)
 	if v.OK || v.Code != GateFPNoMatch {
-		t.Fatalf("编号表对不上必须拒：%+v", v)
+		t.Fatalf("界面不同必须拒：%+v", v)
 	}
-	if v.Diff.Same != 0 || v.Diff.LiveTotal != 100 {
-		t.Fatalf("差异条数要如实报：%+v", v.Diff)
+	if v.Diff.LiveTotal != 100 || v.Diff.LiveCoverage != 0 {
+		t.Fatalf("差异条数与身份覆盖要如实报：%+v", v.Diff)
+	}
+	if len(v.Diff.IdentUnexpected) == 0 || !containsStr(v.Diff.IdentUnexpected, "g001#1") {
+		t.Fatalf("差异清单的「意外」栏要点名当前界面的身份：%v", v.Diff.IdentUnexpected)
+	}
+	if len(v.Diff.IdentPending) == 0 || !containsStr(v.Diff.IdentPending, "f001#1") {
+		t.Fatalf("「尚未加载」栏要点名录制件里的身份：%v", v.Diff.IdentPending)
 	}
 	if len(v.Examples) == 0 {
 		t.Fatal("拒绝时要给出「录制里是哪个编号、现在这个坐标是哪个编号」的头几条")
 	}
 }
 
-// 闸门：同一条路径、当前界面是录制件的一个前缀（起完作业就录的样子）⇒ 放行。
+// 闸门：判据是"当前界面的身份都能在录制件里找到"（A21 单向覆盖），不是"覆盖了多少条"。
 //
-// 这是**回放的真实场景**：录制件是"整个会话"，当前会话只有刚打开的那一屏。
-func TestGatePassesWhenLiveIsAPrefixOfTheRecording(t *testing.T) {
-	var rec []FPEntry
-	for i := 1; i <= 300; i++ {
-		rec = append(rec, FPEntry{Kind: "Value", Scope: 3, ID: i, Role: "f"})
+// 三个场景：同一界面（编号全变）⇒ 放；**半屏**（本轮要救的误拒）⇒ 放；
+// 证据太少（连 10 条都不到，或不到录制件的一半）⇒ 拒（理由写"证据不足"）。
+func TestGateAcceptsWholeInterfaceAndHalfScreen(t *testing.T) {
+	form := func(shift, keep int) []FPEntry {
+		var out []FPEntry
+		for i := 1; i <= keep; i++ {
+			out = append(out, FPEntry{Kind: "FormField", Scope: 3, ID: i + shift, Role: "demo_t.f",
+				ColName: fmt.Sprintf("f%03d", i), FieldID: strconv.Itoa(i)})
+		}
+		return out
 	}
-	live := append([]FPEntry(nil), rec[:300]...)
-	v := gate(
+	rec := form(0, 300)
+	if v := gate(
 		Snapshot{Label: "件", Path: PathRunnerRR, Entries: rec, FP: FingerprintOf(rec)},
-		Snapshot{Label: "会话", Path: PathRunnerRR, Entries: live, FP: FingerprintOf(live)},
-	)
-	if !v.OK || !v.PathChecked {
-		t.Fatalf("同路径前缀该放行：%+v", v)
+		Snapshot{Label: "会话", Path: PathRunnerRR, Entries: form(9000, 300), FP: FingerprintOf(form(9000, 300))},
+	); !v.OK || !v.PathChecked {
+		t.Fatalf("同一界面（身份全同、编号全变）该放行：%s", v.Report())
 	}
 
-	// 界面的 1% 允许对不上（实测同路径会有极少数裸 id 复用导致的重声明）：
-	// 3/300 = 1% 仍在门内，4/300 就出去。
-	bad := append([]FPEntry(nil), live...)
-	bad[0].ID, bad[1].ID, bad[2].ID = 9001, 9002, 9003
-	if v = gate(Snapshot{Entries: rec, Path: PathRunnerRR, FP: FingerprintOf(rec)},
-		Snapshot{Label: "会话", Path: PathRunnerRR, Entries: bad, FP: FingerprintOf(bad)}); !v.OK {
-		t.Fatalf("1%%（3/300）该放行：%+v", v)
+	// 半屏：录制件是整会话，当前只走到一半 ⇒ **放行**（A21；A19 会误拒）
+	half := form(9000, 150)
+	v := gate(
+		Snapshot{Label: "件", Path: PathRunnerRR, Entries: rec, FP: FingerprintOf(rec)},
+		Snapshot{Label: "会话", Path: PathRunnerRR, Entries: half, FP: FingerprintOf(half)},
+	)
+	if !v.OK {
+		t.Fatalf("半屏必须放行（这正是 A21 要消灭的误拒）：%s", v.Report())
 	}
-	bad[3].ID = 9004
-	if v = gate(Snapshot{Entries: rec, Path: PathRunnerRR, FP: FingerprintOf(rec)},
-		Snapshot{Label: "会话", Path: PathRunnerRR, Entries: bad, FP: FingerprintOf(bad)}); v.OK {
-		t.Fatalf("超过 1%% 该拒：%+v", v)
+	if v.Diff.LiveCoverage != 1 || len(v.Diff.IdentPending) == 0 {
+		t.Fatalf("半屏应是「覆盖 100%% + 尚未加载一堆」：%+v", v.Diff)
+	}
+
+	// 证据太少：连绝对下限 10 条都不到 ⇒ 拒
+	tiny := form(9000, 5)
+	v = gate(
+		Snapshot{Label: "件", Path: PathRunnerRR, Entries: rec, FP: FingerprintOf(rec)},
+		Snapshot{Label: "会话", Path: PathRunnerRR, Entries: tiny, FP: FingerprintOf(tiny)},
+	)
+	if v.OK || v.Diff.EvidenceOK {
+		t.Fatalf("证据不足必须拒：%s", v.Report())
 	}
 }
 
 // 有一边不知道路径时**不比路径**，但判决完全靠指纹（不是"路径没比就放过"）。
 func TestGateFallsBackToFingerprintWhenPathUnknown(t *testing.T) {
-	es := []FPEntry{{Kind: "Window", Scope: 0, ID: 10, Role: "w"}}
+	build := func(prefix string) []FPEntry {
+		var out []FPEntry
+		for i := 0; i < 12; i++ {
+			out = append(out, FPEntry{Kind: "FormField", Scope: 0, ID: 10 + i*2, Role: "demo_t.f",
+				ColName: fmt.Sprintf("%s%02d", prefix, i), FieldID: strconv.Itoa(i)})
+		}
+		return out
+	}
+	es := build("b_")
 	v := gate(
 		Snapshot{Label: "件", Entries: es, FP: FingerprintOf(es)},
 		Snapshot{Label: "会话", Path: PathRunnerRR, Entries: es, FP: FingerprintOf(es)},
@@ -264,7 +305,7 @@ func TestGateFallsBackToFingerprintWhenPathUnknown(t *testing.T) {
 	if !v.OK || v.PathChecked {
 		t.Fatalf("路径不知道时不比路径、但要如实报没比：%+v", v)
 	}
-	other := []FPEntry{{Kind: "Window", Scope: 0, ID: 99, Role: "w"}}
+	other := build("z_") // 另一张表单：身份全不同
 	v2 := gate(
 		Snapshot{Label: "件", Entries: other, FP: FingerprintOf(other)},
 		Snapshot{Label: "会话", Path: PathRunnerRR, Entries: es, FP: FingerprintOf(es)},
@@ -308,13 +349,20 @@ func TestGateRefusesTwoDifferentRealInterfaces(t *testing.T) {
 	}
 	v := gate(rec, live)
 	if v.OK {
-		t.Fatalf("两份真界面不同，闸门必须拒：%+v", v)
+		t.Fatalf("两份真界面不同，闸门必须拒：%s", v.Report())
 	}
-	if v.Diff.Same*100/v.Diff.LiveTotal >= MinLiveMatchPct {
-		t.Fatalf("这个夹具对已经跑到门口了（%d%%），换一份：%+v", v.Diff.MatchPct(), v.Diff)
+	// 拒的理由必须落在五个判据里的至少一条上（不许出现"都在门内却拒"）。
+	if v.Diff.EvidenceOK && v.Diff.LiveCoverage >= FPIdentJaccardMin &&
+		v.Diff.EdgeCoverage >= FPEdgeIsoMin && v.Diff.ExtraShare <= FPTypeHistMaxDiff &&
+		v.Diff.TypeDiff <= FPTypeHistMaxDiff {
+		t.Fatalf("五个判据都在门槛内却判不过，说明判决另有隐情：%+v", v.Diff)
 	}
-	// 同一份自己跟自己：一定放行（前缀关系的最简情形）
+	if len(v.Diff.IdentUnexpected) == 0 && len(v.Diff.TypeChanged) == 0 &&
+		len(v.Diff.EdgeUnexpected) == 0 {
+		t.Fatalf("拒绝要带差异清单（意外栏）：%+v", v.Diff)
+	}
+	// 同一份自己跟自己：一定放行（三件套全等的最简情形）
 	if v := gate(rec, rec); !v.OK {
-		t.Fatalf("同一份录制自己跟自己该放行：%+v", v)
+		t.Fatalf("同一份录制自己跟自己该放行：%s", v.Report())
 	}
 }

@@ -115,6 +115,187 @@ T100 作业调试的核心：经 SSH 驱动服务器上的 4GL 调试协议，�
 | **接口日志** | 查服务器上的报文日志表；列集对齐 T100 原生页。可按日志里内嵌的报文重跑服务程序（重放调试） |
 | **企业目录快照** | 见下 |
 
+## 断点选项：条件 / 忽略次数 / 监视点（A20 结构 · **A26 口径**）
+
+`POST /api/sessions/{id}/breakpoints` 除 `location` 外还收三个字段，**可以都不给**（省略 = 旧行为）：
+
+| 字段 | 含义 | 生成的 fgldb 命令（**A26**） | 拒绝条件 |
+|---|---|---|---|
+| `cond` | 条件表达式（空 = 无条件） | **`break <loc> if <expr>`**（条件内联进 break，GDB 的 "stop only if %s"） | 含 `\n`/`\r`、以 `end` 结尾、**> 512 字节**；`kind=watch` 时**一律拒**（见下） |
+| `ignore` | 忽略前 N 次命中（0 = 不忽略） | `ignore <n> <count>` | 负数；**0 ⇒ 不发这条命令**（其它照发） |
+| `kind` | `break`（默认）/ `watch` | `watch <location>` | `location` 含**白名单外字符**（只接受标识符/表达式） |
+
+命令顺序固定：`break`（带 `if`）/ `watch` → `ignore`（见 `BreakpointOpts.Commands`）。
+
+**为什么不是 `condition <n> <expr>`**（A20 的原映射）——主机109 真机实测
+（`../.agents/plan/L1-结果-2026-10-18.md` §5.1）：
+`tt debug exec "condition 1 g_current_sw = 1"` → `Undefined command: "condition". Try "help".`，
+`help` 的命令表里也没有它；本地 `libfglvm` 里 `condition` 的**唯一**命中是 DAP 的 JSON 字段名。
+⇒ 内核是 GDB 的**子集**，条件只能写在 break 指令里。
+
+**`watch` + `cond` ⇒ 明确报「不支持条件监视点」**：`watch X if Y` 认不认，一次都没验过；
+不拿"大概能行"的猜法发命令（失败会从"下断点失败"推迟成"命中时机不对"，更难查）。
+
+**拒绝路径为什么保证"不发字节"**：校验（`Validate`）在生成命令之前，不过就直接返错，
+`Commands`/`BreakCmd` 返回 nil/空串 —— 调用方按"没有命令"处理。这是**结构保证**，不是自觉；
+`hBPAdd` 也在取会话之后、发命令之前先校验一次，返回 400 并点名是哪个字段、为什么。
+**刻意不做**"先拼再 sanitize"：把危险字符偷偷删掉会静默改变用户表达式的语义，比拒绝坏得多。
+
+存档（`debug-bps/*.json`）的 `cond` / `ignore` / `kind` 三个键**全部 `omitempty`**：
+
+* 旧存档缺这三个键 ⇒ 读成零值（`""` / `0` / `""`），照常可用；
+* 没设的字段不会多出 `"cond":""` 之类的噪声键；
+* 恢复时按新字段重建（监视点的"位置"是存档 `func` 里那个被监视表达式，没有 file:line 可重定位）；
+  存档里的选项若不合法，**降级为纯位置断点**并记一条日志 —— 不因一个条件表达式丢掉整条断点。
+  **例外**：`kind=watch` 且带 `cond`（本机不支持条件监视点）时只丢**条件**、保住监视点
+  —— 降级成"纯位置断点"会连监视点本身一起丢掉（它的 location 是表达式，不是 file:line）。
+
+## `info breakpoints` 的真实行格式（A27 + A30 + A33）
+
+主机109 实测原文（脱敏）：
+
+```
+Num Type           Disp Enb Address    What
+1 watchpoint keep y  g_current_row
+2 breakpoint keep y 0x00000000 in axm_axmt500_wf.axmt500_ui_dialog at axm_axmt500_wf.4gl:2141
+	ignore next 1 hits
+```
+
+条件断点（A30）下同一张表**多一行**续行：
+
+```
+2 breakpoint keep y 0x00000000 in axm_axmt500_wf.axmt500_ui_dialog at axm_axmt500_wf.4gl:2141
+	stop only if 1=1
+	ignore next 2 hits
+```
+
+**命中过的断点多第三行**（A33，第四次真机；未命中的断点**不打印**这一行）：
+
+```
+2 breakpoint keep y 0x00000000 in main at axm_axmt500_wf.4gl:1553
+	breakpoint already hit 1 time
+```
+
+| 事实 | 后果 |
+|---|---|
+| **watchpoint 行没有 `hw`**、Address 列为空 | 解析**不依赖** `hw`（带 `hw` 的老格式仍容忍）；监视点没有 file:line，表达式落在 `Breakpoint.Func` |
+| breakpoint 行 `0x00000000 in <模块> at <文件>:<行>` | `Module` / `File` / `Line` 三段分别取出 |
+| **`Address` 恒 `0x00000000`**（A33：**命中的那条也是 0**） | 它**不是**"装没装上/生不生效"的判据，解析只是跳过它；**命中与否只看 `Hits` 与停站事件** |
+| `ignore next N hits` 是**独立缩进续行** | 解析必须能跨行，并进上一条断点的 `Ignore` |
+| 条件断点多一行 `stop only if <expr>`（A30，A26 `break … if <expr>` 的回声） | 解析必须并进上一条断点的 `Cond` |
+| 命中的断点多一行 `breakpoint already hit N time(s)`（A33，单复数都认） | 解析必须并进上一条断点的 `Hits`（未命中 = 0，**不是**解析失败） |
+| **三种续行顺序不定** | 都按"并进上一条"处理，不按固定 if-else 链切；空条件的 `stop only if` 不算续行（掉进"行格式不认识"） |
+
+落点：纯函数 `ParseInfoBreakpoints`（`parser.go`，不 IO、可全覆盖），
+`syncBreakpoints`（重建账本）与泵里的 `pendingCmd.settleBPs`（`exec info breakpoints` 类响应）
+都走它 —— 一处格式知识，两个入口。
+
+**`Hits` 的账本兼容（A33 新增字段）**：`Breakpoint.Hits` 带 `omitempty`，且**不进**
+`StoredBP`（`bpsstore.go` 的 JSON 契约一字未动）—— 它是 fgldb 的**实时**事实，不是要在磁盘上
+记住的东西。所以老存档（没有 `hits` 键）照旧读、照旧恢复，零迁移；新报文里 0 命中也不落键。
+
+**解析不出来 ⇒ 报「行格式不认识」并保留原文**：`syncBreakpoints` **不拿空表覆盖账本**
+（一次格式意外会把用户手上的断点全清掉），错误进事件日志；流式路径把错误放进 `execResult.Err`。
+静默吞掉是最坏的处理：一张空断点表 + 没有任何线索，等于让人从零开始猜。
+
+**`Cond` 与 `Ignore` 都以 fgldb 回显为准**（两种续行都能读回来，A30）：`syncBreakpoints`
+重建账本时旧账本**只补空缺**，判据全在纯函数 `inheritMissingBPFields`（`session.go`，
+不碰会话、可全覆盖 —— 见 `bpmerge_cond_test.go`）：
+
+| 字段 | 判据 |
+|---|---|
+| `Cond` | 解析到非空 ⇒ 用解析到的；解析到空（老引擎/老会话不回显）⇒ 才用旧账本补 |
+| `Ignore` | 同上：解析到非 0 优先，`0` 才用旧账本补 |
+
+修前 `Cond` 是**无条件**覆盖（`nbp.Cond = obp.Cond`）—— A30 之后 fgldb 真会回显
+`stop only if 1=1`，那一行等于把刚读到的条件换成旧值，或者（旧账本没条件时）抹成空串。
+匹配上的两条细节：老存档的 `Kind` 是空串（= break）⇒ 比较前归一，否则从旧存档恢复的账本
+**永远**补不到；监视点的 `File/Line` 是空的（位置就是表达式）⇒ 还要比 `Func`，否则两个
+监视点会互相串 `ignore`；同一位置在旧账本里有多条时按 **Num 最小**取（与 map 遍历顺序无关，
+同一份报文两次同步得到同一账本）。
+
+**残余歧义（已知，未改）**：解析到 `Ignore == 0` 既可能是"没有 `ignore next N hits` 续行"，
+也可能是"用户刚 `ignore N 0` 清零"—— 两者在报文上无法区分，所以清零后可能被旧账本的值补回来。
+要精确只能让解析器带一个"这次回显过没有"的标记（`Breakpoint` 加字段 = 账本结构变更）。
+
+## `bp list` 的实时性：账本 vs 内核（A36）
+
+**现场（2026-10-18 真机）**：`bp add` 正常、`info breakpoints` 原文里有 `breakpoint already hit 1 time`、
+点击后**确实停站**（`停站 …:4130 … reason=breakpoint`）—— 可 `bp list` 前后都写 `命中 0 次`。
+
+**根因（代码已复核）**：`hBPList` 直接交出账本（`sess.Breakpoints()`），一个字节都不重读内核；
+而回灌只在"改断点"那刻发生（`/raw` 里 `IsBreakpointCmd(cmd)` 为真时 `syncBreakpoints()`）
+⇒ `命中 N 次` 表达的是**上次改断点时的计数**，不是当下。
+
+| 状态 | `GET …/breakpoints` 的行为 | 响应里的标记 |
+|---|---|---|
+| `stopped` | **先** `syncBreakpoints()`（用内核当下的 `already hit N time(s)` / `ignore next N hits` 覆盖账本）**再**返回 | `fresh: true`，不带 `note` |
+| `running` | **一个字节都不发**（A34：运行期任何调试命令都被 400 拒，只允许 interrupt） | `fresh: false` + `note`（含"可能不是最新"与"先 `tt debug interrupt`"） |
+| `idle` / `loading` / `exit` | 同上（没停站现场，发不出去） | `fresh: false` + `note` |
+| 停站但内核读不回来（格式不认识/被拒） | 账本**保持原样**（不拿空表覆盖），如实说不新鲜 | `fresh: false` + `note`（带错误原文） |
+
+响应形状是**纯新增键**：`ok` / `breakpoints` 一字不改，多出 `fresh`（恒出现）与 `state`，
+`note` 只在 `fresh=false` 时出现 —— 调用方（CLI / 前端 / AI）据此**知道自己在看什么**，
+而不是把一份旧账本当内核真相。
+
+**读命令也回灌（A36 后半）**：`exec "info breakpoints"` 走的是 `/raw`（`kind="other"`），
+`onLine` 那条按 kind 分派的解析不会进，所以它读到的命中计数原本只留在响应文本里。
+现在 `hRaw` 在命令成功后按 `IsBreakpointReadCmd(cmd)` **再回灌一次**（仍然只在停站态）。
+
+**为什么是"单独判断"而不是把 `info` 塞进 `bpCmds`**（二选一，选前者）：
+
+* `bpCmds` 的语义是「会**改动**断点集合」，`info breakpoints` 一个字节都不改 —— 塞进去等于让
+  读命令冒充写命令：`/raw` 的 `act` 会变成 `bp.info`，事件流里平白多出一条"改断点"的动作；
+* 单独判断的影响面只有 `hRaw` 一个分支，`info locals` / `info variables` 读了也不会去动断点账本；
+* 既有判据 `TestIsBreakpointCmd` 明确断言 `info breakpoints` **不是**断点类命令（既有行为不破）。
+
+**测试口径**（`bplist_live_a36_test.go`）：假内核（注入 `Session.execFn`）+ HTTP 桩，不连机器、
+不起会话。四条主线：停站先回灌（且**先**于返回）、运行态零命令且带说明、读命令后账本被刷新、
+add / del / enable 之后 hits 仍与内核一致。两条反证各钉一次：去掉停站态回灌 ⇒ 第一条红；
+让运行态也去 sync ⇒ 第二条红（它真的会发出 `info breakpoints`）。
+
+**`hits: 0` 的 JSON 形状没动**：服务端 `Breakpoint.Hits` 带 `omitempty`（A33 的账本兼容口径），
+所以 0 命中时服务端不落这个键；"`--json` 的 `hits` 键永远在、0 不省键"是 CLI 侧
+`bpView`（`internal/cli/debug/bp.go`，无 `omitempty`）的保证，钉在 `bp_test.go`。
+
+## `asf_` 从哪来 / 断点位置的模块前缀（缺陷 #3）
+
+现场：`debug start axmt500_wf --module asf` 报的停站文件是 **`asf_axmt500_wf.4gl`**，
+而 `info breakpoints` 里的真名是 **`axm_axmt500_wf.4gl`** ⇒ `break asf_…:行` 必然
+`No source file named`。
+
+**根因（读代码得出，不是猜）**：`Session.Module` 本来是**登录后**由 `resolveModule`
+（`session.go`，按 `<作业>.42r` 在各模块 42r 目录里搜）解析出来的 —— 这是唯一权威来源；
+但 CLI 的 `--module` 默认值被写死成 `"asf"`，把权威解析整条短路了，文件名于是由
+`<模块>_<作业>.4gl` 这个拼接规则编出来。
+
+**修法**：
+
+1. `--module` 默认改成**空**（`debug start` 与 `debug probe` 都是），帮助文本由
+   `ModuleFlagHelp()` 统一给：留空 = 登录后自动解析；显式给出则按它拼名；
+2. `BPLocContext.ResolveLocation` 用**会话已知事实**修正用户写错的前缀
+   （`resolveModule` 的结果 / 客制模块 / 本会话作业名）：只改"本会话作业"的文件名，
+   公共库（`lib_*.4gl`）与别人的文件一概不碰；
+3. 事实不足（模块还没解析出来）**不改位置**，而是把"怎么给"写进 `Breakpoint.Note`：
+   `info breakpoints` 看真名 / `debug stop` 看停站 `file` 字段 / 直接 `break <行号>`。
+
+**按作业名前缀推模块是猜，不许**：`axmt500_wf → axm`（实测）但 `bsft001_wf → asf`
+（同台机器的另一支作业，`asf_bsft001_wf.4gl`）—— 同一套"前三字母"规则立刻给出错答案。
+唯一能回答的是 42r 目录，所以答案只能来自登录后的解析。
+
+## 登录区源码目录未知（`tt debug source`，缺陷 #2）
+
+`ReadSourceStandalone` 的白名单根目录是 `Config.ModuleRootsActual()` =
+**登录后回读**的 `$TOP/$ERP/$COM`（`$ERP/<模块>/4gl` 与 `$COM/{lib,sub,qry}/42m`）。
+静态配置里没有、也不许有 T100 路径，所以取不到时**不回退默认目录**
+（那会把"读错机器上的文件"伪装成成功），而是由 `sourceRootsUnknownErr` 把三件事说清：
+
+1. 怎么让它有值：`tt debug start <作业> --env <环境名>`（会话登录后把 `$TOP/$ERP/$COM` 写进该环境 Runtime）；
+2. Runtime 是**进程内**状态：换环境/区域后要在同一个 serve 实例里重新落一次（start 或 switch）；
+3. 已经有值却仍报：`tt debug env` 看该环境到底有没有 TOP/ERP/COM（有值⇒问的是另一个环境段；没值⇒选区后没回读到）。
+
+CLI 侧再补一段命令视角的下一步（`internal/cli/debug/sourcehint.go`，stdout 不污染）。
+
 ## 企业目录的取值顺序
 
 ```
@@ -153,6 +334,13 @@ T100 作业调试的核心：经 SSH 驱动服务器上的 4GL 调试协议，�
 放行之后什么都不弹、启动段也不报错，所以每轮启动都在事件流与快照里报一句画面去向
 （`ScreenTarget`：端口 = 前端监听端口 - 6400）。
 
+**没接线就不只是"看不到画面"，是程序根本活不过 `main`**（A35，第四次真机三次复现）：
+自动接线而本机 7400/6400 上没有 GDC 在听时会话在 `main` 之后**立刻**
+`Fatal error -6300 Can not connect to GUI` 退出（`main:1553` 之后的守卫行一次都没停）。
+所以 `ScreenWarn` 必须在启动段就说这句话、并给出动作（起 GDC / `--fglserver` / 走录制线）；
+文案的唯一来源是 `ScreenWarnWith(fglserver, gdcPresent)` —— 探针结果由调用方给，
+因为 CLI 要在 `debug start` 那一刻也打同一句（见 [../cli/debug/README.md](../cli/debug/README.md) 的 A35 段）。
+
 ## 起作业的路径
 
 会话起的作业是 `fglrun -d <LaunchRef>.42r <LaunchArgs>`（`session.go:668`）：`LaunchRef` 取自
@@ -176,7 +364,19 @@ go test ./internal/debug -count=1
 请求体坏了 → 400、拨号失败 → 500 信封、入参校验**在拨号之前**那处顺序性质；
 从前是五个 —— 那个"服务测试"端点（`/api/wstest`）本批已从产品里取消）；
 **断点存档的落盘与读取**（`bpsstore_test.go`：路径怎么拼、`dataDir` 为空时不落盘也不报错、
-`Read` 的每一条拒绝理由）。
+`Read` 的每一条拒绝理由）；**断点选项的命令生成与拒绝**（`breakpointopts_test.go` +
+`breakpointopts_a26_test.go`：`break … if …` / `ignore` / `watch` 逐字与顺序、非法条件各自报错且
+**不产生命令**、`ignore 0` 不发命令、`watch+cond` 明确拒、**生成器里不许出现 `condition`**、
+存档新字段往返与**旧存档零值**）；**A27/A30/A33 行格式**（`bpinfo_parse_test.go` +
+`bpinfo_stoponly_test.go` + `bphits_parse_test.go`：L1 原文两种形态、`watchpoint` 无 `hw`、
+`ignore` 第二行并入、`stop only if` 续行并入 `Cond`、`breakpoint already hit N time(s)` 并入
+`Hits`（单复数、无该行 = 0、三种续行顺序互换同一份账本、计数不串到别的断点、
+孤儿续行/不认识的行报错并保留原文）；**反证**：拿掉 `already hit` 续行 ⇒ 第一条红）；**账本重建的补空缺判据**（`bpmerge_cond_test.go`：解析到的 `Cond` 优先、
+解析到空才用旧账本补（**反证**：改回无条件覆盖 → 红）、`Ignore` 同向、老存档空 `Kind` 能对上、
+监视点按表达式区分、同位置多条按 Num 最小且与 map 顺序无关）；
+**断点位置的前缀修正**（`bplocation_test.go`：`asf_` 前缀按会话已知模块改正、
+前缀本来就对时一字不改、事实不足时不猜并给出怎么给）；
+**登录区源码目录未知的文案**（`sourcehint_test.go`：可操作、点名环境、不出现默认路径）。
 
 **故意不覆盖**（两处，都是结构上难测，不是漏了）：
 

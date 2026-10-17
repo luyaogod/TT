@@ -1141,6 +1141,35 @@ type SourceResult struct {
 // maxSourceFileBytes 会话外读取的文件大小上限(源码一般远小于此)。
 const maxSourceFileBytes = 4 << 20
 
+// sourceRootsUnknownErr 登录区源码目录取不到时的错误（缺陷 #2 的修法落在文案上）。
+//
+// 现场（.agents/plan/L1-结果-2026-10-18.md §7-2）：`tt debug source` 只回
+// 「登录区源码目录未知(环境路径解析失败)」—— 说了"不行"，没说"怎么办"。
+//
+// 事实：ModuleRootsActual 只认**登录后回读**的 Runtime（$TOP/$ERP/$COM，config.go），
+// 静态配置里没有、也不许有 T100 路径（契约：T100 路径不许静态配置）。所以这里
+// **取不到就是取不到**（A15 不猜：不回退某个默认目录，那会把"读错机器上的文件"伪装成成功），
+// 能做的是把三条可操作的路写清楚。
+func sourceRootsUnknownErr(cfg *Config) error {
+	env := ""
+	if cfg != nil {
+		env = strings.TrimSpace(cfg.EnvName())
+	}
+	named := ""
+	if env != "" {
+		named = "（当前环境：" + env + "）"
+	}
+	return fmt.Errorf("登录区源码目录未知%s：这台机器的登录后路径**取不到** —— "+
+		"$TOP/$ERP/$COM 是登录后回读出来的，T100 路径按契约不许静态配置，所以这里不猜路径、也没有默认目录可退。"+
+		"三条可操作的路：\n"+
+		"  1) 先起一条会话让它回读环境：tt debug start <作业> --env <环境名> —— "+
+		"登录后会把 $TOP/$ERP/$COM 写进该环境的 Runtime；源码目录就是 $ERP/<模块>/4gl 与 $COM/{lib,sub,qry}/42m；\n"+
+		"  2) 换过环境/区域后要在**同一个** serve 实例里重新落一次 Runtime（tt debug start 或 /api/sessions/switch）："+
+		"Runtime 是进程内状态，不跨实例；\n"+
+		"  3) 已经有值却仍报这条：先 tt debug env 看该环境有没有 TOP/ERP/COM —— "+
+		"有值说明你问的是另一个环境段（用 --env 点名）；没值说明选区后没回读到（看 tt debug status 的登录日志）。", named)
+}
+
 // ReadSourceStandalone 读取登录区源码目录(动态 ERP/COM)内的源码文件。
 //   - path 非空:直接按路径读(白名单校验源码目录前缀);
 //   - path 为空:file(如 asf_bsft001_wf.4gl)按 sourceCandidatePaths 候选解析,module 可空(仅查公共目录);
@@ -1163,7 +1192,7 @@ func (m *Manager) ReadSourceStandalone(module, file, path string, from, to int) 
 	err := m.withSrcConn(cfg, func(_ *host.SSHConn, cl *sftp.Client) error {
 		roots := cfg.ModuleRootsActual()
 		if len(roots) == 0 {
-			return fmt.Errorf("登录区源码目录未知(环境路径解析失败)")
+			return sourceRootsUnknownErr(cfg)
 		}
 		readOne := func(p string) ([]byte, time.Time, error) {
 			f, err := cl.Open(p)

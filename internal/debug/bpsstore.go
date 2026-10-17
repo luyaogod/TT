@@ -16,12 +16,19 @@ import (
 )
 
 // StoredBP 持久化的断点
+//
+// Cond/Ignore/Kind 是 A20（契约 §5）新增的三个字段：**全部 omitempty**，
+// 所以旧版本写出的存档（没有这三个键）读进来就是零值（"" / 0 / ""），
+// 而新存档里没设的字段也不会多出 `"cond":""` 这种噪声键。
 type StoredBP struct {
 	File     string `json:"file"`
 	Line     int    `json:"line"`
 	LineText string `json:"lineText,omitempty"` // 下断时的源码行文本(重定位依据)
 	Func     string `json:"func,omitempty"`
 	Enabled  bool   `json:"enabled"`
+	Cond     string `json:"cond,omitempty"`   // 条件表达式(空 = 无条件)
+	Ignore   int    `json:"ignore,omitempty"` // 忽略前 N 次命中(0 = 不忽略)
+	Kind     string `json:"kind,omitempty"`   // "break" | "watch"(空 = "break")
 }
 
 type bpStoreFile struct {
