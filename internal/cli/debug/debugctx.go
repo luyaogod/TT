@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"tt/internal/cli/common"
 )
 
 var (
@@ -101,6 +103,19 @@ func numField(v any) int {
 	return 0
 }
 
+// withoutGlobalEnv 临时摘掉全局 `--env`（root 的持久化开关），返回恢复函数与「原本有没有给」。
+//
+// 给 `source` 用：它读的是**本机 serve**（源码目录由 serve 连的环境决定），而全局 `--env`
+// 会把 API 基址解析带偏 —— 真机 `tt debug source --env 主机109` 报 `dial tcp :0`（D27）。
+func withoutGlobalEnv() (restore func(), had bool) {
+	old := common.Env
+	if strings.TrimSpace(old) == "" {
+		return func() {}, false
+	}
+	common.Env = ""
+	return func() { common.Env = old }, true
+}
+
 // debugSourceCmd 读服务器源码:GET /api/source-file(会话外白名单只读,支持行段)
 var debugSourceCmd = &cobra.Command{
 	Use:   "source [DVM文件]",
@@ -123,6 +138,13 @@ var debugSourceCmd = &cobra.Command{
   tt debug source bsft001_wf.4gl -m asf --from 4400 --to 4600`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// D27：本命令读的是**本机 serve**（源码目录由 serve 连的环境决定），与命令行 `--env` 无关；
+		// 而全局 `--env` 会把 API 基址解析成 `host:`（端口 0），真机报 `dial tcp :0`。
+		// 这里临时摘掉它并**说出来**（不静默地改变行为）。
+		if restore, had := withoutGlobalEnv(); had {
+			defer restore()
+			fmt.Fprintln(cmd.ErrOrStderr(), "· 本命令走本机 serve，全局 --env 对它无效（源码目录由 serve 连的环境决定）")
+		}
 		file, path := "", dbgSourcePath
 		if len(args) == 1 {
 			file = strings.TrimSpace(args[0])
