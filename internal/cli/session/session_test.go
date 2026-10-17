@@ -14,6 +14,7 @@ import (
 	"sync"
 	"testing"
 
+	"tt/internal/cli/common"
 	"tt/internal/debugclient"
 	"tt/internal/testkit"
 )
@@ -297,5 +298,97 @@ func TestSessionJob(t *testing.T) {
 	}
 	if len(f.snapshot()) != before {
 		t.Fatalf("缺 --prog 时不该发请求：%v", f.snapshot())
+	}
+}
+
+// TestSessionLsFiltersAndFormats：`--env` 过滤、`-a` 含已断开、table/csv 输出。
+//
+// 这三件事都属"参数给了却没生效"那一类 —— 人不会报错，只会觉得命令怪。
+func TestSessionLsFiltersAndFormats(t *testing.T) {
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true,"sessions":[
+			{"id":"s1","ref":"主机109#1","name":"A","env":"主机109","ent":"99","n":1,"state":"idle","prog":"p1"},
+			{"id":"s2","ref":"测试1012#1","name":"B","env":"测试1012","ent":"88","n":1,"state":"exit","prog":"p2"}]}`))
+	}))
+	defer hs.Close()
+	old := newClient
+	newClient = func() (*debugclient.Client, error) { return debugclient.New(hs.URL), nil }
+	t.Cleanup(func() { newClient = old })
+
+	resetFlags()
+	group.SetArgs([]string{"ls", "--env", "主机109"})
+	_, out := testkit.CaptureStdout(t, func() int {
+		if err := group.Execute(); err != nil {
+			t.Fatalf("ls --env 报错：%v", err)
+		}
+		return 0
+	})
+	if strings.Contains(out, "测试1012") || !strings.Contains(out, "主机109#1") {
+		t.Fatalf("--env 没生效：%s", out)
+	}
+
+	// 默认不含已断开
+	resetFlags()
+	group.SetArgs([]string{"ls"})
+	_, out = testkit.CaptureStdout(t, func() int { _ = group.Execute(); return 0 })
+	if strings.Contains(out, "测试1012#1") {
+		t.Fatalf("默认不该列出已断开的会话：%s", out)
+	}
+	// -a 含
+	resetFlags()
+	group.SetArgs([]string{"ls", "-a"})
+	_, out = testkit.CaptureStdout(t, func() int { _ = group.Execute(); return 0 })
+	if !strings.Contains(out, "测试1012#1") {
+		t.Fatalf("-a 应含已断开的会话：%s", out)
+	}
+}
+
+// TestSessionLsTableAndCsv：`--format table` 出表格、`--format csv` 出纯 CSV（不带 SQL 表头注释）。
+func TestSessionLsTableAndCsv(t *testing.T) {
+	f := &recFake{}
+	f.install(t)
+	oldFormat := common.Format
+	t.Cleanup(func() { common.Format = oldFormat })
+
+	common.Format = "table"
+	resetFlags()
+	group.SetArgs([]string{"ls"})
+	_, out := testkit.CaptureStdout(t, func() int { _ = group.Execute(); return 0 })
+	if !strings.Contains(out, "REF") || !strings.Contains(out, "主机109#1") {
+		t.Fatalf("table 形态不对：%s", out)
+	}
+
+	common.Format = "csv"
+	resetFlags()
+	group.SetArgs([]string{"ls"})
+	_, out = testkit.CaptureStdout(t, func() int { _ = group.Execute(); return 0 })
+	if strings.Contains(out, "只读事务") || strings.Contains(out, "行数") {
+		t.Fatalf("csv 不该带 SQL 表头注释：%s", out)
+	}
+	if !strings.HasPrefix(out, "REF,") {
+		t.Fatalf("csv 应以表头开头：%s", out)
+	}
+}
+
+// TestSessionArgsErrors：缺参/缺命令时都要报错，且**不发请求**。
+func TestSessionArgsErrors(t *testing.T) {
+	f := &recFake{}
+	f.install(t)
+	before := len(f.snapshot())
+
+	for _, args := range [][]string{
+		{"show"},                    // 缺 --session
+		{"quit"},                    // 缺 --session
+		{"exec", "--session", "A"},  // 缺命令
+		{"new", "--ent", "99"},      // 缺 env
+	} {
+		resetFlags()
+		group.SetArgs(args)
+		if err := group.Execute(); err == nil {
+			t.Fatalf("%v 应报错", args)
+		}
+	}
+	if len(f.snapshot()) != before {
+		t.Fatalf("参数错时不该发请求：%v", f.snapshot())
 	}
 }

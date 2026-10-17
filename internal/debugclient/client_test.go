@@ -350,3 +350,40 @@ func TestJoinBaseDoesNotDoublePrefix(t *testing.T) {
 		t.Fatalf("joinBase = %q", got)
 	}
 }
+
+// TestWaitStoppedExitIsAnError：会话断开不是"超时"，要报错（调用方据此不再等）。
+func TestWaitStoppedExitIsAnError(t *testing.T) {
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true,"state":"exit"}`))
+	}))
+	defer hs.Close()
+	if _, ok, err := New(hs.URL).WaitStopped("s1", time.Second); err == nil || ok {
+		t.Fatalf("exit 该报错：ok=%v err=%v", ok, err)
+	}
+}
+
+// TestResolveEmptyTarget：空目标直接判用法错（不去列会话）。
+func TestResolveEmptyTarget(t *testing.T) {
+	c := New("http://127.0.0.1:1")
+	var f *Failure
+	if _, err := c.Resolve("  "); !errors.As(err, &f) || f.Code != target.CodeUsage {
+		t.Fatalf("空目标该报 %s，实得 %v", target.CodeUsage, err)
+	}
+}
+
+// TestDoUnreachable：连不上服务时的错误要带地址与"先起服务"的提示。
+func TestDoUnreachable(t *testing.T) {
+	c := New("http://127.0.0.1:1")
+	_, err := c.Sessions()
+	if err == nil || !strings.Contains(err.Error(), "无法连接调试服务") {
+		t.Fatalf("连不上该有明确提示：%v", err)
+	}
+}
+
+// TestFailureErrorIncludesHint：人读错误要把 hint 带出来（命令行散文模式就靠它）。
+func TestFailureErrorIncludesHint(t *testing.T) {
+	f := &Failure{Code: target.CodeAmbiguous, Message: "有两条", Hint: "照抄 ref 重发"}
+	if got := f.Error(); !strings.Contains(got, "有两条") || !strings.Contains(got, "照抄 ref 重发") {
+		t.Fatalf("Error() = %q", got)
+	}
+}
