@@ -14,6 +14,7 @@
 | `tt session new … --record` | 一步到位：建空闲会话 + 把录制挂上去（需要 `--name` 与 `--prog`） |
 | `tt session ls [--env …] [-a]` | 列会话（`-a` 含已断开） |
 | `tt session show --session <ref|别名|句柄>` | 看一条：身份、作业、停站现场、附件（画面通道 / 正在录的那一份） |
+| `tt session job --session … --prog …` | 在**这条空闲会话**里起一个作业（换作业跑，不用重建会话） |
 | `tt session ent <值> --session …` | 改会话级企业编号（仅空闲可设；`--clear` 清除覆盖） |
 | `tt session quit --session …` | 结束本轮调试，**会话保留**（回空闲） |
 | `tt session rm --session …` | 收掉会话（断连接、清资源） |

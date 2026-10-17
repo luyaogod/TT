@@ -42,6 +42,8 @@ func (f *recFake) install(t *testing.T) {
 			_, _ = w.Write([]byte(`{"ok":true,"sessionId":"s9"}`))
 		case r.URL.Path == "/api/sessions/switch":
 			_, _ = w.Write([]byte(`{"ok":true,"sessionId":"s1","state":"idle"}`))
+		case strings.HasSuffix(r.URL.Path, "/job"):
+			_, _ = w.Write([]byte(`{"ok":true,"sessionId":"s1","session":"主机109#1"}`))
 		case strings.HasSuffix(r.URL.Path, "/screen"):
 			_, _ = w.Write([]byte(`{"ok":true,"session":"主机109#1","attached":true,"screen":{"tag":"fep-R1","kind":"rec"}}`))
 		case strings.HasSuffix(r.URL.Path, "/record"):
@@ -260,4 +262,40 @@ func TestSessionNewRecord(t *testing.T) {
 	resetFlags() // 清掉上一次的 --name，否则"缺 --name"这一条测不出来
 	group.SetArgs([]string{"new", "--env", "主机109", "--ent", "99", "--prog", "p", "--record"})
 	_ = group.Execute()
+}
+
+// TestSessionJob：`session job` 打的是 `/sessions/{id}/job`，带 prog/module/ent。
+//
+// 这条命令补的是"会话已经在了，只在它里面换作业跑"——与 `new --prog` 的分工见命令帮助。
+func TestSessionJob(t *testing.T) {
+	f := &recFake{}
+	f.install(t)
+
+	out := runCmd(t, "job", "--session", "A", "--prog", "bsft001_wf", "-m", "asf", "--ent", "99")
+	if !strings.Contains(out, `"ok": true`) || !strings.Contains(out, "bsft001_wf") {
+		t.Fatalf("输出不对：%s", out)
+	}
+	var hit map[string]any
+	for i, c := range f.snapshot() {
+		if strings.HasSuffix(c, "/job") {
+			hit = f.bodies()[i]
+		}
+	}
+	if hit == nil {
+		t.Fatalf("没有打到 /job：%v", f.snapshot())
+	}
+	if hit["prog"] != "bsft001_wf" || hit["module"] != "asf" || hit["ent"] != "99" {
+		t.Fatalf("请求体不对：%+v", hit)
+	}
+
+	// 缺 --prog：一个请求都不该发
+	before := len(f.snapshot())
+	resetFlags()
+	group.SetArgs([]string{"job", "--session", "A"})
+	if err := group.Execute(); err == nil {
+		t.Fatal("缺 --prog 应报错")
+	}
+	if len(f.snapshot()) != before {
+		t.Fatalf("缺 --prog 时不该发请求：%v", f.snapshot())
+	}
 }
