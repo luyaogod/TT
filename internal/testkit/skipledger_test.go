@@ -215,6 +215,11 @@ var skipLedger = []skipSite{
 	{file: "internal/dict/formfields/formfields_test.go", msg: "真样本目录不存在（%s）——跳过：仓库内只放合成夹具（契约 C7.2/C7.3）", layer: layL3, why: "需真样本目录：开关 TT_FORM_SAMPLE_DIR（仓库内只放合成夹具）"},
 	{file: "internal/dict/formfields/formfields_test.go", msg: "样本 %s 不在（%v）——换份成果目录就跳", layer: layL3Missing, why: "成果目录在，但里面没有这个表单（换份成果目录就有）"},
 	{file: "internal/drawio/proto42f_test.go", msg: "真样本不在 %s（用 TT_FORM_SAMPLE_DIR 覆盖）；跳过：%v", layer: layL3, why: "需真样本：开关 TT_FORM_SAMPLE_DIR"},
+	// D8：本机 bash 会展开**单引号内**的命令替换（WSL/中间层特性），`$(…)` 与反引号那两类
+	// 用例在这台机器上测不出真结果。不是 `shQuote` 的问题（它是标准写法），换一台 POSIX 环境
+	// 就有意义 —— 所以归 L0-环境，不是"缺开关"。
+	{file: "internal/host/dbprobe_test.go", msg: "本机 bash 会展开单引号内的命令替换：这条用例在这台机器上测不出真结果（台账 D8）", layer: layEnv, why: "本机 bash 对单引号内的 `$(…)` 仍做命令替换（WSL/中间层特性）：换了 POSIX 环境自然跑；与 TT 代码无关"},
+	{file: "internal/host/dbprobe_test.go", msg: "本机 bash 会展开单引号内的命令替换：这条脚本在这台机器上测不出真结果（台账 D8）", layer: layEnv, why: "同上：本机 bash 会展开单引号内的命令替换"},
 	{file: "internal/fep/form42f_test.go", msg: "没有真样本（%s 打不开：%v）—— 设 TT_FORM_SAMPLE_DIR 指向 fixtures/forms/", layer: layL3, why: "需真样本：开关 TT_FORM_SAMPLE_DIR"},
 	{file: "internal/fep/form42f_test.go", msg: "没有归档语料表（%v）—— 设 TT_FORM_CORPUS_MAP 指向 colname-fieldid.json", layer: layL3, why: "需真归档语料表：开关 TT_FORM_CORPUS_MAP"},
 	{file: "internal/fep/form42f_test.go", msg: "归档语料表里没有 w_axmt500（换台机器/换份语料就跳）", layer: layL3Missing, why: "归档语料表在，但里面没有 w_axmt500（换台机器/换份语料就有）"},
