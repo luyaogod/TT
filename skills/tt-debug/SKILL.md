@@ -145,18 +145,18 @@ tt debug exec "continue" --timeout 15 # ❌ 超时会发 SIGINT
 ### 录制轮(一条命令,走我们自己的调试线)
 
 ```bash
-tt fep rec start --env <环境> --prog <作业> --ent <ENT>
+tt recording start --env <环境> --prog <作业> --ent <ENT>
 #   ↑ 它自己做完四件事：起隔离 GDC + 代理 → tt debug start（画面接到代理）→ 自动 continue 放行
 #     → 前台常驻。用户面前**只有作业窗口**，不需要会 debug。
 # —— 让用户在那个窗口里把问题复现出来 ——
 tt fep session close                           # 收工：落身份 + 自动搬进长期库
-tt fep rec list                                # 拿到这一轮的「录制 ID」(形如 fep-20261015-182342)
-tt fep rec show <录制 ID>                       # 身份 + 指纹 + 现在能不能用
+tt recording ls                                # 拿到这一轮的「录制 ID」(形如 fep-20261015-182342)
+tt recording show <录制 ID>                       # 身份 + 指纹 + 现在能不能用
 ```
 
 收工时录制件与身份一起搬进**长期库**：`<数据目录>/records/<环境>/<ENT>/<录制 ID>/`。
 两类录制的寿命不一样：**用户主动录的**（这条命令、面板点录制）长期留着 —— 要清就手动
-`tt fep rec rm <ID> --yes`（或那个环境被删掉时级联清；先 `--dry-run` 看要删什么）；**系统自动录的**（调试会话顺手录的上下文）
+`tt recording rm <ID> --yes`（或那个环境被删掉时级联清；先 `--dry-run` 看要删什么）；**系统自动录的**（调试会话顺手录的上下文）
 留在缓存目录，走统一清理框架（`tt serve` 启动清 7 天以上、`tt cache clear` 全清）。
 身份里记着启动路径（`debug`）、作业、环境/区域/ENT、编译件标识与指纹。
 `<录制 ID>` 就是给别人(或给下一轮的自己)的那个号 —— 复制它,不必再传文件路径。
@@ -164,8 +164,8 @@ tt fep rec show <录制 ID>                       # 身份 + 指纹 + 现在能�
 ### 看一份录制里到底发生了什么
 
 ```bash
-tt fep rec index <录制 ID>          # 建/重建帧索引：帧级时刻 + 字节偏移（已有完整的会跳过）
-tt fep rec index --all              # 库里所有老录制一起补
+tt recording index <录制 ID>          # 建/重建帧索引：帧级时刻 + 字节偏移（已有完整的会跳过）
+tt recording index --all              # 库里所有老录制一起补
 ```
 
 索引是**派生**的（`<raw>.frames.jsonl`，与录制件同住）：录制时由代理顺手落，
@@ -195,7 +195,7 @@ Get-Content "$env:APPDATA\tt\fep\<录制 ID>-replay-*.jsonl" -Tail 1
 
 | 起法 | 录到什么 | 用途 |
 |---|---|---|
-| `tt fep rec start --env <环境> --prog <作业> --ent <ENT>` | 作业界面（`fglrun -d` 起的，画面只有作业） | **要打断点的录制**：用户只管复现，放行是自动的 |
+| `tt recording start --env <环境> --prog <作业> --ent <ENT>` | 作业界面（`fglrun -d` 起的，画面只有作业） | **要打断点的录制**：用户只管复现，放行是自动的 |
 | `tt fep session open --env <环境> --prog <作业> --ent <ENT>` | 作业界面（`r.r` 启动器） | 标准运行录制（**不可调试**：azzp000 不带 `-d`） |
 | 上面第二条 + `tt debug start … --fglserver <本机IP>:1200` | 作业界面（调试线） | 自己下断点、边调边录 |
 
@@ -207,7 +207,7 @@ Get-Content "$env:APPDATA\tt\fep\<录制 ID>-replay-*.jsonl" -Tail 1
 ### 复现轮(一条命令:起会话 + 下断点 + 重放 + 等停站)
 
 ```bash
-tt fep rec reproduce <录制 ID> --break <文件>:<行>      # 例: --break asf_bsft001_wf.4gl:13640
+tt recording replay <录制 ID> --break <文件>:<行>      # 例: --break asf_bsft001_wf.4gl:13640
 #   它读录制身份（环境/作业/ENT 不必手输）→ 起调试线会话 → 放行前下断点 → 过指纹闸
 #   → 重放 → 等停站，报出「指纹比对结果 + file:line」
 #   停站后不收拾会话：接着 tt debug exec 取证，收工 tt debug quit ; tt fep session close
@@ -221,11 +221,11 @@ tt fep rec reproduce <录制 ID> --break <文件>:<行>      # 例: --break asf_
 ### 手工分步(要自己控制节奏时)
 
 ```bash
-tt fep rec start --env <环境> --prog <作业> --ent <ENT> --no-continue   # 先别放行
+tt recording start --env <环境> --prog <作业> --ent <ENT> --no-continue   # 先别放行
 tt debug exec "break <文件>:<行>"              # 例: break asf_bsft001_wf.4gl:13640
 tt debug exec "info breakpoints"               # fgldb 会把非可执行行下移到下一条,以它回报的行为准
 tt debug exec "continue" --wait 20
-tt fep rec replay --id <录制 ID>                # 先过指纹闸,再发计划里的每一条
+tt recording replay <录制 ID>                # 先过指纹闸,再发计划里的每一条
 tt debug wait --for stopped --timeout 300      # 等断点命中;到点返回 timedOut,不是错误
 tt debug exec "where" "print <变量>"            # 已经停在断点上,开始取证
 ```
@@ -245,9 +245,9 @@ tt debug exec "where" "print <变量>"            # 已经停在断点上,开始
   `r.d` 会话的 `#1` 是 fgldeb 调试器界面、`#2` 才是作业界面)——所以"作业只有一条真连接"的
   `r.r`/调试线会话上,这一栏就是一个百分比。
 - **想先看清要发什么就 `--dry-run`**(离线,不需要会话):
-  `tt fep rec replay --id <录制 ID> --dry-run`。
+  `tt recording replay <录制 ID> --dry-run`。
 - **录制件默认在长期库里**,`<数据目录>/records/<环境>/<ENT>/<录制 ID>/`。
-  当时用了 `--no-keep`、或从别处拿来的一份,用 `tt fep rec keep <录制 ID>` 补搬(要有身份文件)。
+  当时用了 `--no-keep`、或从别处拿来的一份,用 `tt recording keep <录制 ID>` 补搬(要有身份文件)。
 
 界面里同一个字段常有多个同角色候选(实测同一会话里 `IC下单单号` 既是 `#192` 又是 `#250`),
 所以 `rec steps` 报出来的名字要连着作用域一起读。

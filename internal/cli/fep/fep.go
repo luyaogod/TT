@@ -71,7 +71,10 @@ func init() {
 		return fail(exitUsage, "%v", err)
 	})
 
-	Group.AddCommand(sessionCmd, uiCmd, recCmd, doCmd, waitCmd, srcCmd, jobCmd, feCmd)
+	// 录制那一组**不再挂在 tt fep 下**：新命令面是 `tt recording …`（见 internal/cli/recording）。
+	// 命令对象保留（RecordingCommands() 会给新入口镜像同一份实现），只是不再从这个组暴露 ——
+	// 两个入口并存会让"到底该用哪个"永远悬着，而它们本来就是同一份实现。
+	Group.AddCommand(sessionCmd, uiCmd, doCmd, waitCmd, srcCmd, jobCmd, feCmd)
 	sessionCmd.AddCommand(sessionPsCmd, sessionCloseCmd)
 	// 多条登记之后 `close` 必须能点名（不点名且有多条 = 歧义，见 session.go）。
 	sessionCloseCmd.Flags().StringVar(&sessionCloseTag, "tag", "", "要收掉的那一份登记的录制 ID（多条登记时必须点名；tt fep session ps 可查）")

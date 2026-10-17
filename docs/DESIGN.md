@@ -131,7 +131,7 @@ TT/
 就是录制件。作业怎么起由 T100 的脚本决定（`r.r` 的 `azzp000`、`r.d` 的 `gendbg`/`fgldeb`，
 或调试线的 `fglrun -d`）；三条路径在运行期分配的对象 id 互不相同，见 [../internal/fep/README.md](../internal/fep/README.md)。
 一份录制除了字节还有身份（同目录的 `<录制 ID>.meta.json`：启动路径、环境/区域/ENT、
-编译件标识与指纹）—— 回放之前拿它跟当前会话比对，`tt fep rec show <ID>` 读的就是它。
+编译件标识与指纹）—— 回放之前拿它跟当前会话比对，`tt recording show <ID>` 读的就是它。
 
 ## 安装与更新
 
