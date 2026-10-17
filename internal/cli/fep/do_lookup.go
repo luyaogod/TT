@@ -627,12 +627,6 @@ func checkCellCandidates(m *fep.Model, grid, row int) []int {
 	return out
 }
 
-func valueOf(m *fep.Model, id int) string {
-	if o, ok := m.Get(id); ok {
-		return o.Attr("value")
-	}
-	return ""
-}
 
 // runtimeBytes 给"这次写有没有被运行期确认"一个可比较的量：
 // 取所有活连接里累计接收字节的最大值（单调增），变了就说明运行期确实回了东西。
