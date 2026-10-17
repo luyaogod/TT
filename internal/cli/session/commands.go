@@ -26,6 +26,7 @@ var (
 	nsEnv, nsEnt, nsName, nsProg, nsModule string
 	nsTimeout                              int
 	nsRecord                               bool // --record：建完会话顺手把录制挂上去
+	nsFGLServer                            string // --fglserver：本轮画面接线（会话 job 用）
 	// 定位
 	lsSession, lsEnv string
 	lsAll            bool
@@ -283,7 +284,7 @@ ENT 必填：企业编号决定用哪个账号连库与据点校验，不再沿�
 			if rerr != nil {
 				return rerr
 			}
-			id, jerr := cl.StartJob(b.ID, prog, nsModule, nsEnt)
+			id, jerr := cl.StartJob(b.ID, prog, nsModule, nsEnt, nsFGLServer)
 			if jerr != nil {
 				return jerr
 			}
@@ -347,6 +348,7 @@ ENT 必填：企业编号决定用哪个账号连库与据点校验，不再沿�
 	jobCmd.Flags().StringVar(&nsProg, "prog", "", "作业程序名（必填）")
 	jobCmd.Flags().StringVarP(&nsModule, "module", "m", "", "T100 模块目录名（留空用 asf）")
 	jobCmd.Flags().StringVar(&nsEnt, "ent", "", "企业编号（留空用会话自己的）")
+	jobCmd.Flags().StringVar(&nsFGLServer, "fglserver", "", "本轮画面接线（<ip>:<port>；留空按登录 shell 的 FGLSERVER 走）")
 	execCmd.Flags().StringVar(&lsSession, "session", "", "目标会话（ref / 别名 / 句柄）")
 
 	group.AddCommand(newCmd, jobCmd, lsCmd, showCmd, entCmd, quitCmd, rmCmd, execCmd)
