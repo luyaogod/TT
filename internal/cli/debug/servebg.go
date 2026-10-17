@@ -34,6 +34,7 @@ import (
 	"tt/internal/cli/common"
 	"tt/internal/config"
 	"tt/internal/debug"
+	"tt/internal/fep"
 )
 
 const (
@@ -329,6 +330,10 @@ func debugServeForeground(cfg *debug.Config, cfgPath string) error {
 	requested := cfg.Listen
 	cfg.DataDir = filepath.Dir(cfgPath)
 	srv := debug.NewServer(cfg, common.WebFrontend(), cfgPath)
+	// 与统一服务同一条接线：把"按会话地址查画面通道"接进去（只递一张表，不 import 循环）。
+	if dir := config.LocationsAt(cfgPath).DataDir(); dir != "" {
+		srv.SetScreenLookup(fep.ScreenLookup(dir))
+	}
 	return RunForeground(cfgPath, ServeSpec{
 		Prefix:   "[tt debug]",
 		StopHint: "tt debug serve --stop",

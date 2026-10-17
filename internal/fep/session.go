@@ -372,3 +372,42 @@ func CheckElevation(gdcPID int) (Elevation, error) {
 	}
 	return e, nil
 }
+
+// ScreenLookup 返回一个"按会话地址查画面通道"的查询函数。
+//
+// 为什么做成函数而不是让调试服务 import 本包：那会把"fep 的认识"塞进调试线，
+// 而调试线不该知道 GDC/代理/录制这些词。这里只交出**一张表**（key → 值），
+// 由调用方（接线层）决定给谁看。
+//
+// 匹配用 `Ref`（P3 起两条线认同一个地址）。没有 `ref` 的老登记不参与匹配 ——
+// 宁可不显示，也不能把"别人的画面"挂到这条会话上。
+func ScreenLookup(dataDir string) func(ref string) (map[string]any, bool) {
+	return func(ref string) (map[string]any, bool) {
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			return nil, false
+		}
+		list, err := NewRegistry(dataDir).List()
+		if err != nil {
+			return nil, false
+		}
+		for _, s := range list {
+			if s == nil || s.Ref != ref {
+				continue
+			}
+			return map[string]any{
+				"tag":        s.Tag,
+				"kind":       string(s.Kind),
+				"env":        s.Env,
+				"prog":       s.Prog,
+				"gdcPid":     s.GDCPID,
+				"proxyPort":  s.ProxyPort,
+				"injectPort": s.InjectPort,
+				"recordDir":  s.RecordDir,
+				"stale":      s.Stale(),
+				"started":    s.Started,
+			}, true
+		}
+		return nil, false
+	}
+}

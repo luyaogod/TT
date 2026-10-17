@@ -42,6 +42,10 @@ type Server struct {
 	// 只有 _test.go 会替换它。
 	dial func(host.SSHConfig) (*host.SSHConn, error)
 
+	// screenLookup 是"按会话地址查画面通道"的查询函数（见 SetScreenLookup）。
+	// nil = 没接入：`/screen`、`/record` 如实回答"现在没有画面"，不编造。
+	screenLookup func(ref string) (map[string]any, bool)
+
 	// mu 同时保护两类运行态:
 	//   stop —— Serve 期间指向该次运行的 cancel(POST /api/shutdown 用,优雅停止);
 	//   *cfg 的替换 —— 配置热替换必须整个换掉,不能让别人看到半个新配置。
@@ -208,6 +212,9 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/sessions/{id}/quit", s.hQuit)
 	mux.HandleFunc("POST /api/sessions/{id}/mode", s.hMode)
 	mux.HandleFunc("POST /api/sessions/switch", s.hSessionSwitch)
+	// 画面通道 / 录制的只读视图（画面通道由外部进程持有，服务只提供查询口）
+	mux.HandleFunc("GET /api/sessions/{id}/screen", s.hSessionScreen)
+	mux.HandleFunc("GET /api/sessions/{id}/record", s.hSessionRecord)
 	mux.HandleFunc("GET /api/sessions/{id}/breakpoints", s.hBPList)
 	mux.HandleFunc("POST /api/sessions/{id}/breakpoints", s.hBPAdd)
 	mux.HandleFunc("DELETE /api/sessions/{id}/breakpoints/{num}", s.hBPDel)
@@ -2444,4 +2451,68 @@ func (s *Server) hStatic(w http.ResponseWriter, r *http.Request) {
 type readSeeker interface {
 	Read(p []byte) (int, error)
 	Seek(offset int64, whence int) (int64, error)
+}
+
+// ---------- 画面通道 / 录制（只读视图）----------
+//
+// 画面通道（GDC + 录制代理）目前由 `tt recording start` 那个进程持有，调试服务并不生它。
+// 但 UI 与 CLI 要回答"这条会话现在挂着哪块画面、录的是哪一份" —— 所以这里接一个**查询函数**
+// （见 SetScreenLookup），由接线层把 fep 的登记表递进来。
+//
+// 为什么不直接 import fep：调试线不该认识 GDC/代理/录制这些词；而且那会形成
+// debug ↔ fep 的循环依赖。只收一个 `map[string]any`，谁提供都行（测试里就是一张假表）。
+
+// SetScreenLookup 注入"按会话地址查画面通道"的查询（nil = 未接入）。
+func (s *Server) SetScreenLookup(fn func(ref string) (map[string]any, bool)) {
+	s.screenLookup = fn
+}
+
+// hSessionScreen 返回这条会话挂着的画面通道（`GET /api/sessions/{id}/screen`）。
+//
+// 未接入 / 没挂着都返回 200 + `attached:false`：这不是错误，是"现在没有画面"。
+// 用 404 会让调用方分不清"会话不存在"和"会话没有画面"。
+func (s *Server) hSessionScreen(w http.ResponseWriter, r *http.Request) {
+	sess := s.sessOf(w, r)
+	if sess == nil {
+		return
+	}
+	info, ok := s.lookupScreen(refOf(sess.EnvName(), sess.Seq()))
+	if !ok {
+		writeJSON(w, 200, map[string]any{
+			"ok": true, "session": refOf(sess.EnvName(), sess.Seq()), "attached": false,
+			"note": "这条会话当前没有画面通道（起录制/回放时会挂上一块）",
+		})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "session": refOf(sess.EnvName(), sess.Seq()), "attached": true, "screen": info})
+}
+
+// hSessionRecord 返回这条会话正在录/回放的那一份（`GET /api/sessions/{id}/record`）。
+//
+// 与 `/screen` 同一份数据源，只是投影不同：录制面板关心 `tag`/`kind`/`stale`。
+func (s *Server) hSessionRecord(w http.ResponseWriter, r *http.Request) {
+	sess := s.sessOf(w, r)
+	if sess == nil {
+		return
+	}
+	info, ok := s.lookupScreen(refOf(sess.EnvName(), sess.Seq()))
+	if !ok {
+		writeJSON(w, 200, map[string]any{"ok": true, "session": refOf(sess.EnvName(), sess.Seq()), "recording": nil})
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"ok": true, "session": refOf(sess.EnvName(), sess.Seq()),
+		"recording": map[string]any{
+			"tag": info["tag"], "kind": info["kind"], "stale": info["stale"],
+			"env": info["env"], "prog": info["prog"], "recordDir": info["recordDir"],
+		},
+	})
+}
+
+// lookupScreen 是上面两个 handler 的共用入口（未接入时恒为 false）。
+func (s *Server) lookupScreen(ref string) (map[string]any, bool) {
+	if s.screenLookup == nil {
+		return nil, false
+	}
+	return s.screenLookup(ref)
 }

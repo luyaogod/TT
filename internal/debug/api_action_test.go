@@ -402,3 +402,47 @@ func TestSessionQuitByPost(t *testing.T) {
 		t.Fatal("quit 之后会话必须保留（收会话走 /close）")
 	}
 }
+
+// TestSessionScreenAndRecord：`/screen` 与 `/record` 是**只读视图** ——
+// 数据来自接线层递进来的查询函数；没接入时如实说"没有画面"，不编造。
+func TestSessionScreenAndRecord(t *testing.T) {
+	hs, s := actionTestDebugServer(t)
+	giveServerNamedEnv(s, "h1", "127.0.0.1", "36")
+	s.mgr.sessions["s1"] = idleOn("s1", s.cfg.CloneEnv("h1"))
+
+	// ① 没接入：200 + attached:false（不是 404 —— 那会让"会话不存在"和"没有画面"分不清）
+	resp := doReq(t, "GET", hs.URL+"/api/sessions/s1/screen", "", "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("未接入时应 200: %d %s", resp.StatusCode, respError(t, resp))
+	}
+	var out struct {
+		Attached bool `json:"attached"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	if out.Attached {
+		t.Fatal("没接入却报 attached —— 编造数据比没有更糟")
+	}
+
+	// ② 接入一块画面：两个端点都看得见
+	s.SetScreenLookup(func(ref string) (map[string]any, bool) {
+		return map[string]any{"tag": "fep-R1", "kind": "rec", "stale": false, "env": "h1", "prog": "axmt500_wf", "recordDir": "D:/rec"}, true
+	})
+	resp = doReq(t, "GET", hs.URL+"/api/sessions/s1/screen", "", "")
+	var scr struct {
+		Attached bool           `json:"attached"`
+		Screen   map[string]any `json:"screen"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&scr)
+	if !scr.Attached || scr.Screen["tag"] != "fep-R1" {
+		t.Fatalf("画面没接上：%+v", scr)
+	}
+
+	resp = doReq(t, "GET", hs.URL+"/api/sessions/s1/record", "", "")
+	var rec struct {
+		Recording map[string]any `json:"recording"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&rec)
+	if rec.Recording == nil || rec.Recording["tag"] != "fep-R1" || rec.Recording["kind"] != "rec" {
+		t.Fatalf("录制视图缺字段：%+v", rec.Recording)
+	}
+}

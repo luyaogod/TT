@@ -209,3 +209,37 @@ func TestRegistryPersistsSessionRef(t *testing.T) {
 		t.Fatalf("无 ref 的老登记该照常读：%v %+v", err, old)
 	}
 }
+
+// TestScreenLookupMatchesByRef：按会话地址（ref）找画面通道；没 ref 的老登记不参与。
+//
+// 宁可不显示，也不能把别人的画面挂到这条会话上 —— 这个查询的返回会被 UI 当成"这条会话
+// 现在挂着的画面"。
+func TestScreenLookupMatchesByRef(t *testing.T) {
+	dir := t.TempDir()
+	reg := NewRegistry(dir)
+	if err := reg.Save(&Session{Tag: "fep-a", Ref: "主机109#1", Prog: "axmt500_wf", GDCPID: 4242, ProxyPort: 7600, InjectPort: 7899}); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.Save(&Session{Tag: "fep-old", Prog: "old"}); err != nil { // 没有 ref 的老登记
+		t.Fatal(err)
+	}
+	lookup := ScreenLookup(dir)
+
+	got, ok := lookup("主机109#1")
+	if !ok {
+		t.Fatal("该按 ref 找到")
+	}
+	if got["tag"] != "fep-a" || got["proxyPort"] != 7600 {
+		t.Fatalf("查出来的东西不对：%+v", got)
+	}
+
+	if _, ok := lookup("主机109#2"); ok {
+		t.Fatal("不存在的地址不该命中")
+	}
+	if _, ok := lookup(""); ok {
+		t.Fatal("空地址不该命中（那等于'谁都算'）")
+	}
+	if _, ok := lookup(""); ok {
+		t.Fatal("没有 ref 的老登记不该被任何地址命中")
+	}
+}

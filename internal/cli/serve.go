@@ -14,6 +14,7 @@ import (
 	debugcli "tt/internal/cli/debug"
 	"tt/internal/config"
 	"tt/internal/debug"
+	"tt/internal/fep"
 	dictserver "tt/internal/dict/server"
 	"tt/internal/web"
 )
@@ -38,17 +39,17 @@ func newServeCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "serve",
-		Short: "启动本地 Web 服务（调试工作台 + 统一设置页）",
+		Short: "启动本地 Web 服务（工作站 + 统一设置页）",
 		Long: `启动统一的本地 Web 服务。
 
-一个进程提供工作台与统一设置页：
+一个进程提供工作站与统一设置页：
 
-  /debug/          前端首屏落在**统一设置页**(这个工具要先配环境才能干活),
-                   活动栏第一个图标就是设置
-  /debug/#settings 统一设置页：站点管理 / 数据字典 / DEBUG / 应用设置
+  /debug/          工作站：左边是「环境 → 会话」两级目录，右边是所选目标的面板
+  /debug/#env/<环境名>/create       环境页：创建会话 / 接口日志 / 接口调试 / FEP录像
+  /debug/#session/<会话 ID>/debug   会话页：Debug / FEP录制（顺序随会话类型）
+  /debug/#settings                  统一设置页：站点管理 / 数据字典 / DEBUG / 应用设置
                    —— 环境与数据库、查询数据源、源码镜像、字典同步、BDL 文档、
                       调试参数、明暗色，全在这里；三个工具共用同一份配置。
-  /debug/#debug    调试工作台：源码 / 断点 / 调用栈 / 变量 / 接口日志
 
 端口默认取配置里的 listen（缺省 127.0.0.1:28670），被占用时自动向后顺延。
 
@@ -115,6 +116,12 @@ func newServeCmd() *cobra.Command {
 			// 调试服务内嵌 SPA（统一前端构建产物）。统一服务只把 /debug/api/ 转给它、
 			// 页面由 internal/web 提供；这份 FS 是为了 `tt debug serve` 单独跑时也能出页面。
 			debugSrv := debug.NewServer(cfg, common.WebFrontend(), path)
+			// 画面通道由 `tt recording start` 那个进程持有；这里把"按会话地址查画面"的
+			// 查询函数接进去，UI/CLI 才能回答"这条会话现在挂着哪块画面、录的是哪一份"。
+			// 只递一张表，不让调试线 import fep（见 debug.SetScreenLookup 的注释）。
+			if dir := config.LocationsAt(path).DataDir(); dir != "" {
+				debugSrv.SetScreenLookup(fep.ScreenLookup(dir))
+			}
 			// 字典同步的目标缺省取**数据目录**（config.json 同目录）下的 erp_data.db，
 			// 与 `tt dict -d` 的缺省一致（都来自 config.Locations，统一路径管理器），
 			// 所以"服务在这里同步、命令行在这里读"天然对得上。
