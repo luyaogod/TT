@@ -236,7 +236,11 @@ var recReproduceCmd = &cobra.Command{
 				fmt.Println("  收工：tt debug quit ; tt fep session close")
 			})
 		}
-		spot, timedOut, werr := waitStopped(cmd, repTimeout)
+		waitAlias := ""
+		if started != nil {
+			waitAlias = recSessionAlias(started.Session.Tag)
+		}
+		spot, timedOut, werr := waitStopped(cmd, waitAlias, repTimeout)
 		if werr != nil {
 			return fail(exitFailed, "%v", werr)
 		}

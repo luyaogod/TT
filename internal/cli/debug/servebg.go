@@ -181,16 +181,6 @@ func configListen() string {
 	return strings.TrimSpace(root.Listen)
 }
 
-// debugAutoURL 客户端自动寻址:状态文件实际地址 > 配置 listen > 内置默认。
-func debugAutoURL() string {
-	if st, err := readServeInfo(configDir()); err == nil && st.URL != "" {
-		return st.URL
-	}
-	if u := configListen(); u != "" {
-		return "http://" + u
-	}
-	return "http://" + debug.DefaultListen
-}
 
 // logTail 返回日志文件末尾内容(后台启动失败时给出线索)。
 func logTail(logPath string, max int) string {

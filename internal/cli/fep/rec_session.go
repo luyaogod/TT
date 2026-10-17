@@ -17,6 +17,7 @@ import (
 	"tt/internal/cli/common"
 	"tt/internal/config"
 	"tt/internal/debug"
+	"tt/internal/debugclient"
 	"tt/internal/fep"
 )
 
@@ -243,13 +244,37 @@ type dbgSessionView struct {
 // 而真起一个调试服务 + 真 SSH 不在单测的范围里。
 var debugSessions = debugSessionsReal
 
-// debugSessionsReal 是生产实现:走子进程读 JSON。
+// debugSessionsReal 是生产实现：**直连调试面**（`internal/debugclient`）。
+//
+// 从前这里是 `runSelf(cmd, "--json", "debug", "status")` —— 起一个子进程读它打印的
+// 两三段 JSON。那是这套代码里最后一块跨域耦合（fep 借用 debug 的 CLI 当 API 用），
+// 代价是：每次一个进程、参数只能用 argv 表达、失败原因只能从退出码反推。
+//
+// 现在两边的调试面调用共用一份客户端（P2 / 见 `internal/debugclient`），
+// cli/debug 与 cli/fep 仍互不 import。
 func debugSessionsReal(cmd *cobra.Command) ([]dbgSessionView, error) {
-	out, err := runSelfOut(cmd, "--json", "debug", "status")
+	cl, err := debugClient()
 	if err != nil {
 		return nil, err
 	}
-	return parseDebugSessions(out)
+	list, err := cl.Sessions()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]dbgSessionView, 0, len(list))
+	for _, b := range list {
+		out = append(out, dbgSessionView{ID: b.ID, Env: b.Env, Prog: b.Prog, State: b.State, Name: b.Name})
+	}
+	return out, nil
+}
+
+// debugClient 按数据目录里的服务状态算出调试面客户端（地址 + 挂载前缀都在状态文件里）。
+func debugClient() (*debugclient.Client, error) {
+	_, dir, err := registry()
+	if err != nil {
+		return nil, err
+	}
+	return debugclient.New(debugclient.Discover(dir, "")), nil
 }
 
 // parseDebugSessions 读 `tt debug status --json` 的报文。
@@ -336,20 +361,68 @@ func (s stopSpot) String() string {
 
 // waitStopped 等调试会话停站，并把现场读出来。
 //
-// 走 `tt debug wait --for stopped --json`（子进程，输出落临时文件再读）：
-//   - 不直接讲调试服务的 HTTP 协议 —— 那个协议只该有一份实现，它在 internal/cli/debug 里；
-//   - 不用管道接输出：沙箱里管道会被拒，而临时文件哪都能用。
+// 直连调试面（`internal/debugclient`），不再起子进程、不再走临时文件转一手。
+// **必须点名**：给了 alias 就解析成那一条；没给时只在"池里唯一"的情况下落位
+// （多条 → 歧义，带候选）—— 与整套多会话规矩一致。
 //
 // 超时**不是错误**（与 `tt debug wait` 同一口径）：返回 timedOut=true，由调用方决定怎么报。
-func waitStopped(cmd *cobra.Command, timeout time.Duration) (stopSpot, bool, error) {
+func waitStopped(cmd *cobra.Command, alias string, timeout time.Duration) (stopSpot, bool, error) {
 	var spot stopSpot
-	out, err := runSelfOut(cmd, "--json", "debug", "wait", "--for", "stopped,exit", "--timeout",
-		fmt.Sprintf("%d", int(timeout.Seconds())))
+	cl, err := debugClient()
 	if err != nil {
 		return spot, false, err
 	}
-	spot, timedOut, err := parseWaitResult(out)
-	return spot, timedOut, err
+	var id string
+	if a := strings.TrimSpace(alias); a != "" {
+		b, rerr := cl.Resolve(a)
+		if rerr != nil {
+			return spot, false, rerr
+		}
+		id = b.ID
+	} else {
+		// 没点名：只在唯一时落位，多条报歧义（绝不挑一条）。
+		list, lerr := cl.Sessions()
+		if lerr != nil {
+			return spot, false, lerr
+		}
+		switch len(list) {
+		case 1:
+			id = list[0].ID
+		case 0:
+			return spot, false, fmt.Errorf("没有活动会话可等（先起一条）")
+		default:
+			return spot, false, fmt.Errorf("有 %d 条会话，等哪一条不明确：用 --session 点名", len(list))
+		}
+	}
+	snap, ok, werr := cl.WaitStopped(id, timeout)
+	if werr != nil {
+		return spot, false, werr
+	}
+	// 现场在快照的 `stop` 里（服务端保证停站时带它）；缺了就是"没等到停站"。
+	if raw, has := snap["stop"].(map[string]any); has {
+		spot = stopSpot{
+			File:   str(raw["file"]),
+			Line:   num(raw["line"]),
+			Func:   str(raw["func"]),
+			Reason: str(raw["reason"]),
+		}
+	}
+	return spot, !ok, nil
+}
+
+// str / num 把快照里的任意值取成字符串 / 整数（缺失给零值）。
+func str(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
+}
+
+func num(v any) int {
+	if f, ok := v.(float64); ok {
+		return int(f)
+	}
+	return 0
 }
 
 // parseWaitResult 读 `tt debug wait --json` 的报文。

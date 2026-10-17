@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -20,6 +19,7 @@ import (
 	"tt/internal/cli/common"
 	"tt/internal/dbconfig"
 	"tt/internal/debug"
+	"tt/internal/debugclient"
 	"tt/internal/output"
 	"tt/internal/target"
 
@@ -74,13 +74,11 @@ var (
 // /debug/api/…。前缀记在状态文件里(见 servebg.go 的 ServeInfo.APIBase),
 // 所以控制端命令不必知道对面是哪个服务。
 func dbgAPIBase() string {
-	prefix := apiBaseFromState()
 	if dbgAPIURL != "" {
-		return joinAPIBase(dbgAPIURL, prefix)
+		// 显式给了 --url：按原样用（自己带了 /api 就不补前缀，加前缀就补）。
+		return joinAPIBase(dbgAPIURL, apiBaseFromState())
 	}
-	// 自动寻址:优先取后台实例状态文件里的真实地址(端口被占用顺延过);
-	// 无实例时回退 config debug.listen / 内置默认,再给出"请先启动"提示。
-	return joinAPIBase(debugAutoURL(), prefix)
+	return debugclient.Discover(configDir(), configListen())
 }
 
 // joinAPIBase 给服务地址补上挂载前缀。URL 自己已经带了 API 路径的(如 …/debug/api)
@@ -104,54 +102,18 @@ func actorSelf() string {
 }
 
 // dbgAPI 调 serve REST;非 2xx 时解析 {"error": ...} 返回错误
+// dbgAPI 调 serve REST;非 2xx 时由客户端把失败信封翻成 `*debugclient.Failure`
+// （码 / 候选 / hint / 退出码都在那一层，见 internal/debugclient）。
+//
+// 这里**不再自己实现一遍 HTTP**：`tt fep` 也走同一个客户端，两条线一套规矩。
+// 从前各写一份的后果是"同一个失败在两条线上有不同的码与提示"。
 func dbgAPI(method, path string, body any) ([]byte, error) {
-	base := dbgAPIBase()
-	var rd io.Reader
-	if body != nil {
-		b, err := json.Marshal(body)
-		if err != nil {
-			return nil, err
-		}
-		rd = bytes.NewReader(b)
-	}
-	req, err := http.NewRequest(method, base+path, rd)
-	if err != nil {
-		return nil, err
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	// 声明自己是谁：服务端靠这个区分"谁在驱动"，模式闸门与操作时间线的归属都依赖它。
-	//
-	// 默认 ai（命令行本来是 AI 的接口），但**人从界面发起的动作**会带 TT_ACTOR=human 进来：
-	// 录制/回放那条链路是"人点按钮 → serve 起 tt 子进程 → 子进程调这里"，不认这个开关的话
-	// 纯人工模式下点「开始录制」会被自己的闸门拦下（实测 2026-10-16）。
-	req.Header.Set("X-Actor", actorSelf())
-	cli := &http.Client{Timeout: 5 * time.Minute}
-	resp, err := cli.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("无法连接调试服务(%s): %w —— 请先运行 tt serve(或 tt debug serve)", base, err)
-	}
-	defer resp.Body.Close()
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode >= 400 {
-		var e struct {
-			// Code 是服务端失败信封的稳定机器码（契约 C5.15）。Agent 靠它分支（Q15）。
-			Code string `json:"code"`
-			// Candidates 是 C5.12 的九键候选清单（只在那五种码下出现，C5.11）。
-			// 十键的声明处是 `internal/target`（C5.17–C5.19：客户端不许手抄第二份事实）。
-			Candidates []target.Candidate `json:"candidates"`
-			Error      string             `json:"error"`
-		}
-		if json.Unmarshal(data, &e) == nil && e.Error != "" {
-			return nil, dbgServerErrorOf(e.Code, e.Error, e.Candidates)
-		}
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(data))
-	}
-	return data, nil
+	return dbgClient().Do(method, path, body)
+}
+
+// dbgClient 按当前配置目录算出调试面客户端（地址与前缀来自服务状态文件）。
+func dbgClient() *debugclient.Client {
+	return debugclient.New(dbgAPIBase())
 }
 
 func dbgJSONOut(v any) error {
