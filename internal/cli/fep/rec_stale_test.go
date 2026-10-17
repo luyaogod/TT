@@ -15,7 +15,7 @@ import (
 	"tt/internal/testkit"
 )
 
-// ── A24 的命令面：`tt fep rec mark-stale <id> [--reason <文字>]` ─────────────
+// ── A24 的命令面：`tt recording mark-stale <id> [--reason <文字>]` ─────────────
 //
 // 三条判据（用户决策 D-F2 + 契约 §7 A24）：
 //

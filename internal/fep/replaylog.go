@@ -346,7 +346,7 @@ func (l *ReplayLog) Progress() ReplayProgress {
 
 // ReplayLogName 是回放日志的文件名（与录制件同一个前缀，便于按 ID 认领）。
 //
-// 落**缓存目录**而不是长期库：回放是**事件**不是录制件。要留证据就 `tt fep rec keep` 那一份
+// 落**缓存目录**而不是长期库：回放是**事件**不是录制件。要留证据就 `tt recording keep` 那一份
 // 录制 —— 别把"事件的记录"混进"证据的库"（见计划 C 的决策 ⑤）。
 func ReplayLogName(id string, at time.Time) string {
 	return fmt.Sprintf("%s-%s%s", id, at.Format("20060102-150405"), ReplayLogSuffix)

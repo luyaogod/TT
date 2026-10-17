@@ -14,7 +14,7 @@ import (
 	"tt/internal/fep"
 )
 
-// E2 接线：`tt fep replay` / `tt fep rec reproduce` 要把**这份录制自己的**界面模型
+// E2 接线：`tt fep replay` / `tt recording replay` 要把**这份录制自己的**界面模型
 // 递进 `fep.PlanReplay`，否则身份链在产品路径上等于没生效（库层做完了却摸不到）。
 //
 // 三条纪律（架构师给定的约束）都落在这一个文件里：

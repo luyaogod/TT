@@ -17,7 +17,7 @@ import (
 	"tt/internal/fep"
 )
 
-// tt fep rec —— 录制件的身份与清单。
+// 录制件的身份与清单（命令面是 `tt recording …`，见 internal/cli/recording）。
 //
 // 一条录制的**名字就是它的 ID**（代理落盘用的 tag，形如 fep-20261015-170031）。
 // 这个 ID 是给人复制流转的：前端面板录完把它显示出来，用户复制给 agent，
@@ -1096,7 +1096,7 @@ func init() {
 
 // RecordingCommands 返回录制那一组命令（供 `tt recording` 重新挂号用）。
 //
-// 为什么要暴露出来：新命令面 `tt recording` 必须与 `tt fep rec` **共用同一份实现**。
+// 为什么要暴露出来：`tt recording` 的每个动词**复用同一份实现**（镜像 RunE 与标志），不复制逻辑。
 // 复制一份 RunE 是这类迁移最常见的坑 —— 改一处忘一处，两个入口慢慢长成两种行为。
 // 这里给的是命令对象本身，`tt recording` 只镜像外观（名字/说明/标志）并复用它的 RunE。
 //

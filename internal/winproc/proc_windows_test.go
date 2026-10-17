@@ -11,7 +11,7 @@ import (
 // HideConsole：父进程没有控制台时给子进程加 CREATE_NO_WINDOW；有控制台时一个字都不动。
 //
 // 为什么值得钉住（用户实测）：点一下面板的「开始录制」会弹出一大堆终端窗口/标签页 ——
-// `tt serve` 起的那条录制链路里，`tt fep rec start` 是 DETACHED_PROCESS（没有控制台），
+// `tt serve` 起的那条录制链路里，`tt recording start` 是 DETACHED_PROCESS（没有控制台），
 // 而它内部 runSelf 起的是一串控制台程序：父进程没有控制台时 Windows 会给**每一个**
 // 子进程新分配一个控制台，于是每起一个子进程就多一个窗口。
 //

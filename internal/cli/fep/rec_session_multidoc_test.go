@@ -11,7 +11,7 @@ package fep
 //
 // 老 `parseDebugSessions` 只做**一次** json.Unmarshal ⇒
 // `invalid character '{' after top-level value` ⇒ preflight 的 session 项报
-// "列会话失败" ⇒ 服务明明起着，`tt fep rec preflight` 也 exit 2；
+// "列会话失败" ⇒ 服务明明起着，`tt recording start` 的前置体检 也 exit 2；
 // 而 `rec start` 开跑前过同一份体检 ⇒ **`rec start` 必然 exit 2**，path=debug 的件录不下来。
 //
 // 本文件只喂字符串给纯函数（不连真机、不起会话、不碰服务器）。
@@ -114,7 +114,7 @@ func TestParseDebugSessionsWithoutSessionsDoc(t *testing.T) {
 // 回归的最终现场：preflight 走**真解析**（两段报文）时，session 项必须 ok。
 //
 // 修前这里报 "列会话失败：invalid character '{' after top-level value"，于是
-// `tt fep rec preflight` exit 2 —— 服务明明起着，工具自己坏了却说环境不全。
+// `tt recording start` 的前置体检 exit 2 —— 服务明明起着，工具自己坏了却说环境不全。
 func TestPreflightSessionOKOnTwoDocStatusJSON(t *testing.T) {
 	dir := t.TempDir()
 	d, _ := readyDeps(t, dir)

@@ -15,7 +15,7 @@ import (
 
 // 录制面板的服务端：列 / 看 / 删 + "现在在录吗"。
 // "起一轮/停一轮"是**另起进程**（见 recordings.go 头注释），所以这里不测它 ——
-// 那条链在命令行上真机验过（`tt fep rec start` / `session close`），
+// 那条链在命令行上真机验过（`tt recording start` / `session close`），
 // 面板这一侧只是把它包成一个接口。
 
 func seedLibRecording(t *testing.T, dataDir, env, ent, id, prog string) string {
@@ -215,7 +215,7 @@ func TestRecordingsCurrentFollowsTheRegistry(t *testing.T) {
 // 登记要分清"还活着"与"只剩一份过期登记"。
 //
 // 为什么值得钉住：登记文件比进程活得久 —— 面板那个「回放」按钮走
-// `tt fep rec reproduce --no-wait`，发完事件就退场，留下的是**一份 ownerPid 已经不在的
+// `tt recording replay --no-wait`，发完事件就退场，留下的是**一份 ownerPid 已经不在的
 // 登记** + 一个还开着的 gdc 窗口（用户要看最后那一屏）。原来只有"在不在"一种判断，
 // 于是面板把它说成"正在录"，而起一轮新录制也会被它挡住（"已经在录了"，可谁都没在录）。
 //

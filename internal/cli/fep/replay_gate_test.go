@@ -12,7 +12,7 @@ import (
 
 // ── A23 的产品面：两条**实际发包**的入口都必须先过身份闸 ────────────────────
 //
-// 两个入口（`tt fep replay` 与 `tt fep rec reproduce`）共用一条组装路径
+// 两个入口（`tt fep replay` 与 `tt recording replay`）共用一条组装路径
 // `planReplayFor`，发包也只走一条：`Client.RunReplayIdentity`（= 身份闸 + 原来那条）。
 // 这里对着那条路断言两件事：
 //

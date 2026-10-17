@@ -1,9 +1,9 @@
 // Package recording 是 `tt recording` 命令组：**录制件是主角**的那套命令面。
 //
-// # 它和 `tt fep rec` 的关系
+// # 实现从哪来
 //
 // 同一批动作（列 / 看 / 留 / 删 / 清 / 建索引）有两个入口：
-//   - `tt fep rec …` 是旧入口，**暂留**：Web 的录制面板还在起 `tt recording start` 子进程
+//   - 实现本身住在 internal/cli/fep 的 rec_*.go（起停、体检、回放、留存、索引）；
 //     （见 internal/web/recordings.go），删掉它会把面板弄坏；
 //   - `tt recording …` 是新入口，名字更直接（录制件不属于"前端协议"那一组）。
 //

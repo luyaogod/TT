@@ -12,7 +12,7 @@ import (
 // 环境被删掉时，它的**录制库要跟着收**（用户 2026-10-15 定的策略：
 // 用户主动录的那些长期留着，但环境没了它们就是没人认领的字节）。
 // 环境可能是设置页删的（这条），也可能是手改 config.json 删的
-// （那条走 `tt fep rec prune` 兜底，见 internal/cli/fep）。
+// （那条走 `tt recording prune` 兜底，见 internal/cli/fep）。
 func TestHostsPutCascadesRecordingLibrary(t *testing.T) {
 	seed := `{"schemaVersion":3,"hosts":{"sshs":[
 	  {"name":"要删的环境","host":"10.0.0.9","port":22,"user":"u","password":"p","zone":"36","db":{"type":"oracle","host":"10.0.0.9","port":1521,"service":"t35prd","accounts":[{"account":"ds","password":"x"}]}},

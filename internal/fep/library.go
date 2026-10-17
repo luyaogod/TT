@@ -356,7 +356,7 @@ func (l *Library) RemoveEnv(env string) (files int, bytes int64, err error) {
 
 // Envs 列出库里有哪些环境（目录名，已按 EnvSegment 归一）。
 //
-// 用途是"环境配置没了、库里还留着"的兜底清理（`tt fep rec prune`）：
+// 用途是"环境配置没了、库里还留着"的兜底清理（`tt recording prune`）：
 // 拿它与配置里的环境列表对一遍，多出来的就是没人认领的那些。
 func (l *Library) Envs() ([]string, error) {
 	if l == nil || l.Root == "" {
@@ -379,7 +379,7 @@ func (l *Library) Envs() ([]string, error) {
 	return out, nil
 }
 
-// EnvSegment 是环境名在库里的那一段目录名（`tt fep rec prune` 要用它把配置里的
+// EnvSegment 是环境名在库里的那一段目录名（`tt recording prune` 要用它把配置里的
 // 环境名与库里的目录名对齐 —— 两边必须用同一个函数，否则永远对不上）。
 func EnvSegment(env string) string { return envSegment(env) }
 

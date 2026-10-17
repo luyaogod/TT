@@ -268,7 +268,7 @@ func (s *Server) hRecordingStart(w http.ResponseWriter, r *http.Request) {
 	}
 	logPath := filepath.Join(cacheDir, "rec-start-"+time.Now().Format("20060102-150405")+".log")
 	// 起的是 `tt recording start`（与命令面同一份实现，见 internal/cli/recording）。
-	// 面板从旧入口切过来，是为了让 `tt fep rec …` 这一层将来能整体删掉 —— 只留一个入口。
+	// 面板与命令行走同一个入口，不存在"面板这条、命令行那条"两套行为。
 	args := []string{"recording", "start", "--env", req.Env, "--prog", req.Prog, "--config", cfgPath}
 	if e := strings.TrimSpace(req.Ent); e != "" {
 		args = append(args, "--ent", e)

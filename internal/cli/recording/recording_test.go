@@ -1,6 +1,6 @@
 package recording
 
-// 判据：`tt recording` 必须**逐条镜像** `tt fep rec` —— 名字映射对、实现同一份、标志不丢。
+// 判据：`tt recording` 必须**逐条镜像** `fep.RecordingCommands()` —— 名字映射对、实现同一份、标志不丢。
 //
 // 这类"两个入口一份实现"的迁移最容易出的错是**漂移**：某天给 `fep rec show` 加了个标志，
 // 新入口没跟上，于是同一个动作在两个入口上行为不同。下面三条判据就是防这个。
@@ -43,7 +43,7 @@ func TestMirrorsEverySourceCommand(t *testing.T) {
 		}
 		m, ok := byName[want]
 		if !ok {
-			t.Errorf("`tt fep rec %s` 在新命令面里没有对应项（期望 `tt recording %s`）", src.Name(), want)
+			t.Errorf("源命令 %s 在新命令面里没有对应项（期望 `tt recording %s`）", src.Name(), want)
 			continue
 		}
 		if m.RunE == nil {
