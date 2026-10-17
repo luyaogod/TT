@@ -125,14 +125,19 @@ var sessionCloseCmd = &cobra.Command{
 		// 放在**这里**而不是常驻进程的收尾里：那边有 8 秒宽限，超了会被 session close 杀掉，
 		// 表现是"收尾做到一半、进程退 1"。
 		if stopped.Path == fep.PathDebug {
-			quitArgs := []string{"debug", "quit"}
-			if alias := recSessionAlias(stopped.Tag); alias != "" {
-				quitArgs = append(quitArgs, "--session", alias)
-			}
-			if qerr := runSelf(cmd, quitArgs...); qerr != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "· 调试会话没收干净（可手工 tt debug quit）：%v\n", qerr)
-			} else {
-				fmt.Fprintln(cmd.ErrOrStderr(), "· 调试会话已收（tt debug quit）")
+			// 直连调试面（不再起 `tt debug quit` 子进程）：按录制 ID 算出的别名点到**自己那条**，
+			// 找不到就说明它已经没了 —— 那不是错误，收尾本来就要幂等。
+			alias := recSessionAlias(stopped.Tag)
+			if cl, cerr := debugClient(); cerr != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "· 连不上调试面，跳过调试侧收尾：%v\n", cerr)
+			} else if alias != "" {
+				if b, rerr := cl.Resolve(alias); rerr != nil {
+					fmt.Fprintln(cmd.ErrOrStderr(), "· 调试会话已不在（无需收）")
+				} else if qerr := cl.Quit(b.ID); qerr != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "· 调试会话没收干净（可手工 tt debug quit）：%v\n", qerr)
+				} else {
+					fmt.Fprintln(cmd.ErrOrStderr(), "· 调试会话已收（结束本轮，宿主保留）")
+				}
 			}
 		}
 		return printJSONOrText(map[string]any{"stopped": stopped.Prog, "tag": stopped.Tag, "gdcPid": stopped.GDCPID, "wasAlive": alive, "registryRemoved": true}, func() {

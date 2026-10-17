@@ -1,83 +1,164 @@
 package fep
 
+// 录制启动那套动作的判据。
+//
+// # 为什么从"比对 argv"改成"比对调用序列"
+//
+// 从前这套动作是靠**起子进程** `tt debug …` 做的，于是判据只能比字符串：
+// `debug env 主机109 --name X` 里那几个词对不对。那种判据有两个毛病：
+//   - 它把"我们自己的命令行语法"钉死了 —— 改一个 flag 名，测试就红，哪怕语义没变；
+//   - 它测不到真正要命的事：**每个动作打到哪个端点、带什么参数、顺序对不对**。
+//
+// 现在动作直连调试面（`internal/debugclient`），判据就可以直接断言"调了哪些端点、什么顺序"。
+// 顺序仍然是这套东西的灵魂：少一步或顺序反了，症状全是**安静**的（界面不出来、作业跑在
+// 别的企业上、断点没下上），真机才发现代价很大。
+
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
-	"tt/internal/cli/common"
+	"tt/internal/debugclient"
 )
 
-// 起录那几步的顺序与开关。第一步是**先收口当前这一轮**（见下），它是 optional：
-// 手上没有会话时 `debug quit` 会报"没有活动会话"，那不是错。
-func TestRecStartStepsOrderAndFlags(t *testing.T) {
-	steps := recStartSteps("主机109", "99", "bsft001_wf", "asf", "192.168.14.193:1200", "")
-	if len(steps) != 4 {
-		t.Fatalf("该是 收口 → 环境 → 企业 → 起作业 四步，got %d: %v", len(steps), steps)
-	}
-	if got := strings.Join(steps[0].args, " "); got != "debug quit" {
-		t.Fatalf("第一步必须先把上一轮收口（否则第二步的 TOPENT 会被拒：只有空闲会话才让设）：%q", got)
-	}
-	if !steps[0].optional {
-		t.Fatal("收口那一步必须是 optional：没有会话时 quit 报错是正常结果，不该让整轮录制失败")
-	}
-	if got := strings.Join(steps[1].args, " "); got != "debug env 主机109" {
-		t.Fatalf("第二步把环境点明白：%q", got)
-	}
-	if got := strings.Join(steps[2].args, " "); got != "debug topent 99" {
-		t.Fatalf("第三步是企业编号：%q", got)
-	}
-	start := strings.Join(steps[3].args, " ")
-	for _, want := range []string{"debug start bsft001_wf", "--env 主机109", "--fglserver 192.168.14.193:1200", "-m asf"} {
-		if !strings.Contains(start, want) {
-			t.Fatalf("起作业那一步缺 %q：%q", want, start)
+// recFake 是一个最小的调试面假服务：记录每次调用，并按端点回固定应答。
+type recFake struct {
+	mu    sync.Mutex
+	calls []string // "METHOD /path"
+
+	// 预置：会话列表（供 Resolve 收口用）
+	sessions []map[string]any
+}
+
+func (f *recFake) record(method, path string) {
+	f.mu.Lock()
+	f.calls = append(f.calls, method+" "+path)
+	f.mu.Unlock()
+}
+
+func (f *recFake) snapshot() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, len(f.calls))
+	copy(out, f.calls)
+	return out
+}
+
+func (f *recFake) server(t *testing.T) *debugclient.Client {
+	t.Helper()
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.record(r.Method, r.URL.Path)
+		switch {
+		case r.URL.Path == "/sessions" && r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "sessions": f.sessions})
+		case r.URL.Path == "/sessions" && r.Method == http.MethodPost:
+			_, _ = w.Write([]byte(`{"ok":true,"sessionId":"s-job"}`))
+		case r.URL.Path == "/sessions/switch":
+			_, _ = w.Write([]byte(`{"ok":true,"sessionId":"s-host","state":"idle"}`))
+		case strings.HasPrefix(r.URL.Path, "/sessions/s-host") && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`{"ok":true,"state":"stopped","stop":{"file":"a.4gl","line":812}}`))
+		case strings.HasPrefix(r.URL.Path, "/sessions/s-job") && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`{"ok":true,"state":"stopped"}`))
+		case strings.HasSuffix(r.URL.Path, "/raw"):
+			_, _ = w.Write([]byte(`{"ok":true,"lines":[]}`))
+		default:
+			_, _ = w.Write([]byte(`{"ok":true}`))
 		}
+	}))
+	t.Cleanup(hs.Close)
+	return debugclient.New(hs.URL)
+}
+
+func quietLog(string, ...any) {}
+
+// TestRecRunPlanOrder：六个动作必须按这个顺序打到这些端点。
+func TestRecRunPlanOrder(t *testing.T) {
+	f := &recFake{}
+	cl := f.server(t)
+
+	err := runRecPlan(cl, recRunPlan{
+		Alias: "fep-R1", Env: "主机109", Ent: "99",
+		Prog: "bsft001_wf", Module: "asf", FGL: "10.0.0.1:1200",
+		Breaks: []string{"812"},
+	}, quietLog)
+	if err != nil {
+		t.Fatalf("runRecPlan: %v", err)
 	}
-	// 画面接线必须落在起作业这一步里（它才是"这一轮画面去哪"的开关）
-	if !strings.HasSuffix(start, "-m asf") {
-		t.Fatalf("模块要接在最后（-m 后面还有别的参数容易被当成它的值）：%q", start)
+
+	got := f.snapshot()
+	want := []string{
+		"GET /sessions",              // ① 收口前先找自己那条（没有就跳过）
+		"POST /sessions/switch",      // ② 点名环境并命名
+		"POST /sessions/s-host/topent", // ③ 定 ENT
+		"POST /sessions",             // ④ 起作业
+		"GET /sessions/s-job",        // ⑤ 等入口停站
+		"POST /sessions/s-job/raw",   // ⑥ 下断点
+		"POST /sessions/s-job/control", // ⑦ 放行
 	}
-	// 没给别名时**一个字都不许多**（H2：既有调用方的子进程参数逐字不变）
-	if strings.Contains(start, "--name") {
-		t.Fatalf("没给别名时不许拼 --name：%q", start)
+	if len(got) != len(want) {
+		t.Fatalf("调了 %d 次，要 %d 次：\n实得 %v", len(got), len(want), got)
 	}
-	// 放行**不在**这里：它是 runRecStartSteps 的最后一步，--no-continue 时整步不跑
-	for _, st := range steps {
-		if strings.Contains(strings.Join(st.args, " "), "continue") {
-			t.Fatalf("放行不该混在起作业那几步里（那样 --no-continue 就没法拦住它）：%v", st.args)
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("第 %d 次是 %q，要 %q（顺序是这套动作的灵魂）\n全部：%v", i, got[i], want[i], got)
 		}
 	}
 }
 
-// T5.4（契约 C7.3）：`fep` 跨进程传目标 = 把**固定别名**拼进起作业那一步的 `--name`。
-//
-// 修前这里没有别名这一路（`recStartSteps` 连参数都没有），所以这一条在修前**编译不过**
-// —— 那就是"修前红"：子进程根本收不到"该落到哪条会话"。
-func TestRecStartStepsCarryAlias(t *testing.T) {
-	steps := recStartSteps("主机109", "99", "bsft001_wf", "asf", "10.0.0.1:1200", "fep-fep-20261016-120000")
-	start := steps[len(steps)-1].args
-	joined := strings.Join(start, " ")
-	if !strings.Contains(joined, "--name fep-fep-20261016-120000") {
-		t.Fatalf("起作业那一步必须带上跨进程传目标用的固定别名：%q", joined)
+// TestRecRunPlanQuitsItsOwnSessionFirst：上一轮自己那条还在 → 先收掉它再往下走。
+func TestRecRunPlanQuitsItsOwnSessionFirst(t *testing.T) {
+	f := &recFake{sessions: []map[string]any{{"id": "s-old", "ref": "主机109#1", "name": "fep-R1", "state": "stopped"}}}
+	cl := f.server(t)
+
+	if err := runRecPlan(cl, recRunPlan{Alias: "fep-R1", Env: "主机109", Ent: "99", Prog: "p", FGL: "1:2"}, quietLog); err != nil {
+		t.Fatalf("runRecPlan: %v", err)
 	}
-	// **每一步都要点到"自己那条"会话**（P1 改正的那一处）。
-	// 从前只有起作业那一步带 `--name`，其余几步裸奔：多会话下 `debug env` / `topent` / `exec`
-	// 要么撞 `SESSION_AMBIGUOUS`，要么落到**别人**那条会话上（改它的 ENT、把断点下错地方）。
-	// 现在的规矩：创建类那一步用 `--name`（创建即命名），其余步骤用 `--session <同一个别名>`。
-	const alias = "fep-fep-20261016-120000"
-	for i, st := range steps {
-		line := strings.Join(st.args, " ")
-		if !strings.Contains(line, "--name "+alias) && !strings.Contains(line, "--session "+alias) {
-			t.Fatalf("第 %d 步没有点名自己那条会话（多会话下会落到别人身上）：%v", i, st.args)
+	got := f.snapshot()
+	if len(got) < 2 || got[0] != "GET /sessions" || got[1] != "DELETE /sessions/s-old" {
+		t.Fatalf("应先把上一轮那条收掉，实得 %v", got)
+	}
+}
+
+// TestRecRunPlanSkipsTopentWithoutEnt：没给 ENT 就不该打 topent。
+//
+// （ENT 现在在起作业那一步是必填；这里测的是"计划里没 ENT 时不多打一次空请求"。）
+func TestRecRunPlanSkipsTopentWithoutEnt(t *testing.T) {
+	f := &recFake{}
+	cl := f.server(t)
+
+	if err := runRecPlan(cl, recRunPlan{Alias: "fep-R1", Env: "主机109", Prog: "p", FGL: "1:2"}, quietLog); err != nil {
+		t.Fatalf("runRecPlan: %v", err)
+	}
+	for _, c := range f.snapshot() {
+		if strings.Contains(c, "/topent") {
+			t.Fatalf("没 ENT 时不该打 topent：%v", f.snapshot())
 		}
 	}
-	// **WP6**：别名给了，收口那一步也要点名（`--session <同一个别名>`）。
-	// 不带目标的 `debug quit` 在多会话下会被服务端按 F1 报 409 并列候选 —— 那一步是
-	// optional，于是"跳过"看起来正常，而后果是 TOPENT 设不上去、整轮录制白起一个代理。
-	if got := strings.Join(steps[0].args, " "); got != "debug quit --session fep-fep-20261016-120000" {
-		t.Fatalf("给了别名时收口那一步必须点名收自己那条：%q", got)
+}
+
+// TestRecRunPlanNoContinueSkipsRelease：--no-continue 时不放行（断点下完就停在那儿）。
+func TestRecRunPlanNoContinueSkipsRelease(t *testing.T) {
+	f := &recFake{}
+	cl := f.server(t)
+
+	if err := runRecPlan(cl, recRunPlan{
+		Alias: "fep-R1", Env: "主机109", Ent: "99", Prog: "p", FGL: "1:2",
+		Breaks: []string{"812"}, NoContinue: true,
+	}, quietLog); err != nil {
+		t.Fatalf("runRecPlan: %v", err)
 	}
-	// 同一个录制身份算出的别名必须**同一个**（否则"重发同一条命令"会另起一条会话，
-	// Q23 的幂等键就失效了）
+	for _, c := range f.snapshot() {
+		if strings.Contains(c, "/control") {
+			t.Fatalf("--no-continue 时不该放行：%v", f.snapshot())
+		}
+	}
+}
+
+// TestRecSessionAliasIsStable：别名由录制身份算出，同一个 ID 永远同一个名字。
+func TestRecSessionAliasIsStable(t *testing.T) {
 	if recSessionAlias("fep-20261016-120000") != recSessionAlias("fep-20261016-120000") {
 		t.Fatal("同一个录制 ID 必须算出同一个别名（别名是幂等键，Q23）")
 	}
@@ -87,40 +168,4 @@ func TestRecStartStepsCarryAlias(t *testing.T) {
 	if a := recSessionAlias("fep-20261016-120000"); strings.ContainsAny(a, `/#`) {
 		t.Fatalf("别名不许含 / 与 #（契约 C2.5 / Q17）：%q", a)
 	}
-}
-
-// 没给 ENT 时不许下发 TOPENT：那是"沿用登录 shell 自己的"，下发个空值会把作业挪走。
-func TestRecStartStepsSkipTopentWithoutEnt(t *testing.T) {
-	steps := recStartSteps("主机109", "", "bsft001_wf", "", "10.0.0.1:1200", "")
-	if len(steps) != 3 {
-		t.Fatalf("没给 ENT 就是 收口 → 环境 → 起作业 三步：%v", steps)
-	}
-	for _, st := range steps {
-		if strings.Contains(strings.Join(st.args, " "), "topent") {
-			t.Fatalf("没给 ENT 不许出现 topent：%v", st.args)
-		}
-	}
-	// 模块为空时不传 -m（让调试线用它自己的默认值），但 --fglserver 必须在
-	start := strings.Join(steps[2].args, " ")
-	if strings.Contains(start, "-m") {
-		t.Fatalf("模块为空时不该补一个空 -m：%q", start)
-	}
-	if !strings.Contains(start, "--fglserver 10.0.0.1:1200") {
-		t.Fatalf("起作业必须带这一轮的画面接线：%q", start)
-	}
-}
-
-// selfArgs 必须把 --config 跟着传下去：调用方可能用的是非缺省配置，
-// 子进程默默换一份配置的后果是"作业起在另一个环境/另一个企业上"。
-func TestSelfArgsPropagatesConfigPath(t *testing.T) {
-	old := common.ConfigPath
-	defer func() { common.ConfigPath = old }()
-
-	common.ConfigPath = `C:\somewhere\config.json`
-	got := selfArgs([]string{"debug", "env", "主机109"})
-	want := []string{"--config", `C:\somewhere\config.json`, "debug", "env", "主机109"}
-	if strings.Join(got, " ") != strings.Join(want, " ") {
-		t.Fatalf("--config 没跟着传：%v", got)
-	}
-	common.ConfigPath = ""
 }

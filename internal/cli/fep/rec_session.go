@@ -96,8 +96,14 @@ func openDebugRecording(cmd *cobra.Command, s recSession) (*fep.Runtime, string,
 		// 传的是**这次会话自己算出来的那个固定别名**（T5.4 / C7.3），与起会话时
 		// 随 `--name` 传下去的是同一个字符串：它正是"收口对象是不是本次录制该收的那条"
 		// 的机器判据（C1.6 的幂等键），比拿一个可能已经过期的句柄去点更稳。
-		if qerr := runSelf(cmd, recQuitArgs(alias)...); qerr != nil {
-			logf("收上一轮会话时失败（继续试）：%v", qerr)
+		if cl, cerr := debugClient(); cerr == nil {
+			if b, rerr := cl.Resolve(alias); rerr == nil {
+				if qerr := cl.Quit(b.ID); qerr != nil {
+					logf("收上一轮会话时失败（继续试）：%v", qerr)
+				}
+			}
+		} else {
+			logf("连不上调试面，跳过收口：%v", cerr)
 		}
 		time.Sleep(2 * time.Second)
 	}
@@ -126,7 +132,15 @@ func openDebugRecording(cmd *cobra.Command, s recSession) (*fep.Runtime, string,
 	}
 	logf("这一轮画面接线：FGLSERVER=%s（调试线按它把作业画到本代理上）", fgl)
 
-	if serr := runRecStartSteps(cmd, recStartSteps(dcfg.EnvName(), s.Ent, s.Prog, s.Module, fgl, alias), s.Breaks, s.NoContinue, alias); serr != nil {
+	cl, cerr := debugClient()
+	if cerr != nil {
+		_ = rt.Close()
+		return nil, "", fail(exitFailed, "连不上调试面：%v", cerr)
+	}
+	if serr := runRecPlan(cl, recRunPlan{
+		Alias: alias, Env: dcfg.EnvName(), Ent: s.Ent,
+		Prog: s.Prog, Module: s.Module, FGL: fgl, Breaks: s.Breaks, NoContinue: s.NoContinue,
+	}, logf); serr != nil {
 		if cerr := rt.Close(); cerr != nil {
 			logf("收代理时还有失败：%v", cerr)
 		}
@@ -152,24 +166,6 @@ func recSessionAlias(tag string) string {
 		return ""
 	}
 	return "fep-" + tag
-}
-
-// recQuitArgs 拼"收掉自己上一轮那条会话"的子进程参数（T5.4 + WP6）。
-//
-// 为什么要单独一个函数：**必须带目标**。多会话放开之后，不带目标的 `debug quit`
-// 在多会话下会被服务端按 F1 报 409 + `SESSION_AMBIGUOUS` 并列候选，于是收口静默失败
-// （下一句 `debug topent` 也随之被拒 —— 那正是这条收口存在的理由）。
-//
-// 目标优先用**固定别名**（`--session <别名>`，contract 1. 的命令角色表 + C3.7）：
-// 它由录制 ID 算出、跨进程可复现，而且**只有自己那条会话叫这个名字**（Q23 的幂等键），
-// 天然不会打到别人的会话上（缺陷 D 的验收）。别名取不到（老调用方没给 RecID）时留空，
-// 那一条是"今天的行为"（H2）—— 多会话下它会失败，但那是旧调用方本来就有的形状。
-func recQuitArgs(alias string) []string {
-	args := []string{"debug", "quit"}
-	if a := strings.TrimSpace(alias); a != "" {
-		args = append(args, "--session", a)
-	}
-	return args
 }
 
 // staleSessionToCollect 判断"上一轮挂着的调试会话"里有没有**属于本次录制**的那一条。

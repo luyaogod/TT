@@ -2,10 +2,8 @@ package fep
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -18,8 +16,8 @@ import (
 	"tt/internal/cli/common"
 	"tt/internal/config"
 	"tt/internal/debug"
+	"tt/internal/debugclient"
 	"tt/internal/fep"
-	"tt/internal/winproc"
 )
 
 var (
@@ -153,7 +151,15 @@ var recStartCmd = &cobra.Command{
 		// alias（T5.4 / C7.3）：把这一轮的录制身份当**固定别名**传进子进程 ——
 		// 子进程之后靠它落回同一条会话（Q23：别名空闲就复用），而不是靠"有会话就收"。
 		alias := recSessionAlias(tag)
-		if serr := runRecStartSteps(cmd, recStartSteps(dcfg.EnvName(), ent, recStartProg, recStartModule, fgl, alias), nil, recStartNoCont, alias); serr != nil {
+		cl, cerr := debugClient()
+		if cerr != nil {
+			_ = rt.Close()
+			return fail(exitFailed, "连不上调试面：%v", cerr)
+		}
+		if serr := runRecPlan(cl, recRunPlan{
+			Alias: alias, Env: dcfg.EnvName(), Ent: ent,
+			Prog: recStartProg, Module: recStartModule, FGL: fgl, NoContinue: recStartNoCont,
+		}, logf); serr != nil {
 			// 半路失败：把已经起来的代理收掉（它占着 GDC/代理/注入三个端口）
 			if cerr := rt.Close(); cerr != nil {
 				logf("收代理时还有失败：%v", cerr)
@@ -192,184 +198,81 @@ var recStartCmd = &cobra.Command{
 	},
 }
 
-// recStep 一条要跑的调试线命令。
+// recRunPlan 是"把作业挂到代理上"要做的动作序列。**顺序不能换**：
 //
-// optional = 失败不算失败。用于**清理类**动作：`debug quit` 在没有会话时会报
-// "没有活动会话,先运行 tt debug start <作业>" —— 那对"先把台面收干净"这件事来说是正常结果。
-type recStep struct {
-	args     []string
-	optional bool
+//	① 收口自己上一轮（按别名找；没有就跳过）
+//	② 点名环境并命名 → 等到 idle
+//	③ 定 ENT（会话级）
+//	④ 起作业（复用 ② 建好的那条宿主）
+//	⑤ 下断点（必须在放行之前）
+//	⑥ 放行
+//
+// 为什么是"计划"而不是"命令列表"：这套动作从前是靠**起子进程** `tt debug …` 表达的，
+// 于是顺序与参数全在 CLI 层用 argv 拼；现在直连调试面（见 `internal/debugclient`），
+// 计划就是数据，执行只有一处。
+type recRunPlan struct {
+	Alias      string
+	Env        string
+	Ent        string
+	Prog       string
+	Module     string
+	FGL        string
+	Breaks     []string
+	NoContinue bool
 }
 
-// recStartSteps 是"把作业挂到代理上"要跑的调试线命令。**顺序不能换**：
-// 先收口上一轮，再点名环境（否则可能挂到上一次的环境上），再点名企业，最后起作业。
+// runRecPlan 按上面的顺序直连调试面执行。
 //
-// 拆成纯函数是为了能钉住它：少一条或顺序反了，症状都是**安静**的
-// （界面不出来、或作业跑在别的企业上），而那种错在真机上才发现代价很大。
-//
-// `alias`（T5.4 / 契约 C7.3）非空时拼进**起作业**那一步的 `--name`：
-// 它就是 `fep` 跨进程传给调试线的**目标**（固定别名 = 幂等键，Q23）。
-// 别名只在 `debug start` 上注册（契约 C3.5），所以其余几步不拼它 ——
-// 那几步（`quit` / `env` / `topent`）今天靠"环境"落位，多会话下的逐个点名
-// 见契约 C7.3 的落地清单（WP4c/WP6）。
-func recStartSteps(env, ent, prog, module, fglserver, alias string) []recStep {
-	// 第一步是**收口当前这一轮**：调试线只在空闲(idle)时才让设 TOPENT，而人点「开始录制」
-	// 时手上常常正停着一个会话 —— 实测 2026-10-16 用户那条：手上停着 aint302_wf 的入口停站，
-	// 录制第二步直接被拒"仅会话空闲(idle)时可设置 TOPENT(当前 已停站);请先结束调试:tt debug quit"。
-	// 收口用 quit（结束本轮运行、宿主会话保留、不重连），没有会话时它的失败由 optional 吃掉。
-	//
-	// **但收口也必须点名**（WP6）：多会话下不带目标的 `quit` 会被服务端按 F1 报 409 并列候选，
-	// 这一步就白白跳过了 —— 而它跳过的后果正是上面那段实测（TOPENT 设不上去）。
-	// 点的是**本轮的固定别名**（同一个字符串也随 `--name` 给 `debug start`，C7.3 / Q23）：
-	// 于是"收口只收自己那条"由名字保证，不会打到别人的会话上（缺陷 D / T5.5）。
-	// 别名取不到（老调用方）时留空 = 今天的行为（H2）。
-	steps := []recStep{{args: recQuitArgs(alias), optional: true}}
-	// 点名环境时**顺手命名**这条会话：后面 topent / exec 两步才有名字可点
-	// （多会话下不点名的后果是"撞歧义"或"落到别人那条上"）。
-	envArgs := []string{"debug", "env", env}
-	if a := strings.TrimSpace(alias); a != "" {
-		envArgs = append(envArgs, "--name", a)
-	}
-	steps = append(steps, recStep{args: envArgs})
-	if strings.TrimSpace(ent) != "" {
-		topArgs := []string{"debug", "topent", ent}
-		if a := strings.TrimSpace(alias); a != "" {
-			topArgs = append(topArgs, "--session", a)
-		}
-		steps = append(steps, recStep{args: topArgs})
-	}
-	start := []string{"debug", "start", prog, "--env", env, "--fglserver", fglserver}
-	// 企业编号随"起作业"那一步送下去：调试线现在**必填** ENT（不再沿用登录 shell 的 $TOPENT）。
-	if e := strings.TrimSpace(ent); e != "" {
-		start = append(start, "--ent", e)
-	}
-	if m := strings.TrimSpace(module); m != "" {
-		start = append(start, "-m", m)
-	}
-	if a := strings.TrimSpace(alias); a != "" {
-		start = append(start, "--name", a)
-	}
-	return append(steps, recStep{args: start})
-}
-
-// runRecStartSteps 依次跑这些命令，再（默认）放行。
-//
-// 为什么走子进程而不是 import 调试那个包：调试服务的协议（HTTP API、apiBase 前缀、
-// X-Actor 头）只该有一份实现，它在 internal/cli/debug 里；跨命令组 import 会把那份实现
-// 变成两处共用、谁都不敢改的东西。代价是每条命令一次进程启动（毫秒级）。
-func runRecStartSteps(cmd *cobra.Command, steps []recStep, breaks []string, noContinue bool, alias string) error {
-	for _, st := range steps {
-		if err := runSelf(cmd, st.args...); err != nil {
-			if st.optional {
-				fmt.Fprintf(cmd.ErrOrStderr(), "· 这一步跳过（可忽略）：%s —— %v\n", strings.Join(st.args, " "), err)
-				continue
+// 失败信息带**是哪一步**：这条链上每一步都有过"安静失败"的现场（界面不出来、
+// 作业跑在别的企业上、断点没下上），笼统一句"录制失败"会让人从头猜。
+func runRecPlan(cl *debugclient.Client, p recRunPlan, logf func(string, ...any)) error {
+	// ① 收口自己上一轮：调试线只在空闲时才让设 ENT，而人点「开始录制」时常常正停着一条。
+	//    按别名找得到才收 —— 收不到就是"本来就没有"，不是错误。
+	if a := strings.TrimSpace(p.Alias); a != "" {
+		if b, rerr := cl.Resolve(a); rerr == nil {
+			if qerr := cl.Quit(b.ID); qerr != nil {
+				logf("收上一轮会话失败（继续）：%v", qerr)
 			}
-			return fail(exitFailed, "调试线这一步失败（%s）：%v", strings.Join(st.args, " "), err)
 		}
 	}
-	// 断点必须在**放行之前**下：程序停在入口时下才有意义，放行之后那一段已经跑过去了。
-	// `--session` 与上面几步同一个别名：多会话下不带目标的 exec 会被服务端按歧义拒掉。
-	for _, b := range breaks {
-		args := []string{"debug", "exec", "break " + b}
-		if a := strings.TrimSpace(alias); a != "" {
-			args = append(args, "--session", a)
-		}
-		if err := runSelf(cmd, args...); err != nil {
-			return fail(exitFailed, "下断点失败（break %s）：%v", b, err)
+	// ② 点名环境并命名：后面几步要靠这个名字点到"自己那条"。
+	id, err := cl.SwitchToIdle(p.Env, p.Ent, p.Alias, 120*time.Second)
+	if err != nil {
+		return fail(exitFailed, "点名环境失败（%s）：%v", p.Env, err)
+	}
+	// ③ 定 ENT（会话级 override）
+	if e := strings.TrimSpace(p.Ent); e != "" {
+		if terr := cl.Topent(id, e); terr != nil {
+			return fail(exitFailed, "设置 ENT 失败（%s）：%v", e, terr)
 		}
 	}
-	if noContinue {
+	// ④ 起作业：同环境同别名 → 复用 ② 那条宿主，不重新登录。
+	fgl := p.FGL
+	sid, err := cl.Launch(debugclient.LaunchReq{
+		Env: p.Env, Prog: p.Prog, Module: p.Module, Name: p.Alias, Ent: p.Ent, FGLServer: &fgl,
+	})
+	if err != nil {
+		return fail(exitFailed, "起作业失败（%s）：%v", p.Prog, err)
+	}
+	if _, ok, werr := cl.WaitStopped(sid, 120*time.Second); werr != nil {
+		return fail(exitFailed, "等入口停站失败：%v", werr)
+	} else if !ok {
+		return fail(exitFailed, "起作业后没等到入口停站（%s）", p.Prog)
+	}
+	// ⑤ 断点必须在放行之前：程序停不住，下断点就没意义。
+	for _, b := range p.Breaks {
+		if _, berr := cl.Exec(sid, "break "+b); berr != nil {
+			return fail(exitFailed, "下断点失败（break %s）：%v", b, berr)
+		}
+	}
+	if p.NoContinue {
 		return nil
 	}
-	contArgs := []string{"debug", "exec", "continue", "--wait", "20"}
-	if a := strings.TrimSpace(alias); a != "" {
-		contArgs = append(contArgs, "--session", a)
-	}
-	if err := runSelf(cmd, contArgs...); err != nil {
-		return fail(exitFailed, "放行失败（tt debug exec continue）：%v", err)
+	// ⑥ 放行
+	if cerr := cl.Continue(sid); cerr != nil {
+		return fail(exitFailed, "放行失败：%v", cerr)
 	}
 	return nil
-}
-
-// selfArgs 拼出"调自己另一个子命令"的完整参数：`--config` 跟着走。
-//
-// 为什么必须跟着：调用方可能用的是非缺省配置（`--config D:\...\config.json`），
-// 子进程默默换一份配置的后果是"作业起在另一个环境/另一个企业上"。
-func selfArgs(args []string) []string {
-	if common.ConfigPath == "" {
-		return args
-	}
-	return append([]string{"--config", common.ConfigPath}, args...)
-}
-
-// runSelf 调我们自己的另一个子命令（同一条命令行界面，另一条线）。
-//
-// 三条要注意的：
-//   - `--config` 必须跟着传（见 selfArgs）；
-//   - 子进程的 stdout 并到**本命令的 stderr**：这些是"过程"，不是本命令的输出，
-//     混进 stdout 会把 --format json 的输出毁掉；
-//   - stdin 继承：调试线的命令有的要读终端（例如提示确认）。
-func runSelf(cmd *cobra.Command, args ...string) error {
-	self, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	c := exec.Command(self, selfArgs(args)...)
-	c.Stdout = cmd.ErrOrStderr()
-	c.Stderr = cmd.ErrOrStderr()
-	c.Stdin = os.Stdin
-	// 父进程没有控制台时（`tt serve` 里那条脱离的 rec start）别让每个子进程弹一个新的
-	// 控制台窗口 —— 用户实测点一下「开始录制」弹出一大堆终端标签页（见 winproc.HideConsole）。
-	winproc.HideConsole(c)
-	if err := c.Run(); err != nil {
-		var ee *exec.ExitError
-		if errors.As(err, &ee) {
-			return fmt.Errorf("退出码 %d", ee.ExitCode())
-		}
-		return err
-	}
-	return nil
-}
-
-// runSelfOut 同 runSelf，但把子进程的 **stdout 收下来**（要解析它的 JSON 时用）。
-//
-// 为什么不接管道：受限沙箱里子进程开管道会被拒（EPERM），而临时文件哪都能用。
-// 输出落临时文件再读回来，代价是一次磁盘写（几十 KB 级）。
-func runSelfOut(cmd *cobra.Command, args ...string) ([]byte, error) {
-	self, err := os.Executable()
-	if err != nil {
-		return nil, err
-	}
-	// 落**本项目的暂存目录**，不用系统临时目录：沙箱里 %TEMP% 可能写不了
-	// （实测 `os.CreateTemp("")` 报 Access is denied），而数据目录是本来就允许写的地方。
-	scratch := ""
-	if d, cerr := cacheDir(); cerr == nil {
-		scratch = d
-	}
-	f, err := os.CreateTemp(scratch, "tt-self-*.out")
-	if err != nil {
-		return nil, err
-	}
-	path := f.Name()
-	defer os.Remove(path)
-	c := exec.Command(self, selfArgs(args)...)
-	c.Stdout = f
-	c.Stderr = cmd.ErrOrStderr()
-	c.Stdin = os.Stdin
-	winproc.HideConsole(c) // 同上：没有控制台的父进程下，别让子进程弹控制台窗口
-	runErr := c.Run()
-	cerr := f.Close()
-	if runErr != nil {
-		var ee *exec.ExitError
-		if errors.As(runErr, &ee) {
-			runErr = fmt.Errorf("退出码 %d", ee.ExitCode())
-		}
-		return nil, runErr
-	}
-	if cerr != nil {
-		return nil, cerr
-	}
-	return os.ReadFile(path)
 }
 
 func init() {

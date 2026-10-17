@@ -153,25 +153,6 @@ func TestStaleSessionToCollectTakesItsOwnEnvironment(t *testing.T) {
 	}
 }
 
-// WP6 / T5.4：收口那一条 `debug quit` **必须带目标**（多会话下不带就被判歧义）。
-//
-// 目标用固定别名（`fep-<录制 ID>`，C7.3 / Q23）：它是本次录制自己的那条会话的名字，
-// 服务端按 Q23 的幂等键落回它，于是"收口不打到别人身上"这件事由**名字**保证。
-func TestRecQuitArgsCarryTheFixedAlias(t *testing.T) {
-	got := recQuitArgs(recSessionAlias("fep-20261016-120000"))
-	want := []string{"debug", "quit", "--session", "fep-fep-20261016-120000"}
-	if strings.Join(got, " ") != strings.Join(want, " ") {
-		t.Fatalf("收口参数 = %v，期望 %v —— 不带 --session 的 quit 在多会话下会被判歧义", got, want)
-	}
-	// 别名取不到（老调用方没给 RecID）时留空：那是"今天的行为"（H2），不编一个名字出来。
-	if got := recQuitArgs(""); len(got) != 2 || got[0] != "debug" || got[1] != "quit" {
-		t.Fatalf("没有别名时该原样只传 `debug quit`（H2），实得 %v", got)
-	}
-	if got := recQuitArgs("   "); len(got) != 2 {
-		t.Fatalf("只有空白的别名等同于没有别名，实得 %v", got)
-	}
-}
-
 // 录制身份那一半：同环境但**作业不同**的、正在跑的会话不是我们起的那一条。
 func TestRecSessionOwnedMatchesRecordingIdentity(t *testing.T) {
 	mine := dbgSessionView{ID: "s1", Env: "恒烁正式区", Prog: "bsft001_wf", State: "idle"}
