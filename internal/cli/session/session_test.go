@@ -35,16 +35,16 @@ func (f *recFake) install(t *testing.T) {
 		f.mu.Unlock()
 
 		switch {
-		case r.URL.Path == "/sessions" && r.Method == http.MethodGet:
+		case r.URL.Path == "/api/sessions" && r.Method == http.MethodGet:
 			_, _ = w.Write([]byte(`{"ok":true,"sessions":[
 				{"id":"s1","ref":"主机109#1","name":"A","env":"主机109","ent":"99","n":1,"epoch":"3","state":"idle","prog":"bsft001_wf"}]}`))
-		case r.URL.Path == "/sessions" && r.Method == http.MethodPost:
+		case r.URL.Path == "/api/sessions" && r.Method == http.MethodPost:
 			_, _ = w.Write([]byte(`{"ok":true,"sessionId":"s9"}`))
-		case r.URL.Path == "/sessions/switch":
+		case r.URL.Path == "/api/sessions/switch":
 			_, _ = w.Write([]byte(`{"ok":true,"sessionId":"s1","state":"idle"}`))
-		case strings.HasPrefix(r.URL.Path, "/sessions/s1") && r.Method == http.MethodGet:
+		case strings.HasPrefix(r.URL.Path, "/api/sessions/s1") && r.Method == http.MethodGet:
 			_, _ = w.Write([]byte(`{"ok":true,"id":"s1","ref":"主机109#1","state":"stopped","stop":{"file":"a.4gl","line":812}}`))
-		case strings.HasPrefix(r.URL.Path, "/sessions/s9") && r.Method == http.MethodGet:
+		case strings.HasPrefix(r.URL.Path, "/api/sessions/s9") && r.Method == http.MethodGet:
 			_, _ = w.Write([]byte(`{"ok":true,"id":"s9","ref":"主机109#2","state":"stopped"}`))
 		case strings.HasSuffix(r.URL.Path, "/raw"):
 			_, _ = w.Write([]byte(`{"ok":true,"lines":["Breakpoint 1 at a.4gl:812"]}`))
@@ -111,7 +111,7 @@ func TestSessionNewIdle(t *testing.T) {
 		t.Fatalf("应回显落在哪条会话（ref）：%s", out)
 	}
 	got := f.snapshot()
-	if len(got) < 1 || got[0] != "POST /sessions/switch" {
+	if len(got) < 1 || got[0] != "POST /api/sessions/switch" {
 		t.Fatalf("空闲会话该走 switch，实得 %v", got)
 	}
 	if b := f.bodies()[0]; b["ent"] != "99" || b["name"] != "A" || b["env"] != "主机109" {
@@ -126,8 +126,8 @@ func TestSessionNewWithProg(t *testing.T) {
 
 	runCmd(t, "new", "--env", "主机109", "--ent", "99", "--prog", "bsft001_wf", "-m", "asf")
 	got := f.snapshot()
-	if len(got) < 2 || got[0] != "POST /sessions" {
-		t.Fatalf("有作业时该先 POST /sessions，实得 %v", got)
+	if len(got) < 2 || got[0] != "POST /api/sessions" {
+		t.Fatalf("有作业时该先 POST /api/sessions，实得 %v", got)
 	}
 	if b := f.bodies()[0]; b["prog"] != "bsft001_wf" || b["ent"] != "99" || b["module"] != "asf" {
 		t.Fatalf("起会话请求体缺字段：%+v", b)
@@ -181,14 +181,14 @@ func TestSessionEntQuitRm(t *testing.T) {
 
 	got := f.snapshot()
 	joined := strings.Join(got, " | ")
-	if !strings.Contains(joined, "POST /sessions/s1/topent") {
+	if !strings.Contains(joined, "POST /api/sessions/s1/topent") {
 		t.Errorf("ent 应打 topent：%s", joined)
 	}
-	if !strings.Contains(joined, "DELETE /sessions/s1") {
-		t.Errorf("quit 应打 DELETE /sessions/{id}（结束本轮、会话保留）：%s", joined)
+	if !strings.Contains(joined, "DELETE /api/sessions/s1") {
+		t.Errorf("quit 应打 DELETE /api/sessions/{id}（结束本轮、会话保留）：%s", joined)
 	}
-	if !strings.Contains(joined, "POST /sessions/s1/close") {
-		t.Errorf("rm 应打 POST /sessions/{id}/close（收掉会话）：%s", joined)
+	if !strings.Contains(joined, "POST /api/sessions/s1/close") {
+		t.Errorf("rm 应打 POST /api/sessions/{id}/close（收掉会话）：%s", joined)
 	}
 }
 

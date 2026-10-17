@@ -29,7 +29,7 @@ func TestFailureKeepsCodeCandidatesAndHint(t *testing.T) {
 	}))
 	defer hs.Close()
 
-	_, err := New(hs.URL).Do(http.MethodGet, "/sessions", nil)
+	_, err := New(hs.URL).Do(http.MethodGet, "/api/sessions", nil)
 	var f *Failure
 	if !errors.As(err, &f) {
 		t.Fatalf("该是 *Failure，实得 %T: %v", err, err)
@@ -57,7 +57,7 @@ func TestNonEnvelopeErrorDoesNotBecomeFailure(t *testing.T) {
 	}))
 	defer hs.Close()
 
-	_, err := New(hs.URL).Do(http.MethodGet, "/sessions", nil)
+	_, err := New(hs.URL).Do(http.MethodGet, "/api/sessions", nil)
 	var f *Failure
 	if errors.As(err, &f) {
 		t.Fatalf("没有信封时不该造一个 *Failure：%+v", f)
@@ -176,9 +176,9 @@ func TestLifecycleEndpoints(t *testing.T) {
 		_ = json.NewDecoder(r.Body).Decode(&b)
 		got = append(got, call{r.Method, r.URL.Path, b})
 		switch {
-		case r.URL.Path == "/sessions/switch":
+		case r.URL.Path == "/api/sessions/switch":
 			_, _ = w.Write([]byte(`{"ok":true,"sessionId":"s1","state":"idle"}`))
-		case r.URL.Path == "/sessions":
+		case r.URL.Path == "/api/sessions":
 			_, _ = w.Write([]byte(`{"ok":true,"sessionId":"s9"}`))
 		case strings.HasSuffix(r.URL.Path, "/raw"):
 			_, _ = w.Write([]byte(`{"ok":true,"lines":["ok"]}`))
@@ -214,12 +214,12 @@ func TestLifecycleEndpoints(t *testing.T) {
 	want := []struct {
 		method, path string
 	}{
-		{"POST", "/sessions/switch"},
-		{"POST", "/sessions/s1/topent"},
-		{"POST", "/sessions"},
-		{"POST", "/sessions/s9/raw"},
-		{"POST", "/sessions/s9/control"},
-		{"DELETE", "/sessions/s9"},
+		{"POST", "/api/sessions/switch"},
+		{"POST", "/api/sessions/s1/topent"},
+		{"POST", "/api/sessions"},
+		{"POST", "/api/sessions/s9/raw"},
+		{"POST", "/api/sessions/s9/control"},
+		{"DELETE", "/api/sessions/s9"},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("打了 %d 次，要 %d 次：%+v", len(got), len(want), got)

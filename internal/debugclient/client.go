@@ -221,7 +221,7 @@ type Brief struct {
 
 // Sessions 列出全部会话。
 func (c *Client) Sessions() ([]Brief, error) {
-	data, err := c.Do(http.MethodGet, "/sessions", nil)
+	data, err := c.Do(http.MethodGet, "/api/sessions", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -279,7 +279,7 @@ func (c *Client) Resolve(want string) (Brief, error) {
 
 // Snapshot 取一条会话的完整快照（原样返回 JSON，调用方按需取字段）。
 func (c *Client) Snapshot(id string) (map[string]any, error) {
-	data, err := c.Do(http.MethodGet, "/sessions/"+id, nil)
+	data, err := c.Do(http.MethodGet, "/api/sessions/"+id, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -354,7 +354,7 @@ func (c *Client) Launch(req LaunchReq) (string, error) {
 	if req.FGLServer != nil {
 		body["fglserver"] = *req.FGLServer
 	}
-	data, err := c.Do(http.MethodPost, "/sessions", body)
+	data, err := c.Do(http.MethodPost, "/api/sessions", body)
 	if err != nil {
 		return "", err
 	}
@@ -382,7 +382,7 @@ func (c *Client) SwitchToIdle(env, ent, name string, timeout time.Duration) (str
 	if name != "" {
 		body["name"] = name
 	}
-	data, err := c.Do(http.MethodPost, "/sessions/switch", body)
+	data, err := c.Do(http.MethodPost, "/api/sessions/switch", body)
 	if err != nil {
 		return "", err
 	}
@@ -420,13 +420,13 @@ func (c *Client) SwitchToIdle(env, ent, name string, timeout time.Duration) (str
 
 // Topent 设置会话级企业编号（仅 idle 可设）。
 func (c *Client) Topent(id, value string) error {
-	_, err := c.Do(http.MethodPost, "/sessions/"+id+"/topent", map[string]any{"value": value})
+	_, err := c.Do(http.MethodPost, "/api/sessions/"+id+"/topent", map[string]any{"value": value})
 	return err
 }
 
 // Exec 透传一条 fgldb 命令，返回输出行。
 func (c *Client) Exec(id, command string) ([]string, error) {
-	data, err := c.Do(http.MethodPost, "/sessions/"+id+"/raw", map[string]any{"command": command})
+	data, err := c.Do(http.MethodPost, "/api/sessions/"+id+"/raw", map[string]any{"command": command})
 	if err != nil {
 		return nil, err
 	}
@@ -441,13 +441,13 @@ func (c *Client) Exec(id, command string) ([]string, error) {
 
 // Continue 放行（不等待停站；要等就接着调 WaitStopped）。
 func (c *Client) Continue(id string) error {
-	_, err := c.Do(http.MethodPost, "/sessions/"+id+"/control", map[string]any{"action": "continue"})
+	_, err := c.Do(http.MethodPost, "/api/sessions/"+id+"/control", map[string]any{"action": "continue"})
 	return err
 }
 
 // Quit 结束本轮调试，会话保留（回 idle）。
 func (c *Client) Quit(id string) error {
-	_, err := c.Do(http.MethodDelete, "/sessions/"+id, nil)
+	_, err := c.Do(http.MethodDelete, "/api/sessions/"+id, nil)
 	return err
 }
 
@@ -457,6 +457,6 @@ func (c *Client) Quit(id string) error {
 //
 // 两个动作在旧命令里都叫过"退出"，混用会留下空会话或误杀宿主 —— 所以在这里分名。
 func (c *Client) Close(id string) error {
-	_, err := c.Do(http.MethodPost, "/sessions/"+id+"/close", nil)
+	_, err := c.Do(http.MethodPost, "/api/sessions/"+id+"/close", nil)
 	return err
 }

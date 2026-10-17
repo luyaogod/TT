@@ -52,15 +52,15 @@ func (f *recFake) server(t *testing.T) *debugclient.Client {
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.record(r.Method, r.URL.Path)
 		switch {
-		case r.URL.Path == "/sessions" && r.Method == http.MethodGet:
+		case r.URL.Path == "/api/sessions" && r.Method == http.MethodGet:
 			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "sessions": f.sessions})
-		case r.URL.Path == "/sessions" && r.Method == http.MethodPost:
+		case r.URL.Path == "/api/sessions" && r.Method == http.MethodPost:
 			_, _ = w.Write([]byte(`{"ok":true,"sessionId":"s-job"}`))
-		case r.URL.Path == "/sessions/switch":
+		case r.URL.Path == "/api/sessions/switch":
 			_, _ = w.Write([]byte(`{"ok":true,"sessionId":"s-host","state":"idle"}`))
-		case strings.HasPrefix(r.URL.Path, "/sessions/s-host") && r.Method == http.MethodGet:
+		case strings.HasPrefix(r.URL.Path, "/api/sessions/s-host") && r.Method == http.MethodGet:
 			_, _ = w.Write([]byte(`{"ok":true,"state":"stopped","stop":{"file":"a.4gl","line":812}}`))
-		case strings.HasPrefix(r.URL.Path, "/sessions/s-job") && r.Method == http.MethodGet:
+		case strings.HasPrefix(r.URL.Path, "/api/sessions/s-job") && r.Method == http.MethodGet:
 			_, _ = w.Write([]byte(`{"ok":true,"state":"stopped"}`))
 		case strings.HasSuffix(r.URL.Path, "/raw"):
 			_, _ = w.Write([]byte(`{"ok":true,"lines":[]}`))
@@ -90,14 +90,14 @@ func TestRecRunPlanOrder(t *testing.T) {
 
 	got := f.snapshot()
 	want := []string{
-		"GET /sessions",                // ① 收口前先找自己那条（没有就跳过）
-		"POST /sessions/switch",        // ② 点名环境并命名
-		"POST /sessions/s-host/topent", // ③ 定 ENT
-		"POST /sessions",               // ④ 起作业
-		"GET /sessions/s-job",          // ⑤ 等入口停站
-		"POST /sessions/s-job/raw",     // ⑥ 下断点
-		"GET /sessions/s-job",          // ⑦ 回填 ref（P3：两条线认同一个地址）
-		"POST /sessions/s-job/control", // ⑧ 放行
+		"GET /api/sessions",                // ① 收口前先找自己那条（没有就跳过）
+		"POST /api/sessions/switch",        // ② 点名环境并命名
+		"POST /api/sessions/s-host/topent", // ③ 定 ENT
+		"POST /api/sessions",               // ④ 起作业
+		"GET /api/sessions/s-job",          // ⑤ 等入口停站
+		"POST /api/sessions/s-job/raw",     // ⑥ 下断点
+		"GET /api/sessions/s-job",          // ⑦ 回填 ref（P3：两条线认同一个地址）
+		"POST /api/sessions/s-job/control", // ⑧ 放行
 	}
 	if len(got) != len(want) {
 		t.Fatalf("调了 %d 次，要 %d 次：\n实得 %v", len(got), len(want), got)
@@ -118,7 +118,7 @@ func TestRecRunPlanQuitsItsOwnSessionFirst(t *testing.T) {
 		t.Fatalf("runRecPlan: %v", err)
 	}
 	got := f.snapshot()
-	if len(got) < 2 || got[0] != "GET /sessions" || got[1] != "DELETE /sessions/s-old" {
+	if len(got) < 2 || got[0] != "GET /api/sessions" || got[1] != "DELETE /api/sessions/s-old" {
 		t.Fatalf("应先把上一轮那条收掉，实得 %v", got)
 	}
 }
