@@ -392,3 +392,33 @@ func TestSessionArgsErrors(t *testing.T) {
 		t.Fatalf("参数错时不该发请求：%v", f.snapshot())
 	}
 }
+
+// TestSessionActionsRespectFormat：`--format table` 对动作类命令也要生效。
+//
+// 之前只有 ls/show/job 走了格式化出口，ent/quit/rm/exec 仍硬打 JSON ——
+// 全局开关被**静默忽略**，正是这套工具一直在灭的毛病。
+func TestSessionActionsRespectFormat(t *testing.T) {
+	f := &recFake{}
+	f.install(t)
+	oldFormat := common.Format
+	t.Cleanup(func() { common.Format = oldFormat })
+	common.Format = "table"
+
+	cases := []struct{ args []string; want string }{
+		{[]string{"ent", "99", "--session", "A"}, "企业编号：99"},
+		{[]string{"quit", "--session", "A"}, "已结束会话"},
+		{[]string{"rm", "--session", "A"}, "已收掉会话"},
+		{[]string{"exec", "--session", "A", "--", "break 812"}, "Breakpoint 1 at"},
+	}
+	for _, c := range cases {
+		resetFlags()
+		group.SetArgs(c.args)
+		_, out := testkit.CaptureStdout(t, func() int { _ = group.Execute(); return 0 })
+		if !strings.Contains(out, c.want) {
+			t.Errorf("%v 的 table 输出应含 %q，实得 %q", c.args, c.want, out)
+		}
+		if strings.Contains(out, `"ok":`) {
+			t.Errorf("%v 在 table 模式下不该打 JSON：%q", c.args, out)
+		}
+	}
+}

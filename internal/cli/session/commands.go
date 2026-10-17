@@ -220,7 +220,13 @@ ENT 必填：企业编号决定用哪个账号连库与据点校验，不再沿�
 			if terr := cl.Topent(b.ID, value); terr != nil {
 				return terr
 			}
-			return emit(map[string]any{"ok": true, "session": b.Ref, "ent": value})
+			return emitFormatted(map[string]any{"ok": true, "session": b.Ref, "ent": value}, func() {
+				if value == "" {
+					fmt.Printf("已清除会话 %s 的企业编号覆盖（回到环境默认）\n", b.Ref)
+				} else {
+					fmt.Printf("会话 %s 的企业编号：%s\n", b.Ref, value)
+				}
+			})
 		},
 	}
 
@@ -240,7 +246,9 @@ ENT 必填：企业编号决定用哪个账号连库与据点校验，不再沿�
 			if qerr := cl.Quit(b.ID); qerr != nil {
 				return qerr
 			}
-			return emit(map[string]any{"ok": true, "session": b.Ref, "state": "idle"})
+			return emitFormatted(map[string]any{"ok": true, "session": b.Ref, "state": "idle"}, func() {
+				fmt.Printf("已结束会话 %s 的本轮调试（会话保留，回空闲）\n", b.Ref)
+			})
 		},
 	}
 
@@ -260,7 +268,9 @@ ENT 必填：企业编号决定用哪个账号连库与据点校验，不再沿�
 			if cerr := cl.Close(b.ID); cerr != nil {
 				return cerr
 			}
-			return emit(map[string]any{"ok": true, "session": b.Ref, "removed": true})
+			return emitFormatted(map[string]any{"ok": true, "session": b.Ref, "removed": true}, func() {
+				fmt.Printf("已收掉会话 %s\n", b.Ref)
+			})
 		},
 	}
 
@@ -321,7 +331,12 @@ ENT 必填：企业编号决定用哪个账号连库与据点校验，不再沿�
 			if xerr != nil {
 				return xerr
 			}
-			return emit(map[string]any{"ok": true, "session": b.Ref, "command": command, "lines": lines})
+			return emitFormatted(map[string]any{"ok": true, "session": b.Ref, "command": command, "lines": lines}, func() {
+				// 透传的输出原样给：它就是调试图输出，加壳反而不好读。
+				for _, line := range lines {
+					fmt.Println(line)
+				}
+			})
 		},
 	}
 
