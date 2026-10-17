@@ -7,18 +7,23 @@ package session
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"tt/internal/cli/common"
 	"tt/internal/debugclient"
+	"tt/internal/winproc"
 )
 
 var (
 	// new
 	nsEnv, nsEnt, nsName, nsProg, nsModule string
 	nsTimeout                              int
+	nsRecord                               bool // --record：建完会话顺手把录制挂上去
 	// 定位
 	lsSession, lsEnv string
 	lsAll            bool
@@ -55,6 +60,34 @@ ENT 必填：企业编号决定用哪个账号连库与据点校验，不再沿�
 				return err
 			}
 			prog := strings.TrimSpace(nsProg)
+
+			if nsRecord {
+				// 「建会话 + 起录制」一步到位：先建**空闲**会话（拿身份），再把录制挂上去。
+				// 顺序不能反 —— 录制挂靠要一条已有会话，而它靠别名落回同一条。
+				if prog == "" {
+					return failUsage("--record 需要 --prog：录的是作业界面，没有作业就没什么可录")
+				}
+				if strings.TrimSpace(nsName) == "" {
+					return failUsage("--record 需要 --name：录制靠别名落回同一条会话，没名字挂不回来")
+				}
+				id, serr := cl.SwitchToIdle(env, ent, strings.TrimSpace(nsName), time.Duration(nsTimeout)*time.Second)
+				if serr != nil {
+					return serr
+				}
+				cfgPath, cerr := common.ResolveConfig(true)
+				if cerr != nil {
+					return cerr
+				}
+				pid, logPath, rerr := startRecording(cfgPath, id, prog, ent)
+				if rerr != nil {
+					return fmt.Errorf("会话已建好（%s），但录制没起来：%w", id, rerr)
+				}
+				return emit(map[string]any{
+					"ok": true, "session": id,
+					"recording": map[string]any{"pid": pid, "log": logPath, "prog": prog},
+					"next":      "tt recording ls 看这一轮的录制 ID；tt recording stop <ID> 收工",
+				})
+			}
 			if prog == "" {
 				// 空闲会话：走"切到该环境并命名"，服务端会建一条 idle 的宿主。
 				id, serr := cl.SwitchToIdle(env, ent, strings.TrimSpace(nsName), time.Duration(nsTimeout)*time.Second)
@@ -237,6 +270,7 @@ ENT 必填：企业编号决定用哪个账号连库与据点校验，不再沿�
 	newCmd.Flags().StringVar(&nsProg, "prog", "", "作业程序名（给了就同时起作业）")
 	newCmd.Flags().StringVarP(&nsModule, "module", "m", "", "T100 模块目录名（留空由作业名自动解析）")
 	newCmd.Flags().IntVar(&nsTimeout, "timeout", 120, "等待空闲 / 入口停站的超时（秒）")
+	newCmd.Flags().BoolVar(&nsRecord, "record", false, "建完会话顺手把录制挂上去（需要 --name 与 --prog）")
 
 	lsCmd.Flags().StringVar(&lsEnv, "env", "", "只看这个环境")
 	lsCmd.Flags().BoolVarP(&lsAll, "all", "a", false, "含已断开的会话")
@@ -276,4 +310,42 @@ func emitSession(cl *debugclient.Client, id string) error {
 	}
 	// 建完立刻列不到（极少数竞态）：至少把句柄给出来，别让调用方以为没建成。
 	return emit(map[string]any{"ok": true, "session": map[string]any{"id": id}})
+}
+
+// startRecording 起一轮录制并**挂到指定会话**上（`session new --record` 的那一步）。
+//
+// 为什么是"起一个脱离进程"而不是在本进程里录：
+//   - 录制要一直活着，直到用户按停止（或 `tt recording stop`）；命令本身应当立刻返回；
+//   - 它持有的东西（GDC 实例、代理、登记）本来就设计成**脱离本进程**也能收尾
+//     （见 internal/fep 的 register-first 与 `recording stop`）。
+//
+// 抽成变量是为了在测试里替换它：真起进程需要 GDC 与真实环境，而这里要钉的是
+// "命令按什么参数起它、失败怎么报"。
+var startRecording = func(cfgPath, sessionRef, prog, ent string) (int, string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return 0, "", err
+	}
+	dir, err := os.MkdirTemp("", "tt-rec-")
+	if err != nil {
+		return 0, "", err
+	}
+	logPath := filepath.Join(dir, "rec-start.log")
+	args := []string{"recording", "start", "--session", sessionRef, "--prog", prog}
+	if e := strings.TrimSpace(ent); e != "" {
+		args = append(args, "--ent", e)
+	}
+	args = append(args, "--config", cfgPath)
+	// TT_ACTOR=human 不传：这是 CLI 起的（AI 或人都有可能），沿用调用者自己的身份。
+	pid, perr := winproc.SpawnDetached(exe, args, logPath)
+	if perr != nil {
+		return 0, logPath, perr
+	}
+	for waited := time.Duration(0); waited < 6*time.Second; waited += 200 * time.Millisecond {
+		time.Sleep(200 * time.Millisecond)
+		if !winproc.Alive(pid) {
+			return pid, logPath, fmt.Errorf("录制进程起来就退了（pid %d）：详见 %s", pid, logPath)
+		}
+	}
+	return pid, logPath, nil
 }
