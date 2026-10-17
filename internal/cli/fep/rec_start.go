@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -85,6 +86,17 @@ var recStartCmd = &cobra.Command{
 			return fail(exitUsage, "环境 %q 不存在（见 tt env list）", name)
 		}
 		dcfg = clone
+		// D29：没给 `--ent` 时用**环境自己的 topent**。
+		//
+		// 为什么必须补：录制身份里 ENT 空 = "未指定"，可这一轮明明知道是哪个企业
+		// （环境配置里就写着 topent）。以前只在 `--ent` 显式给了才落值，于是
+		// `--env 主机109` 录出来的件里写着"ENT-未指定"，事后追溯环境就少了一半信息。
+		// 取不到（topent 未配）就仍然是空 —— 不猜（A15）。
+		if ent == "" {
+			if t := dcfg.TopentInt(); t > 0 {
+				ent = strconv.Itoa(t)
+			}
+		}
 		if dcfg.SSH.Host == "" {
 			return fail(exitPreflight, "环境 %q 没配 SSH host", name)
 		}
