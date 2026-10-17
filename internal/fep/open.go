@@ -151,19 +151,15 @@ type Runtime struct {
 	// 起停、端口、注入都归 Screen，Runtime 只做组合。
 	screen *Screen
 	proxy  *Proxy // 便捷引用（= screen.Proxy()）：收尾与连接清单仍从它走
-	conn  *host.SSHConn
-	pty   *host.PTYSession
-	logf  func(string, ...any)
+	// job 是这一轮的作业连接（可能为 nil：只起画面、不起作业）。
+	job  *Job
+	logf func(string, ...any)
 
 	// ready 表示 Open 走完了全程。收工时只有 ready 的会话才落身份文件：
 	// 起了一半就失败的会话没有"这一轮录了什么"可言，落一份进去只会让人以为它录到了。
 	ready bool
 	// fglServer 是这一次画面接线的地址（`<本机IP>:<代理端口-6400>`），进录制身份。
 	fglServer string
-	// binary 是作业编译件的标识（探不到就是空值）。
-	binary BinaryID
-
-	jobDone chan struct{}
 	closeMu sync.Mutex
 	closed  bool
 }
@@ -196,7 +192,7 @@ func Open(ctx context.Context, cfg OpenConfig, logf func(string, ...any)) (*Runt
 		return nil, err
 	}
 
-	r := &Runtime{cfg: cfg, reg: NewRegistry(cfg.DataDir), logf: logf, jobDone: make(chan struct{})}
+	r := &Runtime{cfg: cfg, reg: NewRegistry(cfg.DataDir), logf: logf, job: newJob(cfg, logf)}
 
 	// 1–2. 画面通道（隔离 GDC + 录制代理）：交给 Screen 一处起停，Runtime 只做组合。
 	screen, err := StartScreen(ScreenConfig{
@@ -236,7 +232,7 @@ func Open(ctx context.Context, cfg OpenConfig, logf func(string, ...any)) (*Runt
 			}
 			logf("FGLSERVER 用本机地址 %s（按到 %s 的路由探测）", ip, cfg.SSH.Host)
 		}
-		if err := r.openJob(ip); err != nil {
+		if err := r.job.Open(ip, r.setFGLServer); err != nil {
 			r.Close()
 			return nil, err
 		}
@@ -249,9 +245,9 @@ func Open(ctx context.Context, cfg OpenConfig, logf func(string, ...any)) (*Runt
 		}
 		logf("作业已打开：%s，FGLSERVER=%s:%d", cfg.Prog, ip, cfg.ProxyPort-FGLSERVEROffset)
 		// 编译件标识（只读，探不到不影响本轮）—— 录制身份里要用它发现"程序重编译过"。
-		r.binary = r.probeBinary()
-		if !r.binary.Empty() {
-			logf("编译件：%s", r.binary.FingerprintString())
+		r.job.ProbeBinary()
+		if b := r.job.Binary(); !b.Empty() {
+			logf("编译件：%s", b.FingerprintString())
 		}
 	} else {
 		// 只起代理时也要把画面接线算出来：`tt fep rec start` 就是"先起代理、再把调试线的
@@ -302,7 +298,7 @@ func (r *Runtime) Wait(ctx context.Context) error {
 		return nil
 	case <-r.proxy.Quit():
 		return nil
-	case <-r.jobDone:
+	case <-jobDone(r.job):
 		return nil
 	}
 }
@@ -319,11 +315,9 @@ func (r *Runtime) Close() error {
 	r.closeMu.Unlock()
 
 	var errs []string
-	if r.pty != nil {
-		r.pty.Close()
-	}
-	if r.conn != nil {
-		if err := r.conn.Close(); err != nil {
+	// 作业连接整块收（PTY + SSH 都归 Job 管）。
+	if r.job != nil {
+		if err := r.job.Close(); err != nil {
 			errs = append(errs, err.Error())
 		}
 	}
@@ -412,7 +406,7 @@ func (r *Runtime) writeMeta(conns []ConnInfo) (string, error) {
 		Env: r.cfg.Env, Zone: r.cfg.Zone, Ent: r.cfg.Ent,
 		Host: r.cfg.SSH.Host, FGLServer: r.fglServer,
 		Started: r.Session.Started, Finished: time.Now(),
-		Binary: r.binary,
+		Binary: jobBinary(r.job),
 	}
 	for _, c := range conns {
 		mt.Conns = append(mt.Conns, MetaConn{
@@ -431,90 +425,6 @@ func (r *Runtime) writeMeta(conns []ConnInfo) (string, error) {
 		mt.Note = "这一轮没读到 AUI 消息：" + err.Error()
 	}
 	return WriteMeta(r.cfg.RecordDir, mt)
-}
-
-// probeBinary 只读地取一次作业编译件的标识（大小 + 修改时间）。
-//
-// 为什么要有它：指纹能发现"界面结构变了"，但**发现不了**"程序只是重编译了一次、
-// 界面一模一样"（那种情况下编号表逐条相同）。两者合起来才是完整的"这份录制还算不算数"。
-//
-// 只读：一条 `ls -ln`。探不到就照实留空 —— 走 `r.r` 时程序路径由登录环境决定
-// （`$AZZ`/`$ASF`），我们只给了作业名，所以那条路要调用方显式给 --binary-ref。
-func (r *Runtime) probeBinary() BinaryID {
-	ref := r.cfg.BinaryRef
-	if ref == "" || r.conn == nil {
-		return BinaryID{}
-	}
-	if err := ValidateBinaryRef(ref); err != nil {
-		r.logf("编译件标识不探：%v", err)
-		return BinaryID{}
-	}
-	// 实测（主机109，2026-10-15）：GNU ls 的 --time-style=+FORMAT 可用，输出形如
-	//   -rwxrwxr-x 1 1012 1012 310855 2026-09-24T10:06:28 /u1/t35prd/erp/asf/42r/bsft001_wf.42r
-	out, err := r.conn.Output("ls -ln --time-style=+%Y-%m-%dT%H:%M:%S "+ref, 15*time.Second)
-	if err != nil {
-		r.logf("探测编译件标识失败（不影响本轮）：%v", err)
-		return BinaryID{}
-	}
-	f := strings.Fields(out)
-	if len(f) < 6 {
-		return BinaryID{}
-	}
-	size, _ := strconv.ParseInt(f[4], 10, 64)
-	return BinaryID{Ref: f[len(f)-1], Size: size, ModTime: f[5]}
-}
-
-// openJob logs in, points FGLSERVER at our proxy and starts the job client.
-func (r *Runtime) openJob(ip string) error {
-	conn, err := host.Dial(r.cfg.SSH)
-	if err != nil {
-		return fmt.Errorf("fep: SSH 连接失败: %w", err)
-	}
-	r.conn = conn
-	pty, err := conn.NewPTY(120, 40)
-	if err != nil {
-		return fmt.Errorf("fep: 开 PTY 失败: %w", err)
-	}
-	r.pty = pty
-
-	// 登录后可能先出区域菜单，也可能直接给 shell 提示符（两台机器就不一样）：
-	// 两种都等，再按实际情况决定要不要选区域。
-	which, err := waitAny(pty, 25*time.Second, host.ReLoginMenu, host.ReShellPrompt)
-	if err != nil {
-		return err
-	}
-	if which == 0 {
-		if r.cfg.Zone == "" {
-			return errors.New("fep: 这个环境没配 zone（区域菜单没法选）")
-		}
-		if err := pty.Write(r.cfg.Zone + "\r"); err != nil {
-			return err
-		}
-		if err := waitRegexp(pty, host.ReShellPrompt, 25*time.Second, "shell 提示符"); err != nil {
-			return err
-		}
-	}
-
-	port := r.cfg.ProxyPort - FGLSERVEROffset
-	if port <= 0 || port > 65535 {
-		return fmt.Errorf("%w: 代理端口 %d 减 %d 后不是合法端口", ErrUsage, r.cfg.ProxyPort, FGLSERVEROffset)
-	}
-	if err := r.setFGLServer(ip); err != nil {
-		return err
-	}
-	cmdLine, cerr := jobLaunchCmd(r.cfg.Path, ip, port, r.cfg.Prog, r.cfg.Ent)
-	if cerr != nil {
-		// 入口已经查过一遍（validateLaunch），走到这里说明两条路的口径不一致 ——
-		// 那就**什么都别发**：半条命令出去了比报错坏得多。
-		return fmt.Errorf("fep: 启动命令拼不出来: %w", cerr)
-	}
-	if err := pty.Write(cmdLine); err != nil {
-		return fmt.Errorf("fep: 下发作业启动命令失败: %w", err)
-	}
-	// The job client keeps running while the GUI is open; its connection ending
-	// means the job is gone.
-	go r.watchJob()
-	return nil
 }
 
 // jobLaunchCmd 拼出启动那一段 shell 命令：先把企业编号下发到登录 shell，
@@ -552,24 +462,6 @@ func jobLaunchCmd(path LaunchPath, ip string, port int, prog, ent string) (strin
 // 少一个引号就能把整条命令拆开。两处规则必须一致，改一处就要改另一处。
 func topentExportLine(ent string) string {
 	return "export TOPENT='" + strings.ReplaceAll(ent, "'", "") + "'\r\n"
-}
-
-// watchJob drains the PTY and reports when the remote job is over.
-func (r *Runtime) watchJob() {
-	defer close(r.jobDone)
-	buf := make([]byte, 4096)
-	for {
-		n, err := r.pty.Read(buf)
-		if n > 0 {
-			line := strings.TrimSpace(string(buf[:n]))
-			if line != "" {
-				r.logf("远端: %s", firstLine(line))
-			}
-		}
-		if err != nil {
-			return
-		}
-	}
 }
 
 func firstLine(s string) string {

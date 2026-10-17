@@ -118,7 +118,8 @@ func TestWriteMetaComputesFingerprintFromRecordings(t *testing.T) {
 		cfg:       OpenConfig{Tag: tag, RecordDir: dir, Prog: "bsft001_wf", Path: PathRunnerRR, Env: "主机109", Zone: "36", Ent: "99"},
 		Session:   &Session{Started: time.Now().Add(-time.Minute)},
 		fglServer: "192.168.14.193:1200",
-		binary:    BinaryID{Ref: "/u1/t35prd/erp/asf/42r/bsft001_wf.42r", Size: 310855},
+		// 编译件标识归 Job 管（P4）：只填它需要的那两个字段即可。
+		job: &Job{binary: BinaryID{Ref: "/u1/t35prd/erp/asf/42r/bsft001_wf.42r", Size: 310855}},
 	}
 	if _, err := r.writeMeta([]ConnInfo{{ID: 1, BytesRT: 100, BytesFE: 50}}); err != nil {
 		t.Fatal(err)
