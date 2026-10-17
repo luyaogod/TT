@@ -203,6 +203,9 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/sessions/{id}/restart", s.hSessionRestart)
 	mux.HandleFunc("POST /api/sessions/{id}/close", s.hSessionClose)
 	mux.HandleFunc("POST /api/sessions/{id}/topent", s.hTopent)
+	mux.HandleFunc("POST /api/sessions/{id}/ent", s.hSessionEnt)
+	// 规格里的 quit 是 POST（DELETE 保留：旧调用方在用的名字）。两者同一件事。
+	mux.HandleFunc("POST /api/sessions/{id}/quit", s.hQuit)
 	mux.HandleFunc("POST /api/sessions/{id}/mode", s.hMode)
 	mux.HandleFunc("POST /api/sessions/switch", s.hSessionSwitch)
 	mux.HandleFunc("GET /api/sessions/{id}/breakpoints", s.hBPList)
@@ -669,8 +672,34 @@ func (s *Server) hLaunch(w http.ResponseWriter, r *http.Request) {
 		"module": sess.Module, "prog": sess.Prog, "runProg": sess.RunProg})
 }
 
+// hList 列会话。
+//
+// 过滤（规格 §2 的 `GET /api/sessions?env=…&all=1`）：
+//   - `env`：只看这个环境（精确匹配环境名，不做模糊 —— 环境名是身份的一部分）；
+//   - `all`：含已断开（`exit`）的残留。默认仍全部返回（与既有行为一致），
+//     但给了 `all=0` 就只给活着的 —— 两个方向都要能表达，避免"想排除却没法说"。
 func (s *Server) hList(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"ok": true, "sessions": s.mgr.Snapshot()})
+	list := s.mgr.Snapshot()
+	env := strings.TrimSpace(r.URL.Query().Get("env"))
+	if env != "" {
+		kept := list[:0]
+		for _, b := range list {
+			if b.Env == env {
+				kept = append(kept, b)
+			}
+		}
+		list = kept
+	}
+	if v := strings.TrimSpace(r.URL.Query().Get("all")); v == "0" || v == "false" {
+		kept := list[:0]
+		for _, b := range list {
+			if b.State != "exit" {
+				kept = append(kept, b)
+			}
+		}
+		list = kept
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "sessions": list})
 }
 
 // identityKeysOf 把**会话身份那一组键**从 `SessionBrief` 里搬进快照（契约 C5.1 / C5.3 / C5.4 / C5.9）。
@@ -919,6 +948,40 @@ func (s *Server) hTopent(w http.ResponseWriter, r *http.Request) {
 	if !readBody(w, r, &req) {
 		return
 	}
+	s.applyTopent(w, r, req.Value)
+}
+
+// hSessionEnt 是规格里的 `POST /api/sessions/{id}/ent`：与 `/topent` 同一件事、同一条规矩，
+// 只是请求体按规格写成 `{"value":"99"}` / `{"clear":true}`。
+//
+// 为什么两个端点都留：`/topent` 是既有调用方（CLI 与前端面板）在用的名字，
+// `/ent` 是规格名。两者的**行为**收在同一个 `applyTopent` 里 —— 两条路各写一份必然漂，
+// 而漂的那一处恰好是"到底设上了没有"。
+func (s *Server) hSessionEnt(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Value string `json:"value"`
+		Clear bool   `json:"clear"`
+	}
+	if !readBody(w, r, &req) {
+		return
+	}
+	s.applyTopent(w, r, entValueOf(req.Value, req.Clear))
+}
+
+// entValueOf 把规格里的两种写法归一：`{"value":"99"}` 与 `{"clear":true}`。
+//
+// 单独一个函数是为了能钉住它：两个端点（/ent 与 /topent）共用同一份实现，
+// 而"清除"在这条链路上等于空值（见 SetTopent 的注释：空值 = 回到环境默认，不是 unset）。
+func entValueOf(value string, clear bool) string {
+	if clear {
+		return ""
+	}
+	return value
+}
+
+// applyTopent 是设置/清除会话级企业编号的唯一实现。
+func (s *Server) applyTopent(w http.ResponseWriter, r *http.Request, value string) {
+	req := struct{ Value string }{Value: value}
 	req.Value = trimTopent(req.Value)
 	sess := s.sessOfWrite(w, r)
 	if sess == nil {

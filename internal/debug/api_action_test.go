@@ -333,3 +333,72 @@ func TestWSLogDebugValidatesInputBeforeDialing(t *testing.T) {
 		t.Errorf("文案该说清是入参超限，得 %q", msg)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// 规格补充端点（§2 的命令面）：`?env=` 过滤、`/ent`、`POST /quit`
+// ---------------------------------------------------------------------------
+
+// TestListFiltersByEnv：`GET /api/sessions?env=` 只返回那个环境的会话。
+//
+// 为什么要有它：多会话之后"列全部"在界面上越来越没用 —— 人问的是"这个环境现在有几条"。
+func TestListFiltersByEnv(t *testing.T) {
+	hs, s := actionTestDebugServer(t)
+	giveServerNamedEnv(s, "h1", "127.0.0.1", "36")
+	giveServerNamedEnv(s, "h2", "127.0.0.1", "36")
+	s.mgr.sessions["s1"] = idleOn("s1", s.cfg.CloneEnv("h1"))
+	s.mgr.sessions["s2"] = idleOn("s2", s.cfg.CloneEnv("h2"))
+
+	resp := doReq(t, "GET", hs.URL+"/api/sessions?env=h1", "", "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("list: %d %s", resp.StatusCode, respError(t, resp))
+	}
+	var out struct {
+		Sessions []struct {
+			Env string `json:"env"`
+		} `json:"sessions"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Sessions) != 1 || out.Sessions[0].Env != "h1" {
+		t.Fatalf("只该剩 h1 那条：%+v", out.Sessions)
+	}
+}
+
+// TestSessionEntEndpoint：`POST /sessions/{id}/ent` 与 `/topent` 同一件事，
+// 只是请求体按规格写成 {"value"} / {"clear":true}。
+func TestSessionEntEndpoint(t *testing.T) {
+	hs, s := actionTestDebugServer(t)
+	giveServerNamedEnv(s, "h1", "127.0.0.1", "36")
+	sess := idleOn("s1", s.cfg.CloneEnv("h1"))
+	s.mgr.sessions["s1"] = sess
+
+	// 假会话没有真 PTY（SetTopent 要往 shell 下发），所以这里钉**接线与闸门**：
+	// 非空闲时 /ent 与 /topent 给出同一个拒绝 —— 两条路走的是同一份实现。
+	sess.mu.Lock()
+	sess.state = StateStopped
+	sess.mu.Unlock()
+	for _, path := range []string{"/api/sessions/s1/ent", "/api/sessions/s1/topent"} {
+		resp := doReq(t, "POST", hs.URL+path, "", `{"value":"88"}`)
+		if resp.StatusCode != 409 {
+			t.Fatalf("%s 应与非空闲会话一样拒绝，实得 %d（%s）", path, resp.StatusCode, respError(t, resp))
+		}
+	}
+}
+
+// TestSessionQuitByPost：规格里 quit 是 POST；与 DELETE 同一件事（结束本轮、会话保留）。
+func TestSessionQuitByPost(t *testing.T) {
+	hs, s := actionTestDebugServer(t)
+	giveServerNamedEnv(s, "h1", "127.0.0.1", "36")
+	sess := idleOn("s1", s.cfg.CloneEnv("h1"))
+	s.mgr.sessions["s1"] = sess
+
+	resp := doReq(t, "POST", hs.URL+"/api/sessions/s1/quit", "", "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("quit: %d %s", resp.StatusCode, respError(t, resp))
+	}
+	// 会话**还在**（结束本轮 ≠ 收掉会话），这是 DELETE/quit 与 /close 的分界。
+	if s.mgr.Get("s1") == nil {
+		t.Fatal("quit 之后会话必须保留（收会话走 /close）")
+	}
+}
