@@ -486,3 +486,34 @@ func (c *Client) Recording(id string) (map[string]any, error) {
 	}
 	return out, nil
 }
+
+// WriteEnvelope 让 `*Failure` 能**自己打信封**（CLI 的错误出口认这个接口，见 cli/root.go）。
+//
+// 为什么要它：CLI 只把 `*output.Error` 认成"带码的错误"，其余一律打成通用码
+// `USAGE`。于是同一个失败 —
+//   - 在 REST 上是 `{"code":"SESSION_NOT_FOUND"}`；
+//   - 在 CLI 输出里却成了 `{"code":"USAGE","error":"没有这条会话…"}`。
+// 靠 code 分支的调用方（Agent、脚本）只能去啃中文，这正是契约里要消灭的东西。
+//
+// 形状与 `internal/output` 的信封一致（ok/code/error/hint/exitCode），
+// 额外带上 `candidates`（多候选时的那九键清单，靠它"照抄重发"）。
+func (f *Failure) WriteEnvelope(w io.Writer) error {
+	if f == nil {
+		return nil
+	}
+	payload := map[string]any{
+		"ok":       false,
+		"code":     f.Code,
+		"error":    f.Message,
+		"exitCode": f.ExitCode(),
+	}
+	if h := strings.TrimSpace(f.Hint); h != "" {
+		payload["hint"] = h
+	}
+	if len(f.Candidates) > 0 {
+		payload["candidates"] = f.Candidates
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}

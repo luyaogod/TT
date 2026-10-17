@@ -5,6 +5,7 @@ package debugclient
 // 从前的子进程实现只能靠退出码反推，正是这里要消灭的东西。
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -238,5 +239,44 @@ func TestLifecycleEndpoints(t *testing.T) {
 	}
 	if got[3].body["command"] != "break 812" {
 		t.Errorf("exec 命令体不对：%+v", got[3].body)
+	}
+}
+
+// TestFailureWritesItsOwnEnvelope：**机器码必须原样传到 CLI 输出**。
+//
+// 这条防的是"REST 上是 SESSION_NOT_FOUND、命令行里变成 USAGE"那种漂：
+// 靠 code 分支的调用方只能去啃中文，而那正是契约要消灭的东西。
+func TestFailureWritesItsOwnEnvelope(t *testing.T) {
+	f := &Failure{
+		Code:    target.CodeAmbiguous,
+		Message: "有 2 条会话",
+		Hint:    "照抄 ref 重发",
+		Candidates: []target.Candidate{
+			{ID: "s1", Ref: "主机109#1"}, {ID: "s2", Ref: "主机109#2"},
+		},
+	}
+	var buf bytes.Buffer
+	if err := f.WriteEnvelope(&buf); err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		OK         bool                `json:"ok"`
+		Code       string              `json:"code"`
+		Error      string              `json:"error"`
+		Hint       string              `json:"hint"`
+		ExitCode   int                 `json:"exitCode"`
+		Candidates []target.Candidate  `json:"candidates"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("信封不是合法 JSON：%v", err)
+	}
+	if out.OK || out.Code != target.CodeAmbiguous || out.Error != "有 2 条会话" || out.Hint != "照抄 ref 重发" {
+		t.Fatalf("信封字段不对：%+v", out)
+	}
+	if len(out.Candidates) != 2 || out.Candidates[0].Ref != "主机109#1" {
+		t.Fatalf("候选丢了：%+v", out.Candidates)
+	}
+	if out.ExitCode != f.ExitCode() {
+		t.Fatalf("退出码不一致：%d vs %d", out.ExitCode, f.ExitCode())
 	}
 }
