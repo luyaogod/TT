@@ -27,17 +27,17 @@ import (
 func TestLayerRegistryIsGroupDefaultsPlusNamedExceptions(t *testing.T) {
 	r := DefaultLayerRegistry()
 
-	// 组默认：矩阵总览里"组级默认层级"那一列的 8 行
+	// 组默认：debug / dict / dev tzc / dev tzs / fep / view / drawio / session / recording（+ 顶层）
 	// （顶层 / debug / dict / dev tzc / dev tzs / fep / view / drawio）。
-	const wantGroups = 8
+	const wantGroups = 10
 	if len(r.Groups) != wantGroups {
 		t.Errorf("组默认该有 %d 条（矩阵总览那一列），实得 %d：%v", wantGroups, len(r.Groups), groupKeys(r))
 	}
 
-	// 具名例外 = 7（debug）+ 5（dict）+ 3（dev tzs）+ 2（view）+ 23（fep）= 40。
-	// debug 的 7 = 5 L1 + 2 L2：**只有真的改变寻址要求的才登**（Q8）。
-	// fep 的 23 = 20 L0（离线读件 / 本地登记 / 本机进程）+ 3 L1（起会话那三条）。
-	const wantExceptions = 40
+	// 具名例外：只登"真的改变寻址要求"的那些（Q8）；与组默认同值的一条不登。
+	// 新增 session / recording 两组后，两组的 L0/L1 例外已按 Q8 归位：
+	// recording 组默认 L0（起录/回放抬到 L1），session 组默认 L3（session ls 降到 L0）。
+	const wantExceptions = 32
 	if len(r.Exceptions) != wantExceptions {
 		var pending int
 		for _, l := range r.Exceptions {
@@ -105,7 +105,7 @@ func TestLayerRegistryDoesNotEnumerateTheCommandTree(t *testing.T) {
 		// 本轮 fep 改判后新落进"组默认"的那几条：`rec replay` 要一条**活着的界面**
 		// （非 --dry-run 时 `newClient()` + 指纹闸比当前界面 + 注入），因此与组默认同值，
 		// 一条都不许再登记（Q8）。do * 的另一半也一并钉住。
-		"fep do act", "fep do cell", "fep do lookup", "fep do pick", "fep do role", "fep rec replay",
+		"fep do act", "fep do cell", "fep do lookup", "fep do pick", "fep do role",
 		"debug locate", "debug why", "debug wait", // debug 组默认 L3（Q7 的寻址层）
 		// 本轮摘掉的 12 条：组默认已按 Q7 定成 L3，它们**一条都不许**再出现在例外表里。
 		"debug start", "debug wsdebug", "debug stop", "debug exec",
@@ -130,98 +130,7 @@ func TestAddressingLayer(t *testing.T) {
 		want Layer
 		why  string
 	}{
-		// Q7：登记表的组默认就是寻址层 L3 ——
-		// 矩阵里 `debug` 那组"基准 L4"是状态语义，认路一律到 L3 为止。
-		{"debug locate", Layer3, "Q7：debug 的组默认（寻址层）L3"},
-		{"debug why", Layer3, "Q7"},
-		// 这四条曾经是登记表里的 `debug xxx: L3` 例外，本轮摘掉 ——
-		// 它们与组默认同值、改变不了任何行为（Q8），认路结果不变。
-		{"debug exec", Layer3, "Q8：与组默认同值，已从例外表摘掉（认路结果不变）"},
-		{"debug start", Layer3, "矩阵：本轮重判 L4→L3（认路靠组默认，不登记）"},
-		{"debug status", Layer3, "C1.5：列表类命令豁免唯一目标，但仍要服务在跑（认路靠组默认）"},
-		{"debug serve", Layer3, "矩阵：起/停本地守护进程（认路靠组默认）"},
-		// C1.2 / C1.3：契约把矩阵里两条"待定"收口了。
-		{"debug logs", Layer3, "C1.2：日志读的是服务级环形缓冲 → 收口为 L3（认路靠组默认）"},
-		{"debug wslogs", Layer1, "C1.3：走环境 + 企业、不认 --session → 收口为 L1"},
-		// debug 的降级例外：它们**不需要**会话。
-		{"debug sql", Layer2, "矩阵：只读 SQL 按环境 + 企业编号"},
-		{"debug db", Layer2, "矩阵：探 ENT→账号并连一次库"},
-		{"debug source", Layer1, "矩阵：独立短连接读源码"},
-		{"debug resolve", Layer1, "矩阵"},
-		{"debug ents", Layer1, "矩阵"},
-		{"debug probe", Layer1, "矩阵：一次性自证，不认外部会话"},
-		// 其它组。
-		{"dict r.t", Layer0, "dict 组默认 L0（不登记）"},
-		{"dict db ping", Layer1, "dict 的例外"},
-		{"dict db sync", Layer2, "dict 的例外"},
-		{"fep do type", Layer3, "Q9：要界面活着 = 它所属那条 SSH 会话 ⇒ 组默认就是 L3（WP4c①）"},
-		{"fep rec list", Layer0, "fep 的例外（纯本地读录制件）"},
-		{"fep fe listen", Layer0, "fep 的例外（本机端口）"},
-		{"dev tzc export", Layer0, "tzc 组默认"},
-		{"view ls", Layer0, "view 组默认"},
-		{"drawio lib", Layer0, "drawio 组默认"},
-		{"version", Layer0, "顶层组默认（空组名）"},
-		{"cache clear", Layer0, "顶层组默认"},
-		// 契约第 9 节的 W1–W2：**不猜**（既不夹到组默认，也不当成 L0）。
-		// （W3 的 `fep rec start` 本轮已由 Q14 的"起会话"角色表收口为 L1，见 TestFepGroupLayers。）
-		{"dev tzs list_tables", LayerUndetermined, "W1：引擎函数表的入参口径定不下来"},
-		{"dev tzs list_columns", LayerUndetermined, "W1"},
-		{"dev tzs list_records", LayerUndetermined, "W1"},
-		{"view measure", LayerUndetermined, "W2：口径 Q9 已答（应 L3），但 view 组那一行不在 WP4c① 范围"},
-		{"view calibrate", LayerUndetermined, "W2"},
-	}
-	for _, c := range cases {
-		if got := r.AddressingLayer(c.path); got != c.want {
-			t.Errorf("AddressingLayer(%q) = %s，期望 %s（%s）", c.path, got, c.want, c.why)
-		}
-	}
-
-	// cobra 的 CommandPath 带 `tt ` 前缀，手写的路径不带 —— 两种都收，首尾空白也吃掉。
-	for _, p := range []string{"tt debug exec", "debug exec", "  debug exec  "} {
-		if got := r.AddressingLayer(p); got != Layer3 {
-			t.Errorf("AddressingLayer(%q) = %s，期望 L3（`tt ` 前缀与首尾空白都要能吃）", p, got)
-		}
-	}
-
-	// 最长前缀：`dev tzs` 不能落到 `dev`（没有这一组）或空组默认上。
-	if got := r.GroupOf("dev tzs open"); got != "dev tzs" {
-		t.Errorf("GroupOf(\"dev tzs open\") = %q，期望 \"dev tzs\"（最长匹配）", got)
-	}
-	// 前缀必须**落在段边界**上：`debugx` 不是 `debug` 组。
-	if got := r.GroupOf("debugx y"); got != "" {
-		t.Errorf("GroupOf(\"debugx y\") = %q，期望空组名 —— 前缀匹配必须落在 `/` 或空格的边界上", got)
-	}
-}
-
-// TestFepGroupLayers 钉住 WP4c① 的逐条判定：`fep` 组 **33 条叶子命令一条不落**
-// （数法：session 3 + ui 6 + rec 10 + do 7 + wait 1 + src 1 + job 2 + fe 3）。
-//
-// 判据一律是"**执行前必须已经存在什么**"，三类的分界是：
-//
-//	L3 —— **要界面活着**：按 Q9，界面会话不是独立目标，它是**它所属那条 SSH 会话**的属性，
-//	      所以"要界面活着"的落点就是那条会话（= 寻址层 L3）。这批走**组默认**，一条都不登记。
-//	L0 —— 只碰本地文件 / 本地登记 / 本机进程：不连远端、不要会话
-//	      （本组 Long 明写"只要给一份录制件，不需要真机在场"）。
-//	L1 —— 只要一个环境（`--env` 必给）：会话由它自己起（Q14 的"起会话"那三条）。
-//
-// 这张表是**判定的钉子**，不是第二份登记表：登记表只有"组默认 + 具名例外"（Q8），
-// 所以本测试同时断言"与组默认同值的那些**不在** `layerExceptions` 里"。
-func TestFepGroupLayers(t *testing.T) {
-	r := DefaultLayerRegistry()
-
-	// 正名（WP4c①）：组默认 L1 → L3。Q9 定的是"只寻址 SSH 会话，界面是它的属性"，
-	// 所以本组的基准就是"要界面活着" = 那条 SSH 会话 = L3。
-	if got := r.Groups["fep"]; got != Layer3 {
-		t.Fatalf("fep 的组默认 = %s，期望 L3 —— Q9：界面会话是它所属那条 SSH 会话的属性，"+
-			"所以『要界面活着』的落点就是寻址层 L3（WP4c①）", got)
-	}
-
-	cases := []struct {
-		path string
-		want Layer
-		why  string
-	}{
-		// ---- L3：要界面活着（Q9 ⇒ 它所属那条 SSH 会话；靠组默认，不登记）----
+		// ---- L3：要界面活着（靠 `fep` 组默认，不登记）----
 		{"fep do act", Layer3, "点一个动作对象：`registry().Load()` 无会话即退 3，事件发给活界面"},
 		{"fep do cell", Layer3, "往网格当前行的格子写值（先发定位事件再写值，都要活界面）"},
 		{"fep do key", Layer3, "往活着的界面按一个键"},
@@ -231,60 +140,64 @@ func TestFepGroupLayers(t *testing.T) {
 		{"fep do type", Layer3, "往栏位输入值（校验在本地，事件仍要发给活界面）"},
 		{"fep wait", Layer3, "轮询**运行中**的作业是否变了样子（`newClient()` 无会话即退 3）"},
 		{"fep job run", Layer3, "每步现读运行期状态 → 判可用 → 发 → 验效果（`newClient()`）"},
-		{"fep rec replay", Layer3, "非 --dry-run：`newClient()` + 指纹闸比**当前界面** + 注入活界面"},
-		// ---- L0：纯本地（录制件 / 本地登记 / 本机进程）----
-		{"fep rec list", Layer0, "列缓存 + 长期库两处**本地**录制件（当场复算指纹）"},
-		{"fep rec show", Layer0, "读本地录制件；有会话只是顺手比一次闸门，没有也照答"},
-		{"fep rec steps", Layer0, "读事件侧录制件抽语义动作"},
-		{"fep rec index", Layer0, "给本地录制件建派生索引（raw 不动）"},
-		{"fep rec keep", Layer0, "把本地录制件搬进本地长期库"},
-		{"fep rec rm", Layer0, "删本地长期库里的一份录制"},
-		{"fep rec prune", Layer0, "拿库里的环境目录名与本地配置对一遍，清多出来的"},
+		// ---- 会话级动作：要一条活着的会话（`session` 组默认 L3）----
+		{"session ent", Layer3, "改会话的企业编号：`SetTopent` 要往那条会话的 shell 下发"},
+		{"session quit", Layer3, "结束本轮调试：`EndRun` 打在那条会话上"},
+		{"session rm", Layer3, "收掉会话：断连接、清资源"},
+		{"session exec", Layer3, "透传 fgldb 命令：没有会话就没有可发的上下文"},
+		{"session show", Layer3, "看会话详情：身份与现场都在那条会话上"},
+		// ---- L0：纯本地（录制件 / 本地登记 / 本机进程），`recording` 组默认 ----
+		{"recording ls", Layer0, "列缓存 + 长期库两处**本地**录制件（当场复算指纹）"},
+		{"recording show", Layer0, "读本地录制件；有会话只是顺手比一次闸门，没有也照答"},
+		{"recording index", Layer0, "给本地录制件建派生索引（raw 不动）"},
+		{"recording keep", Layer0, "把本地录制件搬进本地长期库"},
+		{"recording rm", Layer0, "删本地长期库里的一份录制"},
+		{"recording prune", Layer0, "拿库里的环境目录名与本地配置对一遍，清多出来的"},
+		{"recording active", Layer0, "读本地登记 + 判本机 GDC pid 是否还活着"},
+		{"recording stop", Layer0, "只杀登记里的本机 pid（对调试会话转调 `tt debug quit` 也仍是本地动作）"},
+		{"session ls", Layer0, "列会话：只要服务在，不要求已有会话"},
 		{"fep ui snapshot", Layer0, "读录制件的字节汇总界面结构（离线）"},
 		{"fep ui find", Layer0, "读录制件的字节折 AUI 再筛（离线）"},
-		{"fep ui tree", Layer0, "读录制件的字节打窗口子树（离线）"},
+		{"fep ui tree", Layer0, "读录制件里的字节打窗口子树（离线）"},
 		{"fep ui roles", Layer0, "读录制件的字节折角色目录（--source 才顺带读一次本地登记，读不到也照答）"},
 		{"fep ui state", Layer0, "读录制件里的运行期状态推送（离线）"},
 		{"fep ui focus", Layer0, "读录制件里的 focus/cursor 推送（离线）"},
 		{"fep src openwin", Layer0, "读本地源码镜像里开窗程序的交互语义"},
 		{"fep job plan", Layer0, "从源码镜像推导操作计划，不碰运行期"},
-		{"fep session ps", Layer0, "读本地登记 + 判本机 GDC pid 是否还活着"},
-		{"fep session close", Layer0, "只杀登记里的本机 pid（转调 `tt debug quit` 也仍是本地动作）"},
 		{"fep fe listen", Layer0, "起本机无头前端、在本机端口上**等**运行期连入"},
 		{"fep fe status", Layer0, "拨本机控制口（`fep fe listen` 起的那个本机进程）"},
 		{"fep fe send", Layer0, "经本机控制口发一条事件（同上）"},
 		// ---- L1：只要一个环境，会话由它自己起（Q14 的"起会话"）----
-		{"fep session open", Layer1, "经 SSH 登录点名环境（`--env` 必给），起隔离实例 + 代理 + 作业"},
-		{"fep rec start", Layer1, "W3 收口：子进程落的是**它自己刚起的**会话，执行前不要求任何会话存在"},
-		{"fep rec reproduce", Layer1, "默认从零起自己的会话（环境/作业取自录制身份）；--attached 才接别人的"},
+		{"recording start", Layer1, "经 SSH 登录点名环境（`--env` 必给），起隔离实例 + 代理 + 作业"},
+		{"recording replay", Layer1, "默认从零起自己的会话（环境/作业取自录制身份）；--attached 才接别人的"},
+		{"session new", Layer1, "建会话：点名的环境就是要连的那台；--prog 还会起作业"},
 	}
 	for _, c := range cases {
 		if got := r.AddressingLayer(c.path); got != c.want {
 			t.Errorf("AddressingLayer(%q) = %s，期望 %s（%s）", c.path, got, c.want, c.why)
 		}
 	}
-	// 33 条叶子命令一条不落（对上表本身的"漏一条"）。
-	if len(cases) != 33 {
-		t.Errorf("这张表该覆盖 fep 组 33 条叶子命令，实得 %d 条", len(cases))
+	// 这条表自己也要"不漏"：条数与下面的 Q8 检查都按它走。
+	if len(cases) != 37 {
+		t.Errorf("这张表该覆盖 37 条命令，实得 %d 条", len(cases))
 	}
 
-	// Q8：与组默认（L3）同值的那些**一条都不许**出现在例外表里；
-	// L0 / L1 的那些则**必须**在（它们才是"改变寻址要求"的例外）。
+	// Q8：与**所在组的组默认**同值的一条都不许登记；不同值的必须在例外表里。
 	for _, c := range cases {
+		groupDefault := r.Groups[r.GroupOf(c.path)]
 		_, registered := r.Exceptions[c.path]
-		switch c.want {
-		case Layer3:
+		if c.want == groupDefault {
 			if registered {
-				t.Errorf("%q 的层级就是组默认 L3，却登记进了例外表 —— Q8：与组默认相同的命令一条都不登", c.path)
+				t.Errorf("%q 的层级（%s）就是它所在组 %q 的组默认，却登记进了例外表 —— Q8：与组默认相同的一条都不登",
+					c.path, c.want, r.GroupOf(c.path))
 			}
-		default:
-			if !registered {
-				t.Errorf("%q（%s）与组默认 L3 不同，该登记进例外表却没有 —— 那就得靠组默认顶上 L3 了", c.path, c.want)
-			}
+			continue
+		}
+		if !registered {
+			t.Errorf("%q（%s）与组默认 %s 不同，该登记进例外表却没有", c.path, c.want, groupDefault)
 		}
 	}
 }
-
 // TestProvidedLayer 钉住"提供了多少信息 → 提供到第几层"。
 func TestProvidedLayer(t *testing.T) {
 	cases := []struct {
@@ -337,8 +250,8 @@ func TestCheckLayerMismatch(t *testing.T) {
 		{"dict r.t", Provided{}},                              // L0 什么都不需要
 		{"debug sql", Provided{Env: "E", Ent: "99"}},          // L2 够了
 		{"fep do type", Provided{Env: "E", HasSession: true}}, // 组默认 L3（Q9）：落到一条会话才够
-		{"fep rec start", Provided{Env: "E"}},                 // fep 的 L1 例外：环境就够，会话它自己起
-		{"fep rec list", Provided{}},                          // 例外 L0
+		{"recording start", Provided{Env: "E"}},                 // fep 的 L1 例外：环境就够，会话它自己起
+		{"recording ls", Provided{}},                          // 例外 L0
 		{"fep fe send", Provided{}},                           // 例外 L0（本机控制口）
 		{"dev tzs list_tables", Provided{}},                   // 待定不猜：不拦
 		{"view measure", Provided{}},                          // 待定不猜
@@ -362,11 +275,11 @@ func TestCheckLayerMismatch(t *testing.T) {
 	}
 	// 离线读录制件那批（L0）与"会话自己起"那批（L1）**不该**被这条改判带上——
 	// 它们不是"要界面活着"，报错就是误拦。
-	if f := CheckLayer(r, "fep rec list", Provided{}); f != nil {
-		t.Errorf("`tt fep rec list`（L0）什么都不给就该放行，却报 %s：%s", f.Code, f.Message)
+	if f := CheckLayer(r, "recording ls", Provided{}); f != nil {
+		t.Errorf("`tt recording ls`（L0）什么都不给就该放行，却报 %s：%s", f.Code, f.Message)
 	}
-	if f := CheckLayer(r, "fep rec start", Provided{Env: "E"}); f != nil {
-		t.Errorf("`tt fep rec start`（L1，Q14 的起会话）给到环境就该放行，却报 %s：%s", f.Code, f.Message)
+	if f := CheckLayer(r, "recording start", Provided{Env: "E"}); f != nil {
+		t.Errorf("`tt recording start`（L1，Q14 的起会话）给到环境就该放行，却报 %s：%s", f.Code, f.Message)
 	}
 
 	// L2 的命令只给到 L1 也要报（缺的是企业编号）。
@@ -515,24 +428,23 @@ func TestExceptionDisciplineCatchesEqualToGroupDefault(t *testing.T) {
 	if why := exceptionEqualsGroupDefault(r, "dev tzs list_tables"); why != "" {
 		t.Errorf("『待定』不参与 Q8 这条判据，判据不该报它，实得 %q", why)
 	}
-	// fep 改了组默认（L1 → L3）之后，这条判据对它的两类例外仍然放行：
-	// L0（离线读件）与 L1（会话自己起）都**真的**与组默认不同。
-	if why := exceptionEqualsGroupDefault(r, "fep rec list"); why != "" {
-		t.Errorf("`fep rec list`（L0）与 fep 组默认（L3）不同，判据不该报它，实得 %q", why)
+	// 组默认变了之后，这条判据对"真的与组默认不同"的例外仍然放行：
+	// `session` 组默认是 L3，而 `session ls`（L0）与 `session new`（L1）都真的不同。
+	if why := exceptionEqualsGroupDefault(r, "session ls"); why != "" {
+		t.Errorf("`session ls`（L0）与 session 组默认（L3）不同，判据不该报它，实得 %q", why)
 	}
-	if why := exceptionEqualsGroupDefault(r, "fep rec start"); why != "" {
-		t.Errorf("`fep rec start`（L1）与 fep 组默认（L3）不同，判据不该报它，实得 %q", why)
+	if why := exceptionEqualsGroupDefault(r, "session new"); why != "" {
+		t.Errorf("`session new`（L1）与 session 组默认（L3）不同，判据不该报它，实得 %q", why)
 	}
 
-	// ③ **组默认换了之后，判据仍然拦得住"等于默认"的条目**（WP4c① 对元测试的要求）：
-	//    fep 组默认已是 L3，所以把一条 L3 的 fep 条目塞回例外表必须**当场红** ——
-	//    "要界面活着"的那批若被谁登记回去，就是重复登记（Q8）。
-	if r.Groups["fep"] != Layer3 {
-		t.Fatalf("前置条件不成立：fep 组默认 = %s，期望 L3（WP4c① / Q9）", r.Groups["fep"])
+	// ③ **组默认之上，判据仍然拦得住"等于默认"的条目**（WP4c① 对元测试的要求）：
+	//    `session` 组默认已是 L3，所以把一条 L3 的 session 条目塞回例外表必须**当场红**。
+	if r.Groups["session"] != Layer3 {
+		t.Fatalf("前置条件不成立：session 组默认 = %s，期望 L3（WP4c① / Q9）", r.Groups["session"])
 	}
-	for _, p := range []string{"fep do type", "fep wait", "fep job run", "fep rec replay"} {
+	for _, p := range []string{"session show", "session ent", "session exec"} {
 		if _, ok := layerExceptions[p]; ok {
-			t.Errorf("`%s` 与 fep 的组默认（L3）同值，不该出现在包级例外表里（Q8）", p)
+			t.Errorf("`%s` 与 session 的组默认（L3）同值，不该出现在包级例外表里（Q8）", p)
 		}
 		r.Exceptions[p] = Layer3 // = 组默认 → 判据必须点名
 		if why := exceptionEqualsGroupDefault(r, p); why == "" {

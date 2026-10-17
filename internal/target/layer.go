@@ -134,7 +134,9 @@ func DefaultLayerRegistry() LayerRegistry {
 			// **为什么默认不取条数更多的 L0（20 条）**：组默认取**更严**的那一层 ——
 			// 漏登记时是"多要一层"的响亮失败（`CheckLayer` 当场报出来），
 			// 而不是"少要一层"的静默落错；后者正是本次重构要根除的东西。
-			"fep":    Layer3,
+			"fep":      Layer3,
+	"session":  Layer3, // 会话级动作（ent/quit/rm/exec/show）都要一条活着的会话
+	"recording": Layer0, // 录制件的本地维护默认 L0；起录/回放由例外表抬到 L1
 			"view":   Layer0, // 本机窗口与图像
 			"drawio": Layer0, // 形状库是内置的
 		},
@@ -206,21 +208,13 @@ var layerExceptions = map[string]Layer{
 	//（与 `dict` 的 `--env` 同口径：可选开关不改变最低层级）。
 	//
 	// 例外①L0（20 条）：只碰本地文件 / 本地登记 / 本机进程 —— 不连远端、不要会话。
-	"fep rec index":     Layer0, // 给本地录制件建帧索引（派生文件；raw 是唯一权威）
-	"fep rec keep":      Layer0, // 把本地录制件搬进长期库（落点 = <数据目录>/records）
-	"fep rec list":      Layer0, // 列缓存 + 长期库两处**本地**录制件（当场复算指纹）
-	"fep rec prune":     Layer0, // 清长期库里"配置里已经没有的环境"，只读本地配置比目录名
-	"fep rec rm":        Layer0, // 删长期库里的一份录制件（只动本地目录）
-	"fep rec show":      Layer0, // 读本地录制件与本地登记；有会话时**顺手**比一次闸门，没有也照答
-	"fep rec steps":     Layer0, // 事件侧录制件抽语义动作（纯读文件）
 	"fep ui find":       Layer0, // 读录制件的字节折 AUI 再筛（离线）
 	"fep ui focus":      Layer0, // 读录制件里的 focus/cursor 推送（离线）
 	"fep ui roles":      Layer0, // 读录制件的字节折角色目录（--source 才顺带读一次本地登记，读不到也照答）
 	"fep ui snapshot":   Layer0, // 读录制件的字节汇总界面结构（离线）
 	"fep ui state":      Layer0, // 读录制件里的运行期状态推送（离线）
 	"fep ui tree":       Layer0, // 读录制件的字节打窗口子树（离线）
-	"fep session ps":    Layer0, // 读本地登记 + 判本机 GDC pid 是否还活着
-	"fep session close": Layer0, // 只杀登记里的本机 pid（对调试会话会转调 `tt debug quit`，仍是本地动作）
+	"session ls":        Layer0, // 列会话：只要服务在，不要求已有会话
 	"fep job plan":      Layer0, // 从源码镜像推导操作计划，不碰运行期
 	"fep src openwin":   Layer0, // 读本地镜像里开窗程序的交互语义
 	"fep fe listen":     Layer0, // 起本机无头前端并在本机端口上**等**运行期连入（是"被连"不是"去连"）
@@ -229,9 +223,9 @@ var layerExceptions = map[string]Layer{
 	//
 	// 例外②L1（3 条）：只要一个环境（`--env` 必给，没有默认环境可回落），会话由它自己起 ——
 	// Q14 的"起会话"角色表点的就是这三条。
-	"fep session open":  Layer1, // 经 SSH 登录点名环境、下 TOPENT、起隔离实例 + 代理 + 作业
-	"fep rec start":     Layer1, // W3 由此收口：它起的子进程（`debug start/env/topent`）落的是**它自己刚起的**那条会话，执行前不要求任何会话存在（`debug quit` 那一步是 optional）
-	"fep rec reproduce": Layer1, // 同上（默认口径：从零起自己的会话，环境/作业取自录制身份）；`--attached` 才是"接别人的会话"的变体
+	"recording start":   Layer1, // 起一轮录制：点名环境（--session 挂靠时不新建，但最低要求仍是环境）
+	"recording replay":  Layer1, // 回放：默认从零起自己的会话（环境/作业取自录制身份），执行前不要求任何会话存在
+	"session new":       Layer1, // 建会话：点名的环境就是要连的那台；给了 --prog 还会起作业
 }
 
 // DeclaredLayer 返回登记表里那一层（可能含 L4 与待定）—— 文档、测试与"这条命令要什么"都用它。
