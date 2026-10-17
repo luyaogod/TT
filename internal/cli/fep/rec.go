@@ -1093,3 +1093,14 @@ func init() {
 	recPruneCmd.Flags().BoolVar(&recPruneDryRun, "dry-run", false, "只列该清的环境，一个字节都不删")
 	recPruneCmd.Flags().BoolVar(&recPruneYes, "yes", false, "确认删除（AI 不得自主加）")
 }
+
+// RecordingCommands 返回录制那一组命令（供 `tt recording` 重新挂号用）。
+//
+// 为什么要暴露出来：新命令面 `tt recording` 必须与 `tt fep rec` **共用同一份实现**。
+// 复制一份 RunE 是这类迁移最常见的坑 —— 改一处忘一处，两个入口慢慢长成两种行为。
+// 这里给的是命令对象本身，`tt recording` 只镜像外观（名字/说明/标志）并复用它的 RunE。
+//
+// 顺序即帮助里的顺序（列 → 看 → 留 → 删 → 清 → 索引）。
+func RecordingCommands() []*cobra.Command {
+	return []*cobra.Command{recStartCmd, recListCmd, recShowCmd, recReproduceCmd, recKeepCmd, recRmCmd, recPruneCmd, recIndexCmd}
+}
