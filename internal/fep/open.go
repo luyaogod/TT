@@ -147,7 +147,10 @@ type Runtime struct {
 
 	cfg   OpenConfig
 	reg   *Registry
-	proxy *Proxy
+	// screen 是这一轮的画面通道（隔离 GDC + 录制代理）。P4 起它是一等对象：
+	// 起停、端口、注入都归 Screen，Runtime 只做组合。
+	screen *Screen
+	proxy  *Proxy // 便捷引用（= screen.Proxy()）：收尾与连接清单仍从它走
 	conn  *host.SSHConn
 	pty   *host.PTYSession
 	logf  func(string, ...any)
@@ -195,44 +198,28 @@ func Open(ctx context.Context, cfg OpenConfig, logf func(string, ...any)) (*Runt
 
 	r := &Runtime{cfg: cfg, reg: NewRegistry(cfg.DataDir), logf: logf, jobDone: make(chan struct{})}
 
-	// 1. isolated instance (detached: it must outlive a crashed TT)
-	pid, err := winproc.SpawnDetached(cfg.GDCExe,
-		[]string{"-n", "-M", "-A", "0", "-p", strconv.Itoa(cfg.GDCPort)}, cfg.GDCLog)
+	// 1–2. 画面通道（隔离 GDC + 录制代理）：交给 Screen 一处起停，Runtime 只做组合。
+	screen, err := StartScreen(ScreenConfig{
+		GDCExe: cfg.GDCExe, GDCLog: cfg.GDCLog,
+		GDCPort: cfg.GDCPort, ProxyPort: cfg.ProxyPort, InjectPort: cfg.InjectPort,
+		RecordDir: cfg.RecordDir, Tag: cfg.Tag, WaitGDC: cfg.WaitGDC,
+	}, logf)
 	if err != nil {
-		return nil, fmt.Errorf("fep: 起隔离实例失败: %w", err)
-	}
-	logf("GDC 已起：pid %d，端口 %d", pid, cfg.GDCPort)
-	if err := waitPort(cfg.GDCPort, cfg.WaitGDC); err != nil {
-		winproc.Kill(pid)
 		return nil, err
 	}
-	time.Sleep(gdcWarmup)
-
-	// 2. proxy (records every connection before anything is injected)
-	p := NewProxy(ProxyConfig{
-		Listen:  fmt.Sprintf("0.0.0.0:%d", cfg.ProxyPort),
-		Target:  net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.GDCPort)),
-		LogDir:  cfg.RecordDir,
-		Tag:     cfg.Tag,
-		Control: net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.InjectPort)),
-	})
-	if err := p.Start(); err != nil {
-		winproc.Kill(pid)
-		return nil, err
-	}
-	r.proxy = p
+	r.screen = screen
+	r.proxy = screen.Proxy()
 
 	// 3. register first, clean up later
 	sess := &Session{
 		Env: cfg.Env, Zone: cfg.Zone, Prog: cfg.Prog, Ent: cfg.Ent, Path: cfg.Path,
 		Kind:   cfg.Kind,
-		GDCPID: pid, GDCPort: cfg.GDCPort,
+		GDCPID: screen.GDCPID(), GDCPort: cfg.GDCPort,
 		ProxyPort: cfg.ProxyPort, InjectPort: cfg.InjectPort,
 		Tag: cfg.Tag, RecordDir: cfg.RecordDir, OwnerPID: os.Getpid(), Started: time.Now(),
 	}
 	if err := r.reg.Save(sess); err != nil {
-		p.Close()
-		winproc.Kill(pid)
+		_ = screen.Close()
 		return nil, err
 	}
 	r.Session = sess
@@ -345,6 +332,14 @@ func (r *Runtime) Close() error {
 	var conns []ConnInfo
 	if r.proxy != nil {
 		conns = r.proxy.Conns()
+	}
+	// 画面通道整块收（代理 + GDC 都归它管）。P4 之前这里是"关代理"再靠 Session.PIDs()
+	// 顺手杀 GDC —— 两条收尾路径分开写，漏一条就留下一个孤儿进程。
+	if r.screen != nil {
+		if err := r.screen.Close(); err != nil {
+			errs = append(errs, err.Error())
+		}
+	} else if r.proxy != nil {
 		r.proxy.Close()
 	}
 	// Only ever the PIDs this session registered.
