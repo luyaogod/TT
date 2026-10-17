@@ -446,3 +446,60 @@ func TestSessionScreenAndRecord(t *testing.T) {
 		t.Fatalf("录制视图缺字段：%+v", rec.Recording)
 	}
 }
+
+// TestSessionScreenStart：`POST /sessions/{id}/screen` 的三条前置与 501。
+//
+// 与 CLI 挂靠录制同一套规矩（空闲 / 有名字 / 点名作业）—— 两条入口必须一致，
+// 否则"命令行能挂、界面挂不上"或者反过来。
+func TestSessionScreenStart(t *testing.T) {
+	hs, s := actionTestDebugServer(t)
+	giveServerNamedEnv(s, "h1", "127.0.0.1", "36")
+
+	// ① 没有启动器：501（不是 500 —— 这是"这个部署没有这个能力"，不是内部错误）
+	idleSess := idleOn("s1", s.cfg.CloneEnv("h1"))
+	idleSess.setNameInTest("A")
+	// 假会话默认没有序号与企业：这里补上，才能验到"启动器收到的是规范地址"。
+	idleSess.mu.Lock()
+	idleSess.seq = 1
+	idleSess.cfg.Topent = "99"
+	idleSess.mu.Unlock()
+	s.mgr.sessions["s1"] = idleSess
+	resp := doReq(t, "POST", hs.URL+"/api/sessions/s1/screen", "", `{"prog":"bsft001_wf"}`)
+	if resp.StatusCode != 501 {
+		t.Fatalf("没接入启动器该 501，实得 %d（%s）", resp.StatusCode, respError(t, resp))
+	}
+
+	// ② 接上启动器：把入参原样记下来
+	var got ScreenStartRequest
+	s.SetScreenStarter(func(req ScreenStartRequest) (ScreenStartResult, error) {
+		got = req
+		return ScreenStartResult{PID: 4242, Log: "D:/tmp/screen.log"}, nil
+	})
+	resp = doReq(t, "POST", hs.URL+"/api/sessions/s1/screen", "", `{"prog":"bsft001_wf","tag":"R2"}`)
+	if resp.StatusCode != 202 {
+		t.Fatalf("该 202（已受理），实得 %d（%s）", resp.StatusCode, respError(t, resp))
+	}
+	if got.Prog != "bsft001_wf" || got.Tag != "R2" || got.Ref == "" || got.Ent != "99" {
+		t.Fatalf("启动器收到的入参不对：%+v", got)
+	}
+
+	// ③ 作业在跑：409（画面已经接到别处，此时挂不生效）
+	running := idleOn("s2", s.cfg.CloneEnv("h1"))
+	running.setNameInTest("B")
+	running.mu.Lock()
+	running.state = StateStopped
+	running.mu.Unlock()
+	s.mgr.sessions["s2"] = running
+	resp = doReq(t, "POST", hs.URL+"/api/sessions/s2/screen", "", `{"prog":"x"}`)
+	if resp.StatusCode != 409 {
+		t.Fatalf("非空闲该 409，实得 %d（%s）", resp.StatusCode, respError(t, resp))
+	}
+
+	// ④ 没名字：409（挂回不到同一条会话）
+	anon := idleOn("s3", s.cfg.CloneEnv("h1"))
+	s.mgr.sessions["s3"] = anon
+	resp = doReq(t, "POST", hs.URL+"/api/sessions/s3/screen", "", `{"prog":"x"}`)
+	if resp.StatusCode != 409 {
+		t.Fatalf("没名字该 409，实得 %d（%s）", resp.StatusCode, respError(t, resp))
+	}
+}

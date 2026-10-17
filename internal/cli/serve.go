@@ -15,6 +15,7 @@ import (
 	"tt/internal/config"
 	"tt/internal/debug"
 	"tt/internal/fep"
+	"tt/internal/screenstart"
 	dictserver "tt/internal/dict/server"
 	"tt/internal/web"
 )
@@ -122,6 +123,13 @@ func newServeCmd() *cobra.Command {
 			if dir := config.LocationsAt(path).DataDir(); dir != "" {
 				debugSrv.SetScreenLookup(fep.ScreenLookup(dir))
 			}
+			// 命令型：起画面通道（`POST /api/sessions/{id}/screen`）。实现是起一个脱离的
+			// `tt recording start --session …`；调试线只收函数，不认识 GDC/代理。
+			st := screenstart.New()
+			debugSrv.SetScreenStarter(func(req debug.ScreenStartRequest) (debug.ScreenStartResult, error) {
+				pid, log, serr := st(path, req.Ref, req.Env, req.Ent, req.Prog, req.Tag)
+				return debug.ScreenStartResult{PID: pid, Log: log}, serr
+			})
 			// 字典同步的目标缺省取**数据目录**（config.json 同目录）下的 erp_data.db，
 			// 与 `tt dict -d` 的缺省一致（都来自 config.Locations，统一路径管理器），
 			// 所以"服务在这里同步、命令行在这里读"天然对得上。

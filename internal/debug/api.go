@@ -46,6 +46,9 @@ type Server struct {
 	// nil = 没接入：`/screen`、`/record` 如实回答"现在没有画面"，不编造。
 	screenLookup func(ref string) (map[string]any, bool)
 
+	// screenStarter 起一块画面通道（见 SetScreenStarter）。nil = 本服务不支持起画面。
+	screenStarter ScreenStarter
+
 	// mu 同时保护两类运行态:
 	//   stop —— Serve 期间指向该次运行的 cancel(POST /api/shutdown 用,优雅停止);
 	//   *cfg 的替换 —— 配置热替换必须整个换掉,不能让别人看到半个新配置。
@@ -214,6 +217,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/sessions/switch", s.hSessionSwitch)
 	// 画面通道 / 录制的只读视图（画面通道由外部进程持有，服务只提供查询口）
 	mux.HandleFunc("GET /api/sessions/{id}/screen", s.hSessionScreen)
+	mux.HandleFunc("POST /api/sessions/{id}/screen", s.hSessionScreenStart)
 	mux.HandleFunc("GET /api/sessions/{id}/record", s.hSessionRecord)
 	mux.HandleFunc("GET /api/sessions/{id}/breakpoints", s.hBPList)
 	mux.HandleFunc("POST /api/sessions/{id}/breakpoints", s.hBPAdd)
@@ -2515,4 +2519,87 @@ func (s *Server) lookupScreen(ref string) (map[string]any, bool) {
 		return nil, false
 	}
 	return s.screenLookup(ref)
+}
+
+// ---------- 画面通道（命令型：起/停）----------
+//
+// 和只读视图同一套思路：调试线不认识 GDC/代理/录制，只收**两个函数**——
+// 一个"起一块画面通道"，一个"停掉它"。谁来实现由接线层决定（当前实现是起一个
+// 脱离的 `tt recording start --session …` 进程）。
+
+// ScreenStartRequest 是"给这条会话起一块画面通道"的入参。
+type ScreenStartRequest struct {
+	Ref  string `json:"ref"`  // 挂到哪条会话（规范的 `环境#序号`）
+	Env  string `json:"env"`  // 冗余带上：启动器不必再查一次
+	Ent  string `json:"ent"`
+	Prog string `json:"prog"` // 录的是哪个作业（必填）
+	Tag  string `json:"tag"`  // 期望的录制 ID（可空：由启动器生成）
+}
+
+// ScreenStartResult 是启动结果（进程号与日志，给人排障用）。
+type ScreenStartResult struct {
+	PID int    `json:"pid"`
+	Log string `json:"log,omitempty"`
+}
+
+// ScreenStarter 起一块画面通道。实现方负责"脱离本进程"并立刻返回。
+type ScreenStarter func(ScreenStartRequest) (ScreenStartResult, error)
+
+// SetScreenStarter 注入启动器（nil = 不支持起画面，端点如实报 501）。
+func (s *Server) SetScreenStarter(fn ScreenStarter) { s.screenStarter = fn }
+
+// hSessionScreenStart 给会话挂一块画面通道（`POST /api/sessions/{id}/screen`）。
+//
+// 三条前置与 CLI 的挂靠录制同一套（见 cli/fep 的 bindRecSession）：空闲、有名字、作业点名。
+// 理由也一样 —— 作业在跑时指 FGLSERVER 不生效；没名字挂不回来；不点名作业就没什么可录。
+func (s *Server) hSessionScreenStart(w http.ResponseWriter, r *http.Request) {
+	sess := s.sessOfWrite(w, r)
+	if sess == nil {
+		return
+	}
+	var req struct {
+		Prog string `json:"prog"`
+		Ent  string `json:"ent"`
+		Tag  string `json:"tag"`
+		// GDC 目前只支持 `isolated`（起一个隔离实例）；显式写出来是为了将来能拒绝别的值，
+		// 而不是默默按 isolated 处理。
+		GDC string `json:"gdc"`
+	}
+	if !readBody(w, r, &req) {
+		return
+	}
+	if g := strings.TrimSpace(req.GDC); g != "" && g != "isolated" {
+		fail(w, 400, fmt.Errorf("不支持的画面通道类型 %q：目前只有 isolated（隔离实例）", g))
+		return
+	}
+	if s.screenStarter == nil {
+		fail(w, 501, fmt.Errorf("这个服务没有接入画面通道启动器（由接线层注入，见 SetScreenStarter）"))
+		return
+	}
+	if st := sess.State(); st != StateIdle {
+		fail(w, 409, fmt.Errorf("会话不是空闲（%s）：作业在跑时画面已经接到别处，此时挂画面不生效；先 tt debug quit", st))
+		return
+	}
+	if strings.TrimSpace(sess.Name()) == "" {
+		fail(w, 409, fmt.Errorf("会话没有名字：挂画面靠别名落回同一条会话，请先 tt debug start --name <名字> 重建"))
+		return
+	}
+	prog := strings.TrimSpace(req.Prog)
+	if prog == "" {
+		fail(w, 400, fmt.Errorf("需要 prog：录的是作业界面，没有作业就没什么可录"))
+		return
+	}
+	res, err := s.screenStarter(ScreenStartRequest{
+		Ref: refOf(sess.EnvName(), sess.Seq()), Env: sess.EnvName(),
+		Ent: sess.CurrentEnt(), Prog: prog, Tag: strings.TrimSpace(req.Tag),
+	})
+	if err != nil {
+		fail(w, 500, err)
+		return
+	}
+	s.emitAction(r, sess, "screen.start", fmt.Sprintf("挂画面通道（作业 %s，pid %d）", prog, res.PID))
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"ok": true, "session": refOf(sess.EnvName(), sess.Seq()),
+		"started": res, "note": "画面通道已起；录制 ID 用 GET /api/sessions/{id}/screen 查",
+	})
 }
