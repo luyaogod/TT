@@ -225,7 +225,7 @@ func Open(ctx context.Context, cfg OpenConfig, logf func(string, ...any)) (*Runt
 	// 3. register first, clean up later
 	sess := &Session{
 		Env: cfg.Env, Zone: cfg.Zone, Prog: cfg.Prog, Ent: cfg.Ent, Path: cfg.Path,
-		Kind: cfg.Kind,
+		Kind:   cfg.Kind,
 		GDCPID: pid, GDCPort: cfg.GDCPort,
 		ProxyPort: cfg.ProxyPort, InjectPort: cfg.InjectPort,
 		Tag: cfg.Tag, RecordDir: cfg.RecordDir, OwnerPID: os.Getpid(), Started: time.Now(),
@@ -376,6 +376,15 @@ func (r *Runtime) Close() error {
 				r.logf("按归属（%s）留在缓存目录：%s —— 它会随统一清理框架按年龄删", r.cfg.Origin.Label(), r.cfg.RecordDir)
 			} else if item, perr := NewLibrary(r.cfg.DataDir).Promote(r.cfg.RecordDir, r.cfg.Tag); perr != nil {
 				r.logf("没能入长期库（录制件留在缓存目录，清缓存会删它）：%v", perr)
+				// D28：这一轮**压根没生成流量文件**时，刚写的身份描述的是一份**不存在的录像**。
+				// 留着它会让人以为"有一份录制可以回放"（真机冒烟里正是这样被误导的：
+				// 日志说"录制身份已落"，可缓存目录里根本没有对应的录制件）。
+				// 只删**刚写的这一份**（path 来自 writeMeta），别的一概不碰。
+				if dropMetaIfNoRecording(r.cfg.RecordDir, r.cfg.Tag) {
+					if rerr := os.Remove(path); rerr == nil {
+						r.logf("这一轮没有录制件，已删掉空身份文件：%s", filepath.Base(path))
+					}
+				}
 			} else {
 				r.logf("已入长期库：%s", item.Dir)
 			}
@@ -385,6 +394,16 @@ func (r *Runtime) Close() error {
 		return fmt.Errorf("fep: 收尾有失败: %s", strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+// dropMetaIfNoRecording 判「这一份身份该不该删」：**没有流量文件**就该删。
+//
+// 为什么只认流量文件：L1 真机冒烟里出现过「日志说身份已落、缓存里却没有录制件」的情形
+// （录制在别处失败）。那份身份描述的是**一份不存在的录像**，留着会让人以为能回放。
+// 判据只按**这一份的 tag** 找文件 —— 别人的录制件不算（否则会误判成"有录制"而漏删）。
+func dropMetaIfNoRecording(recordDir, tag string) bool {
+	files, err := recordingLogFiles(recordDir, tag)
+	return err == nil && len(files) == 0
 }
 
 // writeMeta 把这一轮的录制身份落成 `<录制ID>.meta.json`（与录制件同目录）。
