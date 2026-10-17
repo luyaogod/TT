@@ -816,7 +816,7 @@ func TestWP6LaunchReportsAmbiguousWithCandidates(t *testing.T) {
 	// 作业名刻意不是标准标识符：`resolveJobWith` 对非标识符**不连库**（`reProgName` 不匹配
 	// → 直接返回空），于是这次请求一路走到会话准备那一步 —— 否则它会在**解析作业**时
 	// 就先拨一次 SSH 并报别的错（那就不叫"测歧义"了）。
-	resp := doReq(t, "POST", hs.URL+"/api/sessions", "ai", `{"prog":"my job"}`)
+	resp := doReq(t, "POST", hs.URL+"/api/sessions", "ai", `{"prog":"my job","ent":"99"}`)
 	if resp.StatusCode != 409 {
 		t.Fatalf("多会话 + 不给目标该 409（C5.16），实得 %d（%s）", resp.StatusCode, respError(t, resp))
 	}
@@ -857,7 +857,7 @@ func TestWP6LaunchSingleSessionStillFallsThrough(t *testing.T) {
 	s.mgr.sessions[only.ID] = only
 	s.mgr.newSession = fakeNewIdleSession
 
-	resp := doReq(t, "POST", hs.URL+"/api/sessions", "ai", `{"prog":"my job"}`)
+	resp := doReq(t, "POST", hs.URL+"/api/sessions", "ai", `{"prog":"my job","ent":"99"}`)
 	if resp.StatusCode != 200 {
 		t.Fatalf("单会话 + 不给目标照旧该成功（Q2 / C8.1），实得 %d（%s）",
 			resp.StatusCode, respError(t, resp))

@@ -1008,7 +1008,7 @@ func TestContractNameIdempotencyIsEnforced(t *testing.T) {
 		first := m.Snapshot()[0]
 
 		// 同一条命令原样重发（网络抖了、Agent 重试）。
-		sess, err := m.LaunchWith(cfgFor("h1", "36"), "apmt520", "apmt520", alias)
+		sess, err := m.LaunchWith(cfgFor("h1", "36"), "apmt520", "apmt520", alias, "")
 		if err != nil {
 			t.Fatalf("同名 + 空闲该复用宿主并成功，实得：%v", err)
 		}
@@ -1084,7 +1084,7 @@ func TestContractNameIdempotencyIsEnforced(t *testing.T) {
 		if got := m.Snapshot()[0].Name; got != "" {
 			t.Fatalf("前置不成立：这条会话该是无名的，实得 %q", got)
 		}
-		sess, err := m.LaunchWith(cfgFor("h1", "36"), "apmt520", "apmt520", alias)
+		sess, err := m.LaunchWith(cfgFor("h1", "36"), "apmt520", "apmt520", alias, "")
 		if err != nil {
 			t.Fatalf("名字不存在该放行（起新的 / 落在这条宿主上），实得：%v", err)
 		}

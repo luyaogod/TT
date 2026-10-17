@@ -86,7 +86,7 @@ var recStartCmd = &cobra.Command{
 			return fail(exitUsage, "环境 %q 不存在（见 tt env list）", name)
 		}
 		dcfg = clone
-		// D29：没给 `--ent` 时用**环境自己的 topent**。
+		// D29：没给 `--ent` 时用**环境自己的 topent**（配置里的 db.ent）。
 		//
 		// 为什么必须补：录制身份里 ENT 空 = "未指定"，可这一轮明明知道是哪个企业
 		// （环境配置里就写着 topent）。以前只在 `--ent` 显式给了才落值，于是
@@ -96,6 +96,13 @@ var recStartCmd = &cobra.Command{
 			if t := dcfg.TopentInt(); t > 0 {
 				ent = strconv.Itoa(t)
 			}
+		}
+		// 到这里还是空 = 谁都没说这一轮跑在哪个企业。**不许再往下走**：调试线那边已经
+		// 不再沿用登录 shell 的 $TOPENT（requireExplicitEnt），这里提前一句说清楚，
+		// 免得先起代理占了三个端口、再在"起作业"那一步失败。
+		if ent == "" {
+			return fail(exitUsage, "录制必须点名企业编号(ENT)：tt fep rec start --env <环境> --ent <企业编号> --prog <作业>"+
+				"（不再沿用登录 shell 的 $TOPENT —— 那会让「忘了点名」与「点错了」长得一样）")
 		}
 		if dcfg.SSH.Host == "" {
 			return fail(exitPreflight, "环境 %q 没配 SSH host", name)
@@ -222,6 +229,10 @@ func recStartSteps(env, ent, prog, module, fglserver, alias string) []recStep {
 		steps = append(steps, recStep{args: []string{"debug", "topent", ent}})
 	}
 	start := []string{"debug", "start", prog, "--env", env, "--fglserver", fglserver}
+	// 企业编号随"起作业"那一步送下去：调试线现在**必填** ENT（不再沿用登录 shell 的 $TOPENT）。
+	if e := strings.TrimSpace(ent); e != "" {
+		start = append(start, "--ent", e)
+	}
 	if m := strings.TrimSpace(module); m != "" {
 		start = append(start, "-m", m)
 	}
@@ -345,7 +356,7 @@ func runSelfOut(cmd *cobra.Command, args ...string) ([]byte, error) {
 func init() {
 	recStartCmd.Flags().StringVar(&recStartEnv, "env", "", "环境名（必填 —— 环境一律点名，没有默认环境可回落）")
 	recStartCmd.Flags().StringVar(&recStartProg, "prog", "", "作业程序名（必填，如 bsft001_wf）")
-	recStartCmd.Flags().StringVar(&recStartEnt, "ent", "", "企业编号（ENT）：作业落在哪个企业；不给 = 沿用登录 shell 已有的 $TOPENT")
+	recStartCmd.Flags().StringVar(&recStartEnt, "ent", "", "企业编号（ENT，**必填**）：作业落在哪个企业。不给会回落到环境配置里的 db.ent；两者都没有则直接报错 —— 不再沿用登录 shell 的 $TOPENT")
 	recStartCmd.Flags().StringVarP(&recStartModule, "module", "m", "asf", "T100 模块目录名（调试线要用）")
 	recStartCmd.Flags().StringVar(&recStartBinary, "binary-ref", "",
 		"作业编译件（.42r）在服务器上的绝对路径（可选）：给了就只读探一次，记进录制身份")

@@ -51,6 +51,12 @@ var (
 	dbgSQLFile string // sql --file:从本地文件读语句(不是远端 @)
 	dbgSQLEnt  int    // sql --ent:显式指定企业编号(不给 = 用这条会话当前生效的企业编号)
 	dbgEnvFlag string // start/wsdebug --env:这次启动要连哪个环境(权威;空=回落全局 --env/当前环境)
+	// dbgEntRun 是 start/wsdebug --ent：**这一轮跑在哪个企业**。
+	//
+	// 必填（服务端会拒掉空的）：从前这里没有这个标志，企业编号只能靠"起会话后 tt debug topent"
+	// 或者干脆沿用登录 shell 的 $TOPENT —— 后者是静默的，而 ENT 决定用哪个账号连库、以及
+	// 据点校验过不过，"没说"与"说错了"在老实现里长得一模一样。
+	dbgEntRun string
 	// dbgFGLServer 是 start/wsdebug --fglserver:这一轮作业画面画到哪儿(FGLSERVER)。
 	// 空串有语义("本轮交回 T100 自动设置"),所以判定一律用 cmd.Flags().Changed,
 	// 绝不能写成 `if dbgFGLServer != ""`。
@@ -393,9 +399,12 @@ var debugStartCmd = &cobra.Command{
 别再去改全局配置 —— 改了之后每一次放行都不会有画面,而且启动输出不会提这件事。`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// 目标先判一次:--session 给了就在这里落位（F3–F8 的错当场报，不发那个 POST），
-		// --name 的取值纪律也在发请求之前判（F19）。
-		if err := dbgResolveSessionFlag(); err != nil {
+		// 目标先判一次：--session 给了就在这里落位（F3–F8 的错当场报，不发那个 POST），
+		// 落上的那一条随后**随请求体送出去** —— 从前这里只校验、不送（Bug A），
+		// 于是服务端仍按"环境+名字"收窄候选，同环境两条空闲会话时照旧报歧义，
+		// --help 里写着的这个标志等于帮不上忙。--name 的取值纪律也在发请求之前判（F19）。
+		host, err := dbgResolveSessionFlag()
+		if err != nil {
 			return err
 		}
 		if err := dbgValidateNameFlag(); err != nil {
@@ -405,6 +414,16 @@ var debugStartCmd = &cobra.Command{
 		if dbgModule != "" {
 			body["module"] = dbgModule
 		}
+		// `--ent` 是**这一轮的企业**，随请求体送过去：服务端把它落到本轮 cfg.Topent，
+		// 再 export 进会话 shell。空值不送 —— 由服务端拒绝（不再静默沿用登录 shell 的 $TOPENT）。
+		if e := strings.TrimSpace(dbgEntRun); e != "" {
+			body["ent"] = e
+		}
+		// 显式指名的宿主：只送**服务端原始句柄**（C5.4：路径与请求体只认 id，不认 ref/display）。
+		// 空值不送 —— 没打 --session 时请求体与今天逐字相同（H2）。
+		if host != nil {
+			body["session"] = host.ID
+		}
 		// `--name` 是**服务端的事实**（契约 C5.3 的 `name` 键，WP4c 落地）：别名要参与寻址
 		// 与 Q23 的幂等键判定，就必须随这次起会话送过去。空串不送（服务端按未命名处理，
 		// 与今天逐字相同）。注意别名**只在创建时给一次**（C2.5b）：这里送的是"这条会话叫什么"，
@@ -413,6 +432,16 @@ var debugStartCmd = &cobra.Command{
 			body["name"] = n
 		}
 		targetEnv := dbgWireOverrides(cmd, body)
+		// 只点名了会话、没点名环境：**环境由那一条会话决定**（它是那条会话自己的目标）。
+		// 不补这一句的话，服务端会用"它自己当前的环境"去组装本轮配置 —— 点名恒一#1 却把
+		// 这一轮落到另一个环境上，还会把那条会话判成"换目标"（服务端那一档对指名的会话
+		// 是报错，见 namedHostConflict）。空值不送：没打 --session 时这里一个字节都不加（H2）。
+		if host != nil && targetEnv == "" {
+			if env := strings.TrimSpace(host.Env); env != "" {
+				body["ssh"] = env
+				targetEnv = env // 末尾那句 dbgVerifyEnv 要拿它核对 --env 有没有真的生效
+			}
+		}
 		fglChanged := cmd.Flags().Changed("fglserver")
 		// 复用痕迹:启动前记下那个空闲会话,回包 sessionId 与它相同就是"复用了宿主"。
 		// 不标出来的话,"我并没有真正新建会话"这件事在输出里毫无痕迹(反馈 S1-④)。
@@ -1603,13 +1632,30 @@ tt debug topent <企业编号> 改。`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		rowid := args[0]
+		// `--name` 的取值纪律在**发请求之前**判（F19 / C2.8）：不合法时一个字节都不发给服务端。
+		// wsdebug 与 `debug start` 同样是**起会话**的命令（C3.5），所以这个标志的语义与它在
+		// start 上**完全一致**（同一份取值纪律、同一套幂等语义：Q17 / Q23）。
+		if err := dbgValidateNameFlag(); err != nil {
+			return err
+		}
 		reqOverride, err := buildReplayRequest(rowid)
 		if err != nil {
 			return err
 		}
 		body := map[string]any{"rowid": rowid}
+		// `--ent`：重放同样要**显式**说明跑在哪个企业（与 start 同一条规矩）。
+		if e := strings.TrimSpace(dbgEntRun); e != "" {
+			body["ent"] = e
+		}
 		if reqOverride != "" {
 			body["request"] = reqOverride
+		}
+		// `--name` 是**服务端的事实**（C5.3 的 `name` 键）：随这次起会话送过去，别名从那一刻
+		// 起参与寻址（`--session <别名>`）、当幂等键（Q23）、随会话消失即释放（Q19）。
+		// 服务端那一侧由 `hWSLogDebug` → `LaunchReplay` 一路带到 `prepareSession` 登记。
+		// 空串不送 —— 没打这个标志时请求体与今天逐字相同（H2）。
+		if n := strings.TrimSpace(dbgNameFlag); n != "" {
+			body["name"] = n
 		}
 		// 服务端不再自己挑"当前会话"来收口（WP4b：那五处 `Manager.Current()` 兜底全删了，
 		// Q4/C8.2 硬切）。要收掉的那一条由这边显式给（服务端原始句柄，C5.4）：
@@ -1687,6 +1733,10 @@ func init() {
 	debugExecCmd.Flags().StringVar(&dbgExecFile, "file", "", "命令文件:一行一条,空行与 # 开头跳过(与位置参数并用时位置参数在前)")
 	debugExecCmd.Flags().IntVar(&dbgExecMax, "max", 2000, "单条命令**显示**的行数上限(0=不限)。超出的部分不打印,但完整输出会落本地并给出路径")
 	debugStartCmd.Flags().IntVar(&dbgTimeout, "timeout", 120, "等待入口停站超时(秒)")
+	// 企业编号:**必填**（企业编号决定用哪个账号连库与据点校验，不许静默沿用登录 shell 的 $TOPENT）
+	const entHelp = "企业编号(ENT,**必填**):这一轮跑在哪个企业。不给会被服务端拒绝 —— 不再沿用登录 shell 的 $TOPENT"
+	debugStartCmd.Flags().StringVar(&dbgEntRun, "ent", "", entHelp)
+	debugWsdebugCmd.Flags().StringVar(&dbgEntRun, "ent", "", entHelp)
 	debugSQLCmd.Flags().StringVar(&dbgSQLFile, "file", "", "从本地文件读查询语句(长语句用)")
 	debugSQLCmd.Flags().IntVar(&dbgSQLEnt, "ent", 0, "企业编号(不给 = 用这条会话当前生效的企业编号；服务端要求显式给，见 C7.1-5)")
 	debugSQLCmd.Flags().IntVar(&dbgTimeout, "timeout", 0, "查询超时秒数(默认 30,上限 120)")
@@ -1732,10 +1782,12 @@ func init() {
 	//
 	// `--session` 只挂**会话级操作命令**：status / sql / wslogs / wsdebug **不挂**
 	// （C1.5 / C1.2 / C1.3：它们不认会话级目标，挂上去就会让 F16 那条"标志挂错命令"
-	// 的自纠提示落空）。`--name` 只挂**起会话**的命令（C3.5：别处给它就是 F17）。
+	// 的自纠提示落空）。`--name` 只挂**起会话**的命令（C3.5：别处给它就是 F17）——
+	// 今天那两条正是 `start` 与 `wsdebug`（Bug B：wsdebug 同样是起会话的命令，
+	// 从前漏了它，于是它起的会话只能用 ref 寻址、也不能当幂等键）。
 	dbgRegisterSessionFlag(debugStartCmd, debugExecCmd, debugQuitCmd, debugWhyCmd,
 		debugWaitCmd, debugModeCmd)
-	dbgRegisterNameFlag(debugStartCmd)
+	dbgRegisterNameFlag(debugStartCmd, debugWsdebugCmd)
 	addClientURLFlag(debugStartCmd, debugExecCmd, debugStatusCmd, debugQuitCmd, debugWslogsCmd, debugSQLCmd, debugWsdebugCmd, debugWhyCmd, debugWaitCmd, debugModeCmd)
 	Group.AddCommand(debugStartCmd, debugExecCmd, debugStatusCmd, debugQuitCmd, debugWslogsCmd, debugSQLCmd, debugWsdebugCmd, debugWhyCmd, debugWaitCmd, debugModeCmd)
 }

@@ -542,10 +542,21 @@ func (s *Server) hLaunch(w http.ResponseWriter, r *http.Request) {
 		// 它**就是这条会话的幂等键**（Q23）：同名会话空闲 → 复用；正在跑 / 已停站 → 报
 		// `SESSION_TARGET_BUSY` 退 3，**不许静默再开一条**；名字不存在 → 起新会话。
 		Name string `json:"name"`
+		// Session 是 `--session` **显式指名**的宿主会话（服务端原始句柄 `{id}`，C5.4 / Bug A）。
+		// 空 = 没指名 —— 这一档与今天逐字相同（按环境+名字收窄候选，多条即 F1 歧义）。
+		// 非空 = "就用这一条当宿主"：候选集当场收敛成它一条，于是**不可能**再报
+		// `SESSION_AMBIGUOUS`。从前 CLI 只在本机校验这个标志、POST 里不带它，于是
+		// 同环境两条空闲会话时 `--session 恒一#1` 照样歧义 —— 标志在 --help 里写着却帮不上忙。
+		Session string `json:"session"`
 		// FGLServer 本轮 FGLSERVER 覆盖(指针:给了就是权威,空串 = 本轮强制交回 T100 自动设置)。
 		// 存在的理由是"画面去哪"只该由这一轮决定:以前只能改全局配置,于是做一次 fep
 		// 无头前端实验就把调试的画面接线顶掉了,而且静默(见 ScreenTarget)。
 		FGLServer *string `json:"fglserver"`
+		// Ent 是**这一轮**的企业编号(ENT)。从前没有这个字段:企业只能靠"起会话后
+		// tt debug topent"或者沿用登录 shell 的 $TOPENT,而后者是静默的 —— "忘了点名"
+		// 与"点错了"表现完全一样(作业照跑,只是跑在另一家企业上)。现在它是必填:
+		// 空且目标会话也没有显式 override 时,`prepareSession` 会拒掉(见 requireExplicitEnt)。
+		Ent string `json:"ent"`
 	}
 	if !readBody(w, r, &req) {
 		return
@@ -554,17 +565,53 @@ func (s *Server) hLaunch(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, fmt.Errorf("prog 必填(module 可留空,自动按作业名解析)"))
 		return
 	}
+	// `--session` 显式指名的宿主先落一次位（Bug A）：指名的那条**不在池里**就报
+	// `SESSION_NOT_FOUND`，**绝不回落成"那就按候选再收窄一次"** —— 回落会把"我点的那条
+	// 没了"变成"落到另一条上、而输出看起来一切正常"，那正是这次重构要根除的那句话。
+	// 落上了就把**服务端原始句柄**带下去（路径与请求体只认 id，C5.4）；"它还是不是活着"
+	// 由 `prepareSessionOn` 再兜一次 —— 两次判断之间它可能刚好断掉，与
+	// `checkNameFree` / `assignIdentityLocked` 那条两段式同款（判据只有一份，只是兜两次）。
+	if id := strings.TrimSpace(req.Session); id != "" {
+		sess, reason, cands := s.resolveTarget(id)
+		if reason != targetOK {
+			// 非空 id 只可能落到 OK 或 Missing 两种结局：Missing → 404 + `SESSION_NOT_FOUND`。
+			failTarget(w, reason, cands, "调试启动")
+			return
+		}
+		req.Session = sess.ID
+		// 指名了一条会话却没点名 `--env`：环境就是**它自己的那个**。
+		//
+		// 为什么必须在这里补、而且必须排在 `launchCfg` 之前：不补的话 cfg 会按"服务端当前
+		// 环境"（可能是空的 `-`）组装，于是同一条请求被判成"换目标"，而 `namedHostConflict`
+		// 给出的那句话恰恰写着「指名一条会话时环境由它决定」—— 说了却不做，实测就是这么
+		// 自相矛盾的（CLI 靠 body["ssh"] 补了这一刀，直接调 API 的客户端没有）。
+		// 只在空值时补：两边都给了的时候矛盾由 `namedHostConflict` 如实报，不在这里替谁做主。
+		// 只在**配置里真有这个名字**时才补：没有点名环境时 `EnvName()` 会合成一个
+		// `host-zone` 形式的占位名（空主机+空区域就是 `-`），把它当环境名送进 `launchCfg`
+		// 只会换来一句"环境 "-" 不存在"。
+		if env := sess.EnvNameNow(); req.SSH == "" && env != "" && s.cfg.CloneEnv(env) != nil {
+			req.SSH = env
+		}
+	}
 	// 按名换 SSH(环境)/ 覆盖区域/ 覆盖本轮 FGLSERVER:克隆配置,默认链路零影响
 	cfg, err := s.launchCfg(req.SSH, req.Zone, req.FGLServer)
 	if err != nil {
 		fail(w, 404, err)
 		return
 	}
+	// `--ent`：只改**本轮**配置（launchCfg 在没有任何覆盖时会直接返回 s.cfg，
+	// 就地写它会把这个企业留给后面每一轮）。浅拷贝与 CloneWithZone 同一套做法。
+	if e := strings.TrimSpace(req.Ent); e != "" {
+		c2 := *cfg
+		c2.Topent = host.EntValue(e)
+		cfg = &c2
+	}
 	// `--name` 的判定都在**建立会话之前**（C2.8 的同一条纪律：一个字节都不该白花）。
-	// 顺序是：prog（必填）→ 环境（存在性，F6）→ 别名（F19 取值纪律 + Q23 的三种结局）→
-	// 真正登记时兜住撞车（F18，竞态那一支，在 LaunchWith 里）。
+	// 顺序是：prog（必填）→ 环境（存在性，F6）→ 指名的会话（存在性，F 那一族）→
+	// 别名（F19 取值纪律 + Q23 的三种结局）→ 真正登记时兜住撞车（F18，竞态那一支，在 LaunchWith 里）。
 	// 为什么别名排在环境之后：它与目标层"文法 → 环境存在 → 落位"的顺序同源 ——
-	// Q23 判的是"落位"，而落位要先知道环境是哪一个。
+	// Q23 判的是"落位"，而落位要先知道环境是哪一个。指名的会话排在别名之前同理：
+	// 它也是"落位"的一部分（"落在哪一条"），而别名判的是"这条会话能不能叫这个名字"。
 	name, ok := s.beginNamedLaunch(w, req.Name)
 	if !ok {
 		return
@@ -573,10 +620,13 @@ func (s *Server) hLaunch(w http.ResponseWriter, r *http.Request) {
 	// **不传目标**是刻意的:这一轮要保护的那条会话正被顶掉,而"是哪一条"由
 	// `prepareSession` 的复用/收口规则决定(它才是那条规则的家)。池里有 >=2 条时
 	// 这条闸门不再替谁挑一条 —— 它按传进来的目标判,没有目标就是"没有东西可保护"。
+	// 显式指名（`--session`）也不改这一条：指名回答的是"落在哪条会话上"，不是
+	// "这一轮要不要过它的模式闸门" —— 起会话今天就能顶掉任意一条会话，
+	// 多一个标志不该改变"AI 能不能起"（那是既有行为，H2 保护的就是这一档）。
 	if !s.sessOfWriteGlobal(w, r, nil) {
 		return
 	}
-	sess, err := s.mgr.LaunchWith(cfg, req.Module, req.Prog, name)
+	sess, err := s.mgr.LaunchWith(cfg, req.Module, req.Prog, name, req.Session)
 	if err != nil {
 		if s.writeLaunchFailure(w, err) { // F18 别名撞车 / F1 多会话歧义（见 api_target.go）
 			return
@@ -936,7 +986,12 @@ func (s *Server) hSessionSwitch(w http.ResponseWriter, r *http.Request) {
 	}
 	// 目标先落位,再判"谁能写":闸门必须按**要收掉的那一条**判,不能按池子里随便一条
 	// (从前那一处 `Manager.Current()` 就是这么判的 —— 多会话下按的是随机一条)。
-	cur, ok := s.mustTarget(w, r, req.Session, "切换会话")
+	//
+	// 走**冷启动档**（mustTargetOrEmpty）而不是 mustTarget：池子空、也没点名时，
+	// 这里没有"要收掉的那一条"，但下面有"要新建的那一条" —— 那正是「创建会话」。
+	// 从前这一处用的是 mustTarget，于是 `tt debug env <环境>` 在会话池为空时**必失败**：
+	// 用户只能先"起个作业"来凑一条会话，顺序被彻底反过来（真机踩到过）。
+	cur, ok := s.mustTargetOrEmpty(w, r, req.Session, "切换会话")
 	if !ok {
 		return
 	}
@@ -1784,8 +1839,9 @@ func (s *Server) hWSLogContent(w http.ResponseWriter, r *http.Request) {
 		"acct": wslogAcctFor(s.wslogTopent(nil))})
 }
 
-// hWSLogDebug POST /api/wslogs/debug {rowid, request?, session?} → 用该日志的报文重放调试。
+// hWSLogDebug POST /api/wslogs/debug {rowid, request?, session?, name?} → 用该日志的报文重放调试。
 // request 非空 = 界面里改过的入参(落服务器临时文件后作为入参文件),空 = 用日志原报文。
+// name = `--name` 的别名（Bug B）：wsdebug 同样是起会话的命令，别名随这条请求登记。
 //
 // **本批的定稿（Q4 / C8.2 硬切 + 契约 C7.1-3）**：服务端不再用 `Manager.Current()` 找
 // "当前会话"来收口（从前那一处不经模式闸门，是五处里最隐蔽的一处 —— 见计划开头 A–E 表的 B）。
@@ -1799,8 +1855,14 @@ func (s *Server) hWSLogDebug(w http.ResponseWriter, r *http.Request) {
 		Zone    string `json:"zone"` // 区域覆盖(31/35/36/39/t);空 = 默认区域
 		// Session 是**要收掉的那条会话**的服务端原始句柄（可选）。只认 `{id}`（C5.4）。
 		Session string `json:"session"`
+		// Name 是 `--name` 给的别名（Bug B / Q17 / C2.5）。`wsdebug` 与 `debug start` 同样是
+		// **起会话**的命令（C3.5），所以别名在这条路上也要登记 —— 否则它起的会话只能用 ref
+		// 寻址、也不能当幂等键（C1.6 / Q23）。空 = 未命名，与今天逐字相同（键不出现）。
+		Name string `json:"name"`
 		// FGLServer 本轮 FGLSERVER 覆盖,语义同 hLaunch(指针:给空串 = 本轮交回 T100 自动设置)。
 		FGLServer *string `json:"fglserver"`
+		// Ent 是**这一轮**的企业编号(ENT),语义同 hLaunch：必填（或目标会话已有显式 override）。
+		Ent string `json:"ent"`
 	}
 	if !readBody(w, r, &req) {
 		return
@@ -1819,7 +1881,25 @@ func (s *Server) hWSLogDebug(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, err)
 		return
 	}
+	// `--ent`：与 hLaunch 同一条规矩，只改本轮克隆。
+	if e := strings.TrimSpace(req.Ent); e != "" {
+		c2 := *targetCfg
+		c2.Topent = host.EntValue(e)
+		targetCfg = &c2
+	}
+	// `--name` 的判定与 hLaunch **同一处、同一序**（C2.8 的纪律：一个字节都不该白花）：
+	// 取值纪律（F19 → 400 + `USAGE`）与别名的三种结局（Q23：空闲复用 / 忙碌
+	// `SESSION_TARGET_BUSY` / 名字不存在起新的）都在**拨号与收口之前**判完 ——
+	// 注定要被拒的请求不该先把当前会话收掉。落下来的 name 由 LaunchReplay 一路带到
+	// `prepareSession`，别名就在会话登记那一刻成为服务端的事实。
+	name, ok := s.beginNamedLaunch(w, req.Name)
+	if !ok {
+		return
+	}
 	// 目标先落位、闸门按那一条判 —— 这两件事收在 mustTarget 里（见 api_target.go）。
+	// **这里不走 mustTargetOrEmpty**：契约 2.4 的 F2（池里 0 条会话 → 409 `NO_SESSION`）
+	// 就是以这条端点当载体的（判据见 contract_debug_test.go 的「F2 池空」）。重放要不要
+	// 也能从零建会话，是契约问题，不该由一次修复顺手改掉。
 	cur, ok := s.mustTarget(w, r, req.Session, "按接口日志重放")
 	if !ok {
 		return
@@ -1862,7 +1942,7 @@ func (s *Server) hWSLogDebug(w http.ResponseWriter, r *http.Request) {
 			s.mgr.Remove(cur.ID)
 		}
 	}
-	sess, replayWarn, err := s.mgr.LaunchReplay(item, content, req.Request, req.FGLServer)
+	sess, replayWarn, err := s.mgr.LaunchReplay(item, content, req.Request, req.FGLServer, name)
 	if err != nil {
 		// WP6：与 hLaunch 同一条 —— 会话准备报出来的 F1（多会话 + 没点名要哪条宿主）
 		// 必须带 `code` 与候选清单，不许降级成一句散文。

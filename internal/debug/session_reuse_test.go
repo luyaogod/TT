@@ -16,6 +16,9 @@ func cfgFor(h, zone string) *Config {
 	c := &Config{}
 	c.SSH = host.SSHConfig{Host: h, Port: 22, User: "u"}
 	c.Zone = zone
+	// 企业编号现在是**必填**（requireExplicitEnt）：起会话的判据测试必须给它一个明显式值，
+	// 否则每一条都会先撞"未指定 ENT"而测不到自己那件事（选择/复用/歧义/世代）。
+	c.Topent = host.EntValue("99")
 	c.fillDefaults()
 	return c
 }
@@ -84,6 +87,8 @@ func envCfg(name string) *Config {
 	e.Host, e.Port, e.User, e.Zone = "h1", 22, "u", "36"
 	c := &Config{SSH: host.SSHConfig{Host: "h1", Port: 22, User: "u"}, Zone: "36",
 		SSHs: []host.NamedSsh{e}}
+	// 企业编号必填（requireExplicitEnt）：这些夹具都走真实"起会话"的路。
+	c.Topent = host.EntValue("99")
 	c.fillDefaults()
 	// 必须**走真实的环境选择路径**把 envName 定下来:没有默认环境之后,
 	// 不点名时 EnvName() 会退回 `host-zone` 推导名 —— 两个同机同区域的环境
@@ -146,9 +151,11 @@ func TestPrepareSessionRebuildsOnEnvSwitch(t *testing.T) {
 	if got := ns.EnvNameNow(); got != "测试1012" {
 		t.Fatalf("新会话环境应为 测试1012, got %q", got)
 	}
-	// 会话级企业编号:没显式给就是空(不再从环境配置继承 —— 那个字段已移除)。
-	if got := ns.TopentSession(); got != "" {
-		t.Fatalf("没显式给 ENT 时会话企业应为空(企业由登录 shell 的 $TOPENT 决定), go %q", got)
+	// 会话级企业编号：只来自**显式给的** cfg.Topent（夹具里是 99）。
+	// 「不给就让登录 shell 的 $TOPENT 决定」那条静默路径已经删掉了 —— 不给 ENT 的启动
+	// 会在 requireExplicitEnt 处被拒（判据见 ent_required_test.go）。
+	if got := ns.TopentSession(); got != "99" {
+		t.Fatalf("会话企业应等于显式给的那个(99)，实得 %q", got)
 	}
 }
 
@@ -199,6 +206,7 @@ func TestTopentForRun(t *testing.T) {
 		t.Fatalf("手动设置应优先于会话初始 ENT,got %q", got)
 	}
 	s2 := fakeIdleSession("s2", "h1", "36")
+	s2.cfg.Topent = "" // 「没给 ENT」这一档的夹具：cfgFor 现在默认带 99，这里显式清掉
 	if got := s2.topentForRun(); got != "" {
 		t.Fatalf("没给 ENT 也没手动设置应返回空(沿用登录 shell 的 $TOPENT),got %q", got)
 	}

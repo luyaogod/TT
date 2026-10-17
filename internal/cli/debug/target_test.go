@@ -13,7 +13,9 @@ package debug
 //  2. **会话外命令不认它**（C1.2 / C1.3 / C1.5）：status / sql / wslogs / wsdebug /
 //     source / resolve / logs / ents / db / probe / serve —— 挂上去会让 F16 那条
 //     "标志挂错命令"的自纠提示（`该命令不接受 --session`）落空；
-//  3. **`--name` 只在起会话的命令上**（C3.5 / F17）：今天 = `start`。
+//  3. **`--name` 只在起会话的命令上**（C3.5 / F17）：今天 = `start` 与 `wsdebug`
+//     （Bug B：wsdebug 同样是起会话的命令，从前漏注册，于是它起的会话只能用 ref 寻址、
+//     也不能当幂等键；`exec` / `quit` / `stop` 这些仍然不认它）。
 //
 // 另加两条"注册得上"的地基断言：标志名能 Lookup 到、且 help 文案非空 ——
 // 后者是 `--help` 里能看见这条规矩的判据（C5.8/C2.5 那些取值纪律要写在文案里）。
@@ -35,10 +37,10 @@ func TestCharTargetFlagPlacement(t *testing.T) {
 	rejectSession := []string{
 		"status", "sql", "wslogs", "wsdebug", "source", "resolve", "logs", "ents", "db", "probe", "serve",
 	}
-	acceptName := []string{"start"}
+	acceptName := []string{"start", "wsdebug"}
 	rejectName := []string{
 		"exec", "quit", "why", "wait", "mode", "stop", "locate", "interrupt", "env", "topent",
-		"status", "sql", "wslogs", "wsdebug", "source", "resolve", "logs", "ents", "db", "probe", "serve",
+		"status", "sql", "wslogs", "source", "resolve", "logs", "ents", "db", "probe", "serve",
 	}
 
 	// byName 把命令树摊成 名字 → 命令；顺带确认断言表里的名字都还在（改了命令名要一起改这里）。

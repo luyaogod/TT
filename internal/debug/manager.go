@@ -306,7 +306,7 @@ func (m *Manager) Events(n int) []Event {
 // Launch 创建并启动一个调试会话(同一时间仅允许一个会话,保证生产安全)。
 // 启动前清扫已结束的残留会话(程序退出/后端死亡),重启无需先 DELETE。
 func (m *Manager) Launch(module, prog string) (*Session, error) {
-	return m.launchWith(m.cfg, module, prog, "")
+	return m.launchWith(m.cfg, module, prog, "", "")
 }
 
 // LaunchWith 按指定配置启动(多 SSH/多区域:调用方克隆好 cfg 再传入),并给这条会话起别名。
@@ -315,11 +315,17 @@ func (m *Manager) Launch(module, prog string) (*Session, error) {
 // 三种结局（空闲复用 / 忙碌报 SESSION_TARGET_BUSY / 名字不存在起新的）由调用方先判一次
 // （`beginNamedLaunch`），这里负责把名字**登记成服务端的事实**（C5.3 的 `name` 键），
 // 并在登记的瞬间兜住竞态（F18：`ErrNameTaken`）。
-func (m *Manager) LaunchWith(cfg *Config, module, prog, name string) (*Session, error) {
-	return m.launchWith(cfg, module, prog, name)
+//
+// hostID 是 `--session` **显式指名**的那条既有会话（服务端原始句柄 `{id}`，C5.4 / Bug A）：
+// 空 = 没指名，逐字等于今天的行为。非空 = "**就用这一条**当宿主" —— 候选集当场收敛成它一条，
+// 于是 `prepareSession` 那一步的"按环境+名字收窄候选"根本不发生，多候选歧义也就不可能再出现。
+// 它**不跳过校验**：状态处置仍是 `decideHost` 那三条（空闲复用 / 忙碌报错 / 目标或别名对不上
+// → 报错），见 `prepareSessionOn` 与 `namedHostConflict` 的注释。
+func (m *Manager) LaunchWith(cfg *Config, module, prog, name, hostID string) (*Session, error) {
+	return m.launchWith(cfg, module, prog, name, hostID)
 }
 
-func (m *Manager) launchWith(cfg *Config, module, prog, name string) (*Session, error) {
+func (m *Manager) launchWith(cfg *Config, module, prog, name, hostID string) (*Session, error) {
 	// 对齐 T100 gendbg:启动前连库把作业编号解析成实体程序+模块+启动引用(gzzz_t JOIN gzza_t),
 	// 源码与 42r 都跟实体程序走;未配置 db/查询失败/未命中 → 会话内按名称文件搜索兜底
 	runProg, launchRef, extra := "", "", ""
@@ -332,7 +338,7 @@ func (m *Manager) launchWith(cfg *Config, module, prog, name string) (*Session, 
 			module = mod2
 		}
 	}
-	sess, err := m.prepareSession(cfg, module, prog, runProg, launchRef, extra, "", name)
+	sess, err := m.prepareSessionOn(cfg, module, prog, runProg, launchRef, extra, "", name, hostID)
 	if err != nil {
 		return nil, err
 	}
@@ -391,9 +397,36 @@ func (m *Manager) launchWith(cfg *Config, module, prog, name string) (*Session, 
 // 指定了 X 而那条空闲会话叫 Y 时**不复用**它，而是按"换目标"那条路收掉旧的、开一条叫 X 的。
 // 别名只在创建时给一次，所以"要一条叫 X 的会话"绝不能落在一条已经叫 Y 的会话上。
 //
+// # 显式指名（`--session`，Bug A）走的是九参的 `prepareSessionOn`
+//
+// 末尾那个 `hostID` 非空 = 调用方已经点名了**这一条**既有会话当宿主。于是候选**就是它一条**，
+// "按环境+名字收窄候选"这一步根本不发生 —— 多候选歧义连成立的机会都没有（这不是"挑一条"：
+// 是调用方点的名，而 `sessionCandidates` 那套"多候选绝不自己挑"的纪律一个字没动）。
+// 但指名**不跳过校验**：状态处置仍是 `decideHost` 那三条，唯一的差别是
+// `hostCollect`（目标/别名对不上）在指名这一档改报错，不把点名的会话收掉重建
+// （见 `namedHostConflict`）。本函数是"没指名"那一档，逐字等于今天的行为 ——
+// 既有判据测试走的就是它。
+//
 // 返回已登记的会话,由调用方驱动 Launch 登录/启动。
 func (m *Manager) prepareSession(cfg *Config, module, prog, runProg, launchRef, extra, argsOverride, name string) (*Session, error) {
-	cands := m.sessionCandidates(cfg, name)
+	return m.prepareSessionOn(cfg, module, prog, runProg, launchRef, extra, argsOverride, name, "")
+}
+
+// prepareSessionOn 是 prepareSession 的**九参入口**：多一个 `hostID`（`--session` 指名的宿主，
+// 空 = 没指名）。判据、文案、收口时机全在 prepareSession 的注释里，这里只多那一档。
+func (m *Manager) prepareSessionOn(cfg *Config, module, prog, runProg, launchRef, extra, argsOverride, name, hostID string) (*Session, error) {
+	// 候选从哪来：指名了就是那一条；没指名就按环境+名字收窄（今天的行为）。
+	var cands []*Session
+	named := false
+	if id := strings.TrimSpace(hostID); id != "" {
+		host, err := m.namedHost(id)
+		if err != nil {
+			return nil, err
+		}
+		cands, named = []*Session{host}, true
+	} else {
+		cands = m.sessionCandidates(cfg, name)
+	}
 
 	// ---- 候选 ≥2：报歧义，绝不挑一条（F1 / C8.1 / Q2） ----
 	if len(cands) >= 2 {
@@ -407,8 +440,20 @@ func (m *Manager) prepareSession(cfg *Config, module, prog, runProg, launchRef, 
 	var prev *Session
 	if len(cands) == 1 {
 		prev = cands[0]
-		switch decideHost(prev, cfg, name) {
+		decision := decideHost(prev, cfg, name)
+		// 指名的会话"换了目标（环境）"或"别名对不上"时，decideHost 给的是 hostCollect ——
+		// 那条路会把它 `Close` 掉再按新的重建。对**候选**那是对的（空转宿主没什么可丢的），
+		// 对**点名的那一条**不行：那等于把"用这一条"读成"用别处起一条"，而用户手上那个
+		// ref/别名还指着它。所以这一档改报错，绝不收口。
+		if named && decision == hostCollect {
+			return nil, m.namedHostConflict(prev, cfg, name)
+		}
+		switch decision {
 		case hostReuse:
+			// 企业编号必须是**显式的**（见 requireExplicitEnt）。
+			if err := requireExplicitEnt(cfg, prev); err != nil {
+				return nil, err
+			}
 			// 复用宿主跑新一轮：SetRun 会把世代换掉（F15：旧句柄当场失效），
 			// 序号与别名**不动**（它们标识的是"这条会话"，跨轮不变：C2.0 / C2.5b）。
 			prev.SetRun(cfg, module, prog, runProg, launchRef, extra)
@@ -432,6 +477,10 @@ func (m *Manager) prepareSession(cfg *Config, module, prog, runProg, launchRef, 
 	}
 
 	// ---- 候选 0 条：起新会话 ----
+	// 新会话没有历史 override，企业编号**只能**来自本次请求。
+	if err := requireExplicitEnt(cfg, nil); err != nil {
+		return nil, err
+	}
 	// 别名先查（F18）再拨号 —— 注定要被拒的请求不该先花一次 SSH 握手。
 	if err := m.checkNameFree(name); err != nil {
 		return nil, err
@@ -502,6 +551,103 @@ func (m *Manager) sessionCandidates(cfg *Config, name string) []*Session {
 	m.mu.Unlock()
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
+}
+
+// requireExplicitEnt 要求"这一轮要用的企业编号"是**显式给的**，不许静默沿用登录 shell 的 $TOPENT。
+//
+// 为什么删掉那条静默路径：ENT 决定用哪个账号连库、以及框架的据点校验过不过。而"没说"与
+// "说错了"在老实现里长得一模一样 —— 作业跑在登录 shell 自带的那个企业上，输出一切正常，
+// 结论却可能来自另一家企业。环境已经"一律点名"，企业没有理由保留一个隐式默认。
+//
+// 两个合法来源，任一即可：
+//   - 本次启动显式给的 `--ent`（调用方落在 `cfg.Topent`）；
+//   - 这条会话**此前**显式设过的 `tt debug topent`（会话级 override）。
+//
+// `prev` 只在"空闲复用"那条路上有意义：换目标/换名字会收掉旧会话另建一条，旧会话的
+// override **不继承** —— 所以那种情况调用方传 prev=nil，必须重新给 `--ent`。
+func requireExplicitEnt(cfg *Config, prev *Session) error {
+	if cfg != nil && strings.TrimSpace(string(cfg.Topent)) != "" {
+		return nil
+	}
+	if prev != nil {
+		if strings.TrimSpace(prev.TopentOverride()) != "" {
+			return nil
+		}
+		// 这条会话**自己**建立时定下的企业编号也算显式：它是当初 `--ent`（或 `topent`）
+		// 明确给的，随会话一起存在 `cfg.Topent` 里，不是登录 shell 那个隐式值。
+		if strings.TrimSpace(prev.TopentSession()) != "" {
+			return nil
+		}
+	}
+	f := target.NewFailure(target.CodeUsage,
+		"必须显式指定企业编号(ENT)：tt debug start <作业> --ent <企业编号>，"+
+			"或先 tt debug topent <编号> 再启动。"+
+			"**不再**沿用登录 shell 的 $TOPENT —— 那会让「忘了点名」与「点错了」长得一样，"+
+			"而 ENT 决定用哪个账号连库、以及据点校验过不过。")
+	// 老写法（不带 --ent）也要报这一条：它正是这次要禁掉的静默行为，不是"新场景"。
+	f.NewScenario = false
+	f.Hint = "tt debug ents 可列出这台机器上的企业编号与各自账号；确认后再点名"
+	return f
+}
+
+// namedHost 按**服务端原始句柄**取"这次显式指名的那条会话"（`--session` 落位之后的 id，C5.4）。
+//
+// 两条纪律，都是 Bug A 的一半：
+//
+//   - **找不到就报 `SESSION_NOT_FOUND`，绝不回落成"那就按候选再收窄一次"**。回落会把
+//     "我点的那条没了"变成"落到另一条上，而输出看起来一切正常" —— 那正是这次重构开头
+//     要根除的那句话，所以它必须是一条失败；
+//   - **先扫一遍已断开的残留**（`sweepExitedLocked`）：点名的会话可能刚掉线，那条残留
+//     还挂在 map 上但已经不占身份（Q19 / C3.7b）。扫掉之后取不到 = 真的不存在。
+//
+// 为什么不在 `sessionCandidates` 里按环境/名字再筛一遍：指名是**精确通道**，
+// 它给出的是"哪一条"，不是"一类"。再筛一次就又变回候选集了。
+func (m *Manager) namedHost(id string) (*Session, error) {
+	m.mu.Lock()
+	m.sweepExitedLocked()
+	s := m.sessions[id]
+	m.mu.Unlock()
+	if s == nil {
+		// 候选块给**池里现有全部会话**（C5.11 这个码下必须出现）：照抄 <ref> 那一列重发
+		// 就能落到一条真的存在的会话上，比一句"不存在"有用。
+		f := target.NewFailure(target.CodeNotFound,
+			"点名的 SSH 会话 %s 不存在；不会退而落到池里的其它会话（那就成了替你挑一条）", id)
+		f.Hint = "先运行 tt debug status 看现有会话，照抄 <ref> 那一列重发 --session"
+		f.NewScenario = true // `--session` 是本次新放开的写法：这个失败今天无从发生
+		f.Candidates = sessionsToCandidates(m.Snapshot())
+		return nil, f
+	}
+	return s, nil
+}
+
+// namedHostConflict 造"点名的宿主不能用"的失败（`--session` 与 `--env` / `--name` 对不上）。
+//
+// 它是 `decideHost` 给出 `hostCollect` 时**指名档**的替代处置：`hostCollect` 会把这条会话
+// `Close` 掉再按新的重建，而点名的会话不许这样被悄悄收掉 —— 调用方手上那个 ref/别名
+// 还指着它，收掉之后"用这一条"就变成了"用别处起了一条"，而且旧的那条当场消失。
+//
+// 两类冲突各给各的话（同时踩两条时报环境那条，与 `target.Resolve` 的 F12 先于 F13 同序）：
+//
+//   - **目标不同** = F12 那一族在服务端的兜底（正常路径上 CLI 的 `target.Resolve` 已经拦下，
+//     见 `internal/target` 的 `failureEnvConflict`）；服务端这一份是防线，不是重复；
+//   - **别名不同** = C2.5b 的"别名只在创建时给一次"：要把一条已经叫 Y 的会话叫成 X，
+//     那叫**改名**，而改名这条路是关着的。
+func (m *Manager) namedHostConflict(prev *Session, cfg *Config, wantName string) *target.Failure {
+	ref := m.auditRefOf(prev)
+	var f *target.Failure
+	if !prev.sameTarget(cfg) {
+		f = target.NewFailure(target.CodeUsage,
+			"点名要用的会话 %s 属于环境 %q，与这次启动的目标环境 %q 不一致；指名一条会话时环境由它决定",
+			ref, prev.EnvNameNow(), cfg.EnvName())
+		f.Hint = "去掉 --env（环境由 --session 那条决定），或让 --session 与 --env 指同一个环境"
+	} else {
+		f = target.NewFailure(target.CodeUsage,
+			"点名要用的会话 %s 已经有别名 %q，不能改成 %q（别名只在创建时给一次）",
+			ref, prev.Name(), strings.TrimSpace(wantName))
+		f.Hint = "去掉 --name（沿用那条会话的别名），或换一条空闲会话"
+	}
+	f.NewScenario = true
+	return f
 }
 
 // failAmbiguous 把"候选 ≥2 条"写成 F1 的失败（`SESSION_AMBIGUOUS` + 退 3 + 候选清单）。
@@ -596,8 +742,11 @@ func (m *Manager) resolveJobWith(cfg *Config, module, job string) (mod, prog, la
 // 会话复用规则与普通启动一致:同目标空闲宿主直接复用。
 // LaunchReplay 用日志报文重放调试。reqOverride 非空 = 界面里改过的入参(落临时文件后作为 reqPath)。
 // fglserver 非 nil = 本轮 FGLSERVER 覆盖(语义见 Server.launchCfg 与 ScreenTarget)。
+// name 是 `--name` 给的别名（Bug B：`wsdebug` 与 `debug start` 同样是**起会话**的命令，C3.5）：
+// 它原样交给 `prepareSession`，于是别名在会话登记那一刻成为服务端的事实（C5.3 的 `name` 键），
+// 从此参与寻址、当幂等键（Q23）。空 = 未命名，逐字等于今天的行为。
 // 返回的 warn 非空表示这次重放用的是入库的截断文本,结果可能不可信(见 WriteReplayFiles)。
-func (m *Manager) LaunchReplay(item *WSLogItem, content *WSLogContent, reqOverride string, fglserver *string) (*Session, string, error) {
+func (m *Manager) LaunchReplay(item *WSLogItem, content *WSLogContent, reqOverride string, fglserver *string, name string) (*Session, string, error) {
 	// 本轮启动用的配置快照:只有"单轮 FGLSERVER 覆盖"会改它。
 	// 直接改 m.cfg 会把一次重放的接线留在内存配置里 —— 下一轮(哪怕只是普通启动)
 	// 都还带着它,而画面去哪恰恰是静默的(见 ScreenTarget)。
@@ -635,7 +784,7 @@ func (m *Manager) LaunchReplay(item *WSLogItem, content *WSLogContent, reqOverri
 	if rspPath != "" {
 		args += " " + q(rspPath)
 	}
-	sess, err := m.prepareSession(cfg, module, job, runProg, launchRef, extra, args, "")
+	sess, err := m.prepareSession(cfg, module, job, runProg, launchRef, extra, args, name)
 	if err != nil {
 		return nil, "", err
 	}

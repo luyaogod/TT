@@ -235,9 +235,13 @@ var dbgSelectorFailure *target.Failure
 
 // dbgEntFlag 取 `--ent` 的权威取值（契约 C3.1：它是**企业**的权威）。
 //
-// 会话级命令今天没有 `--ent`（它只在 `debug sql` / `debug db` 上）；这里按"没有就是空"
-// 处理，`Resolve` 对空 `ent` 不核对企业（C3.3 的三条冲突都只在给了值时才判）。
-func dbgEntFlag() string { return "" }
+// 从前这里恒返回 ""（"会话级命令今天没有 --ent"），于是目标层为它准备的两种冲突判据
+// （F13：`--session` 里的企业 vs `--ent`；F14：落到的会话实际企业 vs `--ent`）**永远触发不了**
+// —— 那两条规则只活在文档里。现在 start / wsdebug 都有这个标志，判据跟着活过来。
+//
+// 其余命令（exec / quit / topent …）仍然没有它：它们不改变"这一轮跑在哪个企业"，
+// 企业在那条会话建立时就已经钉住了。
+func dbgEntFlag() string { return strings.TrimSpace(dbgEntRun) }
 
 // dbgTargetError 是目标层失败在 CLI 这一侧的**信封**（契约 5.2 / C4.1 / C4.2）。
 //
@@ -419,18 +423,31 @@ func dbgCandidateLines(cands []target.Candidate) []string {
 	return out
 }
 
-// dbgResolveSessionFlag 在**起会话**之前把 `--session` 落位一次。
+// dbgResolveSessionFlag 在**起会话**之前把 `--session` 落位一次，并把落上的那一条回出去。
 //
 // 为什么要独立一步：`debug start` 的目标是"要起的那条会话"，而 `--session` 是"落在
 // 哪条现有会话上"（Q23 的复用宿主）—— 它给了就先把那条会话找到（落不上当场报，见
 // F3–F8，且**不发那个 POST**）。会话级命令不需要这一步：它们自己那次 `dbgSessionID`
 // 就是落位，重复一次白跑一趟 HTTP。
-func dbgResolveSessionFlag() error {
+//
+// # 为什么要把落位结果**回出去**（Bug A）
+//
+// 从前这里只判"落得上/落不上"，落上了却把结果丢掉 —— POST 的 body 里没有目标，
+// 于是服务端仍按"环境+名字"收窄候选：同环境有 2 条空闲会话时，本地校验通过、
+// 服务端照样报 `SESSION_AMBIGUOUS`，`--help` 里写着的这个标志等于帮不上忙。
+// 现在调用方拿到那条会话本身，把它的**服务端原始句柄**（C5.4：只认 id）随请求体送过去，
+// 服务端 `prepareSession` 于是不再有"候选集"这一步 —— 歧义连成立的机会都没有。
+//
+// 空标志 → (nil, nil)：没打这个标志时调用方一个字节都不多送（H2）。
+func dbgResolveSessionFlag() (*target.Session, error) {
 	if strings.TrimSpace(dbgSessionFlag) == "" {
-		return nil
+		return nil, nil
 	}
-	_, err := dbgSessionID()
-	return err
+	sess, err := dbgTargetSession(nil, dbgRequest())
+	if err != nil {
+		return nil, err
+	}
+	return &sess, nil
 }
 
 // dbgRegisterSessionFlag 给一组命令挂上 `--session`（契约 1. 的命令角色表：
@@ -448,10 +465,10 @@ func dbgRegisterSessionFlag(cmds ...*cobra.Command) {
 //
 //  1. **取值纪律的校验**（非空、1–64 字符、只排除 `/` 与 `#`）在**发请求之前**判 ——
 //     不合法时连 POST 都不发（F19）；
-//  2. 合法就**随请求体送给服务端**（`debug start` 的 body["name"]，WP4c 落地）——
-//     别名从那一刻起是**服务端的一条事实**（`SessionBrief.name`，C5.3）：它参与寻址
-//     （`--session <别名>`）、当幂等键（Q23：空闲复用 / 忙碌报 `SESSION_TARGET_BUSY`）、
-//     随会话消失即释放（Q19）。
+//  2. 合法就**随请求体送给服务端**（`debug start` 的 body["name"]、`tt debug wsdebug` 的
+//     body["name"]，两条都是**起会话**的路）—— 别名从那一刻起是**服务端的一条事实**
+//     （`SessionBrief.name`，C5.3）：它参与寻址（`--session <别名>`）、当幂等键
+//     （Q23：空闲复用 / 忙碌报 `SESSION_TARGET_BUSY`）、随会话消失即释放（Q19）。
 //
 // 为什么不是 CLI 自己存一份映射表：D1 写死了"服务端是目标的唯一真相源"，
 // 本地缓存会漂移，而漂移的表现恰好是"静默落错"。

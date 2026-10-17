@@ -136,12 +136,10 @@ func (s *Server) resolveTarget(targetID string) (sess *Session, reason resolveRe
 // 它把"落位 → 判模式闸门"这组动作收成一处:两个端点（切环境 / 按日志重放）都要
 // "先落位、再按那一条判谁能写",两处各写一遍必然漂。
 //
-// 与 `resolveTarget` 的差别只有一处:池子空**也报错**（`targetEmptyPool` → 409 +
-// `NO_SESSION`）。理由:这两个端点干的事都建立在"有一条会话"之上 —— 切环境要收掉它、
-// 按日志重放也要先收掉它,而池空时服务端在"没有目标"这件事上什么都判不了。
-// 报一句"先起一条会话"比替调用方在**零目标**上静默做一半要诚实。
-// （`hLaunch` 不走这里:它是"池空也要能跑"的那条路,它自己那种 `nil` 目标见
-// `sessOfWriteGlobal` 的注释。）
+// 池子空时**报错**（`targetEmptyPool` → 409 + `NO_SESSION`）—— 但只在这些端点
+// **真的要一条既有会话**时才成立。冷启动（池子空、也没点名）不是这种情况:那时
+// 没有"要收掉的那一条",却有"要新建的那一条"。这种调用方用 `mustTargetOrEmpty`，
+// 不要用这里。
 //
 // `what` 见 `failTarget`；`targetID` 是调用方点名的原始句柄（空 = 省略目标）。
 func (s *Server) mustTarget(w http.ResponseWriter, r *http.Request, targetID, what string) (*Session, bool) {
@@ -154,6 +152,28 @@ func (s *Server) mustTarget(w http.ResponseWriter, r *http.Request, targetID, wh
 	}
 	failTarget(w, reason, cands, what)
 	return nil, false
+}
+
+// mustTargetOrEmpty 是 `mustTarget` 的**冷启动档**：池子空且没点名时返回 (nil, true)。
+//
+// 为什么需要它（真机踩到的）：「连到该环境」= **创建**一条会话，Web 上那个按钮就叫
+// 「创建会话」，命令行是 `tt debug env <环境>`。可是它在池子空时会撞上 `mustTarget` 的
+// `NO_SESSION` —— 于是"先建会话、再设 ENT、再调试"这条正确流程在**第一步**就断了，
+// 用户被迫先"起个作业"凑一条会话出来（顺序完全反了）。
+//
+// 边界一字不让:
+//   - **点名了**（targetID 非空）→ 交给 `mustTarget`：点名的不存在就是 `SESSION_NOT_FOUND`；
+//   - **池里多条且没点名** → 也交给它：那是真歧义（"收哪一条"确实不明确）；
+//   - 只有"池空 + 没点名"这一种才放行，返回 nil —— 调用方原本就写着 `if cur != nil`。
+func (s *Server) mustTargetOrEmpty(w http.ResponseWriter, r *http.Request, targetID, what string) (*Session, bool) {
+	if strings.TrimSpace(targetID) == "" && len(s.mgr.Snapshot()) == 0 {
+		// 没有目标可保护，但写闸门仍要过（nil 目标 = 放行，见 sessOfWriteGlobal 的注释）。
+		if !s.sessOfWriteGlobal(w, r, nil) {
+			return nil, false
+		}
+		return nil, true
+	}
+	return s.mustTarget(w, r, targetID, what)
 }
 
 // 同一份池子两次跑出的文案必须一样（否则报错信息没法当判据用）。
