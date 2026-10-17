@@ -3,7 +3,7 @@
 // # 它和 `tt fep rec` 的关系
 //
 // 同一批动作（列 / 看 / 留 / 删 / 清 / 建索引）有两个入口：
-//   - `tt fep rec …` 是旧入口，**暂留**：Web 的录制面板还在起 `tt fep rec start` 子进程
+//   - `tt fep rec …` 是旧入口，**暂留**：Web 的录制面板还在起 `tt recording start` 子进程
 //     （见 internal/web/recordings.go），删掉它会把面板弄坏；
 //   - `tt recording …` 是新入口，名字更直接（录制件不属于"前端协议"那一组）。
 //
@@ -35,17 +35,20 @@ func Register(root *cobra.Command) {
 		Short: "录制：列 / 看 / 留 / 删 / 清 / 建索引",
 		Long: `录制件（.raw 帧流 + 索引 + 元数据）的查看与维护。
 
-  tt recording start …       起一轮录制（旧入口：tt fep rec start）
+  tt recording start …       起一轮录制（--launch debug 可调试 / standard 标准启动）
   tt recording stop <录制ID>  停止一轮录制：收掉代理/GDC、落身份、清登记
-  tt recording replay <录制ID> 回放一份录制（旧名 reproduce）
-  tt recording ls            列出录制件（旧入口：tt fep rec list）
+  tt recording replay <录制ID> 回放一份录制
+  tt recording ls            列出录制件
   tt recording show <录制ID>  看一份录制件的详情
   tt recording keep <录制ID>  标记保留（清理时跳过）
   tt recording rm <录制ID>    删掉一份录制件
   tt recording prune          按保留期清理
   tt recording index [录制ID]  重建帧索引（写坏/缺失时用）
 
-与旧入口 tt fep rec 是**同一份实现**：参数、输出、行为都一致，只是名字更直接。`,
+  tt recording active         列正在进行的录制（登记里还活着的）
+  tt recording mark-stale <录制ID> 把一份录制标成已失效
+
+每个动词都直连本地录制件或调试面；start/replay 会自己起会话，其余动作只碰本地文件。`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},

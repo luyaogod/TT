@@ -16,10 +16,10 @@ import (
 	"tt/internal/debug"
 )
 
-// tt fep rec preflight —— 前置体检：只检查、不录制、不起会话、不写任何录制文件。
+// tt recording start —— 前置体检：只检查、不录制、不起会话、不写任何录制文件。
 //
 // 为什么需要它（真机冒烟，见 .agents/plan/L1-结果-2026-10-18.md）：
-// `tt fep rec start` 连试两次都失败，而且失败信息是**逐层挤出来**的 ——
+// `tt recording start` 连试两次都失败，而且失败信息是**逐层挤出来**的 ——
 // 第一次报"服务没起"，起了服务再跑报"没有会话"，随后又冒一条"切换会话：没有 SSH 会话"。
 // 使用者被迫来回试错才凑齐前置条件。所以这里把四项前置一次查完、一次说清：
 //
@@ -115,7 +115,7 @@ func (it *preflightItem) markUnknown() {
 	it.State, it.OK = preflightStateUnknown, false
 }
 
-// preflightReport 是 tt fep rec preflight 的输出（--json 时原样给，一个对象）。
+// preflightReport 是 tt recording start 的输出（--json 时原样给，一个对象）。
 type preflightReport struct {
 	OK      bool            `json:"ok"`
 	Dir     string          `json:"dir,omitempty"`
@@ -369,7 +369,7 @@ func checkEnv(d preflightDeps, prog, env string) preflightItem {
 		it.markMissing()
 		it.Detail = "没给作业程序（--prog）"
 		it.Why = "没给作业程序"
-		it.Fix = "tt fep rec preflight --prog <作业> --env " + env
+		it.Fix = "tt recording start --prog <作业> --env " + env
 		return it
 	}
 	hosts, err := d.Hosts()
@@ -407,7 +407,7 @@ func missingText(missing []preflightItem) string {
 		}
 		fix := m.Fix
 		if fix == "" {
-			fix = "（看不出怎么补，跑 tt fep rec preflight 看明细）"
+			fix = "（看不出怎么补，跑 tt recording start 看明细）"
 		}
 		// 长的处置（例如不可写那条带 icacls 的）另起一行，别把人读的那一列撑爆
 		if displayWidth(fix) > 48 {
@@ -470,11 +470,11 @@ func (r preflightReport) text() string {
 	}
 	if r.OK {
 		if r.Unknown > 0 {
-			fmt.Fprintf(&b, "就绪（但有 %d 项没检查成功，见上）：可以跑 tt fep rec start --prog %s --env %s\n",
+			fmt.Fprintf(&b, "就绪（但有 %d 项没检查成功，见上）：可以跑 tt recording start --prog %s --env %s\n",
 				r.Unknown, r.Prog, r.Env)
 			return b.String()
 		}
-		fmt.Fprintf(&b, "就绪：可以跑 tt fep rec start --prog %s --env %s\n", r.Prog, r.Env)
+		fmt.Fprintf(&b, "就绪：可以跑 tt recording start --prog %s --env %s\n", r.Prog, r.Env)
 		return b.String()
 	}
 	b.WriteString(missingText(r.missing()) + "\n")
@@ -533,7 +533,7 @@ func recStartPreflightWith(cmd *cobra.Command, prog, env string, d preflightDeps
 	return fail(exitUsage, "%s", missingText(rep.missing()))
 }
 
-// tt fep rec preflight —— 只检查、不录制、不起会话、不写任何录制文件。
+// tt recording start —— 只检查、不录制、不起会话、不写任何录制文件。
 var recPreflightCmd = &cobra.Command{
 	Use:   "preflight",
 	Short: "前置体检：目录/服务/会话/环境一次查清（只检查，不录制）",

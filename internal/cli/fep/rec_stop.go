@@ -7,7 +7,7 @@ package fep
 //   - 只杀进程 → 录制件没有身份文件（以后只能靠算指纹），登记还挂着；
 //   - 走这一步 → 先请常驻进程自己收（写完帧、落身份）、只杀登记的 pid、最后摘登记。
 //
-// 与 `tt fep session close` 是**同一份实现**（`closeRegisteredSession`）：两个入口、
+// 与 `tt recording stop <录制ID>` 是**同一份实现**（`closeRegisteredSession`）：两个入口、
 // 一条收尾路径。复制一份的后果是"两个入口对同一轮录制留下不同的现场"。
 
 import (

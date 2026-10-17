@@ -63,7 +63,7 @@ func bindRecSession(b debugclient.Brief, envFlag, entFlag string) (env, ent, ali
 	return b.Env, ent, b.Name, nil
 }
 
-// tt fep rec start —— 一条命令开始录，走**我们自己的调试线**。
+// tt recording start —— 一条命令开始录，走**我们自己的调试线**。
 //
 // 为什么是这条形态（而不是 T100 原生调试器 `r.d`/fgldeb）：
 //
@@ -84,7 +84,7 @@ var recStartCmd = &cobra.Command{
   1. 起隔离实例 + 代理（这一轮的录制身份写 path=debug、作业、环境/区域/ENT）；
   2. 让调试线把作业挂到这条代理上（tt debug start --fglserver <这一轮探测到的地址>）；
   3. 自动放行（continue）—— 用户不需要会调试，屏幕上只有作业窗口；
-  4. 前台常驻，直到 Ctrl-C 或另开一个终端跑 tt fep session close。
+  4. 前台常驻，直到 Ctrl-C 或另开一个终端跑 tt recording stop <录制ID>。
      收工落身份，并把录制搬进长期库（<数据目录>/records/<环境>/<ENT>/<录制 ID>/）。
 
 环境与企业编号都要点名（作业落在哪个企业只由它决定），模块默认 asf。
@@ -169,7 +169,7 @@ var recStartCmd = &cobra.Command{
 		// 不再沿用登录 shell 的 $TOPENT（requireExplicitEnt），这里提前一句说清楚，
 		// 免得先起代理占了三个端口、再在"起作业"那一步失败。
 		if ent == "" {
-			return fail(exitUsage, "录制必须点名企业编号(ENT)：tt fep rec start --env <环境> --ent <企业编号> --prog <作业>"+
+			return fail(exitUsage, "录制必须点名企业编号(ENT)：tt recording start --env <环境> --ent <企业编号> --prog <作业>"+
 				"（不再沿用登录 shell 的 $TOPENT —— 那会让「忘了点名」与「点错了」长得一样）")
 		}
 		if dcfg.SSH.Host == "" {
@@ -259,8 +259,8 @@ var recStartCmd = &cobra.Command{
 			if recStartNoCont {
 				fmt.Println("  ⚠ --no-continue：作业还停在调试器里，下好断点后跑 tt debug exec \"continue\" 放行")
 			}
-			fmt.Println("  取这一轮：tt fep rec show " + s.Tag)
-			fmt.Println("收工：Ctrl-C，或另开终端跑 tt fep session close（收工落身份并入库）")
+			fmt.Println("  取这一轮：tt recording show " + s.Tag)
+			fmt.Println("收工：Ctrl-C，或另开终端跑 tt recording stop <录制ID>（收工落身份并入库）")
 		}); werr != nil {
 			return werr
 		}

@@ -67,7 +67,7 @@ var recReplayCmd = &cobra.Command{
 				if replayDryRun {
 					fmt.Fprintln(cmd.ErrOrStderr(), "· 没有会话在跑：闸门跳过（--dry-run 只出计划）")
 				} else {
-					return fail(exitNoSession, "没有登记中的会话，指纹闸无从比对（先跑 tt fep session open）")
+					return fail(exitNoSession, "没有登记中的会话，指纹闸无从比对（先跑 tt recording start --launch standard）")
 				}
 			} else {
 				v := fep.GateReplay(rec, live)

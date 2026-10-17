@@ -42,7 +42,7 @@ func (p openParams) path() fep.LaunchPath {
 
 // runSessionOpen 起一个隔离会话（隔离实例 + 代理 + 打开作业），前台常驻到收工。
 //
-// 两个入口共用它：`tt fep session open`（旧）与 `tt recording start --launch standard`（新）。
+// 两个入口共用它：`tt recording start --launch standard`（旧）与 `tt recording start --launch standard`（新）。
 // 复制一份的后果是"两条路对同一轮录制留下不同的现场"，而现场差一点回放就用不了。
 func runSessionOpen(cmd *cobra.Command, p openParams) error {
 
@@ -136,8 +136,8 @@ func runSessionOpen(cmd *cobra.Command, p openParams) error {
 		fmt.Printf("  代理监听 %d（注入口 127.0.0.1:%d）\n", s.ProxyPort, s.InjectPort)
 		fmt.Printf("  录制 ID  %s\n", s.Tag)
 		fmt.Printf("  录制件   %s/%s-*-*.log\n", recDir, s.Tag)
-		fmt.Printf("  取这一轮：tt fep rec show %s（收工时落 %s）\n", s.Tag, s.Tag+fep.MetaSuffix)
-		fmt.Println("收工：Ctrl-C，或另开终端跑 tt fep session close")
+		fmt.Printf("  取这一轮：tt recording show %s（收工时落 %s）\n", s.Tag, s.Tag+fep.MetaSuffix)
+		fmt.Println("收工：Ctrl-C，或另开终端跑 tt recording stop <录制ID>")
 	}); err != nil {
 		return err
 	}

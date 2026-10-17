@@ -73,7 +73,7 @@ func newClient() (*fep.Client, error) {
 	}
 	s, err := reg.Load()
 	if errors.Is(err, fep.ErrNoSession) {
-		return nil, fail(exitNoSession, "没有登记中的会话（先跑 tt fep session open）")
+		return nil, fail(exitNoSession, "没有登记中的会话（先跑 tt recording start --launch standard）")
 	}
 	if err != nil {
 		return nil, fail(exitFailed, "%v", err)

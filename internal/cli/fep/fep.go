@@ -167,7 +167,7 @@ func recordingFiles(from, suffix string, all bool) ([]string, error) {
 		return nil, fail(exitFailed, "读不到 %s: %v", from, err)
 	}
 	if len(files) == 0 {
-		return nil, fail(exitFailed, "%s 下没有 *%s（先跑 tt fep session open 录一轮）", from, suffix)
+		return nil, fail(exitFailed, "%s 下没有 *%s（先跑 tt recording start --launch standard 录一轮）", from, suffix)
 	}
 	if !all && len(files) > 1 {
 		files = files[:1]

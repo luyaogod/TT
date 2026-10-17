@@ -21,7 +21,7 @@ import (
 //
 // 一条录制的**名字就是它的 ID**（代理落盘用的 tag，形如 fep-20261015-170031）。
 // 这个 ID 是给人复制流转的：前端面板录完把它显示出来，用户复制给 agent，
-// agent 拿它跑 `tt fep rec show <ID>` / `tt fep rec replay --id <ID>`。
+// agent 拿它跑 `tt recording show <ID>` / `tt recording replay --id <ID>`。
 // 所以 ID 必须能从文件后缀里切出来（见 fep.RecordingIDFromFile），不能是另一套编号。
 
 var recID string
@@ -99,7 +99,7 @@ func resolveRecording(from, id string) (recTarget, error) {
 		}
 		t = found
 	default:
-		return t, fail(exitUsage, "要么给录制 ID（tt fep rec show <ID>），要么给 --from <文件或目录>")
+		return t, fail(exitUsage, "要么给录制 ID（tt recording show <ID>），要么给 --from <文件或目录>")
 	}
 	if len(t.Files) == 0 {
 		files, err := fep.RecordingFilesFor(t.Dir, t.ID)
@@ -107,7 +107,7 @@ func resolveRecording(from, id string) (recTarget, error) {
 			return t, fail(exitFailed, "读 %s: %v", t.Dir, err)
 		}
 		if len(files) == 0 {
-			return t, fail(exitTarget, "%s 里没有录制 %s（看 tt fep rec list）", t.Dir, t.ID)
+			return t, fail(exitTarget, "%s 里没有录制 %s（看 tt recording ls）", t.Dir, t.ID)
 		}
 		t.Files = files
 	}
@@ -146,7 +146,7 @@ func findByID(id string) (recTarget, error) {
 	} else if found {
 		return recTarget{ID: item.ID, Dir: item.Dir, Files: item.Files, Meta: item.Meta}, nil
 	}
-	return t, fail(exitTarget, "找不到录制 %s（找过缓存 %s 与长期库 %s）—— 看 tt fep rec list",
+	return t, fail(exitTarget, "找不到录制 %s（找过缓存 %s 与长期库 %s）—— 看 tt recording ls",
 		id, cache, lib.Root)
 }
 
@@ -519,7 +519,7 @@ tt serve 启动清超过 7 天的、tt cache clear 立刻清。
 						id, cache)
 				}
 			}
-			return fail(exitTarget, "长期库里没有 %s（看 tt fep rec list）", id)
+			return fail(exitTarget, "长期库里没有 %s（看 tt recording ls）", id)
 		}
 		if recRmDryRun {
 			return printJSONOrText(map[string]any{"id": id, "dir": item.Dir, "dryRun": true}, func() {
@@ -923,7 +923,7 @@ func indexStatus(dir, id string) (string, []indexRow) {
 		var text string
 		switch {
 		case rerr != nil:
-			text = "无（用 tt fep rec index 建）"
+			text = "无（用 tt recording index 建）"
 			row.Err = "无索引"
 		case !ix.Complete() && ix.StaleFormat():
 			text = fmt.Sprintf("%d 帧（格式版本 %d 已过时，可重建）", len(ix.Recs), ix.Version)
@@ -1053,7 +1053,7 @@ var recShowCmd = &cobra.Command{
 			if verdict != nil {
 				fmt.Print(verdict.Report())
 			} else {
-				fmt.Println("闸门     : 没有会话在跑，这一栏等有会话时再看（tt fep rec replay 会自己先比）")
+				fmt.Println("闸门     : 没有会话在跑，这一栏等有会话时再看（tt recording replay 会自己先比）")
 			}
 		})
 	},
@@ -1102,5 +1102,5 @@ func init() {
 //
 // 顺序即帮助里的顺序（列 → 看 → 留 → 删 → 清 → 索引）。
 func RecordingCommands() []*cobra.Command {
-	return []*cobra.Command{recStartCmd, recStopCmd, recActiveCmd, recListCmd, recShowCmd, recReproduceCmd, recKeepCmd, recRmCmd, recPruneCmd, recIndexCmd}
+	return []*cobra.Command{recStartCmd, recStopCmd, recActiveCmd, recListCmd, recShowCmd, recReproduceCmd, recKeepCmd, recRmCmd, recPruneCmd, recIndexCmd, recStaleCmd}
 }

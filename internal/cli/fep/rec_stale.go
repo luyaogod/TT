@@ -9,7 +9,7 @@ import (
 	"tt/internal/fep"
 )
 
-// tt fep rec mark-stale —— 旧件的两条路之一（契约 §7 A24 / 用户决策 D-F2）。
+// tt recording mark-stale —— 旧件的两条路之一（契约 §7 A24 / 用户决策 D-F2）。
 //
 // 背景：回放**强制身份**（A23）之后，早于身份上线的旧件、以及 v2 指纹的旧件，
 // 真跑会被拒。用户定的处置只有两条：**重录**（推荐）、或**打标记**。
@@ -35,9 +35,9 @@ var recStaleCmd = &cobra.Command{
 
 没有身份文件的老件也能标记：会补写一份只有 ID 与标记的身份文件（备注里写明是补写的）。
 
-标记之后：` + "`tt fep rec list`" + ` 与 ` + "`tt fep rec show`" + ` 都会显示「` + fep.StaleNote + `」。
+标记之后：` + "`tt recording ls`" + ` 与 ` + "`tt recording show`" + ` 都会显示「` + fep.StaleNote + `」。
 回放仍然会被拒（A23）—— 这里**不加**任何跳过闸门的开关。要真能跑，只有重录：
-  tt fep rec start <身份>`,
+  tt recording start <身份>`,
 	Args: exactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		t, err := resolveRecording(uiFrom, args[0])
@@ -61,7 +61,7 @@ var recStaleCmd = &cobra.Command{
 			fmt.Printf("  时间：%s\n", m.StaleAt.Format(time.RFC3339))
 			fmt.Printf("  只改了身份文件：%s\n", fep.MetaPath(t.Dir, t.ID))
 			fmt.Printf("  录制文件 %d 份一个都没动（标记只是把后果写在脸上，回放仍会被拒）\n", len(t.Files))
-			fmt.Println("  要真能回放：重录一份（tt fep rec start）；这份留着对照/取证")
+			fmt.Println("  要真能回放：重录一份（tt recording start）；这份留着对照/取证")
 		})
 	},
 }

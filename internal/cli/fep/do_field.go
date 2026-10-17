@@ -137,7 +137,7 @@ func resolveDoField(client *fep.Client, kind string) (fieldTarget, error) {
 		return fieldTarget{}, &fep.Refusal{
 			Code: fep.CodeFormUnknown, Exit: fep.ExitFormUnknown,
 			Message: fmt.Sprintf("读不到当前界面模型（%v）：--field 要靠它把 colName 落成对象", err),
-			Hint: "先确认会话在跑、录制件已落盘：`tt fep session ps`；" +
+			Hint: "先确认会话在跑、录制件已落盘：`tt recording active`；" +
 				"再看这一屏的树：`tt fep ui tree --window <窗口名片段>`（窗口名照 `tt fep ui snapshot` 出的原样值）",
 		}
 	}

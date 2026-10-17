@@ -80,7 +80,7 @@ Action/ToolBarItem/MenuAction=invoke、TableColumn=cell。`,
 		}
 		s, err := reg.Load()
 		if errors.Is(err, fep.ErrNoSession) {
-			return fail(exitNoSession, "没有登记中的会话（先跑 tt fep session open）")
+			return fail(exitNoSession, "没有登记中的会话（先跑 tt recording start --launch standard）")
 		}
 		if err != nil {
 			return fail(exitFailed, "%v", err)

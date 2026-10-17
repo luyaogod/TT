@@ -67,7 +67,7 @@ var recActiveCmd = &cobra.Command{
 
 // closeRegisteredSession 收掉一份登记（tag 空 = 唯一那条；多条则要求点名）。
 //
-// 抽出来是因为**两个入口共用它**：`tt fep session close`（旧）与 `tt recording stop`（新）。
+// 抽出来是因为**两个入口共用它**：`tt recording stop <录制ID>`（旧）与 `tt recording stop`（新）。
 // 收尾这件事里有一串容易漏的细节（先请常驻进程自退、只杀登记的 pid、调试侧按 ref 收口、
 // 最后才摘登记），复制两份必然漂 —— 而漂的那一次会留下一个跑着的代理或一条僵着的调试会话。
 func closeRegisteredSession(cmd *cobra.Command, tag string) error {
@@ -97,7 +97,7 @@ func closeRegisteredSession(cmd *cobra.Command, tag string) error {
 		}
 		s, lerr := reg.LoadTag(tag)
 		if errors.Is(lerr, fep.ErrSessionNotFound) {
-			return fail(exitNoSession, "没有 tag 为 %q 的登记（用 tt fep session ps 看全部）", tag)
+			return fail(exitNoSession, "没有 tag 为 %q 的登记（用 tt recording active 看全部）", tag)
 		}
 		if lerr != nil {
 			return fail(exitFailed, "%v", lerr)

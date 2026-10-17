@@ -15,7 +15,7 @@ import (
 	"tt/internal/fep"
 )
 
-// tt fep rec reproduce —— 把一份录制**在调试器下重放出来**，并报出两样证据：
+// tt recording replay —— 把一份录制**在调试器下重放出来**，并报出两样证据：
 // 指纹比对结果 + 程序停在哪儿。这是计划的终态目标那一步：
 //
 //	用户复现一次异常 → 得到录制 ID → AI 读代码、决定断点 → 这一条命令把它重放出来并捕获现场
@@ -56,7 +56,7 @@ var recReproduceCmd = &cobra.Command{
   4. 等停站，报出 file:line 与原因。
 
 停站之后**不收拾会话** —— 接着用 tt debug exec "print …" 取证，收工是：
-  tt debug quit ; tt fep session close
+  tt debug quit ; tt recording stop <录制ID>
 
 没停站（断点没命中）时退 1 并说清是超时还是程序已经结束 —— 那不是"发失败"，是"没捕获到现场"。
 只想把事件重放出去、不等停站（前端面板那个回放按钮就是这么用的）就加 --no-wait。
@@ -74,7 +74,7 @@ var recReproduceCmd = &cobra.Command{
 		// 实测编号表与调试线逐条相同，闸门会按那条连接比（它里面另有一条 fgldeb 的连接，在这里没有对应）。
 		if t.Path == fep.PathRunnerRR {
 			return fail(exitState,
-				"这份录制是 %s 录的：要在断点下重放，得用调试线录的那一份（tt fep rec start）。"+
+				"这份录制是 %s 录的：要在断点下重放，得用调试线录的那一份（tt recording start）。"+
 					"r.r 录的表与调试线不是同一张（跨路径实测共同编号 0 条相同），重放会点错控件",
 				t.Path.Label())
 		}
@@ -233,7 +233,7 @@ var recReproduceCmd = &cobra.Command{
 			return printJSONOrText(out, func() {
 				fmt.Printf("重放：发 %d 条 / 跳 %d 条 / 失败 %d 条\n", res.Sent, res.Skipped, res.Failed)
 				fmt.Println("✓ 事件已发完（--no-wait：不等停站）。会话留着：tt debug status 看它现在在哪")
-				fmt.Println("  收工：tt debug quit ; tt fep session close")
+				fmt.Println("  收工：tt debug quit ; tt recording stop <录制ID>")
 			})
 		}
 		waitAlias := ""
@@ -262,7 +262,7 @@ var recReproduceCmd = &cobra.Command{
 			fmt.Printf("重放：发 %d 条 / 跳 %d 条 / 失败 %d 条\n", res.Sent, res.Skipped, res.Failed)
 			fmt.Printf("✓ 捕获现场：%s\n", spot)
 			fmt.Println("  取证：tt debug exec \"print <变量>\" \"where\"")
-			fmt.Println("  收工：tt debug quit ; tt fep session close")
+			fmt.Println("  收工：tt debug quit ; tt recording stop <录制ID>")
 		})
 	},
 }
@@ -282,7 +282,7 @@ func waitLiveInterface(cmd *cobra.Command, timeout time.Duration) error {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fail(exitState, "等了 %s 界面还没出来（作业没连上代理？看 tt fep session ps 与代理端口）", timeout)
+			return fail(exitState, "等了 %s 界面还没出来（作业没连上代理？看 tt recording active 与代理端口）", timeout)
 		}
 		fmt.Fprintf(cmd.ErrOrStderr(), "· 等界面出来…\n")
 		time.Sleep(3 * time.Second)
