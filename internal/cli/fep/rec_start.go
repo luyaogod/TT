@@ -33,6 +33,9 @@ var (
 	// 再 `tt recording start --session A` 把画面挂上去。挂的方式仍是 Q23 的"同环境同别名
 	// 复用空闲宿主" —— 所以落到的就是那一条（`ref` 不变）。
 	recStartSession string
+	// recStartLaunch 是 `--launch`：`debug`（默认，走我们自己的调试线，可下断点）
+	// 还是 `standard`（走 T100 标准启动器 r.r —— 界面与用户平时看到的一致，但**不可调试**）。
+	recStartLaunch string
 )
 
 // bindRecSession 把"挂到哪条已有会话"归一成 (环境, 企业, 别名)。
@@ -89,6 +92,24 @@ var recStartCmd = &cobra.Command{
 要自己下断点就先加 --no-continue，放行前用 tt debug exec 下好再 continue。`,
 	Args: noArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// 启动路径先判：`--launch standard` 根本不经过调试会话，后面那套「挂靠/点名环境/
+		// 起调试会话」对它不成立。放在最前面判，是为了让用法错在读写任何东西之前就报出来。
+		switch strings.ToLower(strings.TrimSpace(recStartLaunch)) {
+		case "", "debug":
+			// 默认：我们自己那条调试线
+		case "standard":
+			if strings.TrimSpace(recStartSession) != "" {
+				return fail(exitUsage, "--launch standard 不能与 --session 一起用：标准启动（r.r）不经过调试会话，没有可挂的会话")
+			}
+			if strings.TrimSpace(recStartEnt) == "" {
+				return fail(exitUsage, "录制必须点名企业编号（ENT）：--launch standard 也一样")
+			}
+			return runSessionOpen(cmd, openParams{
+				Env: recStartEnv, Prog: recStartProg, Ent: recStartEnt, Binary: recStartBinary,
+			})
+		default:
+			return fail(exitUsage, "未知的 --launch %q：只有 debug（可调试）与 standard（标准启动）", recStartLaunch)
+		}
 		// `--session`：把录制挂到一条**已有**的空闲会话上（组合用法）。先把目标解出来，
 		// 因为它决定了环境与企业 —— 后面每一步都按它走。
 		var boundAlias string
@@ -340,6 +361,7 @@ func runRecPlan(cl *debugclient.Client, p recRunPlan, logf func(string, ...any))
 }
 
 func init() {
+	recStartCmd.Flags().StringVar(&recStartLaunch, "launch", "debug", "启动路径：debug（调试线，可下断点）| standard（T100 标准启动器 r.r，界面与用户平时一致但不可调试）")
 	recStartCmd.Flags().StringVar(&recStartSession, "session", "", "把录制挂到这条已有会话上（ref / 别名 / 句柄；必须是空闲且有名字）。给了它就不用 --env")
 	recStartCmd.Flags().StringVar(&recStartEnv, "env", "", "环境名（必填 —— 环境一律点名，没有默认环境可回落）")
 	recStartCmd.Flags().StringVar(&recStartProg, "prog", "", "作业程序名（必填，如 bsft001_wf）")

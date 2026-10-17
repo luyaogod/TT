@@ -97,16 +97,15 @@ func TestEntTextSaysWhatHappensWithoutEnt(t *testing.T) {
 // 这条命令只走 T100 标准启动器（r.r），--no-job 时如实报 none。
 // T100 原生的 r.d（fgldeb）不在命令面上 —— 要录要调都走调试线。
 func TestOpenPathReflectsHowTheJobIsStarted(t *testing.T) {
-	defer func(noJob bool) { openNoJob = noJob }(openNoJob)
-	openNoJob = false
-	if got := openPath(); got != fep.PathRunnerRR {
+	_ = openNoJob
+	if got := (openParams{}).path(); got != fep.PathRunnerRR {
 		t.Fatalf("session open 只走标准启动器，got %q", got)
 	}
-	openNoJob = true
-	if got := openPath(); got != fep.PathNone {
+
+	if got := (openParams{NoJob: true}).path(); got != fep.PathNone {
 		t.Fatalf("--no-job 没起作业，要如实报 none，got %q", got)
 	}
-	openNoJob = false
+
 	// 命令面上不许再有 --path：r.d 这条路线已拿掉（它的常量只为识别老录制件而留）
 	if f := sessionOpenCmd.Flags().Lookup("path"); f != nil {
 		t.Fatal("--path 已从命令面拿掉：录制与调试都走调试线")

@@ -208,3 +208,30 @@ func TestBindRecSession(t *testing.T) {
 		t.Fatalf("ENT 应取会话的：%q %v", ent, err)
 	}
 }
+
+// TestRecStartLaunchValidation：`--launch` 的三条规矩。
+//
+// 关键的一条是"standard 不能与 --session 一起用"：标准启动（r.r）根本不经过调试会话，
+// 硬要挂只会落到一条**别的**会话上 —— 那是这套系统里最贵的一类错（安静地做错事）。
+func TestRecStartLaunchValidation(t *testing.T) {
+	cases := []struct {
+		name   string
+		launch string
+		sess   string
+		ent    string
+		wantOK bool
+	}{
+		{"standard 缺 ENT", "standard", "", "", false},
+		{"standard 带 --session", "standard", "A", "99", false},
+		{"未知值", "bogus", "", "99", false},
+	}
+	for _, c := range cases {
+		recStartLaunch, recStartSession, recStartEnt = c.launch, c.sess, c.ent
+		recStartProg = "bsft001_wf"
+		err := recStartCmd.RunE(recStartCmd, nil)
+		if (err == nil) != c.wantOK {
+			t.Fatalf("%s：err=%v，期望成功=%v", c.name, err, c.wantOK)
+		}
+	}
+	recStartLaunch, recStartSession, recStartEnt, recStartProg = "", "", "", ""
+}

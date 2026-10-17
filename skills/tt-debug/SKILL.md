@@ -196,7 +196,7 @@ Get-Content "$env:APPDATA\tt\fep\<录制 ID>-replay-*.jsonl" -Tail 1
 | 起法 | 录到什么 | 用途 |
 |---|---|---|
 | `tt recording start --env <环境> --prog <作业> --ent <ENT>` | 作业界面（`fglrun -d` 起的，画面只有作业） | **要打断点的录制**：用户只管复现，放行是自动的 |
-| `tt fep session open --env <环境> --prog <作业> --ent <ENT>` | 作业界面（`r.r` 启动器） | 标准运行录制（**不可调试**：azzp000 不带 `-d`） |
+| `tt recording start --launch standard --env <环境> --prog <作业> --ent <ENT>` | 作业界面（`r.r` 启动器） | 标准运行录制（**不可调试**：azzp000 不带 `-d`） |
 | 上面第二条 + `tt debug start … --fglserver <本机IP>:1200` | 作业界面（调试线） | 自己下断点、边调边录 |
 
 `--path` / T100 原生的 `r.d`（**fgldeb**）已不在命令面上：那是 T100 的调试器，
