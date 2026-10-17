@@ -503,3 +503,47 @@ func TestSessionScreenStart(t *testing.T) {
 		t.Fatalf("没名字该 409，实得 %d（%s）", resp.StatusCode, respError(t, resp))
 	}
 }
+
+// TestSessionScreenStop：收画面通道必须**幂等**，且只收自己那条。
+func TestSessionScreenStop(t *testing.T) {
+	hs, s := actionTestDebugServer(t)
+	giveServerNamedEnv(s, "h1", "127.0.0.1", "36")
+	sess := idleOn("s1", s.cfg.CloneEnv("h1"))
+	sess.setNameInTest("A")
+	s.mgr.sessions["s1"] = sess
+
+	// ① 没挂着：200 + detached:false（收尾幂等，重复点"停止"不该报错）
+	resp := doReq(t, "DELETE", hs.URL+"/api/sessions/s1/screen", "", "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("没挂着也该 200：%d %s", resp.StatusCode, respError(t, resp))
+	}
+
+	// ② 挂着但没接停止器：501
+	var stoppedTag string
+	s.SetScreenLookup(func(ref string) (map[string]any, bool) {
+		return map[string]any{"tag": "fep-R1", "kind": "rec"}, true
+	})
+	resp = doReq(t, "DELETE", hs.URL+"/api/sessions/s1/screen", "", "")
+	if resp.StatusCode != 501 {
+		t.Fatalf("没接停止器该 501，实得 %d（%s）", resp.StatusCode, respError(t, resp))
+	}
+
+	// ③ 接上停止器：收到的 tag 必须来自这条会话的挂接（不是调用方随便给的）
+	s.SetScreenStopper(func(ref, tag string) error {
+		stoppedTag = tag
+		return nil
+	})
+	resp = doReq(t, "DELETE", hs.URL+"/api/sessions/s1/screen", "", "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("该 200：%d %s", resp.StatusCode, respError(t, resp))
+	}
+	if stoppedTag != "fep-R1" {
+		t.Fatalf("停错对象：%q", stoppedTag)
+	}
+
+	// ④ `/record` 与 `/screen` 是同一件事：同一个 handler
+	resp = doReq(t, "DELETE", hs.URL+"/api/sessions/s1/record", "", "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("record 别名该 200：%d", resp.StatusCode)
+	}
+}

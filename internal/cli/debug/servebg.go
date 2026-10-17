@@ -341,6 +341,15 @@ func debugServeForeground(cfg *debug.Config, cfgPath string) error {
 		pid, log, serr := st(cfgPath, req.Ref, req.Env, req.Ent, req.Prog, req.Tag)
 		return debug.ScreenStartResult{PID: pid, Log: log}, serr
 	})
+	if dir := config.LocationsAt(cfgPath).DataDir(); dir != "" {
+		srv.SetScreenStopper(func(ref, tag string) error {
+			if strings.TrimSpace(tag) == "" {
+				return fmt.Errorf("没有录制 ID，无法定位要收的画面通道")
+			}
+			_, serr := fep.NewRegistry(dir).StopTag(tag)
+			return serr
+		})
+	}
 	return RunForeground(cfgPath, ServeSpec{
 		Prefix:   "[tt debug]",
 		StopHint: "tt debug serve --stop",

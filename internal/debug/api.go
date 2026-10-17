@@ -48,6 +48,8 @@ type Server struct {
 
 	// screenStarter 起一块画面通道（见 SetScreenStarter）。nil = 本服务不支持起画面。
 	screenStarter ScreenStarter
+	// screenStopper 停一块画面通道（见 SetScreenStopper）。nil = 本服务不支持停。
+	screenStopper ScreenStopper
 
 	// mu 同时保护两类运行态:
 	//   stop —— Serve 期间指向该次运行的 cancel(POST /api/shutdown 用,优雅停止);
@@ -218,6 +220,11 @@ func (s *Server) routes(mux *http.ServeMux) {
 	// 画面通道 / 录制的只读视图（画面通道由外部进程持有，服务只提供查询口）
 	mux.HandleFunc("GET /api/sessions/{id}/screen", s.hSessionScreen)
 	mux.HandleFunc("POST /api/sessions/{id}/screen", s.hSessionScreenStart)
+	mux.HandleFunc("DELETE /api/sessions/{id}/screen", s.hSessionScreenStop)
+	// `/record` 与 `/screen` 目前是同一件事（一块画面通道 = 一份录制）：两个名字都收，
+	// 由同一对 handler 处理 —— 分成两套实现的后果是"停止只停了一半"。
+	mux.HandleFunc("POST /api/sessions/{id}/record", s.hSessionScreenStart)
+	mux.HandleFunc("DELETE /api/sessions/{id}/record", s.hSessionScreenStop)
 	mux.HandleFunc("GET /api/sessions/{id}/record", s.hSessionRecord)
 	mux.HandleFunc("GET /api/sessions/{id}/breakpoints", s.hBPList)
 	mux.HandleFunc("POST /api/sessions/{id}/breakpoints", s.hBPAdd)
@@ -2602,4 +2609,39 @@ func (s *Server) hSessionScreenStart(w http.ResponseWriter, r *http.Request) {
 		"ok": true, "session": refOf(sess.EnvName(), sess.Seq()),
 		"started": res, "note": "画面通道已起；录制 ID 用 GET /api/sessions/{id}/screen 查",
 	})
+}
+
+// ScreenStopper 停掉一块画面通道。实现方负责"收干净"（写帧、落身份、杀登记的 pid）。
+type ScreenStopper func(ref, tag string) error
+
+// SetScreenStopper 注入停止器（nil = 不支持停，端点如实报 501）。
+func (s *Server) SetScreenStopper(fn ScreenStopper) { s.screenStopper = fn }
+
+// hSessionScreenStop 收掉会话挂着的画面通道（`DELETE /api/sessions/{id}/screen`）。
+//
+// 没挂着也算成功（`detached:false`）：收尾是**幂等**的 —— 重复点"停止"不该报错，
+// 更不该把别人的画面收掉（tag 只从这条会话的挂接里取）。
+func (s *Server) hSessionScreenStop(w http.ResponseWriter, r *http.Request) {
+	sess := s.sessOfWrite(w, r)
+	if sess == nil {
+		return
+	}
+	ref := refOf(sess.EnvName(), sess.Seq())
+	info, ok := s.lookupScreen(ref)
+	if !ok {
+		writeJSON(w, 200, map[string]any{"ok": true, "session": ref, "detached": false,
+			"note": "这条会话当前没有画面通道"})
+		return
+	}
+	tag, _ := info["tag"].(string)
+	if s.screenStopper == nil {
+		fail(w, 501, fmt.Errorf("这个服务没有接入画面通道停止器（由接线层注入，见 SetScreenStopper）"))
+		return
+	}
+	if err := s.screenStopper(ref, tag); err != nil {
+		fail(w, 500, fmt.Errorf("停画面通道失败（%s）：%w", tag, err))
+		return
+	}
+	s.emitAction(r, sess, "screen.stop", fmt.Sprintf("收画面通道（录制 %s）", tag))
+	writeJSON(w, 200, map[string]any{"ok": true, "session": ref, "detached": true, "tag": tag})
 }

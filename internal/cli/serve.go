@@ -130,6 +130,17 @@ func newServeCmd() *cobra.Command {
 				pid, log, serr := st(path, req.Ref, req.Env, req.Ent, req.Prog, req.Tag)
 				return debug.ScreenStartResult{PID: pid, Log: log}, serr
 			})
+			// 停止器：直接收那一条登记（与 `tt recording stop <tag>` 同一份实现 —— StopTag
+			// 会先请常驻进程自退、只杀登记的 pid，最后摘掉这一条登记）。
+			if dir := config.LocationsAt(path).DataDir(); dir != "" {
+				debugSrv.SetScreenStopper(func(ref, tag string) error {
+					if strings.TrimSpace(tag) == "" {
+						return fmt.Errorf("没有录制 ID，无法定位要收的画面通道")
+					}
+					_, serr := fep.NewRegistry(dir).StopTag(tag)
+					return serr
+				})
+			}
 			// 字典同步的目标缺省取**数据目录**（config.json 同目录）下的 erp_data.db，
 			// 与 `tt dict -d` 的缺省一致（都来自 config.Locations，统一路径管理器），
 			// 所以"服务在这里同步、命令行在这里读"天然对得上。
