@@ -6,6 +6,7 @@ package session
 // 已经在 `internal/cli/fep` 里收成计划了。命令层保持薄，是这套改造的一条底线。
 
 import (
+	"encoding/csv"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 
 	"tt/internal/cli/common"
 	"tt/internal/debugclient"
+	"tt/internal/output"
 	"tt/internal/winproc"
 )
 
@@ -123,7 +125,8 @@ ENT 必填：企业编号决定用哪个账号连库与据点校验，不再沿�
 			if lerr != nil {
 				return lerr
 			}
-			out := make([]map[string]any, 0, len(list))
+			var out []map[string]any
+			var rows [][]string
 			for _, b := range list {
 				if e := strings.TrimSpace(lsEnv); e != "" && b.Env != e {
 					continue
@@ -132,8 +135,26 @@ ENT 必填：企业编号决定用哪个账号连库与据点校验，不再沿�
 					continue
 				}
 				out = append(out, briefMap(b))
+				rows = append(rows, []string{b.Ref, b.Name, b.Env, b.Ent, b.Prog, b.State, b.Epoch})
 			}
-			return emit(map[string]any{"ok": true, "sessions": out})
+			payload := map[string]any{"ok": true, "sessions": out}
+			headers := []string{"REF", "名字", "环境", "ENT", "作业", "状态", "世代"}
+			switch common.OutputFormat() {
+			case output.FormatJSON:
+				return emit(payload)
+			case output.FormatCSV:
+				// 自己写 CSV：`output.WriteCSV` 会带上 SQL 那一套表头注释（"只读事务 / 行数 0"），
+				// 对会话列表是误导 —— 这里明明有行，注释却说 0 行。
+				cw := csv.NewWriter(os.Stdout)
+				_ = cw.Write(headers)
+				for _, row := range rows {
+					_ = cw.Write(row)
+				}
+				cw.Flush()
+				return cw.Error()
+			default:
+				return output.WriteTable(os.Stdout, headers, rows)
+			}
 		},
 	}
 
@@ -162,7 +183,16 @@ ENT 必填：企业编号决定用哪个账号连库与据点校验，不再沿�
 			if rec, xerr := cl.Recording(b.ID); xerr == nil {
 				snap["recording"] = rec
 			}
-			return emit(snap)
+			return emitFormatted(snap, func() {
+				fmt.Printf("会话  : %s（%s）\n", b.Ref, b.Name)
+				fmt.Printf("环境  : %s / ENT %s\n", b.Env, b.Ent)
+				fmt.Printf("作业  : %s（%s）\n", b.Prog, b.State)
+				if scr, ok := snap["screen"].(map[string]any); ok {
+					if tag, ok := scr["tag"].(string); ok && tag != "" {
+						fmt.Printf("画面  : %s（%v）\n", tag, scr["kind"])
+					}
+				}
+			})
 		},
 	}
 

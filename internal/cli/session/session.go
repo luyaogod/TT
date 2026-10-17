@@ -24,6 +24,7 @@ import (
 	"tt/internal/cli/common"
 	"tt/internal/config"
 	"tt/internal/debugclient"
+	"tt/internal/output"
 )
 
 // group 是 `tt session` 的命令组。
@@ -108,4 +109,21 @@ func briefMap(b debugclient.Brief) map[string]any {
 		"env": b.Env, "ent": b.Ent, "n": b.N, "epoch": b.Epoch,
 		"prog": b.Prog, "state": b.State,
 	}
+}
+
+// emitFormatted 按全局 `--format` 输出：JSON 默认；table/text/csv 走人读形态。
+//
+// 为什么要它：新命令一开始一律打 JSON，而全局 `--format table` 被**静默忽略** ——
+// 那正是这套工具反复在灭的毛病（"我明明给了参数，它当没看见"）。
+func emitFormatted(v any, text func()) error {
+	if common.OutputFormat() == output.FormatJSON {
+		return emit(v)
+	}
+	text()
+	return nil
+}
+
+// errf 把用法/运行错按线里约定的码返回。
+func errf(code int, format string, args ...any) error {
+	return &exitErr{code: code, msg: fmt.Sprintf(format, args...)}
 }
