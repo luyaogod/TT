@@ -25,7 +25,7 @@ var (
 	// new
 	nsEnv, nsEnt, nsName, nsProg, nsModule string
 	nsTimeout                              int
-	nsRecord                               bool // --record：建完会话顺手把录制挂上去
+	nsRecord                               bool   // --record：建完会话顺手把录制挂上去
 	nsFGLServer                            string // --fglserver：本轮画面接线（会话 job 用）
 	// 定位
 	lsSession, lsEnv string
@@ -188,9 +188,14 @@ ENT 必填：企业编号决定用哪个账号连库与据点校验，不再沿�
 				fmt.Printf("会话  : %s（%s）\n", b.Ref, b.Name)
 				fmt.Printf("环境  : %s / ENT %s\n", b.Env, b.Ent)
 				fmt.Printf("作业  : %s（%s）\n", b.Prog, b.State)
-				if scr, ok := snap["screen"].(map[string]any); ok {
-					if tag, ok := scr["tag"].(string); ok && tag != "" {
-						fmt.Printf("画面  : %s（%v）\n", tag, scr["kind"])
+				// 只读视图的形状：{attached, screen:{tag,kind}}；老服务可能直接是 {tag,kind}。
+				if info, ok := snap["screen"].(map[string]any); ok {
+					inner, _ := info["screen"].(map[string]any)
+					if inner == nil {
+						inner = info
+					}
+					if tag, ok := inner["tag"].(string); ok && tag != "" {
+						fmt.Printf("画面  : %s（%v）\n", tag, inner["kind"])
 					}
 				}
 			})
