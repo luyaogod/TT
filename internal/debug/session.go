@@ -3125,8 +3125,6 @@ var (
 	sessionSeq atomic.Int64
 	// runScopeSeq 运行作用域的单调序号（见 nextRunScope）。
 	runScopeSeq atomic.Int64
-	// sessionEpochSeq 会话世代号的单调计数（见 nextSessionEpoch）。
-	sessionEpochSeq atomic.Int64
 )
 
 // nextSessionEpoch 发一个新的**会话世代号**（契约 C5.3 的 `epoch`，F15 的判据）。
