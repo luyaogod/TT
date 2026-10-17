@@ -6,12 +6,12 @@ package web
 //
 // 为什么"起一轮"是**另起一个进程**（`winproc.SpawnDetached`）而不是在 serve 里起：
 // 一轮录制 = 一个隔离 GDC + 一条代理 + 一个常驻 Runtime，它天然属于**一个前台进程**
-// （`tt fep rec start` 就是这么活的）。让 serve 兼着管它会牵出两件麻烦事：
-// serve 一重启录制就断，且它登记的是自己那个 pid（`tt fep session close` 会去杀 serve）。
+// （`tt recording start` 就是这么活的）。让 serve 兼着管它会牵出两件麻烦事：
+// serve 一重启录制就断，且它登记的是自己那个 pid（`tt recording stop <录制ID>` 会去杀 serve）。
 // 这与 `tt update` 那条按钮的做法一致（api/update.go 的 hUpdateApply）。
 //
 // 会话怎么被发现：子进程起来就往 `.tt-fep.json` 写登记 —— 面板据此拿到**录制 ID**与端口，
-// 命令行那一侧看到的是同一份登记（`tt fep session ps` / `session close` 都能用它收工）。
+// 命令行那一侧看到的是同一份登记（`tt recording active` / `session close` 都能用它收工）。
 
 import (
 	"fmt"
@@ -223,7 +223,7 @@ func busySession(dataDir, env string) (*fep.Session, bool) {
 
 // hRecordingStart POST /api/recordings
 //
-// 起一个脱离的 `tt fep rec start`（见文件头注释），等它把登记写出来，返回录制 ID。
+// 起一个脱离的 `tt recording start`（见文件头注释），等它把登记写出来，返回录制 ID。
 // 用户此时**不会**被带到任何调试器面前：那一侧走的是我们自己的 fgldb（`rec start` 里那段）。
 func (s *Server) hRecordingStart(w http.ResponseWriter, r *http.Request) {
 	cfgPath, err := s.configPath(true)
@@ -267,7 +267,7 @@ func (s *Server) hRecordingStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	logPath := filepath.Join(cacheDir, "rec-start-"+time.Now().Format("20060102-150405")+".log")
-	// 新入口：`tt recording start`（与 `tt fep rec start` 是同一份实现，见 internal/cli/recording）。
+	// 起的是 `tt recording start`（与命令面同一份实现，见 internal/cli/recording）。
 	// 面板从旧入口切过来，是为了让 `tt fep rec …` 这一层将来能整体删掉 —— 只留一个入口。
 	args := []string{"recording", "start", "--env", req.Env, "--prog", req.Prog, "--config", cfgPath}
 	if e := strings.TrimSpace(req.Ent); e != "" {
@@ -313,7 +313,7 @@ func (s *Server) hRecordingStart(w http.ResponseWriter, r *http.Request) {
 // hRecordingStop POST /api/recordings/stop
 //
 // 收工 = 请常驻进程自己退（它会落身份 + 搬进长期库）+ 收掉调试会话。
-// 与命令行的 `tt fep session close` 同一件事，只是由面板触发。
+// 与命令行的 `tt recording stop <录制ID>` 同一件事，只是由面板触发。
 func (s *Server) hRecordingStop(w http.ResponseWriter, r *http.Request) {
 	dataDir, _, _, err := s.recDirs()
 	if err != nil {
@@ -431,7 +431,7 @@ func tailOf(path string, n int) string {
 
 // hRecordingReplay POST /api/recordings/{id}/replay
 //
-// 「回放」按钮：**另起一个脱离的进程**跑 `tt fep rec reproduce <ID> --no-wait`
+// 「回放」按钮：**另起一个脱离的进程**跑 `tt recording replay <ID> --no-wait`
 // （与起录同一条先例）。为什么是另起进程而不是在 serve 里做：回放自己要走一遍
 // "起调试线会话 + 过指纹闸 + 把事件发出去"，那是一轮**前台**的活，和录制一样天然属于一个
 // 独立进程；serve 只负责把它拉起来并回报日志落点。

@@ -304,7 +304,7 @@ func newFEPClient() (*fep.Client, error) {
 	dir := dataDirOf(cfgPath)
 	s, lerr := fep.NewRegistry(dir).Load()
 	if errors.Is(lerr, fep.ErrNoSession) {
-		return nil, fail(exitNoSession2, "没有登记中的会话（先跑 tt fep session open）")
+		return nil, fail(exitNoSession2, "没有登记中的会话（先跑 tt recording start --launch standard）")
 	}
 	if lerr != nil {
 		return nil, fail(exitFailed, "%v", lerr)

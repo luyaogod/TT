@@ -37,7 +37,7 @@ type recLoc struct {
 	Meta  *fep.RecordingMeta
 }
 
-// locateRecording 按 ID 找一份录制：长期库优先，再缓存（与 `tt fep rec show` 同一优先级）。
+// locateRecording 按 ID 找一份录制：长期库优先，再缓存（与 `tt recording show` 同一优先级）。
 func (s *Server) locateRecording(id string) (recLoc, error) {
 	_, cacheDir, lib, err := s.recDirs()
 	if err != nil {
