@@ -28,10 +28,19 @@ import (
 // 服务可能用 `--config` 指到别处，子进程必须跟着走，否则它会去读默认配置。
 type Starter func(cfgPath, ref, env, ent, prog, tag string) (pid int, logPath string, err error)
 
+// 三个可替换点：测试要能钉住"按什么参数起它"，而不真起一个跑 GDC 的进程。
+var (
+	executable     = os.Executable
+	spawnDetached  = winproc.SpawnDetached
+	processAlive   = winproc.Alive
+	alivePollPause = 200 * time.Millisecond
+	aliveDeadline  = 6 * time.Second
+)
+
 // New 返回生产实现。
 func New() Starter {
 	return func(cfgPath, ref, env, ent, prog, tag string) (int, string, error) {
-		exe, err := os.Executable()
+		exe, err := executable()
 		if err != nil {
 			return 0, "", err
 		}
@@ -57,14 +66,14 @@ func New() Starter {
 		// 是进程号与日志；真正的录制 ID 用 `GET /api/sessions/{id}/screen` 查回来。
 		_ = tag
 
-		pid, perr := winproc.SpawnDetached(exe, args, logPath)
+		pid, perr := spawnDetached(exe, args, logPath)
 		if perr != nil {
 			return 0, logPath, fmt.Errorf("起画面通道进程失败: %w", perr)
 		}
 		// 起来就退 = 启动失败（配置错、环境不可达、GDC 不在…），把日志路径带出去。
-		for waited := time.Duration(0); waited < 6*time.Second; waited += 200 * time.Millisecond {
-			time.Sleep(200 * time.Millisecond)
-			if !winproc.Alive(pid) {
+		for waited := time.Duration(0); waited < aliveDeadline; waited += alivePollPause {
+			time.Sleep(alivePollPause)
+			if !processAlive(pid) {
 				return pid, logPath, fmt.Errorf("画面通道进程起来就退了（pid %d）：详见 %s", pid, logPath)
 			}
 		}

@@ -7,6 +7,7 @@ package debugclient
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -278,5 +279,74 @@ func TestFailureWritesItsOwnEnvelope(t *testing.T) {
 	}
 	if out.ExitCode != f.ExitCode() {
 		t.Fatalf("退出码不一致：%d vs %d", out.ExitCode, f.ExitCode())
+	}
+}
+
+// TestStartJobEndpoint：`POST /sessions/{id}/job` 的路径与请求体（fglserver 可选）。
+func TestStartJobEndpoint(t *testing.T) {
+	var gotPath string
+	var gotBody map[string]any
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.Method + " " + r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_, _ = w.Write([]byte(`{"ok":true,"sessionId":"s1"}`))
+	}))
+	defer hs.Close()
+
+	id, err := New(hs.URL).StartJob("s1", "bsft001_wf", "asf", "99", "10.0.0.1:1200")
+	if err != nil || id != "s1" {
+		t.Fatalf("StartJob = %q, %v", id, err)
+	}
+	if gotPath != "POST /api/sessions/s1/job" {
+		t.Fatalf("路径 = %q", gotPath)
+	}
+	if gotBody["prog"] != "bsft001_wf" || gotBody["module"] != "asf" || gotBody["ent"] != "99" || gotBody["fglserver"] != "10.0.0.1:1200" {
+		t.Fatalf("请求体 = %+v", gotBody)
+	}
+
+	// 没回 sessionId 要报错（而不是让调用方拿着空句柄继续）
+	hs2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer hs2.Close()
+	if _, err := New(hs2.URL).StartJob("s1", "p", "", "", ""); err == nil {
+		t.Fatal("没回 sessionId 该报错")
+	}
+}
+
+// TestCloseUsesCloseEndpoint：`Close` 打的是 `/close`（收掉会话），不是 DELETE（结束本轮）。
+func TestCloseUsesCloseEndpoint(t *testing.T) {
+	var got string
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Method + " " + r.URL.Path
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer hs.Close()
+	if err := New(hs.URL).Close("s9"); err != nil {
+		t.Fatal(err)
+	}
+	if got != "POST /api/sessions/s9/close" {
+		t.Fatalf("Close 打的是 %q", got)
+	}
+}
+
+// TestNilFailureExitCode：nil 失败不许 panic（收尾路径上会碰到）。
+func TestNilFailureExitCode(t *testing.T) {
+	var f *Failure
+	if got := f.ExitCode(); got != 1 {
+		t.Fatalf("nil Failure 的退出码 = %d，要 1", got)
+	}
+	if err := f.WriteEnvelope(io.Discard); err != nil {
+		t.Fatalf("nil Failure 写信封不该报错：%v", err)
+	}
+}
+
+// TestJoinBaseDoesNotDoublePrefix：状态文件给的地址已经指到 API 上时，不再拼前缀。
+func TestJoinBaseDoesNotDoublePrefix(t *testing.T) {
+	if got := joinBase("http://h:1/debug/api", "/debug"); got != "http://h:1/debug/api" {
+		t.Fatalf("joinBase = %q", got)
+	}
+	if got := joinBase("http://h:1", "/debug"); got != "http://h:1/debug" {
+		t.Fatalf("joinBase = %q", got)
 	}
 }
