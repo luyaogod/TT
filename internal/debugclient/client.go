@@ -321,3 +321,132 @@ func stateOf(snap map[string]any) string {
 	}
 	return ""
 }
+
+// ---------------------------------------------------------------------------
+// 生命周期动作：与 `tt debug` 用的是同一批端点
+// ---------------------------------------------------------------------------
+
+// LaunchReq 是"起一条会话并跑作业"的请求。
+type LaunchReq struct {
+	Env       string
+	Prog      string
+	Module    string
+	Name      string
+	Ent       string
+	FGLServer *string // nil = 本轮不给覆盖；指向空串 = 强制交回 T100
+}
+
+// Launch 建会话（可同时起作业），返回会话句柄。
+func (c *Client) Launch(req LaunchReq) (string, error) {
+	body := map[string]any{"prog": req.Prog}
+	if req.Env != "" {
+		body["ssh"] = req.Env
+	}
+	if req.Module != "" {
+		body["module"] = req.Module
+	}
+	if req.Name != "" {
+		body["name"] = req.Name
+	}
+	if req.Ent != "" {
+		body["ent"] = req.Ent
+	}
+	if req.FGLServer != nil {
+		body["fglserver"] = *req.FGLServer
+	}
+	data, err := c.Do(http.MethodPost, "/sessions", body)
+	if err != nil {
+		return "", err
+	}
+	var out struct {
+		SessionID string `json:"sessionId"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil {
+		return "", fmt.Errorf("debugclient: 起会话应答解析失败: %w", err)
+	}
+	if out.SessionID == "" {
+		return "", fmt.Errorf("debugclient: 起会话没回 sessionId")
+	}
+	return out.SessionID, nil
+}
+
+// SwitchToIdle 切到某个环境并**等到空闲**（创建会话那条路）。
+//
+// 服务端是异步登录的（应答里 state=loading），所以这里要轮询到 idle —— 与
+// `tt debug env` 的等待语义一致，只是不再走子进程。
+func (c *Client) SwitchToIdle(env, ent, name string, timeout time.Duration) (string, error) {
+	body := map[string]any{"env": env}
+	if ent != "" {
+		body["ent"] = ent
+	}
+	if name != "" {
+		body["name"] = name
+	}
+	data, err := c.Do(http.MethodPost, "/sessions/switch", body)
+	if err != nil {
+		return "", err
+	}
+	var out struct {
+		SessionID string `json:"sessionId"`
+		State     string `json:"state"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil {
+		return "", fmt.Errorf("debugclient: 切换应答解析失败: %w", err)
+	}
+	if out.SessionID == "" {
+		return "", fmt.Errorf("debugclient: 切换没回 sessionId")
+	}
+	if out.State == "idle" {
+		return out.SessionID, nil
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		snap, serr := c.Snapshot(out.SessionID)
+		if serr != nil {
+			return "", serr
+		}
+		switch stateOf(snap) {
+		case "idle":
+			return out.SessionID, nil
+		case "exit":
+			return "", fmt.Errorf("切换失败：会话已断开（环境 %s）", env)
+		}
+		if time.Now().After(deadline) {
+			return out.SessionID, fmt.Errorf("切换会话超时（%s），用 tt debug status 看状态", timeout)
+		}
+		time.Sleep(time.Second)
+	}
+}
+
+// Topent 设置会话级企业编号（仅 idle 可设）。
+func (c *Client) Topent(id, value string) error {
+	_, err := c.Do(http.MethodPost, "/sessions/"+id+"/topent", map[string]any{"value": value})
+	return err
+}
+
+// Exec 透传一条 fgldb 命令，返回输出行。
+func (c *Client) Exec(id, command string) ([]string, error) {
+	data, err := c.Do(http.MethodPost, "/sessions/"+id+"/raw", map[string]any{"command": command})
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Lines []string `json:"lines"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("debugclient: exec 应答解析失败: %w", err)
+	}
+	return out.Lines, nil
+}
+
+// Continue 放行（不等待停站；要等就接着调 WaitStopped）。
+func (c *Client) Continue(id string) error {
+	_, err := c.Do(http.MethodPost, "/sessions/"+id+"/control", map[string]any{"action": "continue"})
+	return err
+}
+
+// Quit 结束本轮调试，会话保留（回 idle）。
+func (c *Client) Quit(id string) error {
+	_, err := c.Do(http.MethodDelete, "/sessions/"+id, nil)
+	return err
+}

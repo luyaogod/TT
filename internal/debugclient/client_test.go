@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -157,5 +158,85 @@ func TestDiscoverFallsBackToListen(t *testing.T) {
 	}
 	if got := Discover(dir, ""); got == "" || got == "http://" {
 		t.Fatalf("没有状态文件也没有 listen 时必须给内置默认，实得 %q", got)
+	}
+}
+
+// TestLifecycleEndpoints：生命周期动作打到**哪个端点、什么方法、什么请求体**。
+//
+// 这张映射表是 P2 的关键：`tt fep` 从前靠起子进程表达这些动作，现在直连；
+// 端点或请求体写错，表现是"录制起不来"，而错误信息往往指向别处。
+func TestLifecycleEndpoints(t *testing.T) {
+	type call struct {
+		method, path string
+		body         map[string]any
+	}
+	var got []call
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var b map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&b)
+		got = append(got, call{r.Method, r.URL.Path, b})
+		switch {
+		case r.URL.Path == "/sessions/switch":
+			_, _ = w.Write([]byte(`{"ok":true,"sessionId":"s1","state":"idle"}`))
+		case r.URL.Path == "/sessions":
+			_, _ = w.Write([]byte(`{"ok":true,"sessionId":"s9"}`))
+		case strings.HasSuffix(r.URL.Path, "/raw"):
+			_, _ = w.Write([]byte(`{"ok":true,"lines":["ok"]}`))
+		default:
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		}
+	}))
+	defer hs.Close()
+	c := New(hs.URL)
+
+	id, err := c.SwitchToIdle("主机109", "99", "录像A", time.Second)
+	if err != nil || id != "s1" {
+		t.Fatalf("SwitchToIdle = %q, %v", id, err)
+	}
+	if err := c.Topent("s1", "99"); err != nil {
+		t.Fatal(err)
+	}
+	fgl := "10.0.0.1:1200"
+	sid, err := c.Launch(LaunchReq{Env: "主机109", Prog: "bsft001_wf", Module: "asf", Name: "录像A", Ent: "99", FGLServer: &fgl})
+	if err != nil || sid != "s9" {
+		t.Fatalf("Launch = %q, %v", sid, err)
+	}
+	if lines, err := c.Exec("s9", "break 812"); err != nil || len(lines) != 1 {
+		t.Fatalf("Exec = %v, %v", lines, err)
+	}
+	if err := c.Continue("s9"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Quit("s9"); err != nil {
+		t.Fatal(err)
+	}
+
+	want := []struct {
+		method, path string
+	}{
+		{"POST", "/sessions/switch"},
+		{"POST", "/sessions/s1/topent"},
+		{"POST", "/sessions"},
+		{"POST", "/sessions/s9/raw"},
+		{"POST", "/sessions/s9/control"},
+		{"DELETE", "/sessions/s9"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("打了 %d 次，要 %d 次：%+v", len(got), len(want), got)
+	}
+	for i, w := range want {
+		if got[i].method != w.method || got[i].path != w.path {
+			t.Errorf("第 %d 次 = %s %s，要 %s %s", i, got[i].method, got[i].path, w.method, w.path)
+		}
+	}
+	// 请求体里几个关键字段：起会话必须带 ent / ssh / fglserver，放行必须是 continue。
+	if got[2].body["ent"] != "99" || got[2].body["ssh"] != "主机109" || got[2].body["fglserver"] != fgl {
+		t.Errorf("起会话请求体不对：%+v", got[2].body)
+	}
+	if got[4].body["action"] != "continue" {
+		t.Errorf("放行动作不对：%+v", got[4].body)
+	}
+	if got[3].body["command"] != "break 812" {
+		t.Errorf("exec 命令体不对：%+v", got[3].body)
 	}
 }
