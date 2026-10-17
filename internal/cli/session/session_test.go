@@ -176,6 +176,16 @@ func TestSessionLsAndShow(t *testing.T) {
 	// 附件也一并给出来（画面通道 / 录制）：不然人得再跑两条命令才知道这条会话在录什么。
 	if !strings.Contains(out, `"tag": "fep-R1"`) {
 		t.Fatalf("show 应带上画面/录制附件：%s", out)
+	// table 形态下附件也要有一行（形状是 {attached, screen:{tag}}，别去顶层找 tag）
+	oldFmt := common.Format
+	common.Format = "table"
+	resetFlags()
+	group.SetArgs([]string{"show", "--session", "A"})
+	_, textOut := testkit.CaptureStdout(t, func() int { _ = group.Execute(); return 0 })
+	common.Format = oldFmt
+	if !strings.Contains(textOut, "画面  : fep-R1") {
+		t.Fatalf("table 形态应打印画面那一行：%s", textOut)
+	}
 	}
 }
 
