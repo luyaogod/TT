@@ -59,18 +59,18 @@ func recordDir(t *testing.T) string {
 	return dir
 }
 
-// maybeRecordFiles 找现场语料；没有就返回 (nil,false)，**不跳过**。
+// maybeRecordFiles 找现场语料：**只认显式指定的目录**（`TT_FEP_RECORD_DIR`）。
+//
+// 不自动去读 `%APPDATA%/tt/fep`：那是**这台开发机**当下缓存的东西，它的内容
+// 决定了断言（"rn 当成 un 必须至少违反一条"）。自动读它等于让 `go test ./...`
+// 的结果随"本机最近录了什么"变化 —— 换台机器、清一次缓存，红绿就翻。
+// 显式给目录仍然是真覆盖（CI 可以指一份固定语料）。
 //
 // 为什么要一个不跳过的版本：「必跑的夹具测试」在有现场语料的机器上应该顺手多覆盖
 // 一份真语料，而不是因为"语料可有可无"就整条退化成只跑夹具。
 func maybeRecordFiles(t *testing.T) ([]string, bool) {
 	t.Helper()
 	dir := os.Getenv("TT_FEP_RECORD_DIR")
-	if dir == "" {
-		if app := os.Getenv("APPDATA"); app != "" {
-			dir = filepath.Join(app, "tt", "fep")
-		}
-	}
 	if dir == "" {
 		return nil, false
 	}
