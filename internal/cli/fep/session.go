@@ -103,23 +103,30 @@ func closeRegisteredSession(cmd *cobra.Command, tag string) error {
 			return fail(exitFailed, "%v", lerr)
 		}
 		alive := winproc.Alive(s.GDCPID)
+		// **先结束调试，再收代理** —— 顺序反了会把挂靠的那条会话一起带走。
+		//
+		// 代理是作业画面唯一的出口：先杀代理，作业那一侧立刻断连，会话以 exit 收场，
+		// 于是"收工后宿主保留、下一轮免登录"这条承诺当场失效（真机实测：挂在 `regA` 上录一轮，
+		// `recording stop` 之后 `session ls` 空）。
+		// 先 quit 则是"结束本轮、宿主留着"，代理随后关掉时已经没有活作业可连累了。
+		preQuit := s.Path == fep.PathDebug && strings.TrimSpace(s.Ref) != ""
+		if preQuit {
+			if cl, cerr := debugClient(); cerr == nil {
+				if b, rerr := cl.Resolve(s.Ref); rerr == nil {
+					if qerr := cl.Quit(b.ID); qerr != nil {
+						fmt.Fprintf(cmd.ErrOrStderr(), "· 结束调试时失败（继续收代理）：%v\n", qerr)
+					}
+				}
+			}
+		}
 		stopped, serr := reg.StopTag(tag)
 		if serr != nil {
 			return fail(exitFailed, "%v", serr)
 		}
-		// 调试线起的会话，调试那一侧也要收：只收代理会让它在 tt serve 里留成一个开着的会话，
-		// 下一轮 `debug topent` 就设不上去（服务端只允许空闲时设）。
-		// **必须点名**：多会话之后不带目标的 `debug quit` 会被服务端按歧义拒掉，
-		// 于是"收尾"这一步静默失败。别名由录制 ID 算出（recSessionAlias），只有自己那条叫这个名字。
-		// 放在**这里**而不是常驻进程的收尾里：那边有 8 秒宽限，超了会被 session close 杀掉，
-		// 表现是"收尾做到一半、进程退 1"。
-		if stopped.Path == fep.PathDebug {
-			// 直连调试面（不再起 `tt debug quit` 子进程）：**优先用登记里记的 `ref`**
-			// （P3：两条线认同一个地址）；老登记没有 ref 才退回按别名找。
-			target := strings.TrimSpace(stopped.Ref)
-			if target == "" {
-				target = recSessionAlias(stopped.Tag)
-			}
+		// 老登记没有 `ref` 时只能按别名找回那条会话 —— 那一步必须放在收代理**之后**
+		// （别名是服务端的寻址事实，代理死了也还在），且只在没做过 preQuit 时走。
+		if stopped.Path == fep.PathDebug && !preQuit {
+			target := recSessionAlias(stopped.Tag)
 			if cl, cerr := debugClient(); cerr != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "· 连不上调试面，跳过调试侧收尾：%v\n", cerr)
 			} else if target != "" {
@@ -127,8 +134,6 @@ func closeRegisteredSession(cmd *cobra.Command, tag string) error {
 					fmt.Fprintln(cmd.ErrOrStderr(), "· 调试会话已不在（无需收）")
 				} else if qerr := cl.Quit(b.ID); qerr != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "· 调试会话没收干净（可手工 tt debug quit）：%v\n", qerr)
-				} else {
-					fmt.Fprintln(cmd.ErrOrStderr(), "· 调试会话已收（结束本轮，宿主保留）")
 				}
 			}
 		}
