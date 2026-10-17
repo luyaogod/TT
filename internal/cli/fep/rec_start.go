@@ -27,7 +27,38 @@ var (
 	recStartModule string
 	recStartNoCont bool
 	recStartBinary string
+	// recStartSession 是 `--session`：把录制**挂到一条已有会话上**，而不是新起一条。
+	//
+	// 这是"会话 + 画面通道"的组合式用法（P4 的目标形态）：先 `tt session new --name A`，
+	// 再 `tt recording start --session A` 把画面挂上去。挂的方式仍是 Q23 的"同环境同别名
+	// 复用空闲宿主" —— 所以落到的就是那一条（`ref` 不变）。
+	recStartSession string
 )
+
+// bindRecSession 把"挂到哪条已有会话"归一成 (环境, 企业, 别名)。
+//
+// 三条规矩（每条都对应一次会安静出错的现场）：
+//   - 必须**空闲**：作业在跑时画面已经接到别处了，此时再指 FGLSERVER 不会生效；
+//   - 必须**有名字**：挂上去靠的是"同环境同别名复用宿主"，没名字就没法点回同一条；
+//   - 环境**不许打架**：`--session` 与 `--env` 指向不同环境时，宁可报错也不猜。
+func bindRecSession(b debugclient.Brief, envFlag, entFlag string) (env, ent, alias string, err error) {
+	if b.State != string(debug.StateIdle) {
+		return "", "", "", fail(exitState, "会话 %s 正在用（%s）：先 tt session quit --session %s，再挂录制", b.Ref, b.State, b.Ref)
+	}
+	if strings.TrimSpace(b.Name) == "" {
+		return "", "", "", fail(exitUsage,
+			"会话 %s 没有名字：录制挂靠要用别名落回同一条会话。用 tt session new --name <名字> 建一条，或去掉 --session 走 --env/--prog",
+			b.Ref)
+	}
+	if e := strings.TrimSpace(envFlag); e != "" && e != b.Env {
+		return "", "", "", fail(exitUsage, "--session 指向 %s（环境 %s），与 --env %s 不一致", b.Ref, b.Env, e)
+	}
+	ent = strings.TrimSpace(entFlag)
+	if ent == "" {
+		ent = b.Ent
+	}
+	return b.Env, ent, b.Name, nil
+}
 
 // tt fep rec start —— 一条命令开始录，走**我们自己的调试线**。
 //
@@ -58,6 +89,24 @@ var recStartCmd = &cobra.Command{
 要自己下断点就先加 --no-continue，放行前用 tt debug exec 下好再 continue。`,
 	Args: noArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// `--session`：把录制挂到一条**已有**的空闲会话上（组合用法）。先把目标解出来，
+		// 因为它决定了环境与企业 —— 后面每一步都按它走。
+		var boundAlias string
+		if s := strings.TrimSpace(recStartSession); s != "" {
+			cl, cerr := debugClient()
+			if cerr != nil {
+				return fail(exitFailed, "连不上调试面：%v", cerr)
+			}
+			b, rerr := cl.Resolve(s)
+			if rerr != nil {
+				return rerr
+			}
+			env, ent, alias, berr := bindRecSession(b, recStartEnv, recStartEnt)
+			if berr != nil {
+				return berr
+			}
+			recStartEnv, recStartEnt, boundAlias = env, ent, alias
+		}
 		// 开跑前一次查完四项前置（目录可写 / 服务 / 会话 / 环境）。
 		//
 		// 位置在**起代理之前**：代理占三个端口，半路失败要收，收不干净就留一个空会话；
@@ -151,6 +200,11 @@ var recStartCmd = &cobra.Command{
 		// alias（T5.4 / C7.3）：把这一轮的录制身份当**固定别名**传进子进程 ——
 		// 子进程之后靠它落回同一条会话（Q23：别名空闲就复用），而不是靠"有会话就收"。
 		alias := recSessionAlias(tag)
+		if boundAlias != "" {
+			// 挂靠模式：别名就是那条会话的名字 —— 起作业时同环境同别名会**复用**它（Q23），
+			// 于是这一轮录到的就是它，ref 不变。
+			alias = boundAlias
+		}
 		cl, cerr := debugClient()
 		if cerr != nil {
 			_ = rt.Close()
@@ -286,6 +340,7 @@ func runRecPlan(cl *debugclient.Client, p recRunPlan, logf func(string, ...any))
 }
 
 func init() {
+	recStartCmd.Flags().StringVar(&recStartSession, "session", "", "把录制挂到这条已有会话上（ref / 别名 / 句柄；必须是空闲且有名字）。给了它就不用 --env")
 	recStartCmd.Flags().StringVar(&recStartEnv, "env", "", "环境名（必填 —— 环境一律点名，没有默认环境可回落）")
 	recStartCmd.Flags().StringVar(&recStartProg, "prog", "", "作业程序名（必填，如 bsft001_wf）")
 	recStartCmd.Flags().StringVar(&recStartEnt, "ent", "", "企业编号（ENT，**必填**）：作业落在哪个企业。不给会回落到环境配置里的 db.ent；两者都没有则直接报错 —— 不再沿用登录 shell 的 $TOPENT")

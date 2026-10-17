@@ -21,6 +21,7 @@ import (
 	"sync"
 	"testing"
 
+	"tt/internal/debug"
 	"tt/internal/debugclient"
 )
 
@@ -168,5 +169,42 @@ func TestRecSessionAliasIsStable(t *testing.T) {
 	}
 	if a := recSessionAlias("fep-20261016-120000"); strings.ContainsAny(a, `/#`) {
 		t.Fatalf("别名不许含 / 与 #（契约 C2.5 / Q17）：%q", a)
+	}
+}
+
+// TestBindRecSession：挂靠模式的四条规矩。
+//
+// 这一组是"会话 + 画面通道"组合的入口判据：三条拒绝各自对应一次安静的失败
+// （作业在跑时接画面不生效 / 没名字回不到同一条 / 环境打架落到别处）。
+func TestBindRecSession(t *testing.T) {
+	idle := debugclient.Brief{Ref: "主机109#1", Name: "A", Env: "主机109", Ent: "99", State: string(debug.StateIdle)}
+
+	env, ent, alias, err := bindRecSession(idle, "", "")
+	if err != nil || env != "主机109" || ent != "99" || alias != "A" {
+		t.Fatalf("空闲且有名字应直接挂上：%q %q %q %v", env, ent, alias, err)
+	}
+
+	// 环境打架 → 拒绝（不猜）
+	if _, _, _, err := bindRecSession(idle, "测试1012", ""); err == nil {
+		t.Fatal("--session 与 --env 指向不同环境必须拒绝")
+	}
+
+	// 正在用 → 拒绝（画面已经接到别处，此时指 FGLSERVER 不生效）
+	busy := idle
+	busy.State = string(debug.StateStopped)
+	if _, _, _, err := bindRecSession(busy, "", ""); err == nil {
+		t.Fatal("非空闲会话不该能挂录制")
+	}
+
+	// 没名字 → 拒绝（挂靠靠"同环境同别名复用"，没名字点不回去）
+	anon := idle
+	anon.Name = ""
+	if _, _, _, err := bindRecSession(anon, "", ""); err == nil {
+		t.Fatal("没名字的会话不该能挂录制")
+	}
+
+	// ENT 缺省取会话自己的
+	if _, ent, _, err := bindRecSession(idle, "", ""); err != nil || ent != "99" {
+		t.Fatalf("ENT 应取会话的：%q %v", ent, err)
 	}
 }
