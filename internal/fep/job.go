@@ -39,11 +39,21 @@ func newJob(cfg OpenConfig, logf func(string, ...any)) *Job {
 	return &Job{cfg: cfg, logf: logf, done: make(chan struct{})}
 }
 
-// Done 在远端作业结束时关闭。
-func (j *Job) Done() <-chan struct{} { return j.done }
+// Done 在远端作业结束时关闭（nil 返回 nil：调用方据此"只等别的信号"）。
+func (j *Job) Done() <-chan struct{} {
+	if j == nil {
+		return nil
+	}
+	return j.done
+}
 
 // Binary 是作业编译件的标识（探不到就是空值）。
-func (j *Job) Binary() BinaryID { return j.binary }
+func (j *Job) Binary() BinaryID {
+	if j == nil {
+		return BinaryID{}
+	}
+	return j.binary
+}
 
 // Open 登录、把 FGLSERVER 指向我们的代理、启动作业。
 //
