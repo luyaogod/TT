@@ -138,7 +138,6 @@ func kindForReplayEvent(event string) string {
 			return "input"
 		}
 		return ""
-		return "input"
 	}
 	return ""
 }
