@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 	"tt/internal/host"
+	sessionid "tt/internal/session"
 
 	"github.com/pkg/sftp"
 )
@@ -3146,7 +3147,8 @@ var (
 // 的进程级世代（前端靠它知道"服务重启了、`Seq` 要归零"，见 `Event.Seq` 的注释）；
 // 本条是**会话**的世代。两者同名前缀只是巧合，一个在 `Manager` 上、一个在 `Session` 上。
 func nextSessionEpoch() string {
-	return strconv.FormatInt(sessionEpochSeq.Add(1), 36)
+	// 发号规则住在 `internal/session`（FEP 那条线也用它）：这里只是转发。
+	return sessionid.NewEpoch()
 }
 
 // nextRunScope 分配一个进程内唯一的运行作用域（镜像/命令输出的目录段,见 mirrorScope）。

@@ -66,6 +66,10 @@ var sessionPsCmd = &cobra.Command{
 				}
 				fmt.Printf("会话    : %s (环境 %s / 区域 %s / 启动路径 %s / %s)\n", s.Prog, s.Env, s.Zone, s.Path, entText(s.Ent))
 				fmt.Printf("  登记ID: %s\n", s.Tag)
+				if s.Ref != "" {
+					// 调试线那边的地址（C2.0 的 `环境#序号`）：两条线从此对得上，不用人脑补。
+					fmt.Printf("  会话  : %s\n", s.Ref)
+				}
 				fmt.Printf("  GDC   : pid %d 端口 %d  %s\n", s.GDCPID, s.GDCPort, aliveText(winproc.Alive(s.GDCPID)))
 				fmt.Printf("  代理  : 监听 %d → 127.0.0.1:%d（注入口 %d）\n", s.ProxyPort, s.GDCPort, s.InjectPort)
 				fmt.Printf("  起始  : %s（启动者 pid %d）\n", s.Started.Format(time.RFC3339), s.OwnerPID)
@@ -125,13 +129,16 @@ var sessionCloseCmd = &cobra.Command{
 		// 放在**这里**而不是常驻进程的收尾里：那边有 8 秒宽限，超了会被 session close 杀掉，
 		// 表现是"收尾做到一半、进程退 1"。
 		if stopped.Path == fep.PathDebug {
-			// 直连调试面（不再起 `tt debug quit` 子进程）：按录制 ID 算出的别名点到**自己那条**，
-			// 找不到就说明它已经没了 —— 那不是错误，收尾本来就要幂等。
-			alias := recSessionAlias(stopped.Tag)
+			// 直连调试面（不再起 `tt debug quit` 子进程）：**优先用登记里记的 `ref`**
+			// （P3：两条线认同一个地址）；老登记没有 ref 才退回按别名找。
+			target := strings.TrimSpace(stopped.Ref)
+			if target == "" {
+				target = recSessionAlias(stopped.Tag)
+			}
 			if cl, cerr := debugClient(); cerr != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "· 连不上调试面，跳过调试侧收尾：%v\n", cerr)
-			} else if alias != "" {
-				if b, rerr := cl.Resolve(alias); rerr != nil {
+			} else if target != "" {
+				if b, rerr := cl.Resolve(target); rerr != nil {
 					fmt.Fprintln(cmd.ErrOrStderr(), "· 调试会话已不在（无需收）")
 				} else if qerr := cl.Quit(b.ID); qerr != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "· 调试会话没收干净（可手工 tt debug quit）：%v\n", qerr)

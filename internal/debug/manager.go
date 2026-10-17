@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 	"tt/internal/host"
+	sessionid "tt/internal/session"
 	"tt/internal/target"
 
 	"github.com/pkg/sftp"
@@ -1020,20 +1021,16 @@ func (m *Manager) sweepExitedLocked() {
 // 序号**不单独记账**：它按池子里活着的会话现算，所以"会话消失 → 序号释放"是天然的，
 // 与别名同一条性质（Q19 的同源口径）。已断开（`StateExit`）的残留不算占用者。
 func (m *Manager) allocSeqLocked(env string) int {
-	used := map[int]bool{}
+	// 规则住在 `internal/session`（FEP 那条线也要用同一份）：这里只把池子拍平成它要的形状。
+	slots := make([]sessionid.Slot, 0, len(m.sessions))
 	for _, s := range m.sessions {
-		if s.State() == StateExit || s.EnvName() != env {
-			continue
-		}
-		if n := s.Seq(); n > 0 {
-			used[n] = true
-		}
+		slots = append(slots, sessionid.Slot{
+			Env:    s.EnvName(),
+			N:      s.Seq(),
+			Exited: s.State() == StateExit,
+		})
 	}
-	for n := 1; ; n++ {
-		if !used[n] {
-			return n
-		}
-	}
+	return sessionid.NextSeq(env, slots)
 }
 
 // identityOwnerLocked 找别名的占用者：**整个会话池、不区分大小写**（C2.5 的查重口径）。

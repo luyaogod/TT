@@ -182,3 +182,30 @@ func TestRegistrySaveRequiresTag(t *testing.T) {
 		t.Fatal("缺 Tag 的登记应被拒（否则多条之后无法定位）")
 	}
 }
+
+// TestRegistryPersistsSessionRef：登记要记住"这一轮落在调试线哪条会话上"（P3）。
+//
+// 两条线原本各记一套名字（这里 Tag、那边 ref），人得自己脑补对应关系；
+// 收尾只能靠"用录制 ID 反推别名"去猜。Ref 进登记之后，两边指向同一个地址。
+func TestRegistryPersistsSessionRef(t *testing.T) {
+	r := NewRegistry(t.TempDir())
+	if err := r.Save(&Session{Tag: "fep-r1", Prog: "bsft001_wf", Ref: "主机109#1"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := r.LoadTag("fep-r1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Ref != "主机109#1" {
+		t.Fatalf("ref 没留住：%q", got.Ref)
+	}
+
+	// 老登记（没有 ref）照旧能读：不许因为少一个键就当作坏文件。
+	if err := r.Save(&Session{Tag: "fep-old", Prog: "p"}); err != nil {
+		t.Fatal(err)
+	}
+	old, err := r.LoadTag("fep-old")
+	if err != nil || old.Ref != "" {
+		t.Fatalf("无 ref 的老登记该照常读：%v %+v", err, old)
+	}
+}

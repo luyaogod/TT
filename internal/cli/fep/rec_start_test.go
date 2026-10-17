@@ -79,7 +79,7 @@ func TestRecRunPlanOrder(t *testing.T) {
 	f := &recFake{}
 	cl := f.server(t)
 
-	err := runRecPlan(cl, recRunPlan{
+	_, err := runRecPlan(cl, recRunPlan{
 		Alias: "fep-R1", Env: "主机109", Ent: "99",
 		Prog: "bsft001_wf", Module: "asf", FGL: "10.0.0.1:1200",
 		Breaks: []string{"812"},
@@ -90,13 +90,14 @@ func TestRecRunPlanOrder(t *testing.T) {
 
 	got := f.snapshot()
 	want := []string{
-		"GET /sessions",              // ① 收口前先找自己那条（没有就跳过）
-		"POST /sessions/switch",      // ② 点名环境并命名
+		"GET /sessions",                // ① 收口前先找自己那条（没有就跳过）
+		"POST /sessions/switch",        // ② 点名环境并命名
 		"POST /sessions/s-host/topent", // ③ 定 ENT
-		"POST /sessions",             // ④ 起作业
-		"GET /sessions/s-job",        // ⑤ 等入口停站
-		"POST /sessions/s-job/raw",   // ⑥ 下断点
-		"POST /sessions/s-job/control", // ⑦ 放行
+		"POST /sessions",               // ④ 起作业
+		"GET /sessions/s-job",          // ⑤ 等入口停站
+		"POST /sessions/s-job/raw",     // ⑥ 下断点
+		"GET /sessions/s-job",          // ⑦ 回填 ref（P3：两条线认同一个地址）
+		"POST /sessions/s-job/control", // ⑧ 放行
 	}
 	if len(got) != len(want) {
 		t.Fatalf("调了 %d 次，要 %d 次：\n实得 %v", len(got), len(want), got)
@@ -113,7 +114,7 @@ func TestRecRunPlanQuitsItsOwnSessionFirst(t *testing.T) {
 	f := &recFake{sessions: []map[string]any{{"id": "s-old", "ref": "主机109#1", "name": "fep-R1", "state": "stopped"}}}
 	cl := f.server(t)
 
-	if err := runRecPlan(cl, recRunPlan{Alias: "fep-R1", Env: "主机109", Ent: "99", Prog: "p", FGL: "1:2"}, quietLog); err != nil {
+	if _, err := runRecPlan(cl, recRunPlan{Alias: "fep-R1", Env: "主机109", Ent: "99", Prog: "p", FGL: "1:2"}, quietLog); err != nil {
 		t.Fatalf("runRecPlan: %v", err)
 	}
 	got := f.snapshot()
@@ -129,7 +130,7 @@ func TestRecRunPlanSkipsTopentWithoutEnt(t *testing.T) {
 	f := &recFake{}
 	cl := f.server(t)
 
-	if err := runRecPlan(cl, recRunPlan{Alias: "fep-R1", Env: "主机109", Prog: "p", FGL: "1:2"}, quietLog); err != nil {
+	if _, err := runRecPlan(cl, recRunPlan{Alias: "fep-R1", Env: "主机109", Prog: "p", FGL: "1:2"}, quietLog); err != nil {
 		t.Fatalf("runRecPlan: %v", err)
 	}
 	for _, c := range f.snapshot() {
@@ -144,7 +145,7 @@ func TestRecRunPlanNoContinueSkipsRelease(t *testing.T) {
 	f := &recFake{}
 	cl := f.server(t)
 
-	if err := runRecPlan(cl, recRunPlan{
+	if _, err := runRecPlan(cl, recRunPlan{
 		Alias: "fep-R1", Env: "主机109", Ent: "99", Prog: "p", FGL: "1:2",
 		Breaks: []string{"812"}, NoContinue: true,
 	}, quietLog); err != nil {

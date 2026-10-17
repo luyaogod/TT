@@ -49,7 +49,16 @@ type Session struct {
 	InjectPort int        `json:"injectPort"`
 	Tag        string     `json:"tag"`       // recording prefix inside the cache dir（= 录制 ID）
 	RecordDir  string     `json:"recordDir"` // where this session's recordings live
-	OwnerPID   int        `json:"ownerPid"`  // the process that started it
+	// Ref 是这条录制**落在调试线哪条会话上**（`环境#序号`，C2.0 的规范地址）。
+	//
+	// 为什么要进来：录制与调试原本各记一套名字（这里 `Tag`、那边 `ref`），人要自己脑补
+	// 对应关系，收尾只能靠"用录制 ID 反推别名"去猜。有了 Ref，两条线指向同一个地址，
+	// `tt fep session close` 也不必再反推。
+	//
+	// 空值 = 老登记（升级前写的）或"这一轮没有调试会话"（例如 `fep session open` 的 r.r 路径）。
+	// 读取侧一律按"可空"处理，不许据此判断"没有会话"。
+	Ref        string     `json:"ref,omitempty"`
+	OwnerPID   int        `json:"ownerPid"` // the process that started it
 	Started    time.Time  `json:"started"`
 }
 

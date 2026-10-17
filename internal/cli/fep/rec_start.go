@@ -156,15 +156,20 @@ var recStartCmd = &cobra.Command{
 			_ = rt.Close()
 			return fail(exitFailed, "连不上调试面：%v", cerr)
 		}
-		if serr := runRecPlan(cl, recRunPlan{
+		ref, serr := runRecPlan(cl, recRunPlan{
 			Alias: alias, Env: dcfg.EnvName(), Ent: ent,
 			Prog: recStartProg, Module: recStartModule, FGL: fgl, NoContinue: recStartNoCont,
-		}, logf); serr != nil {
+		}, logf)
+		if serr != nil {
 			// 半路失败：把已经起来的代理收掉（它占着 GDC/代理/注入三个端口）
 			if cerr := rt.Close(); cerr != nil {
 				logf("收代理时还有失败：%v", cerr)
 			}
 			return serr
+		}
+		// 把"落到哪条调试会话"写进登记（P3）：两条线从此认同一个地址。
+		if rerr := rt.SetRef(ref); rerr != nil {
+			logf("回填会话地址失败（不影响本轮录制）：%v", rerr)
 		}
 
 		s := rt.Session
@@ -225,7 +230,7 @@ type recRunPlan struct {
 //
 // 失败信息带**是哪一步**：这条链上每一步都有过"安静失败"的现场（界面不出来、
 // 作业跑在别的企业上、断点没下上），笼统一句"录制失败"会让人从头猜。
-func runRecPlan(cl *debugclient.Client, p recRunPlan, logf func(string, ...any)) error {
+func runRecPlan(cl *debugclient.Client, p recRunPlan, logf func(string, ...any)) (string, error) {
 	// ① 收口自己上一轮：调试线只在空闲时才让设 ENT，而人点「开始录制」时常常正停着一条。
 	//    按别名找得到才收 —— 收不到就是"本来就没有"，不是错误。
 	if a := strings.TrimSpace(p.Alias); a != "" {
@@ -238,12 +243,12 @@ func runRecPlan(cl *debugclient.Client, p recRunPlan, logf func(string, ...any))
 	// ② 点名环境并命名：后面几步要靠这个名字点到"自己那条"。
 	id, err := cl.SwitchToIdle(p.Env, p.Ent, p.Alias, 120*time.Second)
 	if err != nil {
-		return fail(exitFailed, "点名环境失败（%s）：%v", p.Env, err)
+		return "", fail(exitFailed, "点名环境失败（%s）：%v", p.Env, err)
 	}
 	// ③ 定 ENT（会话级 override）
 	if e := strings.TrimSpace(p.Ent); e != "" {
 		if terr := cl.Topent(id, e); terr != nil {
-			return fail(exitFailed, "设置 ENT 失败（%s）：%v", e, terr)
+			return "", fail(exitFailed, "设置 ENT 失败（%s）：%v", e, terr)
 		}
 	}
 	// ④ 起作业：同环境同别名 → 复用 ② 那条宿主，不重新登录。
@@ -252,27 +257,32 @@ func runRecPlan(cl *debugclient.Client, p recRunPlan, logf func(string, ...any))
 		Env: p.Env, Prog: p.Prog, Module: p.Module, Name: p.Alias, Ent: p.Ent, FGLServer: &fgl,
 	})
 	if err != nil {
-		return fail(exitFailed, "起作业失败（%s）：%v", p.Prog, err)
+		return "", fail(exitFailed, "起作业失败（%s）：%v", p.Prog, err)
 	}
 	if _, ok, werr := cl.WaitStopped(sid, 120*time.Second); werr != nil {
-		return fail(exitFailed, "等入口停站失败：%v", werr)
+		return "", fail(exitFailed, "等入口停站失败：%v", werr)
 	} else if !ok {
-		return fail(exitFailed, "起作业后没等到入口停站（%s）", p.Prog)
+		return "", fail(exitFailed, "起作业后没等到入口停站（%s）", p.Prog)
 	}
 	// ⑤ 断点必须在放行之前：程序停不住，下断点就没意义。
 	for _, b := range p.Breaks {
 		if _, berr := cl.Exec(sid, "break "+b); berr != nil {
-			return fail(exitFailed, "下断点失败（break %s）：%v", b, berr)
+			return "", fail(exitFailed, "下断点失败（break %s）：%v", b, berr)
 		}
 	}
+	// 回填地址：两条线从此认同一个 `ref`（P3 的落点）。取不到不算失败 —— 老服务可能没有。
+	ref := ""
+	if snap, serr := cl.Snapshot(sid); serr == nil {
+		ref = str(snap["ref"])
+	}
 	if p.NoContinue {
-		return nil
+		return ref, nil
 	}
 	// ⑥ 放行
 	if cerr := cl.Continue(sid); cerr != nil {
-		return fail(exitFailed, "放行失败：%v", cerr)
+		return ref, fail(exitFailed, "放行失败：%v", cerr)
 	}
-	return nil
+	return ref, nil
 }
 
 func init() {

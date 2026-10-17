@@ -816,3 +816,26 @@ func localAddrFor(ssh host.SSHConfig) (string, error) {
 
 // RegistryPath reports the session registry file (for diagnostics).
 func (r *Runtime) RegistryPath() string { return r.reg.Path }
+
+// SetRef 记下"这条录制落在调试线的哪条会话上"（C2.0 的 `环境#序号`）。
+//
+// 为什么由调用方在**会话建立之后**回填：登记的时机是"起代理时"（register first, clean up later），
+// 那时调试会话还不存在。等它起来了再把地址补进来，两个世界就有了同一个坐标。
+//
+// 只改这一条：`Registry.Save` 是按 Tag upsert 的，不会动别的登记。
+func (r *Runtime) SetRef(ref string) error {
+	if r == nil || r.Session == nil {
+		return nil
+	}
+	ref = strings.TrimSpace(ref)
+	if ref == "" || r.Session.Ref == ref {
+		return nil
+	}
+	prev := r.Session.Ref
+	r.Session.Ref = ref
+	if err := r.reg.Save(r.Session); err != nil {
+		r.Session.Ref = prev
+		return err
+	}
+	return nil
+}

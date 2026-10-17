@@ -137,14 +137,19 @@ func openDebugRecording(cmd *cobra.Command, s recSession) (*fep.Runtime, string,
 		_ = rt.Close()
 		return nil, "", fail(exitFailed, "连不上调试面：%v", cerr)
 	}
-	if serr := runRecPlan(cl, recRunPlan{
+	ref, serr := runRecPlan(cl, recRunPlan{
 		Alias: alias, Env: dcfg.EnvName(), Ent: s.Ent,
 		Prog: s.Prog, Module: s.Module, FGL: fgl, Breaks: s.Breaks, NoContinue: s.NoContinue,
-	}, logf); serr != nil {
+	}, logf)
+	if serr != nil {
 		if cerr := rt.Close(); cerr != nil {
 			logf("收代理时还有失败：%v", cerr)
 		}
 		return nil, "", serr
+	}
+	// 把"落到哪条调试会话"写进登记（P3）：两条线从此认同一个地址。
+	if rerr := rt.SetRef(ref); rerr != nil {
+		logf("回填会话地址失败（不影响本轮录制）：%v", rerr)
 	}
 	return rt, fgl, nil
 }
