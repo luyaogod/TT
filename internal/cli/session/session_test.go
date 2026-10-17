@@ -42,10 +42,15 @@ func (f *recFake) install(t *testing.T) {
 			_, _ = w.Write([]byte(`{"ok":true,"sessionId":"s9"}`))
 		case r.URL.Path == "/api/sessions/switch":
 			_, _ = w.Write([]byte(`{"ok":true,"sessionId":"s1","state":"idle"}`))
+		case strings.HasSuffix(r.URL.Path, "/screen"):
+			_, _ = w.Write([]byte(`{"ok":true,"session":"主机109#1","attached":true,"screen":{"tag":"fep-R1","kind":"rec"}}`))
+		case strings.HasSuffix(r.URL.Path, "/record"):
+			_, _ = w.Write([]byte(`{"ok":true,"recording":{"tag":"fep-R1","kind":"rec"}}`))
 		case strings.HasPrefix(r.URL.Path, "/api/sessions/s1") && r.Method == http.MethodGet:
 			_, _ = w.Write([]byte(`{"ok":true,"id":"s1","ref":"主机109#1","state":"stopped","stop":{"file":"a.4gl","line":812}}`))
 		case strings.HasPrefix(r.URL.Path, "/api/sessions/s9") && r.Method == http.MethodGet:
 			_, _ = w.Write([]byte(`{"ok":true,"id":"s9","ref":"主机109#2","state":"stopped"}`))
+
 		case strings.HasSuffix(r.URL.Path, "/raw"):
 			_, _ = w.Write([]byte(`{"ok":true,"lines":["Breakpoint 1 at a.4gl:812"]}`))
 		default:
@@ -164,6 +169,10 @@ func TestSessionLsAndShow(t *testing.T) {
 	out = runCmd(t, "show", "--session", "A")
 	if !strings.Contains(out, `"line": 812`) {
 		t.Fatalf("show 应给出停站现场：%s", out)
+	}
+	// 附件也一并给出来（画面通道 / 录制）：不然人得再跑两条命令才知道这条会话在录什么。
+	if !strings.Contains(out, `"tag": "fep-R1"`) {
+		t.Fatalf("show 应带上画面/录制附件：%s", out)
 	}
 }
 

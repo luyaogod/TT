@@ -460,3 +460,29 @@ func (c *Client) Close(id string) error {
 	_, err := c.Do(http.MethodPost, "/api/sessions/"+id+"/close", nil)
 	return err
 }
+
+// Screen 返回这条会话挂着的画面通道（只读视图；未挂 = attached:false）。
+func (c *Client) Screen(id string) (map[string]any, error) {
+	data, err := c.Do(http.MethodGet, "/api/sessions/"+id+"/screen", nil)
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]any
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("debugclient: 画面视图解析失败: %w", err)
+	}
+	return out, nil
+}
+
+// Recording 返回这条会话正在录/回放的那一份（只读视图）。
+func (c *Client) Recording(id string) (map[string]any, error) {
+	data, err := c.Do(http.MethodGet, "/api/sessions/"+id+"/record", nil)
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]any
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("debugclient: 录制视图解析失败: %w", err)
+	}
+	return out, nil
+}

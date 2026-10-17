@@ -121,6 +121,14 @@ ENT 必填：企业编号决定用哪个账号连库与据点校验，不再沿�
 			if serr != nil {
 				return serr
 			}
+			// 附件：画面通道与录制（只读视图，来自接线层的查询）。
+			// 取不到不算失败 —— 老服务没有这两个端点，而"看会话"这件事本身仍然成立。
+			if scr, xerr := cl.Screen(b.ID); xerr == nil {
+				snap["screen"] = scr
+			}
+			if rec, xerr := cl.Recording(b.ID); xerr == nil {
+				snap["recording"] = rec
+			}
 			return emit(snap)
 		},
 	}
