@@ -105,7 +105,7 @@ func ValidatePath(p LaunchPath) error {
 // 只有 `r.r` 一条：T100 的标准启动器。另外两条不从这里走 ——
 // 调试线由 `internal/debug` 自己起 `fglrun -d`（见它的 README），
 // 而 T100 原生的 `r.d`（gendbg → fgldeb）**已从命令面拿掉**：那是 T100 的调试器，
-// 不是我们的；录制与调试都走调试线（`tt fep rec start` / `tt debug start`）。
+// 不是我们的；录制与调试都走调试线（`tt recording start` / `tt debug start`）。
 // `PathRunnerRD` 这个常量仍留着 —— 它用来**识别**以前录的 r.d 录制件。
 func launchCommand(path LaunchPath, prog string) (string, error) {
 	switch path {
@@ -113,7 +113,7 @@ func launchCommand(path LaunchPath, prog string) (string, error) {
 		// T100 的标准启动器：`r.r <作业>` → `fglrun $AZZ/42r/azzp000.42r <作业>`（不可调试）
 		return "r.r " + prog, nil
 	case PathRunnerRD:
-		return "", fmt.Errorf("%w: T100 原生调试器（r.d → fgldeb）已从命令面拿掉；要录要调都用调试线（tt debug start / tt fep rec start）", ErrUsage)
+		return "", fmt.Errorf("%w: T100 原生调试器（r.d → fgldeb）已从命令面拿掉；要录要调都用调试线（tt debug start / tt recording start）", ErrUsage)
 	case PathDebug:
 		return "", fmt.Errorf("%w: 调试线不用登录 shell 起作业 —— 那是 `tt debug start`（它自己起 fglrun -d）", ErrUsage)
 	case PathNone:

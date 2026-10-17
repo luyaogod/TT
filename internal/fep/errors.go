@@ -108,7 +108,7 @@ func CheckRuntimeHealthy(m *Model) error {
 			Exit: 1,
 			Message: fmt.Sprintf("作业程序停下了：%s —— 这一步之后这个窗口只会回空 ACK，"+
 				"继续发事件都是白费（实测：发给容器会触发 FORMS -6327）", where),
-			Hint: "重开会话（tt fep session close && tt fep session open --prog <作业>）再继续；" +
+			Hint: "重开会话（tt recording stop <录制ID> && tt recording start --launch standard --prog <作业>）再继续；" +
 				"并在重放/计划里去掉那一步（它把值发给了容器，或发给了一个不属于当前交互指令的动作）",
 		}
 	}

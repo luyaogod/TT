@@ -301,7 +301,7 @@ func Do(c *Client, cfg DoConfig) (*DoResult, error) {
 				Code:    output.CodeQueryFailed,
 				Exit:    1,
 				Message: fmt.Sprintf("作业程序停下了：%s", res.Changes.RuntimeError),
-				Hint: "重开会话再继续（tt fep session close && tt fep session open --prog <作业>）；" +
+				Hint: "重开会话再继续（tt recording stop <录制ID> && tt recording start --launch standard --prog <作业>）；" +
 					"并把这一步从重放/计划里去掉：它把值发给了容器，或发给了不属于当前交互指令的动作",
 			}
 		}
@@ -451,7 +451,7 @@ func pickConn(conns []ConnStatus, want int) (ConnStatus, error) {
 				return c, nil
 			}
 		}
-		return ConnStatus{}, fmt.Errorf("fep: 没有连接 #%d（现有 %d 条，见 tt fep session ps）", want, len(conns))
+		return ConnStatus{}, fmt.Errorf("fep: 没有连接 #%d（现有 %d 条，见 tt recording active）", want, len(conns))
 	}
 	live := make([]ConnStatus, 0, len(conns))
 	for _, c := range conns {
@@ -664,7 +664,7 @@ func AppendAudit(path string, e AuditEntry) error {
 	return err
 }
 
-// Quit asks the resident process to stop (`tt fep session close` runs in another
+// Quit asks the resident process to stop (`tt recording stop <录制ID>` runs in another
 // process, so it needs a way to say "you may go now" — the resident then runs its
 // own full clean-up: remote job, proxy, instance, registry).
 func (c *Client) Quit() error {

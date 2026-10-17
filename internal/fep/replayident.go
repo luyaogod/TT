@@ -1,6 +1,7 @@
 package fep
 
 import (
+	"regexp"
 	"fmt"
 	"strconv"
 	"strings"
@@ -194,6 +195,16 @@ const NoIdentityNote = "无身份（真跑会被拒）"
 //
 // 判据只有一条硬事实：事件里有没有 `idRef`（要发给某个对象）。不看类型名、不猜。
 func stepNeedsIdentity(ev ReplayEvent) bool {
+	// `ConfigureEvent` 里**只有"写值"需要身份**：`{ value "X" }` 是真的在改某个字段的值；
+	// cursor / currentRow / currentColumn / tabIndex / bufferSize / pageSize 是运行期定位与排版
+	// （网格这类对象天然没有 colName）。把它们一起要求身份，结果是**每份真录制都回放不了**，
+	// 而它们出错的表现是"某个控件排版/分页不对"，不是"点到了别人的按钮上"。
+	// （网格的 bufferSize/pageSize 就是这样，这类对象天然没有 colName）。
+	// 拿动作那一套身份纪律去要求它，结果是每份真录制都回放不了 —— 而它出错的表现是
+	// "某个控件的排版/分页不对"，不是"点到了别人的按钮上"。
+	if strings.HasPrefix(strings.TrimSpace(ev.Event), "ConfigureEvent") {
+		return configureWritesValue(ev.Event)
+	}
 	_, ok := idRefOf(strings.TrimSpace(ev.Event))
 	return ok
 }
@@ -213,10 +224,11 @@ func RequireStepIdentity(ev ReplayEvent) error {
 	id, _ := idRefOf(strings.TrimSpace(ev.Event))
 	return refusal(CodeFieldNotInScope,
 		fmt.Sprintf("第 %d 步没有字段身份（colName）：它要发给 #%d，而录制里没记下这到底是哪个字段"+
-			" —— 该录制件早于身份上线，需重录（裸 id 跨会话会点到别的控件上）", ev.N, id),
-		"重录一份（tt fep rec start 录一轮新的，计划里就会带上 colName/fieldId）；"+
-			"只想留个标记、不删任何文件：tt fep rec mark-stale <录制 ID> --reason \"…\"；"+
-			"只是想看看要发什么（不发包）：tt fep replay --dry-run")
+			" —— 这个对象不是表单字段（网格/按钮之类），录制时拿不到 colName（裸 id 跨会话会点到别的控件上）；"+
+				"需重录一段只含字段操作的录制，或用 --skip 跳掉这一步", ev.N, id),
+		"重录一份（tt recording start 录一轮新的，计划里就会带上 colName/fieldId）；"+
+			"只想留个标记、不删任何文件：tt recording mark-stale <录制 ID> --reason \"…\"；"+
+			"只是想看看要发什么（不发包）：tt recording replay-log --id <录制 ID> --dry-run")
 }
 
 // RequirePlanIdentity 是**发包之前**的那道闸（A23）：计划的每一条都过一遍。
@@ -253,7 +265,7 @@ func NoIdentitySteps(plan ReplayPlan) []int {
 
 // RunReplayIdentity 是**实际发包**的那条路：先过身份闸（A23），再走原来的回放。
 //
-// 两个真跑入口（`tt fep replay` 与 `tt fep rec reproduce`）都只调它 —— 留一条缝，
+// 两个真跑入口（`tt recording replay` 与 `tt recording replay`）都只调它 —— 留一条缝，
 // 就不会出现"另一个入口忘了接"（E2 那次就是这么漏的）。
 //
 // `opt.DryRun` 时**不判**身份（A23 的例外：不发包就没有点错对象的风险），但仍然
@@ -269,3 +281,13 @@ func (c *Client) RunReplayIdentity(plan ReplayPlan, opt ReplayRunOptions) (*Repl
 	}
 	return c.RunReplayWith(plan, opt)
 }
+
+// configureWritesValue 判一条 ConfigureEvent 是不是在**写字段值**。
+//
+// 判据是事件里有没有 `{ value "…" }` 这一项：有就是"把某个字段设成这个值"（要身份），
+// 没有就是定位/排版（cursor、currentRow、tabIndex、bufferSize…，重录也拿不到 colName）。
+func configureWritesValue(ev string) bool {
+	return configureValueAttr.MatchString(ev)
+}
+
+var configureValueAttr = regexp.MustCompile(`\{\s*value\s*"`)

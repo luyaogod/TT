@@ -76,7 +76,6 @@ func init() {
 	// 两个入口并存会让"到底该用哪个"永远悬着，而它们本来就是同一份实现。
 	Group.AddCommand(uiCmd, doCmd, waitCmd, srcCmd, jobCmd, feCmd)
 	uiCmd.AddCommand(uiSnapshotCmd, uiFindCmd, uiTreeCmd, uiRolesCmd, uiStateCmd)
-	recCmd.AddCommand(recStepsCmd)
 }
 
 // fail 造一个带退出码的错误。根命令通过 ExitCode() 取码（见 internal/cli/root.go）。

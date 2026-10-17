@@ -1102,5 +1102,5 @@ func init() {
 //
 // 顺序即帮助里的顺序（列 → 看 → 留 → 删 → 清 → 索引）。
 func RecordingCommands() []*cobra.Command {
-	return []*cobra.Command{recStartCmd, recStopCmd, recActiveCmd, recListCmd, recShowCmd, recReproduceCmd, recKeepCmd, recRmCmd, recPruneCmd, recIndexCmd, recStaleCmd}
+	return []*cobra.Command{recStartCmd, recStopCmd, recActiveCmd, recListCmd, recShowCmd, recReproduceCmd, recKeepCmd, recRmCmd, recPruneCmd, recIndexCmd, recStaleCmd, recPreflightCmd, recReplayCmd}
 }

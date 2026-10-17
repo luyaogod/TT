@@ -26,7 +26,7 @@ import (
 // 三条不可动摇的规矩：
 //
 //  1. **raw 是唯一权威**：索引只是它的派生视图。任何一帧都能拿 `off/len` 回 raw 取原字节，
-//     索引缺了/坏了，重新解析 raw 就能重建（`tt fep rec index`）。
+//     索引缺了/坏了，重新解析 raw 就能重建（`tt recording index`）。
 //  2. **索引不参与证据**：指纹、闸门、回放计划一律从 raw 算，绝不从索引算 ——
 //     索引是缓存，缓存不该影响"这份录制还算不算数"。
 //  3. **图片缓存不是消息**：type=5 那类帧（`!!__cached__!!`、图片清单）也落索引，
@@ -89,7 +89,7 @@ type indexLine struct {
 }
 
 // ErrNoIndex 表示这个方向没有帧索引（raw 还在，可以重建）。
-var ErrNoIndex = errors.New("fep: 没有帧索引（raw 还在，可用 tt fep rec index 重建）")
+var ErrNoIndex = errors.New("fep: 没有帧索引（raw 还在，可用 tt recording index 重建）")
 
 // IndexPathFor 返回某个 raw 文件对应的索引落点（与 raw 同一个干）。
 func IndexPathFor(raw string) string {
@@ -413,7 +413,7 @@ type IndexBuild struct {
 	Rebuilt bool   `json:"rebuilt"`
 }
 
-// BuildFrameIndex 从一个 raw 文件现场解析并落索引（老录制件补建，`tt fep rec index`）。
+// BuildFrameIndex 从一个 raw 文件现场解析并落索引（老录制件补建，`tt recording index`）。
 //
 // 时间：老录制**没有**帧级时间 —— 那时候还没记。所以 `t` 一律留空，读侧照实说
 // "时间精度：块级"。刻意不去拿 `timeline.log` 的块级时间"补"出一个看起来精确的时刻：

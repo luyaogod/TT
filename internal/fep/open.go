@@ -250,7 +250,7 @@ func Open(ctx context.Context, cfg OpenConfig, logf func(string, ...any)) (*Runt
 			logf("编译件：%s", b.FingerprintString())
 		}
 	} else {
-		// 只起代理时也要把画面接线算出来：`tt fep rec start` 就是"先起代理、再把调试线的
+		// 只起代理时也要把画面接线算出来：`tt recording start` 就是"先起代理、再把调试线的
 		// 作业挂到它上面"，而它得知道这个地址才知道该给调试线传什么 FGLSERVER。
 		// 探测失败不算错（裸代理可以没有环境）：照实留空，由调用方决定怎么办。
 		ip := cfg.FGLServerIP
@@ -291,7 +291,7 @@ func (r *Runtime) setFGLServer(ip string) error {
 func (r *Runtime) FGLServer() string { return r.fglServer }
 
 // Wait blocks until the session ends: the caller's context is cancelled, a
-// control client sent `quit` (`tt fep session close`), or the remote job exited.
+// control client sent `quit` (`tt recording stop <录制ID>`), or the remote job exited.
 func (r *Runtime) Wait(ctx context.Context) error {
 	select {
 	case <-ctx.Done():

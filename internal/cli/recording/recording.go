@@ -26,6 +26,9 @@ import (
 var renames = map[string]string{
 	"list":      "ls",
 	"reproduce": "replay",
+	// `replay` 这个名字给"按身份重放、自己起会话"那条（reproduce）；按日志重发、
+	// 可 `--dry-run` 的那条是另一个命令，叫 `replay-log` 区分开。
+	"replay": "replay-log",
 }
 
 // Register 把这一组挂到根命令上。

@@ -30,8 +30,8 @@ var ErrNoSession = errors.New("fep: no session registered")
 // 不区分的话，录制面板只能把两者都说成"正在录"：面板上写着"正在录:fep-x"，
 // 而那一轮其实是回放留下的窗口（用户 2026-10-15 撞上过）。
 const (
-	SessionKindRec    = "rec"    // tt fep rec start：人在录
-	SessionKindReplay = "replay" // tt fep rec reproduce：把一份录制重放出来
+	SessionKindRec    = "rec"    // tt recording start：人在录
+	SessionKindReplay = "replay" // tt recording replay：把一份录制重放出来
 )
 
 // Session is one running, isolated job: the GDC instance we launched, the local
@@ -53,7 +53,7 @@ type Session struct {
 	//
 	// 为什么要进来：录制与调试原本各记一套名字（这里 `Tag`、那边 `ref`），人要自己脑补
 	// 对应关系，收尾只能靠"用录制 ID 反推别名"去猜。有了 Ref，两条线指向同一个地址，
-	// `tt fep session close` 也不必再反推。
+	// `tt recording stop <录制ID>` 也不必再反推。
 	//
 	// 空值 = 老登记（升级前写的）或"这一轮没有调试会话"（例如 `fep session open` 的 r.r 路径）。
 	// 读取侧一律按"可空"处理，不许据此判断"没有会话"。

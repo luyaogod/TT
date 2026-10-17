@@ -486,3 +486,29 @@ func waitModelHas(t *testing.T, dir, tag string, id int) *Model {
 	t.Fatalf("模型里始终没有 #%d", id)
 	return nil
 }
+
+// TestConfigureEventNeedsIdentityOnlyWhenWritingValue：`ConfigureEvent` 的身份判据按**是否写值**分。
+//
+// 网格的 bufferSize/pageSize、栏位的 tabIndex、光标位置都是运行期**定位与排版**，
+// 这类对象天然没有 colName；拿"点控件"的纪律去要求它们，结果是每份真录制都回放不了
+// （真机现场：一份刚录的 axmt500_wf 在第 14 步被拒，那一行是网格的 pageSize/bufferSize）。
+func TestConfigureEventNeedsIdentityOnlyWhenWritingValue(t *testing.T) {
+	allowed := []string{
+		`ConfigureEvent 0{{idRef "766"}{ pageSize "9"}{ bufferSize "10"}}`,
+		`ConfigureEvent 0{{idRef "1065"}{ tabIndex "1"}}`,
+		`ConfigureEvent 0{{idRef "1034"}{ cursor "0"}}`,
+	}
+	for _, ev := range allowed {
+		if err := RequireStepIdentity(ReplayEvent{N: 1, Event: ev}); err != nil {
+			t.Errorf("定位/排版类 ConfigureEvent 不该被拒：%s → %v", ev, err)
+		}
+	}
+	// 写值仍要身份：不知道写到哪个字段，发出去就是"改错字段"。
+	write := ReplayEvent{N: 2, Event: `ConfigureEvent 0{{idRef "6000"}{ value "X"}}`}
+	var ref *Refusal
+	if err := RequireStepIdentity(write); err == nil {
+		t.Fatal("写值的 ConfigureEvent 没有 colName 时必须拒（A23）")
+	} else if !errors.As(err, &ref) || ref.Code != CodeFieldNotInScope {
+		t.Fatalf("该报 %s，实得 %v", CodeFieldNotInScope, err)
+	}
+}

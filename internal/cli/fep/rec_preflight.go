@@ -570,7 +570,6 @@ var (
 func init() {
 	recPreflightCmd.Flags().StringVar(&recPreflightProg, "prog", "", "作业程序名（体检用：没给时命令里留 <作业> 占位符）")
 	recPreflightCmd.Flags().StringVar(&recPreflightEnv, "env", "", "环境名（体检用：没给时命令里留 <环境> 占位符）")
-	recCmd.AddCommand(recPreflightCmd)
 }
 
 // ---------------------------------------------------------------------------

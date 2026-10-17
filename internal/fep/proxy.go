@@ -82,7 +82,7 @@ func NewProxy(cfg ProxyConfig) *Proxy {
 
 // Quit is closed when a control client asked the proxy to stop
 // (`quit` on the control endpoint). The resident process waits on it, which is
-// how `tt fep session close` stops a session that lives in another process.
+// how `tt recording stop <录制ID>` stops a session that lives in another process.
 func (p *Proxy) Quit() <-chan struct{} { return p.quit }
 
 // Start binds the listen and control sockets.
