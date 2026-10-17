@@ -12,7 +12,7 @@
 | `/api/dbprobe` / `/api/dbaccverify` / `/api/conntest` | 从服务器探测连接要素、验证账号、测试连接 |
 | `/api/config/meta` / `/api/config/status` | 配置的元信息与**派生状态** |
 | `/api/cache/clear` | 清缓存 |
-| `/api/recordings` GET / POST | **录制面板**：按 环境+ENT 列录制（长期库与缓存两处）／起一轮录制（**另起一个进程**跑 `tt fep rec start`，照 `tt update` 那条先例） |
+| `/api/recordings` GET / POST | **录制面板**：按 环境+ENT 列录制（长期库与缓存两处）／起一轮录制（**另起一个进程**跑 `tt recording start`，照 `tt update` 那条先例） |
 | `/api/recordings/current` · `/api/recordings/stop` | 现在在录吗（看会话登记，不看文件；另答两件事：`kind` = 录还是回放、`stale` = 起它的进程还在不在）／停一轮（= `session close` + 收掉调试会话）；**过期登记**（`rec reproduce --no-wait` 发完就退留下的那份）照样报出来 —— 它是那个窗口的收工凭据，但**不算"在跑"**，不挡下一轮起录 |
 | `/api/recordings/{id}` GET / DELETE | 看一份（含身份）／删一份（**必须 `?confirm=1`**：录制不可再生） |
 | `/api/recordings/{id}/overview` | **明细页概览**：各方向的字节/帧数/索引状态 + 条带要的帧数组（只读索引里的**时刻**，位置一律现场从字节解） |
@@ -21,13 +21,13 @@
 | `/api/recordings/{id}/raw` | 某一帧的原始字节（`?conn=&dir=&off=&len=`）：hex + 可打印形态；越界或单次 >8 KB 一律 400 |
 | `/api/recordings/{id}/replay-steps` | **回放进度**：`?since=N&watch=1`。读的是回放进程逐行 flush 的 jsonl（权威）；`since` 是**已拿到多少条记录行**（一行不等于一步） |
 | `/api/recordings/{id}/replay-ctl` POST | 人对回放下的命令：`{cmd: pause\|resume\|step\|stop}` → 写进 `<日志>.ctl`。非法词 400 / 没有日志 404 / 不在跑 409（**停止除外**，收尾那一下要能点） |
-| `/api/recordings/{id}/replay` POST | 回放这一份：**另起一个进程**跑 `tt fep rec reproduce <ID> --no-wait`（按身份起调试线会话 → 过指纹闸 → 发事件，**不等停站**，会话留着给 AI 取证）。r.r 录的件、以及"已经有一轮**活着**的录制在跑"，这两种情形**在起进程之前**就 409 |
+| `/api/recordings/{id}/replay` POST | 回放这一份：**另起一个进程**跑 `tt recording replay <ID> --no-wait`（按身份起调试线会话 → 过指纹闸 → 发事件，**不等停站**，会话留着给 AI 取证）。r.r 录的件、以及"已经有一轮**活着**的录制在跑"，这两种情形**在起进程之前**就 409 |
 | `/api/install` GET / POST / DELETE | 把 tt 加进 / 移出用户 PATH |
 | `/api/update` / `/api/update/check` / `/api/update/apply` | tt 自身的更新：读状态（不联网）/ 人去点才查一次 / 交棒给更新器 |
 | `/api/shutdown` | 停止服务（仅在有停止回调时挂） |
 | `/debug/api/*` | 调试子系统的接口（挂载时剥掉 `/debug` 前缀） |
 | `/api/*` | 字典子系统的端点（源码镜像拉取、字典同步），**直接挂在共享层** |
-| `/debug/` | 调试工作台单页应用 |
+| `/debug/` | 工作站单页应用（左侧环境树 + 右侧面板） |
 | `/` | 根路径 |
 
 ## 录制明细页的读侧（四个端点）

@@ -12,7 +12,9 @@
 | `tt dev …` | [./dev](./dev/README.md) | 设计器包线（cobra 树挂动词；参数解析权在 tdev 自己的解析器，见其 README） |
 | `tt dict …` | [./dict](./dict/README.md) | 字典线 |
 | `tt drawio …` | [./drawio](./drawio/README.md) | 原型图线 |
-| `tt fep …` | [./fep](./fep/README.md) | 前端协议线（录制/回放/动作；含 `rec preflight` 前置体检） |
+| `tt session …` | [./session](./session) | 会话：建 / 列 / 看 / 改 ENT / 结束本轮 / 收掉 / 透传（`--record` 一步建会话并起录制） |
+| `tt recording …` | [./recording](./recording) | 录制：起 / 停 / 列（正在录的、录过件的）/ 回放 / 留 / 删 / 清 / 索引 / 标失效 |
+| `tt fep …` | [./fep](./fep/README.md) | 前端协议线（动作 / 界面快照 / 等待 / 源码 / 作业 / 无头前端） |
 | `tt form …` | [./form](./form/README.md) | 出厂表单线（`.42f` 字段表：`ls` / `show` / `verify` / `fetch` / `cache`） |
 | `tt env / config / cache / serve / install / version` | 本包 | 各组共用 |
 
@@ -48,10 +50,9 @@ tt dev tzc    0 成功 / 2 包格式或用法错 / 3 校验失败 / 4 拒绝写�
 tt dev tzs    0 成功 / 1 引擎内部错 / 2 参数或环境错 / 4 设计器拒绝 / 5 传输或环境失败
               （没有 3；2 也包括"manifest 拉不到"）
 tt dict       0 成功（含"查无结果"）/ 1 用法错 / 2 数据源错 / 3 缺表
-tt fep        0 成功 / 1 运行失败（IO·网络·环境）/ 2 用法错（含缺前置）
-              3 无会话（未登记或已过期）
-              4 会话状态不符（已有会话·端口被占·GDC 未就绪·指纹闸不过）
-              5 目标不存在（连接号·窗口·对象·录制 ID）/ 6 环境体检不过（权限不一致）
+tt session    0 成功 / 1 运行失败（IO·网络·环境）/ 2 用法错 / 3 无会话
+              4 状态不符（会话没空 / 不是空闲 / 端口被占）/ 5 目标不存在 / 6 环境体检不过
+tt recording  0 成功 / 1 运行失败 / 3 无会话登记（active、stop 找不到）/ 5 找不到该录制件
 tt drawio     0 成功 / 1 用法或运行失败 / 2 输入错（spec 不合法、包读不出）/ 3 产物自查未通过
 tt view       0 成功 / 1 运行失败（IO·抓图失败）/ 2 用法错 / 3 找不到目标窗口 / 4 产物自查未通过
 tt form       0 一致 / 1 取件失败（FORM_UNKNOWN：取不到表单，或它不是合法 .42f）
@@ -62,21 +63,20 @@ tt form       0 一致 / 1 取件失败（FORM_UNKNOWN：取不到表单，或�
 
 **包装脚本要按子命令辨认，别只看码**：`3` 在 `.tzc` 线是"校验失败"、在字典线是"缺表"、
 在 drawio 线是"产物自查未通过"、在 `.tzs` 线根本不用；`4` 只在设计器两条线上有；
-`6` 在 `tt fep` 是"环境体检不过"（权限不一致）、在 `tt form` 是"字段表与语料不一致"。
+`6` 在 `tt session`/`tt recording start` 是"环境体检不过"（权限不一致）、在 `tt form` 是"字段表与语料不一致"。
 各线的细化含义在各自 README 里。
 
-**回放的身份闸（`tt fep`，契约 A23/A24）**：`tt fep replay` 与 `tt fep rec reproduce`
+**回放的身份闸（契约 A23/A24）**：`tt recording replay` 与 `tt fep replay`
 在**发包之前**先过身份闸 —— 步骤没有 `colName`（该件早于身份上线）就退 `5`
 （`FIELD_NOT_IN_SCOPE`）；有 `colName` 但解析不过则按四码退 `5/5/1/4`。
 `--dry-run` 是唯一例外（不发包）：照旧展示，但每条无身份的步骤标
 `无身份（真跑会被拒）`。旧件的处置只有两条：重录，或
-`tt fep rec mark-stale <ID> [--reason <文字>]`（只改身份文件，列表随即显示
+`tt recording mark-stale <ID> [--reason <文字>]`（只改身份文件，列表随即显示
 `不可回放（需重录）`）。**没有** `--skip-gate` / `--force` 这类跳过开关。
 
-**前置体检与「一次说清」（`tt fep`，[./fep](./fep/README.md)）**：`tt fep rec preflight`
-只检查、不录制、不起会话、不写任何录制文件 —— 四项（数据目录可写 / 调试服务 / 调试会话 /
-环境·作业）一次查完，`--format text` 出人读态、否则一个 JSON 对象。
-`tt fep rec start` 在**起代理之前**跑同一份体检：缺几项就列几项，每条带可直接复制的命令
+**前置体检与「一次说清」（[./fep](./fep/README.md) 实现，`tt recording start` 触发）**：
+四项（数据目录可写 / 调试服务 / 调试会话 / 环境·作业）一次查完；它只检查、不录制、
+不起会话、不写任何录制文件。`tt recording start` 在**起代理之前**跑这份体检：缺几项就列几项，每条带可直接复制的命令
 （`tt debug serve`、`tt debug start <作业> --env <环境>`），已知的 `--prog`/`--env` 会填进去。
 缺前置一律退 **2**（用法/环境不满足）—— 不新造码，也不占 `6`（那是"体检结论：权限不一致"）。
 

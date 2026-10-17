@@ -84,7 +84,7 @@ go test ./internal/fep -run TestV3 -count=1 -v     # 指纹 v3（A21 非对称�
 ```
 tt fep ui snapshot --from axmt-rt2gdc.log   → 对象 4558 / 窗口 w_axmt500 / 字段名 447-492（90.9%）
 tt fep ui find --from axmt-rt2gdc.log --text 客户  → 客户编号 high name-suffix（comment=cmt_xmda004）
-tt fep rec steps --from teach-4-gdc2rt.log  → 原始事件 52 → 语义动作 17（点击 录入 / 输入 200 / 点击 确定）
+tt fep ui steps --from teach-4-gdc2rt.log  → 原始事件 52 → 语义动作 17（点击 录入 / 输入 200 / 点击 确定）
 ```
 
 退出码：0/1/2/3/4/5/6（表在 `internal/cli/README.md`）。未知子命令退 2、无会话退 3，
@@ -251,11 +251,11 @@ AUI 的裸 id 由**运行期**按对象声明顺序分配，被 `rn` 删掉后�
 | 路径 | 服务器上真正执行的命令 | 在命令面上吗 |
 |---|---|---|
 | `r.r <作业>` | `fglrun $AZZ/42r/azzp000.42r <作业>`（azzp000 是 T100 的作业启动器，**不带 `-d`**） | 是（`session open`，标准运行录制） |
-| debug 线 | `fglrun -d <LaunchRef>.42r <LaunchArgs>`，见 [../debug/README.md](../debug/README.md) | 是（`tt fep rec start` / `tt debug start`） |
+| debug 线 | `fglrun -d <LaunchRef>.42r <LaunchArgs>`，见 [../debug/README.md](../debug/README.md) | 是（`tt recording start` / `tt debug start`） |
 | `r.d <作业>` | `$FBIN/42m/gendbg <作业>` → `$FGLDEBPATH/fgldeb <作业>.42r …`（fgldeb 是 `fglrun -d` 的前端、**T100 的调试器**） | **否**（已从命令面拿掉） |
 
 **录制走哪条**：要"录了以后在断点下重放"就必须走一条带 `-d` 的路（`r.r` 的表与它不同），
-而那条路用本仓库自己的 fgldb 就够 —— `tt fep rec start --env … --prog … [--ent …]`
+而那条路用本仓库自己的 fgldb 就够 —— `tt recording start --env … --prog … [--ent …]`
 一条命令做完：起隔离实例与代理 → `tt debug start --fglserver <本轮探测到的地址>` →
 自动 `continue` 放行 → 前台常驻；用户面前**只有作业窗口**，收工落身份并入库。
 要自己先下断点就加 `--no-continue`。
@@ -289,7 +289,7 @@ AUI 的裸 id 由**运行期**按对象声明顺序分配，被 `rn` 删掉后�
 判据（前置：一台能连的 T100 环境 + 一个作业名；约 3 分钟）：
 
 ```bash
-tt fep session open --env <环境> --prog <作业>     # 第一次
+tt recording start --launch standard --env <环境> --prog <作业>     # 第一次
 # 约 10s 等界面稳定（tt fep fe status --ctl 127.0.0.1:7899 连续两次不变）
 tt fep ui tree > a.txt
 # 收工，再原地重复一次，得到 b.txt
@@ -377,9 +377,9 @@ diff a.txt b.txt                                  # 期望：无差异
 现场量到的两条（主机109，2026-10-15，作业 `bsft001_wf`，**号码口径**，v3 起它们只是 `idDigest`）：
 **同一条路径**上录的几份（五份字节各不相同的调试线录制，跨两轮 `tt serve` 重启）摘要**逐条相同**：
 `493b95ef0b0df2af`（3976 条）；同一个作业换成 `r.r` 路径录一轮就是另一个摘要：`d9431dc4b8f87339`（4961 条）。
-要自己复现就照上面 M3 那条配方做两轮，把 `diff a.txt b.txt` 换成 `tt fep rec show <ID>` 比指纹。
+要自己复现就照上面 M3 那条配方做两轮，把 `diff a.txt b.txt` 换成 `tt recording show <ID>` 比指纹。
 
-`tt fep rec list` 是清单（默认把缓存与长期库都列出来，`--from` 可以指到别处），每份都当场复算指纹。
+`tt recording ls` 是清单（默认把缓存与长期库都列出来，`--from` 可以指到别处），每份都当场复算指纹。
 
 ### 长期库：按 环境 + ENT
 
@@ -387,7 +387,7 @@ diff a.txt b.txt                                  # 期望：无差异
 
 | 谁录的 | 住哪 | 怎么清 |
 |---|---|---|
-| **用户主动**录的（面板点"开始录制"、`tt fep rec start`） | 长期库 `<数据目录>/records/<环境>/<ENT>/<录制 ID>/` | **不参与自动清理**：前端手动删（`tt fep rec rm <ID>`）、环境被删时**级联清** |
+| **用户主动**录的（面板点"开始录制"、`tt recording start`） | 长期库 `<数据目录>/records/<环境>/<ENT>/<录制 ID>/` | **不参与自动清理**：前端手动删（`tt recording rm <ID>`）、环境被删时**级联清** |
 | **系统自动**录的（调试会话顺手录的上下文） | 缓存目录 `<数据目录>/fep/` | 走**统一清理框架**：`tt serve` 启动清超过 7 天的、`tt cache clear` 全清 |
 
 用"住哪"表达寿命是有意的：清理框架只认 `config.CacheSubdirs` 里列出的目录
@@ -418,22 +418,22 @@ diff a.txt b.txt                                  # 期望：无差异
 **删除**两条路（`Library.Remove` / `Library.RemoveEnv`，都走 `config.RemoveTree` ——
 逐文件自底向上删，不用 `os.RemoveAll`，理由见 `internal/config/cache.go` 的实测）：
 
-- `tt fep rec rm <ID>`：删库里的一份（前端"手动清除"落地的那一下）。传进来的不在库里就拒；
+- `tt recording rm <ID>`：删库里的一份（前端"手动清除"落地的那一下）。传进来的不在库里就拒；
   在缓存里的那类会提示它归统一清理框架管，不在那里删。**破坏性动作要 `--yes`**
   （与 `tt dev tzc unlock` / `tt update` 同一条规矩：录制不可再生，AI 不得自主加）；
 - 环境被删 ⇒ 它的整段库跟着删：设置页保存环境列表时**级联**（`internal/web/server.go` 的
   `hHostsPut`：写配置成功之后再删文件，失败只记日志），**手改 config.json** 删掉的那种走
-  `tt fep rec prune`（拿库里的环境目录名与配置里的环境列表对一遍，多出来的就是没人认领的）。
+  `tt recording prune`（拿库里的环境目录名与配置里的环境列表对一遍，多出来的就是没人认领的）。
 
 这条路线的判据（约 1 分钟，要一台能连的 T100 环境）：
 
 ```bash
-tt fep rec start --env <环境> --prog <作业> --ent <ENT>   # 录一轮（用户主动录的）
-tt fep session close                                       # 收工：落身份 + 自动入库
-tt fep rec list                                            # 期望：那一行标着「长期库」并带路径与指纹
-tt fep rec show <录制 ID>                                   # 期望：归属「用户主动录的」／留存「长期库」
-tt fep rec rm <录制 ID> --dry-run                           # 期望：只说要删什么，一个字节都不删
-tt fep rec rm <录制 ID>                                    # 期望：退 2 并要求 --yes（录制不可再生）
+tt recording start --env <环境> --prog <作业> --ent <ENT>   # 录一轮（用户主动录的）
+tt recording stop <录制ID>                                       # 收工：落身份 + 自动入库
+tt recording ls                                            # 期望：那一行标着「长期库」并带路径与指纹
+tt recording show <录制 ID>                                   # 期望：归属「用户主动录的」／留存「长期库」
+tt recording rm <录制 ID> --dry-run                           # 期望：只说要删什么，一个字节都不删
+tt recording rm <录制 ID>                                    # 期望：退 2 并要求 --yes（录制不可再生）
 ```
 
 `config.CleanCache` 只碰 `CacheSubdirs` 里列出的目录，`records/` **不**在其中 ——
@@ -711,9 +711,9 @@ tt fep src openwin q_imaf001_15 --source D:/T100/源代码/主机109
 命令：
 
 ```bash
-tt fep rec index fep-20261016-112410          # 现场解析并落索引（已有完整的就跳过）
-tt fep rec index --all                        # 给两个落点里的每一份都建
-tt fep rec show fep-20261016-112410           # 「帧索引」那一行会说清精度（帧级/无帧级/不完整）
+tt recording index fep-20261016-112410          # 现场解析并落索引（已有完整的就跳过）
+tt recording index --all                        # 给两个落点里的每一份都建
+tt recording show fep-20261016-112410           # 「帧索引」那一行会说清精度（帧级/无帧级/不完整）
 ```
 
 重建出来的索引**没有帧时间**（老件本来就没记，编一个出来更坏），读侧会照实说"块级"。
@@ -793,7 +793,7 @@ tt fep rec show fep-20261016-112410           # 「帧索引」那一行会说�
 退出码 2）；解析不过按四码给非 0 并打 `Hint`。实现与测试在 `internal/cli/fep/do_field.go`
 （`resolveFieldOrRefuse` 是纯函数：不读会话、不发包）。
 
-回放这一侧的接线（E2）：`tt fep replay` 与 `tt fep rec reproduce` 走**同一条**组装路径
+回放这一侧的接线（E2）：`tt fep replay` 与 `tt recording replay` 走**同一条**组装路径
 `internal/cli/fep/replay.go` 的 `planReplayFor` —— 它把**这份录制自己的**界面模型
 （`-rt2gdc.log`）读出来递给 `PlanReplay`。为什么必须是"这份录制自己的"：计划里的 `idRef`
 是录制当时发出去的裸 id，拿当前界面的编号表去翻就是另一张表（与指纹闸同一条理由）。
@@ -805,7 +805,7 @@ tt fep rec show fep-20261016-112410           # 「帧索引」那一行会说�
 
 **A23 —— 真跑必须能说出"发给哪个字段"。** 上面那半（"没身份就照旧按 `idRef` 发"）
 在 `internal/fep` 库层保留，但**两条发包入口已经不这么用了**：
-`tt fep replay` / `tt fep rec reproduce` 都只走 `Client.RunReplayIdentity`
+`tt fep replay` / `tt recording replay` 都只走 `Client.RunReplayIdentity`
 （`replayident.go`），它先过 `RequirePlanIdentity`，再走原来的回放：
 
 | 情形 | 判决 | 出处 |
