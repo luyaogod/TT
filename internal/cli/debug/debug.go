@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -18,16 +19,20 @@ import (
 var (
 	dbgModule string
 	dbgProg   string
-	dbgLine   int
 	dbgListen string
 	dbEnt     int
 	dbRefresh bool
 )
 
-// debugProbeCmd M0 尖刺:全自动跑通 登录→启动→下断点→步进→求值→退出
+// debugProbeCmd 是调试链路自检：全自动跑 登录→启动→下断点→命中→源码→栈帧→步进→求值，
+// 再把"验了什么 / 没验什么"如实报出来。
+//
+// 收尾判据在 `probe_verdict.go`：**前六步必须每一步都真的走通**才算通过；步进与求值
+// 可能因为"程序自己跑完"而没覆盖 —— 那不是链路故障（A35：没有 GDC 接线时作业在 main
+// 之后当场 Fatal error -6300 退出），要如实说明并给出病因，而不是一律 exit 1。
 var debugProbeCmd = &cobra.Command{
 	Use:   "probe",
-	Short: "M0 尖刺:验证协议驱动器(全自动,不依赖 GDC 交互)",
+	Short: "调试链路自检:全自动验一遍协议驱动器(登录/断点/命中/源码/栈帧/步进/求值)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfgPath, err := resolveConfigPath()
 		if err != nil {
@@ -77,17 +82,24 @@ var debugProbeCmd = &cobra.Command{
 			cancel()
 		}()
 
+		// reached 记**真的走通**的步骤：它既喂收尾判据，也是最后那份"验了什么"的清单。
+		// 只在某一步确实成功后追加 —— 失败路径上不许凑数，否则"自检通过"又变回一句空话。
+		reached := make([]string, 0, len(probeRequired)+len(probeOptional))
+
 		fmt.Println("[probe] 启动调试会话(Launch)...")
 		if err := sess.Launch(ctx); err != nil {
 			return fmt.Errorf("Launch 失败: %w", err)
 		}
+		reached = append(reached, probeLogin)
 		fmt.Printf("[probe] 已到 (fgldb) 入口停站 ✓\n\n")
+		reached = append(reached, probeEntry)
 
 		fmt.Println("[probe] break main(函数断点):")
 		bp, err := sess.Break("main")
 		if err != nil {
 			return err
 		}
+		reached = append(reached, probeBreak)
 		fmt.Printf("  Breakpoint %d at %s:%d ✓\n", bp.Num, bp.File, bp.Line)
 
 		fmt.Println("\n[probe] run(等待命中断点)...")
@@ -98,6 +110,7 @@ var debugProbeCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		reached = append(reached, probeRun)
 		fmt.Printf("  命中: %s:%d (%s) ✓\n", stop.File, stop.Line, stop.Func)
 		for _, sl := range stop.Source {
 			mark := "   "
@@ -106,37 +119,79 @@ var debugProbeCmd = &cobra.Command{
 			}
 			fmt.Printf("  %s%-6d %s\n", mark, sl.Num, sl.Text)
 		}
+		// 源码镜像也算一步：取不到就说明"停站处周边的源码"这条链路没通（源码目录未知那类
+		// 故障正是这样表现）—— 空列表不许当成"验过了"。
+		if len(stop.Source) > 0 {
+			reached = append(reached, probeSource)
+		}
 
 		fmt.Println("\n[probe] where:")
 		frames, err := sess.Where()
 		if err != nil {
 			return err
 		}
+		if len(frames) > 0 {
+			reached = append(reached, probeWhere)
+		}
 		for _, f := range frames {
 			fmt.Printf("  #%d %s at %s:%d\n", f.Idx, f.Func, f.File, f.Line)
 		}
 
+		// 程序"自己跑完"从这一步起可能随时发生：这个作业在 main 之后要开界面，而画面没接线时
+		// 它会当场 Fatal error -6300 退出（A35，真机三次复现）。**那不是链路故障** ——
+		// 但也不许拿它当成功糊过去：如实说"步进与求值没覆盖"，并给出能照做的病因。
+		exitAt := ""
+
 		fmt.Println("\n[probe] next:")
 		stop2, err := sess.Step("next")
-		if err != nil {
+		switch {
+		case err == nil:
+			reached = append(reached, probeStep)
+			if stop2 != nil {
+				fmt.Printf("  -> %s:%d (%s)\n", stop2.File, stop2.Line, stop2.Func)
+				for _, sl := range stop2.Source {
+					mark := "   "
+					if sl.IsCur {
+						mark = "-> "
+					}
+					fmt.Printf("  %s%-6d %s\n", mark, sl.Num, sl.Text)
+				}
+			}
+		case probeProgramExited(err, sess.State()):
+			exitAt = probeStep
+			fmt.Printf("  程序自己跑完退出了（不是链路故障）：%v\n", err)
+		default:
 			return err
 		}
-		if stop2 != nil {
-			fmt.Printf("  -> %s:%d (%s)\n", stop2.File, stop2.Line, stop2.Func)
-			for _, sl := range stop2.Source {
-				mark := "   "
-				if sl.IsCur {
-					mark = "-> "
-				}
-				fmt.Printf("  %s%-6d %s\n", mark, sl.Num, sl.Text)
+
+		if exitAt == "" {
+			fmt.Println("\n[probe] print num_args():")
+			v, perr := sess.Print("num_args()")
+			switch {
+			case perr == nil:
+				reached = append(reached, probePrint)
+				fmt.Printf("  %s\n", v)
+			case probeProgramExited(perr, sess.State()):
+				exitAt = probePrint
+				fmt.Printf("  程序自己跑完退出了（不是链路故障）：%v\n", perr)
+			default:
+				// 求值失败与前面的协议步骤无关，不算链路故障；但也绝不装作拿到了值。
+				fmt.Printf("  未取到：%v\n", perr)
 			}
 		}
 
-		fmt.Println("\n[probe] print num_args():")
-		v, err := sess.Print("num_args()")
-		fmt.Printf("  %s (err=%v)\n", v, err)
-
-		fmt.Println("\n[probe] 全流程验证完成,退出会话...")
+		ok, missing := probeVerdict(reached)
+		printProbeVerdict(reached, missing, ok, exitAt)
+		if !ok {
+			return fmt.Errorf("probe 未通过：%s 没真的走通（链路故障，与「程序自己跑完」不同）",
+				strings.Join(missing, "、"))
+		}
+		// 只在「程序自己跑完」时给病因：这不是链路问题，但会让人误以为断点没装上。
+		if exitAt != "" {
+			if hint := debug.ScreenWarnWith(sess.FGLServer(), gdcLocal()); hint != "" {
+				fmt.Println("\n  ⚠ " + hint)
+			}
+		}
 		return nil
 	},
 }
@@ -278,7 +333,6 @@ func init() {
 	// 实测 axmt500_wf 因此被拼成 asf_axmt500_wf.4gl，真名是 axm_axmt500_wf.4gl）。
 	debugProbeCmd.Flags().StringVarP(&dbgModule, "module", "m", "", debug.ModuleFlagHelp())
 	debugProbeCmd.Flags().StringVarP(&dbgProg, "prog", "p", "bsft001_wf", "作业名(如 bsft001_wf)")
-	debugProbeCmd.Flags().IntVarP(&dbgLine, "line", "l", 4452, "探针断点行号")
 	debugServeCmd.Flags().StringVar(&dbgListen, "listen", "", "覆盖监听地址(默认取配置)")
 	debugServeCmd.Flags().BoolVar(&dbgServeForeground, "foreground", false, "前台运行,日志直出终端(默认后台常驻)")
 	debugServeCmd.Flags().BoolVar(&dbgServeStop, "stop", false, "停止后台运行的调试服务(单实例)")
