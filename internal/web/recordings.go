@@ -267,7 +267,9 @@ func (s *Server) hRecordingStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	logPath := filepath.Join(cacheDir, "rec-start-"+time.Now().Format("20060102-150405")+".log")
-	args := []string{"fep", "rec", "start", "--env", req.Env, "--prog", req.Prog, "--config", cfgPath}
+	// 新入口：`tt recording start`（与 `tt fep rec start` 是同一份实现，见 internal/cli/recording）。
+	// 面板从旧入口切过来，是为了让 `tt fep rec …` 这一层将来能整体删掉 —— 只留一个入口。
+	args := []string{"recording", "start", "--env", req.Env, "--prog", req.Prog, "--config", cfgPath}
 	if e := strings.TrimSpace(req.Ent); e != "" {
 		args = append(args, "--ent", e)
 	}
@@ -488,7 +490,7 @@ func (s *Server) hRecordingReplay(w http.ResponseWriter, r *http.Request) {
 	}
 	logPath := filepath.Join(cacheDir, "rec-replay-"+time.Now().Format("20060102-150405")+".log")
 	pid, perr := spawnAndCheck(exe,
-		[]string{"fep", "rec", "reproduce", id, "--no-wait", "--config", cfgPath}, logPath)
+		[]string{"recording", "replay", id, "--no-wait", "--config", cfgPath}, logPath)
 	if perr != nil {
 		writeErr(w, http.StatusInternalServerError, fmt.Errorf("起回放失败: %w", perr))
 		return
