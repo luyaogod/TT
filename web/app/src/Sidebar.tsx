@@ -4,12 +4,17 @@
 // **服务端真实的会话句柄**(`POST /api/sessions/new` 建出来的,见 store.createSession)。
 // 形状按 DSH 的工作站:顶部品牌 + 「新会话」、中间一棵树、底部设置。
 //
-// 交互刻意只做两件事:点环境名进环境页、点会话名进会话页;小箭头只负责展开/收起
-// (用户 2026-10-17 定的:改名/删除留到后面,别在壳子里塞半套 CRUD)。
+// 会话行的形状(用户 2026-10-18 定的):
+//   · 左边一个**状态圆点**(灰=空闲 / 蓝=登录中 / 绿=运行 / 橙=停站 / 红=已退出),
+//     不再用"聊天"图标 —— 图标说不了这条会话现在能不能用,颜色能;
+//   · 圆点与文字的起点对齐父目录(环境)那一行的文件夹图标与名字,树看起来才是两列;
+//   · 悬停时右侧换成「结束会话」按钮(点击**不**进会话页,只收掉它)。
+//
+// 交互:点会话名进会话页;小箭头只负责展开/收起(改名/删除留到后面,别在壳子里塞半套 CRUD)。
 import { useEffect, useMemo, useState } from 'react'
 import {
-  ChevronRight, Folder, FolderOpen, FolderPlus, MessageSquare, PanelLeftClose,
-  Plus, RefreshCw, Search, Settings, Video, X,
+  ChevronRight, CircleX, Folder, FolderOpen, FolderPlus, PanelLeftClose,
+  Plus, RefreshCw, Search, Settings, X,
 } from 'lucide-react'
 import { cn } from '../../shared/utils'
 import type { Route } from './routing'
@@ -20,9 +25,12 @@ export interface SidebarProps {
   envsLoaded: boolean
   envsErr: string
   sessions: SessionItem[]
+  /** 会话 id → 服务端状态(`idle` / `loading` / `running` / `stopped` / `exit`)。 */
+  states: Record<string, string>
   route: Route
   onSelectEnv: (env: string) => void
   onSelectSession: (s: SessionItem) => void
+  onCloseSession: (s: SessionItem) => void
   onNewSession: () => void
   onSettings: () => void
   onRefreshEnvs: () => void
@@ -30,13 +38,31 @@ export interface SidebarProps {
   onCollapse: () => void
 }
 
-/** 会话类型的短名与图标(左树与会话页共用这一份口径)。 */
+/** 会话类型的短名(左树与会话页共用这一份口径)。 */
 export const SESSION_TYPE_LABEL: Record<SessionItem['type'], string> = { debug: 'Debug', fep: 'FEP' }
-const SESSION_TYPE_ICON = { debug: MessageSquare, fep: Video }
+
+/**
+ * 会话状态 → 圆点颜色 + 一句人话。
+ *
+ * 颜色与调试页的语义一致(停站橙 / 运行蓝 / 空闲灰),但**运行是绿**:树上要的是
+ * "这条会话此刻是不是活的"这一眼,与状态栏那条"运行 = 蓝"表达的是不同的东西
+ * (后者是 VS Code 的状态条配色)。两种口径都在各自的位置有说明,别再往一处合并。
+ */
+const SESSION_STATE: Record<string, { dot: string; label: string }> = {
+  idle: { dot: 'bg-muted-foreground/45', label: '空闲（已登录，可直接启动调试）' },
+  loading: { dot: 'bg-sky-500 animate-pulse', label: '登录中…' },
+  running: { dot: 'bg-emerald-500', label: '运行中' },
+  stopped: { dot: 'bg-amber-500', label: '已停站' },
+  exit: { dot: 'bg-red-500', label: '已退出' },
+}
+
+function stateOf(states: Record<string, string>, id: string) {
+  return SESSION_STATE[states[id] || ''] || { dot: 'bg-muted-foreground/25', label: '状态未知' }
+}
 
 export function Sidebar({
-  envs, envsLoaded, envsErr, sessions, route,
-  onSelectEnv, onSelectSession, onNewSession, onSettings, onRefreshEnvs, onAddEnv, onCollapse,
+  envs, envsLoaded, envsErr, sessions, states, route,
+  onSelectEnv, onSelectSession, onCloseSession, onNewSession, onSettings, onRefreshEnvs, onAddEnv, onCollapse,
 }: SidebarProps) {
   // 展开状态:没记过就是展开(新环境默认把会话露出来),用户收起后按环境名记住。
   const [closed, setClosed] = useState<Record<string, boolean>>({})
@@ -180,21 +206,39 @@ export function Sidebar({
 
                 {open && list.map((s) => {
                   const on = route.kind === 'session' && route.id === s.id
-                  const Icon = SESSION_TYPE_ICON[s.type]
+                  const st = stateOf(states, s.id)
                   return (
-                    <button key={s.id} onClick={() => onSelectSession(s)}
-                      title={`${s.name} · ${SESSION_TYPE_LABEL[s.type]} 会话`}
-                      className={cn(rowBase, 'mt-0.5 pr-2', on ? rowOn : rowIdle)}
-                      style={{ paddingLeft: 30 }}>
-                      <Icon className="h-3.5 w-3.5 shrink-0 opacity-80" />
-                      <span className="min-w-0 flex-1 truncate">{s.name}</span>
-                      <span className="shrink-0 text-[10px] opacity-60">{SESSION_TYPE_LABEL[s.type]}</span>
-                    </button>
+                    // paddingLeft 与父目录那一行的**文件夹图标**同一列:行内边距 4 + 箭头 20 +
+                    // 行内 gap 8 = 32;圆点比文件夹图标窄,所以外面套一个 w-4 的定宽槽,
+                    // 文字起点才对得齐(32+16+8 = 56 = 环境名那一格)。
+                    <div key={s.id}
+                      className={cn(rowBase, 'relative mt-0.5 pr-1.5', on ? rowOn : rowIdle)}
+                      style={{ paddingLeft: 32 }}>
+                      <button onClick={() => onSelectSession(s)}
+                        title={`${s.name} · ${SESSION_TYPE_LABEL[s.type]} 会话 · ${st.label}`}
+                        className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                        <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+                          <span className={cn('h-2 w-2 rounded-full', st.dot)} />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate">{s.name}</span>
+                      </button>
+                      {/* 悬停时把类型标签换成"结束会话" —— 一行里放不下两个东西,而收会话是唯一
+                          需要在这里做的破坏性动作,不该藏进右键菜单。 */}
+                      <span className="shrink-0 text-[10px] opacity-60 group-hover:hidden">
+                        {SESSION_TYPE_LABEL[s.type]}
+                      </span>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onCloseSession(s) }}
+                        title="结束会话（断开连接并收掉它）"
+                        className="absolute right-1.5 top-1/2 hidden h-6 w-6 -translate-y-1/2 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground group-hover:flex">
+                        <CircleX className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   )
                 })}
 
                 {open && list.length === 0 && (
-                  <div className="py-1 pl-[30px] text-[11px] text-muted-foreground/70">还没有会话</div>
+                  <div className="py-1 pl-[32px] text-[11px] text-muted-foreground/70">还没有会话</div>
                 )}
               </div>
             )

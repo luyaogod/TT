@@ -11,10 +11,11 @@ import { useEffect, useState } from 'react'
 import { FolderOpen, Video } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { api } from './api'
-import type { SessionItem } from './store'
+import { useStore, type SessionItem } from './store'
 import type { SessionTab } from './routing'
 import { Pane, TabStrip, ViewHeader, Meta, type TabItem } from './Shell'
 import { DebugWorkbench } from './DebugWorkbench'
+import { StatusBar } from './StatusBar'
 import { SESSION_TYPE_LABEL } from './Sidebar'
 
 /** 画面通道(录制代理)的只读视图，与后端 `GET /api/sessions/{id}/screen` 的 `screen` 块同形。 */
@@ -64,6 +65,17 @@ export function SessionView({ session, tab, onTab, onOpenEnv, leading }: {
   leading?: ReactNode
 }) {
   const screen = useScreenInfo(session.id)
+
+  // 会话页一进来（以及状态每次变化）就问一句"要不要把母版源码打开"。
+  //
+  // 为什么放在这一层而不是绑定时一次性做完：会话刚建好是 idle、挂上 proxy 后变成
+  // running、命中第一个断点又变 stopped —— 模块名要等**起跑那一刻**服务端才解析出来，
+  // 绑定时拉不到。所以由状态变化驱动重试，`ensureSource` 自己带幂等判断（有源码就早退）。
+  const state = useStore((s) => s.state)
+  useEffect(() => {
+    void useStore.getState().ensureSource()
+  }, [session.id, state])
+
   const debugTab: TabItem<SessionTab> = { key: 'debug', label: 'Debug', hint: '断点、单步、变量与调用栈' }
   const fepTab: TabItem<SessionTab> = { key: 'fep', label: 'FEP录制', hint: '这条会话的画面通道与录制' }
   const tabs = session.type === 'debug' ? [debugTab, fepTab] : [fepTab, debugTab]
@@ -104,6 +116,9 @@ export function SessionView({ session, tab, onTab, onOpenEnv, leading }: {
           <FepPane session={session} screen={screen} />
         </Pane>
       </div>
+      {/* 状态栏（停站橙/运行蓝/空闲灰 + 接管按钮）属于**这条会话**，所以钉在会话页底部，
+          不再横跨整个壳子 —— 左侧树和环境页没有"调试状态"可报。 */}
+      <StatusBar />
     </div>
   )
 }

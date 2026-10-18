@@ -7,14 +7,13 @@
 //
 // 路由是本文件唯一管 URL 的地方:状态在 `route`,片段由 `routeHash` 生成;浏览器后退/粘链接
 // 走 `parseRoute` 回到同一个目标。两边都要做,否则"界面在这一页、地址栏还是上一页"。
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { PanelLeft, RotateCcw, WifiOff } from 'lucide-react'
 import { connectWS, useStore, type SessionDraft, type SessionItem } from './store'
 import { Sidebar } from './Sidebar'
 import { EnvView } from './EnvView'
 import { SessionView } from './SessionView'
 import { SettingsView } from './SettingsView'
-import { StatusBar } from './StatusBar'
 import { IconBtn, Meta, Pane, ViewHeader } from './Shell'
 import { api } from './api'
 import { parseRoute, routeHash, routeView, type EnvTab, type Route, type SessionTab } from './routing'
@@ -74,6 +73,21 @@ export function App() {
   const loadEnvs = useStore((s) => s.loadEnvs)
   const sessions = useStore((s) => s.sessions)
   const createSession = useStore((s) => s.createSession)
+  const closeSession = useStore((s) => s.closeSession)
+  const sessionList = useStore((s) => s.sessionList)
+
+  // 树上一眼要看到的那件事:这条会话现在能不能用。状态只从服务端列表来(唯一的权威),
+  // 不在树里另存一份 —— 两份必然漂(树的条目是本地缓存,会话状态是活的)。
+  // 绑着的那一条用 store 里的实时状态盖一遍:WS 事件比列表刷新快,否则"运行中→停站"
+  // 在树上要等到下次列表刷新才变色。
+  const boundId = useStore((s) => s.sessionId)
+  const boundState = useStore((s) => s.state)
+  const sessionStates = useMemo(() => {
+    const m: Record<string, string> = {}
+    for (const b of sessionList) m[b.id] = b.state
+    if (boundId && boundState) m[boundId] = boundState
+    return m
+  }, [sessionList, boundId, boundState])
 
   const settingsSection = useStore((s) => s.settingsSection)
   const recordId = useStore((s) => s.recordId)
@@ -291,8 +305,11 @@ export function App() {
         {!collapsed && (
           <ErrorBoundary what="左侧目录">
             <Sidebar
-              envs={envs} envsLoaded={envsLoaded} envsErr={envsErr} sessions={sessions} route={route}
+              envs={envs} envsLoaded={envsLoaded} envsErr={envsErr} sessions={sessions}
+              states={sessionStates} route={route}
               onSelectEnv={openEnv} onSelectSession={openSession}
+              // 失败已经在 store 里 toast 过,这里只吞掉 Promise 的拒绝(不吞掉状态变化)
+              onCloseSession={(s) => { void closeSession(s.id).catch(() => {}) }}
               onNewSession={newSession} onSettings={goSettings}
               onRefreshEnvs={() => void loadEnvs()} onAddEnv={goAddEnv}
               onCollapse={toggleCollapsed}
@@ -370,8 +387,6 @@ export function App() {
           )}
         </main>
       </div>
-
-      <StatusBar />
     </div>
   )
 }

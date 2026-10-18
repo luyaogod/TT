@@ -92,6 +92,12 @@ interface Store {
   // pruneSessions 把树里那些服务端已经没有的会话摘掉（首屏对齐用：服务重启/会话被 rm 之后
   // 树里还留着一格，点进去是空的）。返回摘掉了几条。
   pruneSessions: (aliveIds: string[]) => number
+  // ensureSource 在没有源码可看时把这条会话的**母版源码**打开。
+  // 会话页有三种"有会话但没停站"的时刻（刚建好 / 刚起跑 / 从树上点回来），
+  // 那时人也想看代码 —— 旧实现只有停站才拉源码，于是编辑器一片空白。
+  ensureSource: () => Promise<void>
+  // closeSession 结束一条会话（断开连接 + 从服务端池里与本地树里一起摘掉）。
+  closeSession: (id: string) => Promise<void>
   module: string
   prog: string
   state: string // loading|stopped|running|idle|exit|''
@@ -493,16 +499,22 @@ function scheduleRebindCheck() {
 // 在 Promise 落定时就已经对齐完，测试与后续逻辑都能当它是同步的。
 async function alignSelected(set: (p: Partial<Store>) => void, get: () => Store, id: string) {
   const s = useStore.getState().sessionList.find((x) => x.id === id)
+  // 树里那条（人点的那条）还记着建会话时点名的作业。服务端对**没起过作业的空闲会话**
+  // 是不知道作业编号的（`POST /sessions/new` 只建宿主），所以这里以树为准补上 ——
+  // 否则会话页写"作业 (空)"，而人明明填过（用户 2026-10-18 的截图就是这一格）。
+  const item = useStore.getState().sessions.find((x) => x.id === id)
   if (s) {
     set({
-      module: s.module, prog: s.prog, runProg: s.runProg || s.prog,
+      module: s.module, prog: s.prog || item?.prog || '', runProg: s.runProg || s.prog || item?.prog || '',
       state: s.state, sessionEnv: s.env || '', mode: modeOf(s.mode),
     })
     if (s.state === 'idle' || s.state === 'loading') {
-      // 空闲宿主(idle)：只绑定，不刷源码；等下一次启动直接复用宿主
+      // 空闲宿主(idle)：只绑定，不刷源码；等下一次启动直接复用宿主。
+      // **但要清掉上一条会话的源码** —— 不清的话界面上是 A 的代码、绑的是 B，最误导。
       set({
         started: false, stop: null, currentLine: 0, breakpoints: [], frames: [],
         autovars: [], selectedFrame: -1, holdingSeconds: 0, loadingSource: false,
+        sourceContent: '', sourcePath: '', sourceDVM: '', sourceMissing: false,
       })
       return
     }
@@ -1686,7 +1698,12 @@ export const useStore = create<Store>((set, get) => ({
     const env = (input.env || '').trim()
     const ent = (input.ent || '').trim()
     const prog = (input.prog || '').trim()
+    // 名字**不能空**：录制要靠别名（name）落回同一条会话，后端对没名字的会话会回
+    // 409「会话没有名字」，于是"建好了但挂不上 proxy"——人看到的是一条什么都不会干的会话
+    // （用户 2026-10-18 的现场就是这样）。留空就在**发请求之前**落成「新会话 N」，
+    // 而不是只在界面上显示一个服务端根本不知道的名字。
     const name = (input.name || '').trim()
+      || `新会话 ${get().sessions.filter((s) => s.env === env).length + 1}`
     // 前置校验放在请求之前:与服务端同一套判据，但错误当场说、不白花一次 SSH 握手。
     if (!env) throw new Error('没有点名环境')
     if (!ent) throw new Error('必须填企业编号（ENT）：它决定用哪个账号连库，环境配置里已经没有它了')
@@ -1699,15 +1716,16 @@ export const useStore = create<Store>((set, get) => ({
 
     const item: SessionItem = {
       id, env, type: 'debug', createdAt: Date.now(), ent, prog,
-      // 名字：留空就用规范 id（`环境#序号`）—— 录制要靠别名落回同一条会话，
-      // 所以这条会话**必须**有个名字，而服务端在 name 为空时也照实退回序号。
-      name: (res?.name || '').trim() || name || (res?.ref || '').trim() || prog,
+      // 名字以服务端回的为准（同名幂等时它会把已有的那条的别名回给我们）
+      name: (res?.name || '').trim() || name,
       ref: (res?.ref || '').trim(),
     }
     // 先落树再挂画面：这条会话已经是服务端的事实了，后面挂不上不该让它在树里消失。
     const next = [...get().sessions.filter((s) => s.id !== id), item]
     persistSessions(next)
     set({ sessions: next })
+    // 树上那个状态点读的是服务端列表 —— 建完先刷一次，否则新会话在树里是"状态未知"。
+    void refreshSessionList()
 
     onStep?.('会话已建好，正在登录 ' + env + '…')
     try {
@@ -1729,6 +1747,9 @@ export const useStore = create<Store>((set, get) => ({
         text: `新建会话 ${item.ref || id}（作业 ${prog}，ENT ${ent}），画面通道已挂上`,
       })
     }
+    // 挂上 proxy 后会话从 idle 变成 running/stopped（录制进程在里面起了作业）——
+    // 再刷一次列表，树上的状态点与作业编号才是当下的。
+    await refreshSessionList()
     return item
   },
 
@@ -1742,6 +1763,71 @@ export const useStore = create<Store>((set, get) => ({
     persistSessions(next)
     set({ sessions: next })
     return before.length - next.length
+  },
+
+  // ensureSource 在没有源码可看时，把这条会话的**母版源码**打开。
+  //
+  // 会话页有三种"有会话、但还没停站"的时刻：刚建好（idle）、刚起跑（running）、
+  // 以及从树上点回来。这几种情况下人第一眼想看的就是这个作业的代码，而旧实现只在
+  // `stopped` 时才拉源码 —— 于是编辑器一片空白（用户 2026-10-18 报的就是这个）。
+  //
+  // 只在**模块与程序都已知**时拉：模块没解析出来时拼不出正确文件名
+  // （`<模块>_<程序>.4gl`），去服务器上按错名字瞎撞一串，最后只会得到"无源码"这个假结论。
+  ensureSource: async () => {
+    const st = get()
+    if (!st.sessionId || st.loadingSource) return
+    // 有停站位置的那条由 refreshSource(file,line) 负责（它要顺带落位，不能抢）
+    if (st.state === 'stopped' && st.stop?.file) return
+    if (st.sourceDVM) return
+
+    let mod = st.module
+    let prog = st.runProg || st.prog
+    if (!mod || !prog) {
+      // 模块/作业可能是**刚被服务端解析出来**的（起跑那一刻才知道），本地还空着 ——
+      // 问一次快照再决定。不这么问的话，"从树上点开→别处启动→状态变成 running"
+      // 这条路永远拉不到源码（状态变了但 module 还空，判据一直不成立）。
+      try {
+        const snap: any = await api.snapshot(st.sessionId)
+        if (get().sessionId !== st.sessionId) return // 期间换了会话:这一轮作废
+        mod = mod || snap?.module || ''
+        prog = prog || snap?.prog || ''
+        if (snap?.module || snap?.prog) {
+          set({ module: mod, prog: prog, runProg: snap?.runProg || prog })
+        }
+      } catch {
+        return // 会话瞬态/已不在:下一次状态变化还会来
+      }
+    }
+    if (!mod || !prog) return
+    if (get().sourceDVM) return
+    await get().refreshSource()
+  },
+
+  // closeSession 结束一条会话：服务端断开连接并把它从池里摘掉，树里也摘掉。
+  //
+  // 「结束会话」与「结束本轮调试」是两件事（后者 `quit` 只结束运行、宿主保留）；
+  // 树上那个按钮要的是前者。摘之前**核对一次** —— POST 成功不等于真的关掉了，
+  // 服务端异常时可能回 200 而会话还在（旧面板的注释里记着这一次）。
+  closeSession: async (id) => {
+    const label = get().sessions.find((s) => s.id === id)?.name || id
+    try {
+      await api.sessionClose(id)
+      const { sessions } = await api.list()
+      if ((sessions || []).some((s) => s.id === id)) {
+        throw new Error(`服务端还报着会话「${label}」—— 关闭没有真正生效（看 .tt-serve.log）`)
+      }
+      set({ sessionList: sessions || [] })
+      const next = get().sessions.filter((s) => s.id !== id)
+      persistSessions(next)
+      set({ sessions: next })
+      if (get().sessionId === id) await get().selectSession(null)
+      get().pushTimeline({ origin: 'human', kind: 'command', text: `结束会话 ${label}` })
+      toast.success(`已结束会话 ${label}`)
+    } catch (e: any) {
+      // 绝不假装成功：失败照实抛，界面上由 toast 讲
+      toast.error('结束会话失败', { description: e?.message || String(e), duration: 0 })
+      throw e
+    }
   },
 }))
 

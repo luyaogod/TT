@@ -267,6 +267,18 @@ export function SourceView() {
             </div>
           </div>
         )}
+        {/* 有会话、还没停站、也没有源码:说清为什么空。
+            刚建好的会话是 idle(没起过作业)、刚起跑的是 running(模块还没解析出来),
+            两种都**不该**留一块黑屏 —— 用户 2026-10-18 报的"打开会话没有代码"就是这一格。 */}
+        {isDebug && !sourceContent && !busy && state !== 'stopped' && (state === 'idle' || state === 'running' || state === 'loading') && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
+            <div className="max-w-[440px] border border-border bg-card/90 px-4 py-3 text-xs leading-relaxed text-muted-foreground">
+              {state === 'idle'
+                ? <>这条会话还没起过作业,所以还没有源码可显示。<br />在右侧「运行」里启动它(作业 {prog || '—'}),起跑后会自动打开母版源码。</>
+                : <>等待这条会话解析出作业的源码(按「模块_作业.4gl」找);命中第一个停站后会打开对应文件。</>}
+            </div>
+          </div>
+        )}
         {!isDebug && active!.missing && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
             <div className="border border-border bg-card/90 px-4 py-3 text-sm text-muted-foreground">
