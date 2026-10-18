@@ -42,7 +42,7 @@ export interface SidebarProps {
 export const SESSION_TYPE_LABEL: Record<SessionItem['type'], string> = { debug: 'Debug', fep: 'FEP' }
 
 /** 用途的短名（树上那一列）：debug 会话 / 录制会话 / 回放会话。 */
-export const SESSION_PURPOSE_LABEL: Record<SessionPurpose, string> = { debug: 'Debug', record: '录制', replay: '回放' }
+export const SESSION_PURPOSE_LABEL: Record<SessionPurpose, string> = { debug: 'Debug', record: '监控', replay: '回放' }
 
 /**
  * 会话状态 → 圆点颜色 + 一句人话。

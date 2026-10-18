@@ -248,7 +248,7 @@ switch 要一起改**。
 | 外壳与布局 | `App.tsx`、`main.tsx`、`Shell.tsx`、`Sidebar.tsx`、`EnvView.tsx`、`SessionView.tsx`、`DebugWorkbench.tsx`、`ErrorBoundary.tsx`、`StatusBar.tsx` |
 | 调试区 | `Toolbar.tsx`、`DebugHeader.tsx`、`SourceView.tsx` |
 | 视图 | `SettingsView.tsx`、`WsLogView.tsx`、`WsTestView.tsx`、`RecordView.tsx` |
-| FEP 录像控件 | `FepRecording.tsx`（含 `LiveFrames` / `useScreenInfo`）：一份控件两种作用域 —— 会话页 `scope=session`（可起停）、环境页 `scope=env readOnly compact`（只看当前在录什么）；改它等于同时改两处，**判定只写这一份** |
+| FEP 监控 | `FepMonitor.tsx`：会话页「FEP监控」页签的**全部内容** —— 三泳道时间轴（服务/前端/其它）+ 事件列表，只读、没有按钮；数据按 `from=<已看帧数>` 每秒追加读 `/api/recordings/{id}/timeline`。起停录制/录制 ID/端口/GDC 属于环境页「FEP录像」的录制工作台，**不要**塞回这一屏 |
 | 录制明细 | `RecordingDetail.tsx`、`RecordingOverview.tsx`、`RecordingTable.tsx`、`RecordingInspector.tsx`、`ReplayProgress.tsx`、`recordingKind.ts`、`recordingTime.ts` |
 | 面板 | `Panels.tsx`、`OutlinePanel.tsx`、`VarTreeUi.tsx` |
 | 编辑器 | `monacoSetup.ts`、`PayloadEditor.tsx` |

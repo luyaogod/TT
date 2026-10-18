@@ -2758,6 +2758,12 @@ type ScreenStartRequest struct {
 	Ent  string `json:"ent"`
 	Prog string `json:"prog"` // 录的是哪个作业（必填）
 	Tag  string `json:"tag"`  // 期望的录制 ID（可空：由启动器生成）
+	// NoContinue 是"起作业后**不要**自动放行"（`tt recording start --no-continue`）。
+	//
+	// 由**用途**决定（W7 的"监控 ≠ 自动放行"）：debug 要停在入口，让人先下断点/看现场；
+	// record 是纯录制，直接放行跑起来给人操作。真机 2026-10-18 13:34：debug 会话一挂上
+	// 监控就被自动 continue 送进 GDC，入口停站跳过 —— 等于没法调试。
+	NoContinue bool `json:"noContinue"`
 	// Actor 是**发起方身份**（`ai` / `human`，取自 X-Actor）。启动器要把它传下去：
 	// 起出来的那个进程会用调试线的接口在**这条会话**上写，而写受模式闸门约束
 	// （纯人工模式下 AI 不可写）。人点按钮 → human；AI 调 REST → ai。
@@ -2821,7 +2827,9 @@ func (s *Server) hSessionScreenStart(w http.ResponseWriter, r *http.Request) {
 	res, err := s.screenStarter(ScreenStartRequest{
 		Ref: refOf(sess.EnvName(), sess.Seq()), Env: sess.EnvName(),
 		Ent: sess.CurrentEnt(), Prog: prog, Tag: strings.TrimSpace(req.Tag),
-		Actor: actorOf(r),
+		// 监控是"看"，放行是"跑"——两件事分开：debug 停在入口，record 才自动放行。
+		NoContinue: sess.Purpose() == PurposeDebug,
+		Actor:      actorOf(r),
 	})
 	if err != nil {
 		fail(w, 500, err)

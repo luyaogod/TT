@@ -14,7 +14,6 @@ import { Pane, TabStrip, ViewHeader, Meta, type TabItem } from './Shell'
 import { WsLogView } from './WsLogView'
 import { WsTestView } from './WsTestView'
 import { RecordView } from './RecordView'
-import { FepRecording } from './FepRecording'
 import { SESSION_PURPOSE_LABEL, SESSION_TYPE_LABEL } from './Sidebar'
 
 const ENV_TABS: TabItem<EnvTab>[] = [
@@ -55,16 +54,7 @@ export function EnvView({ env, tab, sessions, onTab, onCreate, onOpenSession, le
         </Pane>
         <Pane show={tab === 'wslogs'} label="接口日志"><WsLogView /></Pane>
         <Pane show={tab === 'wstest'} label="接口调试"><WsTestView /></Pane>
-        <Pane show={tab === 'record'} label="FEP录像">
-          <div className="flex min-h-0 flex-1 flex-col">
-            {/* 可复用控件在**环境作用域**下的用法：只看这个环境里现在在录什么、这一轮过了什么帧，
-                不给起停（起录是下面那套录制工作台的事，它走的是环境级 ec start，与调试会话无关）。 */}
-            <div className="shrink-0 border-b border-border px-4 py-3">
-              <FepRecording scope={{ kind: 'env', env: env.name }} readOnly compact />
-            </div>
-            <RecordView />
-          </div>
-        </Pane>
+        <Pane show={tab === 'record'} label="FEP录像"><RecordView /></Pane>
       </div>
     </div>
   )
@@ -252,4 +242,3 @@ function TypeCard({ on, icon: Icon, title, desc, onClick, disabled }: {
     </button>
   )
 }
-

@@ -340,7 +340,7 @@ func debugServeForeground(cfg *debug.Config, cfgPath string) error {
 	srv.SetScreenStarter(func(req debug.ScreenStartRequest) (debug.ScreenStartResult, error) {
 		pid, log, serr := st(screenstart.Request{
 			CfgPath: cfgPath, Ref: req.Ref, Env: req.Env, Ent: req.Ent,
-			Prog: req.Prog, Tag: req.Tag, Actor: debug.ActorSystem,
+			Prog: req.Prog, Tag: req.Tag, NoContinue: req.NoContinue, Actor: debug.ActorSystem,
 		})
 		return debug.ScreenStartResult{PID: pid, Log: log}, serr
 	})

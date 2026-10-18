@@ -37,6 +37,8 @@ type Request struct {
 	Prog string
 	// Tag 是期望的录制 ID（目前 `recording start` 不支持显式指定，由进程自己生成）。
 	Tag string
+	// NoContinue 是"起作业后先别放行"（debug 用途的会话要停在入口，让人先下断点）。
+	NoContinue bool
 	// Actor 是"这次动作算谁的"（`X-Actor` 同一个口径，注入子进程的 `TT_ACTOR`）。
 	//
 	// 为什么必须传：这个子进程要用调试线的接口在**这条会话**上写（收掉上一轮、点 ENT、
@@ -75,6 +77,10 @@ func New() Starter {
 		// 只走挂靠模式：`--session <ref>` 保证画面挂到**被点名的会话**上，而不是另起一条。
 		// `--env` 也带上：它是幂等键的一部分（同环境同别名复用宿主），少一个就可能落到别处。
 		args := []string{"recording", "start", "--session", req.Ref, "--prog", req.Prog}
+		if req.NoContinue {
+			// 调试会话：作业停在入口，人下好断点再「继续」——监控照挂，但不替人决定放行。
+			args = append(args, "--no-continue")
+		}
 		if e := strings.TrimSpace(req.Ent); e != "" {
 			args = append(args, "--ent", e)
 		}

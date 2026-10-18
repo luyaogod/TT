@@ -1,12 +1,11 @@
 // 会话页:一条会话对应的工作面板。
 //
-// 两个 Tab 恒在(Debug / FEP录制),**顺序与默认落点由会话类型决定**:Debug 会话先看 Debug,
-// FEP 会话先看 FEP录制。不要把"另一条 Tab"藏掉 —— 会话类型只决定"先看哪一个",
-// 两条链路都要能从这里走到。
+// 两个 Tab(Debug / FEP监控),**顺序与默认落点由用途决定**:debug 先看 Debug,
+// record 会话只有 FEP监控(不给编辑器,防误操作),replay 先看监控。
 //
-// Debug Tab 是原来整块调试工作台(见 DebugWorkbench.tsx);FEP录制 那一屏是**可复用控件**
-// `FepRecording`(见 FepRecording.tsx):会话页给它 session 作用域(可起停),环境页给它
-// env 作用域(只看当前在录什么)。同一份判定只写一处 —— 否则两块面板迟早各说一套。
+// Debug Tab 是原来整块调试工作台(见 DebugWorkbench.tsx);**FEP监控 那一屏只放协议流**
+// (见 FepMonitor.tsx):三泳道时间轴 + 事件列表,只读、没有按钮。起停录制/录制 ID/端口/GDC
+// 那些属于「环境页 → FEP录像」那套录制工作台 —— 会话页这边只回答"这条通道上过了什么"。
 import { useEffect } from 'react'
 import { FolderOpen } from 'lucide-react'
 import type { ReactNode } from 'react'
@@ -16,19 +15,17 @@ import { Pane, TabStrip, ViewHeader, Meta, type TabItem } from './Shell'
 import { DebugWorkbench } from './DebugWorkbench'
 import { StatusBar } from './StatusBar'
 import { SESSION_TYPE_LABEL } from './Sidebar'
-import { FepRecording, useScreenInfo } from './FepRecording'
+import { FepMonitor, useScreenInfo } from './FepMonitor'
 
 
-export function SessionView({ session, tab, onTab, onOpenEnv, onOpenRecording, leading }: {
+export function SessionView({ session, tab, onTab, onOpenEnv, leading }: {
   session: SessionItem
   tab: SessionTab
   onTab: (t: SessionTab) => void
   onOpenEnv: () => void
-  /** 打开这一轮录制件的明细（环境页 → FEP录像 → 那一份）。 */
-  onOpenRecording: (recId: string) => void
   leading?: ReactNode
 }) {
-  const screen = useScreenInfo({ kind: 'session', id: session.id, env: session.env })
+  const screen = useScreenInfo(session.id)
 
   // 会话页一进来（以及状态每次变化）就问一句"要不要把母版源码打开"。
   //
@@ -41,7 +38,7 @@ export function SessionView({ session, tab, onTab, onOpenEnv, onOpenRecording, l
   }, [session.id, state])
 
   const debugTab: TabItem<SessionTab> = { key: 'debug', label: 'Debug', hint: '断点、单步、变量与调用栈' }
-  const fepTab: TabItem<SessionTab> = { key: 'fep', label: 'FEP录制', hint: '这条会话的画面通道与录制' }
+  const fepTab: TabItem<SessionTab> = { key: 'fep', label: 'FEP监控', hint: '这条会话的画面通道上过了什么（只读）' }
   // 用途决定给什么（W7 的 PANE_POLICY）：
   //   - record：**不给编辑器**（已经放行跑着，防误操作），只剩 FEP 监控与收尾；
   //   - 其余：Debug + FEP 两条，顺序按用途（debug 先看 Debug，replay 先看 FEP）。
@@ -84,12 +81,8 @@ export function SessionView({ session, tab, onTab, onOpenEnv, onOpenRecording, l
         <Pane show={shownTab === 'debug'} label="Debug">
           <DebugWorkbench active={shownTab === 'debug'} />
         </Pane>
-        <Pane show={shownTab === 'fep'} label="FEP录制">
-          <FepRecording
-            scope={{ kind: 'session', id: session.id, env: session.env, ref: session.ref, ent: session.ent, prog: session.prog }}
-            mode={session.purpose === 'replay' ? 'replay' : 'both'}
-            onOpenRecording={onOpenRecording}
-          />
+        <Pane show={shownTab === 'fep'} label="FEP监控">
+          <FepMonitor sessionId={session.id} />
         </Pane>
       </div>
       {/* 状态栏（停站橙/运行蓝/空闲灰 + 接管按钮）属于**这条会话**，所以钉在会话页底部，
