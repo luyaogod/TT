@@ -40,12 +40,12 @@ package target
 // （示例与 C5.4 都要求它），本次按示例与 C5.4 取齐。`kind` 是同类出入（C5.5 说它恒定，
 // 但它今天不在 `SessionBrief` 上）。
 //
-// `purpose` 是工作站那一批的新增（W1：用途），同样是恒定键：取不到给 `debug`，不省键。
+
 //
 // **这两处都不是定论**：等契约文档退场、以代码为准的那一天，`display` 要么被正式纳入
 // 键集、要么被判冗余下线；`kind` 要么落成真字段、要么退出键集。
 var SessionEnvelopeKeys = []string{
-	"id", "ref", "display", "name", "env", "ent", "n", "kind", "prog", "state", "epoch", "purpose",
+	"id", "ref", "display", "name", "env", "ent", "n", "kind", "prog", "state", "epoch",
 }
 
 // NewSessionKeys 是 C5.3 / Q22 定稿的**纯新增**键：它们今天不在 `SessionBrief` 上，
@@ -56,8 +56,8 @@ var SessionEnvelopeKeys = []string{
 //   - `ent` 也是新增（C5.3 第二条：`string`，与 `internal/fep/session.go` 的 `Ent` 同类型）；
 //   - `display` 见 SessionEnvelopeKeys 的注释；
 //   - `kind` 见 C5.5（本契约只寻址 SSH 会话，所以取值恒为 KindSSH）；
-//   - `purpose` 是工作站那一批的新增（W1：用途 debug/record/replay，缺省 debug）。
-var NewSessionKeys = []string{"ref", "display", "kind", "name", "ent", "n", "epoch", "purpose"}
+
+var NewSessionKeys = []string{"ref", "display", "kind", "name", "ent", "n", "epoch"}
 
 // SessionOptionalKeys 是 `session` 块里**按 omitempty 规则出现**的其余键
 // （C5.2：键名与类型一律沿用 `internal/debug/manager.go` 的 `SessionBrief`，一个都不改名）。

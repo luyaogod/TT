@@ -4,12 +4,12 @@ package debug
 //
 // 这一组钉两件事，两件都是"手抄第二份事实"最容易静默漂坏的地方：
 //
-//  1. **身份键恒定出现**（`ref` / `display` / `name` / `ent` / `n` / `kind` / `epoch` / `purpose`）——
+//  1. **身份键恒定出现**（`ref` / `display` / `name` / `ent` / `n` / `kind` / `epoch`）——
 //     它们是 C5.1 / C5.3 的恒定键：取不到给空串/零值，**不省键**。前端与 CLI 按这份
 //     形状解包，少一个键它们就得写第二套兜底（上一版少了 `ent`，CLI 那边就长出了一层
 //     "退回 `topentSession`"的兜底 —— C5.9 的身份行要的正是 `ent`）。
 //  2. **快照的既有键一个不少、语义一字不改**（H2）—— 身份键之外，键集必须
-//     **恰好**是今天那一份：21 个恒定键（本文件 `snapshotBaseKeys`）+ 8 个身份键 = 29，
+//     **恰好**是今天那一份：21 个恒定键（本文件 `snapshotBaseKeys`）+ 7 个身份键 = 28，
 //     另有 4 个按状态出现的既有键（`snapshotOptionalKeys`）。多一个键也是坏的：
 //     没人认识的键会让人以为服务端学会了新东西。
 //
@@ -46,7 +46,7 @@ var snapshotOptionalKeys = []string{"inflight", "runningSince", "waitingForUser"
 // `ent` 是第七个：C5.9 的身份行 `会话 <display> · <name> · <state> · ENT <ent>` 要它，
 // 而它本来就在 `SessionBrief` 上（`SessionBrief.Ent` = `Session.CurrentEnt()`）——
 // 快照只是把它搬过来，CLI 那边就不必再从 `topentSession` 兜底（C5.17–C5.19）。
-var snapshotIdentityKeys = []string{"ref", "display", "name", "ent", "n", "kind", "epoch", "purpose"}
+var snapshotIdentityKeys = []string{"ref", "display", "name", "ent", "n", "kind", "epoch"}
 
 // snapshotServerWith 起一个不拨真机的调试服务，往池里放**一条**带身份的会话，返回它的句柄。
 //
@@ -112,11 +112,11 @@ func TestSnapshotCarriesIdentityKeysAndKeepsEveryOldKey(t *testing.T) {
 	for k := range raw {
 		got[k] = true
 	}
-	// 数量写死：21 旧恒定键 + 8 身份 = 29（另外 4 个按状态出现的键不在这一列，见
+	// 数量写死：21 旧恒定键 + 7 身份 = 28（另外 4 个按状态出现的键不在这一列，见
 	// `snapshotOptionalKeys`）。少了会由下面两向断言报出具体是哪个，这里再钉一次总数
 	// —— 免得"两张表都少写了同一个键"这种双错互相掩护。
-	if len(want) != 29 {
-		t.Fatalf("前置不成立：期望键集该是 21 旧 + 8 身份 = 29 个，表里凑出 %d 个", len(want))
+	if len(want) != 28 {
+		t.Fatalf("前置不成立：期望键集该是 21 旧 + 7 身份 = 28 个，表里凑出 %d 个", len(want))
 	}
 	for k := range want {
 		if !got[k] {
@@ -129,7 +129,7 @@ func TestSnapshotCarriesIdentityKeysAndKeepsEveryOldKey(t *testing.T) {
 				"    （新增键要走 C5.3 那一处：键集只有 `SessionBrief` 一份定义）", k, keysOf(raw))
 		}
 	}
-	if len(got) != 29 {
+	if len(got) != 28 {
 		t.Errorf("快照该恰好有 29 个恒定键（21 旧 + 8 身份），实得 %d 个：%v", len(got), keysOf(raw))
 	}
 }
@@ -202,11 +202,7 @@ func TestSnapshotIdentityKeysAreConstant(t *testing.T) {
 			if got := raw["epoch"]; got != b.Epoch || b.Epoch == "" {
 				t.Errorf("epoch = %v，`SessionBrief` 给的是 %q（登记时必发一个，空 = F15 的失效判定没法用）", got, b.Epoch)
 			}
-			// W1：用途是恒定键，取值与 `SessionBrief.Purpose` 一字不差（空 = debug）。
-			if got := raw["purpose"]; got != b.Purpose || b.Purpose == "" {
-				t.Errorf("purpose = %v，`SessionBrief` 给的是 %q（恒定键：取不到给 %q，不省键）",
-					got, b.Purpose, PurposeDebug)
-			}
+
 			// ③ 取值形态按 C5.4 分工：ref 是 `环境#序号`（不含 `/`），display 是人读形态。
 			ref, _ := raw["ref"].(string)
 			if ref == "" || !containsAt(ref, target.SeqSep) {

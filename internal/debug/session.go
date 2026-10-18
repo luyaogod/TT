@@ -137,51 +137,15 @@ type Event struct {
 	// Action 机器可读的动作名(bp.add / control.step / session.restart),供前端按类型分支;
 	// Text 则是给人看的文案
 	Action string `json:"action,omitempty"`
-	// Progress 是"录制回放走到第几步"（Type = rec.progress）。
-	//
-	// 为什么不塞进 Text：进度要按**字段**渲染（第几步/结果/等多久），而 Text 是给人看的
-	// 一句话；把它编码成字符串再让前端解析，等于给自己造一个协议。
-	//
-	// 它是**叫一声**，不是权威数据：前端收到之后去读 /api/recordings/{id}/replay-steps
-	// （那份逐行 flush 的 jsonl 才是唯一真相）。这样即使前端漏注册这个类型
-	// （实测踩过：自造的事件类型被前端静默丢掉），退化成"晚几百毫秒"，而不是"进度不动"。
-	Progress *RecProgress `json:"progress,omitempty"`
+
 	// Brief 是 `session.added` 带的那条会话的投影（W2）。用**同一份** `SessionBrief`：
 	// 客户端收到就能直接入索引，不必再 GET 一次（少一次往返、也少一个"列表还没刷到"的窗口）。
 	Brief *SessionBrief `json:"brief,omitempty"`
-	// Reason 是 `session.removed` / `screen.detached` 的原因（W2）：
-	// close | exit | restart | switch | stop | stale | removed
+	// Reason 是 `session.removed` 的原因：close | exit | restart | switch | stop | stale | removed
 	Reason string `json:"reason,omitempty"`
-	// Screen 是界面会话的挂接状态（W2 的 `screen.attached` / `screen.detached`）。
-	Screen *ScreenState `json:"screen,omitempty"`
+
 }
 
-// ScreenState 是界面会话挂接状态的**只读投影**（W2 / W4）。
-//
-// 为什么调试线自己有一份形状：`screen.*` 事件要带得走，而事件是调试线发的；
-// 但调试线**不许** import `internal/fep`（H3）。所以接线层把注册表读成这个形状递进来，
-// 调试线只负责把它广播出去 —— 与 `PublishRecProgress` 同一套做法。
-type ScreenState struct {
-	Ref        string `json:"ref"`
-	Tag        string `json:"tag"`
-	Kind       string `json:"kind"` // rec | replay
-	Env        string `json:"env,omitempty"`
-	Prog       string `json:"prog,omitempty"`
-	GDCPid     int    `json:"gdcPid,omitempty"`
-	ProxyPort  int    `json:"proxyPort,omitempty"`
-	InjectPort int    `json:"injectPort,omitempty"`
-	OwnerPID   int    `json:"ownerPid,omitempty"`
-	// Reason 只在 `screen.detached` 上有意义：stop | exit | stale
-	Reason string `json:"reason,omitempty"`
-}
-
-// RecProgress 是一条回放进度事件（见 Event.Progress）。
-type RecProgress struct {
-	ID     string `json:"id"`
-	N      int    `json:"n"`
-	Total  int    `json:"total"`
-	Result string `json:"result"` // waiting|paused|sent|no-response|skipped|failed
-}
 
 // execResult 命令响应
 type execResult struct {
@@ -414,7 +378,7 @@ type Session struct {
 	seq     int
 	name    string
 	epoch   string
-	purpose string // 用途（W1）：debug | record | replay；空 = debug。创建时定，之后不改
+
 }
 
 const (
@@ -424,47 +388,6 @@ const (
 	ModeCollab = "collab"
 )
 
-// 用途（W1）：这条 SSH 会话是为了什么。
-//
-// 为什么要有它：三种用途的页面组合与可发动作不同（W7）。**它不是 `kind`** ——
-// `SessionBrief.kind` 已经是 `ssh`（D 的 C5.5），改名会破坏既有契约。
-const (
-	// PurposeDebug 调试：人或 agent 发起，可下断点/单步；挂着界面会话时也能监控 FEP。
-	PurposeDebug = "debug"
-	// PurposeRecord 纯录制：已经放行，页面隐藏编辑器（防误操作），只剩收尾动作。
-	PurposeRecord = "record"
-	// PurposeReplay 回放：显示编辑器但只读；只有 driver 能控回放（见 Q10 的定案）。
-	PurposeReplay = "replay"
-)
-
-// ValidPurpose 判断用途取值是否合法（空串合法 = 缺省 debug）。
-func ValidPurpose(p string) bool {
-	switch p {
-	case "", PurposeDebug, PurposeRecord, PurposeReplay:
-		return true
-	}
-	return false
-}
-
-// Purpose 当前用途（空值视为 debug）。
-func (s *Session) Purpose() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.purpose == "" {
-		return PurposeDebug
-	}
-	return s.purpose
-}
-
-// setPurpose 登记用途。**只在建会话时调**：用途创建后不可改（W1），要换就换一条会话。
-func (s *Session) setPurpose(p string) {
-	if p == "" {
-		p = PurposeDebug
-	}
-	s.mu.Lock()
-	s.purpose = p
-	s.mu.Unlock()
-}
 
 // Mode 当前模式(空值视为 solo)
 func (s *Session) Mode() string {
@@ -501,39 +424,23 @@ const (
 
 // MayDo 回答"这次请求能不能对这条 SSH 会话做这一类写"。
 //
-// 三个轴（W7）：用途 `purpose` × 模式 `mode` × 角色 `actor`。
-//   - 收尾（CapOwn）任何用途都放行：收不掉比收错了更糟（H5 幂等收尾）。
-//   - 纯录制（record）只拒**交互式**那一类；编排仍按模式判（录制进程就是这么起作业的）。
+// 两个轴（W7）：模式 `mode` × 角色 `actor`。
+//   - 收尾（CapOwn）任何模式都放行：收不掉比收错了更糟（H5 幂等收尾）。
 //   - 其余沿用既有模式闸门（solo：非 ai 可写；collab：只有 ai 可写）。
 //
 // `Bare()`（测试夹具：没有 pty/conn 的会话）一律放行 —— 与 sessOfWriteGlobal 同一口径。
 func (s *Session) MayDo(cap Capability, actor string) bool {
-	// 收尾先放行：**任何用途、任何模式、任何角色**都收得掉（H5：收不掉比收错了更糟）。
+	// 收尾先放行：**任何模式、任何角色**都收得掉（H5：收不掉比收错了更糟）。
 	if cap == CapOwn {
 		return true
 	}
-	// 平台自己的进程（录制/回放子进程）替这条会话干活：**不受用途与模式约束**。
-	// 少了这一条，`record` 会话在入口停站后的"放行"（continue）会被挡下 ——
-	// 真机 2026-10-18 11:51 就是这么把画面起失败的（见 ActorSystem 的注释）。
+	// 平台自己的进程替这条会话干活：**不受模式约束**。
 	if actor == ActorSystem {
 		return true
-	}
-	// 纯录制的交互式写**先于**模式闸门拦掉：`/sessions/new` 建出来的录制会话
-	// 起跑前 prog/module 都还是空的，而它从出生起就不该接受调试命令。
-	if cap == CapInteractive && s.Purpose() == PurposeRecord {
-		return false
 	}
 	return s.MayWrite(actor)
 }
 
-// ReadOnlyMsg 是 `SESSION_READONLY` 的文案（W7）：必须能照着做。
-func ReadOnlyMsg(purpose string) string {
-	if purpose == PurposeRecord {
-		return "这条 SSH 会话的用途是纯录制（record）：页面不提供编辑器，调试命令一律不发（防误操作）。" +
-			"要调试请另建一条 debug 会话；要收掉这一轮请在 FEP 面板点「停止录制」，或结束整条会话。"
-	}
-	return "这条 SSH 会话当前不接受该写操作"
-}
 
 // ---------- 会话身份（契约 C5.3 / Q22：n / name / epoch；ref 由环境 + n 拼） ----------
 

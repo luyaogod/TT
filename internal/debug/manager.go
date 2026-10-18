@@ -299,8 +299,6 @@ func (m *Manager) emit(ev Event) {
 const (
 	EvSessionAdded   = "session.added"
 	EvSessionRemoved = "session.removed"
-	EvScreenAttached = "screen.attached"
-	EvScreenDetached = "screen.detached"
 )
 
 // emitAdded 广播"池里多了一条"。**必须在会话已登记之后调**：收到的人会立刻按 id 取快照。
@@ -320,30 +318,7 @@ func (m *Manager) emitRemoved(id, reason string) {
 	m.emit(Event{Type: EvSessionRemoved, SessionID: id, Time: time.Now(), Reason: reason})
 }
 
-// PublishScreenChange 广播界面会话的挂接变化（W2 的 screen.attached / detached）。
-//
-// 谁调它：接线层（`internal/cli/serve.go` 的注册表比对循环）—— 界面会话由**外部进程**
-// 登记在 `.tt-fep.json`，调试服务不写它，也不认识 GDC/代理（H3）。做法同
-// `PublishRecProgress`：只把数据递进来，由本函数发事件。
-func (m *Manager) PublishScreenChange(attached bool, st ScreenState) {
-	if st.Ref == "" {
-		return
-	}
-	ev := Event{Type: EvScreenDetached, Time: time.Now(), Screen: &st, Reason: st.Reason}
-	if attached {
-		ev.Type = EvScreenAttached
-		ev.Reason = ""
-	}
-	// ref → 会话 id：scoped 订阅者靠 `SessionID` 在发送端筛（C6.4）。找不到就留空 ——
-	// 那是"无主事件"，只发给 all 订阅者（C6.5），与既有口径一致。
-	for _, b := range m.Snapshot() {
-		if b.Ref == st.Ref {
-			ev.SessionID = b.ID
-			break
-		}
-	}
-	m.emit(ev)
-}
+
 // Events 返回最近 n 条事件(按时间升序;n<=0 返回全部缓冲)。
 func (m *Manager) Events(n int) []Event {
 	m.evMu.Lock()
@@ -952,9 +927,9 @@ type SessionBrief struct {
 	Mode string `json:"mode"`
 	// Epoch 是世代号（C5.3 / F15）。空 = 没有代（不该出现：登记时必发一个）。
 	Epoch string `json:"epoch"`
-	// Purpose 是用途（W1）：debug | record | replay。**恒定键**：取不到给 debug，不省键。
+
 	// 它不是 `kind` —— `kind` 已经是 `ssh`（C5.5）。
-	Purpose string `json:"purpose"`
+
 	// Inflight 正在执行的那条命令(空闲为 nil)—— 界面上"AI 正在执行 continue(已 12s)"
 	Inflight *InflightInfo `json:"inflight,omitempty"`
 }
@@ -1002,7 +977,7 @@ func (m *Manager) briefOf(s *Session) SessionBrief {
 		ID: s.ID,
 		// 身份（C5.1 末段：只有 id / ref / n 是身份，判定身份只许用这三个）
 		Ref: refOf(env, n), Display: displayOf(env, s.Prog, n),
-		N: n, Kind: target.KindSSH, Epoch: s.Epoch(), Purpose: s.Purpose(),
+		N: n, Kind: target.KindSSH, Epoch: s.Epoch(),
 		// 快照（会变：name 只在创建时给，ent 随 topent 改）
 		Name: s.Name(), Ent: s.CurrentEnt(),
 		Module: s.Module, Prog: s.Prog, RunProg: s.RunProg,
@@ -1288,27 +1263,18 @@ func (m *Manager) RemoveAs(id, reason string) {
 //     别名当场释放，这里就地把同一个名字重新登记给新会话，于是调用方手上的别名/ref 继续有效；
 //   - **连到该环境**（`/api/sessions/switch`）传空 —— 那是新建一条会话，别名随旧会话消失
 //     即释放（C3.7b / Q19），要名字就再给一次。
-func (m *Manager) CreateSessionOn(cfg *Config, name, purpose string) (*Session, error) {
+func (m *Manager) CreateSessionOn(cfg *Config, name string) (*Session, error) {
 	m.mu.Lock()
 	m.sweepExitedLocked()
 	m.mu.Unlock()
 	if err := m.checkNameFree(name); err != nil {
 		return nil, err
 	}
-	// 只有 **debug** 会话接管断点存档。录制/回放会话如果也恢复缓存断点，作业一放行就停在
-	// 上一轮调试人留下的断点上 —— 录制画面不动、回放一条事件也发不出去（用户 2026-10-18 16:34
-	// 现场："回放卡住"）。断点存档属于"调试意图"，不属于"录/放"。
-	if purpose != PurposeDebug {
-		c := *cfg
-		no := false
-		c.PersistBPs = &no
-		cfg = &c
-	}
+
 	sess, err := m.newSession(cfg, "", "", "", "", "", m.emit)
 	if err != nil {
 		return nil, err
 	}
-	sess.setPurpose(purpose)
 	m.mu.Lock()
 	if err := m.assignIdentityLocked(sess, name); err != nil {
 		m.mu.Unlock()

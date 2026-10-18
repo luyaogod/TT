@@ -53,7 +53,7 @@ func nextEvent(t *testing.T, ch <-chan Event, want string) Event {
 func TestSessionAddedCarriesBrief(t *testing.T) {
 	m, ch := poolEventManager(t)
 
-	sess, err := m.CreateSessionOn(cfgFor("h1", "36"), "录像A", PurposeRecord)
+	sess, err := m.CreateSessionOn(cfgFor("h1", "36"), "录像A")
 	if err != nil {
 		t.Fatalf("建会话失败：%v", err)
 	}
@@ -68,9 +68,7 @@ func TestSessionAddedCarriesBrief(t *testing.T) {
 	if ev.Brief.ID != sess.ID || ev.Brief.Ref == "" {
 		t.Errorf("brief 的形状不对：id=%q ref=%q", ev.Brief.ID, ev.Brief.Ref)
 	}
-	if ev.Brief.Purpose != PurposeRecord {
-		t.Errorf("brief.purpose = %q，该是建会话时点的 %q（W1 + W2 要能对上）", ev.Brief.Purpose, PurposeRecord)
-	}
+
 	if ev.Seq == 0 {
 		t.Error("事件必须带 seq（游标语义）")
 	}
@@ -80,7 +78,7 @@ func TestSessionAddedCarriesBrief(t *testing.T) {
 func TestSessionRemovedCarriesReasonAndFollowsAdded(t *testing.T) {
 	m, ch := poolEventManager(t)
 
-	sess, err := m.CreateSessionOn(cfgFor("h1", "36"), "", PurposeDebug)
+	sess, err := m.CreateSessionOn(cfgFor("h1", "36"), "")
 	if err != nil {
 		t.Fatalf("建会话失败：%v", err)
 	}
@@ -113,7 +111,7 @@ func TestNoSessionAddedWhenCreateFails(t *testing.T) {
 	ch, cancel := m.SubscribeScoped("pool-event-test", "")
 	defer cancel()
 
-	if _, err := m.CreateSessionOn(cfgFor("h1", "36"), "", PurposeDebug); err == nil {
+	if _, err := m.CreateSessionOn(cfgFor("h1", "36"), ""); err == nil {
 		t.Fatal("假实现必然失败，这里不该成功")
 	}
 	select {
@@ -131,40 +129,6 @@ func TestRemoveUnknownEmitsNothing(t *testing.T) {
 	select {
 	case ev := <-ch:
 		t.Fatalf("移除不存在的会话不该发事件，实得 %q", ev.Type)
-	case <-time.After(150 * time.Millisecond):
-	}
-}
-
-// 界面会话的挂接变化：attached=true → screen.attached；false → screen.detached + reason。
-func TestPublishScreenChange(t *testing.T) {
-	m, ch := poolEventManager(t)
-
-	m.PublishScreenChange(true, ScreenState{
-		Ref: "主机109#1", Tag: "fep-20261018-101401", Kind: "rec",
-		GDCPid: 27300, ProxyPort: 7600, InjectPort: 7899, OwnerPID: 23308,
-	})
-	at := nextEvent(t, ch, EvScreenAttached)
-	if at.Screen == nil || at.Screen.Tag != "fep-20261018-101401" || at.Screen.ProxyPort != 7600 {
-		t.Fatalf("screen.attached 的 screen 块不对：%+v", at.Screen)
-	}
-	if at.Reason != "" {
-		t.Errorf("attached 不该带 reason，实得 %q", at.Reason)
-	}
-
-	m.PublishScreenChange(false, ScreenState{Ref: "主机109#1", Tag: "fep-20261018-101401", Reason: "stop"})
-	de := nextEvent(t, ch, EvScreenDetached)
-	if de.Screen == nil || de.Screen.Reason != "stop" {
-		t.Fatalf("screen.detached 该带 reason=stop：%+v", de.Screen)
-	}
-}
-
-// ref 为空的挂接变化不上事件（没有目标可指向，发了只会让客户端猜）。
-func TestPublishScreenChangeWithoutRefIsIgnored(t *testing.T) {
-	m, ch := poolEventManager(t)
-	m.PublishScreenChange(true, ScreenState{Tag: "x"})
-	select {
-	case ev := <-ch:
-		t.Fatalf("ref 为空时不该发事件，实得 %q", ev.Type)
 	case <-time.After(150 * time.Millisecond):
 	}
 }

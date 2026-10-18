@@ -136,7 +136,7 @@ ENT 必填：企业编号决定用哪个账号连库与据点校验，不再沿�
 					continue
 				}
 				out = append(out, briefMap(b))
-				rows = append(rows, []string{b.Ref, b.Name, b.Env, b.Ent, b.Prog, b.Purpose, b.State, b.Epoch})
+				rows = append(rows, []string{b.Ref, b.Name, b.Env, b.Ent, b.Prog, b.State, b.Epoch})
 			}
 			payload := map[string]any{"ok": true, "sessions": out}
 			headers := []string{"REF", "名字", "环境", "ENT", "作业", "用途", "状态", "世代"}

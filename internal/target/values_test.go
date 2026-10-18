@@ -14,10 +14,9 @@ import (
 	"testing"
 )
 
-// TestSessionEnvelopeKeyLiterals 逐字钉住 C5.1：`session` 块的**恒定键**。
-// 12 个 = C5.1 的 11 个 + 工作站那一批的 `purpose`（W1）。
+// TestSessionEnvelopeKeyLiterals 逐字钉住 C5.1：`session` 块的**恒定键**（11 个）。
 func TestSessionEnvelopeKeyLiterals(t *testing.T) {
-	want := []string{"id", "ref", "display", "name", "env", "ent", "n", "kind", "prog", "state", "epoch", "purpose"}
+	want := []string{"id", "ref", "display", "name", "env", "ent", "n", "kind", "prog", "state", "epoch"}
 	assertSameSet(t, "C5.1 的 session 键集", SessionEnvelopeKeys, want)
 
 	// C5.3 / Q22 的纯新增键必须是它的子集（契约测试用它判"旧键有没有被改名"）。
@@ -31,9 +30,8 @@ func TestSessionEnvelopeKeyLiterals(t *testing.T) {
 		}
 	}
 	// 两者合起来必须正好是 SessionBrief 的 JSON 键（C5.2：键名一个都不许改）。
-	// 27 = C5.1/C5.2 的 26 个 + 工作站那一批新增的 `purpose`（W1）。
-	if got := len(SessionEnvelopeKeys) + len(SessionOptionalKeys); got != 27 {
-		t.Errorf("恒定键 + omitempty 键 = %d 个，应该是 27 个（C5.1/C5.2 的 26 + purpose）", got)
+	if got := len(SessionEnvelopeKeys) + len(SessionOptionalKeys); got != 26 {
+		t.Errorf("恒定键 + omitempty 键 = %d 个，应该是 26 个（C5.1/C5.2）", got)
 	}
 	// 顶层恒定键（5.1）：session 与 requested。
 	assertSameSet(t, "5.1 的顶层恒定键", SessionTopKeys, []string{"session", "requested"})

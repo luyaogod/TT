@@ -42,14 +42,6 @@ type Server struct {
 	// 只有 _test.go 会替换它。
 	dial func(host.SSHConfig) (*host.SSHConn, error)
 
-	// screenLookup 是"按会话地址查画面通道"的查询函数（见 SetScreenLookup）。
-	// nil = 没接入：`/screen`、`/record` 如实回答"现在没有画面"，不编造。
-	screenLookup func(ref string) (map[string]any, bool)
-
-	// screenStarter 起一块画面通道（见 SetScreenStarter）。nil = 本服务不支持起画面。
-	screenStarter ScreenStarter
-	// screenStopper 停一块画面通道（见 SetScreenStopper）。nil = 本服务不支持停。
-	screenStopper ScreenStopper
 
 	// mu 同时保护两类运行态:
 	//   stop —— Serve 期间指向该次运行的 cancel(POST /api/shutdown 用,优雅停止);
@@ -221,15 +213,6 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/sessions/switch", s.hSessionSwitch)
 	// 再建一条**空闲会话**（不碰池里任何一条）。与 /switch 的分工见 hSessionCreate。
 	mux.HandleFunc("POST /api/sessions/new", s.hSessionCreate)
-	// 画面通道 / 录制的只读视图（画面通道由外部进程持有，服务只提供查询口）
-	mux.HandleFunc("GET /api/sessions/{id}/screen", s.hSessionScreen)
-	mux.HandleFunc("POST /api/sessions/{id}/screen", s.hSessionScreenStart)
-	mux.HandleFunc("DELETE /api/sessions/{id}/screen", s.hSessionScreenStop)
-	// `/record` 与 `/screen` 目前是同一件事（一块画面通道 = 一份录制）：两个名字都收，
-	// 由同一对 handler 处理 —— 分成两套实现的后果是"停止只停了一半"。
-	mux.HandleFunc("POST /api/sessions/{id}/record", s.hSessionScreenStart)
-	mux.HandleFunc("DELETE /api/sessions/{id}/record", s.hSessionScreenStop)
-	mux.HandleFunc("GET /api/sessions/{id}/record", s.hSessionRecord)
 	mux.HandleFunc("GET /api/sessions/{id}/breakpoints", s.hBPList)
 	mux.HandleFunc("POST /api/sessions/{id}/breakpoints", s.hBPAdd)
 	mux.HandleFunc("DELETE /api/sessions/{id}/breakpoints/{num}", s.hBPDel)
@@ -518,11 +501,6 @@ func (s *Server) sessOfWriteCap(w http.ResponseWriter, r *http.Request, cap Capa
 	if sess.MayDo(cap, actor) {
 		return sess
 	}
-	// 用途拒（record）与模式拒的文案不同，都得能照做。
-	if cap == CapInteractive && sess.Purpose() == PurposeRecord {
-		writeCandidateFailure(w, http.StatusForbidden, target.CodeReadOnly, ReadOnlyMsg(sess.Purpose()), nil)
-		return nil
-	}
 	fail(w, 403, fmt.Errorf("%s", writeDeniedMsg(sess.Mode(), actor)))
 	return nil
 }
@@ -798,8 +776,6 @@ func identityKeysOf(resp map[string]any, b SessionBrief) {
 	resp["n"] = b.N
 	resp["kind"] = b.Kind
 	resp["epoch"] = b.Epoch
-	// W1：用途也是恒定键（取不到给 debug，不省键）—— 页面靠它决定藏不藏编辑器。
-	resp["purpose"] = b.Purpose
 }
 
 func (s *Server) hSnapshot(w http.ResponseWriter, r *http.Request) {
@@ -938,43 +914,16 @@ func (s *Server) bootToIdle(ns *Session, ctx context.Context) {
 	}
 }
 
-// hSessionClose 「结束会话」:结束当前 debug 并彻底断开连接(与设置默认解耦)
-// hSessionClose 「结束会话」：按归属把这条 SSH 会话名下的东西收干净（W3）。
+// hSessionClose 「结束会话」：按归属把这条 SSH 会话收干净（W3）。
 //
 // 顺序不能反（systemd 的 stop sequence，H5 幂等）：
 //
-//	① 先收界面会话：GDC / 代理 / 注入 / 录制进程都归它（StopTag：先请它自退 → 等 ≤8s
-//	   → 只杀登记过的 pid → 摘登记）。这一条是 D5 的落点 —— 从前只断调试，GDC 与代理留着，
-//	   开几条就把桌面堆满、端口也回不来。
-//	② 再断调试（closeNow：interrupt → 等到 stopped → quit → forceExit）。
-//	③ 最后从池里移除（内部广播 session.removed，reason=close）。
-//
-// 两处刻意的取舍：
-//   - 收界面会话失败**仍然继续**断 SSH 会话，原因进 `warnings`：不假装成功，也不因为
-//     收尾失败把会话留在池里（留下更糟：下一次同一个别名/端口还会撞它）。
-//   - `screen.detached` 不在这里发：注册表的变化由接线层的循环广播（`StartScreenWatch`，
-//     ≤400ms）。一处发声，避免"handler 发一次、循环再发一次"的重复事件。
+//	① 先断调试（closeNow：interrupt → 等到 stopped → quit → forceExit）。
+//	② 最后从池里移除（内部广播 session.removed，reason=close）。
 func (s *Server) hSessionClose(w http.ResponseWriter, r *http.Request) {
 	sess := s.sessOfWriteCap(w, r, CapOwn)
 	if sess == nil {
 		return
-	}
-	ref := refOf(sess.EnvName(), sess.Seq())
-	var warnings []string
-	stoppedTag := ""
-	if info, attached := s.lookupScreen(ref); attached {
-		tag, _ := info["tag"].(string)
-		switch {
-		case s.screenStopper == nil:
-			warnings = append(warnings, fmt.Sprintf(
-				"这条会话挂着界面会话（%s），但服务没有接入停止器：GDC/代理/录制进程要手动收（tt recording stop %s）", tag, tag))
-		default:
-			if err := s.screenStopper(ref, tag); err != nil {
-				warnings = append(warnings, fmt.Sprintf("收界面会话失败（%s）：%v", tag, err))
-			} else {
-				stoppedTag = tag
-			}
-		}
 	}
 	if err := sess.Close(); err != nil {
 		fail(w, 500, err)
@@ -982,14 +931,7 @@ func (s *Server) hSessionClose(w http.ResponseWriter, r *http.Request) {
 	}
 	s.emitAction(r, sess, "session.close", "关闭会话")
 	s.mgr.RemoveAs(sess.ID, "close")
-	resp := map[string]any{"ok": true, "state": "exit"}
-	if stoppedTag != "" {
-		resp["stoppedScreen"] = map[string]any{"tag": stoppedTag}
-	}
-	if len(warnings) > 0 {
-		resp["warnings"] = warnings
-	}
-	writeJSON(w, 200, resp)
+	writeJSON(w, 200, map[string]any{"ok": true, "state": "exit"})
 }
 
 // hSessionRestart 「重启会话」:断开并重连同环境,回到 idle 待启动。
@@ -1010,8 +952,7 @@ func (s *Server) hSessionRestart(w http.ResponseWriter, r *http.Request) {
 	// "环境与序号都对、只是换了代"），所以旧会话从池里消失、别名当场释放的同时，
 	// 把同一个名字重新登记给新会话 —— 调用方手上的别名与 ref 因此继续有效（C3.7b / Q19）。
 	name := sess.Name()
-	// 用途同样要在收口之前取下来（W1：重启继承用途，见下面的 CreateSessionOn）。
-	purpose := sess.Purpose()
+
 	// 先收口当前会话(运行中会先中断/quit),再重建连接
 	if err := sess.Close(); err != nil {
 		fail(w, 500, err)
@@ -1028,9 +969,8 @@ func (s *Server) hSessionRestart(w http.ResponseWriter, r *http.Request) {
 	if ent := strings.TrimSpace(req.Ent); ent != "" {
 		cfg.Topent = host.EntValue(ent)
 	}
-	// 重启 = 同一条逻辑会话重新登录：**用途跟着继承**（W1：用途创建后不可改，
-	// 换用途要换会话，重启不是换用途）。
-	ns, err := s.mgr.CreateSessionOn(cfg, name, purpose)
+	// 重启 = 同一条逻辑会话重新登录（名字跟着继承）。
+	ns, err := s.mgr.CreateSessionOn(cfg, name)
 	if err != nil {
 		var taken *ErrNameTaken
 		if errors.As(err, &taken) {
@@ -1233,9 +1173,7 @@ func (s *Server) hSessionSwitch(w http.ResponseWriter, r *http.Request) {
 	// 「连到该环境」= 新建一条会话：别名**不继承**（C3.7b / Q19：别名随旧会话消失即释放；
 	// 要名字就在起会话时再给一次 —— 这条与 hSessionRestart 的"继承"刻意不同，后者是
 	// 同一条逻辑会话重新登录）。冲突由 CreateSessionOn 在"判定 → 登记"之间兜住（F18 竞态）。
-	// 用途：`switch` 是「连到这个环境」，语义上只服务 debug —— 它建的会话一律 debug
-	// （W1：用途创建后不可改；要 record/replay 请走 `/api/sessions/new`）。
-	ns, err := s.mgr.CreateSessionOn(cfg, name, PurposeDebug)
+	ns, err := s.mgr.CreateSessionOn(cfg, name)
 	if err != nil {
 		var taken *ErrNameTaken
 		if errors.As(err, &taken) {
@@ -1278,9 +1216,6 @@ func (s *Server) hSessionCreate(w http.ResponseWriter, r *http.Request) {
 		Env  string `json:"env"`
 		Ent  string `json:"ent"`
 		Name string `json:"name"`
-		// Purpose 是这条 SSH 会话的用途（W1）：debug | record | replay；空 = debug。
-		// 创建后不可改 —— 要换用途就换一条会话。
-		Purpose string `json:"purpose"`
 	}
 	if !readBody(w, r, &req) {
 		return
@@ -1290,15 +1225,7 @@ func (s *Server) hSessionCreate(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, fmt.Errorf("需要 env：新会话落在哪个环境（tt env ls 可看全部）"))
 		return
 	}
-	purpose := strings.TrimSpace(req.Purpose)
-	if !ValidPurpose(purpose) {
-		writeCandidateFailure(w, http.StatusBadRequest, target.CodeUsage,
-			fmt.Sprintf("用途 %q 不合法：只支持 debug / record / replay（空 = debug）", purpose), nil)
-		return
-	}
-	if purpose == "" {
-		purpose = PurposeDebug
-	}
+
 	cfg := s.envCfgFor(env)
 	if cfg == nil {
 		fail(w, 404, fmt.Errorf("环境 %q 不存在(请在设置中添加)", env))
@@ -1323,23 +1250,14 @@ func (s *Server) hSessionCreate(w http.ResponseWriter, r *http.Request) {
 			writeCandidateFailure(w, http.StatusBadRequest, f.Code, f.Message, nil)
 			return
 		}
-		// 同名已在 → 同用途就是那一条（幂等），**不收口任何别的会话**（与 switch 的差别）。
-		// 用途不同则**拒**：名字是幂等键，键撞了但含义不同，悄悄返回既有那条会让人以为
-		// "我要的录制会话建好了"，而拿到的其实是一条调试会话。
+		// 同名已在 → 就是那一条（幂等），**不收口任何别的会话**（与 switch 的差别）。
 		for _, b := range s.mgr.Snapshot() {
 			if b.Env != env || b.Name == "" || !target.SameAlias(b.Name, name) {
 				continue
 			}
-			if b.Purpose != purpose {
-				writeCandidateFailure(w, http.StatusConflict, target.CodePurposeMismatch,
-					fmt.Sprintf("同名会话 %q 已经存在，但它的用途是 %s（这次要的是 %s）。"+
-						"用途创建后不可改：换一个名字，或先把那条收掉（tt session rm --session %s）",
-						b.Name, b.Purpose, purpose, b.Ref), nil)
-				return
-			}
 			writeJSON(w, 200, map[string]any{
 				"ok": true, "sessionId": b.ID, "ref": b.Ref, "env": env,
-				"name": b.Name, "purpose": b.Purpose, "state": b.State, "reused": true,
+				"name": b.Name, "state": b.State, "reused": true,
 			})
 			return
 		}
@@ -1348,7 +1266,7 @@ func (s *Server) hSessionCreate(w http.ResponseWriter, r *http.Request) {
 	if !s.sessOfWriteGlobal(w, r, nil) {
 		return
 	}
-	ns, err := s.mgr.CreateSessionOn(cfg, name, purpose)
+	ns, err := s.mgr.CreateSessionOn(cfg, name)
 	if err != nil {
 		var taken *ErrNameTaken
 		if errors.As(err, &taken) {
@@ -1366,7 +1284,7 @@ func (s *Server) hSessionCreate(w http.ResponseWriter, r *http.Request) {
 	go s.bootToIdle(ns, r.Context())
 	writeJSON(w, 200, map[string]any{
 		"ok": true, "sessionId": ns.ID, "ref": ref, "env": env,
-		"name": name, "purpose": purpose, "state": "loading", "reused": false,
+		"name": name, "state": "loading", "reused": false,
 	})
 }
 
@@ -2491,32 +2409,7 @@ const wsReplayLimit = 500
 // 混进补发批次反而可能让前端拿旧状态覆盖新状态。
 var replayTypes = map[string]bool{"stopped": true, "ai_action": true, "log": true, "watchdog": true}
 
-// PublishRecProgress 把"回放走到第几步"推给所有看着页面的客户端（Type = rec.progress）。
-//
-// 谁调它：统一层（internal/web）盯回放进程落的 jsonl 时调。本包不认识录制那一套，
-// 只负责"把这条事件发出去"—— 这正是 Options 注入的意义（见 internal/web 的说明）。
-//
-// 它**不进补发批次**（replayTypes 里没有它）：进度是"此刻的状态"，刷新页面后
-// 前端会自己拉一次 /replay-steps，补一堆历史进度只会在界面上闪一遍。
-func (s *Server) PublishRecProgress(id string, n, total int, result string) {
-	if id == "" {
-		return
-	}
-	s.mgr.emit(Event{
-		Type: "rec.progress", Actor: "system", Action: "rec.progress",
-		Text:     fmt.Sprintf("回放 %s：第 %d/%d 步 %s", id, n, total, result),
-		Progress: &RecProgress{ID: id, N: n, Total: total, Result: result},
-	})
-}
 
-// PublishScreenChange 把界面会话的挂接变化广播出去（W2 / W4）。
-//
-// 谁调它：接线层（`internal/cli/serve.go` 与 `tt debug serve`）—— 界面会话由**外部进程**
-// 登记在 `.tt-fep.json`，本包既不写它、也不认识 GDC/代理（H3）。做法同 `PublishRecProgress`：
-// 只递数据，由本包发事件。
-func (s *Server) PublishScreenChange(attached bool, st ScreenState) {
-	s.mgr.PublishScreenChange(attached, st)
-}
 
 // wsScope 解出这次订阅的**范围**（契约 6.1 / C6.2 / C6.4 / C6.7 / Q11）。
 //	?all=1               → 全部（总览台显式订阅全部）→ sessionID = ""
@@ -2679,202 +2572,6 @@ func (s *Server) hStatic(w http.ResponseWriter, r *http.Request) {
 type readSeeker interface {
 	Read(p []byte) (int, error)
 	Seek(offset int64, whence int) (int64, error)
-}
-
-// ---------- 画面通道 / 录制（只读视图）----------
-//
-// 画面通道（GDC + 录制代理）目前由 `tt recording start` 那个进程持有，调试服务并不生它。
-// 但 UI 与 CLI 要回答"这条会话现在挂着哪块画面、录的是哪一份" —— 所以这里接一个**查询函数**
-// （见 SetScreenLookup），由接线层把 fep 的登记表递进来。
-//
-// 为什么不直接 import fep：调试线不该认识 GDC/代理/录制这些词；而且那会形成
-// debug ↔ fep 的循环依赖。只收一个 `map[string]any`，谁提供都行（测试里就是一张假表）。
-
-// SetScreenLookup 注入"按会话地址查画面通道"的查询（nil = 未接入）。
-func (s *Server) SetScreenLookup(fn func(ref string) (map[string]any, bool)) {
-	s.screenLookup = fn
-}
-
-// hSessionScreen 返回这条会话挂着的画面通道（`GET /api/sessions/{id}/screen`）。
-//
-// 未接入 / 没挂着都返回 200 + `attached:false`：这不是错误，是"现在没有画面"。
-// 用 404 会让调用方分不清"会话不存在"和"会话没有画面"。
-func (s *Server) hSessionScreen(w http.ResponseWriter, r *http.Request) {
-	sess := s.sessOf(w, r)
-	if sess == nil {
-		return
-	}
-	info, ok := s.lookupScreen(refOf(sess.EnvName(), sess.Seq()))
-	if !ok {
-		writeJSON(w, 200, map[string]any{
-			"ok": true, "session": refOf(sess.EnvName(), sess.Seq()), "attached": false,
-			"note": "这条会话当前没有画面通道（起录制/回放时会挂上一块）",
-		})
-		return
-	}
-	writeJSON(w, 200, map[string]any{"ok": true, "session": refOf(sess.EnvName(), sess.Seq()), "attached": true, "screen": info})
-}
-
-// hSessionRecord 返回这条会话正在录/回放的那一份（`GET /api/sessions/{id}/record`）。
-//
-// 与 `/screen` 同一份数据源，只是投影不同：录制面板关心 `tag`/`kind`/`stale`。
-func (s *Server) hSessionRecord(w http.ResponseWriter, r *http.Request) {
-	sess := s.sessOf(w, r)
-	if sess == nil {
-		return
-	}
-	info, ok := s.lookupScreen(refOf(sess.EnvName(), sess.Seq()))
-	if !ok {
-		writeJSON(w, 200, map[string]any{"ok": true, "session": refOf(sess.EnvName(), sess.Seq()), "recording": nil})
-		return
-	}
-	writeJSON(w, 200, map[string]any{
-		"ok": true, "session": refOf(sess.EnvName(), sess.Seq()),
-		"recording": map[string]any{
-			"tag": info["tag"], "kind": info["kind"], "stale": info["stale"],
-			"env": info["env"], "prog": info["prog"], "recordDir": info["recordDir"],
-		},
-	})
-}
-
-// lookupScreen 是上面两个 handler 的共用入口（未接入时恒为 false）。
-func (s *Server) lookupScreen(ref string) (map[string]any, bool) {
-	if s.screenLookup == nil {
-		return nil, false
-	}
-	return s.screenLookup(ref)
-}
-
-// ---------- 画面通道（命令型：起/停）----------
-//
-// 和只读视图同一套思路：调试线不认识 GDC/代理/录制，只收**两个函数**——
-// 一个"起一块画面通道"，一个"停掉它"。谁来实现由接线层决定（当前实现是起一个
-// 脱离的 `tt recording start --session …` 进程）。
-
-// ScreenStartRequest 是"给这条会话起一块画面通道"的入参。
-type ScreenStartRequest struct {
-	Ref  string `json:"ref"`  // 挂到哪条会话（规范的 `环境#序号`）
-	Env  string `json:"env"`  // 冗余带上：启动器不必再查一次
-	Ent  string `json:"ent"`
-	Prog string `json:"prog"` // 录的是哪个作业（必填）
-	Tag  string `json:"tag"`  // 期望的录制 ID（可空：由启动器生成）
-	// NoContinue 是"起作业后**不要**自动放行"（`tt recording start --no-continue`）。
-	//
-	// 由**用途**决定（W7 的"监控 ≠ 自动放行"）：debug 要停在入口，让人先下断点/看现场；
-	// record 是纯录制，直接放行跑起来给人操作。真机 2026-10-18 13:34：debug 会话一挂上
-	// 监控就被自动 continue 送进 GDC，入口停站跳过 —— 等于没法调试。
-	NoContinue bool `json:"noContinue"`
-	// Actor 是**发起方身份**（`ai` / `human`，取自 X-Actor）。启动器要把它传下去：
-	// 起出来的那个进程会用调试线的接口在**这条会话**上写，而写受模式闸门约束
-	// （纯人工模式下 AI 不可写）。人点按钮 → human；AI 调 REST → ai。
-	// 不传的后果是子进程默认声明 ai，于是人建的纯人工会话被自己的闸门拦下。
-	Actor string `json:"actor"`
-}
-
-// ScreenStartResult 是启动结果（进程号与日志，给人排障用）。
-type ScreenStartResult struct {
-	PID int    `json:"pid"`
-	Log string `json:"log,omitempty"`
-}
-
-// ScreenStarter 起一块画面通道。实现方负责"脱离本进程"并立刻返回。
-type ScreenStarter func(ScreenStartRequest) (ScreenStartResult, error)
-
-// SetScreenStarter 注入启动器（nil = 不支持起画面，端点如实报 501）。
-func (s *Server) SetScreenStarter(fn ScreenStarter) { s.screenStarter = fn }
-
-// hSessionScreenStart 给会话挂一块画面通道（`POST /api/sessions/{id}/screen`）。
-//
-// 三条前置与 CLI 的挂靠录制同一套（见 cli/fep 的 bindRecSession）：空闲、有名字、作业点名。
-// 理由也一样 —— 作业在跑时指 FGLSERVER 不生效；没名字挂不回来；不点名作业就没什么可录。
-func (s *Server) hSessionScreenStart(w http.ResponseWriter, r *http.Request) {
-	sess := s.sessOfWriteCap(w, r, CapSetup)
-	if sess == nil {
-		return
-	}
-	var req struct {
-		Prog string `json:"prog"`
-		Ent  string `json:"ent"`
-		Tag  string `json:"tag"`
-		// GDC 目前只支持 `isolated`（起一个隔离实例）；显式写出来是为了将来能拒绝别的值，
-		// 而不是默默按 isolated 处理。
-		GDC string `json:"gdc"`
-	}
-	if !readBody(w, r, &req) {
-		return
-	}
-	if g := strings.TrimSpace(req.GDC); g != "" && g != "isolated" {
-		fail(w, 400, fmt.Errorf("不支持的画面通道类型 %q：目前只有 isolated（隔离实例）", g))
-		return
-	}
-	if s.screenStarter == nil {
-		fail(w, 501, fmt.Errorf("这个服务没有接入画面通道启动器（由接线层注入，见 SetScreenStarter）"))
-		return
-	}
-	if st := sess.State(); st != StateIdle {
-		fail(w, 409, fmt.Errorf("会话不是空闲（%s）：作业在跑时画面已经接到别处，此时挂画面不生效；先 tt debug quit", st))
-		return
-	}
-	if strings.TrimSpace(sess.Name()) == "" {
-		fail(w, 409, fmt.Errorf("会话没有名字：挂画面靠别名落回同一条会话，请先 tt debug start --name <名字> 重建"))
-		return
-	}
-	prog := strings.TrimSpace(req.Prog)
-	if prog == "" {
-		fail(w, 400, fmt.Errorf("需要 prog：录的是作业界面，没有作业就没什么可录"))
-		return
-	}
-	res, err := s.screenStarter(ScreenStartRequest{
-		Ref: refOf(sess.EnvName(), sess.Seq()), Env: sess.EnvName(),
-		Ent: sess.CurrentEnt(), Prog: prog, Tag: strings.TrimSpace(req.Tag),
-		// 监控是"看"，放行是"跑"——两件事分开：debug 停在入口，record 才自动放行。
-		NoContinue: sess.Purpose() == PurposeDebug,
-		Actor:      actorOf(r),
-	})
-	if err != nil {
-		fail(w, 500, err)
-		return
-	}
-	s.emitAction(r, sess, "screen.start", fmt.Sprintf("挂画面通道（作业 %s，pid %d）", prog, res.PID))
-	writeJSON(w, http.StatusAccepted, map[string]any{
-		"ok": true, "session": refOf(sess.EnvName(), sess.Seq()),
-		"started": res, "note": "画面通道已起；录制 ID 用 GET /api/sessions/{id}/screen 查",
-	})
-}
-
-// ScreenStopper 停掉一块画面通道。实现方负责"收干净"（写帧、落身份、杀登记的 pid）。
-type ScreenStopper func(ref, tag string) error
-
-// SetScreenStopper 注入停止器（nil = 不支持停，端点如实报 501）。
-func (s *Server) SetScreenStopper(fn ScreenStopper) { s.screenStopper = fn }
-
-// hSessionScreenStop 收掉会话挂着的画面通道（`DELETE /api/sessions/{id}/screen`）。
-//
-// 没挂着也算成功（`detached:false`）：收尾是**幂等**的 —— 重复点"停止"不该报错，
-// 更不该把别人的画面收掉（tag 只从这条会话的挂接里取）。
-func (s *Server) hSessionScreenStop(w http.ResponseWriter, r *http.Request) {
-	sess := s.sessOfWriteCap(w, r, CapOwn)
-	if sess == nil {
-		return
-	}
-	ref := refOf(sess.EnvName(), sess.Seq())
-	info, ok := s.lookupScreen(ref)
-	if !ok {
-		writeJSON(w, 200, map[string]any{"ok": true, "session": ref, "detached": false,
-			"note": "这条会话当前没有画面通道"})
-		return
-	}
-	tag, _ := info["tag"].(string)
-	if s.screenStopper == nil {
-		fail(w, 501, fmt.Errorf("这个服务没有接入画面通道停止器（由接线层注入，见 SetScreenStopper）"))
-		return
-	}
-	if err := s.screenStopper(ref, tag); err != nil {
-		fail(w, 500, fmt.Errorf("停画面通道失败（%s）：%w", tag, err))
-		return
-	}
-	s.emitAction(r, sess, "screen.stop", fmt.Sprintf("收画面通道（录制 %s）", tag))
-	writeJSON(w, 200, map[string]any{"ok": true, "session": ref, "detached": true, "tag": tag})
 }
 
 // hSessionJob 在**指定的会话**里起一个作业（`POST /api/sessions/{id}/job`）。

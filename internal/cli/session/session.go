@@ -117,7 +117,7 @@ func briefMap(b debugclient.Brief) map[string]any {
 	return map[string]any{
 		"id": b.ID, "ref": b.Ref, "display": b.Display, "name": b.Name,
 		"env": b.Env, "ent": b.Ent, "n": b.N, "epoch": b.Epoch,
-		"prog": b.Prog, "purpose": b.Purpose, "state": b.State,
+		"prog": b.Prog, "state": b.State,
 	}
 }
 

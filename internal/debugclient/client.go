@@ -217,8 +217,8 @@ type Brief struct {
 	N       int    `json:"n"`
 	Epoch   string `json:"epoch"`
 	Prog    string `json:"prog"`
-	// Purpose 是用途（W1）：debug | record | replay。服务端恒定给这个键。
-	Purpose string `json:"purpose"`
+
+
 }
 
 // Sessions 列出全部会话。
@@ -431,15 +431,9 @@ func (c *Client) SwitchToIdle(env, ent, name string, timeout time.Duration) (str
 // 它只关心"我这条"在不在，环境里另有一条会话与它无关。真机 2026-10-18 13:15 就是拿
 // SwitchToIdle 办这件事：环境里有 2 条会话 → SESSION_AMBIGUOUS → 开始录制必然失败。
 //
-// 走的是 `/api/sessions/new`（服务端语义就是"同名幂等、绝不收口别人"），purpose 固定 debug
-// —— 录制挂靠的是一条调试会话，用途在它建的时候就定了（W1：用途不可改）。
-func (c *Client) EnsureSession(env, ent, name, purpose string, timeout time.Duration) (string, error) {
-	// purpose 必须**跟着目标会话**走（W1 的用途不可变）：给 record 会话建/找一条 debug
-	// 会被服务端按 SESSION_PURPOSE_MISMATCH 拒掉。空 = 交给服务端按 debug 处理。
+// 走的是 `/api/sessions/new`（服务端语义就是"同名幂等、绝不收口别人"）。
+func (c *Client) EnsureSession(env, ent, name string, timeout time.Duration) (string, error) {
 	body := map[string]any{"env": env}
-	if p := strings.TrimSpace(purpose); p != "" {
-		body["purpose"] = p
-	}
 	if ent != "" {
 		body["ent"] = ent
 	}
