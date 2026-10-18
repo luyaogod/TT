@@ -77,7 +77,7 @@ func LayerNeed(l Layer) string {
 // LayerRegistry 是"组默认 + 具名例外"的层级登记（Q8）。
 //
 // Groups 的键是**命令组路径**（如 `debug` / `dev tzs`；顶层用空串），
-// Exceptions 的键是**完整命令路径**（如 `debug sql` / `fep rec list`）。
+// Exceptions 的键是**完整命令路径**（如 `debug sql` / `session new`）。
 //
 // 查一条命令的层级：先看例外表（精确匹配），再取**最长匹配**的组默认 ——
 // 所以矩阵里那 166 条叶子命令不需要在这里各占一行（Q8：清单从命令树派生）。
@@ -86,25 +86,14 @@ type LayerRegistry struct {
 	Exceptions map[string]Layer
 }
 
-// DefaultLayerRegistry 是 `tt-target-levels.md` 的登记：组默认 8 条 + 具名例外 40 条。
+// DefaultLayerRegistry 是 `tt-target-levels.md` 的登记：组默认 7 条 + 具名例外 17 条。
 //
 // 例外按组：`debug` 7（矩阵「例外条数」19 − 12 条 L3 冗余，见下）+ `dict` 5 + `dev tzs` 3 +
-// `view` 2 + `fep` 23。
+// `session` 2（`ls` 降到 L0、`new` 抬到 L1）。
 // `debug` 的组默认是 **L3**（Q7 的寻址层），所以矩阵里那 12 条 `: L3` 在认路时与组默认同值、
 // 一条都不改变行为 —— 按 Q8「与组默认相同的命令一条都不登」全部摘掉。
-// `fep` 的组默认本轮由 L1 **正名为 L3**（WP4c①，Q9）：本组的基准是"要界面活着"，
-// 而界面会话不是独立目标 —— 它是**它所属那条 SSH 会话**的属性（Q9）⇒ "要界面活着"的落点
-// 就是寻址层 L3。于是那 10 条"要界面活着"的（`do *` / `wait` / `job run` / `rec replay`）
-// 与新的组默认同值、一条都不登（Q8）；例外只剩"离线读件 / 本地登记 / 本机进程"（L0）
-// 与"只要环境、会话自己起"（L1）两类。
-// 其中矩阵里标"待定"的 8 条按契约第 9 节处理：`debug logs` / `debug wslogs` 两条已被
-// C1.2 / C1.3 收口（L3 / L1，L3 那条现在由组默认承担、不再登记），`fep rec start`
-// 本轮由 Q14 的"起会话"角色表收口（L1，见 `layerExceptions` 的 fep 一节），
-// 剩下 5 条（tzs 三条 / view 两条）保持待定。
 //
 // **改这张表要一起改的**：`tt-target-levels.md`（人读那份）与 `layer_test.go` 的条数断言。
-// 本轮只动了 `internal/target`（WP4c① 的范围）：那份人读矩阵里 `tt fep` 那一组仍写着
-// 组级默认 **L1**、`rec replay` / `rec reproduce` 也还是旧判 —— 它要照本表一起刷。
 //
 // 交出来的两份 map 都是**副本**：调用方想试一种别的登记形状（测试、`--dry-run` 式的推演）
 // 不会改到包级那份 `layerExceptions`。
@@ -121,23 +110,7 @@ func DefaultLayerRegistry() LayerRegistry {
 			"dict":    Layer0, // 缺省数据源是本地 SQLite 镜像
 			"dev tzc": Layer0,
 			"dev tzs": Layer0, // 本机常驻引擎 + 本地包/工作区
-			// **组默认 L3（WP4c① 定稿；Q9）**：本组的基准是"**要界面活着**"，而界面会话
-			// 不是独立目标 —— 它是**它所属那条 SSH 会话**的属性（Q9）⇒ "要界面活着"的落点
-			// 就是寻址层 **L3**（它所属的那条 SSH 会话），不是"要环境"的 L1。
-			// 于是 `do *`（7 条）/ `wait` / `job run` / `rec replay` 这 10 条**靠默认就对了**，
-			// 一条都不登记（Q8）；例外只剩两类（逐条判据见 `layerExceptions` 的 fep 一节）：
-			//
-			//	L0：只读本地录制件 / 本地登记 / 本机进程（离线 —— 本组 Long 明写
-			//	    "只要给一份录制件，不需要真机在场"）；
-			//	L1：只要一个环境，会话由它自己起（Q14 的"起会话"那三条）。
-			//
-			// **为什么默认不取条数更多的 L0（20 条）**：组默认取**更严**的那一层 ——
-			// 漏登记时是"多要一层"的响亮失败（`CheckLayer` 当场报出来），
-			// 而不是"少要一层"的静默落错；后者正是本次重构要根除的东西。
-			"fep":      Layer3,
-	"session":  Layer3, // 会话级动作（ent/quit/rm/exec/show）都要一条活着的会话
-	"recording": Layer0, // 录制件的本地维护默认 L0；起录/回放由例外表抬到 L1
-			"view":   Layer0, // 本机窗口与图像
+			"session": Layer3, // 会话级动作（ent/quit/rm/exec/show）都要一条活着的会话
 			"drawio": Layer0, // 形状库是内置的
 		},
 		Exceptions: cloneLayerMap(layerExceptions),
@@ -188,44 +161,8 @@ var layerExceptions = map[string]Layer{
 	"dev tzs list_columns": LayerUndetermined,
 	"dev tzs list_records": LayerUndetermined,
 
-	// ---- tt view（2 条待定，W2） ----
-	//
-	// 口径问题 Q9 已经答了（界面会话是它所属 SSH 会话的属性 ⇒ 这两条"要界面活着"的落点
-	// 就是 **L3**），但 `view` 组的那一行**不在 WP4c① 的范围**（① 只正 `fep` 组），
-	// 所以这里保持原状：谁动 `view` 组，把这两条一起改成 L3 —— 改完这一组的待定即归零。
-	"view measure":   LayerUndetermined,
-	"view calibrate": LayerUndetermined,
-
-	// ---- tt fep（23 条例外：20 L0 + 3 L1） ----
-	//
-	// 组默认是 **L3**（Q9：界面会话是它所属那条 SSH 会话的属性），所以"**要界面活着**"
-	// 的那批 —— `do act` / `do cell` / `do key` / `do lookup` / `do pick` / `do role` /
-	// `do type` / `wait` / `job run` / `rec replay` 这 10 条**一条都不登**：
-	// 它们与组默认同值、认路上改变不了任何行为（Q8：清单从命令树派生，登了就是"全清单"的开始）。
-	// `rec replay` 从 L0 挪到默认也要说清：它非 `--dry-run` 时**要一条活着的会话** ——
-	// `newClient()`（无登记即退 3）+ 指纹闸比的是**当前界面** + 事件注入到活界面
-	// （`replay.go:54/60/110/130`）；`--dry-run` 只是"先看清楚"的离线出口，不改登记层级
-	//（与 `dict` 的 `--env` 同口径：可选开关不改变最低层级）。
-	//
-	// 例外①L0（20 条）：只碰本地文件 / 本地登记 / 本机进程 —— 不连远端、不要会话。
-	"fep ui find":       Layer0, // 读录制件的字节折 AUI 再筛（离线）
-	"fep ui focus":      Layer0, // 读录制件里的 focus/cursor 推送（离线）
-	"fep ui roles":      Layer0, // 读录制件的字节折角色目录（--source 才顺带读一次本地登记，读不到也照答）
-	"fep ui snapshot":   Layer0, // 读录制件的字节汇总界面结构（离线）
-	"fep ui state":      Layer0, // 读录制件里的运行期状态推送（离线）
-	"fep ui tree":       Layer0, // 读录制件的字节打窗口子树（离线）
-	"session ls":        Layer0, // 列会话：只要服务在，不要求已有会话
-	"fep job plan":      Layer0, // 从源码镜像推导操作计划，不碰运行期
-	"fep src openwin":   Layer0, // 读本地镜像里开窗程序的交互语义
-	"fep fe listen":     Layer0, // 起本机无头前端并在本机端口上**等**运行期连入（是"被连"不是"去连"）
-	"fep fe status":     Layer0, // 拨本机控制口（`fep fe listen` 起的那个本机进程），不连远端、不读会话登记
-	"fep fe send":       Layer0, // 同上：经本机控制口发一条事件
-	//
-	// 例外②L1（3 条）：只要一个环境（`--env` 必给，没有默认环境可回落），会话由它自己起 ——
-	// Q14 的"起会话"角色表点的就是这三条。
-	"recording start":   Layer1, // 起一轮录制：点名环境（--session 挂靠时不新建，但最低要求仍是环境）
-	"recording replay":  Layer1, // 回放：默认从零起自己的会话（环境/作业取自录制身份），执行前不要求任何会话存在
-	"session new":       Layer1, // 建会话：点名的环境就是要连的那台；给了 --prog 还会起作业
+	"session ls":  Layer0, // 列会话：只要服务在，不要求已有会话
+	"session new": Layer1, // 建会话：点名的环境就是要连的那台；给了 --prog 还会起作业
 }
 
 // DeclaredLayer 返回登记表里那一层（可能含 L4 与待定）—— 文档、测试与"这条命令要什么"都用它。
