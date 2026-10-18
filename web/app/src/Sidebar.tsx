@@ -18,7 +18,7 @@ import {
 } from 'lucide-react'
 import { cn } from '../../shared/utils'
 import type { Route } from './routing'
-import type { EnvBrief, SessionItem, SessionPurpose } from './store'
+import type { EnvBrief, SessionItem } from './store'
 
 export interface SidebarProps {
   envs: EnvBrief[]
@@ -39,10 +39,7 @@ export interface SidebarProps {
 }
 
 /** 会话类型的短名(左树与会话页共用这一份口径)。 */
-export const SESSION_TYPE_LABEL: Record<SessionItem['type'], string> = { debug: 'Debug', fep: 'FEP' }
-
-/** 用途的短名（树上那一列）：debug 会话 / 录制会话 / 回放会话。 */
-export const SESSION_PURPOSE_LABEL: Record<SessionPurpose, string> = { debug: 'Debug', record: '监控', replay: '回放' }
+export const SESSION_TYPE_LABEL: Record<SessionItem['type'], string> = { debug: 'Debug' }
 
 /**
  * 会话状态 → 圆点颜色 + 一句人话。
@@ -218,18 +215,15 @@ export function Sidebar({
                       className={cn(rowBase, 'relative mt-0.5 pr-1.5', on ? rowOn : rowIdle)}
                       style={{ paddingLeft: 32 }}>
                       <button onClick={() => onSelectSession(s)}
-                        title={`${s.name} · ${SESSION_PURPOSE_LABEL[s.purpose]}会话 · ${st.label}`}
+                        title={`${s.name} · ${st.label}`}
                         className="flex min-w-0 flex-1 items-center gap-2 text-left">
                         <span className="flex h-4 w-4 shrink-0 items-center justify-center">
                           <span className={cn('h-2 w-2 rounded-full', st.dot)} />
                         </span>
                         <span className="min-w-0 flex-1 truncate">{s.name}</span>
                       </button>
-                      {/* 悬停时把类型标签换成"结束会话" —— 一行里放不下两个东西,而收会话是唯一
+                      {/* 悬停时显示"结束会话" —— 一行里放不下两个东西,而收会话是唯一
                           需要在这里做的破坏性动作,不该藏进右键菜单。 */}
-                      <span className="shrink-0 text-[10px] opacity-60 group-hover:hidden">
-                        {SESSION_PURPOSE_LABEL[s.purpose]}
-                      </span>
                       <button
                         onClick={(e) => { e.stopPropagation(); onCloseSession(s) }}
                         title="结束会话（断开连接并收掉它）"

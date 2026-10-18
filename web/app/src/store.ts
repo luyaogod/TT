@@ -16,20 +16,15 @@ export type { ThemeMode }
 // 建出来的那条），不是本地假数据。第一阶段那批"只存在浏览器里"的会话已经随
 // `tt.sessions.v1` 一起作废（见 SESSIONS_KEY 的注释）。
 export interface EnvBrief { name: string; host?: string; zone?: string }
-export type SessionType = 'debug' | 'fep'
-/** 用途（W1）：决定页面给什么、能发什么。服务端恒定给这个键。 */
-export type SessionPurpose = 'debug' | 'record' | 'replay'
+export type SessionType = 'debug'
 export interface SessionItem {
   // 服务端会话句柄（C5.4：路径与句柄只认 id）。调试面板绑定、画面通道、结束会话都用它。
   id: string
   env: string
   name: string
-  // type 是**派生的**（purpose≠debug 的会话在界面上算 FEP 那一类：先看 FEP 面板）。
-  // 服务端没有 type 这个键，别把它当事实用。
+  // type 是**派生的**（目前只有 debug 一种）。
   type: SessionType
   createdAt: number
-  // purpose 是服务端的事实（W1）：debug / record / replay。
-  purpose: SessionPurpose
   // 建会话时点名的企业编号与作业编号。ENT 是**会话级事实**（环境配置里已经没有它），
   // 作业编号是"这条会话要调哪个作业"——后面起作业/挂录制都从这两个值往下走。
   ent: string
@@ -45,8 +40,7 @@ export interface SessionItem {
  * 这一批只收"索引级"的那几个字段（树上要看、页面切换要用的）；编辑器那一套
  * （源码、断点面板、调用栈、时间线）仍在 `useStore` 的单例上，等 W-P2 的下一阶段搬。
  * 字段全部来自服务端事实或本地派生，**没有第二份真相**：
- *   - `state` / `stop` / `prog` / `module` / `mode` 来自事件或 `GET /api/sessions`；
- *   - `screen` 来自 `screen.*` 事件与 `GET /sessions/{id}/screen`。
+ *   - `state` / `stop` / `prog` / `module` / `mode` 来自事件或 `GET /api/sessions`。
  */
 export interface SessionRuntime {
   id: string
@@ -55,7 +49,6 @@ export interface SessionRuntime {
   prog: string
   module: string
   mode: 'solo' | 'collab'
-  screen: { attached: boolean; tag?: string; kind?: string } | null
   // updatedAt 只用于"这份运行时是什么时候变的"（排查事件断档时有用），不参与渲染判定。
   updatedAt: number
 }
@@ -66,8 +59,6 @@ export interface CreateSessionInput {
   ent: string
   prog: string
   name?: string
-  /** 用途（W1）：debug（默认）| record（FEP 录制会话）。建会话时定一次，之后不可改。 */
-  purpose?: SessionPurpose
 }
 
 /** 环境页那张卡片填的东西：环境由它自己在哪一页决定，所以不带 `env`。 */
@@ -122,9 +113,7 @@ interface Store {
   // runtimes 是**每条会话的运行时**（W6）：按 id 各一份，事件到了就更新。
   // 它与 `sessions`/`sessionList`（池的投影）分工：后者回答"有哪些"，前者回答"它现在怎么样"。
   runtimes: Record<string, SessionRuntime>
-  // screens 是**界面会话的挂接状态**（W2 的 screen.* 事件 + GET /screen 的合并结果）。
-  // 事件到了即时更新，页面不必每秒问一次；`useScreenInfo` 仍可主动刷新。
-  screens: Record<string, { attached: boolean; tag?: string; kind?: string }>
+
   loadEnvs: () => Promise<void>
   setActiveEnv: (env: string) => void
   // createSession 建一条**真的** Debug 会话（企业编号 + 作业编号），默认把画面通道（proxy）
@@ -136,13 +125,7 @@ interface Store {
   ensureSource: () => Promise<void>
   // closeSession 结束一条会话（断开连接 + 从服务端池里与本地树里一起摘掉）。
   closeSession: (id: string) => Promise<void>
-  // startRecording 给**绑定的那条**会话挂一块画面通道（= 开始录制），等登记完成才返回。
-  // 失败抛错（原因里带服务端那句话），由面板显示 —— 绝不假装成功。
-  startRecording: (prog: string, ent: string) => Promise<void>
-  // stopRecording 收掉绑定那条会话的画面通道（= 停止录制/回放）。服务端按登记 StopTag 收干净，幂等。
-  stopRecording: () => Promise<void>
-  // refreshScreen 手读一次画面状态并写进 `screens`（事件之外的同步点）。
-  refreshScreen: (id: string) => Promise<void>
+
   module: string
   prog: string
   state: string // loading|stopped|running|idle|exit|''
@@ -200,21 +183,7 @@ interface Store {
   // 设置页当前分区(站点管理/数据字典/DEBUG/应用设置)。放在 store 而不是 SettingsView 局部
   // 是因为 App 的首屏深链接解析要写它。写在这里的是"纯状态",URL 片段由 SettingsView 同步。
   settingsSection: SettingsSectionKey
-  // 录制明细页:纯状态(真正的说明在下面那组 action 上,见 setRecordId/setRecordAt)。
-  recordId: string
-  // 区间深链接里的那一刻(`#record/<id>?t=<Unix 毫秒>`;0 = 不定位)。
-  //
-  // 它是**只读的入参**:页面打开时用它把游标与可视窗口落到那一刻,之后就由用户在条带上的
-  // 操作接管(不再回写)。为什么只读:滚动/缩放是连续动作,每一步都进 URL 会让地址栏
-  // 变成一条疯跑的记录;而"把这一刻发给别人"只需要点一次那个按钮(条带的「这一刻」)。
-  recordAt: number
-  // 回放进度:服务端每次推 `rec.progress` 就把计数器 +1(值本身没有意义,只表示"变了")。
-  //
-  // 为什么不把进度数据也存进 store:它的权威在 `/api/recordings/{id}/replay-steps`
-  // (读的是回放进程逐行 flush 的 jsonl)。WS 只是"叫一声",明细页听见了就去读一次 ——
-  // 这样即使这个事件类型被漏注册、或 WS 断了,退化成"晚几百毫秒",而不是"进度不动"。
-  recProgressTick: number
-  recProgressID: string
+
   theme: ThemeMode // 外观选择:暗色/亮色/跟随系统(html.dark 挂点,localStorage tt.theme 持久化)
   dark: boolean // 解析结果(system 时随系统变化);html.dark 与 Monaco 主题都按它渲染
   // 服务测试(复刻 awsq990 集成服务测试)
@@ -265,13 +234,7 @@ interface Store {
   onReplay: (ev: Event) => void
   setView: (v: ViewKey) => void
   setSettingsSection: (s: SettingsSectionKey) => void
-  // 录制明细:非空 = 正在看这一份的明细(空 = 列表)。
-  // 为什么放在 store 而不是 RecordView 的局部状态:URL 片段是深链接的权威
-  // (`#record/<id>`,见 routing.ts),而解析片段的那条 effect 在 App 里 —— 两处必须看到
-  // 同一个值。与 view/settingsSection 完全同一套做法(store 存纯状态,片段由 App 同步)。
-  // 字段本体在文件上半部分的 Store 形状里,这里只声明动作。
-  setRecordId: (id: string) => void
-  setRecordAt: (ms: number) => void
+
   // 明细页的页签:分层记录 / 全文流。**记在本地**(localStorage),用户回来还在那一页 ——
   setLaunchError: (msg: string) => void
   setTheme: (t: ThemeMode) => void
@@ -400,25 +363,21 @@ function clearLegacySessions() {
 // 模块加载时清一次：旧树的数据没有任何用途，留着只会让人以为"浏览器还记着会话"。
 clearLegacySessions()
 
-// purposeOf 把服务端给的那一列读成用途：**缺键/认不出来一律当 debug**
+// （FEP 移除后不再有"用途"这一层：所有会话都是调试会话。）
+// 下面这段注释保留在原位，避免与上面 Store 形状的注释断档。
 // （恒定键的兜底：取不到给缺省，不让页面猜）。
-function purposeOf(b: SessionBrief | undefined): SessionPurpose {
-  const p = (b?.purpose || '').trim()
-  return p === 'record' || p === 'replay' ? p : 'debug'
-}
+
 
 // itemFromBrief 把池里的那一条投影成树里的一项。
 //
 // 这里**只做投影，不补业务字段**：brief 里没有的（比如"是谁在本机建的"）不该出现在树上。
 function itemFromBrief(b: SessionBrief): SessionItem {
-  const purpose = purposeOf(b)
+
   return {
     id: b.id,
     env: b.env || '',
     name: (b.name || '').trim() || b.ref || b.id,
-    // record/replay 的会话在界面上先看 FEP 面板（先看"画面"而不是编辑器）。
-    type: purpose === 'debug' ? 'debug' : 'fep',
-    purpose,
+    type: 'debug',
     createdAt: 0,
     ent: b.ent || '',
     prog: b.prog || '',
@@ -441,7 +400,7 @@ function indexFromList(list: SessionBrief[]): SessionItem[] {
 // 这一批只收索引级的字段；编辑器那一套仍在单例上（下一阶段搬）。
 
 function emptyRuntime(id: string): SessionRuntime {
-  return { id, state: '', stop: null, prog: '', module: '', mode: 'solo', screen: null, updatedAt: 0 }
+  return { id, state: '', stop: null, prog: '', module: '', mode: 'solo', updatedAt: 0 }
 }
 
 // runtimeFromBrief 用池里快照初始化/修正一份运行时。
@@ -609,33 +568,6 @@ async function waitSessionIdle(id: string, timeoutMs = 90000): Promise<void> {
   }
 }
 
-// attachScreen 给会话挂画面通道（= 录制代理 proxy）。
-//
-// 返回**一句要报给人听的话**（空 = 一切正常）。它刻意不抛错：会话已经建好了，
-// 挂画面失败不该让"建会话"整体失败 —— 更不该假装成功（那是另一类错）。
-async function attachScreen(id: string, prog: string, ent: string, onStep?: (step: string) => void): Promise<string> {
-  try {
-    await api.screenStart(id, prog, ent)
-  } catch (e: any) {
-    return `会话已建好，但画面通道（proxy）没挂上：${e?.message || String(e)}`
-  }
-  // 进程起来 ≠ 登记完成。录制进程是"先登记身份、再连 GDC"，所以这里查一次登记，
-  // 顺便拿到录制 ID —— 界面上"这条会话录的是哪一份"就从它来。
-  //
-  // 等 30 秒不是保险起见：实测有一次紧接着查还是 `attached:false`（那一轮录制进程在
-  // 收上一轮的尾、登记先摘再写），十几秒后才出现。这里等不到**只报警不失败**：
-  // 通道进程确实起来了（POST 已经 202），人可以在会话页的「FEP录制」里再查一次。
-  onStep?.('画面通道已起，正在确认登记…')
-  const deadline = Date.now() + 30000
-  while (Date.now() < deadline) {
-    try {
-      const r = await api.screen(id)
-      if (r?.attached) return ''
-    } catch { /* 查不到就再等一轮：登记可能刚好在写 */ }
-    await sleep(300)
-  }
-  return '画面通道进程已起，但 30 秒内还没在会话上登记成功（GET /screen 仍 attached=false）——看 .tt-serve.log 与那一条录制日志；也可以在会话页的「FEP录制」里点「重新查一次」'
-}
 
 // refreshSessionList 列全部会话（`GET /api/sessions`）填进 `sessionList`，并**同步派生树**。
 //
@@ -876,7 +808,7 @@ export const useStore = create<Store>((set, get) => ({
   // 刷新后恢复**人上次点的那条**（`tt.sessionId`）。恢复的是"选择"，不是"问服务端要一条"：
   // 这条会话若已经不在服务端了，`checkSelectedStillThere` 会把它清成"未选择"。
   sessionId: readStoredSessionId(), sessionList: [],
-  envs: [], envsLoaded: false, envsErr: '', activeEnv: '', sessions: [], sessionsLoaded: false, editor: {}, runtimes: {}, screens: {}, module: '', prog: '', state: '', sessionEnv: '', started: false, stop: null, holdingSeconds: 0,
+  envs: [], envsLoaded: false, envsErr: '', activeEnv: '', sessions: [], sessionsLoaded: false, editor: {}, runtimes: {}, module: '', prog: '', state: '', sessionEnv: '', started: false, stop: null, holdingSeconds: 0,
   launching: false, launchError: '', showBottom: true, bottomMax: false,
   // 面板开关默认关(localStorage tt.stackAuto / tt.autovarsAuto 持久化)
   stackAuto: localStorage.getItem('tt.stackAuto') === '1',
@@ -902,10 +834,7 @@ export const useStore = create<Store>((set, get) => ({
   // 想干活点「调试」只需往下一格。深链接(#debug、#wslogs…)仍然优先,见 App.tsx 的 parseHash。
   view: 'settings',
   settingsSection: 'sites',
-  recordId: '',
-  recordAt: 0,
-  recProgressTick: 0,
-  recProgressID: '',
+
   theme: initialTheme,
   dark: resolveDark(initialTheme),
   wsLogs: [], wsLogsLoading: false, wsLogsPage: 1, wsLogsHasMore: false,
@@ -1010,31 +939,12 @@ export const useStore = create<Store>((set, get) => ({
       case 'session.removed': {
         const id = ev.sessionId
         dropBrief(id)
-        if (id) set((s) => {
-          const rest = { ...s.screens }
-          delete rest[id]
-          return { screens: rest }
-        })
+
         // 我绑着的那条没了 → 回到未选择（绝不替人挑下一条）。
         if (id && get().sessionId === id) void get().selectSession(null)
         return
       }
-      case 'screen.attached':
-      case 'screen.detached': {
-        const id = ev.sessionId
-        const scr = (ev as any).screen as { tag?: string; kind?: string } | undefined
-        if (!id) return
-        const attached = ev.type === 'screen.attached'
-        set((s) => ({
-          screens: {
-            ...s.screens,
-            [id]: { attached, tag: scr?.tag, kind: scr?.kind },
-          },
-        }))
-        // 运行时里的那一份也跟着变（W6）：页面切到这条会话时不必先问一次。
-        patchRuntime(id, { screen: { attached, tag: scr?.tag, kind: scr?.kind } })
-        return
-      }
+
     }
 
     // ---- 运行时：**任何**会话的状态都记，不只绑着的那条（W6） ----
@@ -1180,16 +1090,7 @@ export const useStore = create<Store>((set, get) => ({
         }
         return
       }
-      // 回放进度(录制明细页)。**必须在这里注册**:这个 switch 只认列出来的类型,
-      // 没注册的会被**静默丢掉**(实测:自造一个 warn 类型,前端什么都不显示、
-      // 也不报错,查了很久)。所以新增事件类型时,这一处与 Event 类型一起改。
-      //
-      // 处理方式刻意最轻:只把计数器 +1(有没有变、变了第几号),**不碰时间线**。
-      // 进度靠高频小事件刷时间线只会把它淹掉。明细页订阅这个计数器,
-      // 它一变就去读一次 /replay-steps —— 权威数据永远来自那个端点。
-      case 'rec.progress':
-        set({ recProgressTick: get().recProgressTick + 1, recProgressID: ev.progress?.id || '' })
-        return
+
     }
   },
 
@@ -1225,10 +1126,7 @@ export const useStore = create<Store>((set, get) => ({
 
   setView: (v) => set({ view: v }),
   setSettingsSection: (s) => set({ settingsSection: s }),
-  // 切明细/回列表。**不在这里动 URL**:片段由 App 那条 effect 按状态写回(与 view 同一套),
-  // 于是浏览器前进/后退与深链接天然一致 —— 这里再写一次 history 就成了两个作者。
-  setRecordId: (id) => set({ recordId: id }),
-  setRecordAt: (ms) => set({ recordAt: ms > 0 ? ms : 0 }),
+
   setLaunchError: (msg) => set({ launchError: msg }),
   // 外观:选择 → 持久化 + 立即应用(跟随系统时 dark 取当前系统偏好)
   setTheme: (t) => {
@@ -1992,23 +1890,17 @@ export const useStore = create<Store>((set, get) => ({
     const ent = (input.ent || '').trim()
     const prog = (input.prog || '').trim()
     // 用途：建会话时定一次（W1）。`record` = FEP 录制会话（创建即挂监控、作业自动放行、
-    // 会话页只给「异常调试 + FEP监控」两屏）；其余一律 debug。
-    const purpose: SessionPurpose = input.purpose === 'record' ? 'record' : 'debug'
-    // 名字**不能空**：录制要靠别名（name）落回同一条会话，后端对没名字的会话会回
-    // 409「会话没有名字」，于是"建好了但挂不上 proxy"——人看到的是一条什么都不会干的会话
-    // （用户 2026-10-18 的现场就是这样）。留空就在**发请求之前**落成「新会话 N」，
-    // 而不是只在界面上显示一个服务端根本不知道的名字。
+    // 名字留空就在**发请求之前**落成「新会话 N」，而不是只在界面上显示一个
+    // 服务端根本不知道的名字。
     const name = (input.name || '').trim()
-      || (purpose === 'record'
-        ? `FEP录制 ${get().sessions.filter((s) => s.env === env && s.purpose === 'record').length + 1}`
-        : `新会话 ${get().sessions.filter((s) => s.env === env).length + 1}`)
+      || `新会话 ${get().sessions.filter((s) => s.env === env).length + 1}`
     // 前置校验放在请求之前:与服务端同一套判据，但错误当场说、不白花一次 SSH 握手。
     if (!env) throw new Error('没有点名环境')
     if (!ent) throw new Error('必须填企业编号（ENT）：它决定用哪个账号连库，环境配置里已经没有它了')
-    if (!prog) throw new Error('必须填作业编号：要录/要调的就是这个作业')
+    if (!prog) throw new Error('必须填作业编号：它就是这条会话要启动的作业')
 
     onStep?.('正在建会话（连 ' + env + '）…')
-    const res = await api.sessionCreate(env, ent, name, purpose)
+    const res = await api.sessionCreate(env, ent, name)
     const id = (res?.sessionId || '').trim()
     if (!id) throw new Error('服务端没回会话 ID（看 .tt-serve.log）')
 
@@ -2018,7 +1910,7 @@ export const useStore = create<Store>((set, get) => ({
     const item: SessionItem = get().sessions.find((s) => s.id === id) || {
       // 极端情况：列表还没刷到它（服务端刚建、聚合有延迟）。用应答里的事实拼一条，
       // 只用于**导航**；下一轮 List / 事件会把树换成权威那份。
-      id, env, type: purpose === 'record' ? 'fep' : 'debug', purpose, createdAt: Date.now(), ent, prog,
+      id, env, type: 'debug', createdAt: Date.now(), ent, prog,
       name: (res?.name || '').trim() || name,
       ref: (res?.ref || '').trim(),
     }
@@ -2031,67 +1923,13 @@ export const useStore = create<Store>((set, get) => ({
       throw e
     }
 
-    onStep?.('正在挂画面通道（proxy）…')
-    const warn = await attachScreen(id, prog, ent, onStep)
-    if (warn) {
-      // 画面通道没挂上 = 会话能用但**没有代理**：这是必须看到的失败，走 error 而不是 info。
-      toast.error('画面通道（proxy）没挂上', { description: warn, duration: 0 })
-      get().pushTimeline({ origin: 'system', kind: 'warn', text: warn })
-    } else {
-      get().pushTimeline({
-        origin: 'system', kind: 'info',
-        text: `新建会话 ${item.ref || id}（作业 ${prog}，ENT ${ent}），画面通道已挂上`,
-      })
-    }
-    // 挂上 proxy 后会话从 idle 变成 running/stopped（录制进程在里面起了作业）——
-    // 再刷一次列表，树上的状态点与作业编号才是当下的。
-    await refreshSessionList()
+    get().pushTimeline({
+      origin: 'system', kind: 'info',
+      text: `新建会话 ${item.ref || id}（作业 ${prog}，ENT ${ent}）`,
+    })
     return item
   },
 
-  // startRecording / stopRecording 是 FEP 面板的两个动作（W-P4）。
-  //
-  // 它们只做"调服务端 + 把结果说清楚"：起画面是 POST /screen（CapSetup），
-  // 收画面是 DELETE /screen（CapOwn，服务端会级联收 GDC/代理/录制进程）。
-  startRecording: async (prog, ent) => {
-    const id = get().sessionId
-    if (!id) throw new Error('还没有选中会话')
-    const p = (prog || '').trim()
-    if (!p) throw new Error('必须填作业编号：要录的就是这个作业')
-    const e = (ent || '').trim()
-    get().pushTimeline({
-      origin: 'human', kind: 'command',
-      text: `开始录制：作业 ${p}${e ? `，ENT ${e}` : '（ENT 沿用会话）'}`,
-    })
-    const warn = await attachScreen(id, p, e)
-    if (warn) {
-      get().pushTimeline({ origin: 'system', kind: 'warn', text: warn })
-      throw new Error(warn)
-    }
-    await get().refreshScreen(id)
-    get().pushTimeline({ origin: 'system', kind: 'info', text: '录制已开始：画面通道登记完成' })
-  },
-
-  stopRecording: async () => {
-    const id = get().sessionId
-    if (!id) throw new Error('还没有选中会话')
-    await api.screenStop(id)
-    get().pushTimeline({ origin: 'human', kind: 'command', text: '停止录制' })
-    // 立刻同步一次状态；事件（screen.detached）随后也会到，两边说的是同一件事。
-    await get().refreshScreen(id)
-  },
-
-  refreshScreen: async (id) => {
-    if (!id) return
-    try {
-      const r = await api.screen(id)
-      const attached = !!r.attached
-      const s = (r.screen || {}) as Record<string, any>
-      set((st) => ({ screens: { ...st.screens, [id]: { attached, tag: s.tag, kind: s.kind } } }))
-    } catch {
-      // 查不到就保持现状：事件会再来，且"查失败"不该把已知的挂接状态抹掉。
-    }
-  },
 
   // （`pruneSessions` 已随"树由池派生"一起下线：树在 refreshSessionList 里随池重建，
   //  不再需要单独摘条目。）
@@ -2152,11 +1990,6 @@ export const useStore = create<Store>((set, get) => ({
       // 树跟着池一起重建（close 的事件也会到，但这里不等它：人点了就该立刻少一条）。
       set({ sessionList: sessions || [], sessions: indexFromList(sessions || []), sessionsLoaded: true })
       dropRuntime(id)
-      set((st) => {
-        const rest = { ...st.screens }
-        delete rest[id]
-        return { screens: rest }
-      })
       if (get().sessionId === id) await get().selectSession(null)
       get().pushTimeline({ origin: 'human', kind: 'command', text: `结束会话 ${label}` })
       toast.success(`已结束会话 ${label}`)

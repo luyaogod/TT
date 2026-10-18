@@ -289,28 +289,6 @@ assert.ok(S().sourceContent.length > 0, '源码内容要落到编辑器上')
 assert.equal(S().currentLine, 3, '入口停站应跳到 MAIN 首条语句(第 3 行)')
 console.log('OK 12) 入口停站(无 stopped 事件)从快照补齐位置与源码')
 
-// ---------- 13) 录制明细的状态字段(计划 C 的 D3) ----------
-// 它们是 **URL 片段**在 store 里的那一半,而片段是深链接的权威(`#record/<id>`)——
-// 所以"存得下来"这件事本身要钉住;`#record` 回列表 = 把 ID 清空,不是另设一个标志位。
-assert.equal(S().recordId, '', '默认不在明细里(空 = 列表)')
-S().setRecordId('fep-1')
-assert.equal(S().recordId, 'fep-1')
-S().setRecordId('')
-assert.equal(S().recordId, '', '回列表 = 清空 ID(一个状态,不是两个)')
-console.log('OK 13) 录制明细:recordId 空 = 列表(没有页签/面板那套并行状态)')
-
-// ---------- 14) 区间深链接里那一刻是**只读入参**,不是可写状态 ----------
-// `?t=` 只在进页面时用一次(把游标落到那一刻),之后由用户在条带上的操作接管。
-// 它必须能被清空(进别的页面时 App 会把它归零),而且**不接受 0/负数/垃圾**
-// —— 一个坏数字不该让游标落到 1970 年。
-S().setRecordAt(1792132127728)
-assert.equal(S().recordAt, 1792132127728)
-S().setRecordAt(0)
-assert.equal(S().recordAt, 0, '归零 = 不定位')
-S().setRecordAt(-5)
-assert.equal(S().recordAt, 0, '非正数一律当"不定位"，不许落到 1970 年')
-console.log('OK 14) 区间深链接:recordAt 可清空、非正数一律不定位')
-
 // ---------- 15) 会话操作不许"假装成功" ----------
 // 原来 `sessionOp` 写成 `if (op === 'close' && st.sessionId) await api.sessionClose(...)`：
 // 条件不成立时**一个请求都不发**，却照样记一条"结束会话"到时间线、再 sync 一次 ——
@@ -332,53 +310,43 @@ console.log('\n全部通过: 19/19')
 // ---------- 16) 树由池派生:池事件直接改树,不等刷新 ----------
 // W2/W6/D9:树不是本地账本,而是 GET /api/sessions 与 session.added/removed 的投影。
 // 这一条钉的是"CLI / 别的浏览器建的会话会出现在树上"的前端半边。
-useStore.setState({ sessionId: null, sessionList: [], sessions: [], screens: {} })
+useStore.setState({ sessionId: null, sessionList: [], sessions: [] })
 S().onEvent({
   type: 'session.added', sessionId: 's-cli-1',
   brief: {
     id: 's-cli-1', ref: '主机109#2', display: '主机109#2', name: 'CLI 建的',
     env: '主机109', ent: '99', n: 2, epoch: 'e1', prog: 'axmt500_wf', state: 'idle',
-    module: '', holdingSeconds: 0, breakpoints: 0, watchdogSeconds: 0, purpose: 'record',
+    module: '', holdingSeconds: 0, breakpoints: 0, watchdogSeconds: 0,
   },
 })
 let tree = S().sessions
 assert.equal(tree.length, 1, 'session.added 应让树当场多一条')
 assert.equal(tree[0].id, 's-cli-1')
-assert.equal(tree[0].purpose, 'record', '用途来自服务端,不许本地猜')
-assert.equal(tree[0].type, 'fep', 'record 会话在界面上算 FEP 那一类(先看画面)')
+assert.equal(tree[0].type, 'debug', '所有会话在界面上都是调试那一类')
 assert.equal(tree[0].ent, '99')
 assert.equal(tree[0].prog, 'axmt500_wf')
 assert.equal(tree[0].ref, '主机109#2')
 
-// 画面挂接事件进 screens(界面会话状态即时更新,不必每秒问)
-S().onEvent({ type: 'screen.attached', sessionId: 's-cli-1', screen: { ref: '主机109#2', tag: 'fep-x', kind: 'rec' } })
-assert.equal(S().screens['s-cli-1']?.attached, true)
-assert.equal(S().screens['s-cli-1']?.tag, 'fep-x')
 
 // 池事件不认"绑定"这一套:我绑的是另一条,收到别人的 added 也照样进树
 useStore.setState({ sessionId: 's-other' })
 S().onEvent({
   type: 'session.added', sessionId: 's-cli-2',
-  brief: { id: 's-cli-2', ref: '主机109#3', env: '主机109', name: 'B', state: 'idle', purpose: 'debug', module: '', prog: '', holdingSeconds: 0, breakpoints: 0, watchdogSeconds: 0 },
+  brief: { id: 's-cli-2', ref: '主机109#3', env: '主机109', name: 'B', state: 'idle', module: '', prog: '', holdingSeconds: 0, breakpoints: 0, watchdogSeconds: 0 },
 })
 assert.ok(S().sessions.some((x) => x.id === 's-cli-2'), '别人的会话也要进树（树是池的投影）')
 assert.equal(S().sessionId, 's-other', '池事件不得改绑定（绑定只能由人点）')
 
-// 缺 purpose 的 brief:按 debug 兜底（恒定键取不到的兜底,不让页面猜）
-S().onEvent({ type: 'session.added', sessionId: 's-cli-3', brief: { id: 's-cli-3', ref: '主机109#4', env: '主机109', name: 'C', state: 'idle', module: '', prog: '', holdingSeconds: 0, breakpoints: 0, watchdogSeconds: 0 } })
-assert.equal(S().sessions.find((x) => x.id === 's-cli-3')?.purpose, 'debug', '缺 purpose 按 debug')
-
-// 移除:树当场少一条, screens 也清掉
+// 移除:树当场少一条
 S().onEvent({ type: 'session.removed', sessionId: 's-cli-1', reason: 'close' })
 assert.ok(!S().sessions.some((x) => x.id === 's-cli-1'), 'session.removed 应让树当场少一条')
-assert.equal(S().screens['s-cli-1'], undefined, '移除会话时它的画面状态也该清掉')
-console.log('OK 16) 树由池派生:added/removed 与 screens 事件即时生效,且不动绑定')
+console.log('OK 16) 树由池派生:added/removed 即时生效,且不动绑定')
 
 
 // ---------- 17) 运行时按会话各存一份(W6):别的会话的状态也记 ----------
 // 单例那套字段只装得下"绑着的那条";多会话下别人起停的事件必须落到它自己的运行时里,
 // 否则树上的状态点只会在下一次 List 时才变(最长一秒多),而面板切回去还得重新问一遍。
-useStore.setState({ sessionId: 's-bind', state: 'stopped', sessionList: [], sessions: [], runtimes: {}, screens: {} })
+useStore.setState({ sessionId: 's-bind', state: 'stopped', sessionList: [], sessions: [], runtimes: {} })
 useStore.setState({ sessionList: [{ id: 's-bind', state: 'stopped', module: '', prog: 'p0', holdingSeconds: 0, breakpoints: 0, watchdogSeconds: 0, mode: 'solo' },
   { id: 's-other', state: 'idle', module: 'asf', prog: 'axmt500_wf', holdingSeconds: 0, breakpoints: 0, watchdogSeconds: 0, mode: 'collab' }] })
 
@@ -400,7 +368,7 @@ assert.equal(S().state, 'running')
 assert.equal(S().runtimes['s-bind']?.state, 'running')
 
 // 池事件:added 落运行时(状态来自 brief),removed 把它删掉
-S().onEvent({ type: 'session.added', sessionId: 's-new', brief: { id: 's-new', ref: '主机109#5', env: '主机109', name: 'N', state: 'loading', purpose: 'debug', module: '', prog: '', holdingSeconds: 0, breakpoints: 0, watchdogSeconds: 0 } })
+S().onEvent({ type: 'session.added', sessionId: 's-new', brief: { id: 's-new', ref: '主机109#5', env: '主机109', name: 'N', state: 'loading', module: '', prog: '', holdingSeconds: 0, breakpoints: 0, watchdogSeconds: 0 } })
 assert.equal(S().runtimes['s-new']?.state, 'loading', 'session.added 要给新会话落一份运行时')
 S().onEvent({ type: 'session.removed', sessionId: 's-new' })
 assert.equal(S().runtimes['s-new'], undefined, '会话没了,运行时也不留')
