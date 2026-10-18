@@ -170,6 +170,12 @@ func newServeCmd() *cobra.Command {
 				var once sync.Once
 				stopWeb := func() { once.Do(cancel) }
 
+				// 界面会话的挂接变化（W2）：注册表由录制进程写，这里盯它、把差异广播出去。
+				// 与回放进度同一个位置（接线层），调试线只收数据、不认识 GDC/代理。
+				if dir := config.LocationsAt(path).DataDir(); dir != "" {
+					debugcli.StartScreenWatch(ctx, dir, debugSrv.PublishScreenChange)
+				}
+
 				svc := web.New(web.Options{
 					DebugFS:    common.WebFrontend(),
 					ConfigPath: path,

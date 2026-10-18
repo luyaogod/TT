@@ -358,6 +358,10 @@ func debugServeForeground(cfg *debug.Config, cfgPath string) error {
 		StopHint: "tt debug serve --stop",
 		APIBase:  APIBaseAtRoot,
 	}, func(ctx context.Context, onReady func(addr string)) error {
+		// 界面会话的挂接变化（W2）：与统一服务同一套接线。
+		if dir := config.LocationsAt(cfgPath).DataDir(); dir != "" {
+			StartScreenWatch(ctx, dir, srv.PublishScreenChange)
+		}
 		ln, addr, err := srv.Listen()
 		if err != nil {
 			return err

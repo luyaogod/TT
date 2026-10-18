@@ -290,6 +290,53 @@ func (m *Manager) emit(ev Event) {
 	}
 }
 
+// 池与界面会话的事件类型（W2）。字符串只在这里出现一次，别的文件引用常量。
+//
+// 为什么这四类要有自己的事件，而不是靠副作用（`log` / `state`）判：
+//   - 前端要维持一棵**由服务端派生**的树（D9）。靠"看到一条带新 id 的 log 就当池变了"
+//     在删除那一半完全失效（删的时候没有任何事件），于是树里留死条目、点进去是空的。
+//   - 这四类都是"叫一声"：权威始终是 `GET /api/sessions` 与 `GET …/screen`（见 W2）。
+const (
+	EvSessionAdded   = "session.added"
+	EvSessionRemoved = "session.removed"
+	EvScreenAttached = "screen.attached"
+	EvScreenDetached = "screen.detached"
+)
+
+// emitAdded 广播"池里多了一条"。**必须在会话已登记之后调**：收到的人会立刻按 id 取快照。
+func (m *Manager) emitAdded(s *Session) {
+	if s == nil || s.ID == "" {
+		return
+	}
+	b := m.briefOf(s)
+	m.emit(Event{Type: EvSessionAdded, SessionID: s.ID, Brief: &b})
+}
+
+// emitRemoved 广播"池里少了一条"。**必须在 delete 之后调**。
+func (m *Manager) emitRemoved(id, reason string) {
+	if id == "" {
+		return
+	}
+	m.emit(Event{Type: EvSessionRemoved, SessionID: id, Reason: reason})
+}
+
+// PublishScreenChange 广播界面会话的挂接变化（W2 的 screen.attached / detached）。
+//
+// 谁调它：接线层（`internal/cli/serve.go` 的注册表比对循环）—— 界面会话由**外部进程**
+// 登记在 `.tt-fep.json`，调试服务不写它，也不认识 GDC/代理（H3）。做法同
+// `PublishRecProgress`：只把数据递进来，由本函数发事件。
+func (m *Manager) PublishScreenChange(attached bool, st ScreenState) {
+	if st.Ref == "" {
+		return
+	}
+	ev := Event{Type: EvScreenDetached, Screen: &st, Reason: st.Reason}
+	if attached {
+		ev.Type = EvScreenAttached
+		ev.Reason = ""
+	}
+	m.emit(ev)
+}
+
 // Events 返回最近 n 条事件(按时间升序;n<=0 返回全部缓冲)。
 func (m *Manager) Events(n int) []Event {
 	m.evMu.Lock()
@@ -503,6 +550,10 @@ func (m *Manager) prepareSessionOn(cfg *Config, module, prog, runProg, launchRef
 	}
 	m.sessions[sess.ID] = sess
 	m.mu.Unlock()
+
+	// 已登记 → 广播"多了一条"（W2）。放在 unlock 之后：briefOf 要拿会话锁，
+	// 而 emit 只碰事件的锁，两者不重叠，但"登记完成"这个语义必须在锁外表达。
+	m.emitAdded(sess)
 
 	// 新会话已登记 —— 这时才收口那条换了目标/换了名字的空闲宿主。
 	// 它是空闲的，没有在跑的活要保护；而且它从池里移除的那一刻，它的别名与序号
@@ -1193,11 +1244,29 @@ func decideHost(prev *Session, cfg *Config, wantName string) hostDecision {
 	return hostReuse
 }
 
-// Remove 移除已结束的会话
+// Remove 移除已结束的会话。
+//
+// 它**一定广播** `session.removed`（W2）：树的另一半（删除）没有别的信号可用。
+// 知道原因（close / exit / restart / switch）的调用方请用 `RemoveAs`，事件里会带上它。
 func (m *Manager) Remove(id string) {
+	m.RemoveAs(id, "removed")
+}
+
+// RemoveAs 移除会话并广播原因（W2 的 reason 取值：close|exit|restart|switch|removed）。
+//
+// 两步都要：先从池里删（`GET /api/sessions` 立刻不再列它），再广播（在删之后发 ——
+// 收到的人若去 GET 它，本来就该 404，这与"它已经不在了"是同一件事）。
+func (m *Manager) RemoveAs(id, reason string) {
+	if id == "" {
+		return
+	}
 	m.mu.Lock()
+	_, existed := m.sessions[id]
 	delete(m.sessions, id)
 	m.mu.Unlock()
+	if existed {
+		m.emitRemoved(id, reason)
+	}
 }
 
 // CreateSessionOn 新建并登记一个纯宿主会话(module/prog 为空,登录后回到 idle),
@@ -1232,6 +1301,7 @@ func (m *Manager) CreateSessionOn(cfg *Config, name, purpose string) (*Session, 
 	}
 	m.sessions[sess.ID] = sess
 	m.mu.Unlock()
+	m.emitAdded(sess) // W2：已登记 → 广播"多了一条"
 	return sess, nil
 }
 

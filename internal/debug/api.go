@@ -470,16 +470,32 @@ func (s *Server) emitAction(r *http.Request, sess *Session, action, text string)
 //
 // 闸门是会话级的静态标志,不做逐命令协商:协作模式下只有 AI 能写,
 // 纯人工模式下只有人能写。切换靠界面上的按钮,不进这条路径。
+// sessOfWrite 写操作的会话入口 = sessOf + **交互式**调试那道闸门（W7 的 CapInteractive）。
+// 被拒时已写好响应并返回 nil。
 func (s *Server) sessOfWrite(w http.ResponseWriter, r *http.Request) *Session {
+	return s.sessOfWriteCap(w, r, CapInteractive)
+}
+
+// sessOfWriteCap 是写操作的会话入口，按**能力类**判（W7）。
+//
+// 分类的好处：`record` 用途只拒交互式调试，编排（起作业 / 起界面会话）与收尾照旧 ——
+// 录制进程正是靠编排那两类才跑得起来的。判据本身仍只有 `Session.MayDo` 一处。
+func (s *Server) sessOfWriteCap(w http.ResponseWriter, r *http.Request, cap Capability) *Session {
 	sess := s.sessOf(w, r)
 	if sess == nil {
 		return nil
 	}
-	if actor := actorOf(r); !sess.MayWrite(actor) {
-		fail(w, 403, fmt.Errorf("%s", writeDeniedMsg(sess.Mode(), actor)))
+	actor := actorOf(r)
+	if sess.MayDo(cap, actor) {
+		return sess
+	}
+	// 用途拒（record）与模式拒的文案不同，都得能照做。
+	if cap == CapInteractive && sess.Purpose() == PurposeRecord {
+		writeCandidateFailure(w, http.StatusForbidden, target.CodeReadOnly, ReadOnlyMsg(sess.Purpose()), nil)
 		return nil
 	}
-	return sess
+	fail(w, 403, fmt.Errorf("%s", writeDeniedMsg(sess.Mode(), actor)))
+	return nil
 }
 
 // ---------- 会话 ----------
@@ -807,7 +823,7 @@ func (s *Server) hSnapshot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) hQuit(w http.ResponseWriter, r *http.Request) {
-	sess := s.sessOfWrite(w, r)
+	sess := s.sessOfWriteCap(w, r, CapOwn)
 	if sess == nil {
 		return
 	}
@@ -820,7 +836,7 @@ func (s *Server) hQuit(w http.ResponseWriter, r *http.Request) {
 	s.emitAction(r, sess, "session.quit", "结束本轮调试")
 	kept := sess.State() != StateExit
 	if !kept {
-		s.mgr.Remove(sess.ID)
+		s.mgr.RemoveAs(sess.ID, "exit")
 	}
 	writeJSON(w, 200, map[string]any{"ok": true, "kept": kept, "state": "idle"})
 }
@@ -889,29 +905,68 @@ func (s *Server) bootToIdle(ns *Session, ctx context.Context) {
 		log.Printf("[debug] 会话 %s(%s) 登录失败: %v", ns.ID, ns.EnvName(), err)
 		s.mgr.emit(Event{Type: "log", SessionID: ns.ID, Text: "会话连接失败: " + err.Error()})
 		ns.ForceExit()
-		s.mgr.Remove(ns.ID)
+		s.mgr.RemoveAs(ns.ID, "exit")
 	}
 }
 
 // hSessionClose 「结束会话」:结束当前 debug 并彻底断开连接(与设置默认解耦)
+// hSessionClose 「结束会话」：按归属把这条 SSH 会话名下的东西收干净（W3）。
+//
+// 顺序不能反（systemd 的 stop sequence，H5 幂等）：
+//
+//	① 先收界面会话：GDC / 代理 / 注入 / 录制进程都归它（StopTag：先请它自退 → 等 ≤8s
+//	   → 只杀登记过的 pid → 摘登记）。这一条是 D5 的落点 —— 从前只断调试，GDC 与代理留着，
+//	   开几条就把桌面堆满、端口也回不来。
+//	② 再断调试（closeNow：interrupt → 等到 stopped → quit → forceExit）。
+//	③ 最后从池里移除（内部广播 session.removed，reason=close）。
+//
+// 两处刻意的取舍：
+//   - 收界面会话失败**仍然继续**断 SSH 会话，原因进 `warnings`：不假装成功，也不因为
+//     收尾失败把会话留在池里（留下更糟：下一次同一个别名/端口还会撞它）。
+//   - `screen.detached` 不在这里发：注册表的变化由接线层的循环广播（`StartScreenWatch`，
+//     ≤400ms）。一处发声，避免"handler 发一次、循环再发一次"的重复事件。
 func (s *Server) hSessionClose(w http.ResponseWriter, r *http.Request) {
-	sess := s.sessOfWrite(w, r)
+	sess := s.sessOfWriteCap(w, r, CapOwn)
 	if sess == nil {
 		return
+	}
+	ref := refOf(sess.EnvName(), sess.Seq())
+	var warnings []string
+	stoppedTag := ""
+	if info, attached := s.lookupScreen(ref); attached {
+		tag, _ := info["tag"].(string)
+		switch {
+		case s.screenStopper == nil:
+			warnings = append(warnings, fmt.Sprintf(
+				"这条会话挂着界面会话（%s），但服务没有接入停止器：GDC/代理/录制进程要手动收（tt recording stop %s）", tag, tag))
+		default:
+			if err := s.screenStopper(ref, tag); err != nil {
+				warnings = append(warnings, fmt.Sprintf("收界面会话失败（%s）：%v", tag, err))
+			} else {
+				stoppedTag = tag
+			}
+		}
 	}
 	if err := sess.Close(); err != nil {
 		fail(w, 500, err)
 		return
 	}
 	s.emitAction(r, sess, "session.close", "关闭会话")
-	s.mgr.Remove(sess.ID)
-	writeJSON(w, 200, map[string]any{"ok": true, "state": "exit"})
+	s.mgr.RemoveAs(sess.ID, "close")
+	resp := map[string]any{"ok": true, "state": "exit"}
+	if stoppedTag != "" {
+		resp["stoppedScreen"] = map[string]any{"tag": stoppedTag}
+	}
+	if len(warnings) > 0 {
+		resp["warnings"] = warnings
+	}
+	writeJSON(w, 200, resp)
 }
 
 // hSessionRestart 「重启会话」:断开并重连同环境,回到 idle 待启动。
 // ent = 本次要用的企业编号(同 hSessionSwitch;空 = 沿用登录 shell 的 $TOPENT)。
 func (s *Server) hSessionRestart(w http.ResponseWriter, r *http.Request) {
-	sess := s.sessOfWrite(w, r)
+	sess := s.sessOfWriteCap(w, r, CapOwn)
 	if sess == nil {
 		return
 	}
@@ -933,7 +988,7 @@ func (s *Server) hSessionRestart(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err)
 		return
 	}
-	s.mgr.Remove(id)
+	s.mgr.RemoveAs(id, "restart")
 	cfg := s.envCfgFor(env)
 	if cfg == nil {
 		// 原环境已被删除 ⇒ **不再退回某个"默认"环境**(默认环境这个概念已移除):
@@ -1011,7 +1066,9 @@ func entValueOf(value string, clear bool) string {
 func (s *Server) applyTopent(w http.ResponseWriter, r *http.Request, value string) {
 	req := struct{ Value string }{Value: value}
 	req.Value = trimTopent(req.Value)
-	sess := s.sessOfWrite(w, r)
+	// 设 ENT 属于**编排**（CapSetup）：录制进程启动时就要设它。拍在交互式那一类里
+	// 会让 record 会话连企业编号都设不上 —— W7 分类正是为这种差别存在的。
+	sess := s.sessOfWriteCap(w, r, CapSetup)
 	if sess == nil {
 		return
 	}
@@ -1136,12 +1193,12 @@ func (s *Server) hSessionSwitch(w http.ResponseWriter, r *http.Request) {
 				s.mgr.emit(Event{Type: "log", SessionID: cur.ID,
 					Text: fmt.Sprintf("切换会话到 %s：收掉旧的命名会话（%s），按 %s 重建", req.Env, cur.Name(), name)})
 				_ = cur.Close()
-				s.mgr.Remove(cur.ID)
+				s.mgr.RemoveAs(cur.ID, "switch")
 			}
 		} else {
 			s.mgr.emit(Event{Type: "log", SessionID: cur.ID, Text: fmt.Sprintf("切换会话到 %s,断开当前会话", req.Env)})
 			_ = cur.Close()
-			s.mgr.Remove(cur.ID)
+			s.mgr.RemoveAs(cur.ID, "switch")
 		}
 	}
 	// 「连到该环境」= 新建一条会话：别名**不继承**（C3.7b / Q19：别名随旧会话消失即释放；
@@ -2189,7 +2246,7 @@ func (s *Server) hWSLogDebug(w http.ResponseWriter, r *http.Request) {
 		} else {
 			s.mgr.emit(Event{Type: "log", SessionID: cur.ID, Text: fmt.Sprintf("重放调试启动,断开当前会话(环境切换为 %s)", s.cfg.EnvName())})
 			_ = cur.Close()
-			s.mgr.Remove(cur.ID)
+			s.mgr.RemoveAs(cur.ID, "switch")
 		}
 	}
 	sess, replayWarn, err := s.mgr.LaunchReplay(item, content, req.Request, req.FGLServer, name)
@@ -2423,8 +2480,16 @@ func (s *Server) PublishRecProgress(id string, n, total int, result string) {
 	})
 }
 
-// wsScope 解出这次订阅的**范围**（契约 6.1 / C6.2 / C6.4 / C6.7 / Q11）。
+// PublishScreenChange 把界面会话的挂接变化广播出去（W2 / W4）。
 //
+// 谁调它：接线层（`internal/cli/serve.go` 与 `tt debug serve`）—— 界面会话由**外部进程**
+// 登记在 `.tt-fep.json`，本包既不写它、也不认识 GDC/代理（H3）。做法同 `PublishRecProgress`：
+// 只递数据，由本包发事件。
+func (s *Server) PublishScreenChange(attached bool, st ScreenState) {
+	s.mgr.PublishScreenChange(attached, st)
+}
+
+// wsScope 解出这次订阅的**范围**（契约 6.1 / C6.2 / C6.4 / C6.7 / Q11）。
 //	?all=1               → 全部（总览台显式订阅全部）→ sessionID = ""
 //	?session=<原始句柄>  → 只看那一条 → sessionID = 那个 id
 //	两个都不给           → 等价 `all=1`：**今天的 `/api/ws` 就是"全部事件"**
@@ -2688,7 +2753,7 @@ func (s *Server) SetScreenStarter(fn ScreenStarter) { s.screenStarter = fn }
 // 三条前置与 CLI 的挂靠录制同一套（见 cli/fep 的 bindRecSession）：空闲、有名字、作业点名。
 // 理由也一样 —— 作业在跑时指 FGLSERVER 不生效；没名字挂不回来；不点名作业就没什么可录。
 func (s *Server) hSessionScreenStart(w http.ResponseWriter, r *http.Request) {
-	sess := s.sessOfWrite(w, r)
+	sess := s.sessOfWriteCap(w, r, CapSetup)
 	if sess == nil {
 		return
 	}
@@ -2751,7 +2816,7 @@ func (s *Server) SetScreenStopper(fn ScreenStopper) { s.screenStopper = fn }
 // 没挂着也算成功（`detached:false`）：收尾是**幂等**的 —— 重复点"停止"不该报错，
 // 更不该把别人的画面收掉（tag 只从这条会话的挂接里取）。
 func (s *Server) hSessionScreenStop(w http.ResponseWriter, r *http.Request) {
-	sess := s.sessOfWrite(w, r)
+	sess := s.sessOfWriteCap(w, r, CapOwn)
 	if sess == nil {
 		return
 	}
@@ -2782,7 +2847,7 @@ func (s *Server) hSessionScreenStop(w http.ResponseWriter, r *http.Request) {
 //
 // 前置：会话必须**空闲**（作业在跑时再起一个，等于同一台 shell 上叠两个客户端）。
 func (s *Server) hSessionJob(w http.ResponseWriter, r *http.Request) {
-	sess := s.sessOfWrite(w, r)
+	sess := s.sessOfWriteCap(w, r, CapSetup)
 	if sess == nil {
 		return
 	}

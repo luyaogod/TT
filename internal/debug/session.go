@@ -146,6 +146,33 @@ type Event struct {
 	// （那份逐行 flush 的 jsonl 才是唯一真相）。这样即使前端漏注册这个类型
 	// （实测踩过：自造的事件类型被前端静默丢掉），退化成"晚几百毫秒"，而不是"进度不动"。
 	Progress *RecProgress `json:"progress,omitempty"`
+	// Brief 是 `session.added` 带的那条会话的投影（W2）。用**同一份** `SessionBrief`：
+	// 客户端收到就能直接入索引，不必再 GET 一次（少一次往返、也少一个"列表还没刷到"的窗口）。
+	Brief *SessionBrief `json:"brief,omitempty"`
+	// Reason 是 `session.removed` / `screen.detached` 的原因（W2）：
+	// close | exit | restart | switch | stop | stale | removed
+	Reason string `json:"reason,omitempty"`
+	// Screen 是界面会话的挂接状态（W2 的 `screen.attached` / `screen.detached`）。
+	Screen *ScreenState `json:"screen,omitempty"`
+}
+
+// ScreenState 是界面会话挂接状态的**只读投影**（W2 / W4）。
+//
+// 为什么调试线自己有一份形状：`screen.*` 事件要带得走，而事件是调试线发的；
+// 但调试线**不许** import `internal/fep`（H3）。所以接线层把注册表读成这个形状递进来，
+// 调试线只负责把它广播出去 —— 与 `PublishRecProgress` 同一套做法。
+type ScreenState struct {
+	Ref        string `json:"ref"`
+	Tag        string `json:"tag"`
+	Kind       string `json:"kind"` // rec | replay
+	Env        string `json:"env,omitempty"`
+	Prog       string `json:"prog,omitempty"`
+	GDCPid     int    `json:"gdcPid,omitempty"`
+	ProxyPort  int    `json:"proxyPort,omitempty"`
+	InjectPort int    `json:"injectPort,omitempty"`
+	OwnerPID   int    `json:"ownerPid,omitempty"`
+	// Reason 只在 `screen.detached` 上有意义：stop | exit | stale
+	Reason string `json:"reason,omitempty"`
 }
 
 // RecProgress 是一条回放进度事件（见 Event.Progress）。
@@ -454,6 +481,52 @@ func (s *Session) SetMode(m string) {
 	s.mu.Lock()
 	s.mode = m
 	s.mu.Unlock()
+}
+
+// 能力类（W7）：一次写操作属于哪一类，决定它受哪些轴约束。
+//
+// 为什么必须分类：`record` 用途要"只读"，但录制进程自己还要靠"起作业 + 起界面会话"
+// 才跑得起来。一刀切（record 什么都不许写）会把它自己挡在门外 —— 真机第一次挂画面
+// 就是这么失败的（报"纯人工模式:AI 不可操作"，而真正原因是用途和动作类没分开）。
+type Capability int
+
+const (
+	// CapInteractive 交互式调试：控制 / 断点 / 变量 / raw / 定位 / 校准。
+	CapInteractive Capability = iota
+	// CapSetup 编排：在会话里起作业、设 ENT、起/停界面会话。
+	CapSetup
+	// CapOwn 收尾：close / quit / restart / 停界面会话。**任何用途都允许**。
+	CapOwn
+)
+
+// MayDo 回答"这次请求能不能对这条 SSH 会话做这一类写"。
+//
+// 三个轴（W7）：用途 `purpose` × 模式 `mode` × 角色 `actor`。
+//   - 收尾（CapOwn）任何用途都放行：收不掉比收错了更糟（H5 幂等收尾）。
+//   - 纯录制（record）只拒**交互式**那一类；编排仍按模式判（录制进程就是这么起作业的）。
+//   - 其余沿用既有模式闸门（solo：非 ai 可写；collab：只有 ai 可写）。
+//
+// `Bare()`（测试夹具：没有 pty/conn 的会话）一律放行 —— 与 sessOfWriteGlobal 同一口径。
+func (s *Session) MayDo(cap Capability, actor string) bool {
+	// 收尾先放行：**任何用途、任何模式、任何角色**都收得掉（H5：收不掉比收错了更糟）。
+	if cap == CapOwn {
+		return true
+	}
+	// 纯录制的交互式写**先于**模式闸门拦掉：`/sessions/new` 建出来的录制会话
+	// 起跑前 prog/module 都还是空的，而它从出生起就不该接受调试命令。
+	if cap == CapInteractive && s.Purpose() == PurposeRecord {
+		return false
+	}
+	return s.MayWrite(actor)
+}
+
+// ReadOnlyMsg 是 `SESSION_READONLY` 的文案（W7）：必须能照着做。
+func ReadOnlyMsg(purpose string) string {
+	if purpose == PurposeRecord {
+		return "这条 SSH 会话的用途是纯录制（record）：页面不提供编辑器，调试命令一律不发（防误操作）。" +
+			"要调试请另建一条 debug 会话；要收掉这一轮请在 FEP 面板点「停止录制」，或结束整条会话。"
+	}
+	return "这条 SSH 会话当前不接受该写操作"
 }
 
 // ---------- 会话身份（契约 C5.3 / Q22：n / name / epoch；ref 由环境 + n 拼） ----------
