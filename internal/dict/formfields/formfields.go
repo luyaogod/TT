@@ -6,7 +6,7 @@ package formfields
 //
 // 三条硬约束（都在代码里，不靠注释）：
 //
-//  1. **不复制解析器**：`.42f` 一律交给 `fep.ParseForm42F`（契约 C1）。本包只做
+//  1. **不复制解析器**：`.42f` 一律交给 `form42f.ParseForm42F`（契约 C1）。本包只做
 //     "字段表 × 字典"的合并与路径定位 —— `tt form show` 的输出契约（C5.2）一个键都不动，
 //     本包的 JSON 键是**另一套**（见 README）。
 //  2. **不猜**（契约 A15 / A18）：中文名只有两种来源 —— 字典 `dzeb_t`/`dzebl_t` 给出的
@@ -23,7 +23,7 @@ import (
 	"strings"
 
 	"tt/internal/dict/db"
-	"tt/internal/fep"
+	"tt/internal/form42f"
 )
 
 // ── 状态常量：中文名"有没有"必须写在脸上 ─────────────────────────────────────
@@ -161,7 +161,7 @@ func LoadForm(root, module, form string, namer FieldNamer) (*Table, error) {
 	if err != nil {
 		return nil, fmt.Errorf("读 %s 失败: %w", path, err)
 	}
-	f, err := fep.ParseForm42F(form, string(b))
+	f, err := form42f.ParseForm42F(form, string(b))
 	if err != nil {
 		// 解析失败归 FORM_UNKNOWN（契约 C1.7 / C4.2）—— 原样上传，由命令层定退出码
 		return nil, fmt.Errorf("%s 不是可用的 .42f: %w", path, err)
@@ -175,7 +175,7 @@ func LoadForm(root, module, form string, namer FieldNamer) (*Table, error) {
 
 // Merge 把解析结果并成字段表。**纯函数**（不读盘、不连库，只走调用方给的 namer），
 // 所以"不猜"这条规矩可以在合成夹具上钉死。
-func Merge(f *fep.F42Form, module string, namer FieldNamer) *Table {
+func Merge(f *form42f.F42Form, module string, namer FieldNamer) *Table {
 	tab := &Table{
 		Module:      module,
 		Form:        string(f.Name),
@@ -234,7 +234,7 @@ func Merge(f *fep.F42Form, module string, namer FieldNamer) *Table {
 // 这**不是**启发式：没有按名字反推表名（"b_xmda001 大概是 xmda_t"那种），
 // 表集合是表单自己列的，字段名是 `cmt_*`/`lbl_*`/`colName` 明写的；两张表给出不同名字时
 // 一律判 `ambiguous`（见 resolve）。
-func formTables(f *fep.F42Form) []string {
+func formTables(f *form42f.F42Form) []string {
 	set := map[string]bool{}
 	add := func(tab string) {
 		tab = strings.TrimSpace(tab)
@@ -277,7 +277,7 @@ func newTableCache(namer FieldNamer, tab *Table) *tableCache {
 // resolve 返回 (中文名, 位置, 未解析原因)；中文名为空串即"没解析到"。
 //
 // 判定只看"字典给不给名字"与"名字是否唯一"，不看任何启发式（A15/A18）。
-func (c *tableCache) resolve(fld fep.F42Field, tables []string) (label, from, reason string) {
+func (c *tableCache) resolve(fld form42f.F42Field, tables []string) (label, from, reason string) {
 	if c.namer == nil {
 		return "", "", ReasonNoDict
 	}
@@ -346,7 +346,7 @@ func (c *tableCache) rowsOf(table string) []db.TableInfo {
 //
 // 注意：`colName` **原样**不当键用（字典 `dzeb_t` 里存的是物理字段名 `xmda001`）——
 // 键取错了最多查不到（→ 未解析），永远不会变成"编出来的中文名"。
-func candidateKeys(fld fep.F42Field) []string {
+func candidateKeys(fld form42f.F42Field) []string {
 	var out []string
 	add := func(s string) {
 		s = strings.TrimSpace(s)

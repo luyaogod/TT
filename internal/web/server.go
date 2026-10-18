@@ -23,7 +23,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -31,7 +30,6 @@ import (
 	"tt/internal/dbconfig"
 	"tt/internal/designer"
 	"tt/internal/erpdb"
-	"tt/internal/fep"
 	"tt/internal/host"
 )
 
@@ -419,35 +417,9 @@ func (s *Server) hHostsPut(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	// 改名 = 搬家（先搬，后删；顺序要紧：**搬不动的绝不删**）。
-	// 失败只记日志：配置已经落盘成功，但必须让用户看见 —— 那句"没有删任何东西"是关键。
-	if len(renamed) > 0 || len(removedEnvs) > 0 {
-		lib := fep.NewLibrary(filepath.Dir(path))
-		for _, rn := range renamed {
-			n, rerr := lib.RenameEnv(rn.From, rn.To)
-			if rerr != nil {
-				log.Printf("[tt] 环境 %s 改名为 %s，但它的录制库没搬过去（**没有删任何东西**）: %v",
-					rn.From, rn.To, rerr)
-				continue
-			}
-			if n > 0 {
-				log.Printf("[tt] 环境 %s 改名为 %s：把 %d 份录制搬了过去", rn.From, rn.To, n)
-			}
-		}
-		// 级联清理：被删掉的那些环境，把它们的录制库一起收掉。
-		// 失败只记日志：配置已经落盘成功，但必须让用户看见 —— 否则就成了
-		// "以为清了、其实还留着几十 MB 业务数据"。
-		for _, name := range removedEnvs {
-			files, bytes, derr := lib.RemoveEnv(name)
-			if derr != nil {
-				log.Printf("[tt] 环境 %s 已移除，但它的录制库没清干净: %v", name, derr)
-				continue
-			}
-			if files > 0 {
-				log.Printf("[tt] 环境 %s 已移除：级联删掉它名下 %d 份录制文件（%d 字节）", name, files, bytes)
-			}
-		}
-	}
+	// 录制库的改名/级联清理已随 FEP 移除：这里只剩配置本身的落盘。
+	_ = renamed
+	_ = removedEnvs
 	// 通知持有配置内存态的子系统（如调试服务）重新加载。
 	// 失败只记日志：配置已经落盘成功，重新加载失败不该把一个成功的写报成失败，
 	// 但必须让用户看见 —— 否则就成了"保存成功但没生效"。

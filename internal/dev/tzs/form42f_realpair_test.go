@@ -39,7 +39,7 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/fep"
+	"tt/internal/form42f"
 )
 
 const (
@@ -76,7 +76,7 @@ func TestForm42FRealPair(t *testing.T) {
 		t.Fatalf("读 %s 失败：%v", f42Path, err)
 	}
 	formName := formNameFrom42F(f42Path)
-	want, err := fep.ParseForm42F(formName, string(b))
+	want, err := form42f.ParseForm42F(formName, string(b))
 	if err != nil {
 		t.Fatalf("解析 %s 失败（样本在、但不是合法 .42f）：%v", f42Path, err)
 	}

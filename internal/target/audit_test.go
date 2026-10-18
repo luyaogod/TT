@@ -36,7 +36,7 @@ func TestAuditEntryJSONLineCarriesWhoWhichWhat(t *testing.T) {
 	}
 }
 
-// TestAuditEntryFillsInTime 钉住"没给时间就补当前时间"（与 `internal/fep.AppendAudit` 同一口径）：
+// TestAuditEntryFillsInTime 钉住"没给时间就补当前时间"（与 `internal/form42f.AppendAudit` 同一口径）：
 // 审计行不许出现零值时间 —— 那会让"什么时候干的"这一问没有答案。
 func TestAuditEntryFillsInTime(t *testing.T) {
 	e := NewAuditEntry("agent", "恒烁正式区#1", "quit", time.Time{})

@@ -25,7 +25,7 @@ import (
 
 	"tt/internal/cli/dev/common"
 	"tt/internal/dev/tzs"
-	"tt/internal/fep"
+	"tt/internal/form42f"
 )
 
 // tzsFormCheckUsage 是这个动词的帮助（`tt dev tzs formcheck --help`）。
@@ -79,7 +79,7 @@ func cmdTzsFormCheck(args []string) int {
 		return common.Fail(tzsCheckError{Msg: "读不到 .42f：" + err.Error()}, *asJSON)
 	}
 	form := common.StripIdentitySuffix(*f42Path) // 表单名按文件名（`WITH FORM` 那一侧的 scope）
-	want, err := fep.ParseForm42F(form, string(text))
+	want, err := form42f.ParseForm42F(form, string(text))
 	if err != nil {
 		return common.Fail(tzsCheckError{Msg: "解析 .42f 失败：" + err.Error()}, *asJSON)
 	}

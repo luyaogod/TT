@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/fep"
+	"tt/internal/form42f"
 	"tt/internal/testkit"
 )
 
@@ -46,7 +46,7 @@ func vformSource() *fakeSource {
 // ── 比对核心（纯函数）────────────────────────────────────────────────────────
 
 func TestCompareCounts(t *testing.T) {
-	f, err := fep.ParseForm42F("vform", vformXML)
+	f, err := form42f.ParseForm42F("vform", vformXML)
 	if err != nil {
 		t.Fatalf("解析夹具失败: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestCompareCounts(t *testing.T) {
 }
 
 func TestCompareAllConsistent(t *testing.T) {
-	f, err := fep.ParseForm42F("vform", vformXML)
+	f, err := form42f.ParseForm42F("vform", vformXML)
 	if err != nil {
 		t.Fatalf("解析夹具失败: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestCompareAllConsistent(t *testing.T) {
 }
 
 func TestCompareAmbiguousNotInCandidates(t *testing.T) {
-	f, err := fep.ParseForm42F("vform", vformXML)
+	f, err := form42f.ParseForm42F("vform", vformXML)
 	if err != nil {
 		t.Fatalf("解析夹具失败: %v", err)
 	}
@@ -232,25 +232,10 @@ func TestFormVerifyFetchFailureIsNonZero(t *testing.T) {
 	}
 }
 
-func TestFormVerifyRecordingDirWithoutRecordingsIsNonZero(t *testing.T) {
-	tempDataDir(t)
-	injectSource(t, vformSource())
-
-	empty := t.TempDir()
-	_, err := runForm(t, "verify", "--env", "demoenv", "--module", "axm", "--form", "vform",
-		"--window", "w_vdemo", "--recording", empty)
-	if err == nil {
-		t.Fatal("录制目录里没有录制件必须非 0 退出（不许当成零可比）")
-	}
-	if got := exitOf(t, err); got != exitFormUnknown {
-		t.Errorf("退出码 = %d, want %d", got, exitFormUnknown)
-	}
-}
-
 // 反证：把「比对」退化成「只数不比」这条测试必须红 —— 不一致一定要逐条留下，
 // 且在 JSON 里看得见（agent 拿到的是 JSON，不是 Go 结构体）。
 func TestCompareNeverSwallowsMismatch(t *testing.T) {
-	f, err := fep.ParseForm42F("vform", vformXML)
+	f, err := form42f.ParseForm42F("vform", vformXML)
 	if err != nil {
 		t.Fatalf("解析夹具失败: %v", err)
 	}

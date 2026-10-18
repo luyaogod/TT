@@ -41,7 +41,7 @@ func NewAuditEntry(actor, ref, action string, at time.Time) AuditEntry {
 
 // JSONLine 把这条审计序列化成**一行**（不含换行），字段顺序固定。
 //
-// 没给时间就补当前时间（与 `internal/fep.AppendAudit` 同一口径）：审计行不许出现零值时间。
+// 没给时间就补当前时间（与 `internal/form42f.AppendAudit` 同一口径）：审计行不许出现零值时间。
 func (e AuditEntry) JSONLine() (string, error) {
 	if e.Time.IsZero() {
 		e.Time = time.Now()

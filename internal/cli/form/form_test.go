@@ -136,7 +136,7 @@ func codeOf(t *testing.T, err error) string {
 // 两份夹具迟早会漂移成"看起来对、其实对不上"。
 func fixtureBasic(t *testing.T) string {
 	t.Helper()
-	p := filepath.Join("..", "..", "fep", "testdata", "form42f", "basic.xml")
+	p := filepath.Join("..", "..", "form42f", "testdata", "form42f", "basic.xml")
 	b, err := os.ReadFile(p)
 	if err != nil {
 		t.Fatalf("读合成夹具失败: %v", err)

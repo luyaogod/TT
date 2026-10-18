@@ -18,7 +18,7 @@ import (
 	"testing"
 
 	"tt/internal/dict/db"
-	"tt/internal/fep"
+	"tt/internal/form42f"
 )
 
 // ── 假字典（不连真机、不读 SQLite） ──────────────────────────────────────────
@@ -92,9 +92,9 @@ const synthFormTwoTables = `<?xml version="1.0" encoding="UTF-8"?>
 </Form>`
 
 // parseSynth 解析合成夹具（复用 fep 的解析器，绝不另写一份解析）。
-func parseSynth(t *testing.T, text string) *fep.F42Form {
+func parseSynth(t *testing.T, text string) *form42f.F42Form {
 	t.Helper()
-	f, err := fep.ParseForm42F("demofm", text)
+	f, err := form42f.ParseForm42F("demofm", text)
 	if err != nil {
 		t.Fatalf("解析合成夹具失败: %v", err)
 	}

@@ -4,7 +4,7 @@ package drawio
 //
 // 契约面（唯一口径）：`.agents/plan/tt-genero-formdef-contract.md` 的 C1（`.42f` 解析）
 // 与 A15/A18（拿不准就不猜、启发式不得参与判定）。本文件**不重解析 XML** —— 解析由
-// `internal/fep.ParseForm42F` 负责，这里只消费它的结果（`F42Field` / `RecordViews`）。
+// `internal/form42f.ParseForm42F` 负责，这里只消费它的结果（`F42Field` / `RecordViews`）。
 //
 // 三条设计口径，改这里之前先读：
 //
@@ -33,7 +33,7 @@ import (
 	"sort"
 	"strings"
 
-	"tt/internal/fep"
+	"tt/internal/form42f"
 )
 
 // DefaultProtoCellPx 是一个 `.42f` 网格单位画成多少 drawio 像素。
@@ -184,7 +184,7 @@ func (p *Proto) Field(colName string) *ProtoField {
 // ProtoFrom42FFile 读一个 `.42f` 文件并展开成原型数据。
 //
 // 表单名取文件名（去掉 `.42f`）：`.42f` 里的 `<Form name>` 实测会写成
-// `axmt500_wf.tmp`（编译中间名），不能当 scope（见 `fep.F42Form.DeclaredName`）。
+// `axmt500_wf.tmp`（编译中间名），不能当 scope（见 `form42f.F42Form.DeclaredName`）。
 func ProtoFrom42FFile(path string, opts *ProtoOptions) (*Proto, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -201,7 +201,7 @@ func ProtoFrom42FFile(path string, opts *ProtoOptions) (*Proto, error) {
 func ProtoFrom42F(form, text string, opts *ProtoOptions) (*Proto, error) {
 	o := normalizeProtoOptions(opts)
 
-	ff, err := fep.ParseForm42F(form, text)
+	ff, err := form42f.ParseForm42F(form, text)
 	if err != nil {
 		return nil, err
 	}
@@ -312,7 +312,7 @@ func ProtoFrom42F(form, text string, opts *ProtoOptions) (*Proto, error) {
 }
 
 // makeProtoField42F 决定一条字段的形状、尺寸与文字。
-func makeProtoField42F(i int, f *fep.F42Field, cat *Catalog, o protoOpts, p *Proto) ProtoField {
+func makeProtoField42F(i int, f *form42f.F42Field, cat *Catalog, o protoOpts, p *Proto) ProtoField {
 	pf := ProtoField{
 		Index: i, ColName: string(f.ColName), FieldID: int(f.FieldID),
 		Tag: f.Tag, Widget: f.Widget,
@@ -465,7 +465,7 @@ func outerBase42F(cat *Catalog, shape string) string {
 // protoTabs42F 把 RecordView 的链接翻成分组：tabName → 它链接到的 colName。
 //
 // 只报链接里写了的东西：链接里没有的字段一律不推测归属（A15）。
-func protoTabs42F(ff *fep.F42Form, fields []ProtoField) []ProtoTab {
+func protoTabs42F(ff *form42f.F42Form, fields []ProtoField) []ProtoTab {
 	known := make(map[string]bool, len(fields))
 	for i := range fields {
 		known[fields[i].ColName] = true

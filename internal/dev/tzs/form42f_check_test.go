@@ -36,7 +36,7 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/fep"
+	"tt/internal/form42f"
 )
 
 // ── 合成夹具（内联；遵循 internal/fep/plan_test.go:15 的先例，B14）───────────────
@@ -86,9 +86,9 @@ const (
 )
 
 // mustF42 解析合成 `.42f`（解析器是 internal/fep 的，本包不重写）。
-func mustF42(t *testing.T, text string) *fep.F42Form {
+func mustF42(t *testing.T, text string) *form42f.F42Form {
 	t.Helper()
-	f, err := fep.ParseForm42F("apcs001_wf", text)
+	f, err := form42f.ParseForm42F("apcs001_wf", text)
 	if err != nil {
 		t.Fatalf("解析合成 .42f 失败：%v", err)
 	}
@@ -335,7 +335,7 @@ func TestCheckForm42F_T100Sample(t *testing.T) {
 	if err != nil {
 		t.Skipf("没有真样本（%s 打不开：%v）—— 设 TT_FORM_SAMPLE_DIR 指向 fixtures/forms/", path, err)
 	}
-	f, err := fep.ParseForm42F("axmt500_wf", string(b))
+	f, err := form42f.ParseForm42F("axmt500_wf", string(b))
 	if err != nil {
 		t.Fatalf("解析 %s 失败：%v", path, err)
 	}
@@ -481,8 +481,8 @@ func TestReadTzsFormPackage_MiniCorpus(t *testing.T) {
 		t.Errorf("Skipped = %d，want 0（这个包里没有 fieldId 非整数的元素）", f.Skipped)
 	}
 	// 写死几个锚点，防止解析器"读到了但字段全错位"。
-	anchors := map[fep.ColName]fep.FieldID{"apcasite": 57, "apcald": 61, "ooef001": 60}
-	idx := map[fep.ColName]TzsField{}
+	anchors := map[form42f.ColName]form42f.FieldID{"apcasite": 57, "apcald": 61, "ooef001": 60}
+	idx := map[form42f.ColName]TzsField{}
 	for _, fld := range f.Fields {
 		idx[fld.ColName] = fld
 	}
@@ -513,7 +513,7 @@ func TestReadTzsFormPackage_MiniCorpus(t *testing.T) {
 //
 // `.42f` 侧编号固定 10,11,12…；tzs 侧 = 该值 + shifts[i]。三侧属性一律对齐（编号是唯一变量），
 // 所以除了"编号"这一组，别的规则都不该有话说。
-func radixPair(t *testing.T, shifts ...int) (*fep.F42Form, *TzsForm) {
+func radixPair(t *testing.T, shifts ...int) (*form42f.F42Form, *TzsForm) {
 	t.Helper()
 	var f42, tzs strings.Builder
 	f42.WriteString(`<?xml version='1.0' encoding='UTF-8'?>` + "\n<Form name=\"apcr001_wf.tmp\">\n  <Page>\n")
@@ -600,7 +600,7 @@ func TestCheckForm42F_FieldIDScatteredIsPerPair(t *testing.T) {
 	if len(g) != 4 {
 		t.Fatalf("差值散开时该逐条报 4 条，得 %d 条：\n%s", len(g), c)
 	}
-	var gotCols []fep.ColName
+	var gotCols []form42f.ColName
 	for _, f := range g {
 		if f.Undecided {
 			t.Errorf("逐条报的编号差异是确定差异，不该是未判定：%+v", f)
@@ -611,7 +611,7 @@ func TestCheckForm42F_FieldIDScatteredIsPerPair(t *testing.T) {
 		gotCols = append(gotCols, f.ColName)
 	}
 	sort.Slice(gotCols, func(i, j int) bool { return gotCols[i] < gotCols[j] })
-	wantCols := []fep.ColName{"prmd001", "prmd002", "prmd003", "prmd004"}
+	wantCols := []form42f.ColName{"prmd001", "prmd002", "prmd003", "prmd004"}
 	if fmt.Sprint(gotCols) != fmt.Sprint(wantCols) {
 		t.Errorf("逐条报的 colName = %v，want %v", gotCols, wantCols)
 	}
@@ -745,7 +745,7 @@ func TestCheckForm42F_WritabilityCrossAttributeIsUndecided(t *testing.T) {
 // 它刻意不做任何换算：同名字段、同一编号、同一批布尔与控件名原样搬过去。
 // 于是 CheckForm42F 的差异组必然全空 —— 剩下能真正量到的是"配对有没有漏"与
 // "未判定是不是只来自没带控件类型的条目"，这两条都是有牙齿的。
-func projectF42ToTzs(f *fep.F42Form) *TzsForm {
+func projectF42ToTzs(f *form42f.F42Form) *TzsForm {
 	out := &TzsForm{Prog: string(f.Name), DeclaredName: f.DeclaredName}
 	for _, fld := range f.Fields {
 		out.Fields = append(out.Fields, TzsField{

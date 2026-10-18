@@ -17,13 +17,13 @@ import (
 // 所以最有价值的不是"跑通了"，而是第 2 条测试（`TestProto42F_ZeroedGeometryIsRed`）：
 // 把夹具里的坐标全改成 0，第 1 条的那些断言必须红 —— 否则它们只是在描述自己。
 
-// basic42F 读合成夹具 `internal/fep/testdata/form42f/basic.xml`。
+// basic42F 读合成夹具 `internal/form42f/testdata/form42f/basic.xml`。
 //
-// 就地复用 fep 的夹具，不复制第二份：一个事实只有一个家，`.42f` 的解析口径由
-// internal/fep 守，这里只消费它的产物。
+// 就地复用 form42f 的夹具，不复制第二份：一个事实只有一个家，`.42f` 的解析口径由
+// internal/form42f 守，这里只消费它的产物。
 func basic42F(t *testing.T) (string, string) {
 	t.Helper()
-	p := filepath.Join(testkit.RepoRoot(t), "internal", "fep", "testdata", "form42f", "basic.xml")
+	p := filepath.Join(testkit.RepoRoot(t), "internal", "form42f", "testdata", "form42f", "basic.xml")
 	b, err := os.ReadFile(p)
 	if err != nil {
 		t.Fatalf("读不到夹具 %s：%v", p, err)

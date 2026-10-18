@@ -2,14 +2,11 @@ package form
 
 // `tt form verify`：把离线字段表与**基线**逐条比对（契约 C5.1 / C7.4 / 变更记录 A5）。
 //
-// 基线的两个来源，优先级写死（A5）：
+// 基线来自 `--map <colname-fieldid.json>`（或 TT_FORM_CORPUS_MAP）：归档语料表，
+// 可离线跑。原「--recording 原始录制件」那条路随 FEP 录制一起移除。
 //
-//  1. `--recording <目录>`（或 TT_FEP_RECORD_DIR）：原始录制件，**优先**；
-//  2. 否则 `--map <colname-fieldid.json>`（或 TT_FORM_CORPUS_MAP）：归档语料表 ——
-//     它是同一批录制派生的**等价基线**，且可离线跑（Q4b 已把原始录制删除）。
-//
-// 比对口径与 `internal/fep/form42f_test.go` 的 TestFormMatchesRecording **同一套**
-// （可比 / 一致 / 仅在语料里 / 歧义项落候选），否则两处迟早各数各的。
+// 比对口径（可比 / 一致 / 仅在语料里 / 歧义项落候选）只此一处，
+// 否则两处迟早各数各的。
 //
 // 验收（M1）：窗口 `w_axmt500` 可比 **509** 条 → 必须 100% 一致，不做百分比容忍。
 
@@ -18,13 +15,12 @@ import (
 	"fmt"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"tt/internal/cli/common"
-	"tt/internal/fep"
+	"tt/internal/form42f"
 )
 
 var (
@@ -32,7 +28,6 @@ var (
 	verifyForm      string
 	verifyWindow    string
 	verifyMap       string
-	verifyRecording string
 	verifyDir       string
 	verifyNoCache   bool
 )
@@ -59,7 +54,7 @@ func init() {
 	verifyCmd.Flags().StringVar(&verifyForm, "form", "", "表单名，不含扩展名（如 axmt500_wf）")
 	verifyCmd.Flags().StringVar(&verifyWindow, "window", "", "语料里的窗口名（默认按表单名推，如 axmt500_wf → w_axmt500）")
 	verifyCmd.Flags().StringVar(&verifyMap, "map", "", "归档语料表 colname-fieldid.json（也可用 TT_FORM_CORPUS_MAP）")
-	verifyCmd.Flags().StringVar(&verifyRecording, "recording", "", "原始录制件目录（给了就优先用它当基线）")
+
 	verifyCmd.Flags().StringVar(&verifyDir, "dir", "", "从本地目录/镜像取件（离线；也可用 TT_FORM_DIR）")
 	verifyCmd.Flags().BoolVar(&verifyNoCache, "no-cache", false, "不读不写表单缓存（每次都重新取）")
 }
@@ -141,27 +136,15 @@ type Baseline struct {
 	WindowsSeen []string
 }
 
-// loadBaseline 按 A5 的优先级造基线：录制件优先，其次归档语料表。
+// loadBaseline 造基线：归档语料表（那个文件的顶层键就是窗口名，属事实而非启发式）。
 //
-// window 只用于**归档语料表**那一路（那个文件的顶层键就是窗口名，属事实而非启发式）；
-// 录制件那一路不按窗口过滤（见 LoadRecordingBaseline）。derived 只影响**报错措辞**：
-// 窗口名是推出来的话，要说清"你没点名窗口"—— 而不是让启发式去当拒绝理由（A15）。
+// derived 只影响**报错措辞**：窗口名是推出来的话，要说清"你没点名窗口"——
+// 而不是让启发式去当拒绝理由（A15）。
 func loadBaseline(window string, derived bool) (*Baseline, error) {
-	if dir := firstNonEmpty(verifyRecording, os.Getenv("TT_FEP_RECORD_DIR")); dir != "" {
-		b, err := LoadRecordingBaseline(dir)
-		if err != nil {
-			return nil, formUnknown(
-				"确认 --recording 指向的是录制件目录（里头应该有 *-rt2gdc.log）；"+
-					"只想要归档语料表那条路就先别给 --recording",
-				"从录制件建基线失败（目录 %s）：%v", dir, err)
-		}
-		return b, nil
-	}
-
 	mp := firstNonEmpty(verifyMap, os.Getenv("TT_FORM_CORPUS_MAP"))
 	if mp == "" {
-		return nil, failUsage("verify 需要一份基线：给 --map <colname-fieldid.json>（归档语料表）、" +
-			"--recording <录制件目录>，或设 TT_FORM_CORPUS_MAP")
+		return nil, failUsage("verify 需要一份基线：给 --map <colname-fieldid.json>（归档语料表），" +
+			"或设 TT_FORM_CORPUS_MAP")
 	}
 	cm, err := LoadCorpusMap(mp)
 	if err != nil {
@@ -253,99 +236,6 @@ func LoadCorpusMap(path string) (*CorpusMap, error) {
 	return out, nil
 }
 
-// LoadRecordingBaseline 从**原始录制件目录**重建基线（A5 的优先那条）。
-//
-// 三条口径：
-//
-//  1. 字段编号取自 AUI 对象上的 `fieldId` 属性；**没有这个属性就不猜**（拿会话 id 顶替
-//     会得到一个"看起来有数、其实全错"的基线）；
-//  2. 同一个 colName 被观测到**多个不同编号**（同一窗口里另有一张表单/另一个节点）
-//     → 进 `Ambiguous` 候选集合，**绝不静默取最后一个**（A7：多种 fieldId = 真歧义）；
-//  3. **不按窗口过滤**（A15）。实测仓库自带的三份夹具里，`m.WindowName` 给出来的是窗口
-//     **标题**（"单据别编号数据查询(q_ooba002_1)" / "重新整理"）或空串，而按表单名推出来的
-//     `w_<表单>` 一个都对不上 —— 拿它当过滤器会把 13–18 条证据全滤掉，再报"没有字段对象"，
-//     那就是一次**由启发式决定的静默拒绝**。窗口名只进 `WindowsSeen` 供诊断。
-//
-// 录制件的命名沿既有约定：目录里的 `*-rt2gdc.log`（见 fep.ReadModelFrom 的说明）。
-func LoadRecordingBaseline(dir string) (*Baseline, error) {
-	m, _, _, err := fep.LoadModelFrom(dir, "")
-	if err != nil {
-		return nil, err
-	}
-	b := &Baseline{Exact: map[string]int{}, Ambiguous: map[string][]int{}}
-	ids := map[string]map[int]int{} // colName → {fieldId: 出现次数}
-	wins := map[string]int{}
-	for _, o := range m.Objects() {
-		if !recordingFieldTypes[o.Type] {
-			continue
-		}
-		col := o.Attr("colName")
-		if col == "" {
-			col = o.Attr("col")
-		}
-		idText := strings.TrimSpace(o.Attr("fieldId"))
-		if col == "" || idText == "" {
-			continue
-		}
-		id, cerr := strconv.Atoi(idText)
-		if cerr != nil {
-			continue
-		}
-		if ids[col] == nil {
-			ids[col] = map[int]int{}
-		}
-		ids[col][id]++
-		// 诊断：这个对象挂在哪个窗口下（拿不到就记成"（无窗口）"—— 绝大多数节点如此）
-		name := "（无窗口）"
-		if win, ok := m.Window(o.ID); ok {
-			if n := strings.TrimSpace(m.WindowName(win)); n != "" {
-				name = n
-			}
-		}
-		wins[name]++
-	}
-	for col, byID := range ids {
-		list := make([]int, 0, len(byID))
-		for id := range byID {
-			list = append(list, id)
-		}
-		sort.Ints(list)
-		if len(list) == 1 {
-			b.Exact[col] = list[0]
-			continue
-		}
-		b.Ambiguous[col] = list
-	}
-	b.WindowsSeen = sortedCountKeys(wins)
-	if len(b.Exact)+len(b.Ambiguous) == 0 {
-		return nil, fmt.Errorf("%s 里没有带 colName/fieldId 的字段对象（%s；观察到的窗口：%s）",
-			dir, rtRecordingHint(), strings.Join(b.WindowsSeen, " / "))
-	}
-	return b, nil
-}
-
-// rtRecordingHint 在"录制件读不出东西"时给出下一步（可操作，C4.3）。
-func rtRecordingHint() string {
-	return "录制件是 *-rt2gdc.log 这种命名"
-}
-
-// sortedCountKeys 把计数 map 的键排序后返回（输出要可 diff，不能随 map 顺序抖）。
-func sortedCountKeys(m map[string]int) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
-
-// recordingFieldTypes 是录制件里"可寻址字段"的对象类型（与 .42f 的四类载体对应）。
-var recordingFieldTypes = map[string]bool{
-	"FormField":        true,
-	"TableColumn":      true,
-	"PhantomColumn":    true,
-	"PhantomFormField": true,
-}
 
 // ── 比对 ────────────────────────────────────────────────────────────────────
 
@@ -406,7 +296,7 @@ func (r *VerifyResult) Summary() string {
 //
 // 结果里的两个清单**排序后返回**：map 的遍历顺序是随机的，而这份输出会被人和 agent
 // 拿去逐行看差异 —— 每次跑出来的顺序都不同就等于不可 diff。
-func Compare(f *fep.F42Form, b *Baseline) *VerifyResult {
+func Compare(f *form42f.F42Form, b *Baseline) *VerifyResult {
 	r := &VerifyResult{
 		Form:         string(f.Name),
 		Variant:      VariantOf(string(f.Name)),
@@ -415,7 +305,7 @@ func Compare(f *fep.F42Form, b *Baseline) *VerifyResult {
 		AmbiguousBad: []Mismatch{},
 	}
 	for col, want := range b.Exact {
-		got, ok := f.ByColName[fep.ColName(col)]
+		got, ok := f.ByColName[form42f.ColName(col)]
 		if !ok {
 			r.CorpusOnly++
 			continue
@@ -428,7 +318,7 @@ func Compare(f *fep.F42Form, b *Baseline) *VerifyResult {
 		r.Consistent++
 	}
 	for col, cands := range b.Ambiguous {
-		got, ok := f.ByColName[fep.ColName(col)]
+		got, ok := f.ByColName[form42f.ColName(col)]
 		if !ok {
 			continue
 		}

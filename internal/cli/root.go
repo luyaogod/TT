@@ -26,7 +26,6 @@ import (
 	"tt/internal/cli/drawio"
 	"tt/internal/cli/form"
 	"tt/internal/cli/session"
-	"tt/internal/cli/view"
 	"tt/internal/output"
 )
 
@@ -116,7 +115,6 @@ func init() {
 	dict.Register(rootCmd)
 	session.Register(rootCmd)
 	form.Register(rootCmd)
-	view.Register(rootCmd)
 	drawio.Register(rootCmd)
 
 	rootCmd.AddCommand(newEnvCmd())

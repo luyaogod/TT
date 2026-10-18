@@ -9,7 +9,7 @@ package tzs
 //
 // 三条纪律（与包 README 同一套）：
 //
-//  1. **本文件不重写解析器**。`.42f` 一律走 `fep.ParseForm42F`（切片 A 已交付，509/509 对齐）；
+//  1. **本文件不重写解析器**。`.42f` 一律走 `form42f.ParseForm42F`（切片 A 已交付，509/509 对齐）；
 //     这里只负责"tzs 侧的表单描述"与两侧比对。tzs 侧是 `.tzs` 包内的 `.4fd`（明文 XML）——
 //     它和 `.42f` **属性同名同义**（`colName` / `fieldId` / `widget` / `noEntry` / `required` /
 //     `notNull`），所以比对不需要任何换算表；这是选它当"实然"的唯一理由。
@@ -51,7 +51,7 @@ import (
 	"strconv"
 	"strings"
 
-	"tt/internal/fep"
+	"tt/internal/form42f"
 )
 
 // ── 差异分组 ───────────────────────────────────────────────────────────────
@@ -103,7 +103,7 @@ type Note struct {
 	Rule  Rule          `json:"rule"`            // 挂在哪条规则下（目前只有 RuleFieldID）
 	Text  string        `json:"text"`            // 人读的说明（措辞只陈述事实，不猜哪一侧是 0 基）
 	Pairs int           `json:"pairs,omitempty"` // 这个事实覆盖了多少对唯一配对
-	Cols  []fep.ColName `json:"cols,omitempty"`  // 样例 colName（人抽查用：说明降级了，但线索还在）
+	Cols  []form42f.ColName `json:"cols,omitempty"`  // 样例 colName（人抽查用：说明降级了，但线索还在）
 }
 
 // Finding 是一条比对结论（差异或未判定）。
@@ -112,7 +112,7 @@ type Note struct {
 // Tzs = tzs 生成物（实然/待校对）。
 type Finding struct {
 	Rule      Rule        `json:"rule"`
-	ColName   fep.ColName `json:"colName"`
+	ColName   form42f.ColName `json:"colName"`
 	F42       string      `json:"f42,omitempty"` // 应然侧的值（人可读：`fieldId=23` / `noEntry=false` / `Edit`）
 	Tzs       string      `json:"tzs,omitempty"` // 实然侧的值
 	Why       string      `json:"why"`           // 为什么算差异 / 为什么拿不准
@@ -130,7 +130,7 @@ type FormCheck struct {
 	Pairs           int           `json:"pairs"`              // 真正配成对的 colName 数
 	Notes           []Note        `json:"notes,omitempty"`    // 聚合说明（A37）：不是差异，也不是未判定
 	Findings        []Finding     `json:"findings,omitempty"` // 全部（差异 + 未判定），按文档顺序
-	F42Only         []fep.ColName `json:"f42_only,omitempty"` // 只在 `.42f` 里出现（信息，不算差异）
+	F42Only         []form42f.ColName `json:"f42_only,omitempty"` // 只在 `.42f` 里出现（信息，不算差异）
 }
 
 // NoteFor 返回挂在某条规则下的聚合说明。
@@ -248,7 +248,7 @@ func (c *FormCheck) JSONReport() map[string]any {
 	}
 	only := c.F42Only
 	if only == nil {
-		only = []fep.ColName{}
+		only = []form42f.ColName{}
 	}
 	return map[string]any{
 		"ok":                c.Consistent(),
@@ -278,8 +278,8 @@ func (c *FormCheck) JSONReport() map[string]any {
 type TzsField struct {
 	Tag      string      // 元素名（Edit / ComboBox / TableColumn / Phantom …，仅诊断用）
 	Name     string      // 协议名（如 formonly.pmdl001）
-	ColName  fep.ColName // 栏位身份
-	FieldID  fep.FieldID // 表单内编号（设计期分配 —— 与 `.42f` 的编号**可能不同物**，见 B5）
+	ColName  form42f.ColName // 栏位身份
+	FieldID  form42f.FieldID // 表单内编号（设计期分配 —— 与 `.42f` 的编号**可能不同物**，见 B5）
 	Widget   string      // `widget` 属性（缺省退元素名）
 	NoEntry  string      // `noEntry` 原值
 	Required string      // `required` 原值
@@ -291,7 +291,7 @@ type TzsForm struct {
 	Prog         string        // 程序名（`.4fd` 文件名不含扩展名；读包时从 zip 条目推）
 	DeclaredName string        // `<Form name=…>` 原值（与 `.42f` 的 DeclaredName 对照用）
 	Fields       []TzsField    // 文档顺序
-	Duplicates   []fep.ColName // 同名 colName（重名 ⇒ 无法唯一对应，见 CheckForm42F）
+	Duplicates   []form42f.ColName // 同名 colName（重名 ⇒ 无法唯一对应，见 CheckForm42F）
 	Skipped      int           // 有 `fieldId` 但不是整数（或空）而被跳过的元素数；不猜、不 panic
 }
 
@@ -326,7 +326,7 @@ func ParseTzsForm4FD(prog, text string) (*TzsForm, error) {
 	dec := xml.NewDecoder(strings.NewReader(text))
 	dec.CharsetReader = func(_ string, in io.Reader) (io.Reader, error) { return in, nil }
 
-	seen := map[fep.ColName]bool{}
+	seen := map[form42f.ColName]bool{}
 	for {
 		tok, err := dec.Token()
 		if err == io.EOF {
@@ -358,15 +358,15 @@ func ParseTzsForm4FD(prog, text string) (*TzsForm, error) {
 		fld := TzsField{
 			Tag:      se.Name.Local,
 			Name:     a["name"],
-			ColName:  fep.ColName(a["colName"]),
-			FieldID:  fep.FieldID(id),
+			ColName:  form42f.ColName(a["colName"]),
+			FieldID:  form42f.FieldID(id),
 			Widget:   a["widget"],
 			NoEntry:  a["noEntry"],
 			Required: a["required"],
 			NotNull:  a["notNull"],
 		}
 		if fld.Widget == "" {
-			fld.Widget = se.Name.Local // 与 fep.ParseForm4fd 同一手法
+			fld.Widget = se.Name.Local // 与 form42f.ParseForm4fd 同一手法
 		}
 		if fld.ColName != "" {
 			if seen[fld.ColName] {
@@ -456,7 +456,7 @@ func ReadTzsFormPackage(pkgPath string) (*TzsForm, error) {
 //	      （顺序由实然侧决定，读起来与包内一致）；
 //	第二遍 只看 `pairs` 判"编号"（A37 要求先看整体分布，一遍扫的时候还没有全部差值）；
 //	第三遍 再按 `pairs` 顺序判"可写性 / 控件族"。
-func CheckForm42F(want *fep.F42Form, got *TzsForm) *FormCheck {
+func CheckForm42F(want *form42f.F42Form, got *TzsForm) *FormCheck {
 	c := &FormCheck{}
 	if want != nil {
 		c.Form = string(want.Name)
@@ -472,12 +472,12 @@ func CheckForm42F(want *fep.F42Form, got *TzsForm) *FormCheck {
 		return c
 	}
 
-	byCol42F := map[fep.ColName][]*fep.F42Field{}
+	byCol42F := map[form42f.ColName][]*form42f.F42Field{}
 	for i := range want.Fields {
 		fld := &want.Fields[i]
 		byCol42F[fld.ColName] = append(byCol42F[fld.ColName], fld)
 	}
-	byColTzs := map[fep.ColName][]*TzsField{}
+	byColTzs := map[form42f.ColName][]*TzsField{}
 	for i := range got.Fields {
 		fld := &got.Fields[i]
 		if fld.ColName == "" {
@@ -488,7 +488,7 @@ func CheckForm42F(want *fep.F42Form, got *TzsForm) *FormCheck {
 
 	// ── 第一遍：存在性 + 重名 + 收集唯一配对 ──
 	var pairs []f42Pair
-	done := map[fep.ColName]bool{}
+	done := map[form42f.ColName]bool{}
 	for i := range got.Fields {
 		tf := &got.Fields[i]
 		if tf.ColName == "" || done[tf.ColName] {
@@ -547,8 +547,8 @@ func CheckForm42F(want *fep.F42Form, got *TzsForm) *FormCheck {
 
 // f42Pair 是一对**唯一**配上的栏位（两侧各一个，无重名）。
 type f42Pair struct {
-	col fep.ColName
-	f42 *fep.F42Field
+	col form42f.ColName
+	f42 *form42f.F42Field
 	tzs *TzsField
 }
 
@@ -620,7 +620,7 @@ func fieldIDFindings(pairs []f42Pair, notes *[]Note) []Finding {
 func radixNote(pairs []f42Pair, shift int) Note {
 	minF, maxF := pairs[0].f42.FieldID, pairs[0].f42.FieldID
 	minT, maxT := pairs[0].tzs.FieldID, pairs[0].tzs.FieldID
-	cols := make([]fep.ColName, 0, len(pairs))
+	cols := make([]form42f.ColName, 0, len(pairs))
 	for _, p := range pairs {
 		if p.f42.FieldID < minF {
 			minF = p.f42.FieldID
@@ -660,7 +660,7 @@ func radixNote(pairs []f42Pair, shift int) Note {
 //	    疑似编译器把 NOT NULL 归一成必填，**非设计变更**；一份快照也排除不了"导出后又改"，
 //	    所以措辞一律"疑似"；
 //	  · 没有那个组合、且**同一属性**反向 ⇒ 确定差异。
-func classifyWritability(f42 *fep.F42Field, tzf *TzsField) []Finding {
+func classifyWritability(f42 *form42f.F42Field, tzf *TzsField) []Finding {
 	col := tzf.ColName
 	var out []Finding
 
@@ -767,7 +767,7 @@ func classifyWritability(f42 *fep.F42Field, tzf *TzsField) []Finding {
 }
 
 // undeclaredAttr 是"tzs 侧没声明这个属性"的未判定条目（A15：未声明 ≠ 声明为 false）。
-func undeclaredAttr(col fep.ColName, key string, f42v bool) Finding {
+func undeclaredAttr(col form42f.ColName, key string, f42v bool) Finding {
 	return Finding{
 		Rule:      RuleWritable,
 		ColName:   col,
@@ -784,7 +784,7 @@ func undeclaredAttr(col fep.ColName, key string, f42v bool) Finding {
 //	两侧同一控件（或确定等价：FFLabel≡Label、FFImage≡Image）  → 无条目
 //	两侧都是已知控件但不等价                              → 差异（RuleWidget）
 //	任一侧为空 / 不在已知表                                → 未判定
-func compareWidget(f42Widget, tzsWidget string, col fep.ColName) []Finding {
+func compareWidget(f42Widget, tzsWidget string, col form42f.ColName) []Finding {
 	fw, tw := strings.TrimSpace(f42Widget), strings.TrimSpace(tzsWidget)
 	if fw == "" || tw == "" {
 		return []Finding{{
@@ -909,7 +909,7 @@ func describeTzsField(f *TzsField) string {
 }
 
 // describeF42Duplicates / describeTzsDuplicates 写重名时的两侧编号清单。
-func describeF42Duplicates(fs []*fep.F42Field) string {
+func describeF42Duplicates(fs []*form42f.F42Field) string {
 	ids := make([]string, 0, len(fs))
 	for _, f := range fs {
 		ids = append(ids, fmt.Sprintf("%d", f.FieldID))
@@ -934,7 +934,7 @@ func orNone(s string) string {
 }
 
 // joinColNames 折叠过长的 colName 清单（超过 n 个就写"…另 k 个"）。
-func joinColNames(cols []fep.ColName, n int) string {
+func joinColNames(cols []form42f.ColName, n int) string {
 	parts := make([]string, 0, len(cols))
 	for i, c := range cols {
 		if i >= n {

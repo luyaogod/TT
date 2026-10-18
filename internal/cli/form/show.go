@@ -21,7 +21,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"tt/internal/cli/common"
-	"tt/internal/fep"
+	"tt/internal/form42f"
 )
 
 var (
@@ -83,7 +83,7 @@ func runShow(cmd *cobra.Command, _ []string) error {
 //
 // 失败一律归 `FORM_UNKNOWN`（退出码 1，契约 C4.2 / C4.3）：取不到与"不是合法 .42f"
 // 是同一档的两条病因，Hint 里给出可操作的下一步。
-func loadForm(ctx context.Context, env, module, form, dir string, noCache bool) (*fep.F42Form, error) {
+func loadForm(ctx context.Context, env, module, form, dir string, noCache bool) (*form42f.F42Form, error) {
 	dir = firstNonEmpty(dir, os.Getenv("TT_FORM_DIR"))
 	src, err := sourceFor(env, sourceOpts{Dir: dir, NoCache: noCache})
 	if err != nil {
@@ -94,7 +94,7 @@ func loadForm(ctx context.Context, env, module, form, dir string, noCache bool) 
 		return nil, formUnknown(formHint(env, module, form, dir),
 			"取不到表单 %s（环境 %s / 模块 %s）：%v", form, env, module, err)
 	}
-	f, perr := fep.ParseForm42F(form, string(raw))
+	f, perr := form42f.ParseForm42F(form, string(raw))
 	if perr != nil {
 		return nil, formUnknown(formHint(env, module, form, dir),
 			"%v（环境 %s / 模块 %s / %d 字节）", perr, env, module, len(raw))
@@ -152,7 +152,7 @@ type showRecordVal struct {
 	Links   []string `json:"links"`
 }
 
-func newShowDoc(env, module, form, variant string, f *fep.F42Form) showDoc {
+func newShowDoc(env, module, form, variant string, f *form42f.F42Form) showDoc {
 	doc := showDoc{
 		Env:         env,
 		Module:      module,

@@ -4,7 +4,7 @@ package dict
 //
 // 它回答"这张表单/作业有哪些字段，各自的中文名与类型是什么"：
 // 数据源是本地目录里的 `.42f`（编译后的表单文件，明文 XML），解析直接调用
-// `internal/fep.ParseForm42F`（**不复制解析器**），中文名走字典既有的
+// `internal/form42f.ParseForm42F`（**不复制解析器**），中文名走字典既有的
 // `dzeb_t`/`dzebl_t` 解析（`FieldNamer` → `QueryTable`）。
 //
 // 四条纪律：
