@@ -75,7 +75,7 @@ DWM 给窗口留的阴影区在 PrintWindow 里是**纯黑**（实测左/右/下
 **32px = 1 格**）说明：比例是存在的，但**静态推不出来** —— AUI 里累积着多个画面的对象，
 且几何单位混用。所以映射通过一次**实测校准**得到：
 
-1. 往两个已知栏位各写一个值（`tt fep` 注入）；
+1. 往两个已知栏位各写一个值（由调用方注入）；
 2. 各拍一张图，取**像素差**（`DiffBox`）—— 变化的那些像素就是那个栏位在屏幕上的真实位置；
 3. `SolveMapping` 由两个锚点解出 (格宽, 格高, 原点)，残差大就报出来（说明两次取值不是同一列/行）。
 
@@ -125,9 +125,9 @@ tt view marks --png job.png --calibration <实测> --field 客户编号 --field 
 ## 成品：v12 手册（真图 + 实测校准 + 可见性门）
 
 ```
-%APPDATA%\tt\fep\T100-操作手册-v12.pptx     （7 页，含导图自查）
-%APPDATA%\tt\fep\img-v12\                   （4 张真图：录入画面 / 表头标注 / 客户编号 / 门失败的例子）
-%APPDATA%\tt\fep\calibration.json           （实测校准：格宽 7.0、格高 32、原点 421,151）
+%APPDATA%\tt\cache\T100-操作手册-v12.pptx     （7 页，含导图自查）
+%APPDATA%\tt\cache\img-v12\                   （4 张真图：录入画面 / 表头标注 / 客户编号 / 门失败的例子）
+%APPDATA%\tt\cache\calibration.json           （实测校准：格宽 7.0、格高 32、原点 421,151）
 ```
 
 这一版与以往三处不同，都是这一轮做出来的：① 图是 `tt view shot` 抓的**真图**
@@ -171,7 +171,7 @@ tt view marks --png job.png --region "客户编号(实测)" --out annotated.png
 `(未解析)`）。所以流程是"**按值找 → 按 id 量**"：
 
 ```
-tt fep ui find --value "1,000.000"        → #3009 Value（未解析）value="1,000.000"   ← 就是订购量那个格子
+（原 `tt fep ui find` 已随 FEP 移除）
 tt view measure --target '#3009' --value 2000 --name "明细订购量(第1行)"
 tt view marks --png job.png --region "明细订购量(第1行)" --out annotated.png
 ```

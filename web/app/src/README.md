@@ -21,27 +21,23 @@
 
 | 目标 | Tab |
 |---|---|
-| 环境页 | 创建会话 / 接口日志 / 接口调试 / FEP录像 |
-| 会话页 | Debug / FEP录制（顺序与默认项由会话类型决定） |
+| 环境页 | 创建会话 / 接口日志 / 接口调试 |
+| 会话页 | Debug |
 | 设置页 | 站点管理 / 数据字典 / DEBUG / 应用设置（`routing.ts` 的 `SETTINGS_SECTIONS`） |
 
-环境页有三个 Tab 是**已有画面原样搬进来的**：接口日志 = `WsLogView`、接口调试 = `WsTestView`、
-FEP录像 = `RecordView`。「创建会话」已经是**真动作**（2026-10-18）：填 ENT + 作业编号 →
-`POST /api/sessions/new` 建一条空闲会话 → 等它登录完（loading→idle）→
-`POST /api/sessions/{id}/screen` 给它挂上画面通道（一个脱离进程的 `tt recording start`）。
-会话页的「FEP录制」目前如实显示这条会话挂着的画面通道（录制 ID / 类型 / 端口 / 目录），
-起停录制与回放后续再接。Debug Tab 里是整块调试工作台
+环境页的两个 Tab 是**已有画面原样搬进来的**：接口日志 = `WsLogView`、接口调试 = `WsTestView`。
+「创建会话」是**真动作**：填 ENT + 作业编号 → `POST /api/sessions/new` 建一条空闲会话 →
+等它登录完（loading→idle）→ 跳到它的 Debug 页。会话页只有 Debug 一屏
 （`DebugWorkbench.tsx`，从旧外壳原样拆出来），区别只是它不再自带左侧会话栏。
 
 **数据边界**：环境读 `GET /api/hosts` 的 `sshs`（真实配置）；**会话树是池的投影**——
 `store.sessions` 由 `sessionList`（`GET /api/sessions`）与池事件（`session.added` /
-`session.removed`，W2）经 `indexFromList` 派生，**本地不再记"有哪些会话"**：
+`session.removed`）经 `indexFromList` 派生，**本地不再记"有哪些会话"**：
 `tt.sessions.v2` 已作废（启动时清掉），旧的 `pruneSessions` 一并下线。所以 CLI、别的浏览器、
-AI 建的会话都会当场出现在树上，服务端没有的条目也不会留在树上。界面会话的挂接状态同样有事件
-（`screen.attached/detached` → `store.screens`），面板即时更新，仍可
-`GET /sessions/{id}/screen` 主动刷新。每条会话的**运行时**另存一份（`store.runtimes[id]`，W6）：
-`state` / `stop` / `prog` / `module` / `mode` / `screen`。收到别的会话的事件时更新的是**它那一份**，
-单例字段只跟绑定的那条走 —— 这是多实例页面的地基（`useSessionRuntime(id)` 可直接读）。
+AI 建的会话都会当场出现在树上，服务端没有的条目也不会留在树上。每条会话的**运行时**另存一份
+（`store.runtimes[id]`）：`state` / `stop` / `prog` / `module` / `mode`。收到别的会话的事件时
+更新的是**它那一份**，单例字段只跟绑定的那条走 —— 这是多实例页面的地基
+（`useSessionRuntime(id)` 可直接读）。
 面板绑定的那条会话仍是 `sessionId`（`tt.sessionId`），
 它由路由写（见 App.tsx 的绑定 effect）：**地址栏说哪条，面板就绑哪条**；池事件**不改绑定**
 （绑定只能由人点）。注意路由那条失效判定要等 `sessionsLoaded`（池列过一次）才生效 ——
@@ -60,16 +56,15 @@ terminal（下方面板）、bug-play（调试面板）、list-tree（大纲，�
 ## 路由：哈希
 
 ```
-#env/<环境名>/<Tab>             环境页 create / wslogs / wstest / record
-#env/<环境名>/record/<录制 ID>   FEP录像里正打开的那一份（可再带 ?t=<毫秒> 定位）
-#session/<会话 ID>/<Tab>         会话页 debug / fep
+#env/<环境名>/<Tab>             环境页 create / wslogs / wstest
+#session/<会话 ID>/<Tab>         会话页 debug
 #settings/<分区>
 ```
 
 环境名编码后进片段（设置里允许中文/空格），解析时解回来。认不出来的片段一律当成"没有目标"，
 由外壳落到第一个环境的「创建会话」；一个环境都没有就落到设置页（先配环境）。
-录制 ID / 会话 ID 用同一套白名单（`isRecordID`）：形如 `#env/X/record/a/b` 或 ID 里带
-空格/`..`/中文的**丢弃**，不静默截断 —— 这个值会被用户粘给别人，猜错了就会打开另一份文件。
+会话 ID 用白名单（`isSessionID`）：ID 里带空格/`..`/中文的**丢弃**，不静默截断 ——
+这个值会被用户粘给别人，猜错了就会打开另一条会话。
 
 **两条硬约束**（都是有原因的）：
 
@@ -81,107 +76,6 @@ terminal（下方面板）、bug-play（调试面板）、list-tree（大纲，�
 （规范化交给第二次），否则深链接会被默认目标覆盖。设置页那条「分区 → 片段」同步让的是同一件事。
 往后每换一次目标/Tab 都写片段（`replaceState`，不用 push：否则浏览器后退要一格一格走遍所有 Tab）。
 URL 停止不动同样是错的：点 Tab 切目标时地址栏不跟，刷新就落回旧页。
-
-
-## 录制明细页：一屏一条全文流
-
-「FEP录像」这一屏内部有两级：**列表** ↔ **明细**（`#env/<环境名>/record/<id>`，可选 `?t=<毫秒>` 定位到某一刻）。
-两级各有各的头，**不共用**：列表那一屏顶上是录制的工具条（作业名 / 开始 / 停止 / 环境过滤 /
-在录吗），明细那一屏顶上是身份与动作（`← 列表 | <ID> | <作业名> | 回放 / 复制 ID / 删除 / 刷新`）。
-"起一轮录制"这件事只属于列表 —— 明细页不显示录制工具条（用户 2026-10-16：
-"明细页面不应该显示录制区域"），否则会让人以为在这一屏也能起录。
-
-明细由四块组成（**没有页签**：一屏就是一页，用户 2026-10-16 定的）：
-
-| 文件 | 负责 |
-|---|---|
-| `RecordingDetail.tsx` | 装配：取数（四个只读端点）、返回、回放/复制/删除、**唯一的轴域**、键盘缩放 |
-| `RecordingOverview.tsx` | 概览条带：三条泳道（**服务 / 前端 / 其它**）+ 一根游标 + 时间尺 |
-| `RecordingTable.tsx` | 全文流：**类型 / 时间 / 向 / 文本**四列，自研固定行高虚拟化 |
-| `RecordingInspector.tsx` | 明细面板：概览 / 原始帧 / 引起的回应 / 名字来源。**默认收起**，点一行才出（左边缘 `×`） |
-| `recordingKind.ts` | 帧类别的颜色与短名（**唯一实现**）：条带的块与表里的类型 tag 都从它取 |
-| `recordingTime.ts` | 时间与位置刻度（**唯一实现**）、格式化 |
-
-**头里只有身份**：`← 列表 | <ID> | <作业名>` + 回放 / 复制 ID / 删除 / 刷新。存储位置、
-三层计数、时间精度**不写在这里**——它们是「这份录制是什么样」的答案，在明细面板的「概览」
-页签里本来就有一份；横轴不是时间时条带自己会挂一条警告。
-
-**五条纪律**（都踩过或差点踩）：
-
-1. **`X(t)` 只有一份**。条带上的游标与表格行里那个位置指的是同一个东西，两处各写一遍
-   `x=(v-min)/(max-min)*w` 迟早会指着不同时刻——而两个方向的录制件是两条独立的字节流、
-   序号分属两侧，**时间是对得上的唯一坐标**。所以域由 `RecordingDetail` 持有，
-   条带与表各拿同一个 `Domain` 去算（`recordingTime.ts` 的 `makeScale`）。
-2. **没有帧级时间就不画时间轴**。老件（或索引是事后重建的）没有帧时刻，横轴改成**字节序**
-   并在轴标签上写出来；绝不插值出假的时刻（`AxisMode` = `time` | `bytes`）。
-3. **固定行高 22px 的窗口化虚拟化**，不引第三方。行 key 一律 `连接:方向:字节偏移`——
-   **不是步号**：步号随 `--stop-at/--skip` 变，不是身份。
-   行的外壳**不许**自己开 `overflow-x-auto`：一轴非 visible 时另一轴的计算值也变成 auto，
-   每行就变成一个滚动容器、行高 22px 而内容 24px，结果是每行都被裁掉一截（实测截图里
-   文字互相压着）。横向滚动只在表体那一层。每行带 1px 底线（border-box，不破坏行高算术）。
-4. **名字与置信度同屏**：`high` 才给名字，`low` 显示但标「低置信」，`unresolved` 显示
-   `Type#id` + 「未解析」，tooltip 里给**为什么**（服务端算的 `why`）。
-   界面**绝不**给未解析的控件编名字——17 个动作里实测只有 6 个能解出名字（见
-   `internal/web/README.md` 的三条纪律）。
-5. **明细页改了列表关心的事，必须报一声**（`onChanged`）：列表是 keep-alive 的
-   （只切显隐不卸载），它的重拉条件是 `view / sessionEnv / tick`。删除只清 `recordId`
-   （`view` 仍是 `record`），不报一声的话回到列表**还看得见刚删掉的那一行**（用户实测）。
-
-条带的交互照 `@deepseek-ai/dsh-client-ui-trajectory` 的做法：悬停 **500 ms** 才出精确时刻、
-滚轮或 `+`/`-` 缩放（锚在游标那一刻；`0` 复位）、右键拖动平移、右键单击复位、
-窗口外的块**压暗贴边**（不许画到框外）。操作说明只在 tooltip 里，不占屏幕。
-
-
-## 回放进度：叫一声与权威分开
-
-回放是另一个进程干的，进度落在它逐行 flush 的 jsonl 里。界面上是明细页顶上那一条
-（`ReplayProgress.tsx`），它同时接两条通道：
-
-| 通道 | 在界面上的角色 |
-|---|---|
-| `GET /api/recordings/{id}/replay-steps`（1 秒兜底轮询 + 每次收到 WS 就叫一次） | **数据来源** |
-| WS `rec.progress` → `store.recProgressTick` | 只是"变了"的信号，**不携带数据** |
-
-**为什么不让 WS 直接带数据**：那个事件类型必须在 `store.ts` 的 `onEvent` switch 里显式注册，
-否则会被**静默丢掉**（实测：自造一个 `warn` 类型，界面什么都不显示、也不报错，查了很久）。
-分成"叫一声"之后，漏注册的后果只是"晚几百毫秒"。**新增 WS 事件类型时，`Event` 类型与那个
-switch 要一起改**。
-
-四条显示纪律：
-
-1. **进行中的步不画时长**：`waiting` 那一步显示"已等 Nms"（用 `fmtWait`，0 也要显示成
-   `0 ms`，因为"正在等"和"没有这个数"不是一回事）。
-2. **"本来无应答" ≠ "8s 无回包（可疑）"**：判定在服务端（`suspect` = 点击类事件却没回包），
-   界面只按它上色。两者的下一步完全不同。
-3. **数字来自服务端**：`progress` 那一组计数是服务端按 jsonl 收敛出来的，界面**不自己数**
-   （重连补发、暂停、跳过都会让行数与步数不等）。
-4. **只有一行，而且只在回放跑着的时候存在**（用户 2026-10-16 逐次定的）：进度条 + 一句计数
-   + "正在等的那一步" + 四个命令。原来那列逐条确认清单删掉了——73 行"已确认"是重复信息，
-   每一步的明细在下面的表里。
-   **跑完就整行撤掉**：否则屏幕上会永久留一行 `完成 73/73` 的死信息，而它答不了任何当下问题；
-   这一行同时是**唯一**的回放控制台（暂停/单步/停止、走到第几步、已等 N ms），所以跑着时必须在。
-   完成的那一刻由 `RecordingDetail` 发一条 toast 说结果（`failed > 0` 时用 error 样式）。
-5. **只报异常**（用户 2026-10-16："移除掉 已确认"）：计数那一句里**不写"已回包"**
-   （成了多少步由 `第 N/M 步` 与进度条回答），表里的徽标也**只挂异常** ——
-   正常回包是**正常**，不是发现；73 行全挂一个绿色徽标只会把真正要看的那几行淹掉。
-
-表里的行还会按**事件文本**挂异常徽标（`stepByEvent`）：`无应答 / 无回包? / 跳过 / 失败 /
-进行中 / 已暂停`。把"用户点的那一下"与"回放有没有把它发出去"对到一起看，是这一页最有用的交叉。
-没回过放时**不挂徽标**："没回过放"与"回放跳过了它"是两件事。
-（注意"回应"在这一屏有两个来源：这里是**回放**的结果，明细面板那一栏 `录制时的回应` 说的是
-**当初录制**时运行期推回来的帧。）
-
-## 已知限制（录制明细页）
-
-1. **只列有身份文件（`.meta.json`）的录制**：身份是收工那一刻落的，所以"正在录的那半份"
-   不列（列了只会让人以为已经录完）。反过来说，**没有身份的老件也不会出现在列表里**——
-   它可以直接用 `#env/<环境名>/record/<ID>` 打开（明细页的帧数据不依赖身份）。
-2. **老件的时间只能到块级**：索引是这一轮才加的，那时候的件没记帧级时刻；重建索引只能补位置。
-   界面会照实标「时间:块级」并把横轴换成字节序。
-3. **`unresolved` 是常态**：解析不出的控件显示 `Value#5585` 这样的 id，这是**结论**不是缺陷。
-4. **没有回包 ≠ 0 毫秒**：耗时一栏在没有回应时显示「—」；进行中的步不画时长。
-5. **明细页是只读的**：要发事件走 `tt fep do/act` 或回放器；这一页不提供"改一改再放"。
-6. **图片缓存（type=5）只作为泳道出现**：不解析、不重放，也不显示成"消息"。
 
 ## 渲染期异常：错误边界
 
@@ -213,7 +107,7 @@ switch 要一起改**。
 | 类 | 前缀 | 说明 |
 |---|---|---|
 | 调试专属（会话、断点、报文日志、WebSocket） | **带** `/debug/api` | 与共享层的同名路径区分开 |
-| 共享端点（环境配置、探测、连接测试、安装、镜像、同步、录制） | **不带** | 统一服务在顶层各提供一份 |
+| 共享端点（环境配置、探测、连接测试、安装、镜像、同步） | **不带** | 统一服务在顶层各提供一份 |
 
 > 调试子系统自己也有一个环境配置的只读副本（供它独立运行时装页面用）；统一服务下
 > 环境页读写的**必须**是顶层那个。
@@ -247,9 +141,7 @@ switch 要一起改**。
 |---|---|
 | 外壳与布局 | `App.tsx`、`main.tsx`、`Shell.tsx`、`Sidebar.tsx`、`EnvView.tsx`、`SessionView.tsx`、`DebugWorkbench.tsx`、`ErrorBoundary.tsx`、`StatusBar.tsx` |
 | 调试区 | `Toolbar.tsx`、`DebugHeader.tsx`、`SourceView.tsx` |
-| 视图 | `SettingsView.tsx`、`WsLogView.tsx`、`WsTestView.tsx`、`RecordView.tsx` |
-| FEP 监控 | `FepMonitor.tsx`：会话页「FEP监控」页签的**全部内容** —— 三泳道时间轴（服务/前端/其它）+ 事件列表，只读、没有按钮；数据按 `from=<已看帧数>` 每秒追加读 `/api/recordings/{id}/timeline`。起停录制/录制 ID/端口/GDC 属于环境页「FEP录像」的录制工作台，**不要**塞回这一屏 |
-| 录制明细 | `RecordingDetail.tsx`、`RecordingOverview.tsx`、`RecordingTable.tsx`、`RecordingInspector.tsx`、`ReplayProgress.tsx`、`recordingKind.ts`、`recordingTime.ts` |
+| 视图 | `SettingsView.tsx`、`WsLogView.tsx`、`WsTestView.tsx` |
 | 面板 | `Panels.tsx`、`OutlinePanel.tsx`、`VarTreeUi.tsx` |
 | 编辑器 | `monacoSetup.ts`、`PayloadEditor.tsx` |
 | 4GL 语言工具 | `fglTokens.ts`、`fgloutline.ts`、`fglparse.ts`、`fglPath.ts`、`fglHover.tsx` |
@@ -273,11 +165,8 @@ cd web && npm run build         # 类型检查 + 打包
 | 状态容器的形状 | 全站视图；它同时被 Node 侧的检查项加载，**顶层不能碰 DOM**。容器里删字段/删联合成员（如侧栏 sheet 去掉 `session`）时，`store.test.mjs` 用 `setState` 灌的部分状态不会有编译期保护 —— 靠 `npm run build` 的 `tsc --noEmit` 找调用点 |
 | 路由键 | 深链接与设置页分区；键只有一份定义，别在别处再列一遍 |
 | 外壳的 Tab 键（`EnvTab` / `SessionTab`） | 路由的解析与生成、环境页/会话页、`routeView` 要一起改；键只有 `routing.ts` 一份定义 |
-| 左树的数据形状（`EnvBrief` / `SessionItem`） | `Sidebar` / `EnvView` / `SessionView` / store。`SessionItem` 是 `SessionBrief` 的投影（`indexFromList`）：`id` 是**服务端句柄**，`purpose` 是服务端事实；改形状等于改树、绑定、画面通道、结束会话那一路 |
+| 左树的数据形状（`EnvBrief` / `SessionItem`） | `Sidebar` / `EnvView` / `SessionView` / store。`SessionItem` 是 `SessionBrief` 的投影（`indexFromList`）：`id` 是**服务端句柄**；改形状等于改树、绑定、结束会话那一路 |
 | 外壳的配色 | `index.css` 的 `.dark .dsh-shell` 一处覆盖；搬进来的旧画面也读同一套语义 token，别在组件里再写死颜色 |
-| `recordingTime.ts` | 条带 + 表 + 检查器的所有位置与时刻都从它出；改它等于同时改三处，**只许有一个实现** |
-| `recordingKind.ts` | 帧类别的颜色/短名：条带的块与表里的类型 tag 共用，**只许有一个实现**（两处各写一份迟早条带绿、表里蓝） |
-| 录制明细页四个端点的形状 | 三层数字、`t=0` 的含义、`responsesState`；后端在 `internal/web/recordingread.go`，那边一改这里要跟着改 |
 | 往片段里写东西的地方 | 首跑必须让深链接一次（见「路由：哈希」），否则深链接全废且不报错 |
 | 接口客户端的前缀 | 打错前缀会让请求落到同名但不同的端点上（表现是"数据不对"而不是报错） |
 | 4GL 语言工具 | Go 侧有同一套夹具在对拍，两边要保持一致 |
@@ -288,5 +177,3 @@ cd web && npm run build         # 类型检查 + 打包
 - 设计系统与主题 token → [../../shared/README.md](../../shared/README.md)
 - 构建配置与脚本 → [../README.md](../README.md)
 - 后端接口面 → [../../../internal/web/README.md](../../../internal/web/README.md)
-
-

@@ -13,8 +13,8 @@
 
 **依赖面刻意窄**：只 import [config](../../config/README.md)（状态文件落点）与
 [winproc](../../winproc/README.md)（起 / 判活 / 杀）加标准库；`form42f_check.go` 另外 import
-[fep](../../fep/README.md) 的**纯解析器** `ParseForm42F`（`.42f` 的解析只有一份，本包不重写它）
-—— 方向是 `dev/tzs → fep`，而 `fep` 不 import `dev/*`，所以不成环。
+[form42f](../../form42f) 的**纯解析器** `ParseForm42F`（`.42f` 的解析只有一份，本包不重写它）
+—— 方向是 `dev/tzs → form42f`，而 `form42f` 不 import `dev/*`，所以不成环。
 它**不 import `internal/cli/dev`** —— 那边 import 它，反过来就成环。命令层（动词分发、退出码、文案）住在
 [cli](../../cli/dev/README.md)，本包只提供退出码映射这类纯函数供它调用。
 
@@ -126,7 +126,7 @@
 
 | 侧 | 是什么 | 出处 |
 |---|---|---|
-| **应然** | `.42f`（编译后的表单，明文 XML）—— **声明期权威** | `fep.ParseForm42F`（切片 A 已交付，509/509 对齐） |
+| **应然** | `.42f`（编译后的表单，明文 XML）—— **声明期权威** | `form42f.ParseForm42F`（切片 A 已交付，509/509 对齐） |
 | **实然** | tzs 生成物里的表单描述：`.tzs`/`.tzv` 包内的 `.4fd`（或摊在工作区里的明文 `.4fd`） | 本文件的 `ParseTzsForm4FD` |
 
 **为什么挑 `.4fd` 当"实然"**：它和 `.42f` **属性同名同义**（`colName` / `fieldId` / `widget` /
@@ -180,7 +180,7 @@
 ParseTzsForm4FD(prog, text string) (*TzsForm, error)   // 纯函数：不 IO、不 panic
 ReadTzsForm4FD(path string) (*TzsForm, error)          // 明文 .4fd
 ReadTzsFormPackage(pkgPath string) (*TzsForm, error)   // .tzs/.tzv（zip；只解那一个 .4fd 条目）
-CheckForm42F(want *fep.F42Form, got *TzsForm) *FormCheck
+CheckForm42F(want *form42f.F42Form, got *TzsForm) *FormCheck
 ```
 
 `FormCheck` 的读法：`Diffs()`（**确定**差异）/ `Undecided()` / `Group(rule)` / `NoteFor(rule)`（**聚合说明**）/
