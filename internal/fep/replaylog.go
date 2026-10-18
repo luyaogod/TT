@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -426,6 +427,63 @@ func ReplayCtlPath(logPath string) string {
 // WriteReplayCtl 写控制命令（覆盖式：只有最新一条有意义）。
 func WriteReplayCtl(logPath string, c ReplayCtl) error {
 	return os.WriteFile(ReplayCtlPath(logPath), []byte(c+"\n"), 0o644)
+}
+
+// ReplayBreaksPath 是"这一步之前停住"的断点集合（与 .ctl 同目录、同前缀）。
+//
+// 为什么单独一个文件而不是塞进 .ctl：.ctl 一次只有**一个**当前命令（覆盖式），
+// 而断点是**一组**步号，要能随时增删、跨进程共享。
+func ReplayBreaksPath(logPath string) string {
+	return strings.TrimSuffix(logPath, ReplayLogSuffix) + ".breaks"
+}
+
+// ReadReplayBreaks 读断点集合（步号）。文件不在 = 没有断点（不是错误）。
+func ReadReplayBreaks(logPath string) []int {
+	b, err := os.ReadFile(ReplayBreaksPath(logPath))
+	if err != nil {
+		return nil
+	}
+	var out []int
+	for _, ln := range strings.Split(string(b), "\n") {
+		ln = strings.TrimSpace(ln)
+		if ln == "" {
+			continue
+		}
+		if n, cerr := strconv.Atoi(ln); cerr == nil && n > 0 {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// WriteReplayBreaks 覆盖写断点集合（排序去重，一行一个）。
+func WriteReplayBreaks(logPath string, ns []int) error {
+	seen := map[int]bool{}
+	var clean []int
+	for _, n := range ns {
+		if n <= 0 || seen[n] {
+			continue
+		}
+		seen[n] = true
+		clean = append(clean, n)
+	}
+	sort.Ints(clean)
+	var b strings.Builder
+	for _, n := range clean {
+		b.WriteString(strconv.Itoa(n))
+		b.WriteString("\n")
+	}
+	return os.WriteFile(ReplayBreaksPath(logPath), []byte(b.String()), 0o644)
+}
+
+// HasReplayBreak 判某一步是否设了断点（每次现读：人可能刚点上）。
+func HasReplayBreak(logPath string, n int) bool {
+	for _, x := range ReadReplayBreaks(logPath) {
+		if x == n {
+			return true
+		}
+	}
+	return false
 }
 
 // ReadReplayCtl 读控制命令（文件不在或读不动时返回空 = 什么都不做）。

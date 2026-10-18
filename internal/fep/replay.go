@@ -152,6 +152,11 @@ type ReplayRunOptions struct {
 	Settle time.Duration
 	DryRun bool
 	Logf   func(string, ...any)
+	// BreakAt 判"这一步发之前要不要停"（回放断点，用户 2026-10-18 定：**发之前停**）。
+	//
+	// nil = 没有断点能力（比如没有控制通道的调用方）。判据由调用方给：它知道
+	// 断点文件在哪（`<回放日志>.breaks`），这里只管"到了就进暂停态"。
+	BreakAt func(n int) bool
 	// OnStep 逐步回调：**每一步的中间态与终态各叫一次**（waiting → sent/no-response）。
 	//
 	// 为什么连中间态也要叫：用户要看的是"现在走到哪了、等多久了"。只在结束时报告，
@@ -211,6 +216,11 @@ func (c *Client) RunReplayWith(plan ReplayPlan, opt ReplayRunOptions) (*ReplayRe
 	// 行为正好相反。用一个 bool 表达会写成 `if paused { paused = true }` 这种自欺的句子
 	// （第一版就是这么写的，实测按单步会一直跑下去）。
 	mode := ""
+	// resumedAt 是"人刚按过继续"的那一步：断点不能在同一步上立刻又把它拦住
+	// （否则「继续」等于没点 —— 真机上那就是死循环）。
+	resumedAt := -1
+	// pauseReason 决定停住时那行日志/面子上写什么（断点 vs 手动暂停）。
+	pauseReason := "已暂停（等「继续」或「单步」）"
 	for _, ev := range plan.Events {
 		step := ReplayStep{N: ev.N, Total: total, Event: ev.Event, Kind: eventKind(ev.Event)}
 		// skipped 是"这一步被人按了跳过"：**每一步都要重置** —— 声明在循环外会把
@@ -245,11 +255,17 @@ func (c *Client) RunReplayWith(plan ReplayPlan, opt ReplayRunOptions) (*ReplayRe
 			if skipped {
 				continue
 			}
+			// 断点：**发之前**停。人刚按过「继续」的那一步不拦（否则继续=没点）。
+			if opt.BreakAt != nil && mode != "step" && !skipped && ev.N != resumedAt && opt.BreakAt(ev.N) {
+				mode = "pause"
+				pauseReason = fmt.Sprintf("断点：停在第 %d 步之前（点「发一步」或「继续」放行）", ev.N)
+				logf("断点：停在第 %d 步之前", ev.N)
+			}
 			if mode == "pause" {
 				// 只报**一次**"停在第几步"：这个等待循环每 200ms 转一圈，
 				// 每圈都落一行会把日志冲成垃圾（而进度条只需要知道"停在哪"）。
 				step.Result = ReplayPaused
-				step.Reason = "已暂停（等「继续」或「单步」）"
+				step.Reason = pauseReason
 				emit(step)
 				logf("已暂停在第 %d 步（等「继续」或「单步」）", ev.N)
 				for mode == "pause" {
@@ -261,8 +277,10 @@ func (c *Client) RunReplayWith(plan ReplayPlan, opt ReplayRunOptions) (*ReplayRe
 						return res, nil
 					case CtlResume:
 						mode = ""
+						resumedAt = ev.N
 					case CtlStep:
 						mode = "step"
+						resumedAt = ev.N
 					case CtlSkip:
 						// 停在第 N 步时按「跳过」：**不发它**，记一条 skipped，
 						// 然后**继续停着**（下一步再等你按「发一步 / 继续」）。

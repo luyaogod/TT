@@ -508,6 +508,17 @@ export interface RecordingRawSlice {
 // 一步可能有**不止一条**记录：`waiting`（已发出、正在等回包）之后才是终态，
 // 暂停时还有 `paused`。所以界面按 `n` 取**最后一条**（服务端也用 `states` 收敛好了）。
 export type ReplayStepResult = 'waiting' | 'paused' | 'sent' | 'no-response' | 'skipped' | 'failed'
+/** 计划里的一步（左栏那一行）：回放要发什么、发给谁、有没有正式身份。 */
+export interface ReplayPlanStep {
+  n: number
+  event: string
+  kind?: string
+  target?: number
+  colName?: string
+  fieldId?: number
+  /** true = 没有正式身份，真跑时按录制时的临时编号发（界面标"降级"）。 */
+  degraded?: boolean
+}
 export interface ReplayStep {
   n: number
   total: number
@@ -544,6 +555,8 @@ export interface ReplayStepsResp {
   ok: boolean
   id: string
   hasLog: boolean
+  /** 左侧列表里设了"发之前停"的断点（步号）。 */
+  breaks?: number[]
   path?: string
   running?: boolean
   total?: number
@@ -869,6 +882,15 @@ export const api = {
   // 服务端会拒:非法词 400、没有日志 404、不在跑 409(停止除外 —— 收尾那一下要能点)。
   // 会话页的「回放控制台」：会话只知道别名（`fep-<录制ID>`），不知道源录制 ID。
   // 服务端按别名定位这一轮回放；载荷与 replaySteps 同形。
+  // 两栏调试器的**左栏**：整份计划（回放开始之前就能铺满，像代码行一样）。
+  replayPlan: (id: string) =>
+    req<{ ok: boolean; id: string; total: number; scanned: number; steps: ReplayPlanStep[]; skips: { raw: string; reason: string }[] }>(
+      `/api/recordings/${encodeURIComponent(id)}/replay-plan`),
+  // 断点：某一步**发之前**停（左侧列表的红点）。
+  replayBreak: (id: string, n: number, on: boolean) =>
+    req<{ ok: boolean; id: string; breaks: number[] }>(
+      `/api/recordings/${encodeURIComponent(id)}/replay-breaks`,
+      { method: 'POST', body: JSON.stringify({ n, on }) }),
   replayLatest: (forName?: string) =>
     req<ReplayStepsResp>(`/api/replay/latest${forName ? `?for=${encodeURIComponent(forName)}` : ''}`),
   replayCtl: (id: string, cmd: 'pause' | 'resume' | 'step' | 'skip' | 'stop') =>

@@ -222,7 +222,14 @@ var recReproduceCmd = &cobra.Command{
 					rlog.Step(s)
 				}
 			},
-			// 人的命令：暂停 / 单步 / 停止（面板按钮写这个文件）。
+			// 断点：**发之前**停（面板左侧列表点的那些步号，存在 `<日志>.breaks`）。
+			BreakAt: func(n int) bool {
+				if rlog == nil {
+					return false
+				}
+				return fep.HasReplayBreak(rlog.Path(), n)
+			},
+			// 人的命令：暂停 / 单步 / 暂停 / 跳过 / 停止（面板按钮写这个文件）。
 			Ctl: func() fep.ReplayCtl {
 				if rlog == nil {
 					return ""

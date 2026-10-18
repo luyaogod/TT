@@ -195,6 +195,61 @@ func TestReplayCtlRefusals(t *testing.T) {
 	}
 }
 
+// TestReplayBreakTogglesAndPersists：左侧列表那个红点（**发之前停**）。
+//
+// 落在 `<回放日志>.breaks` 上：回放进程每一步现读，所以点了立刻生效、不用重启。
+func TestReplayBreakTogglesAndPersists(t *testing.T) {
+	s, cfgPath := newTestServer(t, `{"schemaVersion":3,"hosts":{"sshs":[]}}`)
+	path := seedReplayLog(t, filepath.Dir(cfgPath), "fep-bp", []fep.ReplayStep{{N: 1, Total: 3, Result: fep.ReplaySent}}, fep.ReplayResult{})
+	if code, out := postJSON(t, s, "/api/recordings/fep-bp/replay-breaks", `{"n":2,"on":true}`); code != http.StatusOK {
+		t.Fatalf("设断点该成功：%d %v", code, out)
+	}
+	if got := fep.ReadReplayBreaks(path); len(got) != 1 || got[0] != 2 {
+		t.Fatalf("断点该落到 .breaks 里，读到 %v", got)
+	}
+	// 再加一个 + 取消第一个：集合语义（不是单值覆盖）
+	if code, out := postJSON(t, s, "/api/recordings/fep-bp/replay-breaks", `{"n":5,"on":true}`); code != http.StatusOK {
+		t.Fatalf("第二个断点该成功：%d %v", code, out)
+	}
+	if code, out := postJSON(t, s, "/api/recordings/fep-bp/replay-breaks", `{"n":2,"on":false}`); code != http.StatusOK {
+		t.Fatalf("取消断点该成功：%d %v", code, out)
+	}
+	if got := fep.ReadReplayBreaks(path); len(got) != 1 || got[0] != 5 {
+		t.Fatalf("取消之后只该剩第 5 步，读到 %v", got)
+	}
+	// 步号必须 ≥1
+	if code, _ := postJSON(t, s, "/api/recordings/fep-bp/replay-breaks", `{"n":0,"on":true}`); code != http.StatusBadRequest {
+		t.Fatalf("步号 0 该 400，实得 %d", code)
+	}
+}
+
+// TestReplayPlanPrefillsTheLeftPane：左栏要能**在回放之前**铺满整份计划。
+func TestReplayPlanPrefillsTheLeftPane(t *testing.T) {
+	s, cfgPath := newTestServer(t, `{"schemaVersion":3,"hosts":{"sshs":[]}}`)
+	dataDir := filepath.Dir(cfgPath)
+	seedLibRecording(t, dataDir, "主机109", "99", "fep-plan", "bsft001_wf")
+	// 事件侧：seedLibRecording 只造界面侧，这里**在入库后的目录里**补一条事件侧
+	ev := filepath.Join(dataDir, "records", "主机109", "99", "fep-plan", "fep-plan-1-gdc2rt.log")
+	if err := os.WriteFile(ev, []byte("event _om 1{}{{ActionEvent 0{{idRef \"42\"}}}}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out := getJSON(t, s, "/api/recordings/fep-plan/replay-plan")
+	if code != http.StatusOK {
+		t.Fatalf("计划该读出来：%d %v", code, out)
+	}
+	steps, _ := out["steps"].([]any)
+	if len(steps) != 1 {
+		t.Fatalf("该有 1 步计划，实得 %d：%v", len(steps), out)
+	}
+	first, _ := steps[0].(map[string]any)
+	if first["event"] == "" || first["kind"] != "ActionEvent" {
+		t.Fatalf("这一步该带事件原文与类型：%v", first)
+	}
+	if first["degraded"] != true {
+		t.Fatalf("没有 colName 的步该标降级：%v", first)
+	}
+}
+
 // 盯盘循环：新行会被推出去（注入的 RecProgress 收得到）。
 func TestReplayWatchPushesNewSteps(t *testing.T) {
 	var mu sync.Mutex

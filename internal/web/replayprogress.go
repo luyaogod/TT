@@ -19,11 +19,14 @@ package web
 // 或者这一轮已经收尾，它就自己退场 —— 不留常驻 goroutine。
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -42,6 +45,8 @@ func (s *Server) registerReplayProgress(m *http.ServeMux) {
 	m.HandleFunc("GET /api/recordings/{id}/replay-steps", s.hReplaySteps)
 	// 会话页的「回放控制台」用这条：它只知道会话（别名 `fep-<录制ID>`），不知道源录制 ID。
 	m.HandleFunc("GET /api/replay/latest", s.hReplayLatest)
+	m.HandleFunc("GET /api/recordings/{id}/replay-plan", s.hReplayPlan)
+	m.HandleFunc("POST /api/recordings/{id}/replay-breaks", s.hReplayBreak)
 	m.HandleFunc("POST /api/recordings/{id}/replay-ctl", s.hReplayCtl)
 }
 
@@ -97,8 +102,169 @@ func replayPayload(s *Server, id string, lg *fep.ReplayLog) map[string]any {
 		"steps":      lg.States(),
 		"note":       lg.Note,
 		"ctlPath":    fep.ReplayCtlPath(lg.Path),
+		"breaks":     fep.ReadReplayBreaks(lg.Path),
 	}
 	return out
+}
+
+// hReplayBreak POST /api/recordings/{id}/replay-breaks {n, on}
+//
+// 左侧列表里那个红点：**发之前**停在第 n 步（用户 2026-10-18 定）。
+// 落在 `<回放日志>.breaks` 上，回放进程每一步现读 —— 点了立刻生效，不用重启。
+func (s *Server) hReplayBreak(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.PathValue("id"))
+	var req struct {
+		N  int  `json:"n"`
+		On bool `json:"on"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("请求体不是合法 JSON: %w", err))
+		return
+	}
+	if req.N <= 0 {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("步号必须 ≥1（收到 %d）", req.N))
+		return
+	}
+	_, cacheDir, _, err := s.recDirs()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	lg, lerr := fep.LatestReplayLog(cacheDir, id)
+	if lerr != nil {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("这一份录制还没有回放日志（先回放一轮）"))
+		return
+	}
+	cur := fep.ReadReplayBreaks(lg.Path)
+	next := make([]int, 0, len(cur)+1)
+	have := false
+	for _, n := range cur {
+		if n == req.N {
+			have = true
+			if !req.On {
+				continue
+			}
+		}
+		next = append(next, n)
+	}
+	if req.On && !have {
+		next = append(next, req.N)
+	}
+	if werr := fep.WriteReplayBreaks(lg.Path, next); werr != nil {
+		writeErr(w, http.StatusInternalServerError, werr)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": id, "breaks": fep.ReadReplayBreaks(lg.Path)})
+}
+
+// hReplayPlan GET /api/recordings/{id}/replay-plan
+//
+// 给会话页的两栏调试器**提前铺满左侧**：整份计划（每一步要发什么）在回放开始前就能看。
+// 计划是纯离线算出来的（录制件 + 它自己的界面模型），不需要会话、不需要运行期。
+func (s *Server) hReplayPlan(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("没给录制 ID"))
+		return
+	}
+	dir, cacheDir, lib, err := s.recDirs()
+	_ = dir
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	recDir := cacheDir
+	if item, found, ferr := lib.Find(id); ferr == nil && found {
+		recDir = item.Dir
+	} else if files, cerr := fep.RecordingFilesFor(cacheDir, id); cerr != nil || len(files) == 0 {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("长期库与缓存里都没有 %s", id))
+		return
+	}
+	events, eerr := replayEventsOf(recDir, id)
+	if eerr != nil {
+		writeErr(w, http.StatusInternalServerError, eerr)
+		return
+	}
+	m, _, _, _ := fep.LoadModelFrom(recDir, id) // 读不到模型 ⇒ nil：计划里就没有身份，照旧
+	plan := fep.PlanReplay(events, fep.ReplayOptions{Model: m})
+	steps := make([]map[string]any, 0, len(plan.Events))
+	for _, ev := range plan.Events {
+		item := map[string]any{"n": ev.N, "event": ev.Event, "kind": eventKindOf(ev.Event)}
+		if id, ok := idRefOfEvent(ev.Event); ok {
+			item["target"] = id
+		}
+		if ev.ColName != "" {
+			item["colName"] = ev.ColName
+			item["fieldId"] = ev.FieldID
+			item["degraded"] = false
+		} else if _, ok := idRefOfEvent(ev.Event); ok {
+			item["degraded"] = true
+		}
+		steps = append(steps, item)
+	}
+	skips := make([]map[string]any, 0, len(plan.Skips))
+	for _, sk := range plan.Skips {
+		skips = append(skips, map[string]any{"raw": sk.Raw, "reason": sk.Reason})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "id": id, "total": len(plan.Events), "scanned": plan.Scanned,
+		"steps": steps, "skips": skips,
+	})
+}
+
+// replayEventsOf 读一份录制的**事件侧**（前端→运行期）并拆成一条条事件。
+func replayEventsOf(dir, id string) ([]string, error) {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, e := range ents {
+		n := e.Name()
+		if e.IsDir() || !strings.HasPrefix(n, id+"-") || !strings.HasSuffix(n, "-gdc2rt.log") {
+			continue
+		}
+		files = append(files, filepath.Join(dir, n))
+	}
+	sort.Strings(files)
+	var out []string
+	for _, f := range files {
+		bodies, rerr := fep.ReadRecording(f)
+		if rerr != nil {
+			return nil, rerr
+		}
+		for _, body := range bodies {
+			out = append(out, fep.SplitEvents(body)...)
+		}
+	}
+	return out, nil
+}
+
+// eventKindOf / idRefOfEvent 是给计划列表用的轻量解析（不引 fep 的内部函数）。
+func eventKindOf(ev string) string {
+	ev = strings.TrimSpace(ev)
+	if i := strings.IndexAny(ev, " \t"); i > 0 {
+		return ev[:i]
+	}
+	return ev
+}
+
+func idRefOfEvent(ev string) (int, bool) {
+	const key = `idRef "`
+	i := strings.Index(ev, key)
+	if i < 0 {
+		return 0, false
+	}
+	rest := ev[i+len(key):]
+	j := strings.IndexByte(rest, '"')
+	if j <= 0 {
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(rest[:j]))
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 // newestReplayLog 在缓存目录里找**最新**的一份回放日志（按文件名里的时刻）。
