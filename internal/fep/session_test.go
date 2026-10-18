@@ -115,6 +115,28 @@ func TestRegistrySaveUpsertsByTag(t *testing.T) {
 	}
 }
 
+// TestRegistrySavePrunesDeadEntries：Save 顺手清掉**已经死了**的登记。
+//
+// 不行的后果（真机 2026-10-18）：上一轮回放进程已退、登记还在，新一轮 Save 后
+// 登记里两条 → 任何 `Load()` 都报"登记里有多条会话"，新一轮一个事件都发不出去。
+func TestRegistrySavePrunesDeadEntries(t *testing.T) {
+	r := NewRegistry(t.TempDir())
+	dead := &Session{Tag: "fep-dead", OwnerPID: 999999} // 这个 pid 不该存在
+	if err := r.Save(dead); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Save(&Session{Tag: "fep-live", OwnerPID: os.Getpid()}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := r.Load()
+	if err != nil {
+		t.Fatalf("死登记该被清掉、只剩活的那条，实得 %v", err)
+	}
+	if got.Tag != "fep-live" {
+		t.Fatalf("该剩 fep-live，实得 %q", got.Tag)
+	}
+}
+
 // TestRegistryLoadIsAmbiguousWhenMultiple：多条时 `Load()` **不挑**，报歧义并列出 tag。
 //
 // 这是多会话之后最容易踩的一处：`tt fep do` 这类命令不带目标时会走 `Load()`，

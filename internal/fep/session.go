@@ -241,6 +241,20 @@ func (r *Registry) Save(s *Session) error {
 	if err != nil {
 		return err
 	}
+	// 先收掉**已经死了**的登记（OwnerPID 不在）：它们只会让下一个调用者撞 ErrAmbiguous。
+	//
+	// 真机 2026-10-18 现场：点「重新开始」→ 上一轮的回放进程已经退了，但登记还留着；
+	// 新一轮 Save 之后登记里有两条，随后任何 `Load()`（不带 tag）都报
+	// "登记里有多条会话" —— 新一轮一个事件都没发出去。
+	// 只在 Save 里清（读路径保持纯读）：下一次起来顺手把上一轮的尸体收掉。
+	live := make([]*Session, 0, len(list)+1)
+	for _, old := range list {
+		if old.Tag != s.Tag && old.Stale() {
+			continue
+		}
+		live = append(live, old)
+	}
+	list = live
 	replaced := false
 	for i, old := range list {
 		if old.Tag == s.Tag {

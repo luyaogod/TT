@@ -7,7 +7,7 @@
 // 顶上是**调试器手柄**（继续 / 暂停 / 发一步 / 跳过 / 停止），与 Debug 页同一套肌肉记忆：
 // 左边看"要执行哪一行"，右边看"执行结果"，中间用断点/单步控制节奏。
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Pause, Play, SkipForward, Square } from 'lucide-react'
+import { Pause, Play, RotateCcw, SkipForward, Square, StepForward } from 'lucide-react'
 import { api, type ReplayPlanStep, type ReplayStep, type ReplayStepsResp } from './api'
 import { FepFrames } from './FepMonitor'
 import { useToast } from './toast'
@@ -100,6 +100,22 @@ export function ReplayDebugger({ sessionId, name }: { sessionId: string; name?: 
     }
   }
 
+  // 重新开始：把这一轮停掉、再起一轮（从头跑）。
+  //
+  // 为什么不是"倒带"：运行期的状态已经走过去了，**没法原地回退**；
+  // 起新的一轮才是真"从头"，而且 `openDebugRecording` 会先收掉上一轮挂着的会话。
+  const restart = async () => {
+    if (!rp?.id) return
+    try {
+      if (rp.running) await api.replayCtl(rp.id, 'stop').catch(() => { /* 已经停了就算了 */ })
+      await new Promise((r) => setTimeout(r, 500)) // 让上一轮把登记/端口放掉
+      await api.recordingReplay(rp.id)
+      toast.success('已重新开始', { description: '新一轮从头跑；左栏计划不变' })
+    } catch (e: any) {
+      toast.error('重新开始失败', { description: e?.message || String(e) })
+    }
+  }
+
   const toggleBreak = async (n: number) => {
     if (!rp?.id) return
     try {
@@ -125,27 +141,32 @@ export function ReplayDebugger({ sessionId, name }: { sessionId: string; name?: 
           无应答 {progress?.noResp ?? 0} · 跳过 {progress?.skipped ?? 0}
           {(progress?.degraded ?? 0) > 0 ? ` · 降级 ${progress?.degraded}` : ''} · 失败 {progress?.failed ?? 0}
         </span>
+        {/* 手柄（用户 2026-10-18 定的四键）：运行到下一个断点 / 步过 / 暂停 / 重新开始；
+            另外保留「跳过」（不发这一步）与「停止」（不再往下发）。 */}
         <span className="ml-auto flex items-center gap-1">
-          {paused ? (
-            <>
-              <button onClick={() => void ctl('step')} className={btn} title="发这一步（发完继续停住）">
-                <Play size={11} /> 发一步
-              </button>
-              <button onClick={() => void ctl('skip')} className={btn} title="跳过这一步（不发，继续停着）">
-                <SkipForward size={11} /> 跳过
-              </button>
-              <button onClick={() => void ctl('resume')} className={btn} title="继续跑到下一个断点（或跑完）">
-                继续
-              </button>
-            </>
-          ) : (
-            <button onClick={() => void ctl('pause')} className={btn} disabled={!running} title="暂停：当前这一步回包后生效">
-              <Pause size={11} /> 暂停
-            </button>
-          )}
+          <button onClick={() => void ctl('resume')} className={btn} disabled={!paused}
+            title="运行到下一个断点（没有断点就跑完）">
+            <Play size={11} /> 运行到下一个断点
+          </button>
+          <button onClick={() => void ctl('step')} className={btn} disabled={!paused}
+            title="步过：只发这一步，发完仍然停住">
+            <StepForward size={11} /> 步过
+          </button>
+          <button onClick={() => void ctl('pause')} className={btn} disabled={!running || paused}
+            title="暂停：当前这一步回包后生效（最长 8 秒）">
+            <Pause size={11} /> 暂停
+          </button>
+          <button onClick={() => void ctl('skip')} className={btn} disabled={!paused}
+            title="跳过：这一步不发，继续停着">
+            <SkipForward size={11} /> 跳过
+          </button>
           <button onClick={() => void ctl('stop')} className={`${btn} text-red-600 dark:text-red-400`}
             disabled={!running} title="停止：不再发后面的步骤">
             <Square size={11} /> 停止
+          </button>
+          <button onClick={() => void restart()} className={btn} disabled={!rp?.id}
+            title="重新开始：把这一轮停掉，从头再跑一轮">
+            <RotateCcw size={11} /> 重新开始
           </button>
         </span>
       </div>
