@@ -336,7 +336,6 @@ export function App() {
                   sessions={sessions.filter((s) => s.env === envBrief.name)}
                   onTab={(t) => setRoute({ kind: 'env', env: envBrief.name, tab: t })}
                   onCreate={(form, onStep) => createUnder(envBrief.name, form, onStep)}
-                  onOpenSession={openSession}
                   leading={leading}
                 />
               </ErrorBoundary>
