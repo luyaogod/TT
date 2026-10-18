@@ -18,7 +18,7 @@ import (
 //
 //	1. 计划里有没有身份，是**录制件自己**决定的（没有界面侧 ⇒ 没有身份 ⇒ 早于身份上线）；
 //	2. 一旦有这么一步，拒绝发生在**任何发包之前** —— 注入口一条都收不到；
-//	3. `--dry-run` 例外：能展示，而且每步都标「无身份（真跑会被拒）」。
+//	3. `--dry-run`：能展示，而且每步都标「无身份（真跑按临时编号发送）」。
 
 // legacyRecFixture 造一份"早于身份上线"的录制：只有事件侧能读出事件，
 // 界面侧里那些对象**没有 colName** ⇒ 计划里没有身份（正是老件的形态）。
@@ -38,14 +38,16 @@ func legacyRecFixture(t *testing.T) (recTarget, string) {
 	return recTarget{ID: id, Dir: dir, Files: []string{aui}}, dir
 }
 
-// TestReplayGateRefusesIdentitylessPlanBeforeAnyByte：A23 的核心断言。
-func TestReplayGateRefusesIdentitylessPlanBeforeAnyByte(t *testing.T) {
+// TestReplaySendsIdentitylessPlanByBareID：**2026-10-18 的决策**（替换原来的"整份拒绝"）。
+//
+// 老件（没有 colName）不再被一票否决：照录制时的临时编号发出去，并且**每一步都标出来**。
+// 这一条用产品那条组装路径（`planReplayFor`）+ 注入传输来断言"确实发了、也确实标了"。
+func TestReplaySendsIdentitylessPlanByBareID(t *testing.T) {
 	tgt, dir := legacyRecFixture(t)
 	events, err := tgt.events()
 	if err != nil {
 		t.Fatalf("读事件侧: %v", err)
 	}
-	// 走**产品那条**组装路径：计划里没有身份（老件）
 	plan := planReplayFor(tgt, events, replayStopAt, replaySkip)
 	if len(plan.Events) != 1 {
 		t.Fatalf("计划条数 = %d，想要 1", len(plan.Events))
@@ -53,20 +55,20 @@ func TestReplayGateRefusesIdentitylessPlanBeforeAnyByte(t *testing.T) {
 	if plan.Events[0].ColName != "" {
 		t.Fatalf("这份夹具本该没有身份：%+v", plan.Events[0])
 	}
+	if n := fep.CountUnidentified(plan); n != 1 {
+		t.Fatalf("该报 1 步降级，实得 %d", n)
+	}
 
 	client, sent := fakeInject(t, dir)
 	res, rerr := client.RunReplayIdentity(plan, fep.ReplayRunOptions{Conn: 1, Settle: 10 * time.Millisecond})
-	if rerr == nil {
-		t.Fatalf("无身份的步骤实际发包时必须被拒（A23），结果 = %+v", res)
+	if rerr != nil {
+		t.Fatalf("没有身份不再整份拒绝，实得 %v", rerr)
 	}
-	if !strings.Contains(rerr.Error(), "需重录") {
-		t.Fatalf("报文要写清后果（需重录）：%v", rerr)
+	if res == nil || res.Sent != 1 || res.Degraded != 1 {
+		t.Fatalf("结果 = %+v，想要 sent=1 degraded=1", res)
 	}
-	if res != nil {
-		t.Fatalf("被拒时不许给出结果：%+v", res)
-	}
-	if got := sent(); len(got) != 0 {
-		t.Fatalf("拒之前发了 %d 条：%v（要求一个字节都不发）", len(got), got)
+	if got := sent(); len(got) != 1 {
+		t.Fatalf("该发 1 条（按临时编号），实得 %d 条：%v", len(got), got)
 	}
 }
 

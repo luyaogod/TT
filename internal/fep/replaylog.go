@@ -84,6 +84,11 @@ type ReplayStep struct {
 	// 录制时写入（从当步目标节点取），两个键都 `omitempty`：旧日志没有它们 ⇒ 读侧得
 	// 零值 = 未记录，**不是错误**（`ReadReplayLog` 不做任何键集校验）。
 	ColName string `json:"colName,omitempty"`
+	// Resolved 说明这一步**最终怎么找到目标**的：`field`（按字段身份现解析）|
+	// `bare`（按录制时的临时编号 —— 降级，跨会话可能点错）。空 = 没走到那一步。
+	Resolved string `json:"resolved,omitempty"`
+	// Degraded 是 Resolved=="bare" 的布尔形态：界面/汇总按它聚合，不必再解字符串。
+	Degraded bool `json:"degraded,omitempty"`
 	FieldID int    `json:"fieldId,omitempty"`
 	// Code 是这一步被拒时的四码（`FIELD_NOT_IN_SCOPE` 等）；只有 `refused` 会带。
 	Code string `json:"code,omitempty"`
@@ -299,7 +304,9 @@ type ReplayProgress struct {
 	Skipped int `json:"skipped"`
 	// Refused 是"带身份、解析不过 ⇒ 一个字节都没发"的步数（四码之一）。
 	Refused int  `json:"refused,omitempty"`
-	Failed  int  `json:"failed"`
+	// Degraded 是"没有正式身份、按录制时的临时编号发出去"的步数（降级发送）。
+	Degraded int  `json:"degraded,omitempty"`
+	Failed   int  `json:"failed"`
 	Pending bool `json:"pending"` // 有一步正在等回包（waiting）
 	Paused  bool `json:"paused"`  // 停在第 N 步（等用户按继续/单步）
 	Running bool `json:"running"` // 尾行还没落 = 这一轮还在跑
@@ -316,6 +323,9 @@ func (l *ReplayLog) Progress() ReplayProgress {
 		p.Total = len(l.Steps)
 	}
 	for _, s := range l.States() {
+		if s.Degraded {
+			p.Degraded++
+		}
 		switch s.Result {
 		case ReplayWaiting:
 			p.Pending = true

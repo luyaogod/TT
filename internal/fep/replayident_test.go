@@ -422,29 +422,32 @@ func TestRequirePlanIdentityRefusesStepsWithoutIdentity(t *testing.T) {
 	}
 }
 
-// TestRunReplayIdentityRefusesBeforeAnyByte 是 A23 的**硬要求**：
-// 拒绝必须发生在**任何发包之前** —— 连"有身份、本该能发"的第 1 步也不许先发出去。
-func TestRunReplayIdentityRefusesBeforeAnyByte(t *testing.T) {
+// TestRunReplayIdentitySendsUnidentifiedStepsByBareID：**2026-10-18 的决策**。
+//
+// 没有正式身份（colName）的步骤**不再整份拒绝**，而是按录制时的临时编号发出去，
+// 并且这一步要标 `degraded`、结果里计数 —— 真实操作必含工具栏/表格点击，它们天生
+// 没有字段身份（真机 87 个点击里只有 1.1% 带 colName），一票否决等于"真录制永远不能回放"。
+func TestRunReplayIdentitySendsUnidentifiedStepsByBareID(t *testing.T) {
 	c, _, rt, _, _ := sessionFixture(t)
 	plan := ReplayPlan{Events: []ReplayEvent{
-		{N: 1, Event: `ActionEvent 0{{idRef "5160"}}`, ColName: "b_target", FieldID: 5},
-		{N: 2, Event: `ConfigureEvent 0{{idRef "6000"}{ value "X"}}`},
+		{N: 1, Event: `ActionEvent 0{{idRef "5160"}}`},                     // 在界面里 → 按临时编号发
+		{N: 2, Event: `ConfigureEvent 0{{idRef "6000"}{ value "X"}}`},      // 不在界面里 → AUI 闸跳过
 	}}
 	res, err := c.RunReplayIdentity(plan, ReplayRunOptions{Settle: 10 * time.Millisecond})
-	if res != nil {
-		t.Fatalf("被拒时不许给出「跑完了」的结果：%+v", res)
+	if err != nil {
+		t.Fatalf("没有身份的步骤不该再整份拒绝：%v", err)
 	}
-	var ref *Refusal
-	if !errors.As(err, &ref) || !strings.Contains(ref.Message, "需重录") {
-		t.Fatalf("无身份的一步必须以「需重录」的拒绝收场，得到 %v", err)
+	if res == nil || res.Sent != 1 || res.Skipped != 1 {
+		t.Fatalf("结果 = %+v，想要 sent=1 skipped=1（第 2 步的对象不在当前界面）", res)
 	}
-	// 运行期那条连接上**一个字节都没有**（连第 1 步都没发）
+	if res.Degraded != 1 {
+		t.Fatalf("该有 1 步降级（真正按临时编号发出去的第 1 步），实得 %d", res.Degraded)
+	}
+	// 运行期那条连接上确实收到了两帧（证明"照发"而不是"拒了但假装发了"）。
 	buf := make([]byte, 4096)
-	rt.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
-	if n, rerr := rt.Read(buf); n > 0 {
-		t.Fatalf("拒绝之前发了 %d 字节：%q", n, string(buf[:n]))
-	} else if ne, ok := rerr.(net.Error); !ok || !ne.Timeout() {
-		t.Fatalf("读运行期连接出错：%v", rerr)
+	rt.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	if n, _ := rt.Read(buf); n == 0 {
+		t.Fatal("两步都发了，运行期连接上却一个字节都没有")
 	}
 }
 

@@ -279,6 +279,37 @@ func GateReplay(rec, live MultiSnapshot) GateVerdict {
 	return v
 }
 
+// GateReplayInitial 是**回放**用的闸门口径：录制件是"累积"的，当前界面是"此刻"的，
+// 两者本来就不同 —— 一份走过界面的录制必然比刚开出来的界面**多**出一堆东西（尚未加载）。
+//
+// 所以这里把 `GateReplay` 的硬判据**收窄**到一条真正危险的信号：
+// **当前界面有、录制件没有**（意外身份/意外边 / live 覆盖率不够）= 很可能不是同一个界面。
+// 只剩"录制件比当前界面多"（尚未加载）与"类型直方图差异"时**放行**并写明原因 ——
+// 后者在"累积 vs 即时"下永远会差（同一个身份在录制里出现 N 次、在当前界面只出现 1 次）。
+//
+// 路径不符 / 没有界面 / 空录制件仍然照拒（那几条与"累积"无关）。
+func GateReplayInitial(rec, live MultiSnapshot) GateVerdict {
+	v := GateReplay(rec, live)
+	if v.OK || v.Code != GateFPNoMatch {
+		return v
+	}
+	d := v.Diff
+	if !d.EvidenceOK || d.LiveCoverage < FPIdentJaccardMin || d.EdgeCoverage < FPEdgeIsoMin {
+		return v
+	}
+	if len(d.IdentUnexpected) > 0 || len(d.EdgeUnexpected) > 0 {
+		return v
+	}
+	v.OK, v.Code = true, GateOK
+	// 复用拒绝那句正文（它已经把所有数值列全了），前面加一句"按回放口径放行"。
+	v.Reason = fmt.Sprintf("闸门按**当前界面为准**放行（回放口径）：当前界面 %d 个身份、%d 条边全部能在录制件里找到；"+
+		"录制件另有 %d 个身份 / %d 条边是**还没走到**的（累积录制 vs 即时界面，正常）；证据量 %s。原判："+
+		"身份覆盖 %.4f／边覆盖 %.4f／类型直方图差异 %.4f（后者在累积录制下必然偏，不作否决）",
+		d.IdentLive, d.EdgeLive, len(d.IdentPending), len(d.EdgePending), evidencePhrase(d),
+		d.LiveCoverage, d.EdgeCoverage, d.TypeDiff)
+	return v
+}
+
 // evidencePhrase 说清①（证据量）这一条过没过。
 func evidencePhrase(d FPDiff) string {
 	if d.EvidenceOK {

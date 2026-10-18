@@ -3,12 +3,14 @@ package fep
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"tt/internal/debug"
 	"tt/internal/fep"
 )
 
@@ -41,7 +43,13 @@ var recReplayCmd = &cobra.Command{
 每一步都写审计。执行前会先把闸门判决与计划（要发什么、跳了什么、为什么）打出来 —— 先看得见再动手。`,
 	Args: noArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// ① 录制件那一面（离线，读文件）
+		// 回放是**平台**在发事件（既不是人也不是 AI 的自由操作）：不声明就是把 CLI 默认的
+		// `ai` 带进模式/用途闸门里。实测（2026-10-18 16:08）：录制会话的用途是 record，
+		// 放行那一步被"纯录制会话不提供编辑器"整条拒掉 —— 回放一个字节都没发出去。
+		// 与 `tt recording start` 同一条口径：平台驱动的动作声明成 system。
+		if strings.TrimSpace(os.Getenv(debug.ActorEnv)) == "" {
+			_ = os.Setenv(debug.ActorEnv, debug.ActorSystem)
+		}		// ① 录制件那一面（离线，读文件）
 		t, terr := resolveRecording(uiFrom, recID)
 		if terr != nil {
 			return terr
@@ -70,7 +78,7 @@ var recReplayCmd = &cobra.Command{
 					return fail(exitNoSession, "没有登记中的会话，指纹闸无从比对（先跑 tt recording start --launch standard）")
 				}
 			} else {
-				v := fep.GateReplay(rec, live)
+				v := fep.GateReplayInitial(rec, live)
 				fmt.Fprint(cmd.ErrOrStderr(), v.Report())
 				if !v.OK {
 					if replayDryRun {
@@ -110,10 +118,12 @@ var recReplayCmd = &cobra.Command{
 			}
 		}
 
-		// A23：**真跑之前**先过身份闸。放在这里而不是发包循环里，是为了让"一个字节都没发"
-		// 成为结构上的事实（连连接路由都还没做）；dry-run 在上面已经返回，不受此限。
-		if gerr := fep.RequirePlanIdentity(plan); gerr != nil {
-			return replayGateErr(cmd, gerr)
+		// 降级规模先报出来（用户 2026-10-18 定：没有正式身份不再整份拒绝，而是照发 + 标注）：
+		// 真实操作必含工具栏/表格点击，它们天生没有字段身份；这里只**说清楚**有多少步是降级。
+		if n := fep.CountUnidentified(plan); n > 0 {
+			fmt.Fprintf(cmd.ErrOrStderr(),
+				"· 其中 %d 步没有正式身份：将按**录制时的临时编号**发送（日志逐条标 degraded）—— "+
+					"现场与录制时不同的话，这些步可能点到别的控件\n", n)
 		}
 
 		conn := replayConn
@@ -136,7 +146,7 @@ var recReplayCmd = &cobra.Command{
 		entry := fep.AuditEntry{Verb: "replay", Result: "done"}
 		if res != nil {
 			entry.Conn = conn
-			entry.Result = fmt.Sprintf("sent=%d skipped=%d failed=%d", res.Sent, res.Skipped, res.Failed)
+			entry.Result = fmt.Sprintf("sent=%d skipped=%d failed=%d degraded=%d", res.Sent, res.Skipped, res.Failed, res.Degraded)
 		}
 		if rerr != nil {
 			entry.Result = "failed: " + rerr.Error()
@@ -148,8 +158,24 @@ var recReplayCmd = &cobra.Command{
 		return printJSONOrText(res, func() {
 			fmt.Printf("回放：发 %d 条 / 跳 %d 条 / 失败 %d 条；运行期 +%d 字节\n",
 				res.Sent, res.Skipped, res.Failed, res.RuntimeBytes)
+			if res.Degraded > 0 {
+				fmt.Printf("  其中 %d 条是**降级发送**（没有正式身份，按录制时的临时编号）：现场与录制时不同的话，这些步可能点到别的控件\n", res.Degraded)
+			}
 		})
 	},
+}
+
+// replayGateErr 把一次 `*fep.Refusal`（身份解析不过/有歧义）翻成 CLI 的失败信封：
+// 这类拒绝仍然**逐条生效**（那才是"会点错"的场合），所以入口没变。
+func replayGateErr(cmd *cobra.Command, err error) error {
+	var ref *fep.Refusal
+	if errors.As(err, &ref) {
+		if ref.Hint != "" {
+			fmt.Fprintf(cmd.ErrOrStderr(), "· 怎么办：%s\n", ref.Hint)
+		}
+		return fail(ref.Exit, "%s（%s）", ref.Message, ref.Code)
+	}
+	return fail(exitFailed, "%v", err)
 }
 
 func truncate(s string, n int) string {
@@ -231,17 +257,6 @@ func replayIdentityModel(t recTarget) *fep.Model {
 // 为什么不能直接 `fail(exitFailed, …)`：契约 C4.2/A11 的四码各有退出码（5/5/1/4），
 // 一律折成 1 就等于把"没这个字段"与"网络坏了"说成同一件事（自动化排障要能分开）。
 // Hint 走 stderr：它是给人看的下一步，不该混进 json 信封的 message 里。
-func replayGateErr(cmd *cobra.Command, err error) error {
-	var ref *fep.Refusal
-	if errors.As(err, &ref) {
-		if ref.Hint != "" {
-			fmt.Fprintf(cmd.ErrOrStderr(), "· 怎么办：%s\n", ref.Hint)
-		}
-		return fail(ref.Exit, "%s（%s）", ref.Message, ref.Code)
-	}
-	return fail(exitFailed, "%v", err)
-}
-
 // dryRunStep 是干跑输出里的一步：`ReplayEvent` 原样平铺，只**多**一个 note。
 //
 // 为什么用嵌入而不是改 `fep.ReplayEvent`：有身份的步骤不多出任何键 ——

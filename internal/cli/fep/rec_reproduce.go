@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"tt/internal/debug"
 	"tt/internal/fep"
 )
 
@@ -64,7 +65,13 @@ var recReproduceCmd = &cobra.Command{
 已经有一个会话在跑（例如你刚用 rec start 起过）就加 --attached，跳过第 1、2 步。`,
 	Args: exactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// ① 录制那一面：身份决定怎么起会话
+		// 回放是**平台**在发事件（既不是人也不是 AI 的自由操作）：不声明就是把 CLI 默认的
+		// `ai` 带进模式/用途闸门里。实测（2026-10-18 16:08）：录制会话的用途是 record，
+		// 放行那一步被"纯录制会话不提供编辑器"整条拒掉 —— 回放一个字节都没发出去。
+		// 与 `tt recording start` 同一条口径：平台驱动的动作声明成 system。
+		if strings.TrimSpace(os.Getenv(debug.ActorEnv)) == "" {
+			_ = os.Setenv(debug.ActorEnv, debug.ActorSystem)
+		}		// ① 录制那一面：身份决定怎么起会话
 		t, err := resolveRecording(uiFrom, args[0])
 		if err != nil {
 			return err
@@ -100,10 +107,15 @@ var recReproduceCmd = &cobra.Command{
 		}
 		// 身份接线（与 `rec replay` **同一条**组装路径 planReplayFor）：把这份录制自己的
 		// 界面模型递进去，计划里就会带上 `colName`/`fieldId`，重放时每一步按身份重新定位
-		// （契约 C3/A18）。读不到模型 ⇒ nil ⇒ 计划里没有身份 ⇒ 上面那道闸会拒（A23）。
+		// （契约 C3/A18）。
+		//
+		// **不再整份拒绝**（2026-10-18 用户决策，与 rec replay 同口径）：没有正式身份的步骤
+		// 照录制时的临时编号发，逐步标 degraded；这里只把降级规模先说清楚。
 		plan := planReplayFor(t, events, repStopAt, repSkip)
-		if gerr := fep.RequirePlanIdentity(plan); gerr != nil {
-			return replayGateErr(cmd, gerr)
+		if n := fep.CountUnidentified(plan); n > 0 {
+			fmt.Fprintf(cmd.ErrOrStderr(),
+				"· 其中 %d 步没有正式身份：将按**录制时的临时编号**发送（日志逐条标 degraded）—— "+
+					"现场与录制时不同的话，这些步可能点到别的控件\n", n)
 		}
 
 		// ② 先把会话起起来（断点在放行前下好）
@@ -151,7 +163,7 @@ var recReproduceCmd = &cobra.Command{
 		if !ok {
 			return fail(exitNoSession, "没有会话在跑（--attached 时请先起一个）")
 		}
-		v := fep.GateReplay(rec, live)
+		v := fep.GateReplayInitial(rec, live)
 		fmt.Fprint(cmd.ErrOrStderr(), v.Report())
 		if !v.OK {
 			return fail(exitState, "指纹闸不过，没发任何事件：%s", v.Reason)

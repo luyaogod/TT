@@ -130,6 +130,11 @@ type ReplayResult struct {
 	// Stopped 是"**人**按了停止"（不是失败、也不是跑完）—— 三者在界面上的说法完全不同：
 	// 跑完是"完成"，失败要查原因，而"人停了"是正常操作。
 	Stopped bool `json:"stopped,omitempty"`
+	// Degraded 是"按录制时的临时编号发出去"的步数（没有正式身份 ⇒ 跨会话可能指到别的控件）。
+	//
+	// 它不是失败：这些步**照发**了（用户 2026-10-18 定），但必须能被看见 ——
+	// 界面/CLI 把"发了几步、其中几步是降级"一起报出来。
+	Degraded int `json:"degraded,omitempty"`
 }
 
 // RunReplay sends the plan through the resident session.
@@ -284,11 +289,21 @@ func (c *Client) RunReplayWith(plan ReplayPlan, opt ReplayRunOptions) (*ReplayRe
 			ev.Event = tgt.Event // 只换目标，其余字节原样（回放求保真）
 			step.Event, step.Target = tgt.Event, tgt.ID
 			step.ColName, step.FieldID = string(tgt.ColName), int(tgt.FieldID)
-		} else if step.Target != 0 && m != nil {
-			// 计划期没记身份：这里**只补记**日志里的身份（"录制时写入"），
-			// 不参与发送 —— 没带 colName 的步骤行为一字不变。
-			if idn := IdentityOf(m, step.Target); idn.ColName != "" {
-				step.ColName, step.FieldID = string(idn.ColName), int(idn.FieldID)
+			step.Resolved = "field"
+		} else if step.Target != 0 {
+			// 计划期没记身份 ⇒ **降级**：按录制时的临时编号发（用户 2026-10-18 定）。
+			//
+			// 为什么不再"整份拒绝"：真实操作必然含工具栏/表格点击，它们**天生没有字段身份**
+			// （真机 37 份录制、87 个点击步骤实测：只有 1.1% 带 colName）。一票否决的实际效果
+			// 是"真人录的录制永远不能回放"，而不是保护。
+			//
+			// 风险用**标注**兜住：这一步标 degraded、结果里计数、日志逐条写明；
+			// 真正的硬拒仍留给"有身份但解析不过/有歧义"（那才是会点错的场合）。
+			step.Resolved = "bare"
+			if m != nil {
+				if idn := IdentityOf(m, step.Target); idn.ColName != "" {
+					step.ColName, step.FieldID = string(idn.ColName), int(idn.FieldID)
+				}
 			}
 		}
 		// ② 既有 AUI 安全闸：对象不在**当次界面**里就跳过（行为不变）
@@ -303,6 +318,12 @@ func (c *Client) RunReplayWith(plan ReplayPlan, opt ReplayRunOptions) (*ReplayRe
 					continue
 				}
 			}
+		}
+		// 真正发出去之前才计"降级"：被上面那道 AUI 闸跳过的步不算。
+		if step.Resolved == "bare" {
+			step.Degraded = true
+			res.Degraded++
+			logf("降级 #%d：没有正式身份，按录制时的临时编号 #%d 发送（现场若变了可能点错）", ev.N, step.Target)
 		}
 		if _, err := c.Send(conn, ev.Event); err != nil {
 			logf("失败 #%d：%v", ev.N, err)

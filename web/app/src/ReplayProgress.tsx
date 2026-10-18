@@ -59,6 +59,7 @@ export function ReplayProgressBar(p: Props) {
             异常全是 0 的时候这一句就是"什么都没出问题"——那也是要说的话。 */}
         <span className="text-muted-foreground">
           无应答 {pr.noResp}{pr.suspect ? `（其中可疑 ${pr.suspect}）` : ''} · 跳过 {pr.skipped} · 失败 {pr.failed}
+          {pr.degraded ? ` · 降级 ${pr.degraded}` : ''}
         </span>
         {waiting && (
           <span className="font-mono text-sky-600 dark:text-sky-400"

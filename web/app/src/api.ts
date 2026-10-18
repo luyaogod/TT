@@ -522,6 +522,8 @@ export interface ReplayStep {
   /** 本该有回包却没有（点击类事件）—— 界面据此把「本来无应答」与「8s 无回包（可疑）」分开。 */
   suspect?: boolean
   runtimeBytes?: number
+  /** 这一步是**降级发送**：没有正式身份，按录制时的临时编号发的（现场变了可能点错）。 */
+  degraded?: boolean
   reason?: string
 }
 export interface ReplayProgress {
@@ -532,6 +534,8 @@ export interface ReplayProgress {
   suspect: number
   skipped: number
   failed: number
+  /** 降级发送的步数（没有正式身份、按临时编号发出去的） */
+  degraded?: number
   pending: boolean // 有一步正在等回包
   paused: boolean
   running: boolean // 尾行还没落 = 这一轮还在跑

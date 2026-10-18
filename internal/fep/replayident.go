@@ -195,7 +195,7 @@ func refusalReason(err error) string {
 // NoIdentityNote 是"这一步没有身份"在不发包路径上的**唯一标注**（列表/命令行共用）。
 //
 // 括号里的后果是重点：展示得出来 ≠ 跑得动，这句话就是把差别写在脸上。
-const NoIdentityNote = "无身份（真跑会被拒）"
+const NoIdentityNote = "无身份（真跑按临时编号发送）"
 
 // stepNeedsIdentity 报告这一步在**实际发包**时是不是必须能说出"发给哪个字段"。
 //
@@ -279,13 +279,35 @@ func NoIdentitySteps(plan ReplayPlan) []int {
 //
 // 被拒时返回 (nil, *Refusal)：`res` 为 nil 是刻意的 —— "拒了"不是"跑完了"，
 // 调用方不该拿到一份看起来正常的统计。
+// RunReplayIdentity 是**实际发包**的回放入口（保留旧名字：调用点只有一个）。
+//
+// **它不再做"整份拒绝"**（2026-10-18 用户决策）：真实操作必含工具栏/表格点击，
+// 那些对象天生没有 `colName`；一票否决的真实效果是"真人录的录制永远不能回放"。
+// 现在的口径：
+//
+//	有 `colName`          → 逐步现解析（`ByColName`）；解析不过/有歧义 → **拒这一步并停**
+//	                          （那才是"会点错"的场合，见 RequireStepIdentity 的说明）
+//	没有 `colName` 但有目标 → **降级**：按录制时的临时编号发，每步标 `degraded`
+//	                          （`ReplayResult.Degraded` 计数，日志逐条写明）
+//
+// 想恢复"严格模式"（没有身份就整份不跑）的调用方用 `RequirePlanIdentity` —— 它还在，
+// 只是不再是产品路径上的默认。
 func (c *Client) RunReplayIdentity(plan ReplayPlan, opt ReplayRunOptions) (*ReplayResult, error) {
-	if !opt.DryRun {
-		if err := RequirePlanIdentity(plan); err != nil {
-			return nil, err
+	return c.RunReplayWith(plan, opt)
+}
+
+// CountUnidentified 数计划里"有目标但没有正式身份"的步数 —— 给调用方报告降级规模用。
+func CountUnidentified(plan ReplayPlan) int {
+	n := 0
+	for _, ev := range plan.Events {
+		if _, ok := idRefOf(strings.TrimSpace(ev.Event)); !ok {
+			continue
+		}
+		if strings.TrimSpace(string(ev.ColName)) == "" {
+			n++
 		}
 	}
-	return c.RunReplayWith(plan, opt)
+	return n
 }
 
 // configureWritesValue 判一条 ConfigureEvent 是不是在**写字段值**。
