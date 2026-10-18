@@ -127,7 +127,13 @@ func newServeCmd() *cobra.Command {
 			// `tt recording start --session …`；调试线只收函数，不认识 GDC/代理。
 			st := screenstart.New()
 			debugSrv.SetScreenStarter(func(req debug.ScreenStartRequest) (debug.ScreenStartResult, error) {
-				pid, log, serr := st(path, req.Ref, req.Env, req.Ent, req.Prog, req.Tag)
+				pid, log, serr := st(screenstart.Request{
+					CfgPath: path, Ref: req.Ref, Env: req.Env, Ent: req.Ent,
+					Prog: req.Prog, Tag: req.Tag,
+					// 发起方身份往下传：这个子进程要在这条会话上写（收上一轮、点 ENT、起作业），
+					// 而写受模式闸门约束。人点按钮 → human，AI 调 REST → ai。
+					Actor: req.Actor,
+				})
 				return debug.ScreenStartResult{PID: pid, Log: log}, serr
 			})
 			// 停止器：直接收那一条登记（与 `tt recording stop <tag>` 同一份实现 —— StopTag

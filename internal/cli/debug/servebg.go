@@ -338,7 +338,10 @@ func debugServeForeground(cfg *debug.Config, cfgPath string) error {
 	// 命令型：起画面通道。与统一服务同一条接线（只递函数，调试线不认识 fep）。
 	st := screenstart.New()
 	srv.SetScreenStarter(func(req debug.ScreenStartRequest) (debug.ScreenStartResult, error) {
-		pid, log, serr := st(cfgPath, req.Ref, req.Env, req.Ent, req.Prog, req.Tag)
+		pid, log, serr := st(screenstart.Request{
+			CfgPath: cfgPath, Ref: req.Ref, Env: req.Env, Ent: req.Ent,
+			Prog: req.Prog, Tag: req.Tag, Actor: req.Actor,
+		})
 		return debug.ScreenStartResult{PID: pid, Log: log}, serr
 	})
 	if dir := config.LocationsAt(cfgPath).DataDir(); dir != "" {

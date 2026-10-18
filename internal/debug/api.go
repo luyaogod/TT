@@ -219,6 +219,8 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/sessions/{id}/quit", s.hQuit)
 	mux.HandleFunc("POST /api/sessions/{id}/mode", s.hMode)
 	mux.HandleFunc("POST /api/sessions/switch", s.hSessionSwitch)
+	// 再建一条**空闲会话**（不碰池里任何一条）。与 /switch 的分工见 hSessionCreate。
+	mux.HandleFunc("POST /api/sessions/new", s.hSessionCreate)
 	// 画面通道 / 录制的只读视图（画面通道由外部进程持有，服务只提供查询口）
 	mux.HandleFunc("GET /api/sessions/{id}/screen", s.hSessionScreen)
 	mux.HandleFunc("POST /api/sessions/{id}/screen", s.hSessionScreenStart)
@@ -1161,6 +1163,96 @@ func (s *Server) hSessionSwitch(w http.ResponseWriter, r *http.Request) {
 	s.emitAction(r, ns, "session.switch", "切换环境到 "+req.Env)
 	go s.bootToIdle(ns, r.Context())
 	writeJSON(w, 200, map[string]any{"ok": true, "sessionId": ns.ID, "env": req.Env, "state": "loading"})
+}
+
+// hSessionCreate 再建一条**空闲会话**（`POST /api/sessions/new`）。
+//
+// 与 `/api/sessions/switch` 的分工必须说清，否则两条路会互相顶掉：
+//
+//   - switch 是"**连到这个环境**"：池里已有一条同环境的就复用；叫别的名字且空闲时
+//     **收掉旧的按新名重建**（C3.7b / Q19 —— 那是"换目标"的语义）；
+//   - 这条是"**再给我一条**"：池里有十条也一条都不动，新的那条自己登录、自己待命。
+//     多会话（几个 Agent 同时用、同一个环境并发录制）要的就是这条 —— 用 switch 建第二条
+//     会把第一条收掉，于是"我建了新的、旧的却没了"，而那正是最难发现的一类错。
+//
+// 幂等键是**名字**：同环境已有同名会话 → 原样返回它（不重连、不收口）。不给名字则必然新建
+// —— "都没有名字"不构成"是同一条"的证据，猜错的代价是两条会话落在不同作业上。
+//
+// ENT 必填（requireExplicitEnt）：与启动作业同一条纪律，不许静默沿用登录 shell 的 $TOPENT。
+func (s *Server) hSessionCreate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Env  string `json:"env"`
+		Ent  string `json:"ent"`
+		Name string `json:"name"`
+	}
+	if !readBody(w, r, &req) {
+		return
+	}
+	env := strings.TrimSpace(req.Env)
+	if env == "" {
+		fail(w, 400, fmt.Errorf("需要 env：新会话落在哪个环境（tt env ls 可看全部）"))
+		return
+	}
+	cfg := s.envCfgFor(env)
+	if cfg == nil {
+		fail(w, 404, fmt.Errorf("环境 %q 不存在(请在设置中添加)", env))
+		return
+	}
+	// `--ent` 只改**这一次**的配置（envCfgFor 给的是克隆，写它不会把这个企业留给别的会话）。
+	if e := strings.TrimSpace(req.Ent); e != "" {
+		cfg.Topent = host.EntValue(e)
+	}
+	if err := requireExplicitEnt(cfg, nil); err != nil {
+		var f *target.Failure
+		if errors.As(err, &f) {
+			writeCandidateFailure(w, http.StatusBadRequest, f.Code, f.Message, nil)
+			return
+		}
+		fail(w, 400, err)
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name != "" {
+		if f := target.ValidateAlias(name); f != nil {
+			writeCandidateFailure(w, http.StatusBadRequest, f.Code, f.Message, nil)
+			return
+		}
+		// 同名已在 → 就是那一条。**不收口任何别的会话**（与 switch 的差别就在这一句）。
+		for _, b := range s.mgr.Snapshot() {
+			if b.Env != env || b.Name == "" || !target.SameAlias(b.Name, name) {
+				continue
+			}
+			writeJSON(w, 200, map[string]any{
+				"ok": true, "sessionId": b.ID, "ref": b.Ref, "env": env,
+				"name": b.Name, "state": b.State, "reused": true,
+			})
+			return
+		}
+	}
+	// 写闸门：与其它"能动池子"的端点同一道（nil 目标 = 这一步不保护某一条）。
+	if !s.sessOfWriteGlobal(w, r, nil) {
+		return
+	}
+	ns, err := s.mgr.CreateSessionOn(cfg, name)
+	if err != nil {
+		var taken *ErrNameTaken
+		if errors.As(err, &taken) {
+			s.writeNameTaken(w, taken)
+			return
+		}
+		fail(w, 502, err)
+		return
+	}
+	// 模式由**发起方**决定（与 hLaunch / hSessionSwitch 同一条规则，见 hSessionSwitch 里那段注释）。
+	ns.SetMode(launchModeFor(r))
+	ref := refOf(ns.EnvName(), ns.Seq())
+	s.mgr.emit(Event{Type: "log", SessionID: ns.ID, Text: fmt.Sprintf("新建会话:正在连接 %s …", env)})
+	s.emitAction(r, ns, "session.new", "新建会话到 "+env)
+	go s.bootToIdle(ns, r.Context())
+	writeJSON(w, 200, map[string]any{
+		"ok": true, "sessionId": ns.ID, "ref": ref, "env": env,
+		"name": name, "state": "loading", "reused": false,
+	})
 }
 
 // ---------- 断点 ----------
@@ -2543,6 +2635,11 @@ type ScreenStartRequest struct {
 	Ent  string `json:"ent"`
 	Prog string `json:"prog"` // 录的是哪个作业（必填）
 	Tag  string `json:"tag"`  // 期望的录制 ID（可空：由启动器生成）
+	// Actor 是**发起方身份**（`ai` / `human`，取自 X-Actor）。启动器要把它传下去：
+	// 起出来的那个进程会用调试线的接口在**这条会话**上写，而写受模式闸门约束
+	// （纯人工模式下 AI 不可写）。人点按钮 → human；AI 调 REST → ai。
+	// 不传的后果是子进程默认声明 ai，于是人建的纯人工会话被自己的闸门拦下。
+	Actor string `json:"actor"`
 }
 
 // ScreenStartResult 是启动结果（进程号与日志，给人排障用）。
@@ -2601,6 +2698,7 @@ func (s *Server) hSessionScreenStart(w http.ResponseWriter, r *http.Request) {
 	res, err := s.screenStarter(ScreenStartRequest{
 		Ref: refOf(sess.EnvName(), sess.Seq()), Env: sess.EnvName(),
 		Ent: sess.CurrentEnt(), Prog: prog, Tag: strings.TrimSpace(req.Tag),
+		Actor: actorOf(r),
 	})
 	if err != nil {
 		fail(w, 500, err)

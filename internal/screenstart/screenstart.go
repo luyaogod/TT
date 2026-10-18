@@ -19,16 +19,38 @@ import (
 	"strings"
 	"time"
 
+	"tt/internal/debug"
 	"tt/internal/winproc"
 )
 
-// Starter 起一块画面通道并立刻返回（进程活着就算起成功）。
-//
-// 参数与 `tt recording start` 的挂靠模式一一对应；`cfgPath` 是配置文件路径 ——
-// 服务可能用 `--config` 指到别处，子进程必须跟着走，否则它会去读默认配置。
-type Starter func(cfgPath, ref, env, ent, prog, tag string) (pid int, logPath string, err error)
+// Request 起一块画面通道要的全部信息。
+type Request struct {
+	// CfgPath 是配置文件路径 —— 服务可能用 `--config` 指到别处，子进程必须跟着走，
+	// 否则它会去读默认配置（挂到另一份配置的环境上）。
+	CfgPath string
+	// Ref 是挂到哪条会话（规范的 `环境#序号`）：少了它就变成"另起一条会话"。
+	Ref string
+	// Env 是冗余带上的环境名：它是幂等键的一部分（同环境同别名复用宿主）。
+	Env string
+	Ent string
+	// Prog 是录哪个作业（必填：没有作业就没什么可录）。
+	Prog string
+	// Tag 是期望的录制 ID（目前 `recording start` 不支持显式指定，由进程自己生成）。
+	Tag string
+	// Actor 是"这次动作算谁的"（`X-Actor` 同一个口径，注入子进程的 `TT_ACTOR`）。
+	//
+	// 为什么必须传：这个子进程要用调试线的接口在**这条会话**上写（收掉上一轮、点 ENT、
+	// 起作业），而调试线有模式闸门 —— 纯人工模式下 AI 不可写、协作模式下人不可写。
+	// 人在界面上点「创建会话」时发起方是 human，子进程就得声明 human；AI 调 REST 时是 ai。
+	// 传错的表现是一句莫名其妙的"纯人工模式:AI 不可操作"（实测 2026-10-18），
+	// 而真正的原因是"谁在按这个按钮"没传下去。
+	Actor string
+}
 
-// 三个可替换点：测试要能钉住"按什么参数起它"，而不真起一个跑 GDC 的进程。
+// Starter 起一块画面通道并立刻返回（进程活着就算起成功）。
+type Starter func(Request) (pid int, logPath string, err error)
+
+// 几个可替换点：测试要能钉住"按什么参数起它"，而不真起一个跑 GDC 的进程。
 var (
 	executable     = os.Executable
 	spawnDetached  = winproc.SpawnDetached
@@ -39,7 +61,7 @@ var (
 
 // New 返回生产实现。
 func New() Starter {
-	return func(cfgPath, ref, env, ent, prog, tag string) (int, string, error) {
+	return func(req Request) (int, string, error) {
 		exe, err := executable()
 		if err != nil {
 			return 0, "", err
@@ -52,21 +74,27 @@ func New() Starter {
 
 		// 只走挂靠模式：`--session <ref>` 保证画面挂到**被点名的会话**上，而不是另起一条。
 		// `--env` 也带上：它是幂等键的一部分（同环境同别名复用宿主），少一个就可能落到别处。
-		args := []string{"recording", "start", "--session", ref, "--prog", prog}
-		if e := strings.TrimSpace(ent); e != "" {
+		args := []string{"recording", "start", "--session", req.Ref, "--prog", req.Prog}
+		if e := strings.TrimSpace(req.Ent); e != "" {
 			args = append(args, "--ent", e)
 		}
-		if e := strings.TrimSpace(env); e != "" {
+		if e := strings.TrimSpace(req.Env); e != "" {
 			args = append(args, "--env", e)
 		}
-		if c := strings.TrimSpace(cfgPath); c != "" {
+		if c := strings.TrimSpace(req.CfgPath); c != "" {
 			args = append(args, "--config", c)
 		}
-		// `tag` 目前 `rec start` 不支持显式指定（录制 ID 由进程生成）—— 调用方拿到的
-		// 是进程号与日志；真正的录制 ID 用 `GET /api/sessions/{id}/screen` 查回来。
-		_ = tag
+		// 空的 Tag 不再传：`recording start` 的录制 ID 由进程生成，调用方事后用
+		// `GET /api/sessions/{id}/screen` 查回来。
+		_ = req.Tag
 
-		pid, perr := spawnDetached(exe, args, logPath)
+		// 只有明确给了身份才注入：空 = 不设这个变量，子进程按 CLI 的缺省算 ai（既有行为不变）。
+		var extraEnv []string
+		if a := strings.TrimSpace(req.Actor); a != "" {
+			extraEnv = append(extraEnv, debug.ActorEnv+"="+a)
+		}
+
+		pid, perr := spawnDetached(exe, args, logPath, extraEnv...)
 		if perr != nil {
 			return 0, logPath, fmt.Errorf("起画面通道进程失败: %w", perr)
 		}
