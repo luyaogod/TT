@@ -139,7 +139,7 @@ function CreateSessionPane({ env, count, onCreate }: {
 
           <div className="flex items-start gap-2 rounded-[8px] border border-border bg-muted/30 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
             <Bug className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-70" />
-            <span>建出来的是**调试会话**：停在作业入口，可以下断点、单步、看变量。</span>
+            <span>建出来的是<b className="font-medium text-foreground">调试会话</b>：停在作业入口，可以下断点、单步、看变量。</span>
           </div>
 
           {err && (
