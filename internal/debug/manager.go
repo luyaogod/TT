@@ -1057,7 +1057,7 @@ func (m *Manager) sweepExitedLocked() {
 // 序号**不单独记账**：它按池子里活着的会话现算，所以"会话消失 → 序号释放"是天然的，
 // 与别名同一条性质（Q19 的同源口径）。已断开（`StateExit`）的残留不算占用者。
 func (m *Manager) allocSeqLocked(env string) int {
-	// 规则住在 `internal/session`（FEP 那条线也要用同一份）：这里只把池子拍平成它要的形状。
+	// 规则住在 `internal/session`：这里只把池子拍平成它要的形状。
 	slots := make([]sessionid.Slot, 0, len(m.sessions))
 	for _, s := range m.sessions {
 		slots = append(slots, sessionid.Slot{
@@ -1129,7 +1129,7 @@ func (m *Manager) assignNameLocked(sess *Session, name string) error {
 // X 就是"这条会话叫什么"。它此前没有名字，所以这不是改名（C2.5b 禁的是改名）。
 // NameSession 把别名登记给一条**此前无名**的会话。
 //
-// 为什么要导出：`hSessionSwitch`（`debug env --name`）也要走这条 —— 录制要能
+// 为什么要导出：`hSessionSwitch`（`debug env --name`）也要走这条 —— 命令要能
 // "在这个环境里建一条叫 X 的空闲会话"，而池里可能已经有一条**没名字**的空闲宿主，
 // 把名字登记给它比重新登录一次便宜。它此前无名，所以不是改名（C2.5b 禁的是改名）。
 func (m *Manager) NameSession(sess *Session, name string) error {

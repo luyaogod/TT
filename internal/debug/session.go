@@ -301,7 +301,7 @@ type Session struct {
 	// 为什么要有 quitDone：原来 `quitting` 为真时后来者**立刻 return nil** —— 报"成功"，
 	// 可那一次收口还在跑，会话仍是 running。调用方于是紧接着做下一步（设 TOPENT / 切环境），
 	// 撞上"仅会话空闲(idle)时可设置 TOPENT(当前 运行中)"。实测 2026-10-16：前一条命令
-	// 与另一条命令的 quit 撞在一起，回放就这么静默失败了。现在后来者**等这一次收口做完**。
+	// 与另一条命令的 quit 撞在一起，后一条就这么静默失败了。现在后来者**等这一次收口做完**。
 	quitting bool
 	quitDone chan struct{}
 
@@ -3174,7 +3174,7 @@ var (
 // 的进程级世代（前端靠它知道"服务重启了、`Seq` 要归零"，见 `Event.Seq` 的注释）；
 // 本条是**会话**的世代。两者同名前缀只是巧合，一个在 `Manager` 上、一个在 `Session` 上。
 func nextSessionEpoch() string {
-	// 发号规则住在 `internal/session`（FEP 那条线也用它）：这里只是转发。
+	// 发号规则住在 `internal/session`：这里只是转发。
 	return sessionid.NewEpoch()
 }
 

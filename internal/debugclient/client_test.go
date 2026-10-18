@@ -165,8 +165,8 @@ func TestDiscoverFallsBackToListen(t *testing.T) {
 
 // TestLifecycleEndpoints：生命周期动作打到**哪个端点、什么方法、什么请求体**。
 //
-// 这张映射表是 P2 的关键：`tt fep` 从前靠起子进程表达这些动作，现在直连；
-// 端点或请求体写错，表现是"录制起不来"，而错误信息往往指向别处。
+// 这张映射表是 P2 的关键：从前靠起子进程表达这些动作，现在直连；
+// 端点或请求体写错，表现是"动作起不来"，而错误信息往往指向别处。
 func TestLifecycleEndpoints(t *testing.T) {
 	type call struct {
 		method, path string
