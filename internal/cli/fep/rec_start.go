@@ -24,6 +24,12 @@ var (
 	recStartProg   string
 	recStartEnv    string
 	recStartEnt    string
+	// recStartModule 是 `--module`：**默认留空**，让调试线按作业名解析。
+	//
+	// 为什么不能给个默认值（真机 2026-10-18 14:05 踩到）：录制进程以前硬编码 `-m asf`，
+	// 于是会话的 module 永远是 asf —— 而 axmt500_wf 实际属于 **axm**（启动用的是 `$AXMi`）。
+	// 结果源码按 `asf_axmt500_wf.4gl` 去找，服务器上根本没有这个文件，界面显示"无源码"。
+	// 作业属于哪个模块是 ERP 里的事实，只有调试线能解析（`/api/launch` 的 module 可留空）。
 	recStartModule string
 	recStartNoCont bool
 	recStartBinary string
@@ -377,7 +383,8 @@ func init() {
 	recStartCmd.Flags().StringVar(&recStartEnv, "env", "", "环境名（必填 —— 环境一律点名，没有默认环境可回落）")
 	recStartCmd.Flags().StringVar(&recStartProg, "prog", "", "作业程序名（必填，如 bsft001_wf）")
 	recStartCmd.Flags().StringVar(&recStartEnt, "ent", "", "企业编号（ENT，**必填**）：作业落在哪个企业。不给会回落到环境配置里的 db.ent；两者都没有则直接报错 —— 不再沿用登录 shell 的 $TOPENT")
-	recStartCmd.Flags().StringVarP(&recStartModule, "module", "m", "asf", "T100 模块目录名（调试线要用）")
+	recStartCmd.Flags().StringVarP(&recStartModule, "module", "m", "",
+		"T100 模块目录名（默认留空 = 调试线按作业名自动解析；只有解析不出来才需要显式给）")
 	recStartCmd.Flags().StringVar(&recStartBinary, "binary-ref", "",
 		"作业编译件（.42r）在服务器上的绝对路径（可选）：给了就只读探一次，记进录制身份")
 	recStartCmd.Flags().BoolVar(&recStartNoCont, "no-continue", false,

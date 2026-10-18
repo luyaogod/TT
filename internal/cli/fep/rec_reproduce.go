@@ -332,7 +332,8 @@ func init() {
 	recReproduceCmd.Flags().StringVar(&repEnv, "env", "", "环境名（身份里没有时才需要）")
 	recReproduceCmd.Flags().StringVar(&repProg, "prog", "", "作业程序名（身份里没有时才需要）")
 	recReproduceCmd.Flags().StringVar(&repEnt, "ent", "", "企业编号（身份里没有时才需要）")
-	recReproduceCmd.Flags().StringVarP(&repModule, "module", "m", "asf", "T100 模块目录名")
+	recReproduceCmd.Flags().StringVarP(&repModule, "module", "m", "",
+		"T100 模块目录名（默认留空 = 调试线按作业名自动解析）")
 	recReproduceCmd.Flags().IntVar(&repConn, "conn", 0, "把事件发到哪条连接（0 = 自动）")
 	recReproduceCmd.Flags().StringVar(&repWindow, "window", "", "按窗口名路由连接")
 	recReproduceCmd.Flags().IntVar(&repStopAt, "stop-at", 0, "只回放到第 N 条（含）")
