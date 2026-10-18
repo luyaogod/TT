@@ -327,7 +327,7 @@ assert.ok(!S().timeline.some((t) => t.kind === 'command' && t.text.startsWith('�
   '什么都没发的时候，不许记一条"成功"的命令行')
 console.log('OK 15) 会话操作:做不到就抛错并记 warn，绝不假装成功')
 
-console.log('\n全部通过: 16/16')
+console.log('\n全部通过: 17/17')
 
 // ---------- 16) 树由池派生:池事件直接改树,不等刷新 ----------
 // W2/W6/D9:树不是本地账本,而是 GET /api/sessions 与 session.added/removed 的投影。
@@ -374,3 +374,35 @@ assert.ok(!S().sessions.some((x) => x.id === 's-cli-1'), 'session.removed 应让
 assert.equal(S().screens['s-cli-1'], undefined, '移除会话时它的画面状态也该清掉')
 console.log('OK 16) 树由池派生:added/removed 与 screens 事件即时生效,且不动绑定')
 
+
+// ---------- 17) 运行时按会话各存一份(W6):别的会话的状态也记 ----------
+// 单例那套字段只装得下"绑着的那条";多会话下别人起停的事件必须落到它自己的运行时里,
+// 否则树上的状态点只会在下一次 List 时才变(最长一秒多),而面板切回去还得重新问一遍。
+useStore.setState({ sessionId: 's-bind', state: 'stopped', sessionList: [], sessions: [], runtimes: {}, screens: {} })
+useStore.setState({ sessionList: [{ id: 's-bind', state: 'stopped', module: '', prog: 'p0', holdingSeconds: 0, breakpoints: 0, watchdogSeconds: 0, mode: 'solo' },
+  { id: 's-other', state: 'idle', module: 'asf', prog: 'axmt500_wf', holdingSeconds: 0, breakpoints: 0, watchdogSeconds: 0, mode: 'collab' }] })
+
+// 别的会话开始跑:运行时跟着变,单例与绑定一个都不动
+S().onEvent({ type: 'state', sessionId: 's-other', state: 'running' })
+assert.equal(S().runtimes['s-other']?.state, 'running', '别的会话的 state 事件要进它自己的运行时')
+assert.equal(S().state, 'stopped', '不得改单例（那是绑定那条的状态）')
+assert.equal(S().sessionId, 's-bind', '不得改绑定')
+assert.equal(S().runtimes['s-other']?.prog, 'axmt500_wf', '运行时保留池里的作业编号')
+
+// 它停站:停留现场也进运行时(切回这条会话时不必先问一次)
+S().onEvent({ type: 'stopped', sessionId: 's-other', stop: { file: 'a.4gl', line: 42, reason: 'break' } })
+assert.equal(S().runtimes['s-other']?.state, 'stopped')
+assert.equal(S().runtimes['s-other']?.stop?.line, 42)
+
+// 绑着的那条自己的事件:运行时与单例都更新（单例是页面在用的那份）
+S().onEvent({ type: 'state', sessionId: 's-bind', state: 'running' })
+assert.equal(S().state, 'running')
+assert.equal(S().runtimes['s-bind']?.state, 'running')
+
+// 池事件:added 落运行时(状态来自 brief),removed 把它删掉
+S().onEvent({ type: 'session.added', sessionId: 's-new', brief: { id: 's-new', ref: '主机109#5', env: '主机109', name: 'N', state: 'loading', purpose: 'debug', module: '', prog: '', holdingSeconds: 0, breakpoints: 0, watchdogSeconds: 0 } })
+assert.equal(S().runtimes['s-new']?.state, 'loading', 'session.added 要给新会话落一份运行时')
+S().onEvent({ type: 'session.removed', sessionId: 's-new' })
+assert.equal(S().runtimes['s-new'], undefined, '会话没了,运行时也不留')
+assert.equal(S().runtimes['s-other']?.state, 'stopped', '别人的运行时不受影响')
+console.log('OK 17) 运行时按会话各存一份:别人的状态进别人的账,单例只跟绑定那条')

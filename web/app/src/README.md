@@ -39,9 +39,13 @@ FEP录像 = `RecordView`。「创建会话」已经是**真动作**（2026-10-18
 `tt.sessions.v2` 已作废（启动时清掉），旧的 `pruneSessions` 一并下线。所以 CLI、别的浏览器、
 AI 建的会话都会当场出现在树上，服务端没有的条目也不会留在树上。界面会话的挂接状态同样有事件
 （`screen.attached/detached` → `store.screens`），面板即时更新，仍可
-`GET /sessions/{id}/screen` 主动刷新。面板绑定的那条会话仍是 `sessionId`（`tt.sessionId`），
+`GET /sessions/{id}/screen` 主动刷新。每条会话的**运行时**另存一份（`store.runtimes[id]`，W6）：
+`state` / `stop` / `prog` / `module` / `mode` / `screen`。收到别的会话的事件时更新的是**它那一份**，
+单例字段只跟绑定的那条走 —— 这是多实例页面的地基（`useSessionRuntime(id)` 可直接读）。
+面板绑定的那条会话仍是 `sessionId`（`tt.sessionId`），
 它由路由写（见 App.tsx 的绑定 effect）：**地址栏说哪条，面板就绑哪条**；池事件**不改绑定**
-（绑定只能由人点）。
+（绑定只能由人点）。注意路由那条失效判定要等 `sessionsLoaded`（池列过一次）才生效 ——
+否则深链接到某条会话时，首帧的空池会把地址栏弹回环境页。
 
 调试视图**只有一条 header**（`DebugHeader.tsx`）：左边是源码页签，最右是三个互相独立的开关 ——
 terminal（下方面板）、bug-play（调试面板）、list-tree（大纲，树）。三者可同时激活，所以它们不是

@@ -82,12 +82,16 @@ export function App() {
   // 在树上要等到下次列表刷新才变色。
   const boundId = useStore((s) => s.sessionId)
   const boundState = useStore((s) => s.state)
+  const runtimes = useStore((s) => s.runtimes)
+  const sessionsLoaded = useStore((s) => s.sessionsLoaded)
   const sessionStates = useMemo(() => {
     const m: Record<string, string> = {}
     for (const b of sessionList) m[b.id] = b.state
+    // 运行时先于列表：事件比列表新（列表是"刚才那一刻"，事件是"刚刚发生"）。
+    for (const [id, r] of Object.entries(runtimes)) if (r.state) m[id] = r.state
     if (boundId && boundState) m[boundId] = boundState
     return m
-  }, [sessionList, boundId, boundState])
+  }, [sessionList, runtimes, boundId, boundState])
 
   const settingsSection = useStore((s) => s.settingsSection)
   const recordId = useStore((s) => s.recordId)
@@ -172,8 +176,10 @@ export function App() {
     const fallback = (): Route => first ? { kind: 'env', env: first, tab: 'create' } : { kind: 'settings' }
     if (route.kind === 'home') { setRoute(fallback()); return }
     if (route.kind === 'env' && !envs.some((e) => e.name === route.env)) { setRoute(fallback()); return }
-    if (route.kind === 'session' && !sessions.some((s) => s.id === route.id)) setRoute(fallback())
-  }, [envsLoaded, envs, sessions, route])
+    // 会话页要等**池列过至少一次**再判失效：树是池的投影（W-P1），首帧 `sessions` 还是空的，
+    // 不 gate 的话"深链接到某条会话"会在数据回来之前就被当成失效、弹回环境页。
+    if (route.kind === 'session' && sessionsLoaded && !sessions.some((s) => s.id === route.id)) setRoute(fallback())
+  }, [envsLoaded, envs, sessions, sessionsLoaded, route])
 
   // 路由 → store.view:录制列表、接口日志、设置页那些"进来就重拉一次"的 effect 靠它判断
   // 自己是不是此刻的前台。键的映射只有一份(见 routing.ts 的 routeView)。

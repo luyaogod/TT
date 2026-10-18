@@ -38,6 +38,28 @@ export interface SessionItem {
   ref: string
 }
 
+/**
+ * SessionRuntime 是**一条会话的运行时**（W6 的第一步）：服务端把它那一份状态广播过来，
+ * 这里按 id 各存一份。它与「面板绑着的那条」解耦 —— 收到 A 的事件时，B 的运行时照旧更新。
+ *
+ * 这一批只收"索引级"的那几个字段（树上要看、页面切换要用的）；编辑器那一套
+ * （源码、断点面板、调用栈、时间线）仍在 `useStore` 的单例上，等 W-P2 的下一阶段搬。
+ * 字段全部来自服务端事实或本地派生，**没有第二份真相**：
+ *   - `state` / `stop` / `prog` / `module` / `mode` 来自事件或 `GET /api/sessions`；
+ *   - `screen` 来自 `screen.*` 事件与 `GET /sessions/{id}/screen`。
+ */
+export interface SessionRuntime {
+  id: string
+  state: string
+  stop: StopInfo | null
+  prog: string
+  module: string
+  mode: 'solo' | 'collab'
+  screen: { attached: boolean; tag?: string; kind?: string } | null
+  // updatedAt 只用于"这份运行时是什么时候变的"（排查事件断档时有用），不参与渲染判定。
+  updatedAt: number
+}
+
 /** 创建会话的入参（Debug 会话：企业编号 + 作业编号，名字可选）。 */
 export interface CreateSessionInput {
   env: string
@@ -90,6 +112,12 @@ interface Store {
   // 当前路由所在的环境。录制列表按它过滤(会话环境那条线在 `sessionEnv`)。
   activeEnv: string
   sessions: SessionItem[]
+  // sessionsLoaded = 池**列过至少一次**（不是"有会话"）。路由要用它区分
+  // "还没有会话"与"还没问过" —— 否则深链接会在首帧被当成失效目标弹回环境页。
+  sessionsLoaded: boolean
+  // runtimes 是**每条会话的运行时**（W6）：按 id 各一份，事件到了就更新。
+  // 它与 `sessions`/`sessionList`（池的投影）分工：后者回答"有哪些"，前者回答"它现在怎么样"。
+  runtimes: Record<string, SessionRuntime>
   // screens 是**界面会话的挂接状态**（W2 的 screen.* 事件 + GET /screen 的合并结果）。
   // 事件到了即时更新，页面不必每秒问一次；`useScreenInfo` 仍可主动刷新。
   screens: Record<string, { attached: boolean; tag?: string; kind?: string }>
@@ -395,6 +423,77 @@ function indexFromList(list: SessionBrief[]): SessionItem[] {
   return items
 }
 
+// ---------- 运行时（W6）：按 id 各一份 ----------
+//
+// 为什么现在就加：树与页面要回答"**别的**会话现在怎么样"（状态点、切页时的现场）。
+// 单例那套字段只装得下"绑着的那条"，收到别人的事件只能丢掉 —— 而多会话下那是常态。
+// 这一批只收索引级的字段；编辑器那一套仍在单例上（下一阶段搬）。
+
+function emptyRuntime(id: string): SessionRuntime {
+  return { id, state: '', stop: null, prog: '', module: '', mode: 'solo', screen: null, updatedAt: 0 }
+}
+
+// runtimeFromBrief 用池里快照初始化/修正一份运行时。
+//
+// **不拿 brief 覆盖已有值**：brief 是"列表那一刻"的快照，而事件比它新
+// （先起跑 → 事件 running，列表还是 idle）。所以只补空着的字段。
+function runtimeFromBrief(b: SessionBrief, prev?: SessionRuntime): SessionRuntime {
+  const r = prev ? { ...prev } : emptyRuntime(b.id)
+  r.id = b.id
+  if (!r.state && b.state) r.state = b.state
+  if (!r.prog && b.prog) r.prog = b.prog
+  if (!r.module && b.module) r.module = b.module
+  if (b.mode === 'solo' || b.mode === 'collab') r.mode = b.mode
+  r.updatedAt = Date.now()
+  return r
+}
+
+function patchRuntime(id: string, patch: Partial<SessionRuntime>) {
+  if (!id) return
+  useStore.setState((s) => {
+    // 第一次见到这条会话时，先从池里那一条取个底（作业/模块/模式）—— 事件可能比列表刷新
+    // 先到（新建会话的 state 事件就在 added 之后几百毫秒内来），没有底就会把 prog 弄成空。
+    const seed = s.runtimes[id] || (() => {
+      const b = s.sessionList.find((x) => x.id === id)
+      return b ? runtimeFromBrief(b) : emptyRuntime(id)
+    })()
+    return { runtimes: { ...s.runtimes, [id]: { ...seed, ...patch, id, updatedAt: Date.now() } } }
+  })
+}
+
+function seedRuntimes(list: SessionBrief[]) {
+  useStore.setState((s) => {
+    const runtimes: Record<string, SessionRuntime> = { ...s.runtimes }
+    const seen = new Set<string>()
+    for (const b of list) {
+      if (!b?.id) continue
+      seen.add(b.id)
+      runtimes[b.id] = runtimeFromBrief(b, runtimes[b.id])
+    }
+    // 池里没有的运行时不留：它属于已经消失的会话（与树同一条口径）。
+    for (const id of Object.keys(runtimes)) if (!seen.has(id)) delete runtimes[id]
+    return { runtimes }
+  })
+}
+
+function dropRuntime(id: string) {
+  if (!id) return
+  useStore.setState((s) => {
+    if (!s.runtimes[id]) return {}
+    const next = { ...s.runtimes }
+    delete next[id]
+    return { runtimes: next }
+  })
+}
+
+/**
+ * useSessionRuntime 读一条会话的运行时（W6）。页面与树用它回答"它现在怎么样"，
+ * 不必先把面板绑过去。
+ */
+export function useSessionRuntime(id: string | null | undefined): SessionRuntime | undefined {
+  return useStore((s) => (id ? s.runtimes[id] : undefined))
+}
+
 // sleep 是"等后端状态自己走到下一步"的最小工具(登录、登记画面都要等)。
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
@@ -464,7 +563,8 @@ async function refreshSessionList(): Promise<SessionBrief[] | null> {
   try {
     const { sessions } = await api.list()
     const list = sessions || []
-    useStore.setState({ sessionList: list, sessions: indexFromList(list) })
+    useStore.setState({ sessionList: list, sessions: indexFromList(list), sessionsLoaded: true })
+    seedRuntimes(list)
     return list
   } catch {
     return null // 问不到就保持现状:重连与下一次事件还会再来
@@ -481,6 +581,7 @@ function upsertBrief(b: SessionBrief) {
   const next = st.sessionList.filter((x) => x.id !== b.id)
   next.push(b)
   useStore.setState({ sessionList: next, sessions: indexFromList(next) })
+  patchRuntime(b.id, runtimeFromBrief(b, st.runtimes[b.id]))
 }
 
 function dropBrief(id: string) {
@@ -489,6 +590,7 @@ function dropBrief(id: string) {
   if (!st.sessionList.some((x) => x.id === id)) return
   const next = st.sessionList.filter((x) => x.id !== id)
   useStore.setState({ sessionList: next, sessions: indexFromList(next) })
+  dropRuntime(id)
 }
 
 // checkSelectedStillThere 只问一件事：**本地选的那条还在不在**。
@@ -687,7 +789,7 @@ export const useStore = create<Store>((set, get) => ({
   // 刷新后恢复**人上次点的那条**（`tt.sessionId`）。恢复的是"选择"，不是"问服务端要一条"：
   // 这条会话若已经不在服务端了，`checkSelectedStillThere` 会把它清成"未选择"。
   sessionId: readStoredSessionId(), sessionList: [],
-  envs: [], envsLoaded: false, envsErr: '', activeEnv: '', sessions: [], screens: {}, module: '', prog: '', state: '', sessionEnv: '', started: false, stop: null, holdingSeconds: 0,
+  envs: [], envsLoaded: false, envsErr: '', activeEnv: '', sessions: [], sessionsLoaded: false, runtimes: {}, screens: {}, module: '', prog: '', state: '', sessionEnv: '', started: false, stop: null, holdingSeconds: 0,
   launching: false, launchError: '', showBottom: true, bottomMax: false,
   // 面板开关默认关(localStorage tt.stackAuto / tt.autovarsAuto 持久化)
   stackAuto: localStorage.getItem('tt.stackAuto') === '1',
@@ -835,13 +937,34 @@ export const useStore = create<Store>((set, get) => ({
         const id = ev.sessionId
         const scr = (ev as any).screen as { tag?: string; kind?: string } | undefined
         if (!id) return
+        const attached = ev.type === 'screen.attached'
         set((s) => ({
           screens: {
             ...s.screens,
-            [id]: { attached: ev.type === 'screen.attached', tag: scr?.tag, kind: scr?.kind },
+            [id]: { attached, tag: scr?.tag, kind: scr?.kind },
           },
         }))
+        // 运行时里的那一份也跟着变（W6）：页面切到这条会话时不必先问一次。
+        patchRuntime(id, { screen: { attached, tag: scr?.tag, kind: scr?.kind } })
         return
+      }
+    }
+
+    // ---- 运行时：**任何**会话的状态都记，不只绑着的那条（W6） ----
+    //
+    // 这是"多会话"最直接的一步：别人（CLI / 另一个页面）起停的那条会话，它的状态点
+    // 现在也能变。放在"是不是我绑的那条"之前 —— 否则整个记录会被下面的 return 吃掉。
+    if (ev.sessionId) {
+      switch (ev.type) {
+        case 'state':
+          patchRuntime(ev.sessionId, { state: ev.state || '' })
+          break
+        case 'stopped':
+          patchRuntime(ev.sessionId, { state: 'stopped', stop: ev.stop || null })
+          break
+        case 'dead':
+          patchRuntime(ev.sessionId, { state: 'exit' })
+          break
       }
     }
 
@@ -857,10 +980,12 @@ export const useStore = create<Store>((set, get) => ({
     // 唯一例外是**本页面自己发起**的那次动作（launch / replayStart）：它们由
     // HTTP 响应权威绑定（见那两处的 set({sessionId: r.sessionId})），不经过这里。
     if (st.sessionId && ev.sessionId && ev.sessionId !== st.sessionId) {
-      // 本地绑的这条收到的却是**另一条会话**的事件 —— 要么它已经被换掉（同目标复用宿主
-      // 时 id 会相同，所以这里多半是"别人起了新会话"），要么池里已经不止一条。
-      // 问一次服务端：**只问"我选的那条还在不在"**，不在就回到未选择（绝不挑一条）。
-      scheduleRebindCheck()
+      // 收到的是**另一条会话**的事件。多会话下这是常态（池里有 N 条），不再是"我绑的那条
+      // 可能被换掉了"的信号 —— 它的运行时上面已经记过了，这里直接不动面板。
+      //
+      // 只有一个例外仍然值得问一次：事件来自一条**我不认识的会话**（池里没有它）。
+      // 那说明索引断档（丢事件/服务端重启），此时按老规矩只问"我选的那条还在不在"。
+      if (!st.sessionList.some((b) => b.id === ev.sessionId)) scheduleRebindCheck()
       return
     }
     // 刚点重放/重新开始:旧会话的收尾事件不得清掉新会话的加载态(见 retireID 注释)
@@ -1884,7 +2009,8 @@ export const useStore = create<Store>((set, get) => ({
         throw new Error(`服务端还报着会话「${label}」—— 关闭没有真正生效（看 .tt-serve.log）`)
       }
       // 树跟着池一起重建（close 的事件也会到，但这里不等它：人点了就该立刻少一条）。
-      set({ sessionList: sessions || [], sessions: indexFromList(sessions || []) })
+      set({ sessionList: sessions || [], sessions: indexFromList(sessions || []), sessionsLoaded: true })
+      dropRuntime(id)
       set((st) => {
         const rest = { ...st.screens }
         delete rest[id]
@@ -2052,4 +2178,5 @@ if (typeof window !== 'undefined') {
 
 // 浏览器控制台调试入口(生产无副作用)
 ;(window as any).__store = useStore
+
 
