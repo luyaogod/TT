@@ -9,6 +9,40 @@ import { toast } from './toastBus'
 import type { SettingsSectionKey, ViewKey } from './routing'
 export type { ThemeMode }
 
+// ---------- 工作站外壳的两级目录 ----------
+//
+// 环境 = 设置 → 站点管理里配的那一条(`config.json` 的 hosts.sshs),外壳只取显示用的字段;
+// 会话 = 环境下面的二级条目，**每一条都是服务端真实的会话句柄**（`POST /api/sessions/new`
+// 建出来的那条），不是本地假数据。第一阶段那批"只存在浏览器里"的会话已经随
+// `tt.sessions.v1` 一起作废（见 SESSIONS_KEY 的注释）。
+export interface EnvBrief { name: string; host?: string; zone?: string }
+export type SessionType = 'debug' | 'fep'
+export interface SessionItem {
+  // 服务端会话句柄（C5.4：路径与句柄只认 id）。调试面板绑定、画面通道、结束会话都用它。
+  id: string
+  env: string
+  name: string
+  type: SessionType
+  createdAt: number
+  // 建会话时点名的企业编号与作业编号。ENT 是**会话级事实**（环境配置里已经没有它），
+  // 作业编号是"这条会话要调哪个作业"——后面起作业/挂录制都从这两个值往下走。
+  ent: string
+  prog: string
+  // 服务端给的规范 id「环境#序号」（建会话时就分配了）。空串 = 服务端没给（不该发生）。
+  ref: string
+}
+
+/** 创建会话的入参（Debug 会话：企业编号 + 作业编号，名字可选）。 */
+export interface CreateSessionInput {
+  env: string
+  ent: string
+  prog: string
+  name?: string
+}
+
+/** 环境页那张卡片填的东西：环境由它自己在哪一页决定，所以不带 `env`。 */
+export type SessionDraft = Omit<CreateSessionInput, 'env'>
+
 // timeline 条目(人/AI/系统 的操作与事件,可审计)
 export interface TimelineItem {
   time: string
@@ -39,6 +73,25 @@ interface Store {
   // 它只用于显示与"我选的那条还在不在"的校验 —— **不参与挑会话**：
   // 选中态是 `sessionId`，只能由人点（`selectSession`）或本页面自己发起的动作写。
   sessionList: SessionBrief[]
+  // ---- 工作站外壳:环境树 + 会话树 ----
+  // `envs` 来自共享端点 `/api/hosts` 的 `sshs`；`sessions` 是**外壳那棵树**（每条都是真的
+  // 会话句柄，见 SessionItem 的注释），落在 `tt.sessions.v2`。它与下面那组调试态
+  // （`sessionId` / `state` / `stop` …）是一件事的两面：树回答"有哪些"，`sessionId` 回答
+  // "此刻面板绑的是哪一条" —— 两者都由本文件写，别在别处再存一份。
+  envs: EnvBrief[]
+  envsLoaded: boolean
+  envsErr: string
+  // 当前路由所在的环境。录制列表按它过滤(会话环境那条线在 `sessionEnv`)。
+  activeEnv: string
+  sessions: SessionItem[]
+  loadEnvs: () => Promise<void>
+  setActiveEnv: (env: string) => void
+  // createSession 建一条**真的** Debug 会话（企业编号 + 作业编号），默认把画面通道（proxy）
+  // 一起挂上。onStep 用来把"正在登录 / 正在挂画面"这些阶段报给界面（长跑动作要有进度）。
+  createSession: (input: CreateSessionInput, onStep?: (step: string) => void) => Promise<SessionItem>
+  // pruneSessions 把树里那些服务端已经没有的会话摘掉（首屏对齐用：服务重启/会话被 rm 之后
+  // 树里还留着一格，点进去是空的）。返回摘掉了几条。
+  pruneSessions: (aliveIds: string[]) => number
   module: string
   prog: string
   state: string // loading|stopped|running|idle|exit|''
@@ -278,6 +331,111 @@ function setBoundSession(id: string | null) {
   useStore.setState({ sessionId: id })
 }
 
+// ---------- 外壳会话树的本机存储 ----------
+//
+// 键与「面板绑着的那条」分开(`tt.sessionId` 是后者):树是"有哪些会话",绑定是"现在看哪条"。
+//
+// 为什么是 v2:v1 存的是第一阶段那批**假会话**(id 形如 `s-<base36>-<rand>`,只活在浏览器里,
+// 点开也连不上任何后端)。第二阶段起树里每一条都是服务端句柄,两种 id 混在一个键里,
+// "这条还在不在"就永远判不出来 —— 所以换键,v1 直接不读(那批本来就是壳子,没有要保留的数据)。
+const SESSIONS_KEY = 'tt.sessions.v2'
+
+function isSessionType(v: unknown): v is SessionType {
+  return v === 'debug' || v === 'fep'
+}
+
+function readStoredSessions(): SessionItem[] {
+  try {
+    const raw = localStorage.getItem(SESSIONS_KEY)
+    if (!raw) return []
+    const arr = JSON.parse(raw)
+    if (!Array.isArray(arr)) return []
+    // 逐条验形:坏数据(手改过 localStorage、或以后换过字段)只丢那一条,
+    // 不让整棵树因为一行 JSON 崩掉。`ent`/`prog`/`ref` 缺了给空串(旧条目/半截写入),
+    // 由界面对空串如实显示"没记下",不拿猜的值去凑。
+    return arr.flatMap((x): SessionItem[] => {
+      if (!x || typeof x !== 'object') return []
+      const o = x as Record<string, unknown>
+      if (typeof o.id !== 'string' || !o.id) return []
+      if (typeof o.env !== 'string' || !o.env) return []
+      if (typeof o.name !== 'string' || !o.name) return []
+      if (!isSessionType(o.type)) return []
+      return [{
+        id: o.id, env: o.env, name: o.name, type: o.type, createdAt: Number(o.createdAt) || 0,
+        ent: typeof o.ent === 'string' ? o.ent : '',
+        prog: typeof o.prog === 'string' ? o.prog : '',
+        ref: typeof o.ref === 'string' ? o.ref : '',
+      }]
+    })
+  } catch {
+    return []
+  }
+}
+
+function persistSessions(list: SessionItem[]) {
+  try { localStorage.setItem(SESSIONS_KEY, JSON.stringify(list)) } catch { /* 配额满/隐私模式:界面照常,只是刷新会丢 */ }
+}
+
+// sleep 是"等后端状态自己走到下一步"的最小工具(登录、登记画面都要等)。
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+// waitSessionIdle 等这条会话**登录完**(loading → idle)。
+//
+// 为什么要等:挂画面通道的前置就是"会话空闲"（后端 hSessionScreenStart 会 409），
+// 而 create 是立刻返回的 —— 登录是另一条异步路（服务端 go bootToIdle）。
+// 不轮询就会立刻撞 409，用户看到的解释却是"会话不是空闲(loading)"，而不是"再等等"。
+//
+// 失败要分得清三种:登录失败(会话被服务端终结)、超时、其它。三种的处置完全不同。
+async function waitSessionIdle(id: string, timeoutMs = 90000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    let snap: any
+    try {
+      snap = await api.snapshot(id)
+    } catch (e: any) {
+      // 登录失败时服务端会 ForceExit + Remove，于是这条 id 当场查不到。
+      throw new Error(`会话登录失败（服务端已结束这条会话）：${e?.message || String(e)}`)
+    }
+    const state = String(snap?.state || '')
+    if (state === 'idle') return
+    if (state === 'exit') {
+      throw new Error('会话登录失败：后端把这条会话结束了，检查环境配置（服务器地址/区域）与服务器状态')
+    }
+    if (Date.now() > deadline) {
+      throw new Error(`会话 ${Math.round(timeoutMs / 1000)} 秒内没登录完（现在状态：${state || '未知'}）——连不上就挂不了画面通道，先查服务器`)
+    }
+    await sleep(400)
+  }
+}
+
+// attachScreen 给会话挂画面通道（= 录制代理 proxy）。
+//
+// 返回**一句要报给人听的话**（空 = 一切正常）。它刻意不抛错：会话已经建好了，
+// 挂画面失败不该让"建会话"整体失败 —— 更不该假装成功（那是另一类错）。
+async function attachScreen(id: string, prog: string, ent: string, onStep?: (step: string) => void): Promise<string> {
+  try {
+    await api.screenStart(id, prog, ent)
+  } catch (e: any) {
+    return `会话已建好，但画面通道（proxy）没挂上：${e?.message || String(e)}`
+  }
+  // 进程起来 ≠ 登记完成。录制进程是"先登记身份、再连 GDC"，所以这里查一次登记，
+  // 顺便拿到录制 ID —— 界面上"这条会话录的是哪一份"就从它来。
+  //
+  // 等 30 秒不是保险起见：实测有一次紧接着查还是 `attached:false`（那一轮录制进程在
+  // 收上一轮的尾、登记先摘再写），十几秒后才出现。这里等不到**只报警不失败**：
+  // 通道进程确实起来了（POST 已经 202），人可以在会话页的「FEP录制」里再查一次。
+  onStep?.('画面通道已起，正在确认登记…')
+  const deadline = Date.now() + 30000
+  while (Date.now() < deadline) {
+    try {
+      const r = await api.screen(id)
+      if (r?.attached) return ''
+    } catch { /* 查不到就再等一轮：登记可能刚好在写 */ }
+    await sleep(300)
+  }
+  return '画面通道进程已起，但 30 秒内还没在会话上登记成功（GET /screen 仍 attached=false）——看 .tt-serve.log 与那一条录制日志；也可以在会话页的「FEP录制」里点「重新查一次」'
+}
+
 // refreshSessionList 列全部会话（`GET /api/sessions`）填进 `sessionList`。
 //
 // 它**只取数、不动绑定** —— 这正是与旧 `syncFromSessions` 的分工差别：
@@ -481,7 +639,8 @@ export const useStore = create<Store>((set, get) => ({
   wsConnected: false,
   // 刷新后恢复**人上次点的那条**（`tt.sessionId`）。恢复的是"选择"，不是"问服务端要一条"：
   // 这条会话若已经不在服务端了，`checkSelectedStillThere` 会把它清成"未选择"。
-  sessionId: readStoredSessionId(), sessionList: [], module: '', prog: '', state: '', sessionEnv: '', started: false, stop: null, holdingSeconds: 0,
+  sessionId: readStoredSessionId(), sessionList: [],
+  envs: [], envsLoaded: false, envsErr: '', activeEnv: '', sessions: readStoredSessions(), module: '', prog: '', state: '', sessionEnv: '', started: false, stop: null, holdingSeconds: 0,
   launching: false, launchError: '', showBottom: true, bottomMax: false,
   // 面板开关默认关(localStorage tt.stackAuto / tt.autovarsAuto 持久化)
   stackAuto: localStorage.getItem('tt.stackAuto') === '1',
@@ -1370,6 +1529,9 @@ export const useStore = create<Store>((set, get) => ({
   adoptExisting: async () => {
     const list = await refreshSessionList()
     if (!list) return
+    // 顺手把树里服务端已经没有的会话摘掉（服务重启、`session rm`、登录失败被终结）。
+    // 不摘的话树里会留一格"点进去什么都没有"的条目，而它连报错都不会有。
+    get().pruneSessions(list.map((s) => s.id))
     const id = get().sessionId
     if (!id) return // 未选择:界面提示"选一条"(见会话面板),这里什么都不做
     if (!list.some((s) => s.id === id)) {
@@ -1486,6 +1648,100 @@ export const useStore = create<Store>((set, get) => ({
     if (cur.stop && (cur.stop.file !== cur.sourceDVM || cur.sourceMissing)) {
       await cur.refreshSource(cur.stop.file, cur.stop.line)
     }
+  },
+
+  // ---- 工作站外壳:环境树 + 会话树 ----
+  //
+  // 环境清单来自共享端点 `/api/hosts`(与设置页同一份数据源,含口令,所以只在需要时拉)。
+  // 失败与"一个都没配"是两件事:`envsErr` 非空时界面要说"读不到",不能显示成"还没有环境"
+  // (旧会话面板在这条上踩过一次,见 SessionPanel.tsx 的注释)。
+  loadEnvs: async () => {
+    try {
+      const c = await api.settings()
+      const sshs = Array.isArray(c?.sshs) ? c.sshs : []
+      const envs: EnvBrief[] = sshs.flatMap((e): EnvBrief[] => {
+        const name = (e?.name || '').trim()
+        if (!name) return []
+        return [{ name, host: e.host, zone: e.zone }]
+      })
+      set({ envs, envsLoaded: true, envsErr: '' })
+    } catch (e: any) {
+      set({ envsLoaded: true, envsErr: e?.message || String(e) })
+    }
+  },
+  setActiveEnv: (env) => set({ activeEnv: env }),
+
+  // 建一条**真的** Debug 会话（企业编号 + 作业编号），默认把画面通道（proxy）一起挂上。
+  //
+  // 三步都是必须的，顺序也不能换：
+  //   ① `POST /sessions/new` 建**空闲**会话（登录是服务端的另一条异步路）；
+  //   ② 等它登录完（loading → idle）—— 挂画面的前置就是"空闲"；
+  //   ③ `POST /sessions/{id}/screen` 起画面通道：那是一个脱离本进程的
+  //      `tt recording start --session …`，录制代理就位后作业才在里面跑。
+  //
+  // 失败的分寸：①失败 = 没建出来，抛错（界面不跳转）；②失败 = 会话在、但连不上，也抛错
+  // （它会留在树里，因为服务端确实有这条，人得能看见它、能删它）；③失败 = 会话能用、录制没挂上，
+  // **只报警不抛错** —— 会话已经建好这个事实不该被一句"建会话失败"盖掉。
+  createSession: async (input, onStep) => {
+    const env = (input.env || '').trim()
+    const ent = (input.ent || '').trim()
+    const prog = (input.prog || '').trim()
+    const name = (input.name || '').trim()
+    // 前置校验放在请求之前:与服务端同一套判据，但错误当场说、不白花一次 SSH 握手。
+    if (!env) throw new Error('没有点名环境')
+    if (!ent) throw new Error('必须填企业编号（ENT）：它决定用哪个账号连库，环境配置里已经没有它了')
+    if (!prog) throw new Error('必须填作业编号：要录/要调的就是这个作业')
+
+    onStep?.('正在建会话（连 ' + env + '）…')
+    const res = await api.sessionCreate(env, ent, name)
+    const id = (res?.sessionId || '').trim()
+    if (!id) throw new Error('服务端没回会话 ID（看 .tt-serve.log）')
+
+    const item: SessionItem = {
+      id, env, type: 'debug', createdAt: Date.now(), ent, prog,
+      // 名字：留空就用规范 id（`环境#序号`）—— 录制要靠别名落回同一条会话，
+      // 所以这条会话**必须**有个名字，而服务端在 name 为空时也照实退回序号。
+      name: (res?.name || '').trim() || name || (res?.ref || '').trim() || prog,
+      ref: (res?.ref || '').trim(),
+    }
+    // 先落树再挂画面：这条会话已经是服务端的事实了，后面挂不上不该让它在树里消失。
+    const next = [...get().sessions.filter((s) => s.id !== id), item]
+    persistSessions(next)
+    set({ sessions: next })
+
+    onStep?.('会话已建好，正在登录 ' + env + '…')
+    try {
+      await waitSessionIdle(id)
+    } catch (e: any) {
+      get().pushTimeline({ origin: 'system', kind: 'warn', text: String(e?.message || e) })
+      throw e
+    }
+
+    onStep?.('正在挂画面通道（proxy）…')
+    const warn = await attachScreen(id, prog, ent, onStep)
+    if (warn) {
+      // 画面通道没挂上 = 会话能用但**没有代理**：这是必须看到的失败，走 error 而不是 info。
+      toast.error('画面通道（proxy）没挂上', { description: warn, duration: 0 })
+      get().pushTimeline({ origin: 'system', kind: 'warn', text: warn })
+    } else {
+      get().pushTimeline({
+        origin: 'system', kind: 'info',
+        text: `新建会话 ${item.ref || id}（作业 ${prog}，ENT ${ent}），画面通道已挂上`,
+      })
+    }
+    return item
+  },
+
+  // 摘掉服务端已经不存在的会话（首屏对齐 / 服务重启后）。只动树，不动绑定：
+  // 被摘掉的那条若正是绑定的那条，由 syncFromSessions 的"回到未选择"负责。
+  pruneSessions: (aliveIds) => {
+    const alive = new Set(aliveIds)
+    const before = get().sessions
+    const next = before.filter((s) => alive.has(s.id))
+    if (next.length === before.length) return 0
+    persistSessions(next)
+    set({ sessions: next })
+    return before.length - next.length
   },
 }))
 

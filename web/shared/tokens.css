@@ -9,6 +9,8 @@
    (WsTestView / WsLogView),以及 Button、ToolIcon 与左右活动栏的图标按钮、主内容面板(App.tsx)。
    要改口径只动这一个 token —— 别再往组件里写 rounded-[6px] 这类字面量,
    否则同一个值会有两套机制,改的时候必漏一处。
+   工作站外壳(`.dsh-shell`)在 app/src/index.css 里把这一档放宽到 8px —— 仍是同一个档位,
+   只是取值跟着外壳走。
    两处**刻意不圆**的,别顺手"统一"掉:
      · 表格与零散小件(下拉弹层、弹窗、表格网格、Calendar、Checkbox)保持直角;
      · 没有边框、底色透明的输入框也保持直角 —— 可编辑表格的 .cell-input 要融进网格线,

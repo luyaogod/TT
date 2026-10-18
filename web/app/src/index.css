@@ -90,6 +90,31 @@
   background: var(--ring);
 }
 
+/* ---- 工作站外壳(DSH 式) ----
+   只在外壳的暗色主题下压暗一档。取色照 DSH 截图实测:侧栏 #1b1b1c、主区 #151517、
+   选中/悬停 #2d2d2e、Tab 下划线 #7aaaff(见 2026-10-17 的两张参考图)。
+
+   写成**外壳作用域内的语义 token 覆盖**,而不是在组件里写死颜色:搬进来的旧画面
+   (编辑器、报文日志、录制面板)照旧读同一套 token,自动跟着变深 —— 两套配色不会在
+   同一条边上撞车,以后要再调深浅也只改这一处。圆角同时放宽到 8px(DSH 的观感),
+   仍然只走 --radius-ui 这一个档位。 */
+.dark .dsh-shell {
+  --background: #151517;
+  --card: #1b1b1c;
+  --popover: #232325;
+  --secondary: #262628;
+  --muted: #232325;
+  --muted-foreground: #9a9aa2;
+  --accent: #2d2d2e;
+  --accent-foreground: #ededf0;
+  --foreground: #d8d8dc;
+  --border: #2a2a2c;
+  --input: #333336;
+  --radius-ui: 8px;
+  --dsh-accent: #7aaaff;
+}
+.dsh-shell { --dsh-accent: #2f6fce; }
+
 /* Ctrl+悬停函数链接样式(类 VS Code):蓝字+下划线+手形光标 */
 .fn-link {
   color: #005fb8 !important;

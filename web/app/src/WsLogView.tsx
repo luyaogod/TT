@@ -398,8 +398,8 @@ export function WsLogView() {
     return (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1.5 p-6 text-center text-xs text-muted-foreground">
         <span className="text-sm text-foreground">未连接会话</span>
-        <span>接口日志按当前会话所属环境的数据库查询。</span>
-        <span>请先在「会话」面板选择一个环境连接,再回到这里查看。</span>
+        <span>接口日志按会话所属环境的数据库查询。</span>
+        <span>第一阶段会话还没接进这一屏:接进来之前,这里没有可查的数据源。</span>
       </div>
     )
   }

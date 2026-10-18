@@ -25,8 +25,10 @@ export default defineConfig(() => {
     },
     server: {
       proxy: {
-        // 调试专属接口：去掉 /debug 前缀后转给后端（后端内部按 /api/… 注册）
-        '/debug/api': { target, ws: true, rewrite: (p) => p.replace(/^\/debug/, '') },
+        // 调试专属接口：**原样转发**，不剥 /debug。剥前缀的是后端自己
+        // （internal/web 用 http.StripPrefix("/debug", debugHandler)，剥完才是调试子系统的 /api/…）。
+        // 这里再剥一次就变成共享层的 /api/sessions，命中「未知接口」。
+        '/debug/api': { target, ws: true },
         // 共用接口：原样转发
         '/api': { target, ws: true },
       },

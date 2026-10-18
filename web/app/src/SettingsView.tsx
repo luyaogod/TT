@@ -45,7 +45,7 @@ import { Card, Field, InfoRow, SectionTitle, SettingRow } from '../../shared/set
 import { useToast } from './toast'
 import { useStore, type ThemeMode } from './store'
 import { cn } from '../../shared/utils'
-import { SETTINGS_SECTIONS, parseHash, settingsHash } from './routing'
+import { SETTINGS_SECTIONS, parseRoute, settingsHash } from './routing'
 
 // ---------- 表单模型 ----------
 
@@ -540,7 +540,7 @@ export function SettingsView() {
     const want = settingsHash(section)
     if (!hashSyncedRef.current) {
       hashSyncedRef.current = true
-      if (parseHash(window.location.hash).view) return
+      if (parseRoute(window.location.hash).kind !== 'home') return
     }
     if (window.location.hash !== want) window.history.replaceState(null, '', want)
   }, [section])

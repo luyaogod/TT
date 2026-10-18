@@ -112,6 +112,10 @@ export function RecordView() {
   // 有了独立的会话栏,这里再摆一个环境下拉就是在两个地方管同一件事。
   // 于是本面板不再自己选环境 —— 列表按"当前会话的环境"过滤,起录也用同一个。
   const sessionEnv = useStore((s) => s.sessionEnv)
+  // 列表按**当前环境**过滤:环境页的「FEP录像」Tab 是在看这个环境,不一定有会话。
+  // 起一轮录制仍跟会话走(`sessionEnv`)—— 那是"用哪个登录态/企业",与"看哪个环境的件"是两件事。
+  const activeEnv = useStore((s) => s.activeEnv)
+  const listEnv = activeEnv || sessionEnv
   const sessionId = useStore((s) => s.sessionId)
   const toast = useToast()
 
@@ -174,8 +178,8 @@ export function RecordView() {
   // 会话换了环境(sessionEnv 变)也要跟着重拉:列表是按它过滤的。
   useEffect(() => {
     if (view !== 'record') return
-    void load(sessionEnv)
-  }, [view, sessionEnv, tick, load])
+    void load(listEnv)
+  }, [view, listEnv, tick, load])
 
   // 「正在录/正在回放」这条状态要**自己收敛**。
   //
@@ -195,12 +199,12 @@ export function RecordView() {
             && !!next.stale === !!cur.stale && (next.kind || '') === (cur.kind || '')
           if (same) return
           setCur(next)
-          if (!next) void load(sessionEnv)
+          if (!next) void load(listEnv)
         } catch { /* 轮询失败不动界面:下一拍再试 */ }
       })()
     }, 5000)
     return () => window.clearInterval(t)
-  }, [view, cur, load, sessionEnv])
+  }, [view, cur, load, listEnv])
 
   // 点开一行就取它的身份。取不到(没有 .meta.json 的老件)照实说,不假装有。
   // 列表与明细页共用同一个「在录吗」轮询:明细页自己不再轮询 —— 那是同一件事。
@@ -247,7 +251,7 @@ export function RecordView() {
         description: `作业 ${r.recording?.prog || p}${r.log ? `;日志 ${r.log}` : ''}`,
         duration: 8000, // 录制 ID 多留一会儿:默认 3.5 秒常常还没看清就没了
       })
-      await load(sessionEnv)
+      await load(listEnv)
     } catch (e: any) {
       toast.error('开始录制失败', { description: e?.message || String(e) })
     } finally {
@@ -268,7 +272,7 @@ export function RecordView() {
           ? '回放留下的那个窗口已经关掉,会话登记也清了'
           : `${r.stopped?.prog || ''} 已收工,录制件落到长期库/缓存(稍等再点刷新)`,
       })
-      await load(sessionEnv)
+      await load(listEnv)
     } catch (e: any) {
       toast.error('停止录制失败', { description: e?.message || String(e) })
     } finally {
@@ -330,10 +334,10 @@ export function RecordView() {
           className="p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40">
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
         </button>
-        {/* 列表按哪个环境过滤:说清它跟着会话走,不然用户会以为漏了一份 */}
+        {/* 列表按哪个环境过滤:说清它跟着当前打开的环境走,不然用户会以为漏了一份 */}
         <span className="shrink-0 text-[11px] text-muted-foreground"
-          title="列表按当前会话的环境过滤;还没连会话时列全部环境">
-          {sessionEnv ? `环境 ${sessionEnv}` : '未连会话:列全部环境'}
+          title="列表按左侧选中的环境过滤;没有选中环境时列全部">
+          {listEnv ? `环境 ${listEnv}` : '未选环境:列全部环境'}
         </span>
         {cur && (
           <span className={`flex min-w-0 items-center gap-1 text-xs ${cur.stale
@@ -436,10 +440,10 @@ export function RecordView() {
                 </div>
               ) : (
                 <div className="space-y-1 p-4 text-center text-xs text-muted-foreground">
-                  <div>{sessionEnv ? `环境 ${sessionEnv} 下还没有录制件。` : '还没有录制件。'}</div>
+                  <div>{listEnv ? `环境 ${listEnv} 下还没有录制件。` : '还没有录制件。'}</div>
                   <div>填好上方的作业名,点「开始录制」录一轮;录完收工后它就会出现在这里。</div>
                   {!sessionEnv && (
-                    <div>起录需要一个环境:先在左侧「会话」面板连一个(环境与企业编号都跟着它走)。</div>
+                    <div>起录需要一个会话环境:先在左侧选一个环境、建一条会话,连上之后才能起录。</div>
                   )}
                 </div>
               )

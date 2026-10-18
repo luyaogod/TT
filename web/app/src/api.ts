@@ -24,6 +24,9 @@ export interface InflightInfo { cmd: string; since: string; elapsed: number }
 export interface SessionBrief {
   id: string; module: string; prog: string; runProg?: string; state: string
   env?: string
+  // 身份三键（C5.1/C5.4）：`ref` 是规范 id「环境#序号」，`name` 是别名（空串=未命名），
+  // `ent` 是这条会话当前生效的企业编号。服务端**恒定给键**，取不到是空串。
+  ref?: string; display?: string; name?: string; ent?: string; n?: number; epoch?: string
   file?: string; line?: number; func?: string; reason?: string
   holdingSeconds: number; breakpoints: number; watchdogSeconds: number
   // 谁在驾驶:solo(纯人工)| collab(协作,AI 主导)
@@ -687,6 +690,25 @@ export const api = {
   sessionSwitch: (env: string, ent?: string, sessionId?: string) =>
     req<{ sessionId: string; env?: string; state?: string }>(
       `${API_BASE}/sessions/switch`, { method: 'POST', body: JSON.stringify({ env, ent: ent || '', session: sessionId || '' }), timeoutMs: 90000 }),
+  // 新建会话（`POST /sessions/new`）：**再给我一条**空闲会话，池里别的会话一条都不动。
+  //
+  // 与 sessionSwitch 的分工（后端 hSessionCreate 里写清了）：switch 是"连到这个环境" ——
+  // 池里已有就复用，名字不同还会把空闲那条收掉重建；new 是"再建一条"，同名才算同一条
+  // （幂等键是名字，`reused:true` 表示"本来就有"）。多会话下建第二条**只能用这条**，
+  // 用 switch 会把上一条收掉。
+  sessionCreate: (env: string, ent: string, name: string) =>
+    req<{ sessionId: string; ref?: string; env?: string; name?: string; state?: string; reused?: boolean }>(
+      `${API_BASE}/sessions/new`, { method: 'POST', body: JSON.stringify({ env, ent, name }), timeoutMs: 90000 }),
+  // 画面通道（= 录制代理 proxy）的只读视图。`attached:false` 是"现在没挂着"，不是错误。
+  screen: (id: string) =>
+    req<{ attached: boolean; session?: string; screen?: Record<string, any>; note?: string }>(`${API_BASE}/sessions/${id}/screen`),
+  // 给这条会话挂一块画面通道（起一个脱离本进程的 `tt recording start --session …`）。
+  //
+  // 前置（后端 409，不满足就拒）：会话**空闲**、**有名字**、点名了作业。
+  // "空闲"意味着刚 create 完要等它登录完（loading → idle）再调这里。
+  screenStart: (id: string, prog: string, ent?: string) =>
+    req<{ ok: boolean; session?: string; started?: { pid?: number; log?: string }; note?: string }>(
+      `${API_BASE}/sessions/${id}/screen`, { method: 'POST', body: JSON.stringify({ prog, ent: ent || '' }), timeoutMs: 120000 }),
   // 空闲态重新设置会话 TOPENT(空值 = 清除覆盖并重新下发配置默认)
   topent: (id: string, value: string) => req<{ topent: string }>(`${API_BASE}/sessions/${id}/topent`, { method: 'POST', body: JSON.stringify({ value }) }),
   bpAdd: (id: string, location: string) =>
