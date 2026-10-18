@@ -41,7 +41,7 @@ var verifyCmd = &cobra.Command{
   仅在语料里  语料有、表单没有 —— 允许（同一窗口里还有别的表单/开窗/动态节点）
   歧义项  语料标了 ambiguous 的 —— 表单里的编号必须落在候选里
 
-基线：--recording <目录>（原始录制件，优先）或 --map <colname-fieldid.json>
+基线：--map <colname-fieldid.json>
 （归档语料表，也可用 TT_FORM_CORPUS_MAP）。
 
 退出码：0 全部一致 / 6 有不一致（体检不过）/ 1 取件或解析失败 / 2 用法错（没有基线）。`,
@@ -182,7 +182,7 @@ func (c *CorpusMap) Windows() string {
 
 // LoadCorpusMap 读归档语料表。
 //
-// 形状与 `internal/fep/form42f_test.go` 读到的一致：
+// 形状与 `internal/form42f/form42f_test.go` 读到的一致：
 //
 //	{"map": {"w_axmt500": {"b_xmda001": 18, "ooff013": {"ambiguous":[{"fieldId":654,…}]}}}}
 //

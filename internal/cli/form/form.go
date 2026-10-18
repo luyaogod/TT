@@ -6,7 +6,7 @@
 //   - **C5 CLI 面** —— `ls` / `show` / `verify`，`show --json` 的键名冻结在 C5.2；
 //   - **§4 的 A8 接口归消费方** —— 取件接口（`Source`）定义在**这里**（消费方），
 //     实现放两处：本地目录（`DirSource`，镜像/离线）与真机按需单取
-//     （`internal/host/formsource.go`）。`internal/fep` 只留纯解析，零 IO。
+//     （`internal/host/formsource.go`）。`internal/form42f` 只留纯解析，零 IO。
 //
 // 退出码（本组，与 `tt fep` 同一族 —— 见 internal/cli/README.md 的码表）：
 //
@@ -37,11 +37,8 @@ import (
 //
 //	0  一致（成功）
 //	1  取件失败（`FORM_UNKNOWN`：网络/权限/路径取不到，或不是合法 .42f）
-//	2  用法错**或无基线**（缺 --env/--module/--form；既没 --map 也没 --recording；
-//	   语料里没有点名/推到的那一节窗口）
+//	2  用法错**或无基线**（缺 --env/--module/--form 或 --map；语料里没有点名/推到的那一节窗口）
 //	6  verify **不一致**（复用既有 `output.CodePreflight` =「体检不过」，**不新造码名**）
-//
-// 与 `tt fep` 的码表同族（`internal/cli/fep/fep.go`：1 运行失败 / 2 用法错 / 6 体检不过）。
 const (
 	exitOK          = 0
 	exitFormUnknown = 1 // 取件失败 / 不是合法 .42f
@@ -57,7 +54,7 @@ const (
 //
 // 名字逐字照抄契约，不新造码名（契约 §2：不许改错误码名）。另外三码
 // （`FIELD_NOT_IN_SCOPE` / `FIELD_AMBIGUOUS`，A11 又加了 `FIELD_NOT_ACTIONABLE`）属
-// **寻址面**，由 M2 的 `internal/fep` 落；本组不寻址，所以只定义用得上的这一个。
+// **寻址面**，由 M2 的 `internal/form42f` 落；本组不寻址，所以只定义用得上的这一个。
 const CodeFormUnknown = "FORM_UNKNOWN"
 
 // Group 是 tt form 命令组。
