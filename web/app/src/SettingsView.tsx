@@ -367,7 +367,7 @@ function sshsFormOf(c: HostsView): SshItem[] {
   })
 }
 
-// 没有 `onBack` / `backLabel` 了（用户 2026-10-16 要求去掉那个「返回「录制」」按钮）：
+// 没有 `onBack` / `backLabel` 了（用户 2026-10-16 要求去掉那个「返回「返回」按钮）：
 // 设置页的出口只有左侧那一列视图图标。原来那个按钮的用意是"设置页不渲染右侧那四个依赖会话
 // 的图标，得给一条回程路" —— 但设置是"先配环境"的地方，它不该猜你想回哪一件活儿。
 export function SettingsView() {
@@ -1870,4 +1870,3 @@ export function SettingsView() {
     </div>
   )
 }
-

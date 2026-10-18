@@ -11,7 +11,7 @@ import (
 // 协议坐标 → 图像坐标的映射，以及“说明里点名的栏位在这一帧里真的看得见吗”。
 //
 // 这一层只认几何与像素，不认识 AUI：把 AUI 属性翻译成 Box 是**调用方**（CLI 层）的事，
-// 这样 internal/fep 与 internal/view 谁都不 import 谁（跨线只走 JSON 产物与会话登记）。
+// 这样 internal/form42f 与 internal/view 谁都不 import 谁（跨线只走 JSON 产物与会话登记）。
 //
 // 为什么需要"派生"而不是写死比例：AUI 的 posX/posY/gridWidth/gridHeight 是协议自己的
 // 坐标系（栅格/字符单位，随主题与字体而变），抓到的图是物理像素。写死一个比例，

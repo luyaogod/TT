@@ -429,7 +429,7 @@ func (c *Client) SwitchToIdle(env, ent, name string, timeout time.Duration) (str
 //
 // 解析别名再起作业的那类调用要的是后者：
 // 它只关心"我这条"在不在，环境里另有一条会话与它无关。真机 2026-10-18 13:15 就是拿
-// SwitchToIdle 办这件事：环境里有 2 条会话 → SESSION_AMBIGUOUS → 开始录制必然失败。
+// SwitchToIdle 办这件事：环境里有 2 条会话 → SESSION_AMBIGUOUS → 那个动作必然失败。
 //
 // 走的是 `/api/sessions/new`（服务端语义就是"同名幂等、绝不收口别人"）。
 func (c *Client) EnsureSession(env, ent, name string, timeout time.Duration) (string, error) {

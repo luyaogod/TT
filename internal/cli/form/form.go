@@ -8,7 +8,7 @@
 //     实现放两处：本地目录（`DirSource`，镜像/离线）与真机按需单取
 //     （`internal/host/formsource.go`）。`internal/form42f` 只留纯解析，零 IO。
 //
-// 退出码（本组，与 `tt fep` 同一族 —— 见 internal/cli/README.md 的码表）：
+// 退出码（本组 —— 见 internal/cli/README.md 的码表）：
 //
 //	0  成功
 //	1  FORM_UNKNOWN：表单取不到（网络/权限/路径）或不是合法 `.42f`

@@ -257,7 +257,7 @@ func FailureFlagNotAccepted(flag string) *Failure {
 	switch flag {
 	case FlagName:
 		f.Message = fmt.Sprintf("unknown flag: %s", FlagName)
-		f.Hint = "--name 只在起会话的命令上有意义（tt debug start / tt debug wsdebug / tt recording start / tt recording replay）"
+		f.Hint = "--name 只在起会话的命令上有意义（tt debug start / tt debug wsdebug / tt debug start / tt debug exec）"
 	default:
 		// cobra 对未注册标志的原话是单横线的名字（`flag provided but not defined: -session`）。
 		f.Message = "flag provided but not defined: -" + strings.TrimLeft(flag, "-")

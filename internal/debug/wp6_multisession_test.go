@@ -677,7 +677,7 @@ func TestWP6WebSocketScopeRejectsUnknownSession(t *testing.T) {
 // T5.4：`--session <别名>` 真的能落位（WP5 留下的那一步）
 // ---------------------------------------------------------------------------
 
-// WP5 让 `fep` 子进程把固定别名随 `--name` 传下去，当时服务端还不认识别名。
+// WP5 让 `form42f` 子进程把固定别名随 `--name` 传下去，当时服务端还不认识别名。
 // WP4c 把别名变成服务端事实（`SessionBrief.name`），**本条确认它真的可寻址**：
 // 池里有两条同环境会话时，`--session <别名>` 精确落到那一条（不是歧义、不是第一条）。
 func TestWP6SessionAliasLands(t *testing.T) {
@@ -719,8 +719,8 @@ func TestWP6SessionAliasLands(t *testing.T) {
 }
 
 // recAliasForTest 是按 WP5 的算法（`recSessionAlias`）算出来的那种形状：
-// `fep-<录制 ID>`。这里写死一个字面量，免得为了一个字符串把 cli/fep import 进来。
-const recAliasForTest = "fep-20261016-120000"
+// `<会话别名>`。这里写死一个字面量，免得为了一个字符串把命令层 import 进来。
+const recAliasForTest = "rec-20261016-120000"
 
 // ---------------------------------------------------------------------------
 // "两条会话能同时跑、互不干扰"（本批的总验收）

@@ -946,7 +946,7 @@ func joinColNames(cols []form42f.ColName, n int) string {
 	return strings.Join(parts, " ")
 }
 
-// attrMapTzs 把属性摊成 map（同包不引 fep 的私有实现，3 行不值得跨包导出）。
+// attrMapTzs 把属性摊成 map（同包不引 form42f 的私有实现，3 行不值得跨包导出）。
 func attrMapTzs(attrs []xml.Attr) map[string]string {
 	m := make(map[string]string, len(attrs))
 	for _, a := range attrs {

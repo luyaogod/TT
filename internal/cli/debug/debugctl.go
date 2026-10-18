@@ -105,7 +105,7 @@ func actorSelf() string {
 // dbgAPI 调 serve REST;非 2xx 时由客户端把失败信封翻成 `*debugclient.Failure`
 // （码 / 候选 / hint / 退出码都在那一层，见 internal/debugclient）。
 //
-// 这里**不再自己实现一遍 HTTP**：`tt fep` 也走同一个客户端，两条线一套规矩。
+// 这里**不再自己实现一遍 HTTP**：其他命令也走同一个客户端，一套规矩。
 // 从前各写一份的后果是"同一个失败在两条线上有不同的码与提示"。
 func dbgAPI(method, path string, body any) ([]byte, error) {
 	return dbgClient().Do(method, path, body)

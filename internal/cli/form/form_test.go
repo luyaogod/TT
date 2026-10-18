@@ -131,8 +131,8 @@ func codeOf(t *testing.T, err error) string {
 	return oe.Code
 }
 
-// fixtureBasic 是 internal/fep 的合成夹具（几百字节，随仓库走）。
-// 复用它而不是在两边各写一份 XML：`tt form show` 的解析结果就是 `fep` 的解析结果，
+// fixtureBasic 是 internal/form42f 的合成夹具（几百字节，随仓库走）。
+// 复用它而不是在两边各写一份 XML：`tt form show` 的解析结果就是 `form42f` 的解析结果，
 // 两份夹具迟早会漂移成"看起来对、其实对不上"。
 func fixtureBasic(t *testing.T) string {
 	t.Helper()

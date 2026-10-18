@@ -1084,7 +1084,7 @@ func (s *Server) hSessionSwitch(w http.ResponseWriter, r *http.Request) {
 		Ent string `json:"ent"`
 		// Name 是**这条新会话的别名**（可选）：创建即命名。
 		//
-		// 为什么需要它（多会话）：录制那几步要能点名"我这条"会话，而点名要有名字。
+		// 为什么需要它（多会话）：那几步要能点名"我这条"会话，而点名要有名字。
 		// 从前只能在 `debug start` 那一步用 `--name` 给，于是 `env`/`topent`/`exec` 这几步
 		// 只能裸奔 —— 多会话下要么撞歧义，要么落到别人的会话上。
 		Name string `json:"name"`

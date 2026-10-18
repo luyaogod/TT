@@ -6,7 +6,7 @@
 **不做什么**：
 
 - 不碰键鼠、不改窗口样式、不置顶（那是驱动层的事，本层不提供这些入口）；
-- 不自己找"哪个是作业窗口" —— 窗口与作业的对应关系由上层（`tt fep` 的会话与 AUI）给出；
+ - 不自己找"哪个是作业窗口" —— 窗口与作业的对应关系由上层（调试会话）给出；
 - 不做缩放：合成一律用 Go 的 `image/draw` 逐像素画。PowerShell/GDI+ 的 `DrawImage`
   会按 DPI 比自动缩放（96/120 → 画布右侧 20% 变黑），实测踩过。
 
@@ -171,7 +171,7 @@ tt view marks --png job.png --region "客户编号(实测)" --out annotated.png
 `(未解析)`）。所以流程是"**按值找 → 按 id 量**"：
 
 ```
-（原 `tt fep ui find` 已随 FEP 移除）
+（原按值查控件的那条命令已移除）
 tt view measure --target '#3009' --value 2000 --name "明细订购量(第1行)"
 tt view marks --png job.png --region "明细订购量(第1行)" --out annotated.png
 ```

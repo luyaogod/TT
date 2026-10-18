@@ -3,7 +3,7 @@ package form
 // `tt form verify`：把**离线解析出来的 `colName→fieldId`** 与基线逐条比对（契约 C5.1 / C7.4 / 变更记录 A5）。
 //
 // 基线有两处来源，优先级写死：
-//  1. `--recording <目录>`：原始录制件（**优先**，A5 原文「若同时也给了录制目录，优先用录制」）；
+//  1. `--map <文件>`：归档语料表（A5 的基线，可离线跑）；
 //  2. 否则 `--map <文件>` / `TT_FORM_CORPUS_MAP`：归档语料表（A5 的等价基线，可离线跑）。
 //
 // 口径（照抄 `internal/form42f/form42f_test.go` 的 TestFormMatchesCorpus，避免两处漂移）：

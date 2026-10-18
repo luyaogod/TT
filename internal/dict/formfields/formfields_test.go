@@ -91,7 +91,7 @@ const synthFormTwoTables = `<?xml version="1.0" encoding="UTF-8"?>
   </RecordView>
 </Form>`
 
-// parseSynth 解析合成夹具（复用 fep 的解析器，绝不另写一份解析）。
+// parseSynth 解析合成夹具（复用 form42f 的解析器，绝不另写一份解析）。
 func parseSynth(t *testing.T, text string) *form42f.F42Form {
 	t.Helper()
 	f, err := form42f.ParseForm42F("demofm", text)

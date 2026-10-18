@@ -196,7 +196,7 @@ func ProtoFrom42FFile(path string, opts *ProtoOptions) (*Proto, error) {
 
 // ProtoFrom42F 把 `.42f` 文本展开成原型数据。
 //
-// `form` 是调用方知道的表单名（scope 用）；解析失败原样透出 `fep` 的错误
+// `form` 是调用方知道的表单名（scope 用）；解析失败原样透出 `form42f` 的错误
 // （那是 `FORM_UNKNOWN` 的来源，命令层据此退码）。
 func ProtoFrom42F(form, text string, opts *ProtoOptions) (*Proto, error) {
 	o := normalizeProtoOptions(opts)

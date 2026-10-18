@@ -97,7 +97,7 @@ func (r *RemoteFormSource) connect() (*SSHConn, *sftp.Client, string, error) {
 	return r.conn, r.sf, r.top, nil
 }
 
-// Form 取一张表单的**原始字节**（就是 `.42f` 文件本身，不解析 —— 解析在 internal/fep）。
+// Form 取一张表单的**原始字节**（就是 `.42f` 文件本身，不解析 —— 解析在 internal/form42f）。
 func (r *RemoteFormSource) Form(ctx context.Context, _, module, form string) ([]byte, error) {
 	conn, sf, top, err := r.connect()
 	if err != nil {

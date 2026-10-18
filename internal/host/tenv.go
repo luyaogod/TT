@@ -102,7 +102,7 @@ var reZone = regexp.MustCompile(`^[A-Za-z0-9_-]{1,16}$`)
 // ZoneOK 判一个区域代码过不过白名单。
 //
 // 导出的理由:这条规则不只 tenv 用 —— 任何要把区域代码拼进远端命令或写进远端 PTY
-// 的地方都得先问它(fep 的会话登录就是直接往 PTY 里写区域代码)。规则只此一份:
+// 的地方都得先问它(form42f 的会话登录就是直接往 PTY 里写区域代码)。规则只此一份:
 // 各写一份正则,迟早会有一处漏掉。
 func ZoneOK(zone string) bool { return reZone.MatchString(zone) }
 

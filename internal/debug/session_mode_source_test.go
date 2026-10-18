@@ -9,10 +9,10 @@ import (
 
 // 每一条**造会话**的路径都必须按发起方设模式（launchModeFor）。
 //
-// 事故背景（用户 2026-10-16 报"点回放没反应"）：/api/sessions/switch 这条路漏了
+// 事故背景（用户 2026-10-16 报"点了没反应"）：/api/sessions/switch 这条路漏了
 // SetMode(launchModeFor(r))，新建出来的会话保留 NewSession 的初始值 —— 业主授权
 // （config.aiTakeover=true）时那是 **collab**，于是流水线下一步（`debug topent`）以"人"
-// 的身份被"协作模式:本次调试由 AI 主导"拒掉，回放静默失败。hSessionRestart 是同一天
+// 的身份被"协作模式:本次调试由 AI 主导"拒掉，操作静默失败。hSessionRestart 是同一天
 // 发现的第二处。（launchModeFor 的注释早写着"两条启动路径必须都过这里"，实际有四条。）
 //
 // 这条测试把"必须都过"变成断言：以后再加一条造会话的路径、忘了设模式，就是红的。

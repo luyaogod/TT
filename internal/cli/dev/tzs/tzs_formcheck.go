@@ -73,7 +73,7 @@ func cmdTzsFormCheck(args []string) int {
 			*asJSON)
 	}
 
-	// 应然侧：`.42f` 走 internal/fep 的解析器（不在这里重写）
+	// 应然侧：`.42f` 走 internal/form42f 的解析器（不在这里重写）
 	text, err := os.ReadFile(*f42Path)
 	if err != nil {
 		return common.Fail(tzsCheckError{Msg: "读不到 .42f：" + err.Error()}, *asJSON)

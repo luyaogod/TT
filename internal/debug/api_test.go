@@ -261,7 +261,7 @@ func fglPtr(v string) *string { return &v }
 // launchCfg 的单轮 FGLSERVER 覆盖:改的只该是**本轮**，内存里的配置一字不动。
 //
 // 这一条是实测事故的回填:以前"画面去哪"只能改全局 config.debug.fglserver，
-// 于是做一次 fep 无头前端实验(填 本机IP:1300)就把调试的画面接线顶掉了 ——
+// 于是做一次 无头前端实验(填 本机IP:1300)就把调试的画面接线顶掉了 ——
 // 之后每次放行都不弹画面，而启动输出一个字都没提画面去了哪。
 func TestLaunchCfgFGLServerOverride(t *testing.T) {
 	pinned := "10.1.25.33:1300"

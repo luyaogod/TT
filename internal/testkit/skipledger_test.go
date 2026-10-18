@@ -197,7 +197,7 @@ var skipLedger = []skipSite{
 	//   · `form42f_realpair_test.go` 那条要两个开关同时指对（TT_TZS_REAL_DIR +
 	//     TT_FORM_42F）：要的不是一份 .42f，而是**同一个现场**打出来的 .tzs 与 .42f。
 	//
-	// 注意这批文件的归属：`dev/tzs`、`dict`、`drawio`、`fep` 都另有切片在改。
+	// 注意这批文件的归属：`dev/tzs`、`dict`、`drawio`、`form42f` 都另有切片在改。
 	// 台账只登记**当前源文件里的字面量**；那些文件里的跳过文案一改（含标点），
 	// 这里就会红 —— 那是对的：文案是"这条跳过在说什么"。
 	{file: "internal/cli/form/verify_test.go", msg: "没有真样本（%v）—— 设 TT_FORM_SAMPLE_DIR 指向 fixtures/forms/", layer: layL3, why: "需真样本：开关 TT_FORM_SAMPLE_DIR"},

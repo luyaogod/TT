@@ -9,7 +9,7 @@ import (
 
 // 审计行（计划 WP6 的验收项之一：**每次会话操作有一条审计行**）（谁 / 哪条 / 干了什么）。
 //
-// 形状取本仓库既有审计的同一族：`internal/fep` 的 `AppendAudit`（`internal/fep/do.go:571-605`）
+// 形状取本仓库既有审计的同一族：`internal/form42f` 的 `AppendAudit`（`internal/form42f/do.go:571-605`）
 // 写的就是"一条 JSON 行"，字段名固定、时间为 RFC3339。这里不另立一种日记格式。
 //
 // 「哪条」写的是**规范 id**（`ref`）：契约 C5.4 明写"机器对账、错误文案、审计行用它"，

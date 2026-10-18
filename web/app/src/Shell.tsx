@@ -83,7 +83,7 @@ export function TabStrip<K extends string>({ items, active, onChange }: {
 /**
  * keep-alive:第一次显示之后常驻挂载,切换只改 display。
  *
- * 现有几块画面(Monaco 编辑器、报文日志、录制列表、设置页)都有自己的滚动位置与本地输入,
+ * 现有几块画面(Monaco 编辑器、报文日志、日志列表、设置页)都有自己的滚动位置与本地输入,
  * 卸载重挂会把它们丢光 —— 这条在旧的五视图外壳里已经踩实(见 App.tsx 的历史注释),
  * 新外壳换成 Tab 之后约束不变。
  */

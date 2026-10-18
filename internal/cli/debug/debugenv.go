@@ -23,7 +23,7 @@ var (
 	dbgTopClear   bool
 	// dbgEnvName 是 `debug env --name`：**创建会话时一并命名**。
 	//
-	// 需要它的理由是多会话录制：录制那几步（env / topent / exec）都要能点名"我这条"会话，
+	// 需要它的理由是多会话：那几步（env / topent / exec）都要能点名"我这条"会话，
 	// 而点名要有名字。从前名字只能在 `debug start` 那一步给，于是前面几步只能裸奔。
 	dbgEnvName string
 )

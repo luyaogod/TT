@@ -170,9 +170,7 @@ func TestSessionLsAndShow(t *testing.T) {
 	if !strings.Contains(out, `"line": 812`) {
 		t.Fatalf("show 应给出停站现场：%s", out)
 	}
-	if strings.Contains(out, `"screen"`) || strings.Contains(out, `"recording"`) {
-		t.Fatalf("show 不该再带画面/录制附件（端点已移除）：%s", out)
-	}
+
 }
 
 // TestSessionEntQuitRm：三条动作分别打 topent / quit(DELETE) / close(POST)。

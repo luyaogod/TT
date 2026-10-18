@@ -427,7 +427,7 @@ func TestWSLogDebugAcceptsValidAlias(t *testing.T) {
 	}
 
 	resp := doReq(t, "POST", hs.URL+"/api/wslogs/debug", "ai",
-		`{"rowid":"1","session":"s1","name":"回放-甲"}`)
+		`{"rowid":"1","session":"s1","name":"调试-甲"}`)
 	if resp.StatusCode != 500 {
 		t.Fatalf("合法别名该放行到拨号那一层（这里注入的拨号必然失败 → 500），实得 %d（%s）",
 			resp.StatusCode, respError(t, resp))

@@ -267,7 +267,7 @@ func TestCharWsdebugRejectsBadNameBeforeAnyRequest(t *testing.T) {
 func TestCharWsdebugSendsNameToServer(t *testing.T) {
 	resetLaunchFlags(t)
 	rec := launchAPIStub(t, twoIdleSessions())
-	dbgNameFlag = "回放-甲"
+	dbgNameFlag = "调试-甲"
 
 	if err := debugWsdebugCmd.RunE(debugWsdebugCmd, []string{"12345"}); err == nil {
 		t.Fatal("前置不成立：桩对 POST 回的是失败信封，RunE 不该成功")
@@ -275,8 +275,8 @@ func TestCharWsdebugSendsNameToServer(t *testing.T) {
 	if rec.body == nil {
 		t.Fatal("没收到 POST /api/wslogs/debug")
 	}
-	if got := rec.body["name"]; got != "回放-甲" {
-		t.Errorf("请求体的 name = %v，期望 \"回放-甲\" —— 不送的话服务端登记不上别名，\n"+
+	if got := rec.body["name"]; got != "调试-甲" {
+		t.Errorf("请求体的 name = %v，期望 \"调试-甲\" —— 不送的话服务端登记不上别名，\n"+
 			"    这条会话就只能用 ref 寻址、也不能当幂等键（Q23）", got)
 	}
 	if got := rec.body["rowid"]; got != "12345" {

@@ -39,7 +39,7 @@ import (
 	"tt/internal/form42f"
 )
 
-// ── 合成夹具（内联；遵循 internal/fep/plan_test.go:15 的先例，B14）───────────────
+// ── 合成夹具（内联；遵循 internal/form42f/form42f_test.go 的先例 的先例，B14）───────────────
 //
 // 三张字段：pmdl001（FormField + Edit，必填）、pmdl002（TableColumn + Edit）、
 // pmdl003（FormField + CheckBox）。两侧**完全对齐**，任何一条差异都只能是测试改出来的。
@@ -85,7 +85,7 @@ const (
 `
 )
 
-// mustF42 解析合成 `.42f`（解析器是 internal/fep 的，本包不重写）。
+// mustF42 解析合成 `.42f`（解析器是 internal/form42f 的，本包不重写）。
 func mustF42(t *testing.T, text string) *form42f.F42Form {
 	t.Helper()
 	f, err := form42f.ParseForm42F("apcs001_wf", text)
@@ -789,7 +789,7 @@ func tzsCheckRepoRoot(t *testing.T) string {
 	}
 }
 
-// tzsCheckSampleDir 真样本目录：`TT_FORM_SAMPLE_DIR` 优先（与 internal/fep 的 sampleDir42F
+// tzsCheckSampleDir 真样本目录：`TT_FORM_SAMPLE_DIR` 优先（与 internal/form42f 的 sampleDir42F
 // 同一口径，契约 C7.3），缺省指向成果目录里的 fixtures/forms/。
 func tzsCheckSampleDir(t *testing.T) string {
 	t.Helper()

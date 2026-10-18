@@ -2,8 +2,8 @@ package form
 
 // 取件（契约 C2 / 变更记录 A8）。
 //
-// **接口归消费方**：`Source` 定义在这里（不是 `internal/fep`）—— Go 惯例，且让
-// `internal/fep` 保住"零 IO 的纯解析"。两个实现：
+// **接口归消费方**：`Source` 定义在这里（不是 `internal/form42f`）—— Go 惯例，且让
+// `internal/form42f` 保住"零 IO 的纯解析"。两个实现：
 //
 //	DirSource      本地目录/镜像（离线与测试用，本文件）
 //	host.RemoteFormSource  真机按需单取（只读 find + SFTP get，internal/host/formsource.go）

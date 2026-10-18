@@ -12,8 +12,8 @@ import (
 
 // TestAuditEntryJSONLineCarriesWhoWhichWhat 钉住审计行的三要素与形状。
 //
-// 形状取的是本仓库既有审计的**同一族**（`internal/fep` 的 `AppendAudit` 写一条 JSON 行，
-// `internal/fep/do.go:571-586`）：一行一条、字段名固定、时间 RFC3339。
+// 形状取的是本仓库既有审计的**同一族**（`internal/form42f` 的 `AppendAudit` 写一条 JSON 行，
+// `internal/form42f/do.go:571-586`）：一行一条、字段名固定、时间 RFC3339。
 func TestAuditEntryJSONLineCarriesWhoWhichWhat(t *testing.T) {
 	at := time.Date(2026, 10, 16, 14, 30, 22, 0, time.UTC)
 	e := NewAuditEntry("agent", "恒烁正式区#1", "quit", at)
