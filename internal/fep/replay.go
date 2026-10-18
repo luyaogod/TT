@@ -85,6 +85,31 @@ type ReplayOptions struct {
 	Model  *Model   // 只用于**记身份**，不参与取舍（见上）
 }
 
+// unwrapEvent 把录制件里的**线上形态** `event _om <n>{}{{<事件体>}}` 还原成事件体。
+//
+// 为什么必须有这一步：录制件里存的就是线上形态（`WrapEvent` 的产物），而
+//   - 白名单 `AllowedForReplay` 认的是**事件体**的前缀（`ActionEvent` / `KeyEvent` / `ConfigureEvent`）；
+//   - 发送端 `Client.Send` 发的是 `@<conn> <事件体>`（信封由注入口自己补）。
+//
+// 少了它，`PlanReplay` 会以"不以 ActionEvent 开头"把**每一条**真实事件都拒掉 —— 真机
+// 2026-10-18 实测：一份含 23 条 `ActionEvent` 的录制，进计划 **0 条**，而且**静默**
+// （报告写"不在回放白名单"，人只会以为"这一轮本来就没动作"）。
+func unwrapEvent(ev string) string {
+	const p = "event _om "
+	if !strings.HasPrefix(ev, p) {
+		return ev
+	}
+	i := strings.Index(ev, "{}{{")
+	if i < 0 {
+		return ev
+	}
+	inner := ev[i+len("{}{{"):]
+	if strings.HasSuffix(inner, "}}") {
+		inner = inner[:len(inner)-2]
+	}
+	return strings.TrimSpace(inner)
+}
+
 // PlanReplay turns recorded events into a replay plan.
 //
 // 录制侧写入：`opt.Model` 非 nil 时，每条带 `idRef` 的事件都去模型里取它的
@@ -93,7 +118,7 @@ func PlanReplay(events []string, opt ReplayOptions) ReplayPlan {
 	plan := ReplayPlan{}
 	for _, ev := range events {
 		plan.Scanned++
-		ev = strings.TrimSpace(ev)
+		ev = unwrapEvent(strings.TrimSpace(ev))
 		if !AllowedForReplay(ev) {
 			plan.Skips = append(plan.Skips, ReplaySkip{Raw: ev, Reason: "不在回放白名单（导航/状态噪声）"})
 			continue
