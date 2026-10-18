@@ -57,8 +57,10 @@ func (f *recFake) server(t *testing.T) *debugclient.Client {
 			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "sessions": f.sessions})
 		case r.URL.Path == "/api/sessions" && r.Method == http.MethodPost:
 			_, _ = w.Write([]byte(`{"ok":true,"sessionId":"s-job"}`))
-		case r.URL.Path == "/api/sessions/switch":
-			_, _ = w.Write([]byte(`{"ok":true,"sessionId":"s-host","state":"idle"}`))
+		case r.URL.Path == "/api/sessions/new":
+			// 录制挂靠走的是"确保这条会话在"（W-P0 之后：switch 是"把环境切到某一条"，
+			// 多会话下会歧义，见 rec_start.go 的第 ② 步注释）。
+			_, _ = w.Write([]byte(`{"ok":true,"sessionId":"s-host","state":"idle","reused":true}`))
 		case strings.HasPrefix(r.URL.Path, "/api/sessions/s-host") && r.Method == http.MethodGet:
 			_, _ = w.Write([]byte(`{"ok":true,"state":"stopped","stop":{"file":"a.4gl","line":812}}`))
 		case strings.HasPrefix(r.URL.Path, "/api/sessions/s-job") && r.Method == http.MethodGet:
@@ -92,7 +94,7 @@ func TestRecRunPlanOrder(t *testing.T) {
 	got := f.snapshot()
 	want := []string{
 		"GET /api/sessions",                // ① 收口前先找自己那条（没有就跳过）
-		"POST /api/sessions/switch",        // ② 点名环境并命名
+		"POST /api/sessions/new",        // ② 确保"我这条"在且空闲（不动别人的会话）
 		"POST /api/sessions/s-host/topent", // ③ 定 ENT
 		"POST /api/sessions",               // ④ 起作业
 		"GET /api/sessions/s-job",          // ⑤ 等入口停站

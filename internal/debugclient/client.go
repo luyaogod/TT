@@ -420,6 +420,63 @@ func (c *Client) SwitchToIdle(env, ent, name string, timeout time.Duration) (str
 	}
 }
 
+// EnsureSession 确保"这个环境里有一条叫 name 的空闲会话"，返回它的句柄。
+//
+// 与 SwitchToIdle 的区别（这一条是多会话的分水岭）：
+//   - SwitchToIdle 问的是"把这个环境切到哪一条"，池里有多条时**必须**点名（否则歧义），
+//     点名与池里那条不同名时还会**收掉重建**（Q26/Q27 的"连到该环境"）；
+//   - EnsureSession 问的是"这条会话在不在"，**不动别的会话**：同名幂等返回、异名新建。
+//
+// 录制挂靠（`tt recording start --session <ref>` → 解析出别名 → 起作业）要的是后者：
+// 它只关心"我这条"在不在，环境里另有一条会话与它无关。真机 2026-10-18 13:15 就是拿
+// SwitchToIdle 办这件事：环境里有 2 条会话 → SESSION_AMBIGUOUS → 开始录制必然失败。
+//
+// 走的是 `/api/sessions/new`（服务端语义就是"同名幂等、绝不收口别人"），purpose 固定 debug
+// —— 录制挂靠的是一条调试会话，用途在它建的时候就定了（W1：用途不可改）。
+func (c *Client) EnsureSession(env, ent, name string, timeout time.Duration) (string, error) {
+	body := map[string]any{"env": env, "purpose": "debug"}
+	if ent != "" {
+		body["ent"] = ent
+	}
+	if name = strings.TrimSpace(name); name != "" {
+		body["name"] = name
+	}
+	data, err := c.Do(http.MethodPost, "/api/sessions/new", body)
+	if err != nil {
+		return "", err
+	}
+	var out struct {
+		SessionID string `json:"sessionId"`
+		State     string `json:"state"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil {
+		return "", fmt.Errorf("debugclient: 建会话应答解析失败: %w", err)
+	}
+	if out.SessionID == "" {
+		return "", fmt.Errorf("debugclient: 建会话没回 sessionId")
+	}
+	if out.State == "idle" {
+		return out.SessionID, nil
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		snap, serr := c.Snapshot(out.SessionID)
+		if serr != nil {
+			return "", serr
+		}
+		switch stateOf(snap) {
+		case "idle":
+			return out.SessionID, nil
+		case "exit":
+			return "", fmt.Errorf("会话登录失败（环境 %s）", env)
+		}
+		if time.Now().After(deadline) {
+			return out.SessionID, fmt.Errorf("等会话空闲超时（%s），用 tt debug status 看状态", timeout)
+		}
+		time.Sleep(time.Second)
+	}
+}
+
 // Topent 设置会话级企业编号（仅 idle 可设）。
 func (c *Client) Topent(id, value string) error {
 	_, err := c.Do(http.MethodPost, "/api/sessions/"+id+"/topent", map[string]any{"value": value})

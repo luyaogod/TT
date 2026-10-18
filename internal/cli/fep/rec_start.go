@@ -92,6 +92,13 @@ var recStartCmd = &cobra.Command{
 要自己下断点就先加 --no-continue，放行前用 tt debug exec 下好再 continue。`,
 	Args: noArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// 这一轮录制是**平台**在替这条会话干活（与界面点「开始录制」时 screenstart 派生的
+		// 子进程同一个身份）。它要写会话：确保会话在、设 ENT、起作业、入口停站后放行 ——
+		// 既不是"人"也不是"AI"。不声明的话 CLI 默认声明 ai，于是纯人工模式（人建的会话）下
+		// 连"设 ENT"都会被模式闸门拒（真机 2026-10-18 13:26：设置 ENT 失败（99）：纯人工模式:AI 不可操作）。
+		if strings.TrimSpace(os.Getenv(debug.ActorEnv)) == "" {
+			_ = os.Setenv(debug.ActorEnv, debug.ActorSystem)
+		}
 		// 启动路径先判：`--launch standard` 根本不经过调试会话，后面那套「挂靠/点名环境/
 		// 起调试会话」对它不成立。放在最前面判，是为了让用法错在读写任何东西之前就报出来。
 		switch strings.ToLower(strings.TrimSpace(recStartLaunch)) {
@@ -315,10 +322,14 @@ func runRecPlan(cl *debugclient.Client, p recRunPlan, logf func(string, ...any))
 			}
 		}
 	}
-	// ② 点名环境并命名：后面几步要靠这个名字点到"自己那条"。
-	id, err := cl.SwitchToIdle(p.Env, p.Ent, p.Alias, 120*time.Second)
+	// ② 确保"这条会话"在且空闲：后面几步要靠这个名字点到"自己那条"。
+	//
+	// 这里**不能**用 SwitchToIdle（"把环境切到某一条"）：多会话下它会因为"有 2 条"报歧义，
+	// 点名的别名它也不看 —— 真机 2026-10-18 13:15「多会话 + 开始录制」就是这么失败的。
+	// EnsureSession 只保证"我这条在"，不动环境里别的会话。
+	id, err := cl.EnsureSession(p.Env, p.Ent, p.Alias, 120*time.Second)
 	if err != nil {
-		return "", fail(exitFailed, "点名环境失败（%s）：%v", p.Env, err)
+		return "", fail(exitFailed, "点名会话失败（%s）：%v", p.Env, err)
 	}
 	// ③ 定 ENT（会话级 override）
 	if e := strings.TrimSpace(p.Ent); e != "" {
