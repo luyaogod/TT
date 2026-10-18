@@ -384,9 +384,10 @@ type Session struct {
 	//
 	// 三个都不是"这条会话现在什么样"，而是"这条会话是哪条"（C5.1 末段：只有 id/ref/n 是身份，
 	// 其余是快照）—— 读它们一律走下面的取值器，别从别处推导。
-	seq   int
-	name  string
-	epoch string
+	seq     int
+	name    string
+	epoch   string
+	purpose string // 用途（W1）：debug | record | replay；空 = debug。创建时定，之后不改
 }
 
 const (
@@ -395,6 +396,48 @@ const (
 	// ModeCollab 协作:AI 主导,人只能读 + 请求 AI 代为操作。
 	ModeCollab = "collab"
 )
+
+// 用途（W1）：这条 SSH 会话是为了什么。
+//
+// 为什么要有它：三种用途的页面组合与可发动作不同（W7）。**它不是 `kind`** ——
+// `SessionBrief.kind` 已经是 `ssh`（D 的 C5.5），改名会破坏既有契约。
+const (
+	// PurposeDebug 调试：人或 agent 发起，可下断点/单步；挂着界面会话时也能监控 FEP。
+	PurposeDebug = "debug"
+	// PurposeRecord 纯录制：已经放行，页面隐藏编辑器（防误操作），只剩收尾动作。
+	PurposeRecord = "record"
+	// PurposeReplay 回放：显示编辑器但只读；只有 driver 能控回放（见 Q10 的定案）。
+	PurposeReplay = "replay"
+)
+
+// ValidPurpose 判断用途取值是否合法（空串合法 = 缺省 debug）。
+func ValidPurpose(p string) bool {
+	switch p {
+	case "", PurposeDebug, PurposeRecord, PurposeReplay:
+		return true
+	}
+	return false
+}
+
+// Purpose 当前用途（空值视为 debug）。
+func (s *Session) Purpose() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.purpose == "" {
+		return PurposeDebug
+	}
+	return s.purpose
+}
+
+// setPurpose 登记用途。**只在建会话时调**：用途创建后不可改（W1），要换就换一条会话。
+func (s *Session) setPurpose(p string) {
+	if p == "" {
+		p = PurposeDebug
+	}
+	s.mu.Lock()
+	s.purpose = p
+	s.mu.Unlock()
+}
 
 // Mode 当前模式(空值视为 solo)
 func (s *Session) Mode() string {

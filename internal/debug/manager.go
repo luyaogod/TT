@@ -894,6 +894,9 @@ type SessionBrief struct {
 	Mode string `json:"mode"`
 	// Epoch 是世代号（C5.3 / F15）。空 = 没有代（不该出现：登记时必发一个）。
 	Epoch string `json:"epoch"`
+	// Purpose 是用途（W1）：debug | record | replay。**恒定键**：取不到给 debug，不省键。
+	// 它不是 `kind` —— `kind` 已经是 `ssh`（C5.5）。
+	Purpose string `json:"purpose"`
 	// Inflight 正在执行的那条命令(空闲为 nil)—— 界面上"AI 正在执行 continue(已 12s)"
 	Inflight *InflightInfo `json:"inflight,omitempty"`
 }
@@ -941,7 +944,7 @@ func (m *Manager) briefOf(s *Session) SessionBrief {
 		ID: s.ID,
 		// 身份（C5.1 末段：只有 id / ref / n 是身份，判定身份只许用这三个）
 		Ref: refOf(env, n), Display: displayOf(env, s.Prog, n),
-		N: n, Kind: target.KindSSH, Epoch: s.Epoch(),
+		N: n, Kind: target.KindSSH, Epoch: s.Epoch(), Purpose: s.Purpose(),
 		// 快照（会变：name 只在创建时给，ent 随 topent 改）
 		Name: s.Name(), Ent: s.CurrentEnt(),
 		Module: s.Module, Prog: s.Prog, RunProg: s.RunProg,
@@ -1200,13 +1203,16 @@ func (m *Manager) Remove(id string) {
 // CreateSessionOn 新建并登记一个纯宿主会话(module/prog 为空,登录后回到 idle),
 // 供「会话重启/切换/连接」在指定目标环境上重连;调用方随后驱动 BootIdle。
 //
+// purpose 是这条 SSH 会话的用途（W1：debug | record | replay，空 = debug）。
+// **只在建会话时登记一次**，之后不可改 —— 要换用途就换一条会话。
+//
 // name 是这条新会话要不要继承的别名：
 //   - **会话重启**（`/api/sessions/{id}/restart`）传旧会话的名字 —— 重启是"同一条逻辑会话
 //     重新登录"（F15 的前提就是"环境与序号都对、只是换了代"）：旧会话已从池里移除、
 //     别名当场释放，这里就地把同一个名字重新登记给新会话，于是调用方手上的别名/ref 继续有效；
 //   - **连到该环境**（`/api/sessions/switch`）传空 —— 那是新建一条会话，别名随旧会话消失
 //     即释放（C3.7b / Q19），要名字就再给一次。
-func (m *Manager) CreateSessionOn(cfg *Config, name string) (*Session, error) {
+func (m *Manager) CreateSessionOn(cfg *Config, name, purpose string) (*Session, error) {
 	m.mu.Lock()
 	m.sweepExitedLocked()
 	m.mu.Unlock()
@@ -1217,6 +1223,7 @@ func (m *Manager) CreateSessionOn(cfg *Config, name string) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
+	sess.setPurpose(purpose)
 	m.mu.Lock()
 	if err := m.assignIdentityLocked(sess, name); err != nil {
 		m.mu.Unlock()

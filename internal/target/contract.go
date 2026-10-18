@@ -32,7 +32,7 @@ package target
 
 // SessionEnvelopeKeys 是**成功信封里 `session` 块的恒定键集**（契约 C5.1）。
 //
-// 「恒定出现」= 取不到值时给空串/零值，**不省键**。十一个键里只有 `id`/`ref`/`n`
+// 「恒定出现」= 取不到值时给空串/零值，**不省键**。十二个键里只有 `id`/`ref`/`n`
 // 是身份的组成部分，其余都是当前值快照 —— 判定身份只许用那三个（C5.1 末段）。
 //
 // `display` 也在这个块里：契约 5.1 的 JSON 示例里逐字有它，C5.4 又把它与 `ref`/`id`
@@ -40,10 +40,12 @@ package target
 // （示例与 C5.4 都要求它），本次按示例与 C5.4 取齐。`kind` 是同类出入（C5.5 说它恒定，
 // 但它今天不在 `SessionBrief` 上）。
 //
+// `purpose` 是工作站那一批的新增（W1：用途），同样是恒定键：取不到给 `debug`，不省键。
+//
 // **这两处都不是定论**：等契约文档退场、以代码为准的那一天，`display` 要么被正式纳入
 // 键集、要么被判冗余下线；`kind` 要么落成真字段、要么退出键集。
 var SessionEnvelopeKeys = []string{
-	"id", "ref", "display", "name", "env", "ent", "n", "kind", "prog", "state", "epoch",
+	"id", "ref", "display", "name", "env", "ent", "n", "kind", "prog", "state", "epoch", "purpose",
 }
 
 // NewSessionKeys 是 C5.3 / Q22 定稿的**纯新增**键：它们今天不在 `SessionBrief` 上，
@@ -53,8 +55,9 @@ var SessionEnvelopeKeys = []string{
 //   - `ref` / `name` / `n` / `epoch` 是 Q22 点名的五个新键里的四个；
 //   - `ent` 也是新增（C5.3 第二条：`string`，与 `internal/fep/session.go` 的 `Ent` 同类型）；
 //   - `display` 见 SessionEnvelopeKeys 的注释；
-//   - `kind` 见 C5.5（本契约只寻址 SSH 会话，所以取值恒为 KindSSH）。
-var NewSessionKeys = []string{"ref", "display", "kind", "name", "ent", "n", "epoch"}
+//   - `kind` 见 C5.5（本契约只寻址 SSH 会话，所以取值恒为 KindSSH）；
+//   - `purpose` 是工作站那一批的新增（W1：用途 debug/record/replay，缺省 debug）。
+var NewSessionKeys = []string{"ref", "display", "kind", "name", "ent", "n", "epoch", "purpose"}
 
 // SessionOptionalKeys 是 `session` 块里**按 omitempty 规则出现**的其余键
 // （C5.2：键名与类型一律沿用 `internal/debug/manager.go` 的 `SessionBrief`，一个都不改名）。
@@ -123,6 +126,12 @@ const (
 	CodeState      = "SESSION_STATE"       // 会话存在但状态不符（4.1 表 / B5）
 	CodeEnvUnknown = "ENV_UNKNOWN"         // 环境名不在配置里（F6 / C2.1 / B5）
 	CodeUsage      = "USAGE"               // 文法非法 / 标志冲突 / 别名取值非法（F9–F14、F19）
+	// CodePurposeMismatch 是同名 SSH 会话存在但**用途**不同（W1：名字是幂等键，
+	// 键撞了而含义不同时不能悄悄返回既有那条）。与 `SESSION_NAME_TAKEN` 同一档（退 2）。
+	CodePurposeMismatch = "SESSION_PURPOSE_MISMATCH"
+	// CodeReadOnly 是"这条 SSH 会话当前不接受这个写操作"：用途（record）/ 模式 / 角色
+	// 任一不允（W7 的三类能力）。与 `SESSION_STATE` 同一档（退 4）：都是"存在但此刻不行"。
+	CodeReadOnly = "SESSION_READONLY"
 )
 
 // CodeExits 是契约 4.1.1 那张表的**退出码一列**（**新场景**那一档，Q15 分档生效：
@@ -131,15 +140,17 @@ const (
 // `USAGE` 会出现在两个退出码档下（4.1.1 的两条口径）：新写法下退 2，
 // 老路径（F16/F17，标志写在**不接受**它的命令上）下退 1 —— 后者由 ExitFor 负责。
 var CodeExits = map[string]int{
-	CodeAmbiguous:  3,
-	CodeNotFound:   3,
-	CodeStale:      3,
-	CodeTargetBusy: 3,
-	CodeNoSession:  3,
-	CodeEnvUnknown: 2,
-	CodeUsage:      2,
-	CodeNameTaken:  2,
-	CodeState:      4,
+	CodeAmbiguous:       3,
+	CodeNotFound:        3,
+	CodeStale:           3,
+	CodeTargetBusy:      3,
+	CodeNoSession:       3,
+	CodeEnvUnknown:      2,
+	CodeUsage:           2,
+	CodeNameTaken:       2,
+	CodePurposeMismatch: 2,
+	CodeState:           4,
+	CodeReadOnly:        4,
 }
 
 // 契约 4.1 的其余档位：0 成功、1 运行失败、5 目标不存在、6 体检不过。

@@ -753,6 +753,8 @@ func identityKeysOf(resp map[string]any, b SessionBrief) {
 	resp["n"] = b.N
 	resp["kind"] = b.Kind
 	resp["epoch"] = b.Epoch
+	// W1：用途也是恒定键（取不到给 debug，不省键）—— 页面靠它决定藏不藏编辑器。
+	resp["purpose"] = b.Purpose
 }
 
 func (s *Server) hSnapshot(w http.ResponseWriter, r *http.Request) {
@@ -924,6 +926,8 @@ func (s *Server) hSessionRestart(w http.ResponseWriter, r *http.Request) {
 	// "环境与序号都对、只是换了代"），所以旧会话从池里消失、别名当场释放的同时，
 	// 把同一个名字重新登记给新会话 —— 调用方手上的别名与 ref 因此继续有效（C3.7b / Q19）。
 	name := sess.Name()
+	// 用途同样要在收口之前取下来（W1：重启继承用途，见下面的 CreateSessionOn）。
+	purpose := sess.Purpose()
 	// 先收口当前会话(运行中会先中断/quit),再重建连接
 	if err := sess.Close(); err != nil {
 		fail(w, 500, err)
@@ -940,7 +944,9 @@ func (s *Server) hSessionRestart(w http.ResponseWriter, r *http.Request) {
 	if ent := strings.TrimSpace(req.Ent); ent != "" {
 		cfg.Topent = host.EntValue(ent)
 	}
-	ns, err := s.mgr.CreateSessionOn(cfg, name)
+	// 重启 = 同一条逻辑会话重新登录：**用途跟着继承**（W1：用途创建后不可改，
+	// 换用途要换会话，重启不是换用途）。
+	ns, err := s.mgr.CreateSessionOn(cfg, name, purpose)
 	if err != nil {
 		var taken *ErrNameTaken
 		if errors.As(err, &taken) {
@@ -1141,7 +1147,9 @@ func (s *Server) hSessionSwitch(w http.ResponseWriter, r *http.Request) {
 	// 「连到该环境」= 新建一条会话：别名**不继承**（C3.7b / Q19：别名随旧会话消失即释放；
 	// 要名字就在起会话时再给一次 —— 这条与 hSessionRestart 的"继承"刻意不同，后者是
 	// 同一条逻辑会话重新登录）。冲突由 CreateSessionOn 在"判定 → 登记"之间兜住（F18 竞态）。
-	ns, err := s.mgr.CreateSessionOn(cfg, name)
+	// 用途：`switch` 是「连到这个环境」，语义上只服务 debug —— 它建的会话一律 debug
+	// （W1：用途创建后不可改；要 record/replay 请走 `/api/sessions/new`）。
+	ns, err := s.mgr.CreateSessionOn(cfg, name, PurposeDebug)
 	if err != nil {
 		var taken *ErrNameTaken
 		if errors.As(err, &taken) {
@@ -1184,6 +1192,9 @@ func (s *Server) hSessionCreate(w http.ResponseWriter, r *http.Request) {
 		Env  string `json:"env"`
 		Ent  string `json:"ent"`
 		Name string `json:"name"`
+		// Purpose 是这条 SSH 会话的用途（W1）：debug | record | replay；空 = debug。
+		// 创建后不可改 —— 要换用途就换一条会话。
+		Purpose string `json:"purpose"`
 	}
 	if !readBody(w, r, &req) {
 		return
@@ -1192,6 +1203,15 @@ func (s *Server) hSessionCreate(w http.ResponseWriter, r *http.Request) {
 	if env == "" {
 		fail(w, 400, fmt.Errorf("需要 env：新会话落在哪个环境（tt env ls 可看全部）"))
 		return
+	}
+	purpose := strings.TrimSpace(req.Purpose)
+	if !ValidPurpose(purpose) {
+		writeCandidateFailure(w, http.StatusBadRequest, target.CodeUsage,
+			fmt.Sprintf("用途 %q 不合法：只支持 debug / record / replay（空 = debug）", purpose), nil)
+		return
+	}
+	if purpose == "" {
+		purpose = PurposeDebug
 	}
 	cfg := s.envCfgFor(env)
 	if cfg == nil {
@@ -1217,14 +1237,23 @@ func (s *Server) hSessionCreate(w http.ResponseWriter, r *http.Request) {
 			writeCandidateFailure(w, http.StatusBadRequest, f.Code, f.Message, nil)
 			return
 		}
-		// 同名已在 → 就是那一条。**不收口任何别的会话**（与 switch 的差别就在这一句）。
+		// 同名已在 → 同用途就是那一条（幂等），**不收口任何别的会话**（与 switch 的差别）。
+		// 用途不同则**拒**：名字是幂等键，键撞了但含义不同，悄悄返回既有那条会让人以为
+		// "我要的录制会话建好了"，而拿到的其实是一条调试会话。
 		for _, b := range s.mgr.Snapshot() {
 			if b.Env != env || b.Name == "" || !target.SameAlias(b.Name, name) {
 				continue
 			}
+			if b.Purpose != purpose {
+				writeCandidateFailure(w, http.StatusConflict, target.CodePurposeMismatch,
+					fmt.Sprintf("同名会话 %q 已经存在，但它的用途是 %s（这次要的是 %s）。"+
+						"用途创建后不可改：换一个名字，或先把那条收掉（tt session rm --session %s）",
+						b.Name, b.Purpose, purpose, b.Ref), nil)
+				return
+			}
 			writeJSON(w, 200, map[string]any{
 				"ok": true, "sessionId": b.ID, "ref": b.Ref, "env": env,
-				"name": b.Name, "state": b.State, "reused": true,
+				"name": b.Name, "purpose": b.Purpose, "state": b.State, "reused": true,
 			})
 			return
 		}
@@ -1233,7 +1262,7 @@ func (s *Server) hSessionCreate(w http.ResponseWriter, r *http.Request) {
 	if !s.sessOfWriteGlobal(w, r, nil) {
 		return
 	}
-	ns, err := s.mgr.CreateSessionOn(cfg, name)
+	ns, err := s.mgr.CreateSessionOn(cfg, name, purpose)
 	if err != nil {
 		var taken *ErrNameTaken
 		if errors.As(err, &taken) {
@@ -1251,7 +1280,7 @@ func (s *Server) hSessionCreate(w http.ResponseWriter, r *http.Request) {
 	go s.bootToIdle(ns, r.Context())
 	writeJSON(w, 200, map[string]any{
 		"ok": true, "sessionId": ns.ID, "ref": ref, "env": env,
-		"name": name, "state": "loading", "reused": false,
+		"name": name, "purpose": purpose, "state": "loading", "reused": false,
 	})
 }
 

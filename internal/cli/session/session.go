@@ -112,12 +112,12 @@ func emit(v any) error {
 	return enc.Encode(v)
 }
 
-// briefMap 把一条会话摊成"输出里该有的那几个键"（身份七键 + 作业状态）。
+// briefMap 把一条会话摊成"输出里该有的那几个键"（身份七键 + 用途 + 作业状态）。
 func briefMap(b debugclient.Brief) map[string]any {
 	return map[string]any{
 		"id": b.ID, "ref": b.Ref, "display": b.Display, "name": b.Name,
 		"env": b.Env, "ent": b.Ent, "n": b.N, "epoch": b.Epoch,
-		"prog": b.Prog, "state": b.State,
+		"prog": b.Prog, "purpose": b.Purpose, "state": b.State,
 	}
 }
 

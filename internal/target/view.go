@@ -45,6 +45,9 @@ type Session struct {
 	State string `json:"state"`
 	// Epoch 是世代号：会话每次"重新登录/重启"递增（C5.3）。F15 的失效判据用它。空 = 不校验。
 	Epoch string `json:"epoch"`
+	// Purpose 是用途（W1）：debug | record | replay。恒定键：取不到给 debug，不省键。
+	// 它**不是** `kind`（`kind` 是 `ssh`）。
+	Purpose string `json:"purpose"`
 }
 
 // CanonicalRef 返回这条会话的**规范 id**（C2.0 / C5.4）：服务端给了 `ref` 就用它，

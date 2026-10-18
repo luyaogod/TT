@@ -217,6 +217,8 @@ type Brief struct {
 	N       int    `json:"n"`
 	Epoch   string `json:"epoch"`
 	Prog    string `json:"prog"`
+	// Purpose 是用途（W1）：debug | record | replay。服务端恒定给这个键。
+	Purpose string `json:"purpose"`
 }
 
 // Sessions 列出全部会话。
