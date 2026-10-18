@@ -134,6 +134,13 @@ interface Store {
   ensureSource: () => Promise<void>
   // closeSession 结束一条会话（断开连接 + 从服务端池里与本地树里一起摘掉）。
   closeSession: (id: string) => Promise<void>
+  // startRecording 给**绑定的那条**会话挂一块画面通道（= 开始录制），等登记完成才返回。
+  // 失败抛错（原因里带服务端那句话），由面板显示 —— 绝不假装成功。
+  startRecording: (prog: string, ent: string) => Promise<void>
+  // stopRecording 收掉绑定那条会话的画面通道（= 停止录制/回放）。服务端按登记 StopTag 收干净，幂等。
+  stopRecording: () => Promise<void>
+  // refreshScreen 手读一次画面状态并写进 `screens`（事件之外的同步点）。
+  refreshScreen: (id: string) => Promise<void>
   module: string
   prog: string
   state: string // loading|stopped|running|idle|exit|''
@@ -2033,6 +2040,50 @@ export const useStore = create<Store>((set, get) => ({
     // 再刷一次列表，树上的状态点与作业编号才是当下的。
     await refreshSessionList()
     return item
+  },
+
+  // startRecording / stopRecording 是 FEP 面板的两个动作（W-P4）。
+  //
+  // 它们只做"调服务端 + 把结果说清楚"：起画面是 POST /screen（CapSetup），
+  // 收画面是 DELETE /screen（CapOwn，服务端会级联收 GDC/代理/录制进程）。
+  startRecording: async (prog, ent) => {
+    const id = get().sessionId
+    if (!id) throw new Error('还没有选中会话')
+    const p = (prog || '').trim()
+    if (!p) throw new Error('必须填作业编号：要录的就是这个作业')
+    const e = (ent || '').trim()
+    get().pushTimeline({
+      origin: 'human', kind: 'command',
+      text: `开始录制：作业 ${p}${e ? `，ENT ${e}` : '（ENT 沿用会话）'}`,
+    })
+    const warn = await attachScreen(id, p, e)
+    if (warn) {
+      get().pushTimeline({ origin: 'system', kind: 'warn', text: warn })
+      throw new Error(warn)
+    }
+    await get().refreshScreen(id)
+    get().pushTimeline({ origin: 'system', kind: 'info', text: '录制已开始：画面通道登记完成' })
+  },
+
+  stopRecording: async () => {
+    const id = get().sessionId
+    if (!id) throw new Error('还没有选中会话')
+    await api.screenStop(id)
+    get().pushTimeline({ origin: 'human', kind: 'command', text: '停止录制' })
+    // 立刻同步一次状态；事件（screen.detached）随后也会到，两边说的是同一件事。
+    await get().refreshScreen(id)
+  },
+
+  refreshScreen: async (id) => {
+    if (!id) return
+    try {
+      const r = await api.screen(id)
+      const attached = !!r.attached
+      const s = (r.screen || {}) as Record<string, any>
+      set((st) => ({ screens: { ...st.screens, [id]: { attached, tag: s.tag, kind: s.kind } } }))
+    } catch {
+      // 查不到就保持现状：事件会再来，且"查失败"不该把已知的挂接状态抹掉。
+    }
   },
 
   // （`pruneSessions` 已随"树由池派生"一起下线：树在 refreshSessionList 里随池重建，

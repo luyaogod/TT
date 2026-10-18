@@ -711,6 +711,10 @@ export const api = {
   screenStart: (id: string, prog: string, ent?: string) =>
     req<{ ok: boolean; session?: string; started?: { pid?: number; log?: string }; note?: string }>(
       `${API_BASE}/sessions/${id}/screen`, { method: 'POST', body: JSON.stringify({ prog, ent: ent || '' }), timeoutMs: 120000 }),
+  // 收掉这条会话的画面通道（= 停止录制/回放）：服务端按登记 StopTag 收干净（幂等）。
+  screenStop: (id: string) =>
+    req<{ ok: boolean; session?: string; stopped?: string; note?: string }>(
+      `${API_BASE}/sessions/${id}/screen`, { method: 'DELETE', timeoutMs: 120000 }),
   // 空闲态重新设置会话 TOPENT(空值 = 清除覆盖并重新下发配置默认)
   topent: (id: string, value: string) => req<{ topent: string }>(`${API_BASE}/sessions/${id}/topent`, { method: 'POST', body: JSON.stringify({ value }) }),
   bpAdd: (id: string, location: string) =>

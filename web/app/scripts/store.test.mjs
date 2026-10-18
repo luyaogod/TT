@@ -327,7 +327,7 @@ assert.ok(!S().timeline.some((t) => t.kind === 'command' && t.text.startsWith('�
   '什么都没发的时候，不许记一条"成功"的命令行')
 console.log('OK 15) 会话操作:做不到就抛错并记 warn，绝不假装成功')
 
-console.log('\n全部通过: 18/18')
+console.log('\n全部通过: 19/19')
 
 // ---------- 16) 树由池派生:池事件直接改树,不等刷新 ----------
 // W2/W6/D9:树不是本地账本,而是 GET /api/sessions 与 session.added/removed 的投影。
@@ -465,4 +465,41 @@ try {
   console.log('OK 18) 每条会话各有各的编辑器现场:切走不串场,切回来还在,收掉即清')
 } finally {
   globalThis.fetch = realFetch
+}
+// ---------- 19) FEP 面板的两个动作(W-P4):停止录制真的发 DELETE,缺作业不许发请求 ----------
+const realFetch2 = globalThis.fetch
+const calls = []
+globalThis.fetch = async (url, init) => {
+  const method = (init && init.method) || 'GET'
+  calls.push(`${method} ${String(url)}`)
+  if (String(url).includes('/screen')) {
+    if (method === 'DELETE') return { ok: true, status: 200, json: async () => ({ ok: true, stopped: 'fep-x' }) }
+    return { ok: true, status: 200, json: async () => ({ ok: true, attached: false }) }
+  }
+  return { ok: true, status: 200, json: async () => ({ ok: true, sessions: [] }) }
+}
+try {
+  useStore.setState({ sessionId: 's-rec', screens: { 's-rec': { attached: true, tag: 'fep-x', kind: 'rec' } } })
+  await S().stopRecording()
+  assert.ok(
+    calls.some((c) => c.startsWith('DELETE') && c.includes('/sessions/s-rec/screen')),
+    '停止录制必须真的发 DELETE（服务端靠它级联收 GDC/代理）',
+  )
+  assert.equal(S().screens['s-rec']?.attached, false, '收完之后 screens 应显示未挂载（事件与查询同一件事）')
+
+  // 缺作业编号：当场拒绝，一个请求都不发（别让服务端 400 来告诉我们）
+  const before = calls.length
+  const err = await S().startRecording('', '99').then(() => null, (e) => e)
+  assert.ok(err && /作业编号/.test(err.message), '缺作业编号必须抛错')
+  assert.equal(calls.length, before, '缺作业编号时不许发请求')
+
+  // 没有绑定会话：两个动作都要拒绝（不许静默成功）
+  useStore.setState({ sessionId: null })
+  const e1 = await S().stopRecording().then(() => null, (e) => e)
+  const e2 = await S().startRecording('axmt500_wf', '99').then(() => null, (e) => e)
+  assert.ok(e1 && /选中会话/.test(e1.message), '没绑会话时 stopRecording 必须抛错')
+  assert.ok(e2 && /选中会话/.test(e2.message), '没绑会话时 startRecording 必须抛错')
+  console.log('OK 19) FEP 动作:停止真的发 DELETE、缺作业/缺会话一律拒绝且不发请求')
+} finally {
+  globalThis.fetch = realFetch2
 }

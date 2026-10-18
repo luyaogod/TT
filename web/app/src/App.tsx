@@ -350,6 +350,7 @@ export function App() {
                   tab={sessionShown.tab}
                   onTab={(t) => setRoute({ kind: 'session', id: sessionItem.id, tab: t })}
                   onOpenEnv={() => openEnv(sessionItem.env)}
+                  onOpenRecording={(recId) => setRoute({ kind: 'env', env: sessionItem.env, tab: 'record', recordId: recId })}
                   leading={leading}
                 />
               </ErrorBoundary>
