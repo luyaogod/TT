@@ -308,3 +308,71 @@ func TestBusySessionIsScopedToEnv(t *testing.T) {
 		t.Fatal("过期登记不该算占用（它挡住的是一轮本来能起的录制）")
 	}
 }
+
+// TestRecordingsBulkDeleteRemovesLibraryAndCache：管理模式的批量删除（用户 2026-10-18 定）。
+//
+// 口径与单份那条不同：**长期库与缓存都删**（"勾中的都彻底删除"），一次请求清一批；
+// 没 confirm 一律 400（录制不可再生）；不存在的 id 要如实说，不许算成功。
+func TestRecordingsBulkDeleteRemovesLibraryAndCache(t *testing.T) {
+	s, cfgPath := newTestServer(t, `{"schemaVersion":3,"hosts":{"sshs":[]}}`)
+	dataDir := filepath.Dir(cfgPath)
+	cache := filepath.Join(dataDir, "fep")
+
+	// 两份额度入库的 + 一份只落在缓存的（还没入库）
+	seedLibRecording(t, dataDir, "主机109", "99", "fep-a", "bsft001_wf")
+	seedLibRecording(t, dataDir, "主机109", "99", "fep-b", "bsft001_wf")
+	for _, n := range []string{"fep-cache-1-rt2gdc.log", "fep-cache-1-gdc2rt.log", "fep-cache.meta.json"} {
+		if err := os.WriteFile(filepath.Join(cache, n), []byte("om 3 {{}}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// ① 没 confirm：400，一个字节都不删
+	body := `{"ids":["fep-a","fep-b"]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/recordings/delete", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("没 confirm 必须 400，实得 %d %s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "records", "主机109", "99", "fep-a")); err != nil {
+		t.Fatalf("没 confirm 时不该动长期库里的那一份（err=%v）", err)
+	}
+
+	// ② 带 confirm：长期库那两份与缓存那一份一起清掉
+	body = `{"ids":["fep-a","fep-b","fep-cache"],"confirm":true}`
+	req = httptest.NewRequest(http.MethodPost, "/api/recordings/delete", strings.NewReader(body))
+	rec = httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("批量删除该成功：%d %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		OK      bool `json:"ok"`
+		Deleted int  `json:"deleted"`
+		Failed  int  `json:"failed"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !out.OK || out.Deleted != 3 || out.Failed != 0 {
+		t.Fatalf("三份都该删掉：%+v（%s）", out, rec.Body.String())
+	}
+	for _, n := range []string{"fep-a-1-rt2gdc.log", "fep-a.meta.json", "fep-cache-1-rt2gdc.log", "fep-cache.meta.json"} {
+		if _, err := os.Stat(filepath.Join(cache, n)); !os.IsNotExist(err) {
+			t.Fatalf("缓存里 %s 该被删掉（err=%v）", n, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "records", "主机109", "99", "fep-a")); !os.IsNotExist(err) {
+		t.Fatalf("长期库里的 fep-a 该被删掉（err=%v）", err)
+	}
+
+	// ③ 已经不存在的 id：如实报失败，不算成功
+	body = `{"ids":["fep-a"],"confirm":true}`
+	req = httptest.NewRequest(http.MethodPost, "/api/recordings/delete", strings.NewReader(body))
+	rec = httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if !strings.Contains(rec.Body.String(), "都没有这一份") {
+		t.Fatalf("不存在的 id 要说明白：%s", rec.Body.String())
+	}
+}

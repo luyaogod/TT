@@ -14,6 +14,7 @@ package web
 // 命令行那一侧看到的是同一份登记（`tt recording active` / `session close` 都能用它收工）。
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -38,6 +39,7 @@ func (s *Server) registerRecordings(m *http.ServeMux) {
 	m.HandleFunc("POST /api/recordings/stop", s.hRecordingStop)
 	m.HandleFunc("POST /api/recordings/{id}/replay", s.hRecordingReplay)
 	m.HandleFunc("DELETE /api/recordings/{id}", s.hRecordingDelete)
+	m.HandleFunc("POST /api/recordings/delete", s.hRecordingsBulkDelete)
 	// 明细页的四个读侧端点（D1）：概览条带、全文流、三层模型、原始帧。
 	s.registerRecordingDetail(m)
 	// 回放进度（D2）：读进度 + 暂停/单步/停止（读的是回放进程落的 jsonl）。
@@ -550,6 +552,121 @@ func (s *Server) hRecordingDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": id, "files": files, "bytes": bytes})
+}
+
+// hRecordingsBulkDelete POST /api/recordings/delete
+//
+// 批量彻底删除（用户 2026-10-18 定）：**长期库与缓存都删**，一次把勾中的清干净。
+//
+// 与单份那条（`DELETE /api/recordings/{id}`）的分工：单份是"在明细页里清掉这一份"，
+// 只碰长期库（缓存归统一清理框架）；批量是"管理模式下勾一批，彻底清掉"，两边都碰。
+//
+// 必须显式 confirm：录制不可再生，删了就再也造不出来。
+func (s *Server) hRecordingsBulkDelete(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		IDs     []string `json:"ids"`
+		Confirm bool     `json:"confirm"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("请求体不是合法 JSON: %w", err))
+		return
+	}
+	if !body.Confirm {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("批量删除要二次确认（confirm:true）：这些录制不可再生"))
+		return
+	}
+	_, cacheDir, lib, err := s.recDirs()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	type delOne struct {
+		ID     string `json:"id"`
+		Where  string `json:"where,omitempty"` // 长期库 / 缓存 / 两处
+		Files  int    `json:"files"`
+		Bytes  int64  `json:"bytes"`
+		Failed string `json:"failed,omitempty"`
+	}
+	seen := map[string]bool{}
+	out := make([]delOne, 0, len(body.IDs))
+	for _, raw := range body.IDs {
+		id := strings.TrimSpace(raw)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		// id 是**目录/文件名**的一部分，必须挡住路径穿越与通配：只收录制 ID 的形状。
+		if strings.ContainsAny(id, `\\/:*?"<>|`) || strings.Contains(id, "..") {
+			out = append(out, delOne{ID: id, Failed: "不是合法的录制 ID"})
+			continue
+		}
+		one := delOne{ID: id}
+		var where []string
+		if item, found, lerr := lib.Find(id); lerr == nil && found {
+			if n, b, rerr := lib.Remove(item); rerr != nil {
+				one.Failed = "删长期库失败: " + rerr.Error()
+			} else {
+				one.Files += n
+				one.Bytes += b
+				where = append(where, "长期库")
+			}
+		}
+		// 缓存：同一份录制在缓存里的文件是 `<id>-*.log` / `<id>.meta.json`（见 fep 的落盘命名）。
+		if n, b, cerr := removeCacheRecording(cacheDir, id); cerr != nil {
+			one.Failed = strings.TrimSpace(one.Failed + "；删缓存失败: " + cerr.Error())
+		} else if n > 0 {
+			one.Files += n
+			one.Bytes += b
+			where = append(where, "缓存")
+		}
+		if one.Failed == "" && len(where) == 0 {
+			out = append(out, delOne{ID: id, Failed: "长期库与缓存里都没有这一份"})
+			continue
+		}
+		one.Where = strings.Join(where, " + ")
+		out = append(out, one)
+	}
+	okN, failN := 0, 0
+	for _, d := range out {
+		if d.Failed != "" {
+			failN++
+		} else {
+			okN++
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": failN == 0, "deleted": okN, "failed": failN, "items": out,
+	})
+}
+
+// removeCacheRecording 删掉缓存目录里属于这一份录制的文件（严格按 id 前缀匹配）。
+//
+// 只认两种命名：`<id>-…`（各连接的双向日志/时间线/gdc 输出）与 `<id>.meta.json`。
+// 不认"id 是别人前缀"的情形（`fep-1` 不会吃掉 `fep-10-…`）：判据在分隔符上。
+func removeCacheRecording(dir, id string) (files int, bytes int64, err error) {
+	ents, rerr := os.ReadDir(dir)
+	if rerr != nil {
+		return 0, 0, rerr
+	}
+	for _, e := range ents {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if name != id+".meta.json" && !strings.HasPrefix(name, id+"-") {
+			continue
+		}
+		p := filepath.Join(dir, name)
+		info, ierr := os.Stat(p)
+		if ierr == nil {
+			bytes += info.Size()
+		}
+		if rmErr := os.Remove(p); rmErr != nil {
+			return files, bytes, rmErr
+		}
+		files++
+	}
+	return files, bytes, nil
 }
 
 // rowFromMeta 把身份摊成列表里的一行（体积现算：它就在手边，而"这份多大"是用户会看的）。

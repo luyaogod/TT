@@ -822,6 +822,15 @@ export const api = {
   recordingDelete: (id: string) =>
     req<{ ok: boolean; id: string; files: number; bytes: number }>(
       `/api/recordings/${encodeURIComponent(id)}?confirm=1`, { method: 'DELETE' }),
+  // 批量彻底删除（管理模式的"勾一批删一批"）：**长期库与缓存都删**，所以服务端要求 confirm。
+  // 逐条带回结果：失败的 id 与原因要能原样显示（删不掉的往往正是"已经不在那儿了"）。
+  recordingsBulkDelete: (ids: string[]) =>
+    req<{
+      ok: boolean; deleted: number; failed: number
+      items: { id: string; where?: string; files: number; bytes: number; failed?: string }[]
+    }>('/api/recordings/delete', {
+      method: 'POST', body: JSON.stringify({ ids, confirm: true }),
+    }),
   // ---- 明细页的四个读侧端点 ----
   //
   // 纪律(见 internal/web/recordingread.go):位置一律从字节现场解,索引只补时刻;

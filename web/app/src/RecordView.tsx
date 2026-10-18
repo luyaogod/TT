@@ -18,6 +18,11 @@ import { RefreshCw } from 'lucide-react'
 import { useStore } from './store'
 import { api, type RecordingCurrent, type RecordingRow } from './api'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../shared/ui'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  Checkbox,
+} from '../../shared/ui-radix'
 import { useToast } from './toast'
 import { RecordingDetail } from './RecordingDetail'
 
@@ -100,6 +105,19 @@ export function RecordView() {
   // 列表读取失败的原因（非空 = 界面要给"读不到"而不是"没有"）。
   const [loadErr, setLoadErr] = useState('')
 
+  // ── 管理模式（用户 2026-10-18 定）────────────────────────────────────────
+  //
+  // 列表默认只读（点一行=看明细）。点「管理」进管理模式：每行左侧出现勾选框（表头是全选），
+  // 右上角变成「删除(N)」「退出」。删除是**彻底删除**（长期库 + 缓存一起清），
+  // 所以一定要过一道确认对话框。
+  const [manage, setManage] = useState(false)
+  const [picked, setPicked] = useState<string[]>([])
+  const [askDel, setAskDel] = useState<string[] | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const togglePick = (id: string) =>
+    setPicked((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+  const exitManage = () => { setManage(false); setPicked([]) }
+
   // 明细页:`recordId` 非空就是"正在看这一份"(它是 store 里的状态,URL 片段由 App 同步)。
   const recordId = useStore((s) => s.recordId)
   const setRecordId = useStore((s) => s.setRecordId)
@@ -142,6 +160,34 @@ export function RecordView() {
       setLoading(false)
     }
   }, [toast])
+
+  // 勾选跟着列表收敛：删掉/消失的那些 id 不该继续占着"已选 N"。
+  useEffect(() => {
+    setPicked((prev) => (prev.length === 0 ? prev : prev.filter((id) => rows.some((r) => r.id === id))))
+  }, [rows])
+
+  // 批量彻底删除。**先确认再发**（确认框在下面）：录制不可再生，删了只能重录。
+  const doDelete = async (ids: string[]) => {
+    if (ids.length === 0) return
+    setDeleting(true)
+    try {
+      const r = await api.recordingsBulkDelete(ids)
+      const bad = (r.items || []).filter((x) => x.failed)
+      if (bad.length > 0) {
+        toast.error(`删掉 ${r.deleted} 份，${bad.length} 份没删成`, {
+          description: bad.map((x) => `${x.id}：${x.failed}`).join("\n"),
+        })
+      } else {
+        toast.success(`已彻底删除 ${r.deleted} 份录制`, { description: '长期库与缓存都清掉了' })
+      }
+      exitManage()
+      void load(listEnv)
+    } catch (e: any) {
+      toast.error('批量删除失败', { description: e?.message || String(e) })
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   // 进面板就先拉一次。视图是 keep-alive(只切显隐、不卸载重挂),所以"进面板"这件事
   // 只能由 view 的变化来标识 —— 挂载那一刻 view 就已经是 record 了。
@@ -201,10 +247,31 @@ export function RecordView() {
           title="列表按左侧选中的环境过滤;没有选中环境时列全部">
           {listEnv ? `环境 ${listEnv}` : '未选环境:列全部环境'}
         </span>
-        <button onClick={onRefresh} disabled={loading} title="重新拉列表"
-          className="ml-auto p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40">
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-        </button>
+        <div className="ml-auto flex items-center gap-1.5">
+          {!manage ? (
+            <button onClick={() => setManage(true)} disabled={rows.length === 0}
+              title="管理模式：勾选多份录制，一次彻底删除（长期库 + 缓存）"
+              className="rounded-ui border border-border px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40">
+              管理
+            </button>
+          ) : (
+            <>
+              <button onClick={() => setAskDel(picked)} disabled={picked.length === 0 || deleting}
+                title="彻底删除勾中的录制（长期库 + 缓存，不可恢复）"
+                className="rounded-ui border border-red-500/40 bg-red-500/10 px-2 py-0.5 text-[11px] text-red-600 transition-colors hover:bg-red-500/20 disabled:opacity-40 dark:text-red-400">
+                {deleting ? '删除中…' : `删除${picked.length ? `(${picked.length})` : ''}`}
+              </button>
+              <button onClick={exitManage} disabled={deleting}
+                className="rounded-ui border border-border px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40">
+                退出
+              </button>
+            </>
+          )}
+          <button onClick={onRefresh} disabled={loading} title="重新拉列表"
+            className="p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40">
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
       </div>
       )}
 
@@ -231,6 +298,15 @@ export function RecordView() {
                     它们都还在：指纹与启动路径在**明细页的检查器**里（回放闸门照样按它们比对，
                     只是不再占列表的一列）。 */}
                 <TableRow className="hover:bg-transparent">
+                  {manage && (
+                    <TableHead className="sticky top-0 z-10 w-9 border-t-0 border-l-0 bg-muted px-0 text-center">
+                      <Checkbox
+                        checked={rows.length > 0 && picked.length === rows.length ? true : picked.length ? 'indeterminate' : false}
+                        onCheckedChange={(v) => setPicked(v === true ? rows.map((r) => r.id) : [])}
+                        className="mx-auto cursor-pointer"
+                        title={picked.length === rows.length ? '取消全选' : '全选（当前列表里的全部）'} />
+                    </TableHead>
+                  )}
                   <TableHead className="sticky top-0 z-10 w-52 border-t-0 border-l-0 bg-muted"
                     title="录制 ID:命令行 `tt fep rec show/rm/reproduce <ID>` 用的就是它">ID</TableHead>
                   <TableHead className="sticky top-0 z-10 w-44 border-t-0 border-l-0 bg-muted">时间</TableHead>
@@ -246,9 +322,17 @@ export function RecordView() {
                 {rows.map((r) => {
                   return (
                     <TableRow key={`${r.where}:${r.id}`}
-                      onClick={() => openDetail(r)}
-                      title="点开这一份的明细(条带 + 三层记录表 + 检查器):看它录到了什么、回放前核对身份"
-                      className="h-7 cursor-pointer hover:bg-accent/40">
+                      onClick={() => (manage ? togglePick(r.id) : openDetail(r))}
+                      title={manage ? '勾选这一份（管理模式）' : '点开这一份的明细(条带 + 三层记录表 + 检查器):看它录到了什么、回放前核对身份'}
+                      className={`h-7 cursor-pointer hover:bg-accent/40 ${manage && picked.includes(r.id) ? 'bg-accent/30' : ''}`}>
+                      {manage && (
+                        <TableCell className="w-9 border-t-0 border-l-0 px-0 text-center">
+                          <Checkbox checked={picked.includes(r.id)}
+                            onCheckedChange={() => togglePick(r.id)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="mx-auto cursor-pointer" />
+                        </TableCell>
+                      )}
                       <TableCell className="w-52 border-t-0 border-l-0 px-2 py-0 font-mono" title={r.id}>
                         <span className="block truncate font-mono">{r.id}</span>
                       </TableCell>
@@ -305,6 +389,26 @@ export function RecordView() {
           </div>
         </div>
       </div>
+
+      {/* 批量删除的确认框（用户 2026-10-18 定：需要确认）。
+          用 AlertDialog 而不是 Dialog：这是一次"要做/不做"的决定，不该点遮罩就放过。 */}
+      <AlertDialog open={askDel !== null} onOpenChange={(o) => { if (!o) setAskDel(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>彻底删除 {askDel?.length ?? 0} 份录制？</AlertDialogTitle>
+            <AlertDialogDescription>
+              会把这些录制从**长期库与缓存**里都删掉，不可恢复（要再造一份只能重录一次）。
+              {'\n'}只是不想看它们的话，删之前先想一下：里面可能留着还没回放过的现场。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { const ids = askDel; setAskDel(null); if (ids) void doDelete(ids) }}>
+              删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* 明细页:整屏换过去(列表留在 DOM 里、只 display:none,见上面的 wrapper)。
           它是"录制"视图内部的一级 —— 活动栏那五个图标不变、也不新增视图。 */}
