@@ -5,13 +5,13 @@
 // 从前有两份"调调试面"的实现：
 //
 //   - `internal/cli/debug` 里的 `dbgAPI`（私有的，只给 debug 命令用）；
-//   - `internal/cli/fep` 里的 `runSelf(cmd, "debug", …)` —— 完全绕开 HTTP，改为**起子进程**。
+//   - CLI 子进程里的 `runSelf(cmd, "debug", …)` —— 完全绕开 HTTP，改为**起子进程**。
 //
-// 第二条是这套代码里最后一块跨域耦合：fep 想"收口会话 / 点名环境 / 设 ENT / 起作业"，
+// 第二条是这套代码里最后一块跨域耦合：别的命令想"收口会话 / 点名环境 / 设 ENT / 起作业"，
 // 只能把 `tt debug` 当命令再跑一遍。代价是每次一个进程、参数只能用 argv 表达、错误码
 // 得从子进程的退出码里猜 —— 于是"编排"只能活在 CLI 层，永远沉不到内核里。
 //
-// 本包把这件事收成一份：**谁要调调试面，都用它**。cli/debug 与 cli/fep 都依赖它，
+// 本包把这件事收成一份：**谁要调调试面，都用它**。cli/debug 与其他调用方都依赖它，
 // 彼此仍然互不 import（那是解耦的底线）。
 //
 // # 边界
@@ -92,8 +92,8 @@ func joinBase(url, prefix string) string {
 
 // Failure 是服务端失败信封的客户端形态。
 //
-// 它实现 `ExitCode()`，所以调用方（`tt debug` / `tt fep`）的退出码自动与码表一致 ——
-// 这正是"两条线一套规矩"的落点：从前 fep 只能拿子进程的退出码反推发生了什么。
+// 它实现 `ExitCode()`，所以调用方的退出码自动与码表一致 ——
+// 这正是"一套规矩"的落点：不必拿子进程的退出码反推发生了什么。
 type Failure struct {
 	Status     int                // HTTP 状态（只用于诊断，分支一律读 Code）
 	Code       string             // 稳定机器码（契约 C5.15）
@@ -427,7 +427,7 @@ func (c *Client) SwitchToIdle(env, ent, name string, timeout time.Duration) (str
 //     点名与池里那条不同名时还会**收掉重建**（Q26/Q27 的"连到该环境"）；
 //   - EnsureSession 问的是"这条会话在不在"，**不动别的会话**：同名幂等返回、异名新建。
 //
-// 录制挂靠（`tt recording start --session <ref>` → 解析出别名 → 起作业）要的是后者：
+// 解析别名再起作业的那类调用要的是后者：
 // 它只关心"我这条"在不在，环境里另有一条会话与它无关。真机 2026-10-18 13:15 就是拿
 // SwitchToIdle 办这件事：环境里有 2 条会话 → SESSION_AMBIGUOUS → 开始录制必然失败。
 //
@@ -519,31 +519,7 @@ func (c *Client) Close(id string) error {
 	return err
 }
 
-// Screen 返回这条会话挂着的画面通道（只读视图；未挂 = attached:false）。
-func (c *Client) Screen(id string) (map[string]any, error) {
-	data, err := c.Do(http.MethodGet, "/api/sessions/"+id+"/screen", nil)
-	if err != nil {
-		return nil, err
-	}
-	var out map[string]any
-	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, fmt.Errorf("debugclient: 画面视图解析失败: %w", err)
-	}
-	return out, nil
-}
 
-// Recording 返回这条会话正在录/回放的那一份（只读视图）。
-func (c *Client) Recording(id string) (map[string]any, error) {
-	data, err := c.Do(http.MethodGet, "/api/sessions/"+id+"/record", nil)
-	if err != nil {
-		return nil, err
-	}
-	var out map[string]any
-	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, fmt.Errorf("debugclient: 录制视图解析失败: %w", err)
-	}
-	return out, nil
-}
 
 // WriteEnvelope 让 `*Failure` 能**自己打信封**（CLI 的错误出口认这个接口，见 cli/root.go）。
 //

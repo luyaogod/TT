@@ -131,7 +131,7 @@ var fieldTags42F = map[string]bool{
 // `form` 是调用方知道的表单名（用于 scope）；文件里 `<Form name>` 的值另存 `DeclaredName`。
 func ParseForm42F(form, text string) (*F42Form, error) {
 	if strings.TrimSpace(text) == "" {
-		return nil, fmt.Errorf("fep: %s 的表单内容是空的（空文件或空内容）", form)
+		return nil, fmt.Errorf("form42f: %s 的表单内容是空的（空文件或空内容）", form)
 	}
 
 	f := &F42Form{
@@ -149,7 +149,7 @@ func ParseForm42F(form, text string) (*F42Form, error) {
 		case "ascii", "us-ascii", "utf-8", "utf8", "iso-8859-1", "latin1", "windows-1252":
 			return input, nil
 		}
-		return nil, fmt.Errorf("fep: %s 的表单声明了不认识的编码 %q", form, charset)
+		return nil, fmt.Errorf("form42f: %s 的表单声明了不认识的编码 %q", form, charset)
 	}
 
 	var cur *F42Field          // 当前正在收集的字段条目
@@ -163,7 +163,7 @@ func ParseForm42F(form, text string) (*F42Form, error) {
 		}
 		if err != nil {
 			// 语法坏 → 明确说"不是 XML"，把底层错误带上（便于分辨截断/编码问题）
-			return nil, fmt.Errorf("fep: %s 不是 XML（%v）", form, err)
+			return nil, fmt.Errorf("form42f: %s 不是 XML（%v）", form, err)
 		}
 
 		switch t := tok.(type) {
@@ -257,7 +257,7 @@ func ParseForm42F(form, text string) (*F42Form, error) {
 	// 为什么需要这条：纯文本（没有 '<'）在 Go 的解码器眼里是**合法的字符数据**，
 	// 它会一路 CharData 到 EOF 而不报错 —— 不补这一条，垃圾输入会"解析成功"成一张空表。
 	if !sawForm {
-		return nil, fmt.Errorf("fep: %s 不是 XML（没有 <Form> 元素，无法当成 .42f）", form)
+		return nil, fmt.Errorf("form42f: %s 不是 XML（没有 <Form> 元素，无法当成 .42f）", form)
 	}
 
 	// 建索引（契约 C1.5）

@@ -321,13 +321,11 @@ func (s *Server) sessOf(w http.ResponseWriter, r *http.Request) *Session {
 // 只能靠声明:CLI 统一带 X-Actor: ai,浏览器带 human(不带也按 human 算)。
 const actorHeader = "X-Actor"
 
-// ActorSystem 是**平台自己的进程**（serve 拉起的录制/回放子进程）声明的身份。
+// ActorSystem 是**平台自己的进程**（serve 拉起的、替某条会话干活的子进程）声明的身份。
 //
-// 它存在的原因是这一条链：界面点「创建会话」→ serve 起一个脱离的 `tt recording start`
-// → 那个子进程再调调试线 REST（收上一轮、点 ENT、起作业、**在入口停站后放行**）。
-// 最后那一步（continue）是**交互式命令**，而 `record` 用途按 W7 拒交互式 ——
-// 于是录制进程会被自己平台的闸门挡下（真机 2026-10-18 11:51 踩到：画面起不来，
-// 录制日志写"放行失败：这条 SSH 会话的用途是纯录制（record）"）。
+// 它存在的原因是这一条链：serve 起一个脱离的 `tt …` 子进程 → 那个子进程再调调试线 REST
+// （收上一轮、点 ENT、起作业、**在入口停站后放行**）。子进程替会话干活，不该被
+// "这条会话是谁在驾驶"的模式闸门挡下。
 //
 // 所以 `system` 的语义是"平台在替这条会话干活"，不是"某个用户在操作"。
 // 它和 `ai` / `human` 一样由调用方声明（`X-Actor` 无鉴权），保护的是**误操作**，
@@ -336,11 +334,10 @@ const ActorSystem = "system"
 
 // ActorEnv 是"这次调用算谁的动作"的环境变量开关，由**发起方**在起子进程时设置。
 //
-// 为什么需要它：录制/回放那条链路是"人点界面按钮 → serve 起 tt 子进程 → 子进程再调
-// 调试线 REST"，而 CLI 默认声明 X-Actor: ai（命令行本来是 AI 的接口）。于是纯人工模式下
-// 点「开始录制」会被自己设的模式闸门拦下（实测 2026-10-16：录制失败信息里躺着
-// "纯人工模式:AI 不可操作"）。serve 起这条链路时把 TT_ACTOR=human 传下去，
-// 子进程逐层继承（exec.Command 默认继承环境）。
+// 为什么需要它：那条链路是"人点界面按钮 → serve 起 tt 子进程 → 子进程再调调试线 REST"，
+// 而 CLI 默认声明 X-Actor: ai（命令行本来是 AI 的接口）。于是纯人工模式下，人点出来的动作
+// 会被自己设的模式闸门拦下（实测 2026-10-16："纯人工模式:AI 不可操作"）。
+// serve 起这条链路时把 TT_ACTOR=human 传下去，子进程逐层继承（exec.Command 默认继承环境）。
 const ActorEnv = "TT_ACTOR"
 
 func actorOf(r *http.Request) string {
@@ -348,8 +345,8 @@ func actorOf(r *http.Request) string {
 	case "ai":
 		return "ai"
 	case ActorSystem:
-		// 平台自己的进程（录制/回放子进程）声明 system：它替这条会话干活，
-		// 不受"人/AI 谁在驾驶"和"用途只读"这两道闸门约束（理由见 Session.MayDo）。
+		// 平台自己的进程声明 system：它替这条会话干活，
+		// 不受"人/AI 谁在驾驶"这道闸门约束（理由见 Session.MayDo）。
 		return ActorSystem
 	}
 	return "human"
@@ -375,7 +372,7 @@ func launchModeFor(r *http.Request) string {
 // 最难的地方是服务端看不见 AI 的"一轮"(CLI 每次调用都是独立进程),降级成模式之后
 // 这一整块就不存在了。
 //
-// **`system` 例外**：平台自己拉起的录制/回放子进程声明这个身份（见 ActorSystem）。
+// **`system` 例外**：平台自己拉起的平台子进程声明这个身份（见 ActorSystem）。
 // 它要替这条会话干活（收上一轮、点 ENT、起作业、入口停站后**放行**），
 // 而"放行"是交互式命令 —— 按 W7 那类命令对 record 用途是拒的，拦住它等于功能不可用。
 func (s *Session) MayWrite(actor string) bool {
@@ -490,8 +487,8 @@ func (s *Server) sessOfWrite(w http.ResponseWriter, r *http.Request) *Session {
 
 // sessOfWriteCap 是写操作的会话入口，按**能力类**判（W7）。
 //
-// 分类的好处：`record` 用途只拒交互式调试，编排（起作业 / 起界面会话）与收尾照旧 ——
-// 录制进程正是靠编排那两类才跑得起来的。判据本身仍只有 `Session.MayDo` 一处。
+// 分类的好处：编排（起作业）与收尾任何时候都放行，交互式调试照旧按模式闸门判。
+// 判据本身仍只有 `Session.MayDo` 一处。
 func (s *Server) sessOfWriteCap(w http.ResponseWriter, r *http.Request, cap Capability) *Session {
 	sess := s.sessOf(w, r)
 	if sess == nil {
@@ -597,8 +594,8 @@ func (s *Server) hLaunch(w http.ResponseWriter, r *http.Request) {
 		// 同环境两条空闲会话时 `--session 恒一#1` 照样歧义 —— 标志在 --help 里写着却帮不上忙。
 		Session string `json:"session"`
 		// FGLServer 本轮 FGLSERVER 覆盖(指针:给了就是权威,空串 = 本轮强制交回 T100 自动设置)。
-		// 存在的理由是"画面去哪"只该由这一轮决定:以前只能改全局配置,于是做一次 fep
-		// 无头前端实验就把调试的画面接线顶掉了,而且静默(见 ScreenTarget)。
+		// 存在的理由是"画面去哪"只该由这一轮决定:以前只能改全局配置,
+		// 于是一次前端实验就把调试的画面接线顶掉了,而且静默(见 ScreenTarget)。
 		FGLServer *string `json:"fglserver"`
 		// Ent 是**这一轮**的企业编号(ENT)。从前没有这个字段:企业只能靠"起会话后
 		// tt debug topent"或者沿用登录 shell 的 $TOPENT,而后者是静默的 —— "忘了点名"
@@ -856,7 +853,7 @@ func (s *Server) hQuit(w http.ResponseWriter, r *http.Request) {
 //
 // fglserver 用**指针**而不是字符串:空串在 JSON 里与"这一轮没给"无法区分,而
 // "这一轮把画面交回 T100 自动设置"恰恰是最需要的那个动作(见 ScreenTarget)。
-// 覆盖只落在克隆出来的本轮配置上,s.cfg 一字不动 —— 否则一次 fep 实验的接线
+// 覆盖只落在克隆出来的本轮配置上,s.cfg 一字不动 —— 否则一次前端实验的接线
 // 会留在内存里,后面每一轮(哪怕只是普通启动)都还带着它。
 func (s *Server) launchCfg(sshName, zone string, fglserver *string) (*Config, error) {
 	if sshName == "" && zone == "" && fglserver == nil {
@@ -1035,7 +1032,7 @@ func entValueOf(value string, clear bool) string {
 func (s *Server) applyTopent(w http.ResponseWriter, r *http.Request, value string) {
 	req := struct{ Value string }{Value: value}
 	req.Value = trimTopent(req.Value)
-	// 设 ENT 属于**编排**（CapSetup）：录制进程启动时就要设它。拍在交互式那一类里
+	// 设 ENT 属于**编排**（CapSetup）：平台子进程启动时就要设它。拍在交互式那一类里
 	// 会让 record 会话连企业编号都设不上 —— W7 分类正是为这种差别存在的。
 	sess := s.sessOfWriteCap(w, r, CapSetup)
 	if sess == nil {
@@ -1087,7 +1084,7 @@ func (s *Server) hSessionSwitch(w http.ResponseWriter, r *http.Request) {
 		Ent string `json:"ent"`
 		// Name 是**这条新会话的别名**（可选）：创建即命名。
 		//
-		// 为什么需要它（多会话录制）：录制那几步要能点名"我这条"会话，而点名要有名字。
+		// 为什么需要它（多会话）：录制那几步要能点名"我这条"会话，而点名要有名字。
 		// 从前只能在 `debug start` 那一步用 `--name` 给，于是 `env`/`topent`/`exec` 这几步
 		// 只能裸奔 —— 多会话下要么撞歧义，要么落到别人的会话上。
 		Name string `json:"name"`
@@ -1132,7 +1129,7 @@ func (s *Server) hSessionSwitch(w http.ResponseWriter, r *http.Request) {
 	if cur != nil {
 		if cur.sameEnvAs(cfg) {
 			// 同环境：已经满足"这个环境里有一条能用的会话"，但**名字**要按这次的请求对齐 ——
-			// 录制那条链路（`debug env --name <别名>` → `topent --session <别名>` → `start`）
+			// 那条链路（`debug env --name <别名>` → `topent --session <别名>` → `start`）
 			// 就靠这一步把"我这条"建出来：
 			//   - 没点名 / 同名  → 幂等返回；
 			//   - 它此前无名      → 把名字登记给它（C2.5b 禁的是**改名**，不是首次命名）；
@@ -1185,10 +1182,10 @@ func (s *Server) hSessionSwitch(w http.ResponseWriter, r *http.Request) {
 	}
 	// 模式由**发起方**决定 —— 与 hLaunch / hWSLogDebug 同一条规则。
 	//
-	// 漏了这一句的后果（实测 2026-10-16，用户报"点回放没反应"）：切换环境新建出来的会话
+	// 漏了这一句的后果（实测 2026-10-16，用户报"点了没反应"）：切换环境新建出来的会话
 	// 保留 NewSession 的初始模式，而业主授权（config.aiTakeover=true）时那个初始值是
 	// **collab** —— 于是流水线下一步（`debug topent`）以"人"的身份被"协作模式只有 AI 能写"
-	// 拒掉，回放静默失败。launchModeFor 的注释早写过"两条启动路径必须都过这里"，
+	// 拒掉，操作静默失败。launchModeFor 的注释早写过"两条启动路径必须都过这里"，
 	// 这里是漏掉的第三条（/api/sessions/switch）。
 	ns.SetMode(launchModeFor(r))
 	s.mgr.emit(Event{Type: "log", Text: fmt.Sprintf("切换会话:正在连接 %s …", req.Env)})
@@ -1204,7 +1201,7 @@ func (s *Server) hSessionSwitch(w http.ResponseWriter, r *http.Request) {
 //   - switch 是"**连到这个环境**"：池里已有一条同环境的就复用；叫别的名字且空闲时
 //     **收掉旧的按新名重建**（C3.7b / Q19 —— 那是"换目标"的语义）；
 //   - 这条是"**再给我一条**"：池里有十条也一条都不动，新的那条自己登录、自己待命。
-//     多会话（几个 Agent 同时用、同一个环境并发录制）要的就是这条 —— 用 switch 建第二条
+//     多会话（几个 Agent 同时用、同一个环境并发调试）要的就是这条 —— 用 switch 建第二条
 //     会把第一条收掉，于是"我建了新的、旧的却没了"，而那正是最难发现的一类错。
 //
 // 幂等键是**名字**：同环境已有同名会话 → 原样返回它（不重连、不收口）。不给名字则必然新建

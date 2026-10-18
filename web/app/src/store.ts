@@ -26,7 +26,7 @@ export interface SessionItem {
   type: SessionType
   createdAt: number
   // 建会话时点名的企业编号与作业编号。ENT 是**会话级事实**（环境配置里已经没有它），
-  // 作业编号是"这条会话要调哪个作业"——后面起作业/挂录制都从这两个值往下走。
+  // 作业编号是"这条会话要调哪个作业"——后面起作业都从这两个值往下走。
   ent: string
   prog: string
   // 服务端给的规范 id「环境#序号」（建会话时就分配了）。空串 = 服务端没给（不该发生）。
@@ -102,7 +102,7 @@ interface Store {
   envs: EnvBrief[]
   envsLoaded: boolean
   envsErr: string
-  // 当前路由所在的环境。录制列表按它过滤(会话环境那条线在 `sessionEnv`)。
+  // 当前路由所在的环境。
   activeEnv: string
   sessions: SessionItem[]
   // sessionsLoaded = 池**列过至少一次**（不是"有会话"）。路由要用它区分
@@ -363,7 +363,7 @@ function clearLegacySessions() {
 // 模块加载时清一次：旧树的数据没有任何用途，留着只会让人以为"浏览器还记着会话"。
 clearLegacySessions()
 
-// （FEP 移除后不再有"用途"这一层：所有会话都是调试会话。）
+// （不再有"用途"这一层：所有会话都是调试会话。）
 // 下面这段注释保留在原位，避免与上面 Store 形状的注释断档。
 // （恒定键的兜底：取不到给缺省，不让页面猜）。
 
@@ -541,7 +541,7 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
 // waitSessionIdle 等这条会话**登录完**(loading → idle)。
 //
-// 为什么要等:挂画面通道的前置就是"会话空闲"（后端 hSessionScreenStart 会 409），
+// 为什么要等:建会话是立刻返回的，而"它能不能用"要等登录完（loading → idle）。
 // 而 create 是立刻返回的 —— 登录是另一条异步路（服务端 go bootToIdle）。
 // 不轮询就会立刻撞 409，用户看到的解释却是"会话不是空闲(loading)"，而不是"再等等"。
 //

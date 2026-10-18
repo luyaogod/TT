@@ -29,7 +29,7 @@ T100 作业调试的核心：经 SSH 驱动服务器上的 4GL 调试协议，�
 | `POST /api/sessions/switch` | "**连到这个环境**"（`tt debug env`） | 复用那一条；名字不同且它空闲 → **收掉旧的按新名重建** |
 | `POST /api/sessions/new` | "**再给我一条**"（环境页的「创建会话」） | **一条都不动**；同名（同环境）则原样返回它（幂等），否则新建 |
 
-多会话（几个 Agent 同时用、同一环境并发录制）只能用第二条 —— 用 `switch` 建第二条会把
+多会话（几个 Agent 同时用、同一环境并发调试）只能用第二条 —— 用 `switch` 建第二条会把
 上一条静默收掉，而调用方看到的是"新的建好了"。
 
 ### 会话身份：`id` / `ref` / `display` / `n` / `name` / `epoch`
@@ -348,7 +348,7 @@ CLI 侧再补一段命令视角的下一步（`internal/cli/debug/sourcehint.go`
 **没接线就不只是"看不到画面"，是程序根本活不过 `main`**（A35，第四次真机三次复现）：
 自动接线而本机 7400/6400 上没有 GDC 在听时会话在 `main` 之后**立刻**
 `Fatal error -6300 Can not connect to GUI` 退出（`main:1553` 之后的守卫行一次都没停）。
-所以 `ScreenWarn` 必须在启动段就说这句话、并给出动作（起 GDC / `--fglserver` / 走录制线）；
+所以 `ScreenWarn` 必须在启动段就说这句话、并给出动作（起 GDC / `--fglserver`）；
 文案的唯一来源是 `ScreenWarnWith(fglserver, gdcPresent)` —— 探针结果由调用方给，
 因为 CLI 要在 `debug start` 那一刻也打同一句（见 [../cli/debug/README.md](../cli/debug/README.md) 的 A35 段）。
 
@@ -359,8 +359,7 @@ T100 元数据（gzza004 的启动引用，如 `$ASFi/bsft001_wf`），`LaunchAr
 （默认 `config.DefaultLaunchArgs`，`{prog}` 换成作业名）。这条路径**直接跑目标程序**，
 不经过 T100 自己的启动器（`r.r` 的 `azzp000`、`r.d` 的 `gendbg`/`fgldeb`）。
 
-运行期分配的 AUI id 是**启动历史的函数**：三条路径互不相同。所以录制与回放必须走同一条
-路径 —— 路径表、跨路径的实测后果与判据见 [../fep/README.md](../fep/README.md)。
+运行期分配的 AUI id 是**启动历史的函数**：三条路径互不相同。
 
 ## 判据
 

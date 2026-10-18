@@ -45,10 +45,7 @@ func (f *recFake) install(t *testing.T) {
 			_, _ = w.Write([]byte(`{"ok":true,"sessionId":"s1","state":"idle"}`))
 		case strings.HasSuffix(r.URL.Path, "/job"):
 			_, _ = w.Write([]byte(`{"ok":true,"sessionId":"s1","session":"主机109#1"}`))
-		case strings.HasSuffix(r.URL.Path, "/screen"):
-			_, _ = w.Write([]byte(`{"ok":true,"session":"主机109#1","attached":true,"screen":{"tag":"fep-R1","kind":"rec"}}`))
-		case strings.HasSuffix(r.URL.Path, "/record"):
-			_, _ = w.Write([]byte(`{"ok":true,"recording":{"tag":"fep-R1","kind":"rec"}}`))
+
 		case strings.HasPrefix(r.URL.Path, "/api/sessions/s1") && r.Method == http.MethodGet:
 			_, _ = w.Write([]byte(`{"ok":true,"id":"s1","ref":"主机109#1","state":"stopped","stop":{"file":"a.4gl","line":812}}`))
 		case strings.HasPrefix(r.URL.Path, "/api/sessions/s9") && r.Method == http.MethodGet:
@@ -173,8 +170,10 @@ func TestSessionLsAndShow(t *testing.T) {
 	if !strings.Contains(out, `"line": 812`) {
 		t.Fatalf("show 应给出停站现场：%s", out)
 	}
-	// 附件也一并给出来（画面通道 / 录制）：不然人得再跑两条命令才知道这条会话在录什么。
-	if !strings.Contains(out, `"tag": "fep-R1"`) {
+	if strings.Contains(out, `"screen"`) || strings.Contains(out, `"recording"`) {
+		t.Fatalf("show 不该再带画面/录制附件（端点已移除）：%s", out)
+	}
+	if false {
 		t.Fatalf("show 应带上画面/录制附件：%s", out)
 	// table 形态下附件也要有一行（形状是 {attached, screen:{tag}}，别去顶层找 tag）
 	oldFmt := common.Format
@@ -235,45 +234,6 @@ func TestSessionExecPassthrough(t *testing.T) {
 	}
 }
 
-// TestSessionNewRecord：`--record` = 先建空闲会话，再把录制挂上去。
-//
-// 判据钉三件事：建的必须是**空闲**会话（走 switch，不是起作业）、给录制传的是那个句柄、
-// 缺 --name / --prog 时**不起任何进程**就报错。
-func TestSessionNewRecord(t *testing.T) {
-	f := &recFake{}
-	f.install(t)
-
-	var gotRef, gotProg string
-	oldStart := startRecording
-	startRecording = func(cfgPath, sessionRef, prog, ent string) (int, string, error) {
-		gotRef, gotProg = sessionRef, prog
-		return 4242, "D:/tmp/rec.log", nil
-	}
-	t.Cleanup(func() { startRecording = oldStart })
-
-	out := runCmd(t, "new", "--env", "主机109", "--ent", "99", "--name", "A", "--prog", "bsft001_wf", "--record")
-	if !strings.Contains(out, `"pid": 4242`) {
-		t.Fatalf("应报出录制进程：%s", out)
-	}
-	if gotRef != "s1" || gotProg != "bsft001_wf" {
-		t.Fatalf("录制参数不对：session=%q prog=%q", gotRef, gotProg)
-	}
-	// 必须先建空闲会话：第一个调用是 switch
-	if calls := f.snapshot(); len(calls) == 0 || calls[0] != "POST /api/sessions/switch" {
-		t.Fatalf("应先建空闲会话：%v", calls)
-	}
-
-	// 缺 --name 时不该起进程
-	oldStart2 := startRecording
-	startRecording = func(string, string, string, string) (int, string, error) {
-		t.Fatal("缺必填项时不该起录制进程")
-		return 0, "", nil
-	}
-	t.Cleanup(func() { startRecording = oldStart2 })
-	resetFlags() // 清掉上一次的 --name，否则"缺 --name"这一条测不出来
-	group.SetArgs([]string{"new", "--env", "主机109", "--ent", "99", "--prog", "p", "--record"})
-	_ = group.Execute()
-}
 
 // TestSessionJob：`session job` 打的是 `/sessions/{id}/job`，带 prog/module/ent。
 //

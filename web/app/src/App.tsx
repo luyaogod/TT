@@ -111,8 +111,8 @@ export function App() {
 
   const [route, setRoute] = useState<Route>(() => parseRoute(location.hash))
 
-  // 首次挂载:认深链接(设置分区 / 录制明细)、拉环境清单、连 WS、接管已有会话。
-  // 先动 URL 那条路:深链接里的设置分区与录制 ID 要落进 store,后面的默认路由才不会覆盖它。
+  // 首次挂载:认深链接(设置分区)、拉环境清单、连 WS、接管已有会话。
+  // 先动 URL 那条路:深链接里的设置分区要落进 store,后面的默认路由才不会覆盖它。
   useEffect(() => {
     const r = parseRoute(location.hash)
     const st = useStore.getState()
@@ -173,7 +173,7 @@ export function App() {
     if (route.kind === 'session' && sessionsLoaded && !sessions.some((s) => s.id === route.id)) setRoute(fallback())
   }, [envsLoaded, envs, sessions, sessionsLoaded, route])
 
-  // 路由 → store.view:录制列表、接口日志、设置页那些"进来就重拉一次"的 effect 靠它判断
+  // 路由 → store.view:接口日志、设置页那些"进来就重拉一次"的 effect 靠它判断
   // 自己是不是此刻的前台。键的映射只有一份(见 routing.ts 的 routeView)。
   useEffect(() => { useStore.getState().setView(routeView(route)) }, [route])
 
@@ -196,7 +196,7 @@ export function App() {
     prevKindRef.current = route.kind
   }, [route.kind, loadEnvs])
 
-  // 当前环境:录制列表按它过滤(见 RecordView 的 listEnv)。
+  // 当前环境:环境页与左树按它过滤。
   useEffect(() => {
     const st = useStore.getState()
     if (route.kind === 'env') st.setActiveEnv(route.env)
@@ -223,7 +223,7 @@ export function App() {
   }, [route, settingsSection])
 
   // 面板显隐:环境页/会话页/设置页三块都 keep-alive(第一次显示后只改 display)。
-  // 切走再切回时 Monaco 编辑器、日志详情、录制列表的滚动与输入都还在。
+  // 切走再切回时 Monaco 编辑器、日志详情的滚动与输入都还在。
   const lastEnvRef = useRef<{ name: string; tab: EnvTab } | null>(null)
   if (route.kind === 'env') lastEnvRef.current = { name: route.env, tab: route.tab }
   const lastSessionRef = useRef<{ id: string; tab: SessionTab } | null>(null)

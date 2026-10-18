@@ -295,7 +295,7 @@ func (m *Manager) emit(ev Event) {
 // 为什么这四类要有自己的事件，而不是靠副作用（`log` / `state`）判：
 //   - 前端要维持一棵**由服务端派生**的树（D9）。靠"看到一条带新 id 的 log 就当池变了"
 //     在删除那一半完全失效（删的时候没有任何事件），于是树里留死条目、点进去是空的。
-//   - 这四类都是"叫一声"：权威始终是 `GET /api/sessions` 与 `GET …/screen`（见 W2）。
+//   - 这两类都是"叫一声"：权威始终是 `GET /api/sessions`（见 W2）。
 const (
 	EvSessionAdded   = "session.added"
 	EvSessionRemoved = "session.removed"

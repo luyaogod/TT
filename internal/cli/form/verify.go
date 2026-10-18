@@ -3,7 +3,7 @@ package form
 // `tt form verify`：把离线字段表与**基线**逐条比对（契约 C5.1 / C7.4 / 变更记录 A5）。
 //
 // 基线来自 `--map <colname-fieldid.json>`（或 TT_FORM_CORPUS_MAP）：归档语料表，
-// 可离线跑。原「--recording 原始录制件」那条路随 FEP 录制一起移除。
+// 可离线跑。
 //
 // 比对口径（可比 / 一致 / 仅在语料里 / 歧义项落候选）只此一处，
 // 否则两处迟早各数各的。
@@ -89,7 +89,7 @@ func runVerify(cmd *cobra.Command, _ []string) error {
 	r := Compare(f, base)
 	r.Env, r.Module, r.Window = env, module, window
 	r.WindowDerived = derived
-	// 录制件那一路没有"窗口分节"这回事：窗口名只是诊断，照原样带出来。
+	// 语料表那一路没有"窗口分节"这回事：窗口名只是诊断，照原样带出来。
 	if base.Window == "" {
 		r.WindowsSeen = base.WindowsSeen
 	}
@@ -125,7 +125,7 @@ func (e *mismatchError) AlreadyReported() bool { return true }
 // Baseline 是"被观测到的 colName→fieldId"。
 type Baseline struct {
 	// Window 是它来自哪个窗口 —— **归档语料表那一路**的事实（那个文件按窗口分节）。
-	// 录制件那一路这里是空的：窗口名是启发式结果，不参与判定（A15）。
+	// 语料表那一路这里是空的：窗口名是启发式结果，不参与判定（A15）。
 	Window string
 	// Exact：唯一观测（只观测到一个编号）。
 	Exact map[string]int
@@ -271,7 +271,7 @@ type VerifyResult struct {
 	Pass         bool       `json:"ok"`
 	// WindowDerived：窗口名没给、是按表单名推出来的（启发式 ⇒ 只作诊断）。
 	WindowDerived bool `json:"windowDerived,omitempty"`
-	// WindowsSeen：录制件那一路观察到的窗口名（诊断用，不参与判定）。
+	// WindowsSeen：语料表那一路观察到的窗口名（诊断用，不参与判定）。
 	WindowsSeen []string `json:"windowsSeen,omitempty"`
 }
 
@@ -384,7 +384,7 @@ func printVerifyTable(r *VerifyResult) {
 		writeOut("（窗口 %s 是按表单名推出来的启发式，仅作诊断；要指别的用 --window）\n", r.Window)
 	}
 	if len(r.WindowsSeen) > 0 {
-		writeOut("（录制件里观察到的窗口：%s —— 诊断用，不参与判定）\n", strings.Join(r.WindowsSeen, " / "))
+		writeOut("（语料表里观察到的窗口：%s —— 诊断用，不参与判定）\n", strings.Join(r.WindowsSeen, " / "))
 	}
 	for _, m := range r.Mismatches {
 		writeOut("  不一致：%s 语料=%d 表单=%d\n", m.ColName, m.Corpus, m.Form)

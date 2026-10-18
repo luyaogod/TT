@@ -356,8 +356,8 @@ var debugStartCmd = &cobra.Command{
 按企业编号取的数全返回 0 行。输出末尾的「生效身份」一行就是用来分开这两件事的。
 
 --fglserver <ip:port> 覆盖**这一轮**的 FGLSERVER(作业界面画到哪),不动配置文件。
-默认由 T100 按 SSH 来源 IP 自动设置,也就是回你本机的 GDC;要做 fep 无头前端
-(tt fep fe,听 7700)之类的实验时用 --fglserver <本机IP>:1300 传这一轮,
+默认由 T100 按 SSH 来源 IP 自动设置,也就是回你本机的 GDC;要做 无头前端
+(无头前端,听 7700)之类的实验时用 --fglserver <本机IP>:1300 传这一轮,
 别再去改全局配置 —— 改了之后每一次放行都不会有画面,而且启动输出不会提这件事。`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -489,7 +489,7 @@ func dbgWireOverrides(cmd *cobra.Command, body map[string]any) string {
 // dbgScreenLine 回"这一轮画面去哪"那一行(服务端已经算好人话,这里只做兜底与回显)。
 //
 // 为什么要单独打这一行:画面去哪是静默的 —— 被填错时程序照常启动、照常停站,
-// 只是放行之后什么都不弹,看起来像卡死。实测事故就是配置里留着 fep 的值
+// 只是放行之后什么都不弹,看起来像卡死。实测事故就是配置里留着无头前端实验的值
 // (10.1.25.33:1300 → 前端 7700),放行后 GDC 一片空白而启动输出只字未提。
 func dbgScreenLine(snap *dbgSnapView) string {
 	if snap == nil {
@@ -1721,9 +1721,9 @@ func init() {
 	debugWsdebugCmd.Flags().StringVar(&dbgEnvFlag, "env", "", "环境名(等价 --ssh;不给则用服务端当前环境)。重放必须落在日志所在的那个环境上")
 	debugWsdebugCmd.Flags().StringVar(&dbgSSHName, "ssh", "", "环境名(--env 的别名)")
 	// --fglserver 是"这一轮画面去哪"的单轮覆盖:从前只能改全局 config.debug.fglserver,
-	// 于是做一次 fep 无头前端实验就把调试的画面接线顶掉了,而且静默(见 dbgScreenLine)。
+	// 于是做一次前端实验 无头前端实验就把调试的画面接线顶掉了,而且静默(见 dbgScreenLine)。
 	fglHelp := "本轮作业画面画到哪(FGLSERVER ip:port)。端口 = 前端监听端口-6400:GDC 默认听 7400 → 用 :1000;" +
-		"tt fep fe 无头前端听 7700 → :1300。留空串 = 本轮交回 T100 按 SSH 来源 IP 自动设置;不给 = 用配置值"
+		"无头前端 无头前端听 7700 → :1300。留空串 = 本轮交回 T100 按 SSH 来源 IP 自动设置;不给 = 用配置值"
 	debugStartCmd.Flags().StringVar(&dbgFGLServer, "fglserver", "", fglHelp)
 	debugWsdebugCmd.Flags().StringVar(&dbgFGLServer, "fglserver", "", fglHelp)
 	debugWslogsCmd.Flags().StringVar(&wsService, "service", "", "服务名称 wsfa001(支持 * ? 通配)。是 oa.schema.data.get 这类反域名,不是作业名")
