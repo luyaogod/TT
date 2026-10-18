@@ -130,9 +130,10 @@ func newServeCmd() *cobra.Command {
 				pid, log, serr := st(screenstart.Request{
 					CfgPath: path, Ref: req.Ref, Env: req.Env, Ent: req.Ent,
 					Prog: req.Prog, Tag: req.Tag,
-					// 发起方身份往下传：这个子进程要在这条会话上写（收上一轮、点 ENT、起作业），
-					// 而写受模式闸门约束。人点按钮 → human，AI 调 REST → ai。
-					Actor: req.Actor,
+					// 录制进程是**平台进程**：它要在这条会话上写（收上一轮、点 ENT、起作业、
+					// 入口停站后放行）。以 system 身份跑，才不会被"用途只读/模式闸门"挡下
+					// （真机 2026-10-18 踩到：record 会话的"放行"被拒，画面起不来）。
+					Actor: debug.ActorSystem,
 				})
 				return debug.ScreenStartResult{PID: pid, Log: log}, serr
 			})
@@ -242,3 +243,4 @@ func splitHostPort(addr string) (host, port string, err error) {
 	host = strings.Trim(addr[:i], "[]")
 	return host, addr[i+1:], nil
 }
+

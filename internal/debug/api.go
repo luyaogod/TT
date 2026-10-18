@@ -338,6 +338,19 @@ func (s *Server) sessOf(w http.ResponseWriter, r *http.Request) *Session {
 // 只能靠声明:CLI 统一带 X-Actor: ai,浏览器带 human(不带也按 human 算)。
 const actorHeader = "X-Actor"
 
+// ActorSystem 是**平台自己的进程**（serve 拉起的录制/回放子进程）声明的身份。
+//
+// 它存在的原因是这一条链：界面点「创建会话」→ serve 起一个脱离的 `tt recording start`
+// → 那个子进程再调调试线 REST（收上一轮、点 ENT、起作业、**在入口停站后放行**）。
+// 最后那一步（continue）是**交互式命令**，而 `record` 用途按 W7 拒交互式 ——
+// 于是录制进程会被自己平台的闸门挡下（真机 2026-10-18 11:51 踩到：画面起不来，
+// 录制日志写"放行失败：这条 SSH 会话的用途是纯录制（record）"）。
+//
+// 所以 `system` 的语义是"平台在替这条会话干活"，不是"某个用户在操作"。
+// 它和 `ai` / `human` 一样由调用方声明（`X-Actor` 无鉴权），保护的是**误操作**，
+// 不是攻击者 —— 与既有两道闸门同一档。
+const ActorSystem = "system"
+
 // ActorEnv 是"这次调用算谁的动作"的环境变量开关，由**发起方**在起子进程时设置。
 //
 // 为什么需要它：录制/回放那条链路是"人点界面按钮 → serve 起 tt 子进程 → 子进程再调
@@ -348,8 +361,13 @@ const actorHeader = "X-Actor"
 const ActorEnv = "TT_ACTOR"
 
 func actorOf(r *http.Request) string {
-	if strings.EqualFold(strings.TrimSpace(r.Header.Get(actorHeader)), "ai") {
+	switch strings.ToLower(strings.TrimSpace(r.Header.Get(actorHeader))) {
+	case "ai":
 		return "ai"
+	case ActorSystem:
+		// 平台自己的进程（录制/回放子进程）声明 system：它替这条会话干活，
+		// 不受"人/AI 谁在驾驶"和"用途只读"这两道闸门约束（理由见 Session.MayDo）。
+		return ActorSystem
 	}
 	return "human"
 }
@@ -369,7 +387,18 @@ func launchModeFor(r *http.Request) string {
 // 闸门是**会话级的静态标志**,不做逐命令协商 —— 原先设想的 holder/TTL/续期那一套
 // 最难的地方是服务端看不见 AI 的"一轮"(CLI 每次调用都是独立进程),降级成模式之后
 // 这一整块就不存在了。
+// MayWrite 该身份此刻能否对这个会话执行写操作。
+// 闸门是**会话级的静态标志**,不做逐命令协商 —— 原先设想的 holder/TTL/续期那一套
+// 最难的地方是服务端看不见 AI 的"一轮"(CLI 每次调用都是独立进程),降级成模式之后
+// 这一整块就不存在了。
+//
+// **`system` 例外**：平台自己拉起的录制/回放子进程声明这个身份（见 ActorSystem）。
+// 它要替这条会话干活（收上一轮、点 ENT、起作业、入口停站后**放行**），
+// 而"放行"是交互式命令 —— 按 W7 那类命令对 record 用途是拒的，拦住它等于功能不可用。
 func (s *Session) MayWrite(actor string) bool {
+	if actor == ActorSystem {
+		return true
+	}
 	if s.Mode() == ModeCollab {
 		return actor == "ai"
 	}

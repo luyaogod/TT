@@ -58,6 +58,12 @@ func TestMayDoTruthTable(t *testing.T) {
 		{PurposeReplay, ModeCollab, "ai", CapInteractive, true, "回放：driver（collab=AI）可写"},
 		{PurposeRecord, ModeSolo, "human", CapInteractive, false, "record：人也不许发调试命令"},
 		{PurposeRecord, ModeCollab, "ai", CapInteractive, false, "record：AI 也不许（防误操作）"},
+
+		// 平台自己（录制/回放子进程，见 ActorSystem）：不受用途与模式约束。
+		// 少了这一档，record 会话在入口停站后的"放行"会被拦下 —— 真机踩过。
+		{PurposeRecord, ModeSolo, ActorSystem, CapInteractive, true, "录制进程要放行作业"},
+		{PurposeRecord, ModeCollab, ActorSystem, CapInteractive, true, "同上"},
+		{PurposeDebug, ModeCollab, ActorSystem, CapSetup, true, "平台进程在协作模式下也要能起作业"},
 	}
 	for _, c := range cases {
 		s := capSession(c.purpose+"-"+c.mode+"-"+c.actor, c.purpose, c.mode)
@@ -115,5 +121,6 @@ func TestDebugSessionKeepsInteractiveGate(t *testing.T) {
 		t.Fatalf("debug 会话 + solo + 人不该被拒：%s", respError(t, resp))
 	}
 }
+
 
 

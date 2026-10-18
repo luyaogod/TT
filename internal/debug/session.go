@@ -512,6 +512,12 @@ func (s *Session) MayDo(cap Capability, actor string) bool {
 	if cap == CapOwn {
 		return true
 	}
+	// 平台自己的进程（录制/回放子进程）替这条会话干活：**不受用途与模式约束**。
+	// 少了这一条，`record` 会话在入口停站后的"放行"（continue）会被挡下 ——
+	// 真机 2026-10-18 11:51 就是这么把画面起失败的（见 ActorSystem 的注释）。
+	if actor == ActorSystem {
+		return true
+	}
 	// 纯录制的交互式写**先于**模式闸门拦掉：`/sessions/new` 建出来的录制会话
 	// 起跑前 prog/module 都还是空的，而它从出生起就不该接受调试命令。
 	if cap == CapInteractive && s.Purpose() == PurposeRecord {

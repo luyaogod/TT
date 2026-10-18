@@ -309,7 +309,7 @@ func (m *Manager) emitAdded(s *Session) {
 		return
 	}
 	b := m.briefOf(s)
-	m.emit(Event{Type: EvSessionAdded, SessionID: s.ID, Brief: &b})
+	m.emit(Event{Type: EvSessionAdded, SessionID: s.ID, Time: time.Now(), Brief: &b})
 }
 
 // emitRemoved 广播"池里少了一条"。**必须在 delete 之后调**。
@@ -317,7 +317,7 @@ func (m *Manager) emitRemoved(id, reason string) {
 	if id == "" {
 		return
 	}
-	m.emit(Event{Type: EvSessionRemoved, SessionID: id, Reason: reason})
+	m.emit(Event{Type: EvSessionRemoved, SessionID: id, Time: time.Now(), Reason: reason})
 }
 
 // PublishScreenChange 广播界面会话的挂接变化（W2 的 screen.attached / detached）。
@@ -329,14 +329,21 @@ func (m *Manager) PublishScreenChange(attached bool, st ScreenState) {
 	if st.Ref == "" {
 		return
 	}
-	ev := Event{Type: EvScreenDetached, Screen: &st, Reason: st.Reason}
+	ev := Event{Type: EvScreenDetached, Time: time.Now(), Screen: &st, Reason: st.Reason}
 	if attached {
 		ev.Type = EvScreenAttached
 		ev.Reason = ""
 	}
+	// ref → 会话 id：scoped 订阅者靠 `SessionID` 在发送端筛（C6.4）。找不到就留空 ——
+	// 那是"无主事件"，只发给 all 订阅者（C6.5），与既有口径一致。
+	for _, b := range m.Snapshot() {
+		if b.Ref == st.Ref {
+			ev.SessionID = b.ID
+			break
+		}
+	}
 	m.emit(ev)
 }
-
 // Events 返回最近 n 条事件(按时间升序;n<=0 返回全部缓冲)。
 func (m *Manager) Events(n int) []Event {
 	m.evMu.Lock()
@@ -1568,3 +1575,4 @@ func (m *Manager) CloseAll() {
 		_ = s.Close()
 	}
 }
+
