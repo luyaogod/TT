@@ -9,9 +9,11 @@
 // 天然跟得上"正在录"。
 import { useEffect, useRef, useState } from 'react'
 import { MonitorPlay } from 'lucide-react'
-import { api, type RecordPrecision, type RecordingFrame } from './api'
+import { api, type RecordPrecision, type RecordingFrame, type ReplayStepsResp } from './api'
 import { useStore } from './store'
 import { RecordingTable } from './RecordingTable'
+import { ReplayProgressBar } from './ReplayProgress'
+import { useToast } from './toast'
 
 /** 画面通道的只读视图，与后端 `GET /api/sessions/{id}/screen` 的 `screen` 块同形。 */
 export interface ScreenInfo {
@@ -70,7 +72,36 @@ export function useScreenInfo(id: string) {
   return { ...state, refresh: () => setNonce((n) => n + 1) }
 }
 
-export function FepMonitor({ sessionId }: { sessionId: string }) {
+export function FepMonitor({ sessionId, purpose, name }: { sessionId: string; purpose?: string; name?: string }) {
+  // 回放会话的**逐步控制台**（用户 2026-10-18：控件得在会话页就能看到）。
+  //
+  // 位置：FEP监控的顶上一条 —— 回放时它就是"谁在发、发到第几步"，而这一屏正好是
+  // 看"发出去之后画面变成什么"的地方；两件事在同一屏，才谈得上逐步调试。
+  const toast = useToast()
+  const isReplay = purpose === 'replay'
+  const [rp, setRp] = useState<ReplayStepsResp | null>(null)
+  useEffect(() => {
+    if (!isReplay || !sessionId) return
+    let cancelled = false
+    const tick = async () => {
+      try {
+        const r = await api.replayLatest(name || '')
+        if (!cancelled) setRp(r)
+      } catch { /* 读不到就当没有控制台（下一拍再试） */ }
+    }
+    void tick()
+    const t = window.setInterval(tick, 1000)
+    return () => { cancelled = true; window.clearInterval(t) }
+  }, [isReplay, sessionId, name])
+  const onCtl = async (cmd: 'pause' | 'resume' | 'step' | 'skip' | 'stop') => {
+    if (!rp?.id) return
+    try {
+      await api.replayCtl(rp.id, cmd)
+    } catch (e: any) {
+      toast.error('回放控制失败', { description: e?.message || String(e) })
+    }
+  }
+
   const screen = useScreenInfo(sessionId)
   const tag = screen.attached ? (screen.screen?.tag || '') : ''
   const [frames, setFrames] = useState<RecordingFrame[]>([])
@@ -139,6 +170,11 @@ export function FepMonitor({ sessionId }: { sessionId: string }) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {isReplay && rp?.running && rp.progress && (
+        <ReplayProgressBar
+          id={rp.id} progress={rp.progress} steps={rp.steps || []} running={rp.running} note={rp.note}
+          onCtl={(c) => void onCtl(c)} />
+      )}
       <LaneStrip frames={frames} precision={precision} />
       {waiting && frames.length === 0 ? (
         <div className="px-4 py-3 text-[11px] leading-relaxed text-muted-foreground">

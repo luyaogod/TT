@@ -22,6 +22,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +40,8 @@ const replayWatchIdle = 30 * time.Second
 // registerReplayProgress 挂上回放进度的两个端点。
 func (s *Server) registerReplayProgress(m *http.ServeMux) {
 	m.HandleFunc("GET /api/recordings/{id}/replay-steps", s.hReplaySteps)
+	// 会话页的「回放控制台」用这条：它只知道会话（别名 `fep-<录制ID>`），不知道源录制 ID。
+	m.HandleFunc("GET /api/replay/latest", s.hReplayLatest)
 	m.HandleFunc("POST /api/recordings/{id}/replay-ctl", s.hReplayCtl)
 }
 
@@ -45,6 +49,102 @@ func (s *Server) registerReplayProgress(m *http.ServeMux) {
 //
 // `since` 是**已经拿到多少条**（步数游标，不是 `n`）：跳过与暂停都会产生额外的行，
 // 用 `n` 当游标会丢步（见 internal/fep/replaylog.go 的纪律 3）。
+// hReplayLatest GET /api/replay/latest?for=<会话名 或 录制 ID>
+//
+// 会话页（FEP监控）只有**会话**，没有源录制 ID；而回放的控制台需要源 ID 才能读进度、
+// 写控制文件。会话别名恰好是 `fep-<录制ID>`（T5.4 / C7.3 的固定规则），
+// 所以这里**先按它定位**；定位不到再退回"缓存目录里最新的那一份回放日志"。
+//
+// 返回的载荷与 `/api/recordings/{id}/replay-steps` 同形 —— 前端同一套组件直接用。
+func (s *Server) hReplayLatest(w http.ResponseWriter, r *http.Request) {
+	_, cacheDir, _, err := s.recDirs()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	want := strings.TrimSpace(r.URL.Query().Get("for"))
+	if want != "" {
+		// 别名 = `fep-` + 录制 ID（会话名就是别名）。
+		if id := strings.TrimPrefix(want, "fep-"); id != want && id != "" {
+			if lg, lerr := fep.LatestReplayLog(cacheDir, id); lerr == nil {
+				writeJSON(w, http.StatusOK, replayPayload(s, id, lg))
+				return
+			}
+		}
+		if lg, lerr := fep.LatestReplayLog(cacheDir, want); lerr == nil {
+			writeJSON(w, http.StatusOK, replayPayload(s, want, lg))
+			return
+		}
+	}
+	lg, id, lerr := newestReplayLog(cacheDir)
+	if lerr != nil || lg == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "hasLog": false})
+		return
+	}
+	writeJSON(w, http.StatusOK, replayPayload(s, id, lg))
+}
+
+// replayPayload 把一份回放日志折成前端要的形状（与 replay-steps 同形）。
+func replayPayload(s *Server, id string, lg *fep.ReplayLog) map[string]any {
+	running := replayRunning(s, id) || !lg.Done
+	out := map[string]any{
+		"ok": true, "id": id, "hasLog": true,
+		"path": lg.Path, "running": running, "total": lg.Total,
+		"from": 0, "count": len(lg.Steps),
+		"progress":   lg.Progress(),
+		"startedAt":  msOrZero(lg.Started),
+		"finishedAt": msOrZero(lg.Finished),
+		"steps":      lg.States(),
+		"note":       lg.Note,
+		"ctlPath":    fep.ReplayCtlPath(lg.Path),
+	}
+	return out
+}
+
+// newestReplayLog 在缓存目录里找**最新**的一份回放日志（按文件名里的时刻）。
+//
+// 会话页用它兜底：别名对不上时（比如会话被改过名），"最近跑的那一轮"就是答案。
+func newestReplayLog(dir string) (*fep.ReplayLog, string, error) {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, "", nil
+		}
+		return nil, "", err
+	}
+	best, bestName := "", ""
+	for _, e := range ents {
+		n := e.Name()
+		if e.IsDir() || !strings.HasSuffix(n, fep.ReplayLogSuffix) {
+			continue
+		}
+		if n > bestName {
+			bestName = n
+			best = filepath.Join(dir, n)
+		}
+	}
+	if best == "" {
+		return nil, "", nil
+	}
+	lg, rerr := fep.ReadReplayLog(best)
+	if rerr != nil {
+		return nil, "", rerr
+	}
+	return lg, replaySourceID(bestName), nil
+}
+
+// replaySourceID 从 `<录制ID>-<时刻>.replay.jsonl` 里切回源录制 ID。
+//
+// 时刻固定 15 位（`20060102-150405`），所以从尾部切：`-` + 15 位 + 后缀。
+func replaySourceID(base string) string {
+	stem := strings.TrimSuffix(base, fep.ReplayLogSuffix)
+	const stampLen = 16 // '-' + 15 位
+	if len(stem) > stampLen && stem[len(stem)-stampLen] == '-' {
+		return stem[:len(stem)-stampLen]
+	}
+	return stem
+}
+
 func (s *Server) hReplaySteps(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(r.PathValue("id"))
 	if id == "" {

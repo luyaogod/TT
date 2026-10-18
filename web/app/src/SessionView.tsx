@@ -84,7 +84,7 @@ export function SessionView({ session, tab, onTab, onOpenEnv, leading }: {
             : <DebugWorkbench active={shownTab === 'debug'} />}
         </Pane>
         <Pane show={shownTab === 'fep'} label="FEP监控">
-          <FepMonitor sessionId={session.id} />
+          <FepMonitor sessionId={session.id} purpose={session.purpose} name={session.name} />
         </Pane>
       </div>
       {/* 状态栏（停站橙/运行蓝/空闲灰 + 接管按钮）属于**这条会话**，所以钉在会话页底部，

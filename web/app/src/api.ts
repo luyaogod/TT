@@ -867,6 +867,10 @@ export const api = {
       `/api/recordings/${encodeURIComponent(id)}/replay-steps?since=${since}${watch ? '&watch=1' : ''}`),
   // 人对回放下的命令(写在 `<日志>.ctl` 里,由回放进程在下一步之前读)。
   // 服务端会拒:非法词 400、没有日志 404、不在跑 409(停止除外 —— 收尾那一下要能点)。
+  // 会话页的「回放控制台」：会话只知道别名（`fep-<录制ID>`），不知道源录制 ID。
+  // 服务端按别名定位这一轮回放；载荷与 replaySteps 同形。
+  replayLatest: (forName?: string) =>
+    req<ReplayStepsResp>(`/api/replay/latest${forName ? `?for=${encodeURIComponent(forName)}` : ''}`),
   replayCtl: (id: string, cmd: 'pause' | 'resume' | 'step' | 'skip' | 'stop') =>
     req<{ ok: boolean; id: string; cmd: string; ctl: string; note: string }>(
       `/api/recordings/${encodeURIComponent(id)}/replay-ctl`, { method: 'POST', body: JSON.stringify({ cmd }) }),
