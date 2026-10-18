@@ -1295,6 +1295,15 @@ func (m *Manager) CreateSessionOn(cfg *Config, name, purpose string) (*Session, 
 	if err := m.checkNameFree(name); err != nil {
 		return nil, err
 	}
+	// 只有 **debug** 会话接管断点存档。录制/回放会话如果也恢复缓存断点，作业一放行就停在
+	// 上一轮调试人留下的断点上 —— 录制画面不动、回放一条事件也发不出去（用户 2026-10-18 16:34
+	// 现场："回放卡住"）。断点存档属于"调试意图"，不属于"录/放"。
+	if purpose != PurposeDebug {
+		c := *cfg
+		no := false
+		c.PersistBPs = &no
+		cfg = &c
+	}
 	sess, err := m.newSession(cfg, "", "", "", "", "", m.emit)
 	if err != nil {
 		return nil, err

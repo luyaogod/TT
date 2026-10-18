@@ -69,9 +69,10 @@ var recReproduceCmd = &cobra.Command{
 		// `ai` 带进模式/用途闸门里。实测（2026-10-18 16:08）：录制会话的用途是 record，
 		// 放行那一步被"纯录制会话不提供编辑器"整条拒掉 —— 回放一个字节都没发出去。
 		// 与 `tt recording start` 同一条口径：平台驱动的动作声明成 system。
-		if strings.TrimSpace(os.Getenv(debug.ActorEnv)) == "" {
-			_ = os.Setenv(debug.ActorEnv, debug.ActorSystem)
-		}		// ① 录制那一面：身份决定怎么起会话
+		// **无条件覆盖**：面板那条链路（web.spawnAndCheck）会给子进程塞 `TT_ACTOR=human`
+		// （那是给"人在界面上点的按钮"用的），而回放是平台在逐条发事件 —— human 会被
+		// record 会话的"调试命令一律不发"拦下（真机 2026-10-18 16:29 现场）。
+		_ = os.Setenv(debug.ActorEnv, debug.ActorSystem)		// ① 录制那一面：身份决定怎么起会话
 		t, err := resolveRecording(uiFrom, args[0])
 		if err != nil {
 			return err

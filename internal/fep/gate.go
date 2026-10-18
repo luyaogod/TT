@@ -2,6 +2,7 @@ package fep
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -294,10 +295,32 @@ func GateReplayInitial(rec, live MultiSnapshot) GateVerdict {
 		return v
 	}
 	d := v.Diff
-	if !d.EvidenceOK || d.LiveCoverage < FPIdentJaccardMin || d.EdgeCoverage < FPEdgeIsoMin {
+	if os.Getenv("TT_GATE_DEBUG") != "" {
+		fmt.Fprintf(os.Stderr, "[gate] code=%v evidence=%v identCov=%.4f edgeCov=%.4f extra=%.4f typeDiff=%.4f identUnexpected=%d edgeUnexpected=%d anonEdges=%v\n",
+			v.Code, d.EvidenceOK, d.LiveCoverage, d.EdgeCoverage, d.ExtraShare, d.TypeDiff, len(d.IdentUnexpected), len(d.EdgeUnexpected), edgesWithPlaceholder(d.EdgeUnexpected))
+	}
+	// 身份这一关必须硬：当前界面里出现"录制件没有的身份"就是不是同一个界面。
+	if !d.EvidenceOK || d.LiveCoverage < FPIdentJaccardMin {
 		return v
 	}
-	if len(d.IdentUnexpected) > 0 || len(d.EdgeUnexpected) > 0 {
+	if len(d.IdentUnexpected) > 0 {
+		return v
+	}
+	// 边也只看"有名字的边"：无身份节点的占位是 `type#~N`（**同一类型里按出现顺序数的序号**，
+	// 不含编号），它天然随"这一屏画了多少个无名控件"变化 —— 累积录制 vs 即时界面必然不同
+	// （真机 2026-10-18 16:40：704 条意外边全是 `ValueList#~0→Value#~283` 这种）。
+	// 这类占位之间的边不是"界面不对"的证据，拒它只会让回放永远跑不起来。
+	if !edgesWithPlaceholder(d.EdgeUnexpected) {
+		if os.Getenv("TT_GATE_DEBUG") != "" {
+			shown := 0
+			for _, e := range d.EdgeUnexpected {
+				if strings.Contains(e, "#~") || shown >= 3 {
+					continue
+				}
+				fmt.Fprintf(os.Stderr, "[gate] offending edge: %q\n", e)
+				shown++
+			}
+		}
 		return v
 	}
 	v.OK, v.Code = true, GateOK
@@ -308,6 +331,25 @@ func GateReplayInitial(rec, live MultiSnapshot) GateVerdict {
 		d.IdentLive, d.EdgeLive, len(d.IdentPending), len(d.EdgePending), evidencePhrase(d),
 		d.LiveCoverage, d.EdgeCoverage, d.TypeDiff)
 	return v
+}
+
+// edgesWithPlaceholder 判一批边是不是**全都沾着无名占位**（任一端带 `#~`）。
+//
+// 为什么是"任一端"而不是"两端"：`type#~N` 是同一类型里按出现顺序数的序号（不含编号），
+// 只要有一端是它，这条边就不能跨会话比 —— 另一端有没有名字都不改变这一点。
+//
+// 空集合返回 true：没有意外边本来就是放行的情形。
+func edgesWithPlaceholder(edges []string) bool {
+	for _, e := range edges {
+		// 差异清单末尾会带一条**省略标记**（`… 等 N 条`），它不是边。
+		if !strings.Contains(e, "→") {
+			continue
+		}
+		if !strings.Contains(e, "#~") {
+			return false
+		}
+	}
+	return true
 }
 
 // evidencePhrase 说清①（证据量）这一条过没过。

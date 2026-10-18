@@ -137,9 +137,20 @@ func openDebugRecording(cmd *cobra.Command, s recSession) (*fep.Runtime, string,
 		_ = rt.Close()
 		return nil, "", fail(exitFailed, "连不上调试面：%v", cerr)
 	}
+	// 用途跟着这一轮的 Kind 走：回放建出来的是 **replay** 会话（不是 record）。
+	//
+	// 为什么必须分开：用途决定两道闸门 —— record 会话的"调试命令一律不发"会直接拦掉
+	// 回放的放行（真机 2026-10-18 16:29 现场），而 replay 会话本来就该允许"重放"这类写操作；
+	// 另外非 debug 会话**不接管缓存断点**（见 debug.CreateSessionOn）—— 否则作业一放行就
+	// 停在缓存断点上，回放/录制看起来就是"卡住"。
+	purpose := debug.PurposeRecord
+	if s.Kind == fep.SessionKindReplay {
+		purpose = debug.PurposeReplay
+	}
 	ref, serr := runRecPlan(cl, recRunPlan{
 		Alias: alias, Env: dcfg.EnvName(), Ent: s.Ent,
 		Prog: s.Prog, Module: s.Module, FGL: fgl, Breaks: s.Breaks, NoContinue: s.NoContinue,
+		Purpose: purpose,
 	}, logf)
 	if serr != nil {
 		if cerr := rt.Close(); cerr != nil {

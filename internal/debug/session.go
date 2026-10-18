@@ -3907,8 +3907,16 @@ func (s *Session) restoreBreakpoints() {
 			continue
 		}
 		restored++
-		if !sb.Enabled && bp.Note == "" {
-			_ = s.SetBPEnabled(bp.Num, false)
+		// 存档里"已停用"的断点必须**恢复成停用**。
+		//
+		// 原来的条件还要求 `bp.Note == ""`（位置被自动修正、或"该位置已有断点 #N"时就不停用）——
+		// 那等于"用户明明关了断点，重开一轮它又生效了"，而 903 行这种入口断点一命中就是
+		// "作业停在入口、画面不再前进"。定位修正只是**换了行号**，不该把开关一起改掉。
+		if !sb.Enabled {
+			if err := s.SetBPEnabled(bp.Num, false); err != nil {
+				s.emitEvent(Event{Type: "log", Text: fmt.Sprintf(
+					"断点恢复: %s 在存档里是停用的，但停用失败(%v) —— 它现在会生效", opts.Location, err)})
+			}
 		}
 	}
 	if restored > 0 || skipped > 0 {
