@@ -155,7 +155,7 @@ export function RecordingDetail({ id, onBack, onChanged }: Props) {
     if (progressID && progressID !== id) return
     void readProgress(false)
   }, [progressTick, progressID, id, readProgress])
-  const onCtl = async (cmd: 'pause' | 'resume' | 'step' | 'stop') => {
+  const onCtl = async (cmd: 'pause' | 'resume' | 'step' | 'skip' | 'stop') => {
     try {
       const r = await api.replayCtl(id, cmd)
       toast.success('已下达命令', { description: r.note })

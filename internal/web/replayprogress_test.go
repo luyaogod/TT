@@ -185,6 +185,14 @@ func TestReplayCtlRefusals(t *testing.T) {
 	if note, _ := out["note"].(string); !strings.Contains(note, "收不回来") {
 		t.Fatalf("停止要提醒「发出去的收不回来」：%v", out)
 	}
+	// 逐步调试的「跳过」（用户 2026-10-18）：停着的时候跳过当前这一步。
+	code, out = postJSON(t, s, "/api/recordings/fep-rep/replay-ctl", `{"cmd":"skip"}`)
+	if code != http.StatusOK {
+		t.Fatalf("跳过该被接受：%d %v", code, out)
+	}
+	if got := fep.ReadReplayCtl(path); got != fep.CtlSkip {
+		t.Fatalf("跳过该落到 .ctl 文件里，读到 %q", got)
+	}
 }
 
 // 盯盘循环：新行会被推出去（注入的 RecProgress 收得到）。

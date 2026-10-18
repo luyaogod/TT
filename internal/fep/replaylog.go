@@ -413,6 +413,9 @@ const (
 	CtlResume ReplayCtl = "resume"
 	CtlStep   ReplayCtl = "step" // 单步：继续一步，然后停下
 	CtlStop   ReplayCtl = "stop"
+	// CtlSkip：**跳过当前这一步**（不发），并**仍然停在暂停态**等下一步。
+	// 与 CtlStep 的区别：step 是"发这一步然后停"，skip 是"不发这一步、仍停着"。
+	CtlSkip ReplayCtl = "skip"
 )
 
 // ReplayCtlPath 是控制文件的落点（与日志同一个干，扩展名不同）。
@@ -426,10 +429,20 @@ func WriteReplayCtl(logPath string, c ReplayCtl) error {
 }
 
 // ReadReplayCtl 读控制命令（文件不在或读不动时返回空 = 什么都不做）。
+//
+// **一次性命令读完就删**（step / skip）：这俩是"动作"，不是"状态"。
+// 不删的后果实测（2026-10-18）：回放每步都会再读到文件里那条 `skip`，
+// 于是"跳过这一步"变成"从这里开始全跳过"；`step` 同理会把逐步变成一路跑到底。
+// pause / resume / stop 是状态，留着（下一次读还是它，这正是它们该有的语义）。
 func ReadReplayCtl(logPath string) ReplayCtl {
-	b, err := os.ReadFile(ReplayCtlPath(logPath))
+	p := ReplayCtlPath(logPath)
+	b, err := os.ReadFile(p)
 	if err != nil {
 		return ""
 	}
-	return ReplayCtl(strings.TrimSpace(string(b)))
+	c := ReplayCtl(strings.TrimSpace(string(b)))
+	if c == CtlStep || c == CtlSkip {
+		_ = os.Remove(p)
+	}
+	return c
 }

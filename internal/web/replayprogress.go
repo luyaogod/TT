@@ -106,18 +106,27 @@ func (s *Server) hReplaySteps(w http.ResponseWriter, r *http.Request) {
 // 判据是**会话登记**（`.tt-fep.json`）＋ kind：日志的尾行在不在只能说明"写到哪了"，
 // 而"是不是还在跑"只有登记知道（进程可能被杀在半路，日志永远等不到尾行）。
 func replayRunning(s *Server, id string) bool {
-	dataDir, _, _, err := s.recDirs()
+	// 判据改成**回放日志本身**（进度条用的是同一个事实）：尾行没落 = 还在跑。
+	//
+	// 为什么不再看登记：回放进程登记的是**这一轮新录的那份**（tag = 新录制 ID），
+	// 不是被回放的源录制 ID —— 拿 `sess.Tag == id` 判永远为假，面板上的
+	// 暂停/单步/跳过就全被 409 挡在门外（真机 2026-10-18 18:16 现场）。
+	dataDir, cacheDir, _, err := s.recDirs()
 	if err != nil {
 		return false
 	}
+	// ① 日志还在写（尾行没落）= 这一轮真的在跑。这是**主判据** —— 进度条用的也是它。
+	if lg, lerr := fep.LatestReplayLog(cacheDir, id); lerr == nil && !lg.Done {
+		return true
+	}
+	// ② 日志已收尾（或那一轮被杀在半路）：再看登记里有没有活着的 replay 会话。
+	//    登记的 tag 是"这一轮新录的那份"，不是源录制 ID，所以这里只能按 kind 判 ——
+	//    宁可松一点，也不能让面板上的暂停/跳过全被 409 挡掉（那正是真机撞到的样子）。
 	sess, lerr := fep.NewRegistry(dataDir).Load()
 	if lerr != nil || sess == nil {
 		return false
 	}
-	if sess.Kind != fep.SessionKindReplay || sess.Tag != id {
-		return false
-	}
-	return !sess.Stale()
+	return sess.Kind == fep.SessionKindReplay && !sess.Stale()
 }
 
 // hReplayCtl POST /api/recordings/{id}/replay-ctl {cmd: pause|resume|step|stop}
@@ -138,9 +147,9 @@ func (s *Server) hReplayCtl(w http.ResponseWriter, r *http.Request) {
 	}
 	cmd := fep.ReplayCtl(strings.ToLower(strings.TrimSpace(req.Cmd)))
 	switch cmd {
-	case fep.CtlPause, fep.CtlResume, fep.CtlStep, fep.CtlStop:
+	case fep.CtlPause, fep.CtlResume, fep.CtlStep, fep.CtlSkip, fep.CtlStop:
 	default:
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("cmd 只能是 pause / resume / step / stop（收到 %q）", req.Cmd))
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("cmd 只能是 pause / resume / step / skip / stop（收到 %q）", req.Cmd))
 		return
 	}
 	_, cacheDir, _, err := s.recDirs()
@@ -171,6 +180,9 @@ func (s *Server) hReplayCtl(w http.ResponseWriter, r *http.Request) {
 // ctlNote 说清"这个命令什么时候生效"—— 暂停是在**下一步之前**生效，
 // 而当前这一步可能正在等运行期回包（最长 8 秒）。不说清的话，用户会以为按钮没反应。
 func ctlNote(cmd fep.ReplayCtl) string {
+	if cmd == fep.CtlSkip {
+		return "跳过：这一步**不发**，继续停在暂停态等下一步"
+	}
 	switch cmd {
 	case fep.CtlPause:
 		return "暂停会在当前这一步的回包之后生效（它可能正在等运行期，最长 8 秒）"

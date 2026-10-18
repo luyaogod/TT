@@ -32,7 +32,7 @@ interface Props {
   running: boolean
   note?: string
   /** 人和回放下的命令（暂停/继续/单步/停止）。失败由调用方 toast。 */
-  onCtl: (cmd: 'pause' | 'resume' | 'step' | 'stop') => void
+  onCtl: (cmd: 'pause' | 'resume' | 'step' | 'skip' | 'stop') => void
 }
 
 export function ReplayProgressBar(p: Props) {
@@ -72,23 +72,32 @@ export function ReplayProgressBar(p: Props) {
             {waiting.event}
           </span>
         )}
-        {/* 命令按钮只在"还在跑"时给：已经结束的一轮点了也没有接收方（服务端会 409）。 */}
+        {/* 命令按钮只在"还在跑"时给：已经结束的一轮点了也没有接收方（服务端会 409）。
+            逐步调试（用户 2026-10-18）：停住时三件事 —— 发这一步 / 跳过这一步 / 停止；
+            「跳过」只针对**还没发**的这一步，发出去的收不回来。 */}
         {pr.running && (
           <span className="ml-auto flex items-center gap-1">
             {pr.paused ? (
-              <button onClick={() => p.onCtl('resume')} className={btn}
-                title="继续：从停住的那一步接着发">
-                <Play size={11} /> 继续
-              </button>
+              <>
+                <button onClick={() => p.onCtl('step')} className={btn}
+                  title="发这一步：放行当前这一步，然后重新停下">
+                  <Play size={11} /> 发一步
+                </button>
+                <button onClick={() => p.onCtl('skip')} className={btn}
+                  title="跳过这一步：不发它，继续停着等下一步">
+                  <SkipForward size={11} /> 跳过
+                </button>
+                <button onClick={() => p.onCtl('resume')} className={btn}
+                  title="继续：从停住的那一步接着往下跑，不再逐步停">
+                  继续
+                </button>
+              </>
             ) : (
               <button onClick={() => p.onCtl('pause')} className={btn}
                 title="暂停：在当前这一步的回包之后生效（它可能正在等运行期，最长 8 秒）">
                 <Pause size={11} /> 暂停
               </button>
             )}
-            <button onClick={() => p.onCtl('step')} className={btn} title="单步：放行当前这一步，然后重新停下">
-              <SkipForward size={11} /> 单步
-            </button>
             <button onClick={() => p.onCtl('stop')} className={`${btn} text-red-600 dark:text-red-400`}
               title="停止：不再发后面的步骤（已经发出去的收不回来）">
               <Square size={11} /> 停止

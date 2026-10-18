@@ -213,6 +213,9 @@ func (c *Client) RunReplayWith(plan ReplayPlan, opt ReplayRunOptions) (*ReplayRe
 	mode := ""
 	for _, ev := range plan.Events {
 		step := ReplayStep{N: ev.N, Total: total, Event: ev.Event, Kind: eventKind(ev.Event)}
+		// skipped 是"这一步被人按了跳过"：**每一步都要重置** —— 声明在循环外会把
+		// "跳过这一步"变成"从这里开始全跳过"。
+		skipped := false
 		if id, ok := idRefOf(ev.Event); ok {
 			step.Target = id
 		}
@@ -230,6 +233,17 @@ func (c *Client) RunReplayWith(plan ReplayPlan, opt ReplayRunOptions) (*ReplayRe
 				mode = "step"
 			case CtlResume:
 				mode = ""
+			case CtlSkip:
+				// 没停在暂停态时按「跳过」= 跳过即将发的这一步；不改变暂停态。
+				step.Result = ReplaySkipped
+				step.Reason = "人要求跳过这一步"
+				emit(step)
+				res.Skipped++
+				logf("跳过第 %d 步（人要求）", ev.N)
+				skipped = true
+			}
+			if skipped {
+				continue
 			}
 			if mode == "pause" {
 				// 只报**一次**"停在第几步"：这个等待循环每 200ms 转一圈，
@@ -249,7 +263,22 @@ func (c *Client) RunReplayWith(plan ReplayPlan, opt ReplayRunOptions) (*ReplayRe
 						mode = ""
 					case CtlStep:
 						mode = "step"
+					case CtlSkip:
+						// 停在第 N 步时按「跳过」：**不发它**，记一条 skipped，
+						// 然后**继续停着**（下一步再等你按「发一步 / 继续」）。
+						step.Result = ReplaySkipped
+						step.Reason = "人要求跳过这一步"
+						emit(step)
+						res.Skipped++
+						logf("跳过第 %d 步（人要求）", ev.N)
+						skipped = true
 					}
+					if skipped {
+						break
+					}
+				}
+				if skipped {
+					continue
 				}
 			}
 		}

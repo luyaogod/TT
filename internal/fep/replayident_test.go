@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -451,7 +452,41 @@ func TestRunReplayIdentitySendsUnidentifiedStepsByBareID(t *testing.T) {
 	}
 }
 
-// TestRunReplayIdentityAllowsDryRunWithoutIdentity：**例外**（A23 第二段）——
+// TestReplaySkipSkipsOnlyCurrentStep：逐步调试的「跳过」。
+//
+// 口径（用户 2026-10-18 定）：停在第 N 步时按跳过 —— N **不发**、记 skipped，
+// 并且**继续停在暂停态**（第 N+1 步等下一次命令，不会自己往下跑）。
+func TestReplaySkipSkipsOnlyCurrentStep(t *testing.T) {
+	c, _, _, _, _ := sessionFixture(t)
+	// 三条都发给界面里存在的 #5160（ActionEvent），省掉身份解析的干扰。
+	plan := ReplayPlan{Events: []ReplayEvent{
+		{N: 1, Event: `ActionEvent 0{{idRef "5160"}}`},
+		{N: 2, Event: `ActionEvent 0{{idRef "5160"}}`},
+	}}
+	// 剧本：先暂停 → 再跳过（停在第 1 步）→ 然后继续（把第 2 步放行）。
+	var mu sync.Mutex
+	script := []ReplayCtl{CtlPause, CtlSkip, CtlResume}
+	ctl := func() ReplayCtl {
+		mu.Lock()
+		defer mu.Unlock()
+		if len(script) == 0 {
+			return ""
+		}
+		cmd := script[0]
+		script = script[1:]
+		return cmd
+	}
+	res, err := c.RunReplayIdentity(plan, ReplayRunOptions{Settle: 10 * time.Millisecond, Ctl: ctl})
+	if err != nil {
+		t.Fatalf("跳过不是失败：%v", err)
+	}
+	if res.Skipped != 1 {
+		t.Fatalf("该有 1 步被跳过，实得 %+v", res)
+	}
+	if res.Sent != 1 {
+		t.Fatalf("第 2 步该照常发出去，实得 sent=%d", res.Sent)
+	}
+}
 // 不发包的路径放行，而且照样一个字节都不发。
 func TestRunReplayIdentityAllowsDryRunWithoutIdentity(t *testing.T) {
 	c, _, rt, _, _ := sessionFixture(t)

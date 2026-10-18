@@ -119,6 +119,31 @@ var recReproduceCmd = &cobra.Command{
 					"现场与录制时不同的话，这些步可能点到别的控件\n", n)
 		}
 
+		// 回放遥测：逐行落 `<ID>-replay-<时刻>.jsonl`（缓存目录），并**边跑边被读**。
+		//
+		// **必须一起手就建**（用户 2026-10-18 现场）：起会话 + 等界面要 30~40 秒，
+		// 如果日志等"开始发"才创建，这段时间里面板读到的是**上一轮**已结束的日志
+		// （于是显示"完成"、按钮 409），控制文件也写进上一轮那份 —— 点了毫无反应。
+		// 先建出来：面板立刻看到"在跑"，暂停/跳过/停止也落得到这一轮的文件上。
+		var rlog *fep.ReplayLogWriter
+		rlogClosed := false
+		// 提前退出（起会话失败 / 指纹闸不过 / 等界面超时）也要收尾：
+		// 尾行不落，面板会把这一轮永远当成"还在跑"（按钮永远可点、命令永远没有接收方）。
+		defer func() {
+			if rlog != nil && !rlogClosed {
+				_ = rlog.Close(fep.ReplayResult{}, "回放进程提前结束")
+			}
+		}()
+		if dir, derr := cacheDir(); derr == nil {
+			if w, werr := fep.NewReplayLogWriter(
+				filepath.Join(dir, fep.ReplayLogName(t.ID, time.Now())), t.ID, repConn, len(plan.Events)); werr == nil {
+				rlog = w
+				fmt.Fprintf(cmd.ErrOrStderr(), "· 进度日志 %s\n", w.Path())
+			} else {
+				fmt.Fprintf(cmd.ErrOrStderr(), "· 进度日志写不出来（不影响回放）：%v\n", werr)
+			}
+		}
+
 		// ② 先把会话起起来（断点在放行前下好）
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
@@ -187,22 +212,7 @@ var recReproduceCmd = &cobra.Command{
 			conn = id
 		}
 
-		// 回放遥测：逐行落 `<ID>-replay-<时刻>.jsonl`（缓存目录），并**边跑边被读**。
-		//
-		// 为什么落盘而不是只在内存里报：回放是另一个进程（面板按钮走 SpawnDetached），
-		// 界面与命令行都要看进度，唯一双方都够得着的坐标就是"缓存目录 + 录制 ID"。
-		// 落一次，三处受益：界面实时看、命令行卡住时看最后一行、事后还能复盘。
-		// 写不出来**不影响回放**（它是旁证，不是前提）。
-		var rlog *fep.ReplayLogWriter
-		if dir, derr := cacheDir(); derr == nil {
-			if w, werr := fep.NewReplayLogWriter(
-				filepath.Join(dir, fep.ReplayLogName(t.ID, time.Now())), t.ID, conn, len(plan.Events)); werr == nil {
-				rlog = w
-				fmt.Fprintf(cmd.ErrOrStderr(), "· 进度日志 %s\n", w.Path())
-			} else {
-				fmt.Fprintf(cmd.ErrOrStderr(), "· 进度日志写不出来（不影响回放）：%v\n", werr)
-			}
-		}
+
 		res, rerr := client.RunReplayIdentity(plan, fep.ReplayRunOptions{
 			Conn: conn, Settle: repInterval, Logf: logf,
 			// 每一步（含中间态）都落盘。命令行这一侧不再逐步打印 ——
@@ -226,6 +236,7 @@ var recReproduceCmd = &cobra.Command{
 				note = "用户停止"
 			}
 			_ = rlog.Close(derefRes(res), note)
+			rlogClosed = true
 		}
 		if rerr != nil {
 			return replayGateErr(cmd, rerr)

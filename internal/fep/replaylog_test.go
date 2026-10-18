@@ -120,6 +120,35 @@ func TestReplayLogWithoutTrailerIsStillRunning(t *testing.T) {
 }
 
 // 控制文件：一个词，覆盖式（只有最新一条有意义）。
+// TestReplayCtlOneShotIsConsumed：step / skip 是**动作**，读完就删；pause/resume/stop 是状态，留着。
+//
+// 不消费的后果（真机 2026-10-18）：回放每步都重读文件里那条 `skip`，
+// "跳过这一步"变成"从这里开始全跳过"（94 步全被跳过）；`step` 同理会一路跑到底。
+func TestReplayCtlOneShotIsConsumed(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "fep-x-20260101-000000"+ReplayLogSuffix)
+	for _, c := range []ReplayCtl{CtlStep, CtlSkip} {
+		if err := WriteReplayCtl(log, c); err != nil {
+			t.Fatal(err)
+		}
+		if got := ReadReplayCtl(log); got != c {
+			t.Fatalf("第一次读该是 %q，实得 %q", c, got)
+		}
+		if got := ReadReplayCtl(log); got != "" {
+			t.Fatalf("%q 是一次性命令，读完该没了，实得 %q", c, got)
+		}
+	}
+	// 状态类命令读多少次都还在
+	if err := WriteReplayCtl(log, CtlPause); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if got := ReadReplayCtl(log); got != CtlPause {
+			t.Fatalf("pause 是状态，第 %d 次读该还是它，实得 %q", i+1, got)
+		}
+	}
+}
+
 func TestReplayCtlRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	log := filepath.Join(dir, ReplayLogName("fep-3", time.Now()))

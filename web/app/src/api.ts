@@ -867,7 +867,7 @@ export const api = {
       `/api/recordings/${encodeURIComponent(id)}/replay-steps?since=${since}${watch ? '&watch=1' : ''}`),
   // 人对回放下的命令(写在 `<日志>.ctl` 里,由回放进程在下一步之前读)。
   // 服务端会拒:非法词 400、没有日志 404、不在跑 409(停止除外 —— 收尾那一下要能点)。
-  replayCtl: (id: string, cmd: 'pause' | 'resume' | 'step' | 'stop') =>
+  replayCtl: (id: string, cmd: 'pause' | 'resume' | 'step' | 'skip' | 'stop') =>
     req<{ ok: boolean; id: string; cmd: string; ctl: string; note: string }>(
       `/api/recordings/${encodeURIComponent(id)}/replay-ctl`, { method: 'POST', body: JSON.stringify({ cmd }) }),
 }
