@@ -698,9 +698,11 @@ export const api = {
   // 池里已有就复用，名字不同还会把空闲那条收掉重建；new 是"再建一条"，同名才算同一条
   // （幂等键是名字，`reused:true` 表示"本来就有"）。多会话下建第二条**只能用这条**，
   // 用 switch 会把上一条收掉。
-  sessionCreate: (env: string, ent: string, name: string) =>
-    req<{ sessionId: string; ref?: string; env?: string; name?: string; state?: string; reused?: boolean }>(
-      `${API_BASE}/sessions/new`, { method: 'POST', body: JSON.stringify({ env, ent, name }), timeoutMs: 90000 }),
+  // purpose（W1）：debug / record / replay。**建会话时定一次**，之后不可改。
+  // 前端建会话的入口只有这一个：选「FEP 录制会话」= purpose=record（自动放行、只给日志）。
+  sessionCreate: (env: string, ent: string, name: string, purpose?: string) =>
+    req<{ sessionId: string; ref?: string; env?: string; name?: string; purpose?: string; state?: string; reused?: boolean }>(
+      `${API_BASE}/sessions/new`, { method: 'POST', body: JSON.stringify({ env, ent, name, purpose: purpose || '' }), timeoutMs: 90000 }),
   // 画面通道（= 录制代理 proxy）的只读视图。`attached:false` 是"现在没挂着"，不是错误。
   screen: (id: string) =>
     req<{ attached: boolean; session?: string; screen?: Record<string, any>; note?: string }>(`${API_BASE}/sessions/${id}/screen`),

@@ -50,23 +50,29 @@ var (
 //   - 必须**空闲**：作业在跑时画面已经接到别处了，此时再指 FGLSERVER 不会生效；
 //   - 必须**有名字**：挂上去靠的是"同环境同别名复用宿主"，没名字就没法点回同一条；
 //   - 环境**不许打架**：`--session` 与 `--env` 指向不同环境时，宁可报错也不猜。
-func bindRecSession(b debugclient.Brief, envFlag, entFlag string) (env, ent, alias string, err error) {
+func bindRecSession(b debugclient.Brief, envFlag, entFlag string) (env, ent, alias, purpose string, err error) {
 	if b.State != string(debug.StateIdle) {
-		return "", "", "", fail(exitState, "会话 %s 正在用（%s）：先 tt session quit --session %s，再挂录制", b.Ref, b.State, b.Ref)
+		return "", "", "", "", fail(exitState, "会话 %s 正在用（%s）：先 tt session quit --session %s，再挂录制", b.Ref, b.State, b.Ref)
 	}
 	if strings.TrimSpace(b.Name) == "" {
-		return "", "", "", fail(exitUsage,
+		return "", "", "", "", fail(exitUsage,
 			"会话 %s 没有名字：录制挂靠要用别名落回同一条会话。用 tt session new --name <名字> 建一条，或去掉 --session 走 --env/--prog",
 			b.Ref)
 	}
 	if e := strings.TrimSpace(envFlag); e != "" && e != b.Env {
-		return "", "", "", fail(exitUsage, "--session 指向 %s（环境 %s），与 --env %s 不一致", b.Ref, b.Env, e)
+		return "", "", "", "", fail(exitUsage, "--session 指向 %s（环境 %s），与 --env %s 不一致", b.Ref, b.Env, e)
 	}
 	ent = strings.TrimSpace(entFlag)
 	if ent == "" {
 		ent = b.Ent
 	}
-	return b.Env, ent, b.Name, nil
+	// 用途**跟着目标会话**走（W1：创建后不可改）。给 record 会话建/找一条 debug 会被
+	// 服务端按 SESSION_PURPOSE_MISMATCH 拒掉（真机 2026-10-18 14:39 踩到）。
+	purpose = strings.TrimSpace(b.Purpose)
+	if purpose == "" {
+		purpose = debug.PurposeDebug
+	}
+	return b.Env, ent, b.Name, purpose, nil
 }
 
 // tt recording start —— 一条命令开始录，走**我们自己的调试线**。
@@ -125,7 +131,7 @@ var recStartCmd = &cobra.Command{
 		}
 		// `--session`：把录制挂到一条**已有**的空闲会话上（组合用法）。先把目标解出来，
 		// 因为它决定了环境与企业 —— 后面每一步都按它走。
-		var boundAlias string
+		var boundAlias, boundPurpose string
 		if s := strings.TrimSpace(recStartSession); s != "" {
 			cl, cerr := debugClient()
 			if cerr != nil {
@@ -135,11 +141,11 @@ var recStartCmd = &cobra.Command{
 			if rerr != nil {
 				return rerr
 			}
-			env, ent, alias, berr := bindRecSession(b, recStartEnv, recStartEnt)
+			env, ent, alias, purpose, berr := bindRecSession(b, recStartEnv, recStartEnt)
 			if berr != nil {
 				return berr
 			}
-			recStartEnv, recStartEnt, boundAlias = env, ent, alias
+			recStartEnv, recStartEnt, boundAlias, boundPurpose = env, ent, alias, purpose
 		}
 		// 开跑前一次查完四项前置（目录可写 / 服务 / 会话 / 环境）。
 		//
@@ -247,6 +253,7 @@ var recStartCmd = &cobra.Command{
 		ref, serr := runRecPlan(cl, recRunPlan{
 			Alias: alias, Env: dcfg.EnvName(), Ent: ent,
 			Prog: recStartProg, Module: recStartModule, FGL: fgl, NoContinue: recStartNoCont,
+			Purpose: recPlanPurpose(boundPurpose),
 		}, logf)
 		if serr != nil {
 			// 半路失败：把已经起来的代理收掉（它占着 GDC/代理/注入三个端口）
@@ -312,6 +319,18 @@ type recRunPlan struct {
 	FGL        string
 	Breaks     []string
 	NoContinue bool
+	// Purpose 是要挂靠的那条会话的用途（debug / record / replay）。
+	// 建/找会话时必须带上它：用途是会话的恒定属性，给 record 会话要一条 debug 会被拒。
+	Purpose string
+}
+
+// recPlanPurpose 决定"没点名用途时建哪种会话"：录制命令自己起的会话就是 **record**
+// （它跑起来就自动放行、只给日志/监控）。挂靠模式则用目标会话自己的用途（见 bindRecSession）。
+func recPlanPurpose(p string) string {
+	if s := strings.TrimSpace(p); s != "" {
+		return s
+	}
+	return debug.PurposeRecord
 }
 
 // runRecPlan 按上面的顺序直连调试面执行。
@@ -333,7 +352,7 @@ func runRecPlan(cl *debugclient.Client, p recRunPlan, logf func(string, ...any))
 	// 这里**不能**用 SwitchToIdle（"把环境切到某一条"）：多会话下它会因为"有 2 条"报歧义，
 	// 点名的别名它也不看 —— 真机 2026-10-18 13:15「多会话 + 开始录制」就是这么失败的。
 	// EnsureSession 只保证"我这条在"，不动环境里别的会话。
-	id, err := cl.EnsureSession(p.Env, p.Ent, p.Alias, 120*time.Second)
+	id, err := cl.EnsureSession(p.Env, p.Ent, p.Alias, recPlanPurpose(p.Purpose), 120*time.Second)
 	if err != nil {
 		return "", fail(exitFailed, "点名会话失败（%s）：%v", p.Env, err)
 	}

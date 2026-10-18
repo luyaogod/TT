@@ -51,7 +51,7 @@ export const SESSION_PURPOSE_LABEL: Record<SessionPurpose, string> = { debug: 'D
  * "这条会话此刻是不是活的"这一眼,与状态栏那条"运行 = 蓝"表达的是不同的东西
  * (后者是 VS Code 的状态条配色)。两种口径都在各自的位置有说明,别再往一处合并。
  */
-const SESSION_STATE: Record<string, { dot: string; label: string }> = {
+export const SESSION_STATE: Record<string, { dot: string; label: string }> = {
   idle: { dot: 'bg-muted-foreground/45', label: '空闲（已登录，可直接启动调试）' },
   loading: { dot: 'bg-sky-500 animate-pulse', label: '登录中…' },
   running: { dot: 'bg-emerald-500', label: '运行中' },

@@ -66,6 +66,8 @@ export interface CreateSessionInput {
   ent: string
   prog: string
   name?: string
+  /** 用途（W1）：debug（默认）| record（FEP 录制会话）。建会话时定一次，之后不可改。 */
+  purpose?: SessionPurpose
 }
 
 /** 环境页那张卡片填的东西：环境由它自己在哪一页决定，所以不带 `env`。 */
@@ -1989,19 +1991,24 @@ export const useStore = create<Store>((set, get) => ({
     const env = (input.env || '').trim()
     const ent = (input.ent || '').trim()
     const prog = (input.prog || '').trim()
+    // 用途：建会话时定一次（W1）。`record` = FEP 录制会话（创建即挂监控、作业自动放行、
+    // 会话页只给「异常调试 + FEP监控」两屏）；其余一律 debug。
+    const purpose: SessionPurpose = input.purpose === 'record' ? 'record' : 'debug'
     // 名字**不能空**：录制要靠别名（name）落回同一条会话，后端对没名字的会话会回
     // 409「会话没有名字」，于是"建好了但挂不上 proxy"——人看到的是一条什么都不会干的会话
     // （用户 2026-10-18 的现场就是这样）。留空就在**发请求之前**落成「新会话 N」，
     // 而不是只在界面上显示一个服务端根本不知道的名字。
     const name = (input.name || '').trim()
-      || `新会话 ${get().sessions.filter((s) => s.env === env).length + 1}`
+      || (purpose === 'record'
+        ? `FEP录制 ${get().sessions.filter((s) => s.env === env && s.purpose === 'record').length + 1}`
+        : `新会话 ${get().sessions.filter((s) => s.env === env).length + 1}`)
     // 前置校验放在请求之前:与服务端同一套判据，但错误当场说、不白花一次 SSH 握手。
     if (!env) throw new Error('没有点名环境')
     if (!ent) throw new Error('必须填企业编号（ENT）：它决定用哪个账号连库，环境配置里已经没有它了')
     if (!prog) throw new Error('必须填作业编号：要录/要调的就是这个作业')
 
     onStep?.('正在建会话（连 ' + env + '）…')
-    const res = await api.sessionCreate(env, ent, name)
+    const res = await api.sessionCreate(env, ent, name, purpose)
     const id = (res?.sessionId || '').trim()
     if (!id) throw new Error('服务端没回会话 ID（看 .tt-serve.log）')
 
@@ -2011,7 +2018,7 @@ export const useStore = create<Store>((set, get) => ({
     const item: SessionItem = get().sessions.find((s) => s.id === id) || {
       // 极端情况：列表还没刷到它（服务端刚建、聚合有延迟）。用应答里的事实拼一条，
       // 只用于**导航**；下一轮 List / 事件会把树换成权威那份。
-      id, env, type: 'debug', purpose: 'debug', createdAt: Date.now(), ent, prog,
+      id, env, type: purpose === 'record' ? 'fep' : 'debug', purpose, createdAt: Date.now(), ent, prog,
       name: (res?.name || '').trim() || name,
       ref: (res?.ref || '').trim(),
     }

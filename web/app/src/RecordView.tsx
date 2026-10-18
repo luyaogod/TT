@@ -14,44 +14,17 @@
 // + 检查器。身份、回放、复制 ID、删除这些"看着这一份做决定"的动作也搬到了明细页的头上 ——
 // 一份录制只该有一个"我正看着它"的地方,列表只管挑。
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Play, RefreshCw, Square, Video } from 'lucide-react'
+import { RefreshCw } from 'lucide-react'
 import { useStore } from './store'
 import { api, type RecordingCurrent, type RecordingRow } from './api'
-import { Input, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../shared/ui'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../shared/ui'
 import { useToast } from './toast'
 import { RecordingDetail } from './RecordingDetail'
 
-// 「这一次作业是怎么起来的」与「归谁 / 留哪」的中文名:与 Go 侧的 Label() 同一套措辞
-// (internal/fep/path.go、retention.go),照抄一份 —— 前端无 i18n,中文硬编码。
-// 值本身(r.r / debug / none…)照原样显示,中文只进 tooltip:它是身份的一部分,
-// 不让用户在界面上看到"r.r 被翻译成了别的什么"而对不上命令行与日志。
-const PATH_LABEL: Record<string, string> = {
-  'r.r': 'r.r:T100 标准启动器(界面正常,不可调试)',
-  debug: 'debug:我们自己的调试线(fglrun -d + fgldb)',
-  'r.d': 'r.d:T100 自带调试启动器(gendbg + fgldeb,已不从界面起)',
-  none: 'none:只起了隔离实例与代理,没起作业',
-}
 const ORIGIN_LABEL: Record<string, string> = { user: '用户主动', auto: '系统自动' }
 const RETENTION_LABEL: Record<string, string> = {
   library: '长期库(不自动清理)',
   cache: '缓存目录(随统一清理按年龄删)',
-}
-
-// 会话登记里那一轮**该怎么称呼**。
-//
-// 为什么要分四种:登记文件比进程活得久 —— 「回放」是另起一个进程 `rec reproduce --no-wait`,
-// 它发完事件就退,留下的是"登记还在 + 一个还开着的窗口"(用户要看最后那一屏)。把这种残留
-// 说成"正在录"是错的(用户 2026-10-15 撞上过:面板写着"正在录:fep-x",可那一轮其实是回放),
-// 于是按 用途(录/回放) × 起它的进程还在不在 分四种说法,并且都指向同一个收工按钮。
-function curLabel(cur: RecordingCurrent): string {
-  const stale = !!cur.stale
-  if (cur.kind === 'replay') return stale ? '回放留下的窗口' : '正在回放'
-  return stale ? '上一轮录制没收干净' : '正在录'
-}
-
-// 收工按钮上的字:回放那一轮谈不上"停止录制"(它早就发完了),留住的是那个窗口。
-function stopLabel(cur: RecordingCurrent | null): string {
-  return cur?.kind === 'replay' ? '收工(关窗口)' : '停止录制'
 }
 
 // 详情面板的宽度分配:与接口日志页同一套做法(拖分割条改占比、占比记在本地)。
@@ -116,10 +89,8 @@ export function RecordView() {
   // 起一轮录制仍跟会话走(`sessionEnv`)—— 那是"用哪个登录态/企业",与"看哪个环境的件"是两件事。
   const activeEnv = useStore((s) => s.activeEnv)
   const listEnv = activeEnv || sessionEnv
-  const sessionId = useStore((s) => s.sessionId)
   const toast = useToast()
 
-  const [prog, setProg] = useState('')
   // 「刷新」按钮的强制重拉信号(条件没变时也要重新拉一次)
   const [tick, setTick] = useState(0)
 
@@ -128,7 +99,6 @@ export function RecordView() {
   const [loading, setLoading] = useState(false)
   // 列表读取失败的原因（非空 = 界面要给"读不到"而不是"没有"）。
   const [loadErr, setLoadErr] = useState('')
-  const [busy, setBusy] = useState<'' | 'start' | 'stop'>('')
 
   // 明细页:`recordId` 非空就是"正在看这一份"(它是 store 里的状态,URL 片段由 App 同步)。
   const recordId = useStore((s) => s.recordId)
@@ -211,74 +181,6 @@ export function RecordView() {
 
   const onRefresh = () => setTick((t) => t + 1)
 
-  // 起一轮录制。已经在录时服务端回 409 与一句中文原因,原样弹出来 ——
-  // 所以这里只把"点不了"的两种情形(没会话环境 / 没作业名)挡在前面。
-  //
-  // 环境与 ENT 都跟着**当前会话**走(面板上不再单独选):环境用会话的环境名,
-  // 企业编号读会话自己的 TOPENT(读取失败就不带 —— 那就等于沿用登录 shell 的 $TOPENT,
-  // 与服务端 "空 = 沿用 $TOPENT" 的口径一致)。
-  const onStart = async () => {
-    // 三道闸门在这里**再走一遍**，而不是只靠按钮的 disabled：
-    // 作业名那个输入框的回车也走这条路（实测：按钮已经禁用并写着"已经在录了"时，
-    // 在框里按回车照样把请求发出去；同一个任务里连按两次回车会发出 2 个 POST）。
-    // 按钮的 disabled 只是**界面**上的闸门，状态检查必须落在动作里。
-    if (busy) return
-    if (cur && !cur.stale) {
-      toast.error('已经在录了', { description: `当前这一轮是 ${cur.id}（${cur.prog || '-'}）：先${stopLabel(cur)}再起新的（两个会话会抢同一组端口与调试会话）。` })
-      return
-    }
-    if (!sessionEnv) {
-      toast.error('还没有会话环境', { description: '先在左侧「会话」面板连一个环境 —— 录制落在哪个环境、用哪个企业,都跟着它走。' })
-      return
-    }
-    const p = prog.trim()
-    if (!p) {
-      toast.error('请填作业名', { description: '要录哪个作业(如 bsft001_wf)。' })
-      return
-    }
-    setBusy('start')
-    try {
-      let ent = ''
-      if (sessionId) {
-        try {
-          const snap: any = await api.snapshot(sessionId)
-          ent = snap?.topentSession || ''
-        } catch { /* 读不到就不带 ENT:等同于沿用 $TOPENT */ }
-      }
-      const r = await api.recordingStart({ env: sessionEnv, prog: p, ent })
-      const id = r.recording?.id || ''
-      toast.success(`已开始录制:${id}`, {
-        description: `作业 ${r.recording?.prog || p}${r.log ? `;日志 ${r.log}` : ''}`,
-        duration: 8000, // 录制 ID 多留一会儿:默认 3.5 秒常常还没看清就没了
-      })
-      await load(listEnv)
-    } catch (e: any) {
-      toast.error('开始录制失败', { description: e?.message || String(e) })
-    } finally {
-      setBusy('')
-    }
-  }
-
-  // 停一轮:收工 = 请常驻进程自己退(它会落身份 + 搬进长期库)+ 收掉调试会话。
-  // 收工是异步的,所以刷新后可能还看不到那一件 —— 这是正常的,再点一次刷新即可。
-  const onStop = async () => {
-    setBusy('stop')
-    const replay = cur?.kind === 'replay'
-    try {
-      const r = await api.recordingStop()
-      const id = r.stopped?.id || ''
-      toast.success(replay ? `已收工:${id}` : `已停止录制:${id}`, {
-        description: replay
-          ? '回放留下的那个窗口已经关掉,会话登记也清了'
-          : `${r.stopped?.prog || ''} 已收工,录制件落到长期库/缓存(稍等再点刷新)`,
-      })
-      await load(listEnv)
-    } catch (e: any) {
-      toast.error('停止录制失败', { description: e?.message || String(e) })
-    } finally {
-      setBusy('')
-    }
-  }
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -288,72 +190,21 @@ export function RecordView() {
           于是这一行只留:作业名 + 起录/停录 + 刷新,并且**靠左**(不再 ml-auto 顶到右边:
           左边的条件没了,再把人赶到右边纯属浪费)。
           字段名在左、控件在右,不写进 placeholder(与接口日志页的 QueryField 同一口径)。 */}
-      {/* 录制工具条（作业名 / 开始 / 停止 / 环境过滤 / 在录吗）**只在列表那一屏出现**
-          （用户 2026-10-16："明细页面不应该显示录制区域"）：它是"起一轮、挑一份"的东西，
-          而明细页是"看某一份"——那里已经有自己的头（`← 列表 | ID | 作业名 | 回放/复制/删除/刷新`），
-          再顶一条"开始录制"只会让人以为在这一屏也能起录。 */}
+      {/* 这里**不再有起停操作**（用户 2026-10-18 定：FEP 的唯一入口是「创建会话 → FEP 录制会话」）
+          —— 这一屏只做归档浏览。刷新留着：它只读，不改变任何东西。 */}
       {!recordId && (
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-2 py-2">
-        <span className="shrink-0 text-xs text-muted-foreground"
-          title="要录的作业编号。起录走的是服务端另起的 `tt fep rec start`,与调试会话互不干扰">作业名</span>
-        <Input
-          value={prog}
-          onChange={(e) => setProg(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') void onStart() }}
-          placeholder="如 bsft001_wf"
-          title="要录的作业编号。起录走的是服务端另起的 `tt fep rec start`,与调试会话互不干扰;环境与企业编号都跟着左侧会话面板当前那个会话走"
-          className="h-7 w-40 text-xs"
-        />
-        <button
-          onClick={() => void onStart()}
-          disabled={!!busy || !sessionEnv || !prog.trim() || (!!cur && !cur.stale)}
-          title={cur && !cur.stale
-            ? `已经在录了(${cur.id}):先停掉它再起新的(两个会话会抢同一组端口)`
-            : cur && cur.stale
-              ? `登记里还留着上一轮(${cur.id}),但起它的进程已经不在了 —— 可以直接起新的;那个窗口若还开着,点「${stopLabel(cur)}」收掉`
-              : !sessionEnv
-                ? '先在左侧「会话」面板连一个环境 —— 录制落在哪个环境跟着它走'
-                : `起一轮录制(环境 ${sessionEnv}):服务端会另起一个脱离的进程,等它登记(秒级到几十秒)`}
-          className="inline-flex shrink-0 items-center gap-1 border border-emerald-500/20 px-2 py-0.5 text-xs text-emerald-600 hover:bg-emerald-500/10 disabled:pointer-events-none disabled:opacity-40 dark:text-emerald-400">
-          <Play className="h-3.5 w-3.5" />
-          {busy === 'start' ? '正在起…' : '开始录制'}
-        </button>
-        <button
-          onClick={() => void onStop()}
-          disabled={!!busy || !cur}
-          title={cur
-            ? (cur.kind === 'replay'
-              ? `收工:关掉回放留下的那个窗口(${cur.id},起它的回放进程早就退场了)`
-              : `停止并收工:${cur.id}(它会落身份并搬进长期库)`)
-            : '现在没有在录的会话'}
-          className="inline-flex shrink-0 items-center gap-1 border border-border px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40">
-          <Square className="h-3.5 w-3.5" />
-          {busy === 'stop' ? '正在停…' : stopLabel(cur)}
-        </button>
-        <button onClick={onRefresh} disabled={loading} title="重新拉列表与「在录吗」"
-          className="p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40">
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-        </button>
-        {/* 列表按哪个环境过滤:说清它跟着当前打开的环境走,不然用户会以为漏了一份 */}
-        <span className="shrink-0 text-[11px] text-muted-foreground"
+        <span className="text-[11px] text-muted-foreground">
+          录制从「创建会话 → FEP 录制会话」开始；这里只浏览录制件。
+        </span>
+        <span className="shrink-0 text-[11px] text-muted-foreground/70"
           title="列表按左侧选中的环境过滤;没有选中环境时列全部">
           {listEnv ? `环境 ${listEnv}` : '未选环境:列全部环境'}
         </span>
-        {cur && (
-          <span className={`flex min-w-0 items-center gap-1 text-xs ${cur.stale
-            ? 'text-muted-foreground'
-            : 'text-amber-600 dark:text-amber-400'}`}
-            title={cur.kind === 'replay'
-              ? (cur.stale
-                ? `这是一轮回放留下的窗口(${cur.id}):回放进程发完事件就退场了,登记与那个窗口还在。「${stopLabel(cur)}」会收掉它`
-                : `正在回放 ${cur.id}:进程还在(它会等停站)`)
-              : (cur.stale
-                ? `登记里还留着 ${cur.id},但起它的进程已经不在了(那一轮没收干净)。「${stopLabel(cur)}」可以收掉它留下的窗口`
-                : `这一轮还活着(会话登记里有它)。${stopLabel(cur)}会让它收工并落身份:${PATH_LABEL[cur.path || ''] || cur.path || ''}`)}>
-            <Video className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate">{curLabel(cur)}:{cur.id}({cur.prog || '-'})</span>
-          </span>
-        )}
+        <button onClick={onRefresh} disabled={loading} title="重新拉列表"
+          className="ml-auto p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40">
+          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+        </button>
       </div>
       )}
 

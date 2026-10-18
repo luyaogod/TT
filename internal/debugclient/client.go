@@ -433,8 +433,13 @@ func (c *Client) SwitchToIdle(env, ent, name string, timeout time.Duration) (str
 //
 // 走的是 `/api/sessions/new`（服务端语义就是"同名幂等、绝不收口别人"），purpose 固定 debug
 // —— 录制挂靠的是一条调试会话，用途在它建的时候就定了（W1：用途不可改）。
-func (c *Client) EnsureSession(env, ent, name string, timeout time.Duration) (string, error) {
-	body := map[string]any{"env": env, "purpose": "debug"}
+func (c *Client) EnsureSession(env, ent, name, purpose string, timeout time.Duration) (string, error) {
+	// purpose 必须**跟着目标会话**走（W1 的用途不可变）：给 record 会话建/找一条 debug
+	// 会被服务端按 SESSION_PURPOSE_MISMATCH 拒掉。空 = 交给服务端按 debug 处理。
+	body := map[string]any{"env": env}
+	if p := strings.TrimSpace(purpose); p != "" {
+		body["purpose"] = p
+	}
 	if ent != "" {
 		body["ent"] = ent
 	}

@@ -8,7 +8,7 @@ import { useState, type ReactNode } from 'react'
 import { Bug, Plus, Server, Video } from 'lucide-react'
 import { Button, Input } from '../../shared/ui'
 import { cn } from '../../shared/utils'
-import type { SessionDraft, EnvBrief, SessionItem } from './store'
+import type { SessionDraft, EnvBrief, SessionItem, SessionPurpose } from './store'
 import type { EnvTab } from './routing'
 import { Pane, TabStrip, ViewHeader, Meta, type TabItem } from './Shell'
 import { WsLogView } from './WsLogView'
@@ -81,6 +81,10 @@ function CreateSessionPane({ env, count, sessions, onCreate, onOpenSession }: {
   const [name, setName] = useState('')
   const [ent, setEnt] = useState('')
   const [prog, setProg] = useState('')
+  // 会话类型：两条线在**创建时**就分岔（用途定一次，之后不可改）——
+  //   debug  → 调试会话（停在入口，可断点）
+  //   record → FEP 录制会话（自动放行，只给日志 + 监控）
+  const [purpose, setPurpose] = useState<SessionPurpose>('debug')
   const [busy, setBusy] = useState(false)
   const [step, setStep] = useState('')
   const [err, setErr] = useState('')
@@ -95,7 +99,7 @@ function CreateSessionPane({ env, count, sessions, onCreate, onOpenSession }: {
     setBusy(true)
     setStep('')
     try {
-      await onCreate({ ent: ent.trim(), prog: prog.trim(), name: name.trim() }, setStep)
+      await onCreate({ ent: ent.trim(), prog: prog.trim(), name: name.trim(), purpose }, setStep)
       // 成功后这条会话已经跳走了,但本面板是 keep-alive 的 —— 不清空的话下次回来
       // 还留着上一轮的 ENT/作业,再点一次就会建出一条一模一样的会话。
       setName(''); setEnt(''); setProg('')
@@ -114,7 +118,7 @@ function CreateSessionPane({ env, count, sessions, onCreate, onOpenSession }: {
       <div className="mx-auto w-full max-w-[580px]">
         <h2 className="text-[17px] font-semibold tracking-tight text-foreground">在「{env.name}」下创建会话</h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          会话会挂在左侧这棵树的「{env.name}」下面。建完会自动跳到它的 Debug 页。
+          会话会挂在左侧这棵树的「{env.name}」下面。建完自动跳到它的会话页：调试会话进 Debug，FEP 录制会话进「异常调试」。
         </p>
 
         <div className="mt-5 space-y-4 rounded-[12px] border border-border bg-card p-4">
@@ -154,10 +158,12 @@ function CreateSessionPane({ env, count, sessions, onCreate, onOpenSession }: {
           <div>
             <span className="mb-1.5 block text-xs text-muted-foreground">会话类型</span>
             <div className="grid grid-cols-2 gap-2">
-              <TypeCard on icon={Bug} title={`${SESSION_TYPE_LABEL.debug} 会话`}
-                desc="断点、单步、变量与调用栈 —— 调试那条线" onClick={() => {}} />
-              <TypeCard on={false} disabled icon={Video} title={SESSION_TYPE_LABEL.fep + ' 录制会话'}
-                desc="录一轮 FEP 报文、回放与对拍 —— 这一段还没接进来" onClick={() => {}} />
+              <TypeCard on={purpose === 'debug'} icon={Bug} title={`${SESSION_TYPE_LABEL.debug} 会话`}
+                desc="停在入口，可以下断点、单步、看变量 —— 调试那条线"
+                onClick={() => setPurpose('debug')} />
+              <TypeCard on={purpose === 'record'} icon={Video} title="FEP 录制会话"
+                desc="创建即挂监控并自动放行，只给日志与报文（不设断点）"
+                onClick={() => setPurpose('record')} />
             </div>
           </div>
 
@@ -175,7 +181,9 @@ function CreateSessionPane({ env, count, sessions, onCreate, onOpenSession }: {
             <span className="text-[11px] text-muted-foreground">
               {busy
                 ? (step || '正在创建…')
-                : '默认同时挂上画面通道（proxy），并跳到它的 Debug 页。'}
+                : purpose === 'record'
+                  ? '同时挂上监控（FEP 画面通道），作业自动放行，并跳到它的「异常调试」页。'
+                  : '同时挂上画面通道（proxy），并跳到它的 Debug 页。'}
             </span>
           </div>
 

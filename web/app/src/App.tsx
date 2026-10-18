@@ -259,8 +259,10 @@ export function App() {
 
   // ---- 导航 ----
   const openEnv = (name: string) => setRoute({ kind: 'env', env: name, tab: 'create' })
+  // 进会话页先看哪一屏：record（FEP 录制会话）→ 异常调试；replay → FEP监控；debug → Debug。
   const openSession = (s: SessionItem) => setRoute({
-    kind: 'session', id: s.id, tab: s.type === 'fep' ? 'fep' : 'debug',
+    kind: 'session', id: s.id,
+    tab: s.purpose === 'record' ? 'debug' : s.purpose === 'replay' ? 'fep' : 'debug',
   })
   const goSettings = () => setRoute({ kind: 'settings' })
   const goAddEnv = () => {
