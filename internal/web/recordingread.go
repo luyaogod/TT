@@ -17,6 +17,10 @@ package web
 //  2. **语义层读时算**：动作/步的定义改过多次（回放白名单从"滤导航"变成"全放行"），
 //     落盘必然漂移。每次请求现算，代价是几十毫秒。
 //  3. **不编**：解析不出名字就显示 id（H4）；没有帧级时间就说"块级"，不插值、不猜。
+//
+// **解析结果按"文件指纹"缓存（W5）**：同一份录制、文件没变大（大小与 mtime 都没变）时，
+// 第二次请求直接复用上一次的解析结果 —— 明细页与实时帧流每秒都在读，重复解析纯属浪费。
+// 活录制一旦追加了新字节，指纹就变了，自动重算（因此"正在录"也能看到新帧）。
 
 import (
 	"fmt"
@@ -195,6 +199,13 @@ func (s *Server) loadRecording(id string) (*recRead, error) {
 	if len(raws) == 0 {
 		return nil, fmt.Errorf("%s 里没有 %s 的录制件", loc.Dir, loc.ID)
 	}
+	// 缓存判据：**同一目录、同一个 id、每个方向的大小与 mtime 都没变**。
+	// 命中就复制一份首层返回（调用方可能改自己的字段，但不能把缓存改坏）。
+	stamp := recStamp(raws)
+	cacheKey := loc.Dir + "|" + loc.ID
+	if hit, ok := s.recCacheGet(cacheKey, stamp); ok {
+		return hit, nil
+	}
 	out := &recRead{ID: loc.ID, Dir: loc.Dir, Where: loc.Where, Meta: loc.Meta, Precision: "frame"}
 
 	for _, raw := range raws {
@@ -278,6 +289,8 @@ func (s *Server) loadRecording(id string) (*recRead, error) {
 	// 三层模型的第一层：语义动作。只有**事件侧**（gdc2rt）才有动作。
 	out.Actions = buildActions(out)
 	attributeResponses(out)
+	// 解析完成后才入缓存：缓存里必须是"建好了"的完整模型（W5）。
+	s.recCachePut(cacheKey, stamp, out)
 	return out, nil
 }
 

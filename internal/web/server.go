@@ -132,6 +132,8 @@ type Server struct {
 	once bool
 	// watch 是回放进度的"盯盘"循环（懒建：第一次有人看进度时才起，见 replayprogress.go）。
 	watch *recWatcher
+	// rec 是录制解析结果的读侧缓存（W5：文件没变时不重复解析，见 reccache.go）。
+	rec recCache
 }
 
 // New 装配路由。返回的 Server 可直接交给 http.Server 使用。
