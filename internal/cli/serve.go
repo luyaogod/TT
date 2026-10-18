@@ -44,8 +44,8 @@ func newServeCmd() *cobra.Command {
 一个进程提供工作站与统一设置页：
 
   /debug/          工作站：左边是「环境 → 会话」两级目录，右边是所选目标的面板
-  /debug/#env/<环境名>/create       环境页：创建会话 / 接口日志 / 接口调试 / FEP录像
-  /debug/#session/<会话 ID>/debug   会话页：Debug / FEP录制（顺序随会话类型）
+  /debug/#env/<环境名>/create       环境页：创建会话 / 接口日志 / 接口调试
+  /debug/#session/<会话 ID>/debug   会话页：Debug
   /debug/#settings                  统一设置页：站点管理 / 数据字典 / DEBUG / 应用设置
                    —— 环境与数据库、查询数据源、源码镜像、字典同步、BDL 文档、
                       调试参数、明暗色，全在这里；三个工具共用同一份配置。

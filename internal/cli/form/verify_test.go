@@ -6,7 +6,7 @@ package form
 //  1. `--recording <目录>`：原始录制件（**优先**，A5 原文「若同时也给了录制目录，优先用录制」）；
 //  2. 否则 `--map <文件>` / `TT_FORM_CORPUS_MAP`：归档语料表（A5 的等价基线，可离线跑）。
 //
-// 口径（照抄 `internal/fep/form42f_test.go` 的 TestFormMatchesRecording，避免两处漂移）：
+// 口径（照抄 `internal/form42f/form42f_test.go` 的 TestFormMatchesCorpus，避免两处漂移）：
 //   - **可比** = 语料里有、这张表单里也有的 colName → **必须相等**；
 //   - **仅在语料里** = 语料有、表单没有 → 允许（同一个窗口里还有别的表单/开窗/动态节点）；
 //   - 语料里标了 `ambiguous` 的 → 表单里的编号必须**落在候选里**。

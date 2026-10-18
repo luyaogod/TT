@@ -40,20 +40,6 @@ type Requested struct {
 	Session string `json:"session"`
 }
 
-// UIBlock 是界面会话那个块（C5.7 / C5.5）。
-//
-// 它**只在该 SSH 会话挂着一个界面会话时**出现 —— Q9：界面会话是 SSH 会话的属性，
-// 不是第二个目标（所以没有 `--ui` 这个标志）。为避免与 `session.kind` 撞名，
-// 界面会话自己的类型字段叫 `fepKind`（C5.5）。
-type UIBlock struct {
-	SessionID  string `json:"sessionId"`
-	GDCPid     int    `json:"gdcPid"`
-	GDCPort    int    `json:"gdcPort"`
-	ProxyPort  int    `json:"proxyPort"`
-	InjectPort int    `json:"injectPort"`
-	FepKind    string `json:"fepKind,omitempty"`
-}
-
 // SuccessEnvelope 是会话级命令的成功信封（契约 5.1）。
 //
 // `ok` 与平铺的环境信息（`output.Meta`）沿用现行成功信封（B7）；这里落的是新增的三个块。
@@ -61,7 +47,6 @@ type SuccessEnvelope struct {
 	OK        bool            `json:"ok"`
 	Session   SessionEnvelope `json:"session"`
 	Requested Requested       `json:"requested"`
-	UI        *UIBlock        `json:"ui,omitempty"`
 	Data      any             `json:"data,omitempty"`
 }
 
@@ -73,12 +58,6 @@ func NewSuccessEnvelope(s Session, requestedSelector string, data any) SuccessEn
 		Requested: Requested{Session: requestedSelector},
 		Data:      data,
 	}
-}
-
-// WithUI 挂上界面会话块（C5.7），返回自身便于链式。
-func (e *SuccessEnvelope) WithUI(ui UIBlock) *SuccessEnvelope {
-	e.UI = &ui
-	return e
 }
 
 // FailureEnvelope 是失败信封的**渲染形状**（契约 5.2 / C5.10 / C5.11）。

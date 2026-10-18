@@ -173,19 +173,6 @@ func TestSessionLsAndShow(t *testing.T) {
 	if strings.Contains(out, `"screen"`) || strings.Contains(out, `"recording"`) {
 		t.Fatalf("show 不该再带画面/录制附件（端点已移除）：%s", out)
 	}
-	if false {
-		t.Fatalf("show 应带上画面/录制附件：%s", out)
-	// table 形态下附件也要有一行（形状是 {attached, screen:{tag}}，别去顶层找 tag）
-	oldFmt := common.Format
-	common.Format = "table"
-	resetFlags()
-	group.SetArgs([]string{"show", "--session", "A"})
-	_, textOut := testkit.CaptureStdout(t, func() int { _ = group.Execute(); return 0 })
-	common.Format = oldFmt
-	if !strings.Contains(textOut, "画面  : fep-R1") {
-		t.Fatalf("table 形态应打印画面那一行：%s", textOut)
-	}
-	}
 }
 
 // TestSessionEntQuitRm：三条动作分别打 topent / quit(DELETE) / close(POST)。

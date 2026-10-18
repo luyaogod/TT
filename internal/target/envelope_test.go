@@ -43,24 +43,12 @@ func TestSuccessEnvelopeShape(t *testing.T) {
 	if req == nil || req["session"] != "恒烁正式区#1" {
 		t.Errorf("C5.6：requested.session 该原样回显 \"恒烁正式区#1\"，实得 %v", raw["requested"])
 	}
-	// C5.7：没挂界面会话时 `ui` 块不出现。
-	if _, present := raw["ui"]; present {
-		t.Errorf("C5.7：只有该会话挂着界面会话时才出现 `ui` 块，实得 %v", raw["ui"])
-	}
+
 	if _, present := raw["data"]; !present {
 		t.Errorf("5.1：data 块该在（B7 的现行成功信封就有它）")
 	}
 
-	// 挂上界面会话时 `ui` 出现，且那个类型键叫 fepKind（C5.5）。
-	env.UI = &UIBlock{SessionID: "fep-1", GDCPid: 123, FepKind: "rec"}
-	raw2 := marshalMap(t, env)
-	ui, _ := raw2["ui"].(map[string]any)
-	if ui == nil {
-		t.Fatalf("C5.7：挂了界面会话时该有 `ui` 块")
-	}
-	if ui["sessionId"] != "fep-1" || ui["gdcPid"] != float64(123) {
-		t.Errorf("C5.7 的 ui 块键 = %v", mapKeys(ui))
-	}
+
 }
 
 // TestFailureEnvelopeKeysAreStable 钉住 C5.10 + C5.11：

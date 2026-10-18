@@ -56,8 +56,7 @@ var debugContractSessionOptionalKeys = target.SessionOptionalKeys
 // debugContractSessionTopKeys 是会话级命令成功信封的顶层恒定键（契约 5.1）。
 var debugContractSessionTopKeys = target.SessionTopKeys
 
-// debugContractUIKey 是界面会话那个块的键名（契约 C5.7）。它只在挂了界面会话时出现。
-const debugContractUIKey = target.UIKey
+
 
 // debugContractFailureRequredKeys 是**失败信封里恒定出现**的四键（契约 C5.10）。
 var debugContractFailureRequredKeys = target.FailureRequiredKeys

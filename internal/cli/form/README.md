@@ -10,7 +10,7 @@
 |---|---|
 | `tt form ls --env <环境> --module <模块>` | 列该模块下的表单名（可直接喂 `--form`） |
 | `tt form show --env … --module … --form … [--json]` | 字段表：工号 / 表单内编号 / 控件 / tabIndex / SQL 类型 / 必填 / `cmt_*`+`lbl_*` / 几何 |
-| `tt form verify --env … --module … --form … --map <colname-fieldid.json>` | 与归档语料表（或 `--recording <录制目录>`）逐条比：**可比 N 条 / 一致 N 条** |
+| `tt form verify --env … --module … --form … --map <colname-fieldid.json>` | 与归档语料表逐条比：**可比 N 条 / 一致 N 条** |
 | `tt form fetch --env … --module … [--force] [--json]` | 批量把该模块的表单取进缓存：**新取 / 命中缓存 / 失败**（失败逐条列名+原因） |
 | `tt form cache [--json]` | 缓存的**只读**概览：多少张 / 多少字节 / 最旧·最新（不删任何东西） |
 
@@ -71,7 +71,7 @@
 **不加 `--json`（也没显式 `--format json`）时给人读**（表格）—— 本组默认与人读对齐，
 与"本仓默认 json"的通行取向不同，判据在 `wantJSON`。
 
-码表（本组，与 `tt fep` 同族；`internal/cli/README.md` 的整表尚未加这一行）：
+码表（本组；`internal/cli/README.md` 的整表尚未加这一行）：
 
 ```
 tt form    0 成功
@@ -98,7 +98,7 @@ go test ./internal/cli/form/ -count=1 -v -run TestFormVerifyCorpusGated   # 门�
   反证两条：缓存里出现解析结果（JSON）必红、`--force` 被忽略必红；
   `cache` 概览另有一条"跑前后文件集合逐项相同"的断言（它只读，不删不改）；
 * 牙齿 b：`golden_test.go`；
-* 比对口径与 `internal/fep/form42f_test.go` 的 `TestFormMatchesRecording` 同一套；
+* 比对口径与 `internal/form42f/form42f_test.go` 的 `TestFormMatchesCorpus` 同一套；
 * 门控：真样本 `TT_FORM_SAMPLE_DIR`（默认 `../../.agents/Genero Original Factory Compatible/fixtures/forms/`）、
   真语料 `TT_FORM_CORPUS_MAP`（默认同目录 `out/semantic/colname-fieldid.json`）；
   缺失 `t.Skip` 并写明原因。**验收口径：窗口 `w_axmt500` 可比 509 条 → 必须 100% 一致。**

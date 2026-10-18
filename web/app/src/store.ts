@@ -1880,16 +1880,16 @@ export const useStore = create<Store>((set, get) => ({
   //   ① `POST /sessions/new` 建**空闲**会话（登录是服务端的另一条异步路）；
   //   ② 等它登录完（loading → idle）—— 挂画面的前置就是"空闲"；
   //   ③ `POST /sessions/{id}/screen` 起画面通道：那是一个脱离本进程的
-  //      `tt recording start --session …`，录制代理就位后作业才在里面跑。
+  //      建立/接管这条会话，作业才在里面跑。
   //
   // 失败的分寸：①失败 = 没建出来，抛错（界面不跳转）；②失败 = 会话在、但连不上，也抛错
-  // （它会留在树里，因为服务端确实有这条，人得能看见它、能删它）；③失败 = 会话能用、录制没挂上，
+  // （它会留在树里，因为服务端确实有这条，人得能看见它、能删它）；③失败 = 会话能用，
   // **只报警不抛错** —— 会话已经建好这个事实不该被一句"建会话失败"盖掉。
   createSession: async (input, onStep) => {
     const env = (input.env || '').trim()
     const ent = (input.ent || '').trim()
     const prog = (input.prog || '').trim()
-    // 用途：建会话时定一次（W1）。`record` = FEP 录制会话（创建即挂监控、作业自动放行、
+    // 建会话只有一个入口（不再有"用途"这一层）：
     // 名字留空就在**发请求之前**落成「新会话 N」，而不是只在界面上显示一个
     // 服务端根本不知道的名字。
     const name = (input.name || '').trim()

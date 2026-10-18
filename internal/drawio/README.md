@@ -20,7 +20,7 @@
 
 - **不落盘、不碰配置、不碰网络。** 要写文件的是命令层（`internal/cli/drawio`），落点也由它决定。
 - **不依赖引擎。** 低保真原型图不需要设计器程序集、不需要工作区、不需要活引擎。
-- **不解析输入的 XML。** 形状源是 JSON；`.42f` 的解析在 `internal/fep.ParseForm42F`，本层只消费它的结果。
+- **不解析输入的 XML。** 形状源是 JSON；`.42f` 的解析在 `internal/form42f.ParseForm42F`，本层只消费它的结果。
   本目录唯一读的 XML 是 `shapes/raw/` 里手写的那一个片段。
 
 ## 形状源
@@ -97,9 +97,9 @@ func ProtoFrom42FFile(path string, opts *ProtoOptions) (*Proto, error) // 表单
 func (p *Proto) Field(colName string) *ProtoField                     // 按 colName 取一条
 ```
 
-解析**不在本层**：`internal/fep.ParseForm42F` 负责 C1 的全部口径（字段载体四种、双键、
+解析**不在本层**：`internal/form42f.ParseForm42F` 负责 C1 的全部口径（字段载体四种、双键、
 跳过计数、`RecordViews`）。本层只消费它的 `F42Field`（含 `Geom{Width,Height,PosX,PosY,GridWidth}`）
-与 `RecordViews`。**fep 不反向依赖本包，没有环。**
+与 `RecordViews`。**form42f 不反向依赖本包，没有环。**
 
 ### 三条口径（改这里之前先读）
 

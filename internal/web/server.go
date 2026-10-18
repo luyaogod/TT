@@ -331,11 +331,7 @@ func (s *Server) hHostsPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 环境被删掉时要**级联清掉它的录制库**（用户定的策略：用户主动录的长期留着，
-	// 但环境没了它们就是没人认领的字节）。名字在写配置前记下来、写成功之后再删 ——
-	// 删文件不能放进 config.Edit 的事务里：事务回滚不了已经删掉的文件。
-	//
-	// 改名**不算删**：先算出哪些是改名（录像跟着搬），只有真的少掉的环境才级联清。
+	// 环境改名/删除只影响配置本身，不再有"录制库"要跟着搬或清。
 	var renamed []envRename
 	var removedEnvs []string
 	err = config.Edit(path, nil, func(root map[string]any) error {
@@ -350,6 +346,8 @@ func (s *Server) hHostsPut(w http.ResponseWriter, r *http.Request) {
 			if oldHosts, ok := root["hosts"].(map[string]any); ok {
 				renamed, removedEnvs = diffEnvs(envEntries(oldHosts), envEntries(sec))
 			}
+			// renamed / removedEnvs 只为下面的日志与"改名不算删"的判断保留；
+			// 录制库的搬迁已随 FEP 移除，这里不再动任何文件。
 			// 保留前端表单不管理的 db 字段（目前是 viaSsh）。
 			// 配置页只编辑 type/host/port/service/database/readonlySql/accounts，
 			// 整节替换会把手工配的 SSH 隧道悄悄抹掉 —— 那是"保存一次就丢配置"，

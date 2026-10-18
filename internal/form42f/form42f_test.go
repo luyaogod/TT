@@ -35,7 +35,7 @@ func sampleDir42F(t *testing.T) string {
 	return filepath.Join("..", "..", ".agents", "Genero Original Factory Compatible", "fixtures", "forms")
 }
 
-// corpusMap42F 归档语料表（派生证据；Q4b 已删除原始录制，故基线用它，契约 A5）。
+// corpusMap42F 归档语料表（契约 A5 的基线）。
 func corpusMap42F(t *testing.T) string {
 	t.Helper()
 	if p := os.Getenv("TT_FORM_CORPUS_MAP"); p != "" {
@@ -262,14 +262,14 @@ func TestParseForm42F_T100Samples(t *testing.T) {
 	}
 }
 
-// TestFormMatchesRecording 是 M1 的验收测试（契约 C7.4 / 变更记录 A5）：
+// TestFormMatchesCorpus 是 M1 的验收测试（契约 C7.4 / 变更记录 A5）：
 // 离线解析出来的 `colName→fieldId` 必须与归档语料表**逐条 100% 一致**。
 //
 // 口径（写死，避免"看起来对"）：
 //   - **可比** = 语料里有、且这张表单里也有的 colName → **必须相等**（0 处不一致）；
 //   - **仅在语料里** = 语料有、这张表单没有 → **允许**（同一个窗口里还有别的表单/开窗/动态节点）；
 //   - 语料里标了 `ambiguous` 的 → 表单里的编号必须**落在候选里**。
-func TestFormMatchesRecording(t *testing.T) {
+func TestFormMatchesCorpus(t *testing.T) {
 	raw, err := os.ReadFile(corpusMap42F(t))
 	if err != nil {
 		t.Skipf("没有归档语料表（%v）—— 设 TT_FORM_CORPUS_MAP 指向 colname-fieldid.json", err)

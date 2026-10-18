@@ -67,10 +67,7 @@ func TestSessionViewTagsAreTheEnvelopeKeys(t *testing.T) {
 	if got := NewSessionEnvelope(Session{}).Kind; got != KindSSH {
 		t.Errorf("信封里的 kind 该恒为 %q，实得 %q", KindSSH, got)
 	}
-	// 界面会话的那个键叫 `ui.fepKind`（C5.5：避免与 `session.kind` 撞名）。
-	if got := jsonTagsOf(t, reflect.TypeOf(UIBlock{})); !contains(got, "fepKind") {
-		t.Errorf("C5.5：界面会话的类型键该叫 `fepKind`，实得 %v", got)
-	}
+
 }
 
 // TestCandidateTagsMatchTheCandidateKeys 钉住 C5.12 的唯一出处纪律：

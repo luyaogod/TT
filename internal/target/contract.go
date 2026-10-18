@@ -53,7 +53,7 @@ var SessionEnvelopeKeys = []string{
 // 否则有人删掉一个**旧**键（C5.3 明写不许）也不会红。
 //
 //   - `ref` / `name` / `n` / `epoch` 是 Q22 点名的五个新键里的四个；
-//   - `ent` 也是新增（C5.3 第二条：`string`，与 `internal/fep/session.go` 的 `Ent` 同类型）；
+//   - `ent` 也是新增（C5.3 第二条：`string`）；
 //   - `display` 见 SessionEnvelopeKeys 的注释；
 //   - `kind` 见 C5.5（本契约只寻址 SSH 会话，所以取值恒为 KindSSH）；
 
@@ -75,8 +75,7 @@ var SessionOptionalKeys = []string{
 // `ok` 与平铺的环境信息（`output.Meta`）沿用现行成功信封（B7），不在这里重复声明。
 var SessionTopKeys = []string{"session", "requested"}
 
-// UIKey 是界面会话那个块的键名（C5.7）。它只在挂了界面会话时出现。
-const UIKey = "ui"
+
 
 // KindSSH 是 `session.kind` 的取值（C5.5 / Q9）：本契约只寻址 SSH 会话，
 // 界面会话是它的**属性**（走 `ui` 块），不是第二个目标。
@@ -154,7 +153,7 @@ var CodeExits = map[string]int{
 }
 
 // 契约 4.1 的其余档位：0 成功、1 运行失败、5 目标不存在、6 体检不过。
-// 5 与 6 是 `tt fep` 那条线**现成**的码（B3），本契约不改它一条。
+// 5 与 6 是既有那条线**现成**的码（B3），本契约不改它一条。
 const (
 	ExitOK        = 0
 	ExitRunFailed = 1
