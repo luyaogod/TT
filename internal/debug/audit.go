@@ -12,7 +12,7 @@ package debug
 // # 形状与住处
 //
 // 形状**不在这里定义**：它是 `internal/target` 的 `AuditEntry`（`NewAuditEntry` /
-// `JSONLine` / `HumanLine` / `DefaultActor`），与 `internal/fep` 的 `AppendAudit`
+// `JSONLine` / `HumanLine` / `DefaultActor`），与 target 的 `AppendAudit`
 // 是同一族（一行一条 JSON、字段名固定、时间 RFC3339）。本文件只做两件事：
 //
 //  1. 把某个会话的当前身份投影成审计行的 `ref`（`auditRefOf`）；
@@ -111,7 +111,7 @@ func appendAuditLine(path, line string) error {
 		return err
 	}
 	defer f.Close()
-	// 一行一条：JSONLine 自己不带换行，这里补上（形状见 internal/fep 的 AppendAudit）。
+	// 一行一条：JSONLine 自己不带换行，这里补上（形状见 target 的 AppendAudit）。
 	_, err = f.WriteString(line + "\n")
 	return err
 }

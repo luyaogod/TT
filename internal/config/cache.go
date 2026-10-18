@@ -25,7 +25,6 @@ var CacheSubdirs = []string{
 	"debug-bps", // 断点存档
 	"spill",     // 查询被截断时落盘的完整结果(见 tt dict 的返回上限)
 	"update",    // tt 自身的更新：下载的安装包与最近一次检查结果(删了只是下次重下)
-	"fep",       // 前端协议线的录制件与截图（一轮一删也不心疼）
 	"forms",     // 出厂表单 .42f 的原始 XML（可按需从服务器再取 ⇒ 可再生，见 tt form）
 }
 
@@ -173,7 +172,7 @@ func removeOlderThan(dir string, cutoff time.Time) (removed int, freed int64) {
 // `AppData\Local\Packages\<包名>\LocalCache\Roaming\...` 的跳转),而 os.RemoveAll
 // 对这类目录报 ELOOP("too many levels of symbolic links")—— 同一个目录
 // filepath.WalkDir 走得好好的,所以这不是权限或占用问题。
-// 逐个 os.Remove 走得通,且失败时能说清是哪个文件。\n//\n// 导出是因为"删一棵目录"不只缓存要（录制长期库的级联清理也删一棵）；两处各写一份\n// 迟早会有一处用回 os.RemoveAll,然后把那种容器里的目录删成 ELOOP。
+// 逐个 os.Remove 走得通,且失败时能说清是哪个文件。\n//\n// 导出是因为"删一棵目录"不只缓存要；两处各写一份\n// 迟早会有一处用回 os.RemoveAll,然后把那种容器里的目录删成 ELOOP。
 func RemoveTree(dir string) (files int, bytes int64, err error) {
 	var dirs []string
 	walkErr := filepath.WalkDir(dir, func(p string, d fs.DirEntry, werr error) error {
