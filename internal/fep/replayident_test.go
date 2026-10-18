@@ -452,6 +452,26 @@ func TestRunReplayIdentitySendsUnidentifiedStepsByBareID(t *testing.T) {
 	}
 }
 
+// TestReplaySkipsWhenTargetKindChanged：类型闸。
+//
+// 真机 2026-10-18 19:30：录制里 #4450 是 Table，新会话里 #4450 变成了 Page；
+// 一个 sortColumn 发过去把运行期打成 -6327、程序停住。有这道闸就不发。
+func TestReplaySkipsWhenTargetKindChanged(t *testing.T) {
+	c, _, _, _, _ := sessionFixture(t)
+	// 夹具里 #5160 是 ToolBarItem；计划里说它录制时是 Page ⇒ 类型不符。
+	plan := ReplayPlan{Events: []ReplayEvent{
+		{N: 1, Event: `ActionEvent 0{{idRef "5160"}}`, TargetKind: "Page"},
+		{N: 2, Event: `ActionEvent 0{{idRef "5160"}}`, TargetKind: "ToolBarItem"},
+	}}
+	res, err := c.RunReplayIdentity(plan, ReplayRunOptions{Settle: 10 * time.Millisecond})
+	if err != nil {
+		t.Fatalf("类型不符不是失败，是跳过：%v", err)
+	}
+	if res.Skipped != 1 || res.Sent != 1 {
+		t.Fatalf("该跳 1 发 1，实得 %+v", res)
+	}
+}
+
 // TestReplaySkipSkipsOnlyCurrentStep：逐步调试的「跳过」。
 //
 // 口径（用户 2026-10-18 定）：停在第 N 步时按跳过 —— N **不发**、记 skipped，

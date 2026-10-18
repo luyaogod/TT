@@ -45,6 +45,14 @@ type ReplayEvent struct {
 	ColName string `json:"colName,omitempty"`
 	// FieldID 是录制时那一帧的编号，用来按 C3.4 收窄（0 = 未记录，见 ReplayIdentity）。
 	FieldID int `json:"fieldId,omitempty"`
+	// TargetKind 是**录制时那个对象的类型**（Table / Page / ToolBarItem…）。
+	//
+	// 用途：新会话里同一个编号可能落到**另一个类型**的对象上（分配器会整体平移）。
+	// 真机 2026-10-18 19:30：录制里 #4450 是 `Table s_detail2_s_icd_wh_wf_out`，
+	// 回放会话里多出一个 Completer 让编号整体 +1，#4450 变成了 `Page bpage_2`；
+	// 我们把"排序"发给了一个 Page → 运行期 -6327 内部错误、程序停住。
+	// 有它就能在发包之前拦住（见 RunReplayWith 的类型闸）。
+	TargetKind string `json:"targetKind,omitempty"`
 }
 
 // ReplaySkip records one event that will not be replayed, and why.
@@ -99,6 +107,11 @@ func PlanReplay(events []string, opt ReplayOptions) ReplayPlan {
 		if id, ok := idRefOf(ev); ok {
 			if idn := IdentityOf(opt.Model, id); idn.ColName != "" {
 				e.ColName, e.FieldID = string(idn.ColName), int(idn.FieldID)
+			}
+			if opt.Model != nil {
+				if o, found := opt.Model.Get(id); found {
+					e.TargetKind = o.Type
+				}
 			}
 		}
 		plan.Events = append(plan.Events, e)
@@ -356,10 +369,23 @@ func (c *Client) RunReplayWith(plan ReplayPlan, opt ReplayRunOptions) (*ReplayRe
 		// ② 既有 AUI 安全闸：对象不在**当次界面**里就跳过（行为不变）
 		if m != nil {
 			if id, ok := idRefOf(ev.Event); ok {
-				if _, exists := m.Get(id); !exists {
+				o, exists := m.Get(id)
+				if !exists {
 					logf("跳过 #%d：对象 #%d 不在当前界面", ev.N, id)
 					step.Result = ReplaySkipped
 					step.Reason = fmt.Sprintf("对象 #%d 不在当前界面（AUI 安全闸）", id)
+					emit(step)
+					res.Skipped++
+					continue
+				}
+				// **类型闸**：编号在，但已经不是录制时那个类型了 —— 发送只会打到别人身上。
+				// （真机：录制里 #4450 是 Table，新会话里 #4450 是 Page，一个 sortColumn
+				//   发过去就把运行期打成 -6327。）
+				if ev.TargetKind != "" && o.Type != ev.TargetKind {
+					logf("跳过 #%d：目标变了（#%d 录制时是 %s，现在是 %s）", ev.N, id, ev.TargetKind, o.Type)
+					step.Result = ReplaySkipped
+					step.Reason = fmt.Sprintf("目标变了：#%d 录制时是 %s，现在是 %s（不发，免得打到别的对象上）",
+						id, ev.TargetKind, o.Type)
 					emit(step)
 					res.Skipped++
 					continue
