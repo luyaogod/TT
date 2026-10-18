@@ -88,16 +88,6 @@ type Options struct {
 	// 留空 = 用 config.Locations 的缺省（数据目录下的 erp_data.db）。
 	SyncDefaultTarget string
 
-	// RecProgress 把"回放走到第几步"推给所有看着页面的客户端（由挂载方接到调试子系统的
-	// WS 广播上）。nil = 不推：界面仍然靠轮询 `/api/recordings/{id}/replay-steps` 拿到进度。
-	//
-	// 为什么是注入而不是本包自己广播：WS 那条通道归调试子系统（`/debug/api/ws`），
-	// 而本包与它之间**没有任何 import 边**（耦合全在 Options 上，见 package 注释）。
-	//
-	// 它推的是"叫一声"，不是权威数据：前端收到之后仍然去读那个端点。这样即使前端漏注册
-	// 这个事件类型（实测踩过：自造类型被静默丢掉），退化成"晚几百毫秒"，而不是"进度不动"。
-	RecProgress func(id string, n, total int, result string)
-
 	// ---- 三个"动作"端点的外部依赖 ----
 	//
 	// 它们三个都要连服务器/连库，所以默认档的测试进不去 —— 而这三条路径上的
@@ -130,10 +120,6 @@ type Server struct {
 	opt  Options
 	mux  *http.ServeMux
 	once bool
-	// watch 是回放进度的"盯盘"循环（懒建：第一次有人看进度时才起，见 replayprogress.go）。
-	watch *recWatcher
-	// rec 是录制解析结果的读侧缓存（W5：文件没变时不重复解析，见 reccache.go）。
-	rec recCache
 }
 
 // New 装配路由。返回的 Server 可直接交给 http.Server 使用。
@@ -164,8 +150,6 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/dbprobe", s.hDBProbe)
 	m.HandleFunc("POST /api/dbaccverify", s.hDBAccVerify)
 	m.HandleFunc("POST /api/conntest", s.hConnTest)
-	// ---- 录制面板：列/看/起录/停录/删（见 recordings.go）----
-	s.registerRecordings(m)
 
 	m.HandleFunc("GET /api/config/meta", s.hConfigMeta)
 	m.HandleFunc("GET /api/config/status", s.hConfigStatus)

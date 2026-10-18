@@ -14,8 +14,6 @@ import (
 	debugcli "tt/internal/cli/debug"
 	"tt/internal/config"
 	"tt/internal/debug"
-	"tt/internal/fep"
-	"tt/internal/screenstart"
 	dictserver "tt/internal/dict/server"
 	"tt/internal/web"
 )
@@ -117,37 +115,7 @@ func newServeCmd() *cobra.Command {
 			// 调试服务内嵌 SPA（统一前端构建产物）。统一服务只把 /debug/api/ 转给它、
 			// 页面由 internal/web 提供；这份 FS 是为了 `tt debug serve` 单独跑时也能出页面。
 			debugSrv := debug.NewServer(cfg, common.WebFrontend(), path)
-			// 画面通道由 `tt recording start` 那个进程持有；这里把"按会话地址查画面"的
-			// 查询函数接进去，UI/CLI 才能回答"这条会话现在挂着哪块画面、录的是哪一份"。
-			// 只递一张表，不让调试线 import fep（见 debug.SetScreenLookup 的注释）。
-			if dir := config.LocationsAt(path).DataDir(); dir != "" {
-				debugSrv.SetScreenLookup(fep.ScreenLookup(dir))
-			}
-			// 命令型：起画面通道（`POST /api/sessions/{id}/screen`）。实现是起一个脱离的
-			// `tt recording start --session …`；调试线只收函数，不认识 GDC/代理。
-			st := screenstart.New()
-			debugSrv.SetScreenStarter(func(req debug.ScreenStartRequest) (debug.ScreenStartResult, error) {
-				pid, log, serr := st(screenstart.Request{
-					CfgPath: path, Ref: req.Ref, Env: req.Env, Ent: req.Ent,
-					Prog: req.Prog, Tag: req.Tag, NoContinue: req.NoContinue,
-					// 录制进程是**平台进程**：它要在这条会话上写（收上一轮、点 ENT、起作业、
-					// 入口停站后放行）。以 system 身份跑，才不会被"用途只读/模式闸门"挡下
-					// （真机 2026-10-18 踩到：record 会话的"放行"被拒，画面起不来）。
-					Actor: debug.ActorSystem,
-				})
-				return debug.ScreenStartResult{PID: pid, Log: log}, serr
-			})
-			// 停止器：直接收那一条登记（与 `tt recording stop <tag>` 同一份实现 —— StopTag
-			// 会先请常驻进程自退、只杀登记的 pid，最后摘掉这一条登记）。
-			if dir := config.LocationsAt(path).DataDir(); dir != "" {
-				debugSrv.SetScreenStopper(func(ref, tag string) error {
-					if strings.TrimSpace(tag) == "" {
-						return fmt.Errorf("没有录制 ID，无法定位要收的画面通道")
-					}
-					_, serr := fep.NewRegistry(dir).StopTag(tag)
-					return serr
-				})
-			}
+
 			// 字典同步的目标缺省取**数据目录**（config.json 同目录）下的 erp_data.db，
 			// 与 `tt dict -d` 的缺省一致（都来自 config.Locations，统一路径管理器），
 			// 所以"服务在这里同步、命令行在这里读"天然对得上。
@@ -171,11 +139,6 @@ func newServeCmd() *cobra.Command {
 				var once sync.Once
 				stopWeb := func() { once.Do(cancel) }
 
-				// 界面会话的挂接变化（W2）：注册表由录制进程写，这里盯它、把差异广播出去。
-				// 与回放进度同一个位置（接线层），调试线只收数据、不认识 GDC/代理。
-				if dir := config.LocationsAt(path).DataDir(); dir != "" {
-					debugcli.StartScreenWatch(ctx, dir, debugSrv.PublishScreenChange)
-				}
 
 				svc := web.New(web.Options{
 					DebugFS:    common.WebFrontend(),
@@ -192,10 +155,7 @@ func newServeCmd() *cobra.Command {
 					Shutdown:  stopWeb,
 					// 与字典子系统同一个值，见上面的 syncDefault
 					SyncDefaultTarget: syncDefault,
-					// 回放进度走调试子系统那条 WS（前端已经在收）：统一层盯回放进程落的
-					// jsonl，一有新行就从这里推出去。两包之间仍然没有 import 边 ——
-					// 耦合就在这一行上（见 web.Options.RecProgress 的说明）。
-					RecProgress: debugSrv.PublishRecProgress,
+
 				})
 
 				addr := listen

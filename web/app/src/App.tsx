@@ -94,8 +94,7 @@ export function App() {
   }, [sessionList, runtimes, boundId, boundState])
 
   const settingsSection = useStore((s) => s.settingsSection)
-  const recordId = useStore((s) => s.recordId)
-  const recordAt = useStore((s) => s.recordAt)
+
 
   const backendDead = useStore((s) => s.backendDead)
   const wsConnected = useStore((s) => s.wsConnected)
@@ -118,10 +117,6 @@ export function App() {
     const r = parseRoute(location.hash)
     const st = useStore.getState()
     if (r.kind === 'settings' && r.section) st.setSettingsSection(r.section)
-    if (r.kind === 'env' && r.tab === 'record') {
-      st.setRecordId(r.recordId || '')
-      st.setRecordAt(r.at || 0)
-    }
     void loadEnvs()
     const close = connectWS()
     void api.status().catch(() => {})
@@ -157,11 +152,8 @@ export function App() {
       const r = parseRoute(location.hash)
       const st = useStore.getState()
       if (r.kind === 'settings' && r.section) st.setSettingsSection(r.section)
-      if (r.kind === 'env' && r.tab === 'record') {
-        st.setRecordId(r.recordId || '')
-        st.setRecordAt(r.at || 0)
-      }
-      setRoute(r)    }
+      setRoute(r)
+    }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
@@ -214,21 +206,6 @@ export function App() {
     }
   }, [route, sessions])
 
-  // 录制明细:进明细(片段带着 ID)就把 store 的 recordId 落上;回到列表(或换去别的 Tab)
-  // 就清掉 —— 否则列表会一直以为"正打开着某一份",点返回也回不到列表。
-  useEffect(() => {
-    const st = useStore.getState()
-    if (route.kind === 'env' && route.tab === 'record') {
-      if (route.recordId) {
-        if (st.recordId !== route.recordId) st.setRecordId(route.recordId)
-        if (route.at && st.recordAt !== route.at) st.setRecordAt(route.at)
-      } else if (st.recordId) {
-        st.setRecordId('')
-      }
-      return
-    }
-    if (st.recordId) st.setRecordId('')
-  }, [route])
 
   // 路由 → 片段。首跑**让一次**:片段已经指着某个目标时,URL 是权威(深链接),
   // 这一刻的 route 就是它解析出来的,照写等于把它规范化掉,不写反而一个字节都不改。
@@ -241,9 +218,9 @@ export function App() {
     }
     // 还没选到目标(首次打开、环境清单在读):先把地址栏留着,别写一个 `#` 上去。
     if (route.kind === 'home') return
-    const want = routeHash(route, settingsSection, recordId, recordAt)
+    const want = routeHash(route, settingsSection)
     if (window.location.hash !== want) window.history.replaceState(null, '', want)
-  }, [route, settingsSection, recordId, recordAt])
+  }, [route, settingsSection])
 
   // 面板显隐:环境页/会话页/设置页三块都 keep-alive(第一次显示后只改 display)。
   // 切走再切回时 Monaco 编辑器、日志详情、录制列表的滚动与输入都还在。
@@ -259,11 +236,8 @@ export function App() {
 
   // ---- 导航 ----
   const openEnv = (name: string) => setRoute({ kind: 'env', env: name, tab: 'create' })
-  // 进会话页先看哪一屏：record（FEP 录制会话）→ 异常调试；replay → FEP监控；debug → Debug。
-  const openSession = (s: SessionItem) => setRoute({
-    kind: 'session', id: s.id,
-    tab: s.purpose === 'record' ? 'debug' : s.purpose === 'replay' ? 'fep' : 'debug',
-  })
+  // 会话页只有一屏：Debug。
+  const openSession = (s: SessionItem) => setRoute({ kind: 'session', id: s.id, tab: 'debug' })
   const goSettings = () => setRoute({ kind: 'settings' })
   const goAddEnv = () => {
     useStore.getState().setSettingsSection('sites')

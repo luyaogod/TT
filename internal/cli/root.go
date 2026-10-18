@@ -24,9 +24,7 @@ import (
 	"tt/internal/cli/dev"
 	"tt/internal/cli/dict"
 	"tt/internal/cli/drawio"
-	"tt/internal/cli/fep"
 	"tt/internal/cli/form"
-	"tt/internal/cli/recording"
 	"tt/internal/cli/session"
 	"tt/internal/cli/view"
 	"tt/internal/output"
@@ -117,9 +115,7 @@ func init() {
 	)
 	dev.Register(rootCmd)
 	dict.Register(rootCmd)
-	fep.Register(rootCmd)
 	session.Register(rootCmd)
-	recording.Register(rootCmd)
 	form.Register(rootCmd)
 	view.Register(rootCmd)
 	drawio.Register(rootCmd)

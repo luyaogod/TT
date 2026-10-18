@@ -34,8 +34,6 @@ import (
 	"tt/internal/cli/common"
 	"tt/internal/config"
 	"tt/internal/debug"
-	"tt/internal/fep"
-	"tt/internal/screenstart"
 )
 
 const (
@@ -331,37 +329,13 @@ func debugServeForeground(cfg *debug.Config, cfgPath string) error {
 	requested := cfg.Listen
 	cfg.DataDir = filepath.Dir(cfgPath)
 	srv := debug.NewServer(cfg, common.WebFrontend(), cfgPath)
-	// 与统一服务同一条接线：把"按会话地址查画面通道"接进去（只递一张表，不 import 循环）。
-	if dir := config.LocationsAt(cfgPath).DataDir(); dir != "" {
-		srv.SetScreenLookup(fep.ScreenLookup(dir))
-	}
-	// 命令型：起画面通道。与统一服务同一条接线（只递函数，调试线不认识 fep）。
-	st := screenstart.New()
-	srv.SetScreenStarter(func(req debug.ScreenStartRequest) (debug.ScreenStartResult, error) {
-		pid, log, serr := st(screenstart.Request{
-			CfgPath: cfgPath, Ref: req.Ref, Env: req.Env, Ent: req.Ent,
-			Prog: req.Prog, Tag: req.Tag, NoContinue: req.NoContinue, Actor: debug.ActorSystem,
-		})
-		return debug.ScreenStartResult{PID: pid, Log: log}, serr
-	})
-	if dir := config.LocationsAt(cfgPath).DataDir(); dir != "" {
-		srv.SetScreenStopper(func(ref, tag string) error {
-			if strings.TrimSpace(tag) == "" {
-				return fmt.Errorf("没有录制 ID，无法定位要收的画面通道")
-			}
-			_, serr := fep.NewRegistry(dir).StopTag(tag)
-			return serr
-		})
-	}
+
 	return RunForeground(cfgPath, ServeSpec{
 		Prefix:   "[tt debug]",
 		StopHint: "tt debug serve --stop",
 		APIBase:  APIBaseAtRoot,
 	}, func(ctx context.Context, onReady func(addr string)) error {
-		// 界面会话的挂接变化（W2）：与统一服务同一套接线。
-		if dir := config.LocationsAt(cfgPath).DataDir(); dir != "" {
-			StartScreenWatch(ctx, dir, srv.PublishScreenChange)
-		}
+
 		ln, addr, err := srv.Listen()
 		if err != nil {
 			return err
