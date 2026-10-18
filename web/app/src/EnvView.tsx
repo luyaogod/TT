@@ -14,7 +14,7 @@ import { Pane, TabStrip, ViewHeader, Meta, type TabItem } from './Shell'
 import { WsLogView } from './WsLogView'
 import { WsTestView } from './WsTestView'
 import { RecordView } from './RecordView'
-import { SESSION_TYPE_LABEL } from './Sidebar'
+import { SESSION_PURPOSE_LABEL, SESSION_TYPE_LABEL } from './Sidebar'
 
 const ENV_TABS: TabItem<EnvTab>[] = [
   { key: 'create', label: '创建会话', hint: '在这个环境下面新建一条会话' },
@@ -213,7 +213,7 @@ function CreateSessionPane({ env, count, sessions, onCreate, onOpenSession }: {
                     {s.ent && (
                       <span className="shrink-0 text-[11px] text-muted-foreground">ENT {s.ent}</span>
                     )}
-                    <span className="shrink-0 text-[11px] text-muted-foreground">{SESSION_TYPE_LABEL[s.type]}</span>
+                    <span className="shrink-0 text-[11px] text-muted-foreground">{SESSION_PURPOSE_LABEL[s.purpose]}</span>
                   </button>
                 )
               })}
@@ -242,3 +242,4 @@ function TypeCard({ on, icon: Icon, title, desc, onClick, disabled }: {
     </button>
   )
 }
+

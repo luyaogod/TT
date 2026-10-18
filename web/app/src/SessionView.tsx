@@ -33,14 +33,18 @@ interface ScreenInfo {
 /**
  * 读这条会话挂着的画面通道。
  *
- * 它只回答"现在挂着没有"：`attached:false` 是正常状态(会话可以先没有画面)，不是错误，
- * 所以取不到就显示成"没有"，并把真实的报错留在 `err` 里 —— 两者不能混成一句话。
+ * 两个来源，合起来用：
+ *   - **服务端的 screen 事件**（`store.screens`，W2）：挂了/收了立刻反映，不必等轮询；
+ *   - `GET /sessions/{id}/screen`：进页面时补一次（事件是"叫一声"，权威在查询）。
+ * 取不到就显示成"没有"，并把真实的报错留在 `err` 里 —— 两者不能混成一句话。
  */
 function useScreenInfo(id: string) {
   const [state, setState] = useState<{ attached: boolean; screen: ScreenInfo | null; err: string }>(
     { attached: false, screen: null, err: '' },
   )
   const [nonce, setNonce] = useState(0)
+  const live = useStore((s) => s.screens[id])
+
   useEffect(() => {
     let cancelled = false
     if (!id) return
@@ -54,6 +58,19 @@ function useScreenInfo(id: string) {
     })
     return () => { cancelled = true }
   }, [id, nonce])
+
+  // 事件比查询新：挂了/收了就当场改（保留查询拿到的端口、目录等细节）。
+  useEffect(() => {
+    if (!live) return
+    setState((s) => ({
+      attached: live.attached,
+      screen: live.attached
+        ? { ...(s.screen || {}), tag: live.tag || s.screen?.tag, kind: live.kind || s.screen?.kind }
+        : null,
+      err: '',
+    }))
+  }, [live?.attached, live?.tag, live?.kind])
+
   return { ...state, refresh: () => setNonce((n) => n + 1) }
 }
 
@@ -78,7 +95,15 @@ export function SessionView({ session, tab, onTab, onOpenEnv, leading }: {
 
   const debugTab: TabItem<SessionTab> = { key: 'debug', label: 'Debug', hint: '断点、单步、变量与调用栈' }
   const fepTab: TabItem<SessionTab> = { key: 'fep', label: 'FEP录制', hint: '这条会话的画面通道与录制' }
-  const tabs = session.type === 'debug' ? [debugTab, fepTab] : [fepTab, debugTab]
+  // 用途决定给什么（W7 的 PANE_POLICY）：
+  //   - record：**不给编辑器**（已经放行跑着，防误操作），只剩 FEP 监控与收尾；
+  //   - 其余：Debug + FEP 两条，顺序按用途（debug 先看 Debug，replay 先看 FEP）。
+  const recordOnly = session.purpose === 'record'
+  const tabs = recordOnly
+    ? [fepTab]
+    : (session.purpose === 'replay' ? [fepTab, debugTab] : [debugTab, fepTab])
+  // 深链接可能写着 `/debug`，而 record 会话没有那一屏 —— 实际展示的那一屏以**用途**为准。
+  const shownTab: SessionTab = recordOnly ? 'fep' : tab
 
   const meta = (
     <>
@@ -106,13 +131,13 @@ export function SessionView({ session, tab, onTab, onOpenEnv, leading }: {
             {session.env}
           </button>
         } />
-      <TabStrip items={tabs} active={tab} onChange={onTab} />
+      <TabStrip items={tabs} active={shownTab} onChange={onTab} />
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <Pane show={tab === 'debug'} label="Debug">
-          <DebugWorkbench active={tab === 'debug'} />
+        <Pane show={shownTab === 'debug'} label="Debug">
+          <DebugWorkbench active={shownTab === 'debug'} />
         </Pane>
-        <Pane show={tab === 'fep'} label="FEP录制">
+        <Pane show={shownTab === 'fep'} label="FEP录制">
           <FepPane session={session} screen={screen} />
         </Pane>
       </div>

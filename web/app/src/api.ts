@@ -27,6 +27,8 @@ export interface SessionBrief {
   // 身份三键（C5.1/C5.4）：`ref` 是规范 id「环境#序号」，`name` 是别名（空串=未命名），
   // `ent` 是这条会话当前生效的企业编号。服务端**恒定给键**，取不到是空串。
   ref?: string; display?: string; name?: string; ent?: string; n?: number; epoch?: string
+  // 用途（W1）：debug | record | replay。服务端**恒定给这个键**（取不到是空串 = 按 debug 处理）。
+  purpose?: string
   file?: string; line?: number; func?: string; reason?: string
   holdingSeconds: number; breakpoints: number; watchdogSeconds: number
   // 谁在驾驶:solo(纯人工)| collab(协作,AI 主导)

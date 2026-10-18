@@ -33,11 +33,15 @@ FEP录像 = `RecordView`。「创建会话」已经是**真动作**（2026-10-18
 起停录制与回放后续再接。Debug Tab 里是整块调试工作台
 （`DebugWorkbench.tsx`，从旧外壳原样拆出来），区别只是它不再自带左侧会话栏。
 
-**数据边界**：环境读 `GET /api/hosts` 的 `sshs`（真实配置）；会话树 `store.sessions` 落在
-`localStorage` 的 `tt.sessions.v2`，但**每一条都是服务端会话句柄**（`id` 直接进
-`/api/sessions/{id}/…`），条目只是"这台浏览器里列过哪些"的缓存 —— 服务端没有的会被
-`pruneSessions` 摘掉。面板绑定的那条会话仍是 `sessionId`（`tt.sessionId`），它由路由写
-（见 App.tsx 的绑定 effect）：**地址栏说哪条，面板就绑哪条**。
+**数据边界**：环境读 `GET /api/hosts` 的 `sshs`（真实配置）；**会话树是池的投影**——
+`store.sessions` 由 `sessionList`（`GET /api/sessions`）与池事件（`session.added` /
+`session.removed`，W2）经 `indexFromList` 派生，**本地不再记"有哪些会话"**：
+`tt.sessions.v2` 已作废（启动时清掉），旧的 `pruneSessions` 一并下线。所以 CLI、别的浏览器、
+AI 建的会话都会当场出现在树上，服务端没有的条目也不会留在树上。界面会话的挂接状态同样有事件
+（`screen.attached/detached` → `store.screens`），面板即时更新，仍可
+`GET /sessions/{id}/screen` 主动刷新。面板绑定的那条会话仍是 `sessionId`（`tt.sessionId`），
+它由路由写（见 App.tsx 的绑定 effect）：**地址栏说哪条，面板就绑哪条**；池事件**不改绑定**
+（绑定只能由人点）。
 
 调试视图**只有一条 header**（`DebugHeader.tsx`）：左边是源码页签，最右是三个互相独立的开关 ——
 terminal（下方面板）、bug-play（调试面板）、list-tree（大纲，树）。三者可同时激活，所以它们不是
@@ -193,7 +197,7 @@ switch 要一起改**。
 
 全部前端状态在一个容器里（连接、会话、面板显隐、数据、主题、路由目标）。字段按用途分组，
 不按组件切分。外壳那两项也在里面：环境清单 `envs`（每次窗口回到前台重读 `/api/hosts`）
-与会话树 `sessions`（`tt.sessions.v2`，条目是**服务端会话句柄**，见上文的数据边界）。
+与会话树 `sessions`（**由池派生**：`GET /api/sessions` + `session.added/removed` 事件，见上文的数据边界）。
 
 **连接**：与后端的实时通道是一条 WebSocket，**必须带接口前缀** —— 共享层也有同名路径，
 不带前缀会落到共享层去。事件到达后进状态容器，视图只读容器。
@@ -264,7 +268,7 @@ cd web && npm run build         # 类型检查 + 打包
 | 状态容器的形状 | 全站视图；它同时被 Node 侧的检查项加载，**顶层不能碰 DOM**。容器里删字段/删联合成员（如侧栏 sheet 去掉 `session`）时，`store.test.mjs` 用 `setState` 灌的部分状态不会有编译期保护 —— 靠 `npm run build` 的 `tsc --noEmit` 找调用点 |
 | 路由键 | 深链接与设置页分区；键只有一份定义，别在别处再列一遍 |
 | 外壳的 Tab 键（`EnvTab` / `SessionTab`） | 路由的解析与生成、环境页/会话页、`routeView` 要一起改；键只有 `routing.ts` 一份定义 |
-| 左树的数据形状（`EnvBrief` / `SessionItem`） | `Sidebar` / `EnvView` / `SessionView` / store。`SessionItem.id` 是**服务端句柄**：改它等于改绑定、画面通道、结束会话那一路（`tt.sessions.v2` 的旧条目会被当成坏数据丢掉） |
+| 左树的数据形状（`EnvBrief` / `SessionItem`） | `Sidebar` / `EnvView` / `SessionView` / store。`SessionItem` 是 `SessionBrief` 的投影（`indexFromList`）：`id` 是**服务端句柄**，`purpose` 是服务端事实；改形状等于改树、绑定、画面通道、结束会话那一路 |
 | 外壳的配色 | `index.css` 的 `.dark .dsh-shell` 一处覆盖；搬进来的旧画面也读同一套语义 token，别在组件里再写死颜色 |
 | `recordingTime.ts` | 条带 + 表 + 检查器的所有位置与时刻都从它出；改它等于同时改三处，**只许有一个实现** |
 | `recordingKind.ts` | 帧类别的颜色/短名：条带的块与表里的类型 tag 共用，**只许有一个实现**（两处各写一份迟早条带绿、表里蓝） |
@@ -279,4 +283,5 @@ cd web && npm run build         # 类型检查 + 打包
 - 设计系统与主题 token → [../../shared/README.md](../../shared/README.md)
 - 构建配置与脚本 → [../README.md](../README.md)
 - 后端接口面 → [../../../internal/web/README.md](../../../internal/web/README.md)
+
 

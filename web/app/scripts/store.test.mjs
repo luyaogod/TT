@@ -327,4 +327,50 @@ assert.ok(!S().timeline.some((t) => t.kind === 'command' && t.text.startsWith('�
   '什么都没发的时候，不许记一条"成功"的命令行')
 console.log('OK 15) 会话操作:做不到就抛错并记 warn，绝不假装成功')
 
-console.log('\n全部通过: 15/15')
+console.log('\n全部通过: 16/16')
+
+// ---------- 16) 树由池派生:池事件直接改树,不等刷新 ----------
+// W2/W6/D9:树不是本地账本,而是 GET /api/sessions 与 session.added/removed 的投影。
+// 这一条钉的是"CLI / 别的浏览器建的会话会出现在树上"的前端半边。
+useStore.setState({ sessionId: null, sessionList: [], sessions: [], screens: {} })
+S().onEvent({
+  type: 'session.added', sessionId: 's-cli-1',
+  brief: {
+    id: 's-cli-1', ref: '主机109#2', display: '主机109#2', name: 'CLI 建的',
+    env: '主机109', ent: '99', n: 2, epoch: 'e1', prog: 'axmt500_wf', state: 'idle',
+    module: '', holdingSeconds: 0, breakpoints: 0, watchdogSeconds: 0, purpose: 'record',
+  },
+})
+let tree = S().sessions
+assert.equal(tree.length, 1, 'session.added 应让树当场多一条')
+assert.equal(tree[0].id, 's-cli-1')
+assert.equal(tree[0].purpose, 'record', '用途来自服务端,不许本地猜')
+assert.equal(tree[0].type, 'fep', 'record 会话在界面上算 FEP 那一类(先看画面)')
+assert.equal(tree[0].ent, '99')
+assert.equal(tree[0].prog, 'axmt500_wf')
+assert.equal(tree[0].ref, '主机109#2')
+
+// 画面挂接事件进 screens(界面会话状态即时更新,不必每秒问)
+S().onEvent({ type: 'screen.attached', sessionId: 's-cli-1', screen: { ref: '主机109#2', tag: 'fep-x', kind: 'rec' } })
+assert.equal(S().screens['s-cli-1']?.attached, true)
+assert.equal(S().screens['s-cli-1']?.tag, 'fep-x')
+
+// 池事件不认"绑定"这一套:我绑的是另一条,收到别人的 added 也照样进树
+useStore.setState({ sessionId: 's-other' })
+S().onEvent({
+  type: 'session.added', sessionId: 's-cli-2',
+  brief: { id: 's-cli-2', ref: '主机109#3', env: '主机109', name: 'B', state: 'idle', purpose: 'debug', module: '', prog: '', holdingSeconds: 0, breakpoints: 0, watchdogSeconds: 0 },
+})
+assert.ok(S().sessions.some((x) => x.id === 's-cli-2'), '别人的会话也要进树（树是池的投影）')
+assert.equal(S().sessionId, 's-other', '池事件不得改绑定（绑定只能由人点）')
+
+// 缺 purpose 的 brief:按 debug 兜底（恒定键取不到的兜底,不让页面猜）
+S().onEvent({ type: 'session.added', sessionId: 's-cli-3', brief: { id: 's-cli-3', ref: '主机109#4', env: '主机109', name: 'C', state: 'idle', module: '', prog: '', holdingSeconds: 0, breakpoints: 0, watchdogSeconds: 0 } })
+assert.equal(S().sessions.find((x) => x.id === 's-cli-3')?.purpose, 'debug', '缺 purpose 按 debug')
+
+// 移除:树当场少一条, screens 也清掉
+S().onEvent({ type: 'session.removed', sessionId: 's-cli-1', reason: 'close' })
+assert.ok(!S().sessions.some((x) => x.id === 's-cli-1'), 'session.removed 应让树当场少一条')
+assert.equal(S().screens['s-cli-1'], undefined, '移除会话时它的画面状态也该清掉')
+console.log('OK 16) 树由池派生:added/removed 与 screens 事件即时生效,且不动绑定')
+

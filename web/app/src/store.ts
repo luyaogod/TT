@@ -17,13 +17,19 @@ export type { ThemeMode }
 // `tt.sessions.v1` 一起作废（见 SESSIONS_KEY 的注释）。
 export interface EnvBrief { name: string; host?: string; zone?: string }
 export type SessionType = 'debug' | 'fep'
+/** 用途（W1）：决定页面给什么、能发什么。服务端恒定给这个键。 */
+export type SessionPurpose = 'debug' | 'record' | 'replay'
 export interface SessionItem {
   // 服务端会话句柄（C5.4：路径与句柄只认 id）。调试面板绑定、画面通道、结束会话都用它。
   id: string
   env: string
   name: string
+  // type 是**派生的**（purpose≠debug 的会话在界面上算 FEP 那一类：先看 FEP 面板）。
+  // 服务端没有 type 这个键，别把它当事实用。
   type: SessionType
   createdAt: number
+  // purpose 是服务端的事实（W1）：debug / record / replay。
+  purpose: SessionPurpose
   // 建会话时点名的企业编号与作业编号。ENT 是**会话级事实**（环境配置里已经没有它），
   // 作业编号是"这条会话要调哪个作业"——后面起作业/挂录制都从这两个值往下走。
   ent: string
@@ -74,24 +80,24 @@ interface Store {
   // 选中态是 `sessionId`，只能由人点（`selectSession`）或本页面自己发起的动作写。
   sessionList: SessionBrief[]
   // ---- 工作站外壳:环境树 + 会话树 ----
-  // `envs` 来自共享端点 `/api/hosts` 的 `sshs`；`sessions` 是**外壳那棵树**（每条都是真的
-  // 会话句柄，见 SessionItem 的注释），落在 `tt.sessions.v2`。它与下面那组调试态
-  // （`sessionId` / `state` / `stop` …）是一件事的两面：树回答"有哪些"，`sessionId` 回答
-  // "此刻面板绑的是哪一条" —— 两者都由本文件写，别在别处再存一份。
+  // `envs` 来自共享端点 `/api/hosts` 的 `sshs`；`sessions` 是**外壳那棵树**，
+  // 它由 `sessionList`（服务端池）**派生**（W2/W6/D9）—— 本地不存"有哪些会话"。
+  // 它与下面那组调试态（`sessionId` / `state` / `stop` …）是一件事的两面：
+  // 树回答"有哪些"，`sessionId` 回答"此刻面板绑的是哪一条"。
   envs: EnvBrief[]
   envsLoaded: boolean
   envsErr: string
   // 当前路由所在的环境。录制列表按它过滤(会话环境那条线在 `sessionEnv`)。
   activeEnv: string
   sessions: SessionItem[]
+  // screens 是**界面会话的挂接状态**（W2 的 screen.* 事件 + GET /screen 的合并结果）。
+  // 事件到了即时更新，页面不必每秒问一次；`useScreenInfo` 仍可主动刷新。
+  screens: Record<string, { attached: boolean; tag?: string; kind?: string }>
   loadEnvs: () => Promise<void>
   setActiveEnv: (env: string) => void
   // createSession 建一条**真的** Debug 会话（企业编号 + 作业编号），默认把画面通道（proxy）
   // 一起挂上。onStep 用来把"正在登录 / 正在挂画面"这些阶段报给界面（长跑动作要有进度）。
   createSession: (input: CreateSessionInput, onStep?: (step: string) => void) => Promise<SessionItem>
-  // pruneSessions 把树里那些服务端已经没有的会话摘掉（首屏对齐用：服务重启/会话被 rm 之后
-  // 树里还留着一格，点进去是空的）。返回摘掉了几条。
-  pruneSessions: (aliveIds: string[]) => number
   // ensureSource 在没有源码可看时把这条会话的**母版源码**打开。
   // 会话页有三种"有会话但没停站"的时刻（刚建好 / 刚起跑 / 从树上点回来），
   // 那时人也想看代码 —— 旧实现只有停站才拉源码，于是编辑器一片空白。
@@ -337,49 +343,56 @@ function setBoundSession(id: string | null) {
   useStore.setState({ sessionId: id })
 }
 
-// ---------- 外壳会话树的本机存储 ----------
+// ---------- 外壳会话树：**服务端派生**（W2 / W6 / D9） ----------
 //
-// 键与「面板绑着的那条」分开(`tt.sessionId` 是后者):树是"有哪些会话",绑定是"现在看哪条"。
+// 树是 `GET /api/sessions` 与池事件（`session.added` / `session.removed`）的**投影**。
+// 本地不再记"有哪些会话"：记了就必然与事实漂——CLI 建的会话在树里不存在、
+// 服务端重启后树里留一条点进去什么都没有。`localStorage` 只留 UI 偏好
+// （展开集合、实例顺序、面板宽度、主题）。
 //
-// 为什么是 v2:v1 存的是第一阶段那批**假会话**(id 形如 `s-<base36>-<rand>`,只活在浏览器里,
-// 点开也连不上任何后端)。第二阶段起树里每一条都是服务端句柄,两种 id 混在一个键里,
-// "这条还在不在"就永远判不出来 —— 所以换键,v1 直接不读(那批本来就是壳子,没有要保留的数据)。
-const SESSIONS_KEY = 'tt.sessions.v2'
+// 旧键只用来**清一次**：v2 存的是"浏览器自己记的会话树"，第二阶段起改为服务端派生，
+// 留着它只会让旧条目在树上多活一会儿（它们点开也找不到服务端那条）。
+const LEGACY_SESSIONS_KEY = 'tt.sessions.v2'
 
-function isSessionType(v: unknown): v is SessionType {
-  return v === 'debug' || v === 'fep'
+function clearLegacySessions() {
+  try { localStorage.removeItem(LEGACY_SESSIONS_KEY) } catch { /* 隐私模式：清不掉也不影响事实 */ }
 }
 
-function readStoredSessions(): SessionItem[] {
-  try {
-    const raw = localStorage.getItem(SESSIONS_KEY)
-    if (!raw) return []
-    const arr = JSON.parse(raw)
-    if (!Array.isArray(arr)) return []
-    // 逐条验形:坏数据(手改过 localStorage、或以后换过字段)只丢那一条,
-    // 不让整棵树因为一行 JSON 崩掉。`ent`/`prog`/`ref` 缺了给空串(旧条目/半截写入),
-    // 由界面对空串如实显示"没记下",不拿猜的值去凑。
-    return arr.flatMap((x): SessionItem[] => {
-      if (!x || typeof x !== 'object') return []
-      const o = x as Record<string, unknown>
-      if (typeof o.id !== 'string' || !o.id) return []
-      if (typeof o.env !== 'string' || !o.env) return []
-      if (typeof o.name !== 'string' || !o.name) return []
-      if (!isSessionType(o.type)) return []
-      return [{
-        id: o.id, env: o.env, name: o.name, type: o.type, createdAt: Number(o.createdAt) || 0,
-        ent: typeof o.ent === 'string' ? o.ent : '',
-        prog: typeof o.prog === 'string' ? o.prog : '',
-        ref: typeof o.ref === 'string' ? o.ref : '',
-      }]
-    })
-  } catch {
-    return []
+// 模块加载时清一次：旧树的数据没有任何用途，留着只会让人以为"浏览器还记着会话"。
+clearLegacySessions()
+
+// purposeOf 把服务端给的那一列读成用途：**缺键/认不出来一律当 debug**
+// （恒定键的兜底：取不到给缺省，不让页面猜）。
+function purposeOf(b: SessionBrief | undefined): SessionPurpose {
+  const p = (b?.purpose || '').trim()
+  return p === 'record' || p === 'replay' ? p : 'debug'
+}
+
+// itemFromBrief 把池里的那一条投影成树里的一项。
+//
+// 这里**只做投影，不补业务字段**：brief 里没有的（比如"是谁在本机建的"）不该出现在树上。
+function itemFromBrief(b: SessionBrief): SessionItem {
+  const purpose = purposeOf(b)
+  return {
+    id: b.id,
+    env: b.env || '',
+    name: (b.name || '').trim() || b.ref || b.id,
+    // record/replay 的会话在界面上先看 FEP 面板（先看"画面"而不是编辑器）。
+    type: purpose === 'debug' ? 'debug' : 'fep',
+    purpose,
+    createdAt: 0,
+    ent: b.ent || '',
+    prog: b.prog || '',
+    ref: b.ref || '',
   }
 }
 
-function persistSessions(list: SessionItem[]) {
-  try { localStorage.setItem(SESSIONS_KEY, JSON.stringify(list)) } catch { /* 配额满/隐私模式:界面照常,只是刷新会丢 */ }
+// indexFromList 把整份池投影成树（顺序固定：同一环境内按序号，环境间按名字），
+// 让树的形状**只由服务端决定** —— 两次相同的池一定得到相同的树。
+function indexFromList(list: SessionBrief[]): SessionItem[] {
+  const items = list.filter((b) => b && b.id).map(itemFromBrief)
+  items.sort((a, b) => (a.env === b.env ? a.ref.localeCompare(b.ref) : a.env.localeCompare(b.env)))
+  return items
 }
 
 // sleep 是"等后端状态自己走到下一步"的最小工具(登录、登记画面都要等)。
@@ -442,18 +455,40 @@ async function attachScreen(id: string, prog: string, ent: string, onStep?: (ste
   return '画面通道进程已起，但 30 秒内还没在会话上登记成功（GET /screen 仍 attached=false）——看 .tt-serve.log 与那一条录制日志；也可以在会话页的「FEP录制」里点「重新查一次」'
 }
 
-// refreshSessionList 列全部会话（`GET /api/sessions`）填进 `sessionList`。
+// refreshSessionList 列全部会话（`GET /api/sessions`）填进 `sessionList`，并**同步派生树**。
 //
 // 它**只取数、不动绑定** —— 这正是与旧 `syncFromSessions` 的分工差别：
 // 从前那个函数兼管"替人重绑一条"，而绑定现在只能由人点。
+// 树（`sessions`）在这里跟着池一起重建：树不是另一个事实，就是池的投影（W2/W6）。
 async function refreshSessionList(): Promise<SessionBrief[] | null> {
   try {
     const { sessions } = await api.list()
-    useStore.setState({ sessionList: sessions || [] })
-    return sessions || []
+    const list = sessions || []
+    useStore.setState({ sessionList: list, sessions: indexFromList(list) })
+    return list
   } catch {
     return null // 问不到就保持现状:重连与下一次事件还会再来
   }
+}
+
+// upsertBrief / dropBrief 是**事件驱动**的那半边：池变了不等人刷新。
+//
+// 收到就改 `sessionList` 并重建树 —— 与 refreshSessionList 同一条投影路径
+// （`indexFromList`），所以"列表刷新"与"事件到达"不会长出两种树的形状。
+function upsertBrief(b: SessionBrief) {
+  if (!b || !b.id) return
+  const st = useStore.getState()
+  const next = st.sessionList.filter((x) => x.id !== b.id)
+  next.push(b)
+  useStore.setState({ sessionList: next, sessions: indexFromList(next) })
+}
+
+function dropBrief(id: string) {
+  if (!id) return
+  const st = useStore.getState()
+  if (!st.sessionList.some((x) => x.id === id)) return
+  const next = st.sessionList.filter((x) => x.id !== id)
+  useStore.setState({ sessionList: next, sessions: indexFromList(next) })
 }
 
 // checkSelectedStillThere 只问一件事：**本地选的那条还在不在**。
@@ -652,7 +687,7 @@ export const useStore = create<Store>((set, get) => ({
   // 刷新后恢复**人上次点的那条**（`tt.sessionId`）。恢复的是"选择"，不是"问服务端要一条"：
   // 这条会话若已经不在服务端了，`checkSelectedStillThere` 会把它清成"未选择"。
   sessionId: readStoredSessionId(), sessionList: [],
-  envs: [], envsLoaded: false, envsErr: '', activeEnv: '', sessions: readStoredSessions(), module: '', prog: '', state: '', sessionEnv: '', started: false, stop: null, holdingSeconds: 0,
+  envs: [], envsLoaded: false, envsErr: '', activeEnv: '', sessions: [], screens: {}, module: '', prog: '', state: '', sessionEnv: '', started: false, stop: null, holdingSeconds: 0,
   launching: false, launchError: '', showBottom: true, bottomMax: false,
   // 面板开关默认关(localStorage tt.stackAuto / tt.autovarsAuto 持久化)
   stackAuto: localStorage.getItem('tt.stackAuto') === '1',
@@ -768,6 +803,48 @@ export const useStore = create<Store>((set, get) => ({
 
   onEvent: (ev) => {
     const st = get()
+
+    // ---- 池与界面会话的事件（W2）：**先于**"是不是我绑的那条"处理 ----
+    //
+    // 这四类回答的是"有哪些会话 / 它挂着画面没有"，与绑定无关：树是池的投影（D9），
+    // 所以 CLI、别的浏览器、AI 建的会话都从这里进树。放在最前面还有个理由：
+    // 下面的逻辑会把"别的会话的事件"当成"我绑的那条可能被换掉了"（scheduleRebindCheck），
+    // 而池事件本来就该改索引，不该触发重绑。
+    switch (ev.type) {
+      case 'session.added': {
+        const brief = (ev as any).brief as SessionBrief | undefined
+        if (brief?.id) upsertBrief(brief)
+        // 顺手校一次：事件是"叫一声"，权威是 List（断档/丢事件时靠它收敛）。
+        void refreshSessionList()
+        return
+      }
+      case 'session.removed': {
+        const id = ev.sessionId
+        dropBrief(id)
+        if (id) set((s) => {
+          const rest = { ...s.screens }
+          delete rest[id]
+          return { screens: rest }
+        })
+        // 我绑着的那条没了 → 回到未选择（绝不替人挑下一条）。
+        if (id && get().sessionId === id) void get().selectSession(null)
+        return
+      }
+      case 'screen.attached':
+      case 'screen.detached': {
+        const id = ev.sessionId
+        const scr = (ev as any).screen as { tag?: string; kind?: string } | undefined
+        if (!id) return
+        set((s) => ({
+          screens: {
+            ...s.screens,
+            [id]: { attached: ev.type === 'screen.attached', tag: scr?.tag, kind: scr?.kind },
+          },
+        }))
+        return
+      }
+    }
+
     // **本地没选中就不认领**（WP-F / Q4 的硬规矩，见上面「会话绑定的取数纪律」）。
     //
     // 从前的写法是"事件带着会话 id 而本地还没绑定 → 认领它"，理由是"不认领的话编辑器
@@ -1541,9 +1618,8 @@ export const useStore = create<Store>((set, get) => ({
   adoptExisting: async () => {
     const list = await refreshSessionList()
     if (!list) return
-    // 顺手把树里服务端已经没有的会话摘掉（服务重启、`session rm`、登录失败被终结）。
-    // 不摘的话树里会留一格"点进去什么都没有"的条目，而它连报错都不会有。
-    get().pruneSessions(list.map((s) => s.id))
+    // 树跟着池一起重建（refreshSessionList 里做的），所以这里不需要再"摘条目"：
+    // 服务端没有的会话在树上本来就不会出现（D9：树是池的投影）。
     const id = get().sessionId
     if (!id) return // 未选择:界面提示"选一条"(见会话面板),这里什么都不做
     if (!list.some((s) => s.id === id)) {
@@ -1714,18 +1790,16 @@ export const useStore = create<Store>((set, get) => ({
     const id = (res?.sessionId || '').trim()
     if (!id) throw new Error('服务端没回会话 ID（看 .tt-serve.log）')
 
-    const item: SessionItem = {
-      id, env, type: 'debug', createdAt: Date.now(), ent, prog,
-      // 名字以服务端回的为准（同名幂等时它会把已有的那条的别名回给我们）
+    // 先刷一次池：树是池的投影（W2/D9），这一步让新会话与它的 `purpose` 立刻出现在树上，
+    // 而不是等我们自己往本地数组里塞一条（塞出来的那条没有服务端的 state/purpose）。
+    await refreshSessionList()
+    const item: SessionItem = get().sessions.find((s) => s.id === id) || {
+      // 极端情况：列表还没刷到它（服务端刚建、聚合有延迟）。用应答里的事实拼一条，
+      // 只用于**导航**；下一轮 List / 事件会把树换成权威那份。
+      id, env, type: 'debug', purpose: 'debug', createdAt: Date.now(), ent, prog,
       name: (res?.name || '').trim() || name,
       ref: (res?.ref || '').trim(),
     }
-    // 先落树再挂画面：这条会话已经是服务端的事实了，后面挂不上不该让它在树里消失。
-    const next = [...get().sessions.filter((s) => s.id !== id), item]
-    persistSessions(next)
-    set({ sessions: next })
-    // 树上那个状态点读的是服务端列表 —— 建完先刷一次，否则新会话在树里是"状态未知"。
-    void refreshSessionList()
 
     onStep?.('会话已建好，正在登录 ' + env + '…')
     try {
@@ -1753,17 +1827,9 @@ export const useStore = create<Store>((set, get) => ({
     return item
   },
 
-  // 摘掉服务端已经不存在的会话（首屏对齐 / 服务重启后）。只动树，不动绑定：
-  // 被摘掉的那条若正是绑定的那条，由 syncFromSessions 的"回到未选择"负责。
-  pruneSessions: (aliveIds) => {
-    const alive = new Set(aliveIds)
-    const before = get().sessions
-    const next = before.filter((s) => alive.has(s.id))
-    if (next.length === before.length) return 0
-    persistSessions(next)
-    set({ sessions: next })
-    return before.length - next.length
-  },
+  // （`pruneSessions` 已随"树由池派生"一起下线：树在 refreshSessionList 里随池重建，
+  //  不再需要单独摘条目。）
+
 
   // ensureSource 在没有源码可看时，把这条会话的**母版源码**打开。
   //
@@ -1812,14 +1878,18 @@ export const useStore = create<Store>((set, get) => ({
     const label = get().sessions.find((s) => s.id === id)?.name || id
     try {
       await api.sessionClose(id)
+      // 核对一次：POST 成功不等于真的关掉了（服务端异常时可能回 200 而会话还在）。
       const { sessions } = await api.list()
       if ((sessions || []).some((s) => s.id === id)) {
         throw new Error(`服务端还报着会话「${label}」—— 关闭没有真正生效（看 .tt-serve.log）`)
       }
-      set({ sessionList: sessions || [] })
-      const next = get().sessions.filter((s) => s.id !== id)
-      persistSessions(next)
-      set({ sessions: next })
+      // 树跟着池一起重建（close 的事件也会到，但这里不等它：人点了就该立刻少一条）。
+      set({ sessionList: sessions || [], sessions: indexFromList(sessions || []) })
+      set((st) => {
+        const rest = { ...st.screens }
+        delete rest[id]
+        return { screens: rest }
+      })
       if (get().sessionId === id) await get().selectSession(null)
       get().pushTimeline({ origin: 'human', kind: 'command', text: `结束会话 ${label}` })
       toast.success(`已结束会话 ${label}`)
@@ -1982,3 +2052,4 @@ if (typeof window !== 'undefined') {
 
 // 浏览器控制台调试入口(生产无副作用)
 ;(window as any).__store = useStore
+
