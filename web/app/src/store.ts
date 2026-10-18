@@ -115,6 +115,8 @@ interface Store {
   // sessionsLoaded = 池**列过至少一次**（不是"有会话"）。路由要用它区分
   // "还没有会话"与"还没问过" —— 否则深链接会在首帧被当成失效目标弹回环境页。
   sessionsLoaded: boolean
+  // editor 是**每条会话的编辑器现场**（W6/W-P2）：按 id 各一份，切换绑定时换进换出单例。
+  editor: Record<string, EditorState>
   // runtimes 是**每条会话的运行时**（W6）：按 id 各一份，事件到了就更新。
   // 它与 `sessions`/`sessionList`（池的投影）分工：后者回答"有哪些"，前者回答"它现在怎么样"。
   runtimes: Record<string, SessionRuntime>
@@ -479,10 +481,14 @@ function seedRuntimes(list: SessionBrief[]) {
 function dropRuntime(id: string) {
   if (!id) return
   useStore.setState((s) => {
-    if (!s.runtimes[id]) return {}
-    const next = { ...s.runtimes }
-    delete next[id]
-    return { runtimes: next }
+    const hasRuntime = !!s.runtimes[id]
+    const hasEditor = !!s.editor[id]
+    if (!hasRuntime && !hasEditor) return {}
+    const runtimes = { ...s.runtimes }
+    delete runtimes[id]
+    const editor = { ...s.editor }
+    delete editor[id]
+    return { runtimes, editor }
   })
 }
 
@@ -492,6 +498,74 @@ function dropRuntime(id: string) {
  */
 export function useSessionRuntime(id: string | null | undefined): SessionRuntime | undefined {
   return useStore((s) => (id ? s.runtimes[id] : undefined))
+}
+
+// ---------- 每条会话的**编辑器现场**（W6 / W-P2） ----------
+//
+// 单例那一组字段（源码、页签、断点面板、调用栈、时间线、停站现场…）是**页面的读入口**，
+// 组件照着它渲染。多会话要的不是"再抄一份给组件读"，而是"切换时把这一条的那份换进来"：
+//
+//   A → B：先把 A 的现状存进 `editor[A]`，再把 `editor[B]`（没有就是空现场）换进单例；
+//   B → A：A 的源码/页签/时间线/停站现场原样回来，不必重新拉一遍。
+//
+// 这样组件一行都不用改（它们只认识单例），而"每条会话各有各的页面现场"这件事成立 ——
+// 也是 W-P3 多实例页签的地基（那时把"换进换出"换成"每实例一份 store"即可）。
+//
+// 哪些键属于现场：**只有这条会话自己的**。开关类（下方面板、右栏、主题）、
+// 池与路由（sessions/sessionList/view…）不进来 —— 它们是应用级的，切换会话不该变。
+const EDITOR_KEYS = [
+  'module', 'prog', 'runProg', 'state', 'sessionEnv', 'started', 'stop', 'holdingSeconds',
+  'mode', 'inflight', 'backendDead',
+  'breakpoints', 'adjustedBps', 'frames', 'watches', 'autovars', 'selectedFrame',
+  'timeline', 'rawLog',
+  'sourceContent', 'sourcePath', 'sourceDVM', 'sourceMissing', 'currentLine', 'loadingSource', 'lineOffset',
+  'tabs', 'activeTab', 'revealReq',
+  'lastReplayRowid', 'lastReplayRequest', 'launchError',
+] as const
+
+export type EditorKey = (typeof EDITOR_KEYS)[number]
+export type EditorState = Pick<Store, EditorKey>
+
+/** emptyEditor 给"这条会话还没打开过"一个干净现场（数组一律新建，别共享引用）。 */
+function emptyEditor(): EditorState {
+  return {
+    module: '', prog: '', runProg: '', state: '', sessionEnv: '', started: false, stop: null,
+    holdingSeconds: 0, mode: 'solo', inflight: null, backendDead: '',
+    breakpoints: [], adjustedBps: {}, frames: [], watches: [], autovars: [], selectedFrame: -1,
+    timeline: [], rawLog: [],
+    sourceContent: '', sourcePath: '', sourceDVM: '', sourceMissing: false, currentLine: 0,
+    loadingSource: false, lineOffset: 0,
+    tabs: [], activeTab: 'debug', revealReq: null,
+    lastReplayRowid: null, lastReplayRequest: '', launchError: '',
+  }
+}
+
+// captureEditor 把单例里属于"这条会话现场"的那些键抄出来。
+function captureEditor(st: Store): EditorState {
+  const out = emptyEditor()
+  for (const k of EDITOR_KEYS) (out as any)[k] = st[k]
+  return out
+}
+
+// applyEditor 把一份现场换进单例（组件下一帧就按它渲染）。
+function applyEditor(set: (p: Partial<Store>) => void, ed: EditorState) {
+  set(ed as Partial<Store>)
+}
+
+// switchEditor 在绑定切换时搬运现场：先存旧的，再换新的（没有就给空现场）。
+//
+// **没有 saved 时必须换成空现场**：沿用上一条的源码，就是"绑的是 B、编辑器里是 A 的代码"，
+// 那正是多会话最容易误导人的一种错。
+function switchEditor(set: (p: Partial<Store>) => void, get: () => Store, next: string | null) {
+  const st = get()
+  const prev = st.sessionId
+  if (prev === next) return
+  // 只给**还活着**的会话存现场：它已经没了（`session.removed` / 结束会话）就不该再写回去，
+  // 否则"清现场"之后又被这次搬运重新创建出来（同 id 复用时还会被挖出来）。
+  const prevAlive = !st.sessionsLoaded || st.sessionList.some((b) => b.id === prev)
+  if (prev && prevAlive) set({ editor: { ...st.editor, [prev]: captureEditor(st) } })
+  const saved = next ? (get().editor[next] || null) : null
+  applyEditor(set, saved || emptyEditor())
 }
 
 // sleep 是"等后端状态自己走到下一步"的最小工具(登录、登记画面都要等)。
@@ -587,9 +661,13 @@ function upsertBrief(b: SessionBrief) {
 function dropBrief(id: string) {
   if (!id) return
   const st = useStore.getState()
-  if (!st.sessionList.some((x) => x.id === id)) return
-  const next = st.sessionList.filter((x) => x.id !== id)
-  useStore.setState({ sessionList: next, sessions: indexFromList(next) })
+  // 列表里有它 → 摘掉（树跟着池重建）。
+  if (st.sessionList.some((x) => x.id === id)) {
+    const next = st.sessionList.filter((x) => x.id !== id)
+    useStore.setState({ sessionList: next, sessions: indexFromList(next) })
+  }
+  // **无论列表里有没有**，它的运行时与编辑器现场都要清：这条事件本身就是"它没了"的
+  // 权威通知；列表可能还没刷新到（或本来就断档），留着现场只会在 id 复用时被挖出来。
   dropRuntime(id)
 }
 
@@ -789,7 +867,7 @@ export const useStore = create<Store>((set, get) => ({
   // 刷新后恢复**人上次点的那条**（`tt.sessionId`）。恢复的是"选择"，不是"问服务端要一条"：
   // 这条会话若已经不在服务端了，`checkSelectedStillThere` 会把它清成"未选择"。
   sessionId: readStoredSessionId(), sessionList: [],
-  envs: [], envsLoaded: false, envsErr: '', activeEnv: '', sessions: [], sessionsLoaded: false, runtimes: {}, screens: {}, module: '', prog: '', state: '', sessionEnv: '', started: false, stop: null, holdingSeconds: 0,
+  envs: [], envsLoaded: false, envsErr: '', activeEnv: '', sessions: [], sessionsLoaded: false, editor: {}, runtimes: {}, screens: {}, module: '', prog: '', state: '', sessionEnv: '', started: false, stop: null, holdingSeconds: 0,
   launching: false, launchError: '', showBottom: true, bottomMax: false,
   // 面板开关默认关(localStorage tt.stackAuto / tt.autovarsAuto 持久化)
   stackAuto: localStorage.getItem('tt.stackAuto') === '1',
@@ -1764,6 +1842,11 @@ export const useStore = create<Store>((set, get) => ({
   // 列表可能是空的（还没列过）或还没刷到这条（刚起的会话）。绑定的语义是"人点了这条"，
   // 不是"列表里有这条"，所以取数失败也只退到"只绑 id"，绝不清掉人的选择。
   selectSession: async (id) => {
+    // 先搬编辑器的现场（W-P2）：把上一条的存进 `editor[旧]`，把这一条的换进单例。
+    // 必须在 `setBoundSession` 之前 —— 它靠"当前的 sessionId"判断存谁。
+    // 放到最后做就晚了：alignSelected 会用服务端事实覆盖 state/stop/breakpoints，
+    // 而源码/页签/时间线这些客户端现场只有这一刻能搬。
+    switchEditor(set, get, id)
     if (!id) {
       setBoundSession(null)
       set({

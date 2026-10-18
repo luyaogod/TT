@@ -327,7 +327,7 @@ assert.ok(!S().timeline.some((t) => t.kind === 'command' && t.text.startsWith('�
   '什么都没发的时候，不许记一条"成功"的命令行')
 console.log('OK 15) 会话操作:做不到就抛错并记 warn，绝不假装成功')
 
-console.log('\n全部通过: 17/17')
+console.log('\n全部通过: 18/18')
 
 // ---------- 16) 树由池派生:池事件直接改树,不等刷新 ----------
 // W2/W6/D9:树不是本地账本,而是 GET /api/sessions 与 session.added/removed 的投影。
@@ -406,3 +406,63 @@ S().onEvent({ type: 'session.removed', sessionId: 's-new' })
 assert.equal(S().runtimes['s-new'], undefined, '会话没了,运行时也不留')
 assert.equal(S().runtimes['s-other']?.state, 'stopped', '别人的运行时不受影响')
 console.log('OK 17) 运行时按会话各存一份:别人的状态进别人的账,单例只跟绑定那条')
+// ---------- 18) 每条会话各有各的编辑器现场(W6/W-P2):切走再切回来,现场还在 ----------
+// 从前切会话是把单例整块清掉/覆盖:从 A 点到 B 再点回 A,A 的页签、时间线、协议流、
+// 打开过的源码全没了(只剩服务端能重拉的那点东西)。现在切换时把现场**换进换出**。
+const realFetch = globalThis.fetch
+globalThis.fetch = async (url) => {
+  const u = String(url)
+  if (u.includes('/api/sessions') && !/\/api\/sessions\/[^/]+$/.test(u)) {
+    return { ok: true, status: 200, json: async () => ({ ok: true, sessions: [] }) }
+  }
+  return {
+    ok: true, status: 200,
+    json: async () => ({
+      ok: true, state: 'stopped', module: 'asf', prog: 'axmt500_wf', runProg: '',
+      stop: { file: 'asf_axmt500_wf.4gl', line: 9, reason: 'break' },
+      breakpoints: [], started: true, holdingSeconds: 0, mode: 'solo',
+    }),
+  }
+}
+try {
+  useStore.setState({
+    sessionId: 's-a', editor: {}, sessionList: [
+      { id: 's-a', state: 'stopped', module: 'asf', prog: 'axmt500_wf', holdingSeconds: 0, breakpoints: 0, watchdogSeconds: 0, mode: 'solo' },
+      { id: 's-b', state: 'stopped', module: 'asf', prog: 'bsft001_wf', holdingSeconds: 0, breakpoints: 0, watchdogSeconds: 0, mode: 'solo' },
+    ],
+    sourceContent: 'A 的源码', sourcePath: '/x/a.4gl', sourceDVM: 'a.4gl',
+    timeline: [{ time: 't1', origin: 'system', kind: 'info', text: 'A 的事件' }],
+    rawLog: ['A 的协议行'],
+    tabs: [{ key: 'k-a', file: 'a.4gl', content: 'A', path: '/x/a.4gl', loading: false }],
+    activeTab: 'k-a',
+  })
+
+  await S().selectSession('s-b')
+  // A 的现场被存起来了（下一页要用的都还在）
+  assert.equal(S().editor['s-a']?.sourceContent, 'A 的源码', '切走时要把 A 的源码存下来')
+  assert.equal(S().editor['s-a']?.activeTab, 'k-a', '页签选择也要存')
+  assert.equal(S().editor['s-a']?.timeline.length, 1, '时间线要存')
+  assert.equal(S().editor['s-a']?.rawLog[0], 'A 的协议行', '协议流要存')
+  // 而 B 的页面是**干净的**：不许把 A 的源码/时间线/页签带过去
+  assert.equal(S().timeline.length, 0, '切到 B 不许留着 A 的时间线')
+  assert.equal(S().rawLog.length, 0, '切到 B 不许留着 A 的协议流')
+  assert.equal(S().tabs.length, 0, '切到 B 不许留着 A 的页签')
+  assert.notEqual(S().sourceContent, 'A 的源码', '切到 B 时 A 的源码不许留在编辑器里')
+
+  // 切回 A：现场原样回来（页签、时间线、协议流不必重新拉）
+  //
+  // 注意**不**断言 sourceContent：A 是 stopped，alignSelected 会按停站行重拉一次源码
+  // （那是权威，比缓存新）；这里钉的是缓存里那份"服务端不会告诉我们"的现场。
+  await S().selectSession('s-a')
+  assert.equal(S().activeTab, 'k-a', '切回 A 时页签要回来')
+  assert.equal(S().tabs.length, 1, '切回 A 时打开过的源码页签要回来')
+  assert.equal(S().timeline.length, 1, '切回 A 时时间线要回来')
+  assert.equal(S().rawLog[0], 'A 的协议行', '切回 A 时协议流要回来')
+
+  // 会话没了 → 它的现场也不留（否则同 id 复用时会把旧现场挖出来）
+  S().onEvent({ type: 'session.removed', sessionId: 's-a' })
+  assert.equal(S().editor['s-a'], undefined, '会话没了,编辑器现场也要清')
+  console.log('OK 18) 每条会话各有各的编辑器现场:切走不串场,切回来还在,收掉即清')
+} finally {
+  globalThis.fetch = realFetch
+}
