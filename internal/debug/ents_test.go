@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"tt/internal/config"
 	"tt/internal/dbconfig"
 	"tt/internal/host"
 )
@@ -362,5 +363,43 @@ func TestEntCatalog_EntFilter(t *testing.T) {
 		t.Error("没配账号的企业应当报错")
 	} else if !strings.Contains(err.Error(), "没有配可用账号") {
 		t.Errorf("应当说清是「没配账号」而不是「不存在」: %v", err)
+	}
+}
+
+// 配置里的 ENT 清单优先：存在就不联网（Offline 也必须有答案），Source=config，
+// 且不按 TTL 判过期 —— 否则 10 分钟后它又会“变旧”，把用户推回连库。
+func TestEntCatalogPrefersConfig(t *testing.T) {
+	cfg := testCfg(t.TempDir())
+	cfg.envName = "A"
+	cfg.SSHs = []host.NamedSsh{{
+		Name: "A", Zone: "36",
+		Ents: []config.EntEntry{
+			{Ent: 99, Account: "dsdemo"},
+			{Ent: 907, Account: "dsdata"},
+		},
+		EntsSyncedAt: time.Now().Add(-30 * 24 * time.Hour).Format(time.RFC3339), // 一个月前
+	}}
+	c := NewEntCatalog(cfg.DataDir)
+	c.fetch = noSSH(t) // 一旦走到现查就是错
+
+	l, err := c.list(nil, nil, cfg, EntListOpt{Offline: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l == nil || l.Source != "config" {
+		t.Fatalf("应优先返回配置清单，得到 %+v", l)
+	}
+	if len(l.Ents) != 2 || l.Ents[0].Ent != 99 {
+		t.Fatalf("清单不对: %+v", l.Ents)
+	}
+	if l.Stale {
+		t.Error("配置清单不该按 TTL 判过期（新鲜度靠 entsSyncedAt 展示）")
+	}
+	acct, err := c.account(nil, nil, cfg, 907)
+	if err != nil || acct != "dsdata" {
+		t.Fatalf("account(907) = %q, %v", acct, err)
+	}
+	if _, err := c.account(nil, nil, cfg, 12345); err == nil {
+		t.Error("配置里没有的企业应当报错（并列候选）")
 	}
 }

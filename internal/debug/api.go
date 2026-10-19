@@ -17,6 +17,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"tt/internal/config"
 	"tt/internal/dbconfig"
 	"tt/internal/host"
 	"tt/internal/output"
@@ -42,7 +43,6 @@ type Server struct {
 	// NewServer 里默认成 host.Dial，所以**生产路径的行为与从前一字不差**；
 	// 只有 _test.go 会替换它。
 	dial func(host.SSHConfig) (*host.SSHConn, error)
-
 
 	// mu 同时保护两类运行态:
 	//   stop —— Serve 期间指向该次运行的 cancel(POST /api/shutdown 用,优雅停止);
@@ -237,6 +237,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/source-preview", s.hSourcePreview)
 	mux.HandleFunc("GET /api/wslogs", s.hWSLogs)
 	mux.HandleFunc("GET /api/ents", s.hEnts)
+	mux.HandleFunc("POST /api/ents/sync", s.hEntsSync)
 	mux.HandleFunc("POST /api/dbsql", s.hDBSQL)
 	mux.HandleFunc("GET /api/wslogs/content", s.hWSLogContent)
 	mux.HandleFunc("POST /api/wslogs/debug", s.hWSLogDebug)
@@ -2095,6 +2096,75 @@ func (s *Server) hEnts(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// hEntsSync POST /api/ents/sync {env} —— 连库读 gzou_t，并把结果**写回 config.json**。
+//
+// 与 GET /api/ents?refresh=1 的分工：那个只是“预览一次现查”，不改配置；这个是
+// 设置页「ENT」页签的「从服务器刷新」—— 写完即成为日常读取的权威清单，
+// `--at-list` / tt env ents 从此都是纯本地读取。
+func (s *Server) hEntsSync(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Env string `json:"env"`
+	}
+	if !readBody(w, r, &req) {
+		return
+	}
+	name := strings.TrimSpace(req.Env)
+	if name == "" {
+		fail(w, 400, fmt.Errorf("需要 env：要同步哪个环境的企业清单"))
+		return
+	}
+	cfg := s.envCfgFor(name)
+	if cfg == nil {
+		fail(w, 404, fmt.Errorf("环境 %q 不存在(请在设置中添加)", name))
+		return
+	}
+	if s.cfgPath == "" {
+		fail(w, 500, fmt.Errorf("本服务没有绑定配置文件，无法写回 ENT 清单"))
+		return
+	}
+	l, err := s.mgr.ListEnts(cfg, EntListOpt{Refresh: true})
+	if err != nil {
+		fail(w, 500, err)
+		return
+	}
+	synced := make([]config.SyncedEnt, 0, len(l.Ents))
+	for _, m := range l.Ents {
+		pwd := ""
+		if cfg.DB != nil {
+			if p, ok := cfg.DB.PasswordFor(m.Account); ok {
+				pwd = p
+			}
+		}
+		synced = append(synced, config.SyncedEnt{Ent: m.Ent, Account: m.Account, Password: pwd})
+	}
+	at := time.Now()
+	added, err := config.SaveEnvEnts(s.cfgPath, name, synced, at)
+	if err != nil {
+		fail(w, 500, err)
+		return
+	}
+	// 内存里的那份同步更新（GET /api/ents 与会话都读它），并丢掉企业目录缓存 ——
+	// 否则下一次读还会命中同步前的那份（mem 以指纹为键，与清单内容无关）。
+	entList := make([]config.EntEntry, 0, len(synced))
+	for _, e := range synced {
+		entList = append(entList, config.EntEntry{Ent: e.Ent, Account: e.Account, Password: e.Password})
+	}
+	for i := range s.cfg.SSHs {
+		if s.cfg.SSHs[i].Name == name {
+			s.cfg.SSHs[i].Ents = entList
+			s.cfg.SSHs[i].EntsSyncedAt = at.Format(time.RFC3339)
+		}
+	}
+	s.mgr.ForgetEnts(s.cfg)
+
+	writeJSON(w, 200, map[string]any{
+		"ok": true, "env": name, "count": len(entList),
+		"ents":          l.Ents,
+		"addedAccounts": added,
+		"syncedAt":      at.Format(time.RFC3339),
+	})
+}
+
 // hWSLogs GET /api/wslogs?service=&result=&origin=&server=&onlyFail=1&page=&pageSize=&startFrom=&endTo=&env=&ent=
 // 时间窗对齐原生 awsq990:startFrom 是 wsfa003(起始时间)下界,endTo 是 wsfa004(结束时间)上界
 func (s *Server) hWSLogs(w http.ResponseWriter, r *http.Request) {
@@ -2133,6 +2203,7 @@ func (s *Server) hWSLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true, "items": items, "hasMore": hasMore,
 		"acct": wslogAcctFor(s.wslogTopent(nil)), "ent": entOfQuery(q.Get("ent"))})
 }
+
 // hWSLogContent GET /api/wslogs/content?rowid=
 func (s *Server) hWSLogContent(w http.ResponseWriter, r *http.Request) {
 	rowid := r.URL.Query().Get("rowid")
@@ -2156,6 +2227,7 @@ func (s *Server) hWSLogContent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true, "item": item, "content": content,
 		"acct": wslogAcctFor(s.wslogTopent(nil))})
 }
+
 // hWSLogDebug POST /api/wslogs/debug {rowid, request?, session?, name?} → 用该日志的报文重放调试。
 // request 非空 = 界面里改过的入参(落服务器临时文件后作为入参文件),空 = 用日志原报文。
 // name = `--name` 的别名（Bug B）：wsdebug 同样是起会话的命令，别名随这条请求登记。
@@ -2472,9 +2544,8 @@ const wsReplayLimit = 500
 // 混进补发批次反而可能让前端拿旧状态覆盖新状态。
 var replayTypes = map[string]bool{"stopped": true, "ai_action": true, "log": true, "watchdog": true}
 
-
-
 // wsScope 解出这次订阅的**范围**（契约 6.1 / C6.2 / C6.4 / C6.7 / Q11）。
+//
 //	?all=1               → 全部（总览台显式订阅全部）→ sessionID = ""
 //	?session=<原始句柄>  → 只看那一条 → sessionID = 那个 id
 //	两个都不给           → 等价 `all=1`：**今天的 `/api/ws` 就是"全部事件"**

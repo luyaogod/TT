@@ -111,6 +111,8 @@ export interface HostsDb {
   // 是否允许 AI 执行只读 SQL。undefined = 未配置 = 开启;显式 false 才关。
   readonlySql?: boolean
 }
+export interface HostsEnt { ent: number; account: string; password?: string }
+
 export interface HostsSsh {
   name: string
   host: string
@@ -118,6 +120,10 @@ export interface HostsSsh {
   user: string
   password: string
   zone?: string
+  // ENT 清单：由设置页「ENT」页签或 tt env ents --refresh 从 gzou_t 同步而来，
+  // **不提供手工编辑**。entsSyncedAt 是那份清单的抄写时间（RFC3339）。
+  ents?: HostsEnt[]
+  entsSyncedAt?: string
   // 企业编号(topent)已从环境配置移除:ENT 每次显式给(CLI --ent / 会话面板)。
   // workspace 该环境的 .tzs 工作区（绝对路径）。机器级没有这一项（见 internal/config 的 TzsSettings）
   workspace?: string
@@ -530,6 +536,10 @@ export const api = {
   // 企业目录(ENT → 数据库账号):与 tt debug 的「企业→账号」同一条规则、同一张 gzou_t
   // (固定用系统账号 ds 读),两边的缓存与快照也是同一份(后端的 entdir)。
   // 接口日志页与「创建会话」的 ENT 下拉都用它 —— **不需要一条活会话**。
+  // 同步 ENT：连库读 gzou_t 并**写回 config.json**（设置页「ENT」页签的按钮）。
+  entsSync: (env: string) =>
+    req<{ ok: boolean; env: string; count: number; addedAccounts?: string[]; syncedAt: string }>(
+      `${API_BASE}/ents/sync`, { method: 'POST', body: JSON.stringify({ env }) }),
   ents: (env: string, opt?: { refresh?: boolean }) =>
     req<EntsReply>(`${API_BASE}/ents?env=${encodeURIComponent(env)}${opt?.refresh ? '&refresh=1' : ''}`),
   // 重放调试:request 非空 = 用界面里改过的入参(后端落临时文件后作为入参文件)。

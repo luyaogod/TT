@@ -26,7 +26,7 @@ import {
 import {
   api, type ConfigMeta, type ConfigStatus, type DBSyncJob, type DBSyncResp,
   type DiscoveredEnv,
-  type HostsDb, type HostsPatch, type HostsSsh, type HostsView, type MirrorJob, type MirrorResp,
+  type HostsDb, type HostsEnt, type HostsPatch, type HostsSsh, type HostsView, type MirrorJob, type MirrorResp,
   type UpdateState,
 } from './api'
 import {
@@ -69,6 +69,9 @@ interface SshItem {
   user: string
   password: string
   zone: string
+  // ENT 清单（只读）：由「ENT」页签的“从服务器刷新”写入配置，不提供手工维护。
+  ents?: HostsEnt[]
+  entsSyncedAt?: string
   // workspace 该环境的 .tzs 工作区（含 mta/ 的目录，绝对路径）。
   // 与 launchArgs / watchdogSeconds 不同：它是**必填**的（引擎的默认工作区是真实客户目录），
   // 而且只有环境级这一份 —— 切环境就该跟着换工作区。
@@ -306,6 +309,9 @@ function hostsPatchOf(list: SshItem[]) {
     // 企业编号(topent)不再写进环境配置 —— 该字段已整体移除,ENT 每次显式给。
     // 工作区：留空就是没配（不写这个键），与服务端“环境级没有兜底”一致。
     if (x.workspace.trim()) o.workspace = x.workspace.trim()
+    // ENT 清单原样带回：hosts 是整节提交的，这里漏了 → 改一次密码就把清单抹了。
+    if (x.ents && x.ents.length) o.ents = x.ents.map((e) => ({ ent: e.ent, account: e.account, password: e.password }))
+    if (x.entsSyncedAt) o.entsSyncedAt = x.entsSyncedAt
     if (x.db) {
       const db: HostsDb = { type: x.db.type || 'oracle', host: x.db.host.trim(), port: x.db.port || 0 }
       if (x.db.type === 'oracle') { if (x.db.service.trim()) db.service = x.db.service.trim() }
@@ -357,6 +363,9 @@ function sshsFormOf(c: HostsView): SshItem[] {
       name: e.name || '', host: e.host || '', port: e.port || 22, user: e.user || '', password: e.password || '',
       zone: e.zone || '',
       workspace: e.workspace || '',
+      // ENT 清单必须跟着表单走：hosts 是整节提交的，表单里没有它 = 保存一次就抹掉。
+      ents: (e.ents || []).map((x) => ({ ent: x.ent, account: x.account, password: x.password })),
+      entsSyncedAt: e.entsSyncedAt || '',
       db: d ? {
         type: d.type || 'oracle', host: d.host || '', port: d.port || 0,
         service: d.service || '', database: d.database || '',
@@ -379,7 +388,7 @@ export function SettingsView() {
   // 彩色段落 —— 出现/消失会顶动卡片高度,而这一页卡片多、表格多,串动尤其明显。
   const toast = useToast()
 
-  const [envTab, setEnvTab] = useState<'ssh' | 'db'>('ssh')
+  const [envTab, setEnvTab] = useState<'ssh' | 'db' | 'ents'>('ssh')
   // 读配置失败的原因（非空 = 这一页要显示失败态而不是"加载配置中…"）。
   const [loadErr, setLoadErr] = useState('')
   const [cfg, setCfg] = useState<HostsView | null>(null)
@@ -459,6 +468,8 @@ export function SettingsView() {
     keys.some((k) => dirtyRef.current[k] && sectionSnap(k) !== baselineRef.current[k])
 
   const [showPwd, setShowPwd] = useState(false)
+  // 「ENT」页签的同步状态（连库读 gzou_t 并写回配置；唯一会改动清单的入口）
+  const [entsBusy, setEntsBusy] = useState(false)
   // 数据库页操作状态。accProbe 只记"哪一行、什么状态"用于行内图标;
   // 具体文案走 toast(见 verifyAcct)。
   const [busy, setBusy] = useState<string>('')
@@ -641,6 +652,31 @@ export function SettingsView() {
     patchDb(selSsh, { accounts: [...cur.db.accounts, { account, password }] })
     setAddAcct({ account: '', password: '' })
   }
+  // syncEnts 是「ENT」页签唯一的写入口：连库读 gzou_t → 写回 config.json。
+  // 不允许手填：清单是“从库里抄下来的”，不是人凭记忆写的。
+  const syncEnts = async () => {
+    const s0 = sshs[selSsh]
+    if (!s0?.host) { toast.error('先填 SSH 主机'); return }
+    if (isDirty('hosts')) {
+      toast.error('先把 SSH/数据库的修改保存', { description: '同步会重读配置，未保存的改动会被丢弃' })
+      return
+    }
+    const name = sshName(s0)
+    setEntsBusy(true)
+    try {
+      const r = await api.entsSync(name)
+      await new Promise<void>((resolve) => { loadSettings(); setTimeout(resolve, 300) })
+      const extra = r.addedAccounts?.length
+        ? `；新增账号 ${r.addedAccounts.join('、')}（密码按惯例=账号名，请到「数据库」页签改成真实口令）`
+        : ''
+      toast.success(`已同步 ${r.count} 个企业${extra}`)
+    } catch (e: any) {
+      toast.error('同步 ENT 失败', { description: e?.message || String(e), duration: 0 })
+    } finally {
+      setEntsBusy(false)
+    }
+  }
+
   const addSsh = () => { setSelSsh(sshs.length); setSshs([...sshs, blankSsh()]); markDirty('hosts') }
 
   /**
@@ -1163,11 +1199,12 @@ export function SettingsView() {
                         卡片头部（Card 的 right 位）是右对齐的,单独放页签会偏到最右边,
                         而它下面还要再起一行放按钮 —— 上下两块都占宽度,中间空出一大片。
                         这里合成一行,页面少一行高度,视线也不用上下折返。 */}
-                    <Tabs value={envTab} onValueChange={(v) => setEnvTab(v as 'ssh' | 'db')}>
+                    <Tabs value={envTab} onValueChange={(v) => setEnvTab(v as 'ssh' | 'db' | 'ents')}>
                       <div className="flex items-center gap-2">
                         <TabsList>
                           <TabsTrigger value="ssh">SSH 服务器</TabsTrigger>
                           <TabsTrigger value="db">数据库</TabsTrigger>
+                          <TabsTrigger value="ents">ENT</TabsTrigger>
                         </TabsList>
                         <span className="ml-auto flex items-center gap-2">
                           <Button variant="ghost" size="sm" title="复制该环境(SSH 与数据库连接整份抄一份,名称自动加 -copy)"
@@ -1356,6 +1393,57 @@ export function SettingsView() {
                           </div>
                         </>
                       )}
+                      </TabsContent>
+
+                      {/* ENT：只读清单 + 同步按钮。不提供任何手工编辑控件 —— 清单的来源
+                          只有一个（gzou_t），同步动作也只有一个。 */}
+                      <TabsContent value="ents" forceMount className="mt-3 space-y-3 data-[state=inactive]:hidden">
+                        <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                          <span>
+                            上次同步：{cur.entsSyncedAt
+                              ? new Date(cur.entsSyncedAt).toLocaleString('zh-CN')
+                              : '从未同步'}
+                          </span>
+                          <Button size="sm" variant="outline" className="ml-auto h-7"
+                            disabled={entsBusy || !cur.host}
+                            onClick={() => void syncEnts()}
+                            title="连库读 gzou_t（系统账号 ds），成功后写回 config.json">
+                            <RefreshCw className={cn('h-3.5 w-3.5', entsBusy && 'animate-spin')} />
+                            {entsBusy ? '同步中…' : '从服务器刷新'}
+                          </Button>
+                        </div>
+                        {!cur.ents || cur.ents.length === 0 ? (
+                          <div className="py-3 text-xs text-muted-foreground">
+                            还没有同步过 ENT 清单。点上面的「从服务器刷新」读一次库（需要能连上该环境）；
+                            之后 <span className="font-mono">tt env ents</span> / <span className="font-mono">--at-list</span> 都只读配置、不再连网。
+                          </div>
+                        ) : (
+                          <div className="max-h-[24rem] overflow-auto rounded-ui border border-border">
+                            <Table container={false}>
+                              <TableHeader>
+                                <TableRow className="hover:bg-transparent">
+                                  <TableHead>ENT</TableHead>
+                                  <TableHead>账号(schema)</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {cur.ents.map((e) => (
+                                  <TableRow key={e.ent}>
+                                    <TableCell className="font-mono">{e.ent}</TableCell>
+                                    <TableCell className="font-mono">
+                                      {e.account && e.account !== '-' ? e.account : <span className="text-muted-foreground">未配账号</span>}
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          </div>
+                        )}
+                        <p className="text-[11px] leading-relaxed text-muted-foreground">
+                          清单一律由「从服务器刷新」写入（读 gzou_t 的启用企业 gzou001，账号取 gzou003），
+                          不提供手工编辑。同步会把清单里的账号补进「数据库」页签的账号清单；缺的口令按
+                          T100 惯例（账号=密码）填写，请在那边核对。
+                        </p>
                       </TabsContent>
                     </Tabs>
                   </>

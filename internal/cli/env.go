@@ -96,6 +96,7 @@ Web 端在会话面板里选环境(那个选择是运行时的,同样不写配�
 	})
 	return cmd
 }
+
 // envView 是环境在 --json 输出里的形状。口令一律不出现在输出里。
 type envView struct {
 	Name      string `json:"name"`

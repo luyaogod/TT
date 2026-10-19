@@ -103,13 +103,13 @@ func PrintContract(w io.Writer, cmd *cobra.Command) (int, error) {
 		c.Grammar = "<环境>@<企业>（也可以只写 <环境>，企业可选）"
 		c.Sources = []string{
 			"<环境> ← config.json 的 hosts.sshs[].name（本机配置，无网络）",
-			"<企业> ← 该环境库里的 gzou_t（gzoustus='Y' 的 gzou001；账号取 gzou003）",
+			"<企业> ← config.json 的 hosts.sshs[].ents（设置页「ENT」页签 / tt env ents --refresh 从 gzou_t 同步）",
 			"组合   = 环境名 + \"@\" + 企业编号（企业编号是纯数字）",
 		}
 		c.Example = exampleOf(cmd, "<环境>@<企业>")
 		c.Notes = append(c.Notes,
-			"企业部分只读快照，不拨 SSH；没有快照的环境会明确报出来（见下）",
-			"要现况：tt env ents --refresh")
+			"企业清单来自配置，不拨 SSH；还没同步过的环境会明确报出来（见下）",
+			"要更新清单：tt env ents --refresh（或设置页「ENT」页签）")
 		exit = fillEntValues(&c)
 	case EnvEntReq:
 		c.Grammar = "<环境>@<企业>"
@@ -164,16 +164,19 @@ func writeHuman(w io.Writer, c contract) {
 			extra = append(extra, "区域 "+v.Zone)
 		}
 		if v.Source != "" {
-			fresh := "快照"
+			label := "快照"
+			if v.Source == "config" {
+				label = "配置"
+			}
 			switch {
 			case v.Stale && v.AgeSeconds > 0:
-				fresh = fmt.Sprintf("快照（%s前，已过期）", humanAge(v.AgeSeconds))
+				label = fmt.Sprintf("%s（%s前，已过期）", label, humanAge(v.AgeSeconds))
 			case v.Stale:
-				fresh = "快照（已过期）"
+				label = label + "（已过期）"
 			case v.AgeSeconds > 0:
-				fresh = fmt.Sprintf("快照（%s前）", humanAge(v.AgeSeconds))
+				label = fmt.Sprintf("%s（同步于 %s前）", label, humanAge(v.AgeSeconds))
 			}
-			extra = append(extra, fresh)
+			extra = append(extra, label)
 		}
 		if len(extra) > 0 {
 			line += "  " + strings.Join(extra, " · ")

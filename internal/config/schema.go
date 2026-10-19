@@ -75,11 +75,11 @@ func (e EntValue) Int() (int, bool) {
 // "查不到数据",与"数据不存在"完全一样。现在 ENT 只能每次显式给:
 // CLI `--ent`、Web 会话面板的输入框。
 type NamedSsh struct {
-	Name            string   `json:"name"`
-	SSHConfig                // 匿名嵌入：host/port/user/password 提升到 ssh 层
-	Zone            string   `json:"zone,omitempty"`      // 登录后区域菜单代码：31开发 35测试 36正式 39PATCH t出货
-	LaunchArgs      string   `json:"launchArgs,omitempty"` // 该环境的作业启动参数覆盖（空=用 debug.launchArgs）
-	WatchdogSeconds int      `json:"watchdogSeconds,omitempty"` // 该环境的停站超时覆盖（0=用 debug.watchdogSeconds）
+	Name            string `json:"name"`
+	SSHConfig              // 匠名嵌入：host/port/user/password 提升到 ssh 层
+	Zone            string `json:"zone,omitempty"`            // 登录后区域菜单代码：31开发 35测试 36正式 39PATCH t出货
+	LaunchArgs      string `json:"launchArgs,omitempty"`      // 该环境的作业启动参数覆盖（空=用 debug.launchArgs）
+	WatchdogSeconds int    `json:"watchdogSeconds,omitempty"` // 该环境的停站超时覆盖（0=用 debug.watchdogSeconds）
 	// Workspace 这个环境的 .tzs 工作区（含 mta/ 的目录，绝对路径）。
 	//
 	// 与上面两项同类：按环境覆盖机器级的东西 —— 但工作区**没有**机器级那份
@@ -87,6 +87,27 @@ type NamedSsh struct {
 	// 真实客户目录，配错就等于拿别人的表单当草稿纸。
 	Workspace string               `json:"workspace,omitempty"`
 	DB        *dbconfig.Connection `json:"db,omitempty"` // 该环境的数据库连接（与 SSH 一对一）
+	// Ents 这个环境支持的企业编号与各自的账号（gzou_t 的 gzou001/gzou003）。
+	//
+	// 为什么存进配置（而不是每次现查 gzou_t）：企业清单是**慢变量**，而“能不能看
+	// 到可选项”不该依赖网络（VPN 未开、不同环境在不同内网，都会把发现变成一堆超时）。
+	// 因此这里存的是“某次从 gzou_t 抄下来的清单”，由设置页「ENT」页签或
+	// `tt env ents --refresh` 显式同步（不允许手填）。entsSyncedAt 就是那份清单的
+	// 抄写时间 —— 它不参与判定，但必须如实带出去：账号被改过而没同步，用户要能看见。
+	Ents         []EntEntry `json:"ents,omitempty"`
+	EntsSyncedAt string     `json:"entsSyncedAt,omitempty"` // RFC3339
+}
+
+// EntEntry 一条“企业编号 → 数据库账号”的归档。
+//
+// 账号是连接该企业 schema 用的那个（gzou_t.gzou003）；Password 是同步时从
+// db.accounts 抄过来的副本（账号清单里没收录时按 T100 惯例 账号=密码）。
+// 运行时**优先用 db.accounts 里的口令**（那是唯一的编辑入口），这里这份只有
+// 在账号清单里没有该账号时才用 —— 两处不一致时，以人在设置里改过的那份为准。
+type EntEntry struct {
+	Ent      int    `json:"ent"`
+	Account  string `json:"account"`
+	Password string `json:"password,omitempty"`
 }
 
 // Hosts 服务器环境清单：config.json 顶层 hosts 节。
@@ -97,6 +118,14 @@ type NamedSsh struct {
 // Web 由会话面板选中。见 resolve.go 的 pickName —— 它现在只认显式名字。
 type Hosts struct {
 	SSHs []NamedSsh `json:"sshs"`
+}
+
+// EntsOf 返回某环境的 ENT 清单与同步时间（未配置/环境不存在返回 nil）。
+func (h *Hosts) EntsOf(env string) ([]EntEntry, string) {
+	if e := h.ByName(env); e != nil {
+		return e.Ents, e.EntsSyncedAt
+	}
+	return nil, ""
 }
 
 // ByName 按名取环境；未命中(含 name 为空)返回 nil。

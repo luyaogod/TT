@@ -19,9 +19,10 @@ const (
 
 // AccountSource 账号是怎么定下来的(AccountSource 字段的取值)。
 const (
-	AcctFromPrimary = "accounts[0]" // 客户端直连:账号列表首项
-	AcctFromEnt     = "ent(gzou_t)" // 按企业编号查 gzou_t 解析
-	AcctFromFlag    = "flag"        // 命令行显式指定
+	AcctFromPrimary   = "accounts[0]" // 客户端直连:账号列表首项
+	AcctFromEnt       = "ent(gzou_t)" // 按企业编号查 gzou_t 解析（快照/现查）
+	AcctFromEntConfig = "ent(config)" // 按企业编号查配置里的 ENT 清单（同步过之后的标准路径）
+	AcctFromFlag      = "flag"        // 命令行显式指定
 )
 
 // Target 一次查询的完整落脚点。

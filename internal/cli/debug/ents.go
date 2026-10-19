@@ -29,7 +29,7 @@ var (
 
 var debugEntsCmd = &cobra.Command{
 	Use:   "ents",
-	Short: "列出当前环境的企业编号(ENT)→ 数据库账号(schema);带快照,离线可答",
+	Short: "列出当前环境的企业编号(ENT)→ 数据库账号(schema);读配置,离线可答",
 	Long: `列出当前环境的企业编号(ENT),以及每个企业在该库里该用哪个账号(schema)。
 
 企业清单来自库里的 gzou_t 表(与 tt debug sql 解析账号用的是同一张表)。

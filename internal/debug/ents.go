@@ -197,6 +197,15 @@ func (c *EntCatalog) resolve(conn *host.SSHConn, d *dbRun, cfg *Config, opt EntL
 	path := entSnapshotPath(c.dataDir, cfg)
 	now := time.Now()
 
+	// 配置里的 ENT 清单优先：它是人显式同步过的那一份（设置页「ENT」页签 /
+	// tt env ents --refresh），存在即权威，**一次网络都不发**。
+	// Refresh 明确要求“现查”时才跳过它 —— 那是同步动作，不是日常读取。
+	if !opt.Refresh {
+		if l := configListing(cfg, now); l != nil {
+			return finish(l, cfg, opt, now), nil
+		}
+	}
+
 	if !opt.Refresh {
 		if l := c.memGet(fp, now); l != nil {
 			return finish(l, cfg, opt, now), nil
@@ -281,7 +290,8 @@ func (c *EntCatalog) resolve(conn *host.SSHConn, d *dbRun, cfg *Config, opt EntL
 //
 // **只读 SQL 走这条**,保持 dbsql.go 立下的规矩:解析不到就报错,不静默回退 ds ——
 // 回退到 ds 会安安静静地查另一个 schema,拿到 0 行,然后被当成"没有这条数据"。
-func (c *EntCatalog) account(conn *host.SSHConn, d *dbRun, cfg *Config, ent int) (string, error) {	if ent <= 0 {
+func (c *EntCatalog) account(conn *host.SSHConn, d *dbRun, cfg *Config, ent int) (string, error) {
+	if ent <= 0 {
 		return "", fmt.Errorf("企业编号无效: %d", ent)
 	}
 	l, err := c.list(conn, d, cfg, EntListOpt{Ent: ent})
@@ -324,7 +334,14 @@ func finish(l *EntListing, cfg *Config, opt EntListOpt, now time.Time) *EntListi
 	if l.AgeSeconds < 0 {
 		l.AgeSeconds = 0
 	}
-	l.Stale = l.Source == "snapshot-stale" || now.Sub(l.FetchedAt) >= EntSnapshotTTL
+	switch l.Source {
+	case "config":
+		// 配置清单本身就是“抄下来的那一份”：不按 TTL 判过期（否则 10 分钟后就
+		// 变成 stale，又会去拨网）。新鲜度用 FetchedAt/AgeSeconds 如实展示。
+		l.Stale = false
+	default:
+		l.Stale = l.Source == "snapshot-stale" || now.Sub(l.FetchedAt) >= EntSnapshotTTL
+	}
 	l.Current = entCurrent(cfg, opt.Ent, l.Ents)
 	return l
 }
@@ -395,4 +412,50 @@ func targetOf(cfg *Config) string {
 		return ""
 	}
 	return cfg.DB.Svc()
+}
+
+// configListing 把 config.json 里该环境的 ENT 清单转成 EntListing。
+// 没配置（或清单为空）返回 nil —— 调用方回落到快照/现查（老配置的兼容路径）。
+func configListing(cfg *Config, now time.Time) *EntListing {
+	name := cfg.EnvName()
+	for i := range cfg.SSHs {
+		if cfg.SSHs[i].Name != name {
+			continue
+		}
+		e := &cfg.SSHs[i]
+		if len(e.Ents) == 0 {
+			return nil
+		}
+		ents := make([]EntMapping, 0, len(e.Ents))
+		for _, x := range e.Ents {
+			acct := x.Account
+			if acct == "" {
+				acct = "-"
+			}
+			ents = append(ents, EntMapping{Ent: x.Ent, Account: acct, Placeholder: acct == "-"})
+		}
+		l := &EntListing{
+			Env: cfg.EnvName(), Zone: zoneOr36(cfg.Zone), Dialect: dialectOf(cfg),
+			Target: targetOf(cfg), TopentRaw: string(cfg.Topent),
+			Ents: ents, Source: "config", FetchedAt: now, Fingerprint: entFingerprint(cfg),
+			Notes: []string{"来自配置 json（ENT 页签/ tt env ents --refresh 同步的那一份），不联网"},
+		}
+		if e.EntsSyncedAt != "" {
+			if t, err := time.Parse(time.RFC3339, e.EntsSyncedAt); err == nil {
+				l.FetchedAt = t
+				l.Notes = append(l.Notes, "同步于 "+e.EntsSyncedAt)
+			}
+		}
+		return l
+	}
+	return nil
+}
+
+// ForgetEnts 丢掉某环境的进程内缓存。配置清单被同步改写后必须调用，
+// 否则下一次读还会命中旧的那份（mem 以指纹为键，与清单内容无关）。
+func (m *Manager) ForgetEnts(cfg *Config) {
+	fp := entFingerprint(cfg)
+	m.ents.mu.Lock()
+	delete(m.ents.mem, fp)
+	m.ents.mu.Unlock()
 }
