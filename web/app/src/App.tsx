@@ -181,11 +181,17 @@ export function App() {
   // 地址栏说的是哪条，面板就必须绑哪条。不绑的话，从树上点进 B（或刚建成 B 跳过来），
   // 编辑器/变量/断点还停在上一条 A 上 —— 而且界面上每一处都自洽，看不出错。
   // `selectSession` 仍是唯一的绑定入口（Q4：选中态只能由人点或本页自己发起的动作写）。
+  //
+  // **同一个 id 在这一次页面生命周期里只对齐一次**，但"一次"必须真的发生：
+  // 从前这里写的是 `if (st.sessionId === route.id) return` —— 刷新页面时 store 从
+  // localStorage 里已经绑着同一条，于是**对齐被整个跳过**，快照（state/stop/源码）
+  // 一条都没拉，界面就永远停在「启动中… / 连接中…」。实测 2026-10-19。
+  const alignedRef = useRef<string | null>(null)
   useEffect(() => {
-    if (route.kind !== 'session') return
-    const st = useStore.getState()
-    if (st.sessionId === route.id) return
-    void st.selectSession(route.id)
+    if (route.kind !== 'session') { alignedRef.current = null; return }
+    if (alignedRef.current === route.id) return
+    alignedRef.current = route.id
+    void useStore.getState().selectSession(route.id)
   }, [route])
 
   // 从设置页离开时重读一次环境清单:环境名/增删都只在那里改得动,不重读的话左侧树会

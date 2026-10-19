@@ -647,8 +647,37 @@ function scheduleRebindCheck() {
 //
 // 它是 **async**（等那次快照落定）—— 调用方 `await` 它，于是"选中一条会话"这个动作
 // 在 Promise 落定时就已经对齐完，测试与后续逻辑都能当它是同步的。
+// waitSessionStateSettled 等一条**还在登录**的会话落定（idle / stopped / running / exit）。
+//
+// 为什么需要它：`selectSession` 的对齐在一次页面生命周期里只做一次；若那一次拿到的
+// 状态是 `loading` 就直接返回，登录完成后界面没有任何东西会再来问 —— 用户看到的就是
+// 永远停在「启动中…」（实测 2026-10-19）。这里用快照轮询把它推到落定为止。
+async function waitSessionStateSettled(get: () => Store, id: string, timeoutMs = 90000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 750))
+    if (get().sessionId !== id) return false
+    try {
+      const snap: any = await api.snapshot(id)
+      if (get().sessionId !== id) return false
+      const state = String(snap?.state || '')
+      if (state && state !== 'loading') {
+        void refreshSessionList()
+        return true
+      }
+    } catch {
+      // 会话可能刚被收掉：交给下一轮判断（列表/事件会让绑定失效）
+      const list = await refreshSessionList()
+      if (list && !list.some((x) => x.id === id)) return false
+    }
+    // 列表里的人也可能先变（WS 事件已经把它更新成 idle），这里顺手刷新一次
+    void refreshSessionList()
+  }
+  return false
+}
+
 async function alignSelected(set: (p: Partial<Store>) => void, get: () => Store, id: string) {
-  const s = useStore.getState().sessionList.find((x) => x.id === id)
+  let s = useStore.getState().sessionList.find((x) => x.id === id)
   // 树里那条（人点的那条）还记着建会话时点名的作业。服务端对**没起过作业的空闲会话**
   // 是不知道作业编号的（`POST /sessions/new` 只建宿主），所以这里以树为准补上 ——
   // 否则会话页写"作业 (空)"，而人明明填过（用户 2026-10-18 的截图就是这一格）。
@@ -658,7 +687,7 @@ async function alignSelected(set: (p: Partial<Store>) => void, get: () => Store,
       module: s.module, prog: s.prog || item?.prog || '', runProg: s.runProg || s.prog || item?.prog || '',
       state: s.state, sessionEnv: s.env || '', mode: modeOf(s.mode),
     })
-    if (s.state === 'idle' || s.state === 'loading') {
+    if (s.state === 'idle') {
       // 空闲宿主(idle)：只绑定，不刷源码；等下一次启动直接复用宿主。
       // **但要清掉上一条会话的源码** —— 不清的话界面上是 A 的代码、绑的是 B，最误导。
       set({
@@ -667,6 +696,25 @@ async function alignSelected(set: (p: Partial<Store>) => void, get: () => Store,
         sourceContent: '', sourcePath: '', sourceDVM: '', sourceMissing: false,
       })
       return
+    }
+    if (s.state === 'loading') {
+      // 还在登录：**自己轮询到它落定**，再走下面的常规对齐。
+      // 从前这里直接 return —— 而对齐在一次页面生命周期里只做一次，登录完成后
+      // 没有任何东西会再来刷新状态，界面就永远停在「启动中… / 连接中…」（实测 2026-10-19）。
+      set({ loadingSource: false })
+      const settled = await waitSessionStateSettled(get, id)
+      if (!settled) return
+      s = useStore.getState().sessionList.find((x) => x.id === id) || s
+      if (s.state === 'idle') {
+        set({
+          state: 'idle', module: s.module, prog: s.prog || item?.prog || '',
+          runProg: s.runProg || s.prog || item?.prog || '', sessionEnv: s.env || '',
+          started: false, stop: null, currentLine: 0, breakpoints: [], frames: [],
+          autovars: [], selectedFrame: -1, holdingSeconds: 0, loadingSource: false,
+          sourceContent: '', sourcePath: '', sourceDVM: '', sourceMissing: false,
+        })
+        return
+      }
     }
   }
   try {
@@ -759,6 +807,11 @@ const wsLogContentCache = new Map<string, WSLogContent>()
 const wsLogContentInflight = new Map<string, Promise<WSLogContent>>()
 
 
+// 启动看门狗：点了「运行」之后一直停在 loading 的兜底（POST 超时/作业起不来/GDC 没起）。
+// 120 秒只在时间线提醒一次；240 秒仍没落定就退出 loading 状态并给出可读的失败原因 ——
+// 界面不会永远停在「启动中…」。
+let launchStartedAt = 0
+let launchWarned = false
 // 接口日志查询的"请求代次"。同上:翻页/改条件会叠出多个在途查询。
 let wsLogsGen = 0
 
@@ -1318,6 +1371,8 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   launch: async (module, prog) => {
+    launchStartedAt = Date.now()
+    launchWarned = false
     set({ launching: true, launchError: '', timeline: [], rawLog: [], watches: [], autovars: [], backendDead: '', selectedFrame: -1, lastReplayRowid: null, lastReplayRequest: '' })
     // 启动调试:编辑器进入加载态(转圈),入口停站定位 MAIN 后一次性显示源码,
     // 避免启动过程中内容跳来跳去
@@ -1997,6 +2052,24 @@ function pollUntilStopped(set: (p: Partial<Store>) => void, get: () => Store) {
           st.pushTimeline({ origin: 'system', kind: 'stop', text: `命中断点 ${snap.stop.file}:${snap.stop.line}` })
         }
       }
+      // 启动看门狗：loading 拖太久要说出来（并且最终退出，不留一个永远转圈的界面）。
+      if (snap.state === 'loading' && launchStartedAt > 0) {
+        const waited = Date.now() - launchStartedAt
+        if (waited > 120000 && !launchWarned) {
+          launchWarned = true
+          st.pushTimeline({ origin: 'system', kind: 'warn', text: '启动超过 120 秒仍未停站：检查 GDC 是否已起、作业是否在等界面输入（可看服务日志 .tt-serve.log）' })
+          set({ launchError: '启动超过 120 秒仍未停站。常见原因：GDC 没有起来 / 作业在等服务端输入 / 断点下在不可执行的行。' })
+        }
+        if (waited > 240000) {
+          if (snapTimer) clearInterval(snapTimer!)
+          snapTimer = undefined
+          launchStartedAt = 0
+          set({ state: '', launching: false, loadingSource: false, launchError: '启动超时（240 秒仍未停站）：已退出等待。检查服务日志后重试。' })
+          st.pushTimeline({ origin: 'system', kind: 'warn', text: '启动超时（240 秒）：已退出等待' })
+          return
+        }
+      }
+      if (snap.state === 'stopped' || snap.state === 'idle' || snap.state === 'exit') launchStartedAt = 0
       if (snap.state === 'exit') { clearInterval(snapTimer!); snapTimer = undefined }
       if (snap.state === 'idle') {
         // 本轮运行直接结束(程序立即退出等):回空闲,清运行现场(会话保留)
