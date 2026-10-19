@@ -16,29 +16,36 @@ import (
 const pickDirPS = `
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class TTPickWin {
+  [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+}
+"@
 $d = New-Object System.Windows.Forms.FolderBrowserDialog
 $d.Description = if ($env:TT_PICK_TITLE) { $env:TT_PICK_TITLE } else { '选择文件夹' }
 $d.ShowNewFolderButton = $true
 if ($env:TT_PICK_INITIAL -and (Test-Path -LiteralPath $env:TT_PICK_INITIAL -PathType Container)) {
   $d.SelectedPath = $env:TT_PICK_INITIAL
 }
-$owner = New-Object System.Windows.Forms.Form
-$owner.TopMost = $true
-$owner.ShowInTaskbar = $false
-$owner.WindowState = [System.Windows.Forms.FormWindowState]::Minimized
-$owner.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+$console = [TTPickWin]::GetConsoleWindow()
+$timer = New-Object System.Windows.Forms.Timer
+$timer.Interval = 100
+$timer.add_Tick({ [void][TTPickWin]::ShowWindow($console, 0); $timer.Stop() })
+$timer.Start()
 try {
-  $r = $d.ShowDialog($owner)
+  $r = $d.ShowDialog()
   if ($r -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($d.SelectedPath) }
 } finally {
   $d.Dispose()
-  $owner.Dispose()
 }
 `
 
 func pickDirectory(ctx context.Context, initial, title string) (string, bool, error) {
 	cmd := exec.CommandContext(ctx, "powershell.exe",
-		"-NoProfile", "-STA", "-WindowStyle", "Hidden", "-Command", pickDirPS)
+		"-NoProfile", "-STA", "-Command", pickDirPS)
 	cmd.Env = append(os.Environ(),
 		"TT_PICK_INITIAL="+initial,
 		"TT_PICK_TITLE="+title,
