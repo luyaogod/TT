@@ -21,6 +21,7 @@ import (
 
 	"tt/internal/cli/at"
 	"tt/internal/cli/common"
+	"tt/internal/cli/db"
 	"tt/internal/cli/debug"
 	"tt/internal/cli/dev"
 	"tt/internal/cli/dict"
@@ -115,6 +116,7 @@ func init() {
 		"列出本命令可用的 --at 取值、来源与示例（纯本地，不联网）")
 
 	debug.Register(rootCmd)
+	db.Register(rootCmd)
 	// 把 --env 的读写方式注入 dev 包:它不能直接 import cli/common(与 dev/common 撞包名)。
 	// 读:tzs 用它取该环境的 workspace;写:takeRootFlags 摘到 --env 时落到同一个 common.Env。
 	dev.SetEnvNameFunc(
@@ -135,7 +137,13 @@ func init() {
 	rootCmd.AddCommand(newVersionCmd())
 	rootCmd.AddCommand(newUpdateCmd())
 	// --at 的校验/落位：先于任何 RunE，且子命令自己的 --ent 还没被读。
-	rootCmd.PersistentPreRunE = at.Apply
+	// 目标填错属于“用法/身份”错，统一退 2（各命令线的运行期错误另有自己的码）。
+	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		if err := at.Apply(cmd, args); err != nil {
+			return output.Errorf("USAGE", 2, "%v", err)
+		}
+		return nil
+	}
 }
 
 // Execute 运行根命令。

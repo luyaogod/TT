@@ -7,15 +7,12 @@ package dict
 //          (oracle:chenv zone+ORACLE_HOME+TNS/tnsnames;kingbase:实例发现)
 
 import (
-	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"tt/internal/cli/common"
 	"tt/internal/config"
 	"tt/internal/dbconfig"
-	"tt/internal/dict/live"
 	"tt/internal/host"
 	"tt/internal/output"
 
@@ -82,32 +79,6 @@ var dbListCmd = &cobra.Command{
 			}
 			fmt.Printf("    %-12s %-8s %-28s 账号%d个%s\n", r.Env, r.Type, r.Address, len(r.Accounts), via)
 		}
-		return nil
-	},
-}
-
-// dbPingCmd 验证指定环境库的可达性。
-var dbPingCmd = &cobra.Command{
-	Use:   "ping",
-	Short: "验证环境的数据库可达(--env <环境名>;只读 SELECT version;支持 viaSsh 隧道)",
-	Args:  cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		conn, envName, err := resolveDbConn(common.Env)
-		if err != nil {
-			return err
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
-		defer cancel()
-		l, err := live.Open(ctx, *conn)
-		if err != nil {
-			return err
-		}
-		defer l.Close()
-		ver, err := l.Connector().ServerVersion(ctx)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("连接正常: %s (%s) %s\n", envName, conn.Type, firstLine(ver))
 		return nil
 	},
 }
@@ -252,6 +223,6 @@ func init() {
 	dbDiscoverCmd.Flags().StringVar(&discoverType, "type", "", "数据库类型(oracle/kingbase;默认 oracle)")
 	dbDiscoverCmd.Flags().StringVar(&discoverHost, "host", "", "客户端可达 DB 地址覆盖(默认取探测/ssh host)")
 	dbDiscoverCmd.Flags().BoolVar(&discoverSave, "save", false, "写入该环境的 db(config.json hosts.sshs[].db)")
-	dbCmd.AddCommand(dbListCmd, dbPingCmd, dbDiscoverCmd)
+	dbCmd.AddCommand(dbListCmd, dbDiscoverCmd)
 	dbListCmd.Flags().BoolVar(&dbListSecrets, "show-secrets", false, "原样输出账号口令(默认打码)")
 }

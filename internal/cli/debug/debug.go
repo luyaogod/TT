@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"tt/internal/cli/common"
+	cdb "tt/internal/cli/db"
 	"tt/internal/debug"
 )
 
@@ -21,7 +22,6 @@ var (
 	dbgProg   string
 	dbgListen string
 	dbEnt     int
-	dbRefresh bool
 )
 
 // debugProbeCmd 是调试链路自检：全自动跑 登录→启动→下断点→命中→源码→栈帧→步进→求值，
@@ -245,92 +245,18 @@ var debugServeCmd = &cobra.Command{
 	},
 }
 
-// debugDBCmd 数据库连接探查:登录服务器 → 查 gzou_t 企业→账号映射 → 尝试用对应账号连库
+// debugDBCmd 已迁移到 tt db probe（服务器侧连接体检）；这里只保留隐藏转发，
+// 下一个版本移除。企业/账号来自配置的 ENT 清单，不再现查 gzou_t。
 var debugDBCmd = &cobra.Command{
-	Use:   "db",
-	Short: "数据库连接探查:按企业(TOPENT)查账号并尝试连接",
-	Long: `登录服务器,读取 gzou_t 中企业编号与数据库账号(schema)的映射,
-并尝试用对应账号连接数据库(密码优先取该连接的账号清单,未收录按"账号=密码"惯例)。
-
-  tt debug db            列出全部企业→账号映射
-  tt debug db --ent 99   验证企业 99 对应账号的连接(默认企业取该 SSH 环境的 topent)
-  tt debug db --ent 99 --json  输出 JSON
-
-这条命令是**连接体检**:它会真的连一次库验证账号可用。
-只要清单(不验证连接)用 tt debug ents —— 那份带快照,不联网也能答。`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		cfgPath, err := resolveConfigPath()
-		if err != nil {
-			return err
+	Use:        "db",
+	Short:      "（已迁移）数据库连接体检 —— 用 tt db probe",
+	Hidden:     true,
+	Deprecated: "已迁移：请用 tt db probe --at <环境>@<企业>",
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		if dbEnt <= 0 {
+			return fmt.Errorf("需要 --at <环境>@<企业>（或 --env + --ent）：验的是这个企业的账号")
 		}
-		cfg, err := debug.LoadConfig(cfgPath)
-		if err != nil {
-			return err
-		}
-		// 环境必须点名(与 tt debug ents / tt debug start 同一条解析):
-		// 从前这里只做 ApplyDefaultEnv，--env / --at 被**静默忽略** —— 用户以为验的是
-		// 正式区，实际连的是列表首条。现在没点名就报错并列候选。
-		if name := strings.TrimSpace(common.Env); name != "" {
-			sel := cfg.CloneEnv(name)
-			if sel == nil {
-				return fmt.Errorf("环境 %q 不存在(用 tt env list 查看)", name)
-			}
-			cfg = sel
-		}
-		cfg.ApplyDefaultEnv() // 环境的连接/参数合并到运行时字段
-		// 数据目录 = 配置所在目录:企业目录快照与 serve 侧落在同一份(见 ents.go)
-		cfg.DataDir = filepath.Dir(cfgPath)
-		ent := dbEnt
-		if ent <= 0 {
-			ent = cfg.TopentInt()
-		}
-		rep, err := debug.ProbeDB(cfg, ent, debug.EntListOpt{Ent: ent, Refresh: dbRefresh})
-		if err != nil {
-			return err
-		}
-		if IsJSON() {
-			return printJSON(rep)
-		}
-		// 人类可读输出
-		if kdb := rep.Env["database"]; kdb != "" {
-			fmt.Printf("区域: %s   数据库: 人大金仓 %s@%s:%s\n", rep.Zone, kdb, rep.Env["host"], rep.Env["port"])
-			if ks := rep.Env["ksql"]; ks != "" {
-				fmt.Printf("ksql: %s\n", ks)
-			}
-		} else {
-			fmt.Printf("区域: %s   Oracle: %s:%s (service %s)\n",
-				rep.Zone, rep.Env["host"], rep.Env["port"], rep.TNS)
-			if sp := rep.Env["sqlplus"]; sp != "" {
-				fmt.Printf("sqlplus: %s\n", sp)
-			}
-			if oh := rep.Env["oracleHome"]; oh != "" {
-				fmt.Printf("ORACLE_HOME: %s\n", oh)
-			}
-		}
-		fmt.Printf("\n企业(TOPENT) → 账号(schema),共 %d 个:\n", len(rep.Mappings))
-		for _, m := range rep.Mappings {
-			mark := " "
-			if rep.Probe != nil && m.Ent == rep.Probe.Ent {
-				mark = "*"
-			}
-			fmt.Printf("  %s %-6d → %s\n", mark, m.Ent, m.Account)
-		}
-		if rep.Probe != nil {
-			p := rep.Probe
-			fmt.Printf("\n企业 %d 连接验证: %s@%s\n", p.Ent, p.Account, rep.TNS)
-			if p.Host != "" {
-				fmt.Printf("  主机: %s:%s  服务名: %s\n", p.Host, p.Port, p.Service)
-			}
-			if p.Connect {
-				fmt.Println("  结果: 连接成功 ✓")
-			} else {
-				fmt.Printf("  结果: 连接失败 ✗  %s\n", p.Error)
-			}
-			fmt.Println("  (密码:优先取该连接的账号清单(accounts/主账号),未收录按 账号=密码 惯例;若失败请在 设置-环境-DB 页的账号清单维护密码)")
-		} else {
-			fmt.Println("\n(未指定企业,仅列出映射。用 --ent <企业号> 验证连接)")
-		}
-		return nil
+		return cdb.ProbeOnce(dbEnt)
 	},
 }
 
@@ -347,7 +273,6 @@ func init() {
 	debugServeCmd.Flags().BoolVar(&dbgServeForeground, "foreground", false, "前台运行,日志直出终端(默认后台常驻)")
 	debugServeCmd.Flags().BoolVar(&dbgServeStop, "stop", false, "停止后台运行的调试服务(单实例)")
 	debugDBCmd.Flags().IntVar(&dbEnt, "ent", 0, "企业编号(TOPENT),验证该企业账号连接;0=取该环境的 topent")
-	debugDBCmd.Flags().BoolVar(&dbRefresh, "refresh", false, "跳过企业目录缓存与快照,强制现查 gzou_t")
 
 	Group.AddCommand(debugProbeCmd, debugServeCmd, debugDBCmd)
 }

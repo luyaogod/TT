@@ -115,7 +115,7 @@ func PrintContract(w io.Writer, cmd *cobra.Command) (int, error) {
 		c.Grammar = "<环境>@<企业>"
 		c.Sources = []string{
 			"<环境> ← config.json 的 hosts.sshs[].name（本机配置，无网络）",
-			"<企业> ← 该环境库里的 gzou_t（gzoustus='Y' 的 gzou001；账号取 gzou003）",
+			"<企业> ← config.json 的 hosts.sshs[].ents（设置页「ENT」页签 / tt env ents --refresh 从 gzou_t 同步）",
 			"组合   = 环境名 + \"@\" + 企业编号（企业编号是纯数字）",
 		}
 		c.Example = exampleOf(cmd, "<环境>@<企业>")

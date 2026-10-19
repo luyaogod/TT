@@ -106,7 +106,7 @@ func checkEnt(cmd *cobra.Command, env string, ent int) error {
 		}
 		known = append(known, fmt.Sprintf("%s@%d", env, m.Ent))
 	}
-	return fmt.Errorf("%s 的 --at 指向了企业 %d，但 %s 的 gzou_t 启用清单里没有它。\n可用的是：%s\n（完整清单：tt env ents %s）",
+	return fmt.Errorf("%s 的 --at 指向了企业 %d，但 %s 的 ENT 清单里没有它。\n可用的是：%s\n（完整清单：tt env ents %s；没同步过就跑 tt env ents --refresh）",
 		cmd.CommandPath(), ent, env, strings.Join(known, "、"), env)
 }
 

@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -17,10 +16,9 @@ import (
 	"time"
 
 	"tt/internal/cli/common"
-	"tt/internal/dbconfig"
+	cdb "tt/internal/cli/db"
 	"tt/internal/debug"
 	"tt/internal/debugclient"
-	"tt/internal/output"
 	"tt/internal/target"
 
 	"github.com/spf13/cobra"
@@ -1394,150 +1392,42 @@ func showWSLog(rowid string, asJSON bool, reqSave string) error {
 	return nil
 }
 
-// sqlQueryResult 是 /api/dbsql 返回的只读查询结果(客户端视图)。
+// debugSQLCmd 已迁移到 tt db sql；这里只保留隐藏转发（下一个版本移除）。
 //
-// 环境字段(Env/SSHHost/Zone/DBTarget)与 Ent/Account 一起构成"这次查询落在哪"的完整答案:
-// ENT 决定账号(哪个 schema),环境决定连的是哪台服务器、哪个区的库 —— 同一个企业编号
-// 在开发区与正式区是两套库,只回显其一就不足以发现"查错了地方"。
-type sqlQueryResult struct {
-	Ent           int        `json:"ent"`
-	Account       string     `json:"account"`
-	Env           string     `json:"env"`
-	SSHHost       string     `json:"sshHost"`
-	Zone          string     `json:"zone"`
-	DBTarget      string     `json:"dbTarget"`
-	Dialect       string     `json:"dialect"`
-	Columns       []string   `json:"columns"`
-	Rows          [][]string `json:"rows"`
-	TotalRows     int        `json:"totalRows"`
-	Truncated     bool       `json:"truncated"`
-	ServerLimited bool       `json:"serverLimited"`
-	Elapsed       float64    `json:"elapsedSeconds"`
-	Notes         []string   `json:"notes"`
-}
-
-// sqlMeta 把服务器返回的结果转成统一的输出环境块(internal/output.Meta)。
-//
-// 这是本命令与 tt dict 共用的那一份"我这次落在哪"的表述 —— ENT 决定账号(哪个 schema),
-// 环境决定连的是哪台服务器、哪个区的库,少回显一半就可能把"查错了地方"读成"数据不存在"。
-func sqlMeta(res sqlQueryResult) output.Meta {
-	route := dbconfig.RouteServerOracle
-	if res.Dialect == "kingbase" {
-		route = dbconfig.RouteServerKB
-	}
-	return output.Meta{
-		Source: "live", Env: res.Env, SSHHost: res.SSHHost, Zone: res.Zone,
-		Ent: res.Ent, Account: res.Account, AccountSource: dbconfig.AcctFromEnt,
-		Target: res.DBTarget, Dialect: res.Dialect, Route: route,
-		Readonly:  true,
-		TotalRows: res.TotalRows, Returned: len(res.Rows),
-		Truncated: res.Truncated, ServerLimited: res.ServerLimited,
-		Elapsed: res.Elapsed, Notes: res.Notes,
-	}
-}
-
-// writeSQLResult 输出一次只读查询:`# ` 信息块 + 纯净 CSV(表头 + 数据)。
-//
-// 渲染本身在 internal/output,与 tt dict 同一个实现 —— 头部该有哪些字段、空段怎么跳、
-// 井号后面为什么必须有一个空格,那些规矩只该有一处定义。
-func writeSQLResult(w io.Writer, res sqlQueryResult) error {
-	return output.WriteCSV(w, sqlMeta(res), res.Columns, res.Rows)
-}
-
-// debugSQLCmd 只读 SQL:查业务数据("这个料号在主表里到底有没有")
+// 转发到 db.QueryOnce 的原因：旧命令走 serve（POST /api/dbsql），而 db sql 是本机
+// 直连（SSH + sqlplus/ksql）。两条路必须给出同一份信封，所以共用同一个渲染实现。
 var debugSQLCmd = &cobra.Command{
-	Use:          `sql "<查询语句>"`,
-	Short:        "执行一条只读 SQL(默认 JSON 信封,含环境与 ENT;账号由 TOPENT 决定)",
-	SilenceUsage: true, // 报错多为运行期(白名单拒绝/库上出错),不是用法问题
-	Long: `对当前环境查一条**只读** SQL,用来回答"这条业务数据到底有没有/是什么" ——
-排查接口失败时,靠改入参反复重放去反推太慢,这里能直接看一眼。
-
-  tt debug sql "select bmaa001,bmaastus from bmaa_t where bmaa001='FCPU010100003'"
-  tt debug sql --file q.sql              # 长语句从本地文件读
-  tt debug sql "select * from t" --ent 100   # 显式指定企业(默认取会话的 TOPENT)
-
-**默认输出是 JSON 信封**(与 tt dict 同一条口径):环境信息平铺在顶层,载荷在 data。
-信封里那几项**必须看** —— 账号由企业编号(TOPENT)经 gzou_t 解析而来,企业编号错了
-就会连到另一个 schema、拿到 0 行,而那看起来和"数据不存在"一模一样。
-
-  {"ok":true,"env":"开发环境","zone":"31","ent":99,"account":"dsdemo",
-   "accountSource":"ent(gzou_t)","target":"10.0.0.2:1521/t100dev",
-   "route":"server-sqlplus","readonly":true,
-   "totalRows":2,"returned":2,"truncated":false,
-   "data":{"columns":["BMAA001"],"rows":[["FCPU010100003"]]}}
-
---format csv 给"注释头 + 纯净 CSV":注释行一律以「# 」(井号 + 空格)开头且**全在头部**,
-所以 grep -v '^# ' 切下去就是一个标准 CSV 文件(逗号/引号/换行会被正确转义)。
---format table 给人看对齐表格(前面同样带那几行环境信息)。
-
-限制(都是刻意的,不是没做):
-  - 只允许**单条** SELECT / WITH;写操作、DDL、PL/SQL 块、多语句、sqlplus 命令一律拒绝;
-  - 库会话是只读事务,常规写会被库自己挡回去;
-  - **最多回 200 行**,totalRows 是**下界**(库侧故意多取一行判"还有更多")。要更多请
-    加 WHERE 收窄 —— 工具不提供整表导出;
-  - 单字段超过 4096 字节会被截断,并在 notes 里记一条。
-
-挡不住的(别当成绝对安全):自治事务/函数副作用这类"披着 SELECT 外衣的写",
-以及"只读 ≠ 只读该企业的数据"(账号常有跨 schema 授权)。`,
-	Args: cobra.MaximumNArgs(1),
+	Use:        `sql "<查询语句>"`,
+	Short:      "（已迁移）执行一条只读 SQL —— 用 tt db sql",
+	Hidden:     true,
+	Deprecated: "已迁移：请用 tt db sql（--at <环境>@<企业>）",
+	Args:       cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sqlText := ""
 		if len(args) == 1 {
 			sqlText = strings.TrimSpace(args[0])
 		}
 		if dbgSQLFile != "" {
+			if sqlText != "" {
+				return fmt.Errorf("语句既给了位置参数又给了 --file，二选一")
+			}
 			b, err := os.ReadFile(dbgSQLFile)
 			if err != nil {
 				return fmt.Errorf("读取语句文件失败: %s: %w", dbgSQLFile, err)
 			}
-			if sqlText != "" {
-				return fmt.Errorf("语句既给了位置参数又给了 --file,二选一")
-			}
 			sqlText = strings.TrimSpace(string(b))
 		}
 		if sqlText == "" {
-			return fmt.Errorf(`需要一条查询语句(见 tt debug sql --help),或用 --file 指定语句文件`)
+			return fmt.Errorf(`需要一条查询语句，或用 --file 指定语句文件`)
 		}
-		// 企业编号必须**显式**给服务端（WP4b / 契约 C7.1-5）：服务端那条"ent<=0 就回落
-		// 当前会话 TOPENT"的兜底已删（Q4/C8.2 硬切）。这里按**这条会话**当前生效的企业编号
-		// 填上（会话内覆盖 > 启动时显式给的值；都空就不带，由服务端按 USAGE 拒），
-		// 于是单会话行为与从前逐字相同，多会话下也不会落到别人的企业上去。
 		ent := dbgSQLEnt
 		if ent <= 0 {
 			ent = dbgSQLTopentForRun()
 		}
-		body := map[string]any{"sql": sqlText, "ent": ent}
-		if dbgTimeout > 0 {
-			body["timeout"] = dbgTimeout
+		if ent <= 0 {
+			return fmt.Errorf("需要 --at <环境>@<企业>（或 --env + --ent）：企业编号决定用哪个账号")
 		}
-		data, err := dbgAPI("POST", "/api/dbsql", body)
-		if err != nil {
-			return err
-		}
-		var r struct {
-			Result sqlQueryResult `json:"result"`
-		}
-		if err := json.Unmarshal(data, &r); err != nil {
-			return err
-		}
-		// 默认 JSON —— 与 tt dict 同一条口径:信封带环境信息,载荷在 data。
-		// 从前这里默认吐 CSV、--json 时把服务器响应原样打出去(套着 result 外层),
-		// 于是同一个信封在两个命令里是两种形状。CSV 现在要显式 --format csv,
-		// 人读表格是 --format table。
-		switch common.OutputFormat() {
-		case output.FormatCSV:
-			return writeSQLResult(os.Stdout, r.Result)
-		case output.FormatTable:
-			if err := output.WriteMeta(os.Stdout, sqlMeta(r.Result)); err != nil {
-				return err
-			}
-			return output.WriteTable(os.Stdout, r.Result.Columns, r.Result.Rows)
-		default:
-			return output.Emit(os.Stdout, output.Options{
-				Format: output.FormatJSON, Meta: sqlMeta(r.Result),
-				Data: map[string]any{"columns": r.Result.Columns, "rows": r.Result.Rows},
-			})
-		}
+		return cdb.QueryOnce(sqlText, ent, dbgTimeout)
 	},
 }
 

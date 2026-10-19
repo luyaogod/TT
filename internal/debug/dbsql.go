@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"tt/internal/dbconfig"
 	"tt/internal/host"
 	"tt/internal/safesql"
 )
@@ -39,8 +40,11 @@ const (
 // 的库 —— 同一个企业编号在开发区与正式区是两套完全不同的库,少回显一半就还可能
 // 把"查错了地方"读成"数据不存在"。调用方(CLI)会把它们打进结果头部。
 type DBQueryResult struct {
-	Ent           int        `json:"ent"`
-	Account       string     `json:"account"`
+	Ent     int    `json:"ent"`
+	Account string `json:"account"`
+	// AccountSource 账号是怎么定的：ent(config)=配置里的 ENT 清单（标准路径），
+	// ent(gzou_t)=该环境还没同步 ENT，回落到快照/现查。信封里要如实带出去。
+	AccountSource string     `json:"accountSource,omitempty"`
 	Env           string     `json:"env,omitempty"`      // 环境名(配置里的 sshs[].name)
 	SSHHost       string     `json:"sshHost,omitempty"`  // 该环境的 SSH 主机
 	Zone          string     `json:"zone,omitempty"`     // 登录区域代码
@@ -183,8 +187,15 @@ func (m *Manager) RunReadonlyQuery(conn *host.SSHConn, req ReadonlyQueryReq) (*D
 		}
 	}
 
+	acctSource := dbconfig.AcctFromEnt
+	for i := range m.cfg.SSHs {
+		if m.cfg.SSHs[i].Name == m.cfg.EnvName() && len(m.cfg.SSHs[i].Ents) > 0 {
+			acctSource = dbconfig.AcctFromEntConfig
+			break
+		}
+	}
 	res := &DBQueryResult{
-		Ent: ent, Account: account,
+		Ent: ent, Account: account, AccountSource: acctSource,
 		// 环境信息在这里定格:后面既有 SSH 会话又有库会话,任何一处晚了都可能拿到
 		// 另一个环境的影子值 —— 头部那几个字段是给人判断"查的是哪儿"的,不能猜。
 		// SSH 主机取**实际连上的那条连接**(不是配置里的当前环境),库地址取
