@@ -24,6 +24,9 @@ func TestMirrorEnvDirAndReady(t *testing.T) {
 	if !MirrorReady(dir, "envA") {
 		t.Fatal("有基线标记应为 true")
 	}
+	if !MirrorReadyDir(filepath.Join(dir, "envA")) {
+		t.Fatal("MirrorReadyDir 应识别直接目录的基线标记")
+	}
 	if MirrorReady("", "envA") {
 		t.Fatal("空镜像根应为 false")
 	}

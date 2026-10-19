@@ -54,11 +54,12 @@ func (s *Server) hMirrorGet(w http.ResponseWriter, r *http.Request) {
 	if hosts, err := config.LoadHosts(s.cfgPath); err == nil {
 		for i := range hosts.SSHs {
 			e := &hosts.SSHs[i]
+			envDir := e.MirrorPath(dir)
 			resp.Envs = append(resp.Envs, mirrorEnv{
 				Name:  e.Name,
 				Zone:  e.Zone,
-				Path:  host.MirrorEnvDir(dir, e.Name),
-				Ready: host.MirrorReady(dir, e.Name),
+				Path:  envDir,
+				Ready: host.MirrorReadyDir(envDir),
 			})
 		}
 	}
@@ -80,13 +81,9 @@ func (s *Server) hMirrorPull(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, fmt.Errorf("请选择环境"))
 		return
 	}
-	dir := ""
+	rootDir := ""
 	if root, err := loadConfig(s.cfgPath); err == nil {
-		dir = config.AbsPath(root.Mirror.Dir)
-	}
-	if dir == "" {
-		writeJSON(w, 200, map[string]any{"ok": false, "error": "请先设置镜像根目录"})
-		return
+		rootDir = root.Mirror.Dir
 	}
 	hosts, err := config.LoadHosts(s.cfgPath)
 	if err != nil {
@@ -96,6 +93,11 @@ func (s *Server) hMirrorPull(w http.ResponseWriter, r *http.Request) {
 	e := hosts.ByName(envName)
 	if e == nil {
 		fail(w, 400, fmt.Errorf("未找到环境 %q", envName))
+		return
+	}
+	envDir := e.MirrorPath(rootDir)
+	if envDir == "" {
+		writeJSON(w, 200, map[string]any{"ok": false, "error": "请先设置镜像根目录，或在该环境行单独指定镜像目录"})
 		return
 	}
 
@@ -121,7 +123,7 @@ func (s *Server) hMirrorPull(w http.ResponseWriter, r *http.Request) {
 	s.mirrorCancel = cancel
 	s.mirrorMu.Unlock()
 
-	go s.runMirror(ctx, e, dir, req.Full)
+	go s.runMirror(ctx, e, envDir, req.Full)
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -147,7 +149,7 @@ func (s *Server) hMirrorStop(w http.ResponseWriter, r *http.Request) {
 }
 
 // runMirror 后台执行拉取,把 host 的进度回调同步到任务状态。
-func (s *Server) runMirror(ctx context.Context, e *host.NamedSsh, dir string, full bool) {
+func (s *Server) runMirror(ctx context.Context, e *host.NamedSsh, envDir string, full bool) {
 	onProgress := func(p host.MirrorProgress) {
 		s.mirrorMu.Lock()
 		if p.Phase != "" {
@@ -169,7 +171,7 @@ func (s *Server) runMirror(ctx context.Context, e *host.NamedSsh, dir string, fu
 		s.mirrorMu.Unlock()
 	}
 
-	st, err := host.MirrorPullProgress(ctx, e, dir, full, onProgress)
+	st, err := host.MirrorPullToDirProgress(ctx, e, envDir, full, onProgress)
 
 	s.mirrorMu.Lock()
 	defer s.mirrorMu.Unlock()

@@ -127,6 +127,8 @@ export interface HostsSsh {
   // 企业编号(topent)已从环境配置移除:ENT 每次显式给(CLI --ent / 会话面板)。
   // workspace 该环境的 .tzs 工作区（绝对路径）。机器级没有这一项（见 internal/config 的 TzsSettings）
   workspace?: string
+  // mirrorDir 该环境自己的源码镜像目录；空 = 使用全局 mirror.dir/<环境名>。
+  mirrorDir?: string
   db?: HostsDb | null
 }
 // 调试节(debug.*):本机参数,不随环境走

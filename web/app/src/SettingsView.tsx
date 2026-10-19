@@ -76,6 +76,8 @@ interface SshItem {
   // 与 launchArgs / watchdogSeconds 不同：它是**必填**的（引擎的默认工作区是真实客户目录），
   // 而且只有环境级这一份 —— 切环境就该跟着换工作区。
   workspace: string
+  // 该环境自己的源码镜像目录；空 = 使用全局 mirror.dir/<环境名>。
+  mirrorDir: string
   db: SshDb | null
 }
 
@@ -280,7 +282,7 @@ const defaultAccounts = () => ['ds', 'dsdata', 'dsdemo'].map((a) => ({ account: 
 // 先填上能省掉每次手敲(不对再改)。注意 service 是**真值**不是占位符:
 // placeholder 在框里是灰字、不会被提交,而这里要的是"保存下去就是它"。
 const blankSsh = (): SshItem => ({
-  name: '', host: '', port: 22, user: '', password: '', zone: '1', workspace: '',
+  name: '', host: '', port: 22, user: '', password: '', zone: '1', workspace: '', mirrorDir: '',
   db: { ...blankDb(), accounts: defaultAccounts() },
 })
 
@@ -308,6 +310,8 @@ function hostsPatchOf(list: SshItem[]) {
     // 企业编号(topent)不再写进环境配置 —— 该字段已整体移除,ENT 每次显式给。
     // 工作区：留空就是没配（不写这个键），与服务端“环境级没有兜底”一致。
     if (x.workspace.trim()) o.workspace = x.workspace.trim()
+    // 环境自己的镜像目录：留空不写，后端回退到全局 mirror.dir/<环境名>。
+    if (x.mirrorDir.trim()) o.mirrorDir = x.mirrorDir.trim()
     // ENT 清单原样带回：hosts 是整节提交的，这里漏了 → 改一次密码就把清单抹了。
     if (x.ents && x.ents.length) o.ents = x.ents.map((e) => ({ ent: e.ent, account: e.account, password: e.password }))
     if (x.entsSyncedAt) o.entsSyncedAt = x.entsSyncedAt
@@ -362,6 +366,7 @@ function sshsFormOf(c: HostsView): SshItem[] {
       name: e.name || '', host: e.host || '', port: e.port || 22, user: e.user || '', password: e.password || '',
       zone: e.zone || '',
       workspace: e.workspace || '',
+      mirrorDir: e.mirrorDir || '',
       // ENT 清单必须跟着表单走：hosts 是整节提交的，表单里没有它 = 保存一次就抹掉。
       ents: (e.ents || []).map((x) => ({ ent: x.ent, account: x.account, password: x.password })),
       entsSyncedAt: e.entsSyncedAt || '',
@@ -614,6 +619,11 @@ export function SettingsView() {
         dirtyRef.current[k] = sectionSnapOf(k, formsRef.current) !== sent[k]
       })
 
+      // 镜像目录保存后立刻回读：表格里的实际路径/基线随之更新，
+      // 不要让用户点“增量更新”时还用着保存前的旧路径。
+      if (keys.includes('hosts') || keys.includes('mirror')) {
+        void api.mirror().then(setMirror).catch(() => { /* 提示性信息，失败不打断保存 */ })
+      }
       void api.configStatus().then(setStatus).catch(() => {})
     } catch (ex: any) {
 
@@ -1113,7 +1123,11 @@ export function SettingsView() {
   const mirrorBusy = mirrorRunning || opBusy !== ''
   const syncBusy = syncRunning || opBusy !== ''
   // 渲染期现算的 anyDirty 已在上面算过（它同时给"刷新确认"那条 effect 用），这里不再重复
-  const mirrorDirOk = !!dict.mirrorDir.trim() && !isDirty('mirror')
+  // 每个环境的按钮可用性：目录来自全局根或该环境自己的覆盖，且相关设置在自动保存后再点。
+  const mirrorRowReady = (name: string) => {
+    const ssh = sshs.find((x) => sshName(x) === name)
+    return !!(ssh?.mirrorDir.trim() || dict.mirrorDir.trim()) && !isDirty('mirror') && !isDirty('hosts')
+  }
 
 
   return (
@@ -1617,16 +1631,16 @@ export function SettingsView() {
               </Card>
 
               <Card id="card-dict-mirror" title="源码镜像"
-                description="把 T100 源码(4gl / 4fd / 42s / *.inc)拉到本地,供 AI 检索。">
+                description="把 T100 源码(4gl / 4fd / 42s / *.inc)拉到本地,供 AI 检索；每个环境可单独指定镜像目录。">
                 <SettingRow
                   id="mirror.dir"
-                  label="镜像根目录"
+                  label="镜像根目录（默认）"
                   description={
                     !dict.mirrorDir.trim()
-                      ? '留空 = 未设置,镜像与 AI 检索不可用。'
+                      ? '留空 = 不设默认根目录；下方每个环境仍可单独指定。两者都没有的环境不能拉取。'
                       : status?.mirror.exists
-                        ? '目录已存在。'
-                        : '目录不存在,拉取时自动创建。'
+                        ? '目录已存在；下方每个环境可单独覆盖，留空则用根目录/<环境名>。'
+                        : '目录不存在，拉取时自动创建；下方每个环境可单独覆盖。'
                   }
                   control={<Input className={input} value={dict.mirrorDir} placeholder="如 D:\t100\mirror"
                     onChange={(e) => { setDict((s) => ({ ...s, mirrorDir: e.target.value })); markDirty('mirror') }} />}
@@ -1651,6 +1665,14 @@ export function SettingsView() {
                       {mirror.envs.map((e) => {
                         const busy = !!mirror.job && mirror.job.env === e.name && (mirror.job.running || mirror.job.done)
                         const failed = busy && mirror.job.phase === 'error'
+                        const sshIndex = sshs.findIndex((x) => sshName(x) === e.name)
+                        const ssh = sshIndex >= 0 ? sshs[sshIndex] : undefined
+                        const rowReady = mirrorRowReady(e.name)
+                        const rowTitle = !(ssh?.mirrorDir.trim() || dict.mirrorDir.trim())
+                          ? '先填全局根目录，或在该环境行单独填镜像目录'
+                          : isDirty('hosts') || isDirty('mirror')
+                            ? '镜像目录正在自动保存，稍等'
+                            : ''
                         return (
                           <TableRow key={e.name} className="hover:bg-transparent">
                             <TableCell className="px-2">
@@ -1662,7 +1684,16 @@ export function SettingsView() {
                                 error={failed ? (mirror.job.error || mirror.job.message || '失败') : undefined} />
                             </TableCell>
                             <TableCell className="px-2">
-                              <span className="block truncate font-mono text-[11px] text-muted-foreground" title={e.path}>{e.path}</span>
+                              <Input className="h-7 w-full text-xs font-mono"
+                                value={ssh?.mirrorDir || ''}
+                                placeholder={e.path || '留空 = 用全局根目录/<环境名>'}
+                                onChange={(ev) => {
+                                  if (sshIndex < 0) return
+                                  patchSsh(sshIndex, { mirrorDir: ev.target.value })
+                                }} />
+                              <div className="mt-1 truncate text-[10px] text-muted-foreground" title={e.path}>
+                                {e.path || '未设置镜像目录'}
+                              </div>
                             </TableCell>
                             <TableCell className="px-2">
                               <div className="flex items-center gap-1 whitespace-nowrap">
@@ -1670,13 +1701,13 @@ export function SettingsView() {
                                     一行里最重的视觉落在按钮上而不是"哪个环境、拉没拉过"。
                                     「全量」也去掉 Download 图标:同一格两个按钮,一个带图标一个不带
                                     会让它们看着不是一类东西;动作名已经把事说清了。 */}
-                                <Button variant="ghost" size="sm" disabled={mirrorBusy || !mirrorDirOk}
-                                  title={!dict.mirrorDir.trim() ? '先填镜像根目录' : isDirty('mirror') ? '镜像根目录有未保存的修改,先保存' : '只拉服务器上变过的文件'}
+                                <Button variant="ghost" size="sm" disabled={mirrorBusy || !rowReady}
+                                  title={rowTitle || '只拉服务器上变过的文件'}
                                   onClick={() => void pullMirror(false, e.name)}>
                                   增量更新
                                 </Button>
-                                <Button variant="ghost" size="sm" disabled={mirrorBusy || !mirrorDirOk}
-                                  title={!dict.mirrorDir.trim() ? '先填镜像根目录' : isDirty('mirror') ? '镜像根目录有未保存的修改,先保存' : '整目录替换(含服务器上已删的残留)'}
+                                <Button variant="ghost" size="sm" disabled={mirrorBusy || !rowReady}
+                                  title={rowTitle || '整目录替换(含服务器上已删的残留)'}
                                   onClick={() => void pullMirror(true, e.name)}>
                                   全量
                                 </Button>

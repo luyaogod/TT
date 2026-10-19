@@ -34,11 +34,11 @@ var scopes = map[string]Scope{
 	"dict db":         Env,
 	"dict db status":  None, // 只看本地 SQLite，不碰环境
 	"dict mirror":     Env,  // 隐藏转发到 tt file mirror（下版删）
-	"dict mirror dir": None, // 设的是全局镜像根目录，与环境无关
+	"dict mirror dir": Env,  // 转发到 tt file mirror dir；带 --at 时只改该环境
 
 	// ---- 服务器文件：只读，只认环境 ----
 	"file":            Env,
-	"file mirror dir": None, // 全局镜像根目录，与环境无关
+	"file mirror dir": Env, // 不带 --at=全局根；带 --at=该环境单独目录
 	// 本地目录/本地文件类：连环境都不需要
 	"dict bdldoc": None,
 	"dict spill":  None,

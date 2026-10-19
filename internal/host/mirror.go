@@ -80,7 +80,23 @@ func MirrorPull(ctx context.Context, e *NamedSsh, mirrorDir string, full bool) (
 	return MirrorPullProgress(ctx, e, mirrorDir, full, nil)
 }
 
+// MirrorPullToDir 把镜像直接拉到一个指定目录（不再拼 <环境名>）。
+// 用于设置页里“每个环境单独指定镜像目录”的场景。
+func MirrorPullToDir(ctx context.Context, e *NamedSsh, envDir string, full bool) (*MirrorStats, error) {
+	return MirrorPullToDirProgress(ctx, e, envDir, full, nil)
+}
+
 // MirrorPullProgress 同 MirrorPull,并在各阶段回调 onProgress(供 Web 显示拉取进度)。
+//
+// 兼容旧调用：mirrorDir 是根目录，实际落点是 mirrorDir/<环境名>。
+func MirrorPullProgress(ctx context.Context, e *NamedSsh, mirrorDir string, full bool, onProgress ProgressFunc) (*MirrorStats, error) {
+	return MirrorPullToDirProgress(ctx, e, MirrorEnvDir(mirrorDir, e.Name), full, onProgress)
+}
+
+// MirrorPullToDirProgress 是镜像拉取的实现：envDir 就是本环境的最终目录。
+//
+// 与 MirrorPullProgress 的区别只有落点：这里不再追加环境名，所以设置页/CLI
+// 可以把每个环境指到任意目录。其余基线、增量、取消语义完全一致。
 //
 // ctx 用来**中途取消**:用户误点「全量重建」时界面上的「停止」按钮走的就是它。
 // 取消点选在三处 —— 连接、服务器打包、下载解压循环(见 countingReader / extractTarGz)。
@@ -89,7 +105,14 @@ func MirrorPull(ctx context.Context, e *NamedSsh, mirrorDir string, full bool) (
 // 取消不会留下"看着完整"的半个镜像:.tdict-mirror.ok 只在**解压全部成功之后**才写,
 // 而 MirrorReady() 判的就是这个标记 —— 所以中途停下的目录会被下次拉取当作"缺基线",
 // 自动转全量重建(见上面 needFull 的判定)。
-func MirrorPullProgress(ctx context.Context, e *NamedSsh, mirrorDir string, full bool, onProgress ProgressFunc) (*MirrorStats, error) {
+func MirrorPullToDirProgress(ctx context.Context, e *NamedSsh, envDir string, full bool, onProgress ProgressFunc) (*MirrorStats, error) {
+	if e == nil {
+		return nil, fmt.Errorf("环境为空")
+	}
+	if strings.TrimSpace(envDir) == "" {
+		return nil, fmt.Errorf("镜像目录为空")
+	}
+	envDir = filepath.Clean(envDir)
 	report := func(p MirrorProgress) {
 		if onProgress != nil {
 			onProgress(p)
@@ -123,10 +146,9 @@ func MirrorPullProgress(ctx context.Context, e *NamedSsh, mirrorDir string, full
 
 	// 本地无完整基线(首次拉取/目录被清/旧版本遗留),或白名单升级过(增量补不齐
 	// 新增类型的历史文件)时,自动按全量拉取,避免镜像残缺
-	envDir := filepath.Join(mirrorDir, e.Name)
 	needFull := full
 	if !needFull {
-		if lv := localMarkVersion(envDir); !MirrorReady(mirrorDir, e.Name) {
+		if lv := localMarkVersion(envDir); !MirrorReadyDir(envDir) {
 			needFull = true
 			logfMirror("本地镜像缺少完整基线标记(%s),本次自动按全量拉取以保证完整", filepath.Join(envDir, localMarkName))
 		} else if lv != mirrorWhitelistVersion {
@@ -163,8 +185,8 @@ func MirrorPullProgress(ctx context.Context, e *NamedSsh, mirrorDir string, full
 	st.Bytes = size
 
 	// 下载并解压(流式):countingReader 按压缩字节回报进度
-	if err := os.MkdirAll(mirrorDir, 0o755); err != nil {
-		return nil, fmt.Errorf("创建镜像根目录失败: %w", err)
+	if err := os.MkdirAll(filepath.Dir(envDir), 0o755); err != nil {
+		return nil, fmt.Errorf("创建镜像父目录失败: %w", err)
 	}
 	sc, err := conn.SFTP()
 	if err != nil {
@@ -341,11 +363,15 @@ func MirrorEnvDir(mirrorDir, envName string) string {
 // MirrorReady 本地是否已有完整镜像基线(.tdict-mirror.ok 标记;增量更新的前提)。
 // 无基线时 MirrorPull 会自动转全量。
 func MirrorReady(mirrorDir, envName string) bool {
-	dir := MirrorEnvDir(mirrorDir, envName)
-	if dir == "" {
+	return MirrorReadyDir(MirrorEnvDir(mirrorDir, envName))
+}
+
+// MirrorReadyDir 判一个“最终镜像目录”有没有完整基线。
+func MirrorReadyDir(envDir string) bool {
+	if strings.TrimSpace(envDir) == "" {
 		return false
 	}
-	_, err := os.Stat(filepath.Join(dir, localMarkName))
+	_, err := os.Stat(filepath.Join(envDir, localMarkName))
 	return err == nil
 }
 

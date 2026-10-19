@@ -85,7 +85,9 @@ type NamedSsh struct {
 	// 与上面两项同类：按环境覆盖机器级的东西 —— 但工作区**没有**机器级那份
 	// （见 TzsSettings）：切了环境就该跟着换工作区，而引擎内置的默认工作区是一个
 	// 真实客户目录，配错就等于拿别人的表单当草稿纸。
-	Workspace string               `json:"workspace,omitempty"`
+	Workspace string `json:"workspace,omitempty"`
+	// MirrorDir 这个环境的源码镜像目录（绝对路径）；空 = 用顶层 mirror.dir/<环境名>。
+	MirrorDir string               `json:"mirrorDir,omitempty"`
 	DB        *dbconfig.Connection `json:"db,omitempty"` // 该环境的数据库连接（与 SSH 一对一）
 	// Ents 这个环境支持的企业编号与各自的账号（gzou_t 的 gzou001/gzou003）。
 	//
