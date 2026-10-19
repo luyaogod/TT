@@ -54,7 +54,7 @@ func init() {
 	// 打开/关闭查询数据源:本地 SQLite(--db/TDICT_DB)或远程库(--env/query.source)。
 	// 不依赖本地字典库的子命令(bdldoc/db/mirror/spill)各自覆盖本钩子。
 	Group.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		if err := runRootPreRun(args); err != nil {
+		if err := runRootPreRun(cmd, args); err != nil {
 			return err
 		}
 		// 落在**命令组自己**身上（没给子命令，或给了一个不认识的）时不碰数据源：
@@ -81,16 +81,20 @@ func init() {
 // runRootPreRun 显式补跑祖先命令(tt 根)的 PersistentPreRunE。
 //
 // cobra 只运行「从叶命令往上找到的第一个」PersistentPreRunE —— 子命令一旦定义,
-// 父命令的就被整个跳过。今天 tt 根命令没有钩子,但将来若有(全局初始化之类),
-// 这里必须把它补上,否则会被静默漏掉。从 Group.Parent() 起找,即刻意跳过 Group
-// 自己的钩子(调用方本就是在替代它)。
-func runRootPreRun(args []string) error {
+// 父命令的就被整个跳过。从 Group.Parent() 起找,即刻意跳过 Group 自己的钩子
+// (调用方本就是在替代它)。
+//
+// **必须把叶命令透传下去**: cobra 的契约是钩子收到"真正要执行的那条命令",
+// 钩子也据此判自己该做什么（例如 tt 根钩子按命令路径解析 --at 的作用域）。
+// 传祖先(p 自己)的话，根钩子会把一切当成 "tt" —— `tt dict db list --at X` 会被
+// 判成"这条命令不接受 --at"。这不是理论，实测就是这么错的。
+func runRootPreRun(cmd *cobra.Command, args []string) error {
 	for p := Group.Parent(); p != nil; p = p.Parent() {
 		if p.PersistentPreRunE != nil {
-			return p.PersistentPreRunE(p, args)
+			return p.PersistentPreRunE(cmd, args)
 		}
 		if p.PersistentPreRun != nil {
-			p.PersistentPreRun(p, args)
+			p.PersistentPreRun(cmd, args)
 			return nil
 		}
 	}
@@ -99,7 +103,7 @@ func runRootPreRun(args []string) error {
 
 // skipQuerySource 供「不依赖本地字典库」的子命令覆盖 Group 的数据源钩子,
 // 同时补跑祖先命令的钩子。
-func skipQuerySource(cmd *cobra.Command, args []string) error { return runRootPreRun(args) }
+func skipQuerySource(cmd *cobra.Command, args []string) error { return runRootPreRun(cmd, args) }
 
 // resolveDBPath 读侧定位本地 SQLite。候选与优先级只有一份实现 —— config.Locations
 // (统一路径管理器):TDICT_DB → -d(相对路径按当前目录绝对化)→ 数据目录下的缺省名,

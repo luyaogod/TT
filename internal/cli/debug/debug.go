@@ -267,7 +267,17 @@ var debugDBCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		cfg.ApplyDefaultEnv() // 默认环境的连接/参数合并到运行时字段
+		// 环境必须点名(与 tt debug ents / tt debug start 同一条解析):
+		// 从前这里只做 ApplyDefaultEnv，--env / --at 被**静默忽略** —— 用户以为验的是
+		// 正式区，实际连的是列表首条。现在没点名就报错并列候选。
+		if name := strings.TrimSpace(common.Env); name != "" {
+			sel := cfg.CloneEnv(name)
+			if sel == nil {
+				return fmt.Errorf("环境 %q 不存在(用 tt env list 查看)", name)
+			}
+			cfg = sel
+		}
+		cfg.ApplyDefaultEnv() // 环境的连接/参数合并到运行时字段
 		// 数据目录 = 配置所在目录:企业目录快照与 serve 侧落在同一份(见 ents.go)
 		cfg.DataDir = filepath.Dir(cfgPath)
 		ent := dbEnt

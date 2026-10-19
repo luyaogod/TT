@@ -19,6 +19,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"tt/internal/cli/at"
 	"tt/internal/cli/common"
 	"tt/internal/cli/debug"
 	"tt/internal/cli/dev"
@@ -104,6 +105,15 @@ func init() {
 	pf.StringVar(&common.Env, "conn", "", "指定环境名（--env 的别名）")
 	_ = pf.MarkHidden("conn")
 
+	// --at / --at-list：环境+企业的**统一写法**。
+	// --at 的值最终落到 common.Env 与命令自己的 --ent 上（见 at.Apply）——
+	// 各命令不需要改读法，也不会出现“--at 与 --env 各读一份”。
+	// --at-list 在 Execute 的预扫描里处理（cobra 的 ValidateArgs 早于 pre-run）。
+	pf.StringVar(&at.Raw, "at", "",
+		"这次操作落在哪个目标：<环境> 或 <环境>@<企业>（不知道填什么：加 --at-list）")
+	pf.BoolVar(&at.List, "at-list", false,
+		"列出本命令可用的 --at 取值、来源与示例（纯本地，不联网）")
+
 	debug.Register(rootCmd)
 	// 把 --env 的读写方式注入 dev 包:它不能直接 import cli/common(与 dev/common 撞包名)。
 	// 读:tzs 用它取该环境的 workspace;写:takeRootFlags 摘到 --env 时落到同一个 common.Env。
@@ -124,6 +134,8 @@ func init() {
 	rootCmd.AddCommand(newInstallCmd())
 	rootCmd.AddCommand(newVersionCmd())
 	rootCmd.AddCommand(newUpdateCmd())
+	// --at 的校验/落位：先于任何 RunE，且子命令自己的 --ent 还没被读。
+	rootCmd.PersistentPreRunE = at.Apply
 }
 
 // Execute 运行根命令。
@@ -137,6 +149,16 @@ func Execute(web fs.FS) {
 		if target, ok := legacyAliases[os.Args[1]]; ok {
 			os.Args[1] = target
 		}
+	}
+
+	// --at-list：cobra 解析之前就处理掉（ValidateArgs 比 pre-run 早，
+	// 而 tt debug start --at-list 本来就不带作业名）。
+	if cmd, ok := at.ListTarget(rootCmd, os.Args[1:]); ok {
+		if err := at.PrintContract(os.Stdout, cmd); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
 	}
 
 	if err := rootCmd.Execute(); err != nil {

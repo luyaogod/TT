@@ -128,7 +128,7 @@ func TestCharServerCodeMapsToExitAndEnvelope(t *testing.T) {
 		code       string
 		newSyntax  bool // 命令行上有没有出现 `--session` / `--name`
 		wantExit   int
-		wantCands  int  // -1 = 信封里不该有 candidates（C5.11）
+		wantCands  int // -1 = 信封里不该有 candidates（C5.11）
 		wantInText string
 	}{
 		{"F20 忙碌（新场景，不带标志也退 3）", target.CodeTargetBusy, false, 3, 1, "不能复用"},

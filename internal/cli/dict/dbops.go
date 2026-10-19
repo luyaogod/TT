@@ -9,6 +9,7 @@ package dict
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"tt/internal/cli/common"
@@ -42,8 +43,14 @@ var dbListCmd = &cobra.Command{
 			ViaSsh   string            `json:"viaSsh,omitempty"`
 		}
 		var rows []row
+		want := strings.TrimSpace(common.Env)
 		for _, e := range dbCfg.SSHs {
 			if e.DB == nil {
+				continue
+			}
+			// --at/--env 点名了就只列它：列表类命令的“环境”语义是**过滤**，
+			// 接受却不照做正是 --at 要消灭的那种静默错误。
+			if want != "" && e.Name != want {
 				continue
 			}
 			via := ""

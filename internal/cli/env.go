@@ -47,6 +47,9 @@ func newEnvCmd() *cobra.Command {
 		RunE:  func(cmd *cobra.Command, args []string) error { return runEnvShow(cmd, args[0]) },
 	})
 
+	// 企业清单：--at 的取值来源（环境 × 企业）。用它替代“记住 ENT 号”。
+	cmd.AddCommand(newEnvEntsCmd())
+
 	// env use 是**墓碑**,不是被删掉的命令:它背后的 hosts.activeEnv 已经整个移除
 	// (环境一律点名 —— 见 config.Hosts 的注释)。留一个会解释原因、并给出替代用法的
 	// 命令,好过让用户撞上"unknown command env use"而以为环境管理坏了。
