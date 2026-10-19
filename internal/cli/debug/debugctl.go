@@ -1150,8 +1150,17 @@ func printWSLogAcct(a *wsLogAcct) {
 	}
 }
 
+func wslogContentURL(rowid string) string {
+	q := url.Values{}
+	q.Set("rowid", rowid)
+	if e := strings.TrimSpace(dbgTargetEnv()); e != "" {
+		q.Set("env", e)
+	}
+	return "/api/wslogs/content?" + q.Encode()
+}
+
 func fetchWSLog(rowid string) (*wslOut, error) {
-	data, err := dbgAPI("GET", "/api/wslogs/content?rowid="+url.QueryEscape(rowid), nil)
+	data, err := dbgAPI("GET", wslogContentURL(rowid), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1316,6 +1325,9 @@ var debugWslogsCmd = &cobra.Command{
 		q.Set("pageSize", "50")
 		q.Set("startFrom", wsFrom)
 		q.Set("endTo", wsTo)
+		if e := strings.TrimSpace(dbgTargetEnv()); e != "" {
+			q.Set("env", e) // --at/--env 必须带到接口；否则列表永远查的是服务端当前环境
+		}
 		data, err := dbgAPI("GET", "/api/wslogs?"+q.Encode(), nil)
 		if err != nil {
 			return err
@@ -1348,7 +1360,7 @@ var debugWslogsCmd = &cobra.Command{
 
 // showWSLog 打印单条日志的详情与请求/响应报文;reqSave 非空时把请求原文另存一份。
 func showWSLog(rowid string, asJSON bool, reqSave string) error {
-	data, err := dbgAPI("GET", "/api/wslogs/content?rowid="+url.QueryEscape(rowid), nil)
+	data, err := dbgAPI("GET", wslogContentURL(rowid), nil)
 	if err != nil {
 		return err
 	}

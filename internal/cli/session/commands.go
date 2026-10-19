@@ -100,8 +100,12 @@ ENT 必填：企业编号决定用哪个账号连库与据点校验，不再沿�
 			}
 			var out []map[string]any
 			var rows [][]string
+			wantEnv := strings.TrimSpace(lsEnv)
+			if wantEnv == "" {
+				wantEnv = strings.TrimSpace(common.Env) // --at 落到 common.Env
+			}
 			for _, b := range list {
-				if e := strings.TrimSpace(lsEnv); e != "" && b.Env != e {
+				if wantEnv != "" && b.Env != wantEnv {
 					continue
 				}
 				if !lsAll && b.State == "exit" {
