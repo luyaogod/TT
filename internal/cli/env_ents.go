@@ -39,7 +39,10 @@ type envEntsView struct {
 	TTLSeconds int                `json:"ttlSeconds,omitempty"`
 	Count      int                `json:"count"`
 	Ents       []debug.EntMapping `json:"ents,omitempty"`
-	Error      string             `json:"error,omitempty"`
+	// Notes 是"这份清单是怎么来的"的注脚：现查失败降级到过期快照、快照写不出去等。
+	// 不打印它，"过期数据"就会被当成"当前数据"（实测：VPN 断了照样列出旧清单）。
+	Notes []string `json:"notes,omitempty"`
+	Error string   `json:"error,omitempty"`
 }
 
 func newEnvEntsCmd() *cobra.Command {
@@ -135,6 +138,7 @@ func runEnvEnts(name string, refresh, cached bool, onlyEnt int) error {
 		}
 		v.Zone, v.Dialect, v.Target = l.Zone, l.Dialect, l.Target
 		v.Source, v.Stale = l.Source, l.Stale
+		v.Notes = l.Notes
 		v.FetchedAt = l.FetchedAt.Format(time.RFC3339)
 		v.AgeSeconds, v.TTLSeconds = l.AgeSeconds, l.TTLSeconds
 		for _, m := range l.Ents {
@@ -178,9 +182,9 @@ func writeEnvEnts(w *os.File, views []envEntsView) {
 		}
 		fresh := v.Source
 		if v.Stale {
-			fresh += "（已过期）"
+			fresh += fmt.Sprintf("（已过期 %s）", humanAge(v.AgeSeconds))
 		} else if v.AgeSeconds > 0 {
-			fresh += fmt.Sprintf("（%d 分钟前）", v.AgeSeconds/60)
+			fresh += fmt.Sprintf("（%s前）", humanAge(v.AgeSeconds))
 		}
 		meta := []string{"区域 " + orDash(v.Zone)}
 		if v.Dialect != "" {
@@ -213,3 +217,15 @@ func (e partialEnvErr) Error() string {
 }
 func (e partialEnvErr) ExitCode() int         { return 3 }
 func (e partialEnvErr) AlreadyReported() bool { return true }
+
+// humanAge 把秒数说成人话（与 at 包同一套口径，两处输出要对得上）。
+func humanAge(sec int) string {
+	switch {
+	case sec < 60:
+		return fmt.Sprintf("%d 秒", sec)
+	case sec < 3600:
+		return fmt.Sprintf("%d 分钟", sec/60)
+	default:
+		return fmt.Sprintf("%d 小时", sec/3600)
+	}
+}

@@ -154,9 +154,13 @@ func Execute(web fs.FS) {
 	// --at-list：cobra 解析之前就处理掉（ValidateArgs 比 pre-run 早，
 	// 而 tt debug start --at-list 本来就不带作业名）。
 	if cmd, ok := at.ListTarget(rootCmd, os.Args[1:]); ok {
-		if err := at.PrintContract(os.Stdout, cmd); err != nil {
+		code, err := at.PrintContract(os.Stdout, cmd)
+		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
+		}
+		if code != 0 {
+			os.Exit(code)
 		}
 		return
 	}

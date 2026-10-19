@@ -217,7 +217,7 @@ func (c *EntCatalog) resolve(conn *host.SSHConn, d *dbRun, cfg *Config, opt EntL
 		if snap != nil {
 			return finish(entSnapshotToListing(snap, cfg, opt, now, "snapshot-stale"), cfg, opt, now), nil
 		}
-		return nil, fmt.Errorf("没有可用的企业目录快照(%s);先联网跑一次 tt debug ents", path)
+		return nil, fmt.Errorf("没有可用的企业目录快照(%s);先联网跑一次 tt env ents --refresh", path)
 	}
 
 	// Offline 在 Cached 之后:有快照就照常给(哪怕是过期的,调用方自己看新鲜度),

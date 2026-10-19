@@ -116,7 +116,7 @@ func TestPrintContractNoneAndEnv(t *testing.T) {
 
 	common.JSON = false
 	var buf bytes.Buffer
-	if err := PrintContract(&buf, cmds["version"]); err != nil {
+	if _, err := PrintContract(&buf, cmds["version"]); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(buf.String(), "没有目标参数") {
@@ -124,7 +124,7 @@ func TestPrintContractNoneAndEnv(t *testing.T) {
 	}
 
 	buf.Reset()
-	if err := PrintContract(&buf, cmds["session job"]); err != nil {
+	if _, err := PrintContract(&buf, cmds["session job"]); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(buf.String(), "--session") {

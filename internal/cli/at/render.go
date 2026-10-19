@@ -2,6 +2,11 @@ package at
 
 // --at-list 的渲染。输出是**固定分段**的契约（文法 / 来源 / 可用值 / 示例 / 备注），
 // 人和 agent 读同一份；--json 是同一份数据，不是另一套说法。
+//
+// 关于“取不到企业清单”：ENT 只能靠连库（远端 gzou_t）或它的落盘快照得到。
+// 没开 VPN、换了机器/库、快照坏了，都会让某个环境**一条都拿不到**。
+// 这种情况**不许静默**：逐个环境给出 `!!` 行 + 原因 + 可执行的一句话，
+// 并在末尾汇总“这个列表不完整”。但也不因一个环境把整张表判死 —— 其余环境照常列。
 
 import (
 	"encoding/json"
@@ -24,30 +29,48 @@ type contractValue struct {
 	Source     string `json:"source,omitempty"` // live | snapshot | snapshot-stale
 	Stale      bool   `json:"stale,omitempty"`
 	AgeSeconds int    `json:"ageSeconds,omitempty"`
-	Note       string `json:"note,omitempty"`
+}
+
+// contractFailure 一个“这个环境拿不到企业清单”的说明。
+//
+// Reason 是给机器看的稳定码；Error/Action 是给人和 agent 读的两句话。
+type contractFailure struct {
+	Env    string `json:"env"`
+	Reason string `json:"reason"` // no-snapshot | snapshot-unreadable | config
+	Error  string `json:"error,omitempty"`
+	Action string `json:"action"`
 }
 
 type contract struct {
-	OK          bool            `json:"ok"`
-	Command     string          `json:"command"`
-	Scope       string          `json:"scope"`
-	EntRequired bool            `json:"entRequired,omitempty"`
-	Grammar     string          `json:"grammar"`
-	Sources     []string        `json:"sources,omitempty"`
-	Values      []contractValue `json:"values"`
-	Example     string          `json:"example,omitempty"`
-	Notes       []string        `json:"notes,omitempty"`
-	Message     string          `json:"message,omitempty"`
+	OK          bool              `json:"ok"`
+	Complete    bool              `json:"complete"`
+	Command     string            `json:"command"`
+	Scope       string            `json:"scope"`
+	EntRequired bool              `json:"entRequired,omitempty"`
+	Grammar     string            `json:"grammar"`
+	Sources     []string          `json:"sources,omitempty"`
+	Values      []contractValue   `json:"values"`
+	Failed      []contractFailure `json:"failed,omitempty"`
+	Example     string            `json:"example,omitempty"`
+	Notes       []string          `json:"notes,omitempty"`
+	Message     string            `json:"message,omitempty"`
 }
 
-// PrintContract 打一条命令的 --at 契约。w 由调用方给（测试里换成 buffer）。
-func PrintContract(w io.Writer, cmd *cobra.Command) error {
+// PrintContract 打一条命令的 --at 契约，返回建议的退出码。
+//
+// 退出码只有两种：
+//
+//	0 —— 能给出可用值（个别环境取不到只算“不完整”，见 Complete/Failed）；
+//	3 —— **一条可用值都拿不到**（比如所有环境都没有快照、且配置也读不到）：
+//	     这时空列表不代表“没有企业”，而是“问不到”，脚本必须能分开这两件事。
+func PrintContract(w io.Writer, cmd *cobra.Command) (int, error) {
 	scope := ScopeOf(cmd)
 	sc := scope.String()
 	if scope == EnvEntReq {
 		sc = "env+ent"
 	}
-	c := contract{OK: true, Command: cmd.CommandPath(), Scope: sc, EntRequired: scope == EnvEntReq}
+	c := contract{OK: true, Complete: true, Command: cmd.CommandPath(), Scope: sc, EntRequired: scope == EnvEntReq, Values: []contractValue{}}
+	exit := 0
 
 	switch scope {
 	case None:
@@ -64,15 +87,20 @@ func PrintContract(w io.Writer, cmd *cobra.Command) error {
 		}
 		values, err := envValues()
 		if err != nil {
-			c.Notes = append(c.Notes, "读不到环境清单: "+err.Error())
+			c.Complete = false
+			c.Failed = append(c.Failed, contractFailure{Reason: "config", Error: err.Error(), Action: "检查配置文件：tt config path"})
+			exit = 3
+			break
+		}
+		if len(values) == 0 {
+			c.Complete = false
+			c.Failed = append(c.Failed, contractFailure{Reason: "config", Error: "配置里还没有任何环境", Action: "tt serve 到设置页添加环境，或 tt env list 确认"})
+			exit = 3
 			break
 		}
 		c.Values = values
-	case EnvEnt, EnvEntReq:
-		c.Grammar = "<环境>@<企业>"
-		if scope == EnvEnt {
-			c.Grammar += "（也可以只写 <环境>，企业可选）"
-		}
+	case EnvEnt:
+		c.Grammar = "<环境>@<企业>（也可以只写 <环境>，企业可选）"
 		c.Sources = []string{
 			"<环境> ← config.json 的 hosts.sshs[].name（本机配置，无网络）",
 			"<企业> ← 该环境库里的 gzou_t（gzoustus='Y' 的 gzou001；账号取 gzou003）",
@@ -80,28 +108,32 @@ func PrintContract(w io.Writer, cmd *cobra.Command) error {
 		}
 		c.Example = exampleOf(cmd, "<环境>@<企业>")
 		c.Notes = append(c.Notes,
-			"企业部分只读快照，不拨 SSH；没有快照的环境会标出来",
+			"企业部分只读快照，不拨 SSH；没有快照的环境会明确报出来（见下）",
 			"要现况：tt env ents --refresh")
-		if scope == EnvEntReq {
-			c.Notes = append(c.Notes, "本命令必须带 @企业：企业编号决定用哪个账号连库")
+		exit = fillEntValues(&c)
+	case EnvEntReq:
+		c.Grammar = "<环境>@<企业>"
+		c.Sources = []string{
+			"<环境> ← config.json 的 hosts.sshs[].name（本机配置，无网络）",
+			"<企业> ← 该环境库里的 gzou_t（gzoustus='Y' 的 gzou001；账号取 gzou003）",
+			"组合   = 环境名 + \"@\" + 企业编号（企业编号是纯数字）",
 		}
-		values, notes, err := entValues()
-		c.Notes = append(c.Notes, notes...)
-		if err != nil {
-			c.Notes = append(c.Notes, "读不到企业目录: "+err.Error())
-			break
-		}
-		c.Values = values
+		c.Example = exampleOf(cmd, "<环境>@<企业>")
+		c.Notes = append(c.Notes,
+			"企业部分只读快照，不拨 SSH；没有快照的环境会明确报出来（见下）",
+			"要现况：tt env ents --refresh",
+			"本命令必须带 @企业：企业编号决定用哪个账号连库")
+		exit = fillEntValues(&c)
 	}
 
 	if common.JSON {
 		enc := json.NewEncoder(w)
 		enc.SetIndent("", "  ")
 		enc.SetEscapeHTML(false)
-		return enc.Encode(c)
+		return exit, enc.Encode(c)
 	}
 	writeHuman(w, c)
-	return nil
+	return exit, nil
 }
 
 func writeHuman(w io.Writer, c contract) {
@@ -117,34 +149,60 @@ func writeHuman(w io.Writer, c contract) {
 			fmt.Fprintf(w, "          %s\n", s)
 		}
 	}
-	if len(c.Values) > 0 {
-		fmt.Fprintf(w, "  可用值\n")
-		for _, v := range c.Values {
-			line := v.Handle
-			extra := make([]string, 0, 3)
-			if v.Account != "" {
-				extra = append(extra, v.Account)
+
+	fmt.Fprintf(w, "  可用值\n")
+	if len(c.Values) == 0 {
+		fmt.Fprintf(w, "          （无）\n")
+	}
+	for _, v := range c.Values {
+		line := v.Handle
+		extra := make([]string, 0, 3)
+		if v.Account != "" {
+			extra = append(extra, v.Account)
+		}
+		if v.Zone != "" {
+			extra = append(extra, "区域 "+v.Zone)
+		}
+		if v.Source != "" {
+			fresh := "快照"
+			switch {
+			case v.Stale && v.AgeSeconds > 0:
+				fresh = fmt.Sprintf("快照（%s前，已过期）", humanAge(v.AgeSeconds))
+			case v.Stale:
+				fresh = "快照（已过期）"
+			case v.AgeSeconds > 0:
+				fresh = fmt.Sprintf("快照（%s前）", humanAge(v.AgeSeconds))
 			}
-			if v.Zone != "" {
-				extra = append(extra, "区域 "+v.Zone)
+			extra = append(extra, fresh)
+		}
+		if len(extra) > 0 {
+			line += "  " + strings.Join(extra, " · ")
+		}
+		fmt.Fprintf(w, "          %s\n", line)
+	}
+
+	// 取不到的环境：单独一段，原因 + 下一步都写出来。
+	if len(c.Failed) > 0 {
+		fmt.Fprintf(w, "  取不到（不是“没有企业”，是“问不到”）\n")
+		for _, f := range c.Failed {
+			who := f.Env
+			if who == "" {
+				who = "配置"
 			}
-			if v.Note != "" {
-				extra = append(extra, v.Note)
-			} else if v.Source != "" {
-				fresh := v.Source
-				if v.Stale {
-					fresh += "（已过期）"
-				} else if v.AgeSeconds > 0 {
-					fresh += fmt.Sprintf("（%d 分钟前）", v.AgeSeconds/60)
-				}
-				extra = append(extra, fresh)
+			msg := f.Error
+			if msg == "" {
+				msg = f.Reason
 			}
-			if len(extra) > 0 {
-				line += "  " + strings.Join(extra, " · ")
+			if f.Action != "" {
+				msg += " —— " + f.Action
 			}
-			fmt.Fprintf(w, "          %s\n", line)
+			fmt.Fprintf(w, "          !! %s：%s\n", who, msg)
 		}
 	}
+	if !c.Complete {
+		fmt.Fprintf(w, "  注意    上面的列表不完整：有环境取不到企业清单（见 !! 行）\n")
+	}
+
 	if c.Example != "" {
 		fmt.Fprintf(w, "  示例    %s\n", c.Example)
 	}
@@ -153,6 +211,17 @@ func writeHuman(w io.Writer, c contract) {
 		for _, n := range c.Notes {
 			fmt.Fprintf(w, "          %s\n", n)
 		}
+	}
+}
+
+func humanAge(sec int) string {
+	switch {
+	case sec < 60:
+		return fmt.Sprintf("%d 秒", sec)
+	case sec < 3600:
+		return fmt.Sprintf("%d 分钟", sec/60)
+	default:
+		return fmt.Sprintf("%d 小时", sec/3600)
 	}
 }
 
@@ -170,24 +239,40 @@ func envValues() ([]contractValue, error) {
 	return out, nil
 }
 
-// entValues 逐环境读快照。坏一个环境不影响其它环境（返回值里带 note）。
-func entValues() ([]contractValue, []string, error) {
+// fillEntValues 逐环境读快照填 c，返回建议退出码。
+//
+// 坏一个环境不影响其它环境；但“坏”必须出现在 Failed 里，不许变成一条看起来正常的
+// 假值（从前那种 `{handle: env, note: "无快照"}` 的写法会让 EnvEntReq 的命令看起来
+// 可以只填环境，实际一用就报“需要 @企业”）。
+func fillEntValues(c *contract) int {
 	envs, _, err := LoadEnvs()
 	if err != nil {
-		return nil, nil, err
+		c.Complete = false
+		c.Failed = append(c.Failed, contractFailure{Reason: "config", Error: err.Error(), Action: "检查配置文件：tt config path"})
+		return 3
 	}
-	out := make([]contractValue, 0, len(envs))
-	notes := make([]string, 0, 1)
+	staleSeen := false
 	for _, e := range envs {
 		l, err := SnapshotEnts(e.Name)
 		if err != nil {
-			out = append(out, contractValue{Handle: e.Name, Env: e.Name, Note: "读企业目录失败: " + err.Error()})
+			c.Failed = append(c.Failed, contractFailure{
+				Env: e.Name, Reason: "snapshot-unreadable", Error: err.Error(),
+				Action: "检查该环境的库配置；联网后跑 tt env ents --refresh",
+			})
 			continue
 		}
 		if l == nil {
-			out = append(out, contractValue{Handle: e.Name, Env: e.Name, Note: "无快照（先跑 tt env ents --refresh）"})
-			notes = append(notes, "有环境还没有企业快照 —— 用 tt env ents --refresh 拉一次")
+			c.Failed = append(c.Failed, contractFailure{
+				Env: e.Name, Reason: "no-snapshot",
+				Error:  "没有企业清单快照（从未拉过，或换了机器/库）",
+				Action: "连上网络/VPN 后跑：tt env ents --refresh",
+			})
 			continue
+		}
+		if l.Stale && !staleSeen {
+			staleSeen = true
+			c.Notes = append(c.Notes,
+				fmt.Sprintf("有快照已过期（最旧 %s前）：现在能用，但可能不是库里最新的；要现况跑 tt env ents --refresh", humanAge(l.AgeSeconds)))
 		}
 		for _, m := range l.Ents {
 			v := contractValue{
@@ -200,10 +285,17 @@ func entValues() ([]contractValue, []string, error) {
 			} else {
 				v.Account = "未配账号"
 			}
-			out = append(out, v)
+			c.Values = append(c.Values, v)
 		}
 	}
-	return out, notes, nil
+	if len(c.Failed) > 0 {
+		c.Complete = false
+	}
+	if len(c.Values) == 0 {
+		// 一条都拿不到：空列表 ≠ 没有企业，退出码要把这两种情况分开。
+		return 3
+	}
+	return 0
 }
 
 // exampleOf 用命令自己的路径与位置参数拼一条可复制的例子。
