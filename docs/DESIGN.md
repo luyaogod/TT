@@ -22,7 +22,8 @@ T100 ERP 系统的前后端代码开发依赖鼎捷内部封装的开发工具�
 - `tt dev tzc`：将 T100 开发框架产生的 `.tzc` 文件渲染成带围栏的 4GL 工作区，可直接编辑并打包回 `.tzc`
 - `tt dev tzs`：调度 T100 设计器 C# 引擎，提供直接操作 `.tzs` 前端文件的能力
 - `tt db`：数据库连通性测试（`ping` 本机 / `probe` 服务器）与只读 SQL（`sql`）
-- `tt file`：只读服务器文件（`ls/cat/head/tail/grep/find/stat/wc/du/get`，纯 SFTP、零服务端进程）与离线源码镜像（`mirror`）
+- `tt file`：只读服务器文件（`ls/cat/head/tail/grep/find/stat/wc/du/get`，纯 SFTP、零服务端进程）与离线镜像（`mirror`）
+- `tt interface`：把 `.42f` 的页面/字段结构与 `.42s` 的中文标签合成为前端画面模型
 - `tt dict`：提供 T100 项目上下文的核心工具，包含表、字段、检验、开窗、消息、参数、程序等查询
 - `tt drawio`：用内置的 T100 组件库画原型图（`.drawio`），供需求调研后与客户确认方案
 - `tt update`：更新 tt 自身：查新版、下载并校验 sha256、交棒给一个脱离的更新器进程换文件

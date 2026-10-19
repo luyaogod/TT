@@ -27,6 +27,7 @@ TT/
 │  │  │                 detail 渲染；整线 DisableFlagParsing 透传（动词面由引擎定义）
 │  │  ├─ db/            tt db 命令组（sql 只读 SQL / ping 本机连库 / probe 服务器连库）
 │  │  ├─ file/          tt file 命令组（ls/cat/head/tail/grep/find/stat/wc/du/get + mirror；只读 SFTP）
+│  │  ├─ interfacecmd/  tt interface 命令组（.42f + .42s → 页面/字段/中文标签）
 │  │  ├─ dict/          字典命令组（查询 / db sync / spill）
 │  │  ├─ session/        tt session 命令组（会话：建/列/看/改 ENT/结束/收掉/透传/起作业）
 │  │  └─ form/          tt form 命令组（.42f 字段表：ls / show / verify / fetch / cache）
@@ -34,7 +35,9 @@ TT/
 │  │                    + 统一路径管理器 Locations（数据目录/缓存/服务状态/字典库/引擎 exe 落点）
 │  ├─ debug/            调试子系统：会话管理、断点存档、源码镜像 srccache、执行日志、企业快照
 │  ├─ debugclient/      调试面 REST 的**唯一**客户端（cli/debug 与 cli/session 共用；码/候选/信封）
-│  ├─ form42f/          .42f（编译后的表单文件）解析：字段表（纯函数，零 IO）
+│  ├─ form42f/          .42f（编译后的表单文件）解析：字段表 + 页面布局（纯函数，零 IO）
+│  ├─ str42s/           .42s 编译字符串表解析（纯函数，零 IO）
+│  ├─ screen/           .42f 布局 + .42s 标签 → 前端画面模型
 │  ├─ session/          会话身份规则（序号分配、世代号）—— 不 import 调试线
 │  ├─ dev/              .tzc 设计器包管线（纯管线，无命令层）
 │  │  ├─ fence/         围栏协议：渲染/解析/字节级写回编辑

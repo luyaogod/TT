@@ -1,9 +1,9 @@
-// Package file 是“服务器文件”命令组：**只读**地看文件、取文件，以及管理离线源码镜像。
+// Package file 是“服务器文件”命令组：**只读**地看文件、取文件，以及管理离线镜像。
 //
 // 三件事的边界：
 //
 //	ls/cat/head/tail/grep/find/stat/wc/du/get   在线看文件（纯 SFTP，服务器上不起进程）
-//	mirror dir|path|pull                       离线源码镜像（子集 + 增量，原 tt dict mirror）
+//	mirror dir|path|pull                       离线镜像（子集 + 增量，原 tt dict mirror）
 //
 // 只读不是靠“少给几个命令”，而是靠结构：
 //   - 本包只调用 host.FS 的读原语，没有 Create/Remove/Rename/Mkdir/Chmod；
@@ -51,8 +51,8 @@ var cur *target
 func Register(root *cobra.Command) {
 	g := &cobra.Command{
 		Use:   "file",
-		Short: "文件：看服务器文件、取文件（只读）+ 离线源码镜像",
-		Long: `文件：在服务器上看文件、取文件（只读），以及管理离线源码镜像。
+		Short: "文件：看服务器文件、取文件（只读）+ 离线镜像",
+		Long: `文件：在服务器上看文件、取文件（只读），以及管理离线镜像。
 
   tt file ls    [-la] [--human] [<路径>]                 列出目录（默认 $TOP）
   tt file cat   <文件...>                        输出内容（多文件直接拼接）
@@ -65,7 +65,7 @@ func Register(root *cobra.Command) {
   tt file wc    [-l] <文件...>                   行/词/字节
   tt file du    [-s] [--human] [<路径>]                   占用大小（按文件大小累计，1K 块）
   tt file get   <路径> [-o <本地|->]             下载一个文件（默认同名落当前目录）
-  tt file mirror dir|path|pull                   离线源码镜像（子集 + 增量）
+  tt file mirror dir|path|pull                   离线镜像（子集 + 增量）
 
 范围与保证：
   只读 $TOP 之内；不跟随符号链接（--follow 可开，仍限 $TOP 内）；

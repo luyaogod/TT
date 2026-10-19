@@ -48,6 +48,7 @@ var scopes = map[string]Scope{
 	"debug probe":  Env,
 	"session ls":   Env,
 	"form":         Env,
+	"interface":    Env,
 	"form cache":   None,
 	"env ents":     Env,
 

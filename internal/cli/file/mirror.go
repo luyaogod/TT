@@ -1,13 +1,13 @@
 package file
 
-// tt file mirror：离线源码镜像（服务器 4gl/4fd/42s-zh_CN/*.inc → 本地目录）。
+// tt file mirror：离线镜像（source: 4gl/42f/42s/inc；interface: 42f/42s）。
 //
 //   mirror dir [<目录>]              查看/设置镜像根目录（config.json 顶层 mirror.dir）
 //   mirror pull [<环境>] [--full]    下载/更新该环境镜像（默认增量）
 //   mirror path [<环境>]             打印该环境镜像目录的绝对路径（AI 直接前往）
 //
 // 镜像根必须显式设置（不设默认），避免隐式落盘位置。目录结构与服务器同构：
-// <根>/<环境>/erp/... com/...（只含各模块 4gl/4fd、42s/zh_CN 与 *.inc）。
+// <根>/<环境>/erp/... com/...（按 profile 只含 42f/42s，或 source 的 4gl/42f/42s/inc）。
 //
 // 它是“离线口子”：联网时 AI 用 tt file cat/grep 现读；断网时读这份子集。
 
@@ -28,12 +28,14 @@ import (
 // 避免同一个 *cobra.Command 被挂到两个父命令下）。
 func NewMirrorCmd() *cobra.Command {
 	var full bool
+	var profile string
 	g := &cobra.Command{
 		Use:   "mirror",
-		Short: "管理 T100 本地源码镜像（服务器 4gl/4fd/42s/*.inc → 本地目录）",
-		Long: `把某环境（T100 服务器）的源代码镜像到本地目录，供 AI 用本地文件工具读码：
-只镜像各模块 4gl（源码）、4fd（前端字段描述）、42s（编译字符串，仅 zh_CN 语言目录），
-以及 *.inc（4GL include，任意位置）；per/编译产物/其它语言等一律不拉；
+		Short: "管理 T100 本地镜像（source: 4gl/42f/42s/inc；interface: 42f/42s）",
+		Long: `把某环境（T100 服务器）的源码/界面文件镜像到本地目录。
+profile=source（默认）取 4gl（源码）、42f（编译表单）、42s（编译字符串，仅 zh_CN）
+与 *.inc；profile=interface 只取 42f/42s，供 tt interface 合成前端画面。
+4fd 不再镜像（设计期 fieldId 不稳定）。per/编译产物/其它语言等不拉；
 备份文件（*.bak/*.bck/*~）也排除。目录结构与服务器同构：<镜像目录>/erp/... com/...。
 每个环境可以单独指定镜像目录；未单独指定时回退到全局根目录/<环境名>。
 
@@ -47,9 +49,10 @@ func NewMirrorCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
 	dirCmd := newMirrorDirCmd()
-	pullCmd := newMirrorPullCmd(&full)
+	pullCmd := newMirrorPullCmd(&full, &profile)
 	pathCmd := newMirrorPathCmd()
 	pullCmd.Flags().BoolVar(&full, "full", false, "全量重建（整目录替换，含删除服务器已不存在的文件）")
+	pullCmd.Flags().StringVar(&profile, "profile", "source", "镜像白名单：source(4gl/42f/42s/inc) | interface(42f/42s)")
 	g.AddCommand(dirCmd, pullCmd, pathCmd)
 	return g
 }
@@ -258,16 +261,17 @@ func newMirrorDirCmd() *cobra.Command {
 
 // ---- mirror pull ----
 
-func newMirrorPullCmd(full *bool) *cobra.Command {
+func newMirrorPullCmd(full *bool, profile *string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "pull [<环境>]",
-		Short: "下载/更新该环境源码镜像（默认增量；--full 全量重建）",
-		Long: `SSH 登录环境，按白名单（各模块 4gl/4fd、42s 下 zh_CN 语言目录、*.inc）打包源码，
+		Short: "下载/更新该环境镜像（默认增量；--full 全量重建）",
+		Long: `SSH 登录环境，按 profile 的白名单打包：source 取 4gl/42f/42s/inc；interface 只取 42f/42s，供 tt interface 合成画面。
 下载到该环境的镜像目录（环境单独指定，未指定则用全局根目录/<环境名>）。默认增量：
-服务器 marker 记录上次基线，只拉变更文件；--full 全量重建。白名单升级后，下次拉取会自动转全量以补齐新增类型。
+服务器 marker 记录上次基线，只拉变更文件；--full 全量重建。切换 profile 时旧类型不会自动删除；要纯净目录就换目录或加 --full。白名单升级后，下次拉取会自动转全量以补齐新增类型。
 
 打包根（$TOP）按登录区域动态探测；探测失败直接报错。`,
 		Example: `  tt file mirror pull --at 主机109
+  tt file mirror pull --at 主机109 --profile interface
   tt file mirror pull --at 主机109 --full`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -294,11 +298,15 @@ func newMirrorPullCmd(full *bool) *cobra.Command {
 			if *full {
 				mode = "全量"
 			}
+			prof, err := host.ParseMirrorProfile(*profile)
+			if err != nil {
+				return usageErr("%v", err)
+			}
 			jsonOut := common.IsJSON()
 			if !jsonOut {
-				fmt.Printf("正在拉取 %s 源码镜像（%s）: %s -> %s\n", e.Name, mode, e.Host, envDir)
+				fmt.Printf("正在拉取 %s 镜像（%s，%s）: %s -> %s\n", e.Name, mode, prof.Label(), e.Host, envDir)
 			}
-			st, err := host.MirrorPullToDir(cmd.Context(), e, envDir, *full)
+			st, err := host.MirrorPullToDirProfile(cmd.Context(), e, envDir, *full, prof)
 			if err != nil {
 				return outputErrConn(err)
 			}
@@ -307,7 +315,7 @@ func newMirrorPullCmd(full *bool) *cobra.Command {
 					"ok": true, "env": e.Name, "dir": envDir,
 					"files": st.Files, "bytes": st.Bytes, "pruned": st.Pruned,
 					"elapsed": st.Elapsed, "topDir": st.TopDir, "note": st.Note,
-					"full": st.Full,
+					"full": st.Full, "profile": string(st.Profile),
 				})
 			}
 			if st.Note != "" {
@@ -315,7 +323,7 @@ func newMirrorPullCmd(full *bool) *cobra.Command {
 			} else {
 				fmt.Printf("镜像完成: %d 个文件, %s, 用时 %s\n", st.Files, fmtBytes(st.Bytes), st.Elapsed)
 				if st.Pruned > 0 {
-					fmt.Printf("已清理本地残留备份文件: %d 个（如 *.bak/*.bck；镜像只保留 4gl/4fd、42s_zh_CN 与 *.inc）\n", st.Pruned)
+					fmt.Printf("已清理本地残留备份文件: %d 个（如 *.bak/*.bck；本 profile 只保留 %s）\n", st.Pruned, st.Profile.Label())
 				}
 			}
 			if st.Full && !*full {

@@ -30,3 +30,24 @@ f.ByColName[form42f.ColName("sfajwf012")] // → fieldId 等
 
 本包**不许** import 命令层或任何带 IO 的包（`internal/host` / `internal/cli/*`）——
 "取 `.42f` 的字节"是调用方的事（见 `internal/host/formsource.go`）。
+
+## 页面布局（ParseLayout）
+
+`ParseLayout` 在字段表之上补页面归属与独立 `<Label>` 控件：
+
+```go
+l, err := form42f.ParseLayout("bsft001_wf", xmlText)
+l.Pages       // 页面树（ID/TextKey/ParentID/Path/Fields）
+l.Fields      // 字段 → 页面 + 标签键
+```
+
+规则：
+
+- 页面 `ID` 用 XML `name`；重名时退回 `path`，`textKey` 不保证唯一；
+- 字段仍由 `ParseForm42F` 解析，`ParseLayout` 只用 `colName#fieldId` 回指，不重新猜身份；
+- 标签优先字段自身的 `text`；否则找同页同容器的 `lbl_<colName>`；
+- 最后才按同一行“Label 右侧最近的字段”配对；最近的字段已经有标签时，
+  这个 Label 不再配给更远的 `_desc` 字段（避免把主字段标签抢给说明字段）；
+- 页面外字段保留在 `l.Fields`，`PageID` 为空。
+
+`ParseForm42F` 的输出不变，`tt form show` 不因页面布局新增字段。

@@ -98,13 +98,42 @@ func TestMirrorBackupFindExpr(t *testing.T) {
 	}
 }
 
-// 服务器侧 find 白名单:4gl/4fd + 42s 的 zh_CN 语言目录 + *.inc。
+// 服务器侧 find 白名单:4gl/42f + 42s 的 zh_CN 语言目录 + *.inc。
 func TestMirrorWhitelistFindExpr(t *testing.T) {
-	expr := mirrorWhitelistFindExpr()
-	for _, want := range []string{`-path '*/4gl/*'`, `-path '*/4fd/*'`,
+	expr := mirrorWhitelistFindExpr(MirrorSource)
+	if strings.Contains(expr, "4fd") {
+		t.Fatalf("白名单不应再包含 4fd: %s", expr)
+	}
+	for _, want := range []string{`-path '*/4gl/*'`, `-path '*/42f/*'`,
 		`-path '*/42s/zh_CN/*'`, `-path '*/42s/*/zh_CN/*'`, `-iname '*.inc'`} {
 		if !strings.Contains(expr, want) {
 			t.Errorf("白名单缺少 %s: %s", want, expr)
+		}
+	}
+}
+
+func TestParseMirrorProfile(t *testing.T) {
+	for in, want := range map[string]MirrorProfile{"": MirrorSource, "source": MirrorSource, "interface": MirrorInterface} {
+		got, err := ParseMirrorProfile(in)
+		if err != nil || got != want {
+			t.Fatalf("ParseMirrorProfile(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	if _, err := ParseMirrorProfile("bogus"); err == nil {
+		t.Fatal("未知 profile 应报错")
+	}
+}
+
+func TestMirrorWhitelistInterfaceProfile(t *testing.T) {
+	expr := mirrorWhitelistFindExpr(MirrorInterface)
+	for _, want := range []string{`-path '*/42f/*'`, `-path '*/42s/zh_CN/*'`} {
+		if !strings.Contains(expr, want) {
+			t.Errorf("interface 白名单缺少 %s: %s", want, expr)
+		}
+	}
+	for _, bad := range []string{"4fd", "4gl", ".inc"} {
+		if strings.Contains(expr, bad) {
+			t.Errorf("interface 白名单不应含 %s: %s", bad, expr)
 		}
 	}
 }
@@ -145,10 +174,10 @@ func TestPruneBackupFiles(t *testing.T) {
 		return p
 	}
 	keepA := mk("erp/asf/4gl/cs_aapp320.4gl")
-	keepB := mk("erp/asf/4fd/s_icd_wf_s02.4fd")
+	keepB := mk("erp/asf/42f/s_icd_wf_s02.42f")
 	mk("erp/asf/4gl/cs_aapp320.bck")
 	mk("erp/asf/4gl/cs_aapp320.bck1")
-	mk("erp/asf/4fd/s_icd_wf_s02.4fd.bak")
+	mk("erp/asf/42f/s_icd_wf_s02.42f.bak")
 	mk("erp/asf/4gl/sub/cs_x.4gl~")
 
 	if got := pruneBackupFiles(dir); got != 4 {

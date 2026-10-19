@@ -1649,7 +1649,7 @@ export function SettingsView() {
               </Card>
 
               <Card id="card-dict-mirror" title="源码镜像"
-                description="把 T100 源码(4gl / 4fd / 42s / *.inc)拉到本地,供 AI 检索；每个环境可单独指定镜像目录。">
+                description="把 T100 源码(4gl / 42f / 42s / *.inc；不含 4fd)拉到本地,供 AI 检索；每个环境可单独指定镜像目录。">
                 <SettingRow
                   id="mirror.dir"
                   label="镜像根目录（默认）"

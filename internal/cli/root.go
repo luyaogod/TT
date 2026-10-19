@@ -7,6 +7,7 @@
 //	tt dict …    原 tdict（ERP 数据字典查询）
 //	tt db …      数据库连通性测试与只读 SQL
 //	tt file …    服务器文件只读浏览与离线源码镜像
+//	tt interface … 用 .42f + .42s 合成前端页面/字段/中文标签
 //	tt drawio …  原型图（用 T100 组件库画界面草图）
 //
 // 共享的 CLI 上下文在 internal/cli/common（叶子包，避免循环依赖）。
@@ -30,6 +31,7 @@ import (
 	"tt/internal/cli/drawio"
 	"tt/internal/cli/file"
 	"tt/internal/cli/form"
+	"tt/internal/cli/interfacecmd"
 	"tt/internal/cli/session"
 	"tt/internal/output"
 )
@@ -48,13 +50,14 @@ config.json、同一个本地 Web 服务（tt serve）。
 能力分组：
   tt dict …      数据字典：表/字段/校验/开窗/消息/参数/程序与作业
   tt db …        数据库：连通性测试（ping / probe）与只读 SQL（sql）
-  tt file …      服务器文件：ls/find/grep/head/cat 只读浏览（纯 SFTP）+ 离线源码镜像
+  tt file …      服务器文件：ls/find/grep/head/cat 只读浏览 + 离线镜像（source/interface）
   tt debug …     作业调试：起会话、停站现场、断点、步进、接口日志重放
   tt session …   会话：建 / 列 / 看 / 改 ENT / 结束 / 收掉
   tt dev tzc …   .tzc 代码包：export 渲染围栏工作区，apply 走三道闸门写回
   tt dev tzs …   .tzs 表单包：export 只读解压；读写表单走引擎的具名动词
                  （tt dev tzs <动词> --args '<JSON 对象>'），不是拼 XML
   tt form …      出厂表单：列 / 看字段表 / 与语料核对 / 预热缓存
+  tt interface … 前端画面：合成 .42f + .42s（页面 / 字段 / 中文标签）
   tt drawio …    原型图：用 T100 组件库生成 .drawio
   tt env / config / serve / install / update   环境、配置、本地服务、安装、自更新
 
@@ -62,6 +65,9 @@ config.json、同一个本地 Web 服务（tt serve）。
 file 没有 put/rm；调试重放与镜像打包在服务器上留下的临时文件除外。
 
 退出码按命令线各自定义（同一个数字在不同组含义不同，包装脚本按子命令辨认）。
+tt interface 的码表：
+  tt interface  0 成功 / 1 表单或 42s 不合法 / 2 用法或同名歧义 / 4 精确页面/字段不存在
+
 tt form 的码表：
   tt form       0 一致 / 1 取件失败（FORM_UNKNOWN：取不到表单，或它不是合法 .42f）
                 2 用法错或无基线（缺 --env/--module/--form 或 --map；语料里没有那一节窗口）
@@ -116,6 +122,7 @@ func init() {
 	dict.Register(rootCmd)
 	session.Register(rootCmd)
 	form.Register(rootCmd)
+	interfacecmd.Register(rootCmd)
 	drawio.Register(rootCmd)
 
 	rootCmd.AddCommand(newEnvCmd())

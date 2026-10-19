@@ -3,13 +3,15 @@ package host
 // 本地源码镜像引擎:把某环境(T100 服务器)的源码拉到本地镜像目录。
 //
 // 白名单原则(与调试读码一致):只收
-//   find erp com -type f \( -path '*/4gl/*' -o -path '*/4fd/*' \
+//   find erp com -type f \( -path '*/4gl/*' -o -path '*/42f/*' \
 //        -o -path '*/42s/zh_CN/*' -o -path '*/42s/*/zh_CN/*' -o -iname '*.inc' \)
-//   - 4gl(源码)、4fd(前端字段描述)、42s(编译字符串;只取简体中文目录 zh_CN,
+//   - 4gl(源码)、42f(编译后的表单)、42s(编译字符串;只取简体中文目录 zh_CN,
 //     即文件所在目录的最后一个目录必须是 zh_CN)、*.inc(4GL include,任意位置)。
-// per(界面源)/42m/42r/42f/其它语言/设计器辅助等一概不拉 —— AI 只读源代码、
-// 前端字段描述、包含文件与中文字符串,本地目录与服务器同构(erp/、com/)。
-// 备份/临时文件(x.4fd.bak、x.bck、x.bck1、*~ 等)不拉,并会清理本地残留。
+// 4fd 是设计期字段描述,fieldId 会随保存重排,不再拉取;界面合成使用 42f+42s。
+// per(界面源)/42m/42r/其它语言/设计器辅助等一概不拉 —— AI 只读源代码、
+// 编译表单、包含文件与中文字符串,本地目录与服务器同构(erp/、com/)。
+// profile=interface 时只取 42f/42s（interface 合成画面不需要 4gl/inc）。
+// 备份/临时文件(x.42f.bak、x.bck、x.bck1、*~ 等)不拉,并会清理本地残留。
 //
 // 传输:服务器侧 tar 打包(绝对路径,exec 通道不经登录 profile) → SFTP 流式
 // 下载 → 本地标准库解压(gzip+tar),全程不进内存。
@@ -33,16 +35,44 @@ import (
 	"time"
 )
 
+type MirrorProfile string
+
+const (
+	MirrorSource    MirrorProfile = "source"
+	MirrorInterface MirrorProfile = "interface"
+)
+
+// ParseMirrorProfile 只认两个公开值；空串按 source。
+func ParseMirrorProfile(s string) (MirrorProfile, error) {
+	switch MirrorProfile(strings.ToLower(strings.TrimSpace(s))) {
+	case "", MirrorSource:
+		return MirrorSource, nil
+	case MirrorInterface:
+		return MirrorInterface, nil
+	default:
+		return "", fmt.Errorf("未知镜像 profile %q（可用：source | interface）", s)
+	}
+}
+
+// Label 是给人看的 profile 名称。
+func (p MirrorProfile) Label() string {
+	if p == MirrorInterface {
+		return "42f/42s"
+	}
+	return "4gl/42f/42s/inc"
+}
+
 // MirrorStats 一次镜像拉取的统计结果(CLI 打印用)。
 type MirrorStats struct {
-	Env     string // 环境名
-	TopDir  string // 服务器 TOP(打包根)
-	Full    bool   // 是否全量
-	Files   int    // 归档内文件数(无变更时为 0)
-	Bytes   int64  // 下载字节数(压缩后)
-	Pruned  int    // 本地清理掉的残留备份文件数(历史拉取留下)
-	Elapsed string // 耗时
-	Note    string // 附加说明(如 "无变更")
+	Env     string        // 环境名
+	Profile MirrorProfile // source | interface
+	TopDir  string        // 服务器 TOP(打包根)
+	Full    bool          // 是否全量
+	Files   int           // 归档内文件数(无变更时为 0)
+	Bytes   int64         // 下载字节数(压缩后)
+	Pruned  int           // 本地清理掉的残留备份文件数(历史拉取留下)
+	Elapsed string        // 耗时
+	Note    string        // 附加说明(如 "无变更")
 }
 
 // localMarkName 本地镜像目录内的"完整基线"标记文件:存在表示该目录曾成功
@@ -69,7 +99,7 @@ type MirrorProgress struct {
 // ProgressFunc 进度回调(可能被多次调用,实现需自行加锁)。
 type ProgressFunc func(MirrorProgress)
 
-// MirrorPull 拉取/更新指定环境(NamedSsh)的源码镜像(4gl/4fd/42s-zh_CN/*.inc)到 mirrorDir/<环境名>/。
+// MirrorPull 拉取/更新指定环境(NamedSsh)的源码镜像(4gl/42f/42s-zh_CN/*.inc)到 mirrorDir/<环境名>/。
 // full=true 全量重建;否则增量(服务器 marker 记录基线)。
 // 增量只在本地已有完整基线(envDir 内存在 .tdict-mirror.ok 标记)时允许;
 // 本地首次/目录被清/旧版无标记 → 自动转全量,防止"服务器 marker 存在而本地
@@ -81,9 +111,14 @@ func MirrorPull(ctx context.Context, e *NamedSsh, mirrorDir string, full bool) (
 }
 
 // MirrorPullToDir 把镜像直接拉到一个指定目录（不再拼 <环境名>）。
-// 用于设置页里“每个环境单独指定镜像目录”的场景。
+// 用于设置页里“每个环境单独指定镜像目录”的场景；默认 source profile。
 func MirrorPullToDir(ctx context.Context, e *NamedSsh, envDir string, full bool) (*MirrorStats, error) {
 	return MirrorPullToDirProgress(ctx, e, envDir, full, nil)
+}
+
+// MirrorPullToDirProfile 按 profile 拉到指定目录。
+func MirrorPullToDirProfile(ctx context.Context, e *NamedSsh, envDir string, full bool, profile MirrorProfile) (*MirrorStats, error) {
+	return MirrorPullToDirProfileProgress(ctx, e, envDir, full, profile, nil)
 }
 
 // MirrorPullProgress 同 MirrorPull,并在各阶段回调 onProgress(供 Web 显示拉取进度)。
@@ -93,10 +128,16 @@ func MirrorPullProgress(ctx context.Context, e *NamedSsh, mirrorDir string, full
 	return MirrorPullToDirProgress(ctx, e, MirrorEnvDir(mirrorDir, e.Name), full, onProgress)
 }
 
-// MirrorPullToDirProgress 是镜像拉取的实现：envDir 就是本环境的最终目录。
+// MirrorPullToDirProgress 是 source profile 的薄封装。
+func MirrorPullToDirProgress(ctx context.Context, e *NamedSsh, envDir string, full bool, onProgress ProgressFunc) (*MirrorStats, error) {
+	return MirrorPullToDirProfileProgress(ctx, e, envDir, full, MirrorSource, onProgress)
+}
+
+// MirrorPullToDirProfileProgress 是镜像拉取的实现：envDir 就是本环境的最终目录。
 //
-// 与 MirrorPullProgress 的区别只有落点：这里不再追加环境名，所以设置页/CLI
-// 可以把每个环境指到任意目录。其余基线、增量、取消语义完全一致。
+// profile 只影响服务器侧 find 的白名单：source=4gl/42f/42s/inc，interface=42f/42s。
+// 落点、基线、增量、取消语义完全一致 —— 同一目录切 profile 不会自动删除旧类型，
+// 需要干净目录时先 --full 或换目录。
 //
 // ctx 用来**中途取消**:用户误点「全量重建」时界面上的「停止」按钮走的就是它。
 // 取消点选在三处 —— 连接、服务器打包、下载解压循环(见 countingReader / extractTarGz)。
@@ -105,7 +146,10 @@ func MirrorPullProgress(ctx context.Context, e *NamedSsh, mirrorDir string, full
 // 取消不会留下"看着完整"的半个镜像:.tdict-mirror.ok 只在**解压全部成功之后**才写,
 // 而 MirrorReady() 判的就是这个标记 —— 所以中途停下的目录会被下次拉取当作"缺基线",
 // 自动转全量重建(见上面 needFull 的判定)。
-func MirrorPullToDirProgress(ctx context.Context, e *NamedSsh, envDir string, full bool, onProgress ProgressFunc) (*MirrorStats, error) {
+func MirrorPullToDirProfileProgress(ctx context.Context, e *NamedSsh, envDir string, full bool, profile MirrorProfile, onProgress ProgressFunc) (*MirrorStats, error) {
+	if profile == "" {
+		profile = MirrorSource
+	}
 	if e == nil {
 		return nil, fmt.Errorf("环境为空")
 	}
@@ -119,7 +163,7 @@ func MirrorPullToDirProgress(ctx context.Context, e *NamedSsh, envDir string, fu
 		}
 	}
 	start := time.Now()
-	st := &MirrorStats{Env: e.Name, Full: full}
+	st := &MirrorStats{Env: e.Name, Profile: profile, Full: full}
 	if e.Name == "" {
 		return nil, fmt.Errorf("环境名为空")
 	}
@@ -160,13 +204,13 @@ func MirrorPullToDirProgress(ctx context.Context, e *NamedSsh, envDir string, fu
 
 	// 服务器打包(输出 TDICT_MIRROR_OK <文件数> <字节> / TDICT_MIRROR_NONE)
 	report(MirrorProgress{Phase: "pack", Message: "服务器打包中…"})
-	n, size, err := mirrorPackProgress(ctx, conn, base, top, needFull, report)
+	n, size, err := mirrorPackProgress(ctx, conn, base, top, needFull, profile, report)
 	if err != nil {
 		return nil, fmt.Errorf("服务器打包失败: %w", err)
 	}
 	if n == 0 {
 		st.Elapsed = time.Since(start).Round(100 * time.Millisecond).String()
-		st.Note = "无变更(服务器 4gl/4fd/42s/.inc 自上次 pull 后未修改;--full 可强制全量重建)"
+		st.Note = "无变更(服务器 " + profile.Label() + " 自上次 pull 后未修改;--full 可强制全量重建)"
 		// 服务器无变更但本地基线标记缺失时,依然补一个基线标记,
 		// 否则下次 pull 仍会误判"无基线"而反复尝试全量
 		if !needFull {
@@ -278,7 +322,7 @@ func (c *countingReader) Read(p []byte) (int, error) {
 // mirrorPackProgress 在服务器打包期间轮询归档大小回报进度(pack 阶段无法预知总量)。
 // ctx 取消时主动返回:打包在服务器上是 `tar` 子进程,取消不会杀它,但至少本端立刻收手,
 // 不再等它跑完(服务器归档是临时文件,下次拉取会重建)。
-func mirrorPackProgress(ctx context.Context, conn *SSHConn, base, top string, full bool, report ProgressFunc) (int, int64, error) {
+func mirrorPackProgress(ctx context.Context, conn *SSHConn, base, top string, full bool, profile MirrorProfile, report ProgressFunc) (int, int64, error) {
 	var stopped atomic.Bool
 	done := make(chan struct{})
 	defer func() {
@@ -315,7 +359,7 @@ func mirrorPackProgress(ctx context.Context, conn *SSHConn, base, top string, fu
 	}
 	ch := make(chan packResult, 1)
 	go func() {
-		n, size, err := mirrorPack(conn, base, top, full)
+		n, size, err := mirrorPack(conn, base, top, full, profile)
 		ch <- packResult{n, size, err}
 	}()
 	select {
@@ -380,12 +424,16 @@ func logfMirror(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "[mirror] "+format+"\n", args...)
 }
 
-// mirrorWhitelistFindExpr 服务器侧 find 的白名单:各模块 4gl(源码)、4fd(前端字段描述)、
+// mirrorWhitelistFindExpr 服务器侧 find 的白名单:各模块 4gl(源码)、42f(编译表单)、
 // 42s 编译字符串(只取 zh_CN 语言目录 —— 文件所在目录的最后一个目录必须是 zh_CN;
 // 浅层 <模块>/42s/zh_CN/* 与更深层 <模块>/42s/<...>/zh_CN/* 都覆盖)、
 // 以及 *.inc 包含文件(4GL include,不限定目录,erp/com 下任意位置都收)。
-func mirrorWhitelistFindExpr() string {
-	return `\( -path '*/4gl/*' -o -path '*/4fd/*' ` +
+// 4fd 明确排除：它是设计期字段描述，fieldId 不稳定；前端画面用 42f+42s。
+func mirrorWhitelistFindExpr(profile MirrorProfile) string {
+	if profile == MirrorInterface {
+		return `\( -path '*/42f/*' -o -path '*/42s/zh_CN/*' -o -path '*/42s/*/zh_CN/*' \)`
+	}
+	return `\( -path '*/4gl/*' -o -path '*/42f/*' ` +
 		`-o -path '*/42s/zh_CN/*' -o -path '*/42s/*/zh_CN/*' ` +
 		`-o -iname '*.inc' \)`
 }
@@ -396,11 +444,12 @@ func mirrorWhitelistFindExpr() string {
 //
 //	v1: 4gl/4fd
 //	v2: +42s/zh_CN、*.inc
-const mirrorWhitelistVersion = 2
+//	v3: 4fd → 42f（前端画面改为 42f+42s；4fd 不再镜像）
+const mirrorWhitelistVersion = 3
 
 // mirrorBackupSuffixes 备份/临时文件名特征(不含点全名包含即算备份)。
 // 服务器侧打包排除与本地残留清理共用同一份列表,避免两边规则漂移:
-//   - 框架/人工备份:x.4gl.bak、x.4fd.bak、x.bck、x.bck1、x.bck2 …
+//   - 框架/人工备份:x.4gl.bak、x.42f.bak、x.bck、x.bck1、x.bck2 …
 //   - 编辑器临时文件:x.4gl~、x.swp、x.tmp 等
 var mirrorBackupSuffixes = []string{".bak", ".bck", ".old", ".orig", ".tmp", ".swp", ".swo"}
 
@@ -471,16 +520,16 @@ func shdq(s string) string {
 	return `"` + s + `"`
 }
 
-// mirrorPack 在服务器 TOP 下打包白名单文件(4gl/4fd/42s-zh_CN/*.inc)。返回 (文件数, 归档字节);
+// mirrorPack 在服务器 TOP 下打包白名单文件(4gl/42f/42s-zh_CN/*.inc)。返回 (文件数, 归档字节);
 // 无变更时返回 (0, 0) 且不产生归档。marker 保留在 TOP 下供下次增量。
-func mirrorPack(conn *SSHConn, base, top string, full bool) (int, int64, error) {
+func mirrorPack(conn *SSHConn, base, top string, full bool, profile MirrorProfile) (int, int64, error) {
 	m := shdq(base + ".mark")
 	o := shdq(base + ".tar.gz")
 	l := shdq(base + ".list")
 	t := shdq(top)
 	// 注意:exec 通道不经过登录 profile,但这里只依赖绝对路径与标准工具
-	// 白名单树(4gl/4fd/42s-zh_CN/*.inc)+ 排除备份/临时文件(如 x.4gl.bak、x.bck、x.bck1)
-	findExpr := mirrorWhitelistFindExpr() + " " + mirrorBackupFindExpr()
+	// 白名单树(4gl/42f/42s-zh_CN/*.inc)+ 排除备份/临时文件(如 x.4gl.bak、x.bck、x.bck1)
+	findExpr := mirrorWhitelistFindExpr(profile) + " " + mirrorBackupFindExpr()
 	fullFlag := "0"
 	if full {
 		fullFlag = "1"
@@ -625,7 +674,7 @@ func extractTarGz(r io.Reader, dest string) (int, error) {
 			_ = os.Chtimes(target, hdr.ModTime, hdr.ModTime)
 			files++
 		default:
-			// 符号链接/设备等不落盘(4gl/4fd/42s/.inc 白名单内不会出现)
+			// 符号链接/设备等不落盘(4gl/42f/42s/.inc 白名单内不会出现)
 		}
 	}
 	return files, nil

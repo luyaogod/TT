@@ -14,6 +14,7 @@
 | `tt drawio …` | [./drawio](./drawio/README.md) | 原型图线 |
 | `tt session …` | [./session](./session) | 会话：建 / 列 / 看 / 改 ENT / 结束本轮 / 收掉 / 透传 |
 | `tt form …` | [./form](./form/README.md) | 出厂表单线（`.42f` 字段表：`ls` / `show` / `verify` / `fetch` / `cache`） |
+| `tt interface …` | [./interfacecmd](./interfacecmd/README.md) | 前端画面线（`.42f` + `.42s` 合成页面/字段/中文标签） |
 | `tt env / config / cache / serve / install / version` | 本包 | 各组共用 |
 
 各能力组各自独立子包、**互不 import**；共享的 CLI 上下文在
@@ -52,6 +53,8 @@ tt session    0 成功 / 1 运行失败（IO·网络·环境）/ 2 用法错 / 3
               4 状态不符（会话没空 / 不是空闲 / 端口被占）/ 5 目标不存在 / 6 环境体检不过
 
 tt drawio     0 成功 / 1 用法或运行失败 / 2 输入错（spec 不合法、包读不出）/ 3 产物自查未通过
+
+tt interface  0 成功 / 1 表单或 42s 不合法 / 2 用法或同名歧义 / 4 精确页面/字段不存在
 
 tt form       0 一致 / 1 取件失败（FORM_UNKNOWN：取不到表单，或它不是合法 .42f）
               2 用法错或无基线（缺 --env/--module/--form 或 --map；语料里没有那一节窗口）
