@@ -66,6 +66,8 @@ export interface WSLogQuery {
   server?: string
   pid?: string // wsfa002 服务程序序号(界面「服务程序」列;与 service 一起可精确定位某一次调用)
   onlyFail?: boolean
+  // env：按哪个环境查（统一服务启动时可能没有"生效环境"，必须点名）。
+  env?: string
   page?: number
   startFrom?: string
   endTo?: string
@@ -503,8 +505,8 @@ export const api = {
     p.set('pageSize', '200')
     return req<{ items: WSLogItem[]; hasMore: boolean }>(`${API_BASE}/wslogs?${p.toString()}`)
   },
-  wsLogContent: (rowid: string) =>
-    req<{ item: WSLogItem; content: WSLogContent }>(`${API_BASE}/wslogs/content?rowid=${encodeURIComponent(rowid)}`),
+  wsLogContent: (rowid: string, env?: string) =>
+    req<{ item: WSLogItem; content: WSLogContent }>(`${API_BASE}/wslogs/content?rowid=${encodeURIComponent(rowid)}${env ? `&env=${encodeURIComponent(env)}` : ''}`),
   // 重放调试:request 非空 = 用界面里改过的入参(后端落临时文件后作为入参文件)。
   // **必须带上"要收掉的那条会话"**（WP4b / Q4 / C8.2）：服务端不再自己找当前会话，
   // 池里多条又不带目标时回 409 + SESSION_AMBIGUOUS，不会随机收掉别人的会话。

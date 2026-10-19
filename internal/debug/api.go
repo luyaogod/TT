@@ -2010,13 +2010,31 @@ func (s *Server) hSource(w http.ResponseWriter, r *http.Request) {
 // 运行时字段 —— 它**不**回落到首条（回落会把会话悄悄切到另一台机器上，那正是要根除的行为）。
 // 于是这里拿到的是空地址，原样报出去就是 `dial tcp :0`：接口日志与服务测试一起全红，
 // 而会话面板还显示着环境在跑，谁看都不知道该干什么（2026-10-15 实测过这个现场）。
-func (s *Server) dialSSH() (*host.SSHConn, error) {
-	conn, err := s.dial(s.cfg.SSH)
-	if err != nil && strings.TrimSpace(s.cfg.SSH.Host) == "" {
+func (s *Server) dialSSH() (*host.SSHConn, error) { return s.dialSSHWith(s.cfg) }
+
+// dialSSHWith 用**指定那份配置**拨 SSH（接口日志按请求里的 env 选环境）。
+func (s *Server) dialSSHWith(cfg *Config) (*host.SSHConn, error) {
+	conn, err := s.dial(cfg.SSH)
+	if err != nil && strings.TrimSpace(cfg.SSH.Host) == "" {
 		return nil, fmt.Errorf("%w（服务当前**没有生效环境**：配置里那个环境可能被改名或删掉了 —— "+
 			"在左侧「会话」面板重新选一个环境再试）", err)
 	}
 	return conn, err
+}
+
+// wslogCfg 选这次查询用哪份配置：请求点名了 env 就用那个环境的克隆，
+// 否则退回服务当前生效环境。
+//
+// 为什么要有它：统一服务启动时**可能还没有生效环境**（环境一律点名），
+// 而界面上的接口日志是按"当前所在的环境"看的 —— 前端把 activeEnv 带上来即可，
+// 不必先切一次会话。
+func (s *Server) wslogCfg(env string) *Config {
+	if name := strings.TrimSpace(env); name != "" {
+		if c := s.envCfgFor(name); c != nil {
+			return c
+		}
+	}
+	return s.cfg
 }
 
 // ---------- 接口日志(wsfa_t) ----------
@@ -2035,13 +2053,14 @@ func (s *Server) hWSLogs(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	page, _ := strconv.Atoi(q.Get("page"))
 	pageSize, _ := strconv.Atoi(q.Get("pageSize"))
-	conn, err := s.dialSSH()
+	cfg := s.wslogCfg(q.Get("env"))
+	conn, err := s.dialSSHWith(cfg)
 	if err != nil {
 		fail(w, 500, fmt.Errorf("SSH 连接失败: %w", err))
 		return
 	}
 	defer conn.Close()
-	dbc, err := resolveDBRun(conn, s.cfg)
+	dbc, err := resolveDBRun(conn, cfg)
 	if err != nil {
 		fail(w, 500, err)
 		return
@@ -2066,17 +2085,17 @@ func (s *Server) hWSLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true, "items": items, "hasMore": hasMore,
 		"acct": wslogAcctFor(s.wslogTopent(nil))})
 }
-
 // hWSLogContent GET /api/wslogs/content?rowid=
 func (s *Server) hWSLogContent(w http.ResponseWriter, r *http.Request) {
 	rowid := r.URL.Query().Get("rowid")
-	conn, err := s.dialSSH()
+	cfg := s.wslogCfg(r.URL.Query().Get("env"))
+	conn, err := s.dialSSHWith(cfg)
 	if err != nil {
 		fail(w, 500, fmt.Errorf("SSH 连接失败: %w", err))
 		return
 	}
 	defer conn.Close()
-	dbc, err := resolveDBRun(conn, s.cfg)
+	dbc, err := resolveDBRun(conn, cfg)
 	if err != nil {
 		fail(w, 500, err)
 		return
@@ -2089,7 +2108,6 @@ func (s *Server) hWSLogContent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true, "item": item, "content": content,
 		"acct": wslogAcctFor(s.wslogTopent(nil))})
 }
-
 // hWSLogDebug POST /api/wslogs/debug {rowid, request?, session?, name?} → 用该日志的报文重放调试。
 // request 非空 = 界面里改过的入参(落服务器临时文件后作为入参文件),空 = 用日志原报文。
 // name = `--name` 的别名（Bug B）：wsdebug 同样是起会话的命令，别名随这条请求登记。

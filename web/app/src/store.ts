@@ -791,7 +791,7 @@ function loadWsLogContent(item: WSLogItem): Promise<WSLogContent> {
   if (hit) return Promise.resolve(hit)
   const flying = wsLogContentInflight.get(item.rowid)
   if (flying) return flying
-  const p = api.wsLogContent(item.rowid).then(({ content }) => {
+  const p = api.wsLogContent(item.rowid, useStore.getState().activeEnv || undefined).then(({ content }) => {
     wsLogContentCache.set(item.rowid, content)
     if (wsLogContentCache.size > WSLOG_CACHE_MAX) {
       const oldest = wsLogContentCache.keys().next().value
@@ -1263,7 +1263,9 @@ export const useStore = create<Store>((set, get) => ({
     const gen = ++wsLogsGen
     set({ wsLogsLoading: true, wsLogErr: '' })
     try {
-      const r = await api.wsLogs(q)
+      // 带上"我在哪个环境"：统一服务启动时可能还没有生效环境（环境一律点名），
+      // 而后端的接口日志要连 SSH —— 不点名就会报 "没有生效环境"。
+      const r = await api.wsLogs({ ...q, env: q.env || get().activeEnv || undefined })
       if (gen !== wsLogsGen) return
       set({ wsLogs: r.items || [], wsLogsHasMore: !!r.hasMore, wsLogsPage: q.page ?? 1, wsLogSel: null, wsLogContent: null })
     } catch (e: any) {
