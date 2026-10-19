@@ -116,10 +116,10 @@ func TestResolvePath_NoLegacyFallback(t *testing.T) {
 
 	seed := `{"schemaVersion":2,"hosts":{"activeEnv":"诱饵","sshs":[{"name":"诱饵","host":"h","user":"u"}]}}`
 	legacyDirs := []string{
-		"T100\\tt",       // 旧版默认落点（中间多一层 T100）
-		"T100\\tdebug",   // 合并前的调试工具
-		"T100\\tdict",    // 合并前的字典工具
-		"TDebug",         // 更早的桌面版目录
+		"T100\\tt",     // 旧版默认落点（中间多一层 T100）
+		"T100\\tdebug", // 合并前的调试工具
+		"T100\\tdict",  // 合并前的字典工具
+		"TDebug",       // 更早的桌面版目录
 	}
 	for _, sub := range legacyDirs {
 		p := filepath.Join(home, sub, DefaultConfigName)

@@ -48,7 +48,6 @@ func TestSuccessEnvelopeShape(t *testing.T) {
 		t.Errorf("5.1：data 块该在（B7 的现行成功信封就有它）")
 	}
 
-
 }
 
 // TestFailureEnvelopeKeysAreStable 钉住 C5.10 + C5.11：

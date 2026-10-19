@@ -139,7 +139,6 @@ func newServeCmd() *cobra.Command {
 				var once sync.Once
 				stopWeb := func() { once.Do(cancel) }
 
-
 				svc := web.New(web.Options{
 					DebugFS:    common.WebFrontend(),
 					ConfigPath: path,
@@ -155,7 +154,6 @@ func newServeCmd() *cobra.Command {
 					Shutdown:  stopWeb,
 					// 与字典子系统同一个值，见上面的 syncDefault
 					SyncDefaultTarget: syncDefault,
-
 				})
 
 				addr := listen
@@ -203,4 +201,3 @@ func splitHostPort(addr string) (host, port string, err error) {
 	host = strings.Trim(addr[:i], "[]")
 	return host, addr[i+1:], nil
 }
-

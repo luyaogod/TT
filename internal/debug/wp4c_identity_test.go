@@ -277,10 +277,10 @@ func TestDecideHostMatrix(t *testing.T) {
 	base := cfgFor("h1", "36")
 	cases := []struct {
 		name      string
-		prevEnv   string   // 既有会话的环境（空 = 与这次同一个；非空 = 换环境，用 envCfg 造）
-		prevState State    // 既有会话的状态
-		prevName  string   // 既有会话的别名（空 = 无名）
-		wantName  string   // 这次请求要的别名（空 = 没点名）
+		prevEnv   string // 既有会话的环境（空 = 与这次同一个；非空 = 换环境，用 envCfg 造）
+		prevState State  // 既有会话的状态
+		prevName  string // 既有会话的别名（空 = 无名）
+		wantName  string // 这次请求要的别名（空 = 没点名）
 		want      hostDecision
 	}{
 		{"同目标 空闲 无名 没点名 → 复用（今天的行为）", "", StateIdle, "", "", hostReuse},

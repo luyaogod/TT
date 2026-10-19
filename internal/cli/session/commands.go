@@ -60,7 +60,6 @@ ENT 必填：企业编号决定用哪个账号连库与据点校验，不再沿�
 			}
 			prog := strings.TrimSpace(nsProg)
 
-
 			if prog == "" {
 				// 空闲会话：走"切到该环境并命名"，服务端会建一条 idle 的宿主。
 				id, serr := cl.SwitchToIdle(env, ent, strings.TrimSpace(nsName), time.Duration(nsTimeout)*time.Second)
@@ -348,4 +347,3 @@ func emitSession(cl *debugclient.Client, id string) error {
 	// 建完立刻列不到（极少数竞态）：至少把句柄给出来，别让调用方以为没建成。
 	return emit(map[string]any{"ok": true, "session": map[string]any{"id": id}})
 }
-

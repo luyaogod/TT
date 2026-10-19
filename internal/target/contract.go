@@ -41,7 +41,6 @@ package target
 // 但它今天不在 `SessionBrief` 上）。
 //
 
-//
 // **这两处都不是定论**：等契约文档退场、以代码为准的那一天，`display` 要么被正式纳入
 // 键集、要么被判冗余下线；`kind` 要么落成真字段、要么退出键集。
 var SessionEnvelopeKeys = []string{
@@ -74,8 +73,6 @@ var SessionOptionalKeys = []string{
 // SessionTopKeys 是会话级命令成功信封的顶层恒定键（契约 5.1）。
 // `ok` 与平铺的环境信息（`output.Meta`）沿用现行成功信封（B7），不在这里重复声明。
 var SessionTopKeys = []string{"session", "requested"}
-
-
 
 // KindSSH 是 `session.kind` 的取值（C5.5 / Q9）：本契约只寻址 SSH 会话，
 // 界面会话是它的**属性**（走 `ui` 块），不是第二个目标。

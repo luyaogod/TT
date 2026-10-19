@@ -24,12 +24,12 @@ import (
 )
 
 var (
-	verifyModule    string
-	verifyForm      string
-	verifyWindow    string
-	verifyMap       string
-	verifyDir       string
-	verifyNoCache   bool
+	verifyModule  string
+	verifyForm    string
+	verifyWindow  string
+	verifyMap     string
+	verifyDir     string
+	verifyNoCache bool
 )
 
 var verifyCmd = &cobra.Command{
@@ -235,7 +235,6 @@ func LoadCorpusMap(path string) (*CorpusMap, error) {
 	}
 	return out, nil
 }
-
 
 // ── 比对 ────────────────────────────────────────────────────────────────────
 

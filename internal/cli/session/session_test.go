@@ -219,7 +219,6 @@ func TestSessionExecPassthrough(t *testing.T) {
 	}
 }
 
-
 // TestSessionJob：`session job` 打的是 `/sessions/{id}/job`，带 prog/module/ent。
 //
 // 这条命令补的是"会话已经在了，只在它里面换作业跑"——与 `new --prog` 的分工见命令帮助。
@@ -332,10 +331,10 @@ func TestSessionArgsErrors(t *testing.T) {
 	before := len(f.snapshot())
 
 	for _, args := range [][]string{
-		{"show"},                    // 缺 --session
-		{"quit"},                    // 缺 --session
-		{"exec", "--session", "A"},  // 缺命令
-		{"new", "--ent", "99"},      // 缺 env
+		{"show"},                   // 缺 --session
+		{"quit"},                   // 缺 --session
+		{"exec", "--session", "A"}, // 缺命令
+		{"new", "--ent", "99"},     // 缺 env
 	} {
 		resetFlags()
 		group.SetArgs(args)
@@ -359,7 +358,10 @@ func TestSessionActionsRespectFormat(t *testing.T) {
 	t.Cleanup(func() { common.Format = oldFormat })
 	common.Format = "table"
 
-	cases := []struct{ args []string; want string }{
+	cases := []struct {
+		args []string
+		want string
+	}{
 		{[]string{"ent", "99", "--session", "A"}, "企业编号：99"},
 		{[]string{"quit", "--session", "A"}, "已结束会话"},
 		{[]string{"rm", "--session", "A"}, "已收掉会话"},

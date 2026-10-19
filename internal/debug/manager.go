@@ -318,7 +318,6 @@ func (m *Manager) emitRemoved(id, reason string) {
 	m.emit(Event{Type: EvSessionRemoved, SessionID: id, Time: time.Now(), Reason: reason})
 }
 
-
 // Events 返回最近 n 条事件(按时间升序;n<=0 返回全部缓冲)。
 func (m *Manager) Events(n int) []Event {
 	m.evMu.Lock()
@@ -1550,4 +1549,3 @@ func (m *Manager) CloseAll() {
 		_ = s.Close()
 	}
 }
-

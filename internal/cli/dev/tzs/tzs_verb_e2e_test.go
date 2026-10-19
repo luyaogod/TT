@@ -414,4 +414,3 @@ func TestE2ENarrowingHintFollowsTheManifest(t *testing.T) {
 		t.Errorf("一个收窄提示都没有 —— 这条断言成了空转（list_columns / list_tables 该有的）")
 	}
 }
-

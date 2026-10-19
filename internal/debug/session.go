@@ -143,9 +143,7 @@ type Event struct {
 	Brief *SessionBrief `json:"brief,omitempty"`
 	// Reason 是 `session.removed` 的原因：close | exit | restart | switch | stop | stale | removed
 	Reason string `json:"reason,omitempty"`
-
 }
-
 
 // execResult 命令响应
 type execResult struct {
@@ -375,10 +373,9 @@ type Session struct {
 	//
 	// 三个都不是"这条会话现在什么样"，而是"这条会话是哪条"（C5.1 末段：只有 id/ref/n 是身份，
 	// 其余是快照）—— 读它们一律走下面的取值器，别从别处推导。
-	seq     int
-	name    string
-	epoch   string
-
+	seq   int
+	name  string
+	epoch string
 }
 
 const (
@@ -387,7 +384,6 @@ const (
 	// ModeCollab 协作:AI 主导,人只能读 + 请求 AI 代为操作。
 	ModeCollab = "collab"
 )
-
 
 // Mode 当前模式(空值视为 solo)
 func (s *Session) Mode() string {
@@ -440,7 +436,6 @@ func (s *Session) MayDo(cap Capability, actor string) bool {
 	}
 	return s.MayWrite(actor)
 }
-
 
 // ---------- 会话身份（契约 C5.3 / Q22：n / name / epoch；ref 由环境 + n 拼） ----------
 

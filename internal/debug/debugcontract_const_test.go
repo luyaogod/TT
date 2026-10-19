@@ -56,8 +56,6 @@ var debugContractSessionOptionalKeys = target.SessionOptionalKeys
 // debugContractSessionTopKeys 是会话级命令成功信封的顶层恒定键（契约 5.1）。
 var debugContractSessionTopKeys = target.SessionTopKeys
 
-
-
 // debugContractFailureRequredKeys 是**失败信封里恒定出现**的四键（契约 C5.10）。
 var debugContractFailureRequredKeys = target.FailureRequiredKeys
 

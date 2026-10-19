@@ -264,7 +264,7 @@ func TestUnregisteredAPIPathsReturnJSON404(t *testing.T) {
 
 	cases := []struct{ method, path string }{
 		{"GET", "/api/dbsql"}, // 路径注册了，方法是 POST
-		{"GET", "/api/根本不存在"},  // 路径压根没有
+		{"GET", "/api/根本不存在"}, // 路径压根没有
 		{"POST", "/api/根本不存在"},
 		{"GET", "/api"}, // 前缀本身
 		{"GET", "/api/"},

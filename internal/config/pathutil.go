@@ -89,8 +89,8 @@ type TzsStatus struct {
 }
 
 // TzsStatusOf 汇总引擎那几样东西的状态。activeWorkspace 是当前环境的工作区
-//（config.Root.ActiveWorkspace —— 只此一份取法），defaultEngineExe 是缺省引擎 exe
-//（用 config.EngineExe("") 取 —— 候选只有那一份实现），参数注入是为了可测。
+// （config.Root.ActiveWorkspace —— 只此一份取法），defaultEngineExe 是缺省引擎 exe
+// （用 config.EngineExe("") 取 —— 候选只有那一份实现），参数注入是为了可测。
 //
 // Designer 的位置从**生效的**引擎 exe 推出来,而不是另配一个:引擎自己就是这么算的
 // (D.Bootstrap 的 Install = <自己的目录>\designer),两边各算一次的话,设置页会报"有"

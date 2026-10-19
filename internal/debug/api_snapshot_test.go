@@ -137,9 +137,10 @@ func TestSnapshotCarriesIdentityKeysAndKeepsEveryOldKey(t *testing.T) {
 // TestSnapshotIdentityKeysAreConstant 钉住 C5.1 / C5.3 那半条：**取不到也给空串/零值，不省键**。
 //
 // 三种最容易"省键"的现场各来一次：
-//  ① 已命名的会话（正常形状，值都要对）；
-//  ② **未命名 + 作业为空**：`name` 给空串、`display` 退成 `环境#序号` —— 都不许消失；
-//  ③ `epoch` 是登记时发的（它不该为空，空 = 前端没法判 F15 的失效）。
+//
+//	① 已命名的会话（正常形状，值都要对）；
+//	② **未命名 + 作业为空**：`name` 给空串、`display` 退成 `环境#序号` —— 都不许消失；
+//	③ `epoch` 是登记时发的（它不该为空，空 = 前端没法判 F15 的失效）。
 //
 // 身份键的**值**必须与 `Manager.Snapshot()` 里那一条逐字相等 —— 那是"没有第二份事实"的判据：
 // 快照与列表是同一份投影，不是两处各算一遍（C5.17–C5.19）。
@@ -243,8 +244,9 @@ func TestSnapshotOptionalKeysAreUntouched(t *testing.T) {
 // 会话上取错值（那是本次要根除的"第二份事实"）。
 //
 // 两条判据：
-//  ① 两个键**可以不同**：`ent` 跟着会话内覆盖走，`topentSession` 坚持启动时给的那个；
-//  ② `topentSession` 这个**既有键还在**（收口只删 CLI 那层取舍，不许顺手删服务端的键，H2）。
+//
+//	① 两个键**可以不同**：`ent` 跟着会话内覆盖走，`topentSession` 坚持启动时给的那个；
+//	② `topentSession` 这个**既有键还在**（收口只删 CLI 那层取舍，不许顺手删服务端的键，H2）。
 func TestSnapshotEntIsItsOwnFactAndTopentSessionSurvives(t *testing.T) {
 	s, id := snapshotServerWith(t, "恒烁正式区", "apmt520", "汇率单")
 	// 起会话时给的 `--ent`（`tt debug start --ent 99` 落到 cfg.Topent 上）：
