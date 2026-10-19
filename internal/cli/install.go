@@ -54,8 +54,7 @@ func newInstallCmd() *cobra.Command {
 
   tt install skills [--to <dir>|auto] [--agent <名字>] [--force]
                                              把 exe 同目录的 skills/ 复制到目标目录
-  tt install path   [--dry-run]              把 exe 所在目录追加到用户 PATH(HKCU)
-  tt install bdl    [--dir <目录>] [--force] 把随包的 BDL 语言文档解压到 bdldoc.dir`,
+  tt install path   [--dry-run]              把 exe 所在目录追加到用户 PATH(HKCU)`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("请指定子命令: skills 或 path\n\n%s", cmd.UsageString())

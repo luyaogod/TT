@@ -52,8 +52,9 @@ func newInstallBdlCmd() *cobra.Command {
 		force bool
 	)
 	cmd := &cobra.Command{
-		Use:   "bdl [--dir <目录>] [--force]",
-		Short: "解压随包的 BDL 语言文档到配置目录（bdldoc.dir）",
+		Use:    "bdl [--dir <目录>] [--force]",
+		Short:  "解压随包的 BDL 语言文档到配置目录（bdldoc.dir）",
+		Hidden: true, // 安装器专用：MSI/便携包自动调用；不占用户命令面
 		Long: `把与 tt.exe 同目录的 BDL-Markdown.zip 解压到 BDL 文档目录。
 
 目标目录按这个顺序：
