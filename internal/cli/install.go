@@ -3,6 +3,7 @@
 //	tt install skills [--to <dir>|auto] [--agent <名字>] [--force]
 //	                                           把 exe 同目录的 skills/ 复制到目标目录
 //	tt install path   [--dry-run]              把 exe 所在目录追加到**用户** PATH(HKCU，不需要管理员)
+//	tt install bdl    [--dir <目录>] [--force] 把随包的 BDL 语言文档解压到 bdldoc.dir
 //
 // 合并前 TDebug / TDev / TDictCli 各有一份同形实现，注释里写着"命令形态与另外两个一致
 // （改动请三边同步）"。合并后只有这一份。
@@ -53,13 +54,14 @@ func newInstallCmd() *cobra.Command {
 
   tt install skills [--to <dir>|auto] [--agent <名字>] [--force]
                                              把 exe 同目录的 skills/ 复制到目标目录
-  tt install path   [--dry-run]              把 exe 所在目录追加到用户 PATH(HKCU)`,
+  tt install path   [--dry-run]              把 exe 所在目录追加到用户 PATH(HKCU)
+  tt install bdl    [--dir <目录>] [--force] 把随包的 BDL 语言文档解压到 bdldoc.dir`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("请指定子命令: skills 或 path\n\n%s", cmd.UsageString())
 		},
 	}
-	cmd.AddCommand(newInstallSkillsCmd(), newInstallPathCmd())
+	cmd.AddCommand(newInstallSkillsCmd(), newInstallPathCmd(), newInstallBdlCmd())
 	return cmd
 }
 

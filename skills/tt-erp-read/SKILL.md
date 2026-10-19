@@ -161,3 +161,11 @@ END IF
 tt db sql --at <环境>@<企业> "select count(*) from capp115_tmp"
 tt db sql --at <环境>@<企业> "select bmaa001,bmaastus from bmaa_t where bmaa001='FCPU010100003'"
 ```
+
+## BDL 语言参考
+
+```bash
+tt install bdl                 # 首次/升级：解压随包的 BDL-Markdown.zip 到 bdldoc.dir
+tt dict bdldoc dir             # 显示当前 BDL 文档目录
+tt dict bdldoc dir <目录>      # 手动指定文档目录
+```

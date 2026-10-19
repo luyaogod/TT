@@ -76,6 +76,7 @@ echo [3/5] Staging EMPTY config.json / config.example.json / README.md / skills 
 copy /y config.empty.json "%STAGE%\config.json" >nul || (echo COPY empty config FAILED & exit /b 1)
 copy /y config.example.json "%STAGE%\" >nul || (echo COPY config.example.json FAILED & exit /b 1)
 copy /y README.md "%STAGE%\" >nul || (echo COPY README.md FAILED & exit /b 1)
+copy /y BDL-Markdown.zip "%STAGE%\" >nul || (echo COPY BDL-Markdown.zip FAILED & exit /b 1)
 xcopy /e /i /y /q skills "%STAGE%\skills" >nul || (echo COPY skills FAILED & exit /b 1)
 if not exist "%STAGE%\tt.exe" (echo MISSING staged tt.exe & exit /b 1)
 rem Portable marker: the CLI keeps its config inside the package instead of

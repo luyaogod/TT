@@ -84,6 +84,19 @@
       </Component>
     </DirectoryRef>
 
+    <!-- 安装完成后解压随包的 BDL 文档（tt install bdl）。
+         目标优先取 config.json 已有的 bdldoc.dir；没有就落 %APPDATA%	tBDL-Markdown。
+         Return="ignore"：文档解压失败不该让整个安装失败。 -->
+    <CustomAction Id="InstallBDLDocs"
+                  Directory="INSTALLFOLDER"
+                  ExeCommand="&quot;[INSTALLFOLDER]tt.exe&quot; install bdl"
+                  Execute="immediate"
+                  Return="ignore" />
+
+    <InstallExecuteSequence>
+      <Custom Action="InstallBDLDocs" After="InstallFiles">NOT REMOVE</Custom>
+    </InstallExecuteSequence>
+
     <Feature Id="Main" Title="TT" Level="1">
       <ComponentGroupRef Id="StagedFiles" />
       <ComponentRef Id="UserPathEntry" />
