@@ -277,9 +277,10 @@ func fillEntValues(c *contract) int {
 				fmt.Sprintf("有快照已过期（最旧 %s前）：现在能用，但可能不是库里最新的；要现况跑 tt env ents --refresh", humanAge(l.AgeSeconds)))
 		}
 		for _, m := range l.Ents {
+			// 只保留 handle 与账号/来源；区域/库地址不参与 --at，不在这里显示，
+			// 避免再被误读成企业编号。
 			v := contractValue{
 				Handle: fmt.Sprintf("%s@%d", e.Name, m.Ent), Env: e.Name, Ent: m.Ent,
-				Zone: e.Zone, DBTarget: e.DBTarget,
 				Source: l.Source, Stale: l.Stale, AgeSeconds: l.AgeSeconds,
 			}
 			if m.Account != "" && m.Account != "-" {
