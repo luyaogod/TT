@@ -37,37 +37,39 @@ type dbSyncJob struct {
 
 // dbSyncEnv 可用于同步的环境(挂了数据库的环境)。
 type dbSyncEnv struct {
-	Name    string `json:"name"`
-	Type    string `json:"type"`
-	Address string `json:"address"`
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Address  string `json:"address"`
+	DBPath   string `json:"dbPath"`
+	Exists   bool   `json:"exists"`
+	Size     int64  `json:"size"`
+	Modified string `json:"modified,omitempty"`
 }
 
 type dbSyncResp struct {
-	Target        string      `json:"target"`        // 当前生效目标(写入位置)
-	Configured    string      `json:"configured"`    // config.json 顶层 sync.target(空=用默认)
-	DefaultTarget string      `json:"defaultTarget"` // 默认目标(exe 同目录;便携版自带)
-	Exists        bool        `json:"exists"`        // 目标文件当前是否已存在
-	Envs          []dbSyncEnv `json:"envs"`
-	Job           dbSyncJob   `json:"job"`
+	Dir  string      `json:"dir"` // 本地字典库目录（每个环境一个 .db）
+	Envs []dbSyncEnv `json:"envs"`
+	Job  dbSyncJob   `json:"job"`
 }
 
-// dbSyncView 汇总同步页面需要的状态(目标/环境/任务)。
+// dbSyncView 汇总同步页面需要的状态（库目录/各环境本地库/任务）。
 func (s *Server) dbSyncView() dbSyncResp {
-	target := s.syncTarget()
-	resp := dbSyncResp{Target: target, DefaultTarget: s.defaultDBTarget(), Envs: []dbSyncEnv{}}
-	if root, err := loadConfig(s.cfgPath); err == nil {
-		resp.Configured = config.AbsPath(root.Sync.Target)
-	}
-	if _, err := os.Stat(target); err == nil {
-		resp.Exists = true
-	}
+	dir := s.localDBDir()
+	resp := dbSyncResp{Dir: dir, Envs: []dbSyncEnv{}}
 	if hosts, err := config.LoadHosts(s.cfgPath); err == nil {
 		for i := range hosts.SSHs {
 			e := &hosts.SSHs[i]
 			if e.DB == nil {
 				continue // 未挂库的环境无法同步
 			}
-			resp.Envs = append(resp.Envs, dbSyncEnv{Name: e.Name, Type: e.DB.Type, Address: e.DB.Address()})
+			p := s.dbPathFor(e.Name)
+			row := dbSyncEnv{Name: e.Name, Type: e.DB.Type, Address: e.DB.Address(), DBPath: p}
+			if st, err := os.Stat(p); err == nil {
+				row.Exists = true
+				row.Size = st.Size()
+				row.Modified = st.ModTime().Format("2006-01-02 15:04")
+			}
+			resp.Envs = append(resp.Envs, row)
 		}
 	}
 	resp.Job = s.syncSnapshot()
@@ -107,7 +109,7 @@ func (s *Server) hDBSyncPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	target := s.syncTarget()
+	target := s.dbPathFor(e.Name)
 	s.syncMu.Lock()
 	if s.sync.Running {
 		s.syncMu.Unlock()

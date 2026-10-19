@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"tt/internal/cli/common"
-	"tt/internal/config"
 	"tt/internal/dict/dbsync"
 
 	"github.com/spf13/cobra"
@@ -21,14 +20,14 @@ var dbSyncCmd = &cobra.Command{
 	Short: "从 ERP 刷新本地查询数据",
 	Long: `从 ERP 刷新本地查询数据(表字典、校验、分类码、画面规格、开窗、消息、参数、
 程序与作业等全部内容,约 86 万行),查询命令读的就是它。
-写入 -d/--db 或 TDICT_DB 指向的数据库(缺省 = 数据目录下的 erp_data.db);原库自动备份为 .bak。
---table 可只刷部分;缺省数据源 = 默认环境(activeEnv,tt env list 查看 / tt env use 切换)的库,
-可用 --env <环境名> 指定。
+写入该环境自己的库：<数据目录>/dict/<环境>.db（-d/--db 可显式覆盖；旧版 TDICT_DB 只对裸 local 生效）；原库自动备份为 .bak。
+每个环境一个文件，两个环境互不覆盖。
+环境必须点名：--env <环境> 或 --at <环境>。
+--table 可只刷部分;环境用 --env <环境名> 或 --at <环境> 点名（没有默认环境）。
 各数据族与本地覆盖情况见 tt dict db status。
 也可在 tt serve 的「数据同步」页面里选环境执行(带进度)。`,
-	Example: `  tt dict db sync
-  tt dict db sync --table dzea_t,dzeal_t
-  tt dict db sync --env 正式区`,
+	Example: `  tt dict db sync --env 正式区
+  tt dict db sync --env 正式区 --table dzea_t,dzeal_t`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		conn, envName, err := resolveDbConn(common.Env)
@@ -43,8 +42,8 @@ var dbSyncCmd = &cobra.Command{
 			}
 		}
 
-		// 目标 SQLite:优先已存在的库(与查询命令读的是同一个),不存在再落数据目录
-		target := resolveSyncTarget()
+		// 目标 SQLite：按环境分文件；-d/TDICT_DB 显式覆盖。
+		target := dictDBSyncTarget(envName)
 
 		fmt.Printf("正在从 ERP 拉取字典数据 (环境: %s) -> %s\n", envName, target)
 		st, err := dbsync.Run(context.Background(), *conn, target, tables, func(p dbsync.Progress) {
@@ -66,37 +65,6 @@ var dbSyncCmd = &cobra.Command{
 		}
 		return nil
 	},
-}
-
-// resolveSyncTarget 解析数据同步(写库)的目标路径:
-//  1. 配置里显式写的 sync.target(设置页可改;CLI 与 web 必须写同一个文件);
-//  2. 已存在的库(TDICT_DB > -d > 数据目录 中先找到的那个)——与查询命令读同一个;
-//  3. -d 显式给的是绝对路径时,写那里(文件由同步过程创建);
-//  4. 都没有 → 数据目录下的 erp_data.db(便携包的数据目录就是包内)。
-//
-// 第 1 条是本函数曾经**漏掉**的一环:文档注释一直写着它,代码里却没有 —— 于是设置页
-// 把同步目标改到别处之后,命令行仍写旧位置,两个 erp_data.db 悄悄分叉。
-// 候选与缺省都来自 config.Locations(统一路径管理器)—— 缺省落点是**数据目录**,
-// 不再是 exe 目录/当前目录,与"数据统一在 %APPDATA%\tt"一致。
-func resolveSyncTarget() string {
-	if p := configuredSyncTarget(); p != "" {
-		return p
-	}
-	return config.LocationsAt(srcConfigPath).SyncTarget("", dbPath)
-}
-
-// configuredSyncTarget 读配置里的 sync.target;读不到/未配置返回空串(不报错:
-// 配置问题不该让 db sync 起不来,后面的便携兜底仍然成立)。
-func configuredSyncTarget() string {
-	path, err := common.ResolveConfig(true)
-	if err != nil {
-		return ""
-	}
-	root, err := config.Load(path)
-	if err != nil {
-		return ""
-	}
-	return config.SyncTargetFor(root)
 }
 
 func init() {

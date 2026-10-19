@@ -191,7 +191,7 @@ func TestFieldtabLocalMissingSaysHowToSync(t *testing.T) {
 		t.Fatal("本地库不存在时必须报错（A31：这是确定缺失，不是「查不了」）")
 	}
 	msg := err.Error()
-	for _, want := range []string{"tt dict sync", "missing", "本地数据库文件未找到"} {
+	for _, want := range []string{"tt dict db sync", "missing", "本地数据库文件未找到"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("错误文案该含 %q：\n%s", want, msg)
 		}
@@ -362,8 +362,10 @@ func setupLocalMirror(t *testing.T) string {
 	t.Helper()
 	resetDictPackageState(t)
 	dir := tempConfigDir(t) // common.ConfigPath → <dir>/config.json；数据目录 = <dir>
-	t.Setenv("TDICT_DB", "")
-	makeLocalDict(t, filepath.Join(dir, "erp_data.db"))
+	dbFile := filepath.Join(dir, "erp_data.db")
+	makeLocalDict(t, dbFile)
+	// 每环境一个库；这里用显式 TDICT_DB 指到测试库，避免依赖配置里的环境名。
+	t.Setenv("TDICT_DB", dbFile)
 
 	root := t.TempDir()
 	mod := filepath.Join(root, "t100")

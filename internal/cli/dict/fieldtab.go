@@ -53,8 +53,9 @@ not-in-dict / ambiguous。
 字典来源**两种通道,缺省在线**(--source):
   --source online  直查服务器字典表(只发 SELECT);环境由 --env/--conn 或配置的
                    query.source 决定。连不上/没环境就**报错并给下一步**,绝不偷用本地库。
-  --source local   查本地 SQLite 镜像(-d/--db 或 TDICT_DB 或数据目录下的
-                   erp_data.db);库不存在就报错并指向 tt dict sync。
+  --source local   查该环境的本地 SQLite 镜像（<数据目录>/dict/<环境>.db）：
+                   用 --env <环境> 或 --env local:<环境> 点名；-d/--db 可显式覆盖。
+                   库不存在就报错并指向 tt dict db sync --env <环境>。
 用 --no-dict 可显式跳过字典(整列「未解析(no-dict)」)。
 两种通道都是只读的;这一轮用的是哪种,JSON 里看 dictSource,人读输出里有一行说明。
 

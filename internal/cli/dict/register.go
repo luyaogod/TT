@@ -16,9 +16,12 @@ var Group = &cobra.Command{
 	Short: "TDict - ERP 数据字典查询工具",
 	Long: `查询 ERP 数据字典。
 
-查询数据源（r.t/r.v/desc/scc/r.q）默认直查默认环境（config.json hosts.activeEnv）的远程库
-（金仓/Oracle）；一个环境都没配时才用本地 SQLite 镜像（erp_data.db，由 tt dict db sync 同步）。
-可用 config.json 顶层 query.source 固定数据源，或 --env <环境名|local> 覆盖本次调用。`,
+查询数据源（r.t/r.v/desc/scc/r.q）：环境一律点名。
+  --env <环境>              直查该环境的远程库（金仓/Oracle）
+  --env local:<环境>        查该环境自己的本地 SQLite 镜像
+                            （<数据目录>/dict/<环境>.db，由 tt dict db sync --env <环境> 同步）
+  本地库按环境分文件，各环境互不覆盖。
+也可用 config.json 顶层 query.source 固定数据源（local:<环境> 或环境名）。`,
 
 	// RunE：**收到不认识的子命令必须非 0**（见 common.UnknownSubcommand）。
 	// 没有这个 RunE，cobra 会打一份帮助就退 0 —— 而"我打错了命令"读成成功，

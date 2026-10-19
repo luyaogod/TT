@@ -208,8 +208,8 @@ func (d *DebugSettings) BPsPersisted(dataDir string) bool {
 
 // QuerySettings 字典查询的数据源选择。
 //
-// Source: "" 或 "auto"（缺省）= **在线优先**：用默认环境（hosts.activeEnv）的远程库直查，
-// 一个环境都没配时才用本地 SQLite 镜像；"local" = 固定用本地镜像；<环境名> = 固定用该环境。
+// Source: "" 或 "auto" = 不固定（命令行必须点名环境）；"local:<环境>" = 该环境的本地库；
+// <环境名> = 固定直查该环境的远程库。裸 "local" 已无意义（本地库按环境分文件），会报错。
 //
 // 注意合并前 TDictCli 的 README 写着"默认是本地 SQLite 镜像"，与它自己的代码相反
 // （cli/source.go 的注释写的是"缺省 = **在线**"）。这里以代码为准。
@@ -254,7 +254,10 @@ type BdldocSettings struct {
 	Dir string `json:"dir,omitempty"`
 }
 
-// SyncSettings 字典同步的本地 SQLite 落点（绝对路径）。
+// SyncSettings 旧版单文件字典库落点（绝对路径）。
+//
+// 现在本地库按环境分文件（<数据目录>/dict/<环境>.db），Target 不再参与新落点；
+// 保留字段只为读旧配置不报错，设置页也不再写它。
 type SyncSettings struct {
 	Target string `json:"target,omitempty"`
 }

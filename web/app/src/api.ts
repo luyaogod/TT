@@ -301,6 +301,10 @@ export interface DBSyncEnv {
   name: string
   type: string
   address: string
+  dbPath: string
+  exists: boolean
+  size: number
+  modified?: string
 }
 export interface DBSyncJob {
   running: boolean
@@ -322,10 +326,7 @@ export interface DBSyncJob {
   startedAt?: string
 }
 export interface DBSyncResp {
-  target: string
-  configured: string
-  defaultTarget: string
-  exists: boolean
+  dir: string
   envs: DBSyncEnv[]
   job: DBSyncJob
 }

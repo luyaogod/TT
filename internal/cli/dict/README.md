@@ -27,10 +27,10 @@
 
 | 开关 | 说明 |
 |---|---|
-| `--db` / `-d` | 本地镜像路径（缺省 = 数据目录（config.json 同目录）下的 `erp_data.db`，也可用环境变量 `TDICT_DB` 指定）；按"环境变量 → `-d` → 数据目录"解析（候选在 config.Locations，统一路径管理器） |
+| `--db` / `-d` | 显式指定本地库路径（也可用环境变量 `TDICT_DB`）；不指定时按环境分文件：`<数据目录>/dict/<环境>.db` |
 | `--limit` | **挂在命令组上，不是各命令上**：返回条数上限是全局策略。从前只有三个命令各自定义了一个，其余命令等于没有防线。缺省跟随配置，再缺省 20 |
-| `--env` / `--conn` | 选数据源（环境名或 `local`）；**显式指定即强制** |
-| `--source`（仅 `fieldtab`） | 字典通道：`online`（直查服务器字典表，**缺省**）/ `local`（本地 SQLite 镜像）。不静默降级；`--no-dict` 优先于它 |
+| `--env` / `--conn` | 选数据源：环境名 = 在线直查；`local:<环境>` = 该环境自己的本地库（裸 `local` 缺环境会报错）；**显式指定即强制** |
+| `--source`（仅 `fieldtab`） | 字典通道：`online`（直查服务器字典表，**缺省**）/ `local`（该环境的本地 SQLite；用 `--env <环境>` 或 `local:<环境>` 点名）。不静默降级；`--no-dict` 优先于它 |
 
 帮助末尾会附一行"本地数据齐不齐"（依赖哪个数据族、哪些表缺）—— 那与数据族定义同源。
 
@@ -42,12 +42,11 @@
 | 分类与开窗 | `scc`（系统分类码）、`r.q`（可复用开窗） |
 | 程序 | `prog`（程序与作业、程序↔表格、子程序与元件） |
 | 消息与参数 | `msg`、`sysp`、`docp` |
-| 数据维护 | `db status` / `db sync` / `db list` / `db ping` / `db discover` |
-| 源码与文档 | `mirror dir` / `mirror pull` / `mirror path`、`bdldoc dir` |
+| 数据维护 | `db status`（按环境总览/单环境详情）/ `db sync` / `db list` / `db discover`；连库测试在 `tt db` |
+| 文档 | `bdldoc dir`；源码镜像已迁到 `tt file mirror` |
 | 结果 | `spill list` / `spill show <文件\|latest>` |
 
-**用法与逐条说明见** [`skills/tt-dict/SKILL.md`](../../../skills/tt-dict/SKILL.md) ——
-这里只记契约。
+**技能由维护者单独管理**；这里只记契约。
 
 ## 结果太大怎么办
 

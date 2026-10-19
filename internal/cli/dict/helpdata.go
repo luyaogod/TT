@@ -2,8 +2,10 @@ package dict
 
 import (
 	"fmt"
+	"strings"
 
 	"tt/internal/cli/common"
+	"tt/internal/config"
 	"tt/internal/dict/dbsync"
 
 	"github.com/spf13/cobra"
@@ -39,11 +41,30 @@ func versionLine() string {
 // localDataHint 返回一行「本地数据」状态;keys 为空 = 全部数据族。
 // 只读检查本地库,任何失败都静默(不该因为环境问题让 --help 报错)。
 func localDataHint(keys ...string) string {
-	st, err := dbsync.InspectLocal(resolveSyncTarget())
+	p := helpLocalDBPath()
+	if p == "" {
+		return ""
+	}
+	st, err := dbsync.InspectLocal(p)
 	if err != nil {
 		return ""
 	}
 	return fmt.Sprintf("本地数据(%s): %s", st.Path, st.Summary(keys...))
+}
+
+// helpLocalDBPath help 里能确定的那份本地库：显式 -d/TDICT_DB，或当前点名的 local:<环境>。
+// 没点名环境时不猜（按环境分库，选错比不显示更坏）。
+func helpLocalDBPath() string {
+	if p := explicitLocalDB(); p != "" {
+		return config.AbsPath(p)
+	}
+	if name, ok := localEnvName(strings.TrimSpace(common.Env)); ok && name != "" {
+		return config.DictDBPath(dictDataDir(), name)
+	}
+	if name, ok := localEnvName(strings.TrimSpace(queryCfgSource())); ok && name != "" {
+		return config.DictDBPath(dictDataDir(), name)
+	}
+	return ""
 }
 
 // attachDataHint 在命令组上装 help 钩子。子命令继承命令组的 help 函数,

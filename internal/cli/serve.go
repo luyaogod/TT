@@ -116,16 +116,13 @@ func newServeCmd() *cobra.Command {
 			// 页面由 internal/web 提供；这份 FS 是为了 `tt debug serve` 单独跑时也能出页面。
 			debugSrv := debug.NewServer(cfg, common.WebFrontend(), path)
 
-			// 字典同步的目标缺省取**数据目录**（config.json 同目录）下的 erp_data.db，
-			// 与 `tt dict -d` 的缺省一致（都来自 config.Locations，统一路径管理器），
-			// 所以"服务在这里同步、命令行在这里读"天然对得上。
-			// 要换地方用设置页的 sync.target，或命令行的 -d。
-			//
-			// 把这个值**同时**交给统一层与字典子系统：设置页会显示「默认位置：X」，
-			// 而同步动作真正往那儿写；两边各算一次的话，显示的那个路径可能不是实际写入的那个。
+			// 本地字典库按环境分文件：<数据目录>/dict/<环境>.db。这个目录同时交给
+			// 字典子系统与前端（设置页显示「库目录」），两边算一次就够。
+			dictDir := config.LocationsAt(path).DictDBDir()
+			// 统一层的配置状态仍用「单文件」口径；设置页已改为按环境显示库目录。
 			syncDefault := config.LocationsAt(path).SyncTarget("", "")
 			dictSrv := dictserver.New(path)
-			dictSrv.SetDBTarget(syncDefault)
+			dictSrv.SetDBDir(dictDir)
 
 			return debugcli.RunForeground(path, debugcli.ServeSpec{
 				Prefix:   "TT",
@@ -152,7 +149,7 @@ func newServeCmd() *cobra.Command {
 					// 表现是"改了没生效"。
 					Reloaders: []web.ConfigReloader{debugSrv},
 					Shutdown:  stopWeb,
-					// 与字典子系统同一个值，见上面的 syncDefault
+					// 统一层配置状态仍按旧的单文件口径显示；设置页已改用 /api/dbsync 的库目录。
 					SyncDefaultTarget: syncDefault,
 				})
 

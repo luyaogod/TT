@@ -160,21 +160,30 @@ func openFieldtabOnline() (*fieldtabDict, error) {
 //
 // `local` 与 `auto` 都不是环境名：它们是"用本地"，而本轮要的是在线 —— 如实返回空串。
 func onlineEnvName() string {
-	if e := strings.TrimSpace(common.Env); e != "" && !strings.EqualFold(e, string(SourceLocal)) {
+	if e := strings.TrimSpace(common.Env); e != "" {
+		if _, ok := localEnvName(e); ok {
+			return ""
+		}
+		if strings.EqualFold(e, string(SourceLocal)) {
+			return ""
+		}
 		return e
 	}
-	if c := strings.TrimSpace(queryCfgSource()); c != "" &&
-		!strings.EqualFold(c, "auto") && !strings.EqualFold(c, string(SourceLocal)) {
-		return c
+	c := strings.TrimSpace(queryCfgSource())
+	if c == "" || strings.EqualFold(c, "auto") || strings.EqualFold(c, string(SourceLocal)) {
+		return ""
 	}
-	return ""
+	if _, ok := localEnvName(c); ok {
+		return ""
+	}
+	return c
 }
 
 // fieldtabOnlineGuidance 在线不可用时的下一步：两条**能直接照抄**的命令。
 func fieldtabOnlineGuidance() string {
-	return "怎么办（二选一）：\n" +
-		"  tt dict fieldtab <模块>/<表单> --source online --env <环境名>   # 指一个配了数据库的环境\n" +
-		"  tt dict fieldtab <模块>/<表单> --source local                 # 改用本地镜像（需先 tt dict sync）"
+	return `怎么办（二选一）：
+  tt dict fieldtab <模块>/<表单> --source online --env <环境名>   # 指一个配了数据库的环境
+  tt dict fieldtab <模块>/<表单> --source local --env <环境名>    # 查该环境的本地库（先 tt dict db sync --env <环境名>）`
 }
 
 // ── 本地 ────────────────────────────────────────────────────────────────────
@@ -188,17 +197,32 @@ func openFieldtabLocal() (*fieldtabDict, error) {
 	resetLandingPoint()
 	ensureQueryPolicy()
 
-	// 先定位一次，好把"文件不在"与"文件在但打不开"分开说（两种原因，两种下一步）。
-	path, err := resolveDBPath(dbPath)
-	if err != nil {
-		return nil, fmt.Errorf("%w\n\n"+
-			"本地字典库不存在（missing：确定缺失，不是「查不了」unknown）。\n\n"+
-			"怎么办：\n"+
-			"  tt dict sync                                                 # 从 ERP 全量同步到本地镜像\n"+
-			"  tt dict db status                                            # 先看各数据族缺什么\n"+
-			"  tt dict fieldtab <模块>/<表单> --source online --env <环境名>   # 不落盘，直接查服务器", err)
+	env := localEnvForFieldtab()
+	var path string
+	if env == "" {
+		if explicitLocalDB() == "" {
+			return nil, localNeedsEnvErr()
+		}
+		var err error
+		path, err = resolveDBPath(dbPath)
+		if err != nil {
+			return nil, fmt.Errorf(`%w
+
+本地字典库不存在（missing：确定缺失，不是「查不了」unknown）。
+
+怎么办：
+  先同步: tt dict db sync --env <环境>
+  看状态: tt dict db status
+  或在线: tt dict fieldtab <模块>/<表单> --source online --env <环境名>`, err)
+		}
+	} else {
+		var err error
+		path, err = resolveDBPathForEnv(env, dbPath)
+		if err != nil {
+			return nil, err
+		}
 	}
-	if err := openLocalSource(); err != nil {
+	if err := openLocalSource(env); err != nil {
 		return nil, err
 	}
 	return &fieldtabDict{
@@ -207,4 +231,26 @@ func openFieldtabLocal() (*fieldtabDict, error) {
 		Where: path,
 		close: closeQuerySource,
 	}, nil
+}
+
+// localEnvForFieldtab 本轮本地通道读哪个环境的库：
+// local:<环境> / 裸 local 配 --db / --source local 配 --env <环境> / query.source。
+func localEnvForFieldtab() string {
+	if e := strings.TrimSpace(common.Env); e != "" {
+		if name, ok := localEnvName(e); ok {
+			return name
+		}
+		if strings.EqualFold(e, string(SourceLocal)) {
+			return ""
+		}
+		return e
+	}
+	c := strings.TrimSpace(queryCfgSource())
+	if name, ok := localEnvName(c); ok {
+		return name
+	}
+	if c == "" || strings.EqualFold(c, "auto") || strings.EqualFold(c, string(SourceLocal)) {
+		return ""
+	}
+	return c
 }

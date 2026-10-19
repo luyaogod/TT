@@ -38,7 +38,8 @@ var tableCmd = &cobra.Command{
   tt dict r.t --brief "apca_t,apcb_t,glab_t"   # 多表只解语义,不打字段明细
   tt dict r.t glab_t --who                     # 反查:哪些程序在用 glab_t(含操作类别)
   tt dict r.t dzea_t --json
-  tt dict r.t dzea_t --env 正式区   # 切到某环境的远程库直查(--env local 回本地)`,
+  tt dict r.t dzea_t --env 正式区          # 直查该环境的远程库
+  tt dict r.t dzea_t --env local:正式区    # 查该环境的本地库`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {

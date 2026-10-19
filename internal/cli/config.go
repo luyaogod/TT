@@ -237,13 +237,24 @@ func validateConfig(path string) []string {
 
 	// 原先这里还校验 hosts.activeEnv 与 debug.activeEnv 是否指向存在的环境 ——
 	// 两个字段都已移除("默认环境"这个概念不存在了),所以整段删掉。
-	// query.source 也是裸环境名(或 local / auto):环境被改名/删除后它会悬空,
+	// query.source 是裸环境名(或 local / auto / local:<环境>):环境被改名/删除后它会悬空,
 	// 直到下次查询才以"未找到环境"报错 —— 那是"配错了"被当成"查不到数据"的老毛病。
-	// 与上面两条同一个位置校验,零新增机制。
-	if s := strings.TrimSpace(r.Query.Source); s != "" && s != "local" && s != "auto" {
-		if r.Hosts.ByName(s) == nil {
-			problems = append(problems, fmt.Sprintf(
-				"query.source = %q 指向不存在的环境(应为 local、auto 或某个环境名)", s))
+	if src := strings.TrimSpace(r.Query.Source); src != "" && src != "auto" {
+		switch {
+		case strings.EqualFold(src, "local"):
+			problems = append(problems, "query.source = local 缺少环境：本地库按环境分开，应写 local:<环境>（或在命令行用 --env local:<环境>）")
+		case strings.HasPrefix(strings.ToLower(src), "local:"):
+			env := strings.TrimSpace(src[len("local:"):])
+			if env == "" {
+				problems = append(problems, "query.source = local: 缺少环境名")
+			} else if r.Hosts.ByName(env) == nil {
+				problems = append(problems, fmt.Sprintf("query.source = %q 指向不存在的环境", src))
+			}
+		default:
+			if r.Hosts.ByName(src) == nil {
+				problems = append(problems, fmt.Sprintf(
+					"query.source = %q 指向不存在的环境(应为 auto、local:<环境> 或某个环境名)", src))
+			}
 		}
 	}
 	return problems

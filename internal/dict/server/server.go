@@ -32,7 +32,7 @@ import (
 // Server 字典侧配置服务:config.json 读写 + REST 接口 + 后台任务状态。
 type Server struct {
 	cfgPath string // config.json 路径(读写;文件不存在时首次保存创建)
-	dbPath  string // 数据同步目标 SQLite(由挂载方注入;空=当前目录 erp_data.db)
+	dbDir   string // 本地字典库目录（每个环境一个 .db；由挂载方注入，空=数据目录/dict）
 
 	// 源码镜像拉取任务(单实例:同一时间只允许一个)
 	mirrorMu    sync.Mutex
@@ -59,30 +59,20 @@ func New(cfgPath string) *Server {
 	return &Server{cfgPath: cfgPath}
 }
 
-// SetDBTarget 注入数据同步的默认目标(由挂载方传入,与设置页显示的值同源)。
-func (s *Server) SetDBTarget(p string) { s.dbPath = p }
+// SetDBDir 注入本地字典库目录（每个环境一个 .db）。空 = config.Locations 的缺省（数据目录/dict）。
+func (s *Server) SetDBDir(dir string) { s.dbDir = dir }
 
-// defaultDBTarget 返回默认同步目标(未注入时走 config.Locations 的缺省:
-// 数据目录下的 erp_data.db)。
-//
-// 默认位置只有 config 里那一份实现:统一设置页会显示「默认位置:X」,
-// 而这里真正往那儿写 —— 两边各算一次的话,显示的路径可能不是实际写入的那个。
-func (s *Server) defaultDBTarget() string {
-	if s.dbPath != "" {
-		return s.dbPath
+// localDBDir 返回本地字典库目录。
+func (s *Server) localDBDir() string {
+	if s.dbDir != "" {
+		return s.dbDir
 	}
-	return config.LocationsAt(s.cfgPath).SyncTarget("", "")
+	return config.DictDBDir(config.LocationsAt(s.cfgPath).DataDir())
 }
 
-// syncTarget 返回当前同步目标:优先 config.json 顶层 sync.target(页面可改),
-// 否则用默认目标(exe 同目录)。文件不存在时由同步过程创建(含父目录)。
-func (s *Server) syncTarget() string {
-	if r, err := loadConfig(s.cfgPath); err == nil {
-		if d := config.AbsPath(r.Sync.Target); d != "" {
-			return d
-		}
-	}
-	return s.defaultDBTarget()
+// dbPathFor 某环境的本地库文件。
+func (s *Server) dbPathFor(env string) string {
+	return config.DictDBPathIn(s.localDBDir(), env)
 }
 
 // Handler 返回字典侧的 HTTP 面(镜像/同步/BDL 文档的 REST 接口)。

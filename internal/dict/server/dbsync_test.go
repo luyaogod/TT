@@ -4,18 +4,22 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
+
+	"tt/internal/config"
 )
 
-// GET /api/dbsync:目标库、默认环境、只列挂了库的环境。
+// GET /api/dbsync:库目录 + 各环境自己的 .db（按环境分文件，互不覆盖）。
 func TestDBSyncGet(t *testing.T) {
-	p := writeTempConfig(t, `{"hosts":{"activeEnv":"b","sshs":[
+	p := writeTempConfig(t, `{"hosts":{"sshs":[
       {"name":"a","host":"1.2.3.4","user":"u","password":"p"},
       {"name":"b","host":"5.6.7.8","user":"u","password":"p",
        "db":{"type":"oracle","host":"5.6.7.8","port":1521,"service":"s","accounts":[{"account":"x","password":"x"}]}}]}}`)
+	dir := t.TempDir()
 	s := New(p)
-	s.SetDBTarget("D:/tmp/erp_data.db")
+	s.SetDBDir(dir)
 
 	rec := httptest.NewRecorder()
 	s.hDBSyncGet(rec, httptest.NewRequest("GET", "/api/dbsync", nil))
@@ -23,15 +27,56 @@ func TestDBSyncGet(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}
-	if resp.Target != "D:/tmp/erp_data.db" {
-		t.Fatalf("target = %q", resp.Target)
+	if resp.Dir != dir {
+		t.Fatalf("dir = %q, want %q", resp.Dir, dir)
 	}
-	// activeEnv 已从响应里移除:没有默认环境了(环境一律点名)
 	if len(resp.Envs) != 1 || resp.Envs[0].Name != "b" || resp.Envs[0].Type != "oracle" {
 		t.Fatalf("应只列挂库环境: %+v", resp.Envs)
 	}
+	want := config.DictDBPathIn(dir, "b")
+	if resp.Envs[0].DBPath != want {
+		t.Fatalf("dbPath = %q, want %q", resp.Envs[0].DBPath, want)
+	}
+	if resp.Envs[0].Exists {
+		t.Fatal("库文件尚不存在，exists 应为 false")
+	}
 	if resp.Job.Running {
 		t.Fatal("初始不应有任务在跑")
+	}
+
+	// 建成 b 的库后，状态按文件真实反映
+	if err := os.MkdirAll(filepath.Dir(want), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(want, []byte("sqlite"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec = httptest.NewRecorder()
+	s.hDBSyncGet(rec, httptest.NewRequest("GET", "/api/dbsync", nil))
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Envs[0].Exists || resp.Envs[0].Size != int64(len("sqlite")) {
+		t.Fatalf("已存在的库应报 exists/size: %+v", resp.Envs[0])
+	}
+}
+
+// 不同环境必须落到不同文件（隔离的结构判据）。
+func TestDBSyncPerEnvPathsDiffer(t *testing.T) {
+	p := writeTempConfig(t, `{"hosts":{"sshs":[
+      {"name":"a","host":"1.2.3.4","user":"u","password":"p",
+       "db":{"type":"oracle","host":"1.2.3.4","service":"s","accounts":[{"account":"x","password":"x"}]}},
+      {"name":"b","host":"5.6.7.8","user":"u","password":"p",
+       "db":{"type":"kingbase","host":"5.6.7.8","database":"d","accounts":[{"account":"x","password":"x"}]}}]}}`)
+	dir := t.TempDir()
+	s := New(p)
+	s.SetDBDir(dir)
+	pa, pb := s.dbPathFor("a"), s.dbPathFor("b")
+	if pa == pb {
+		t.Fatalf("两个环境指向同一个文件: %s", pa)
+	}
+	if filepath.Dir(pa) != dir || filepath.Dir(pb) != dir {
+		t.Fatalf("库文件应在库目录 %s 下: %s / %s", dir, pa, pb)
 	}
 }
 
@@ -60,58 +105,5 @@ func TestDBSyncRunningConflict(t *testing.T) {
 	s.hDBSyncPost(rec, httptest.NewRequest("POST", "/api/dbsync", bytes.NewBufferString(`{"env":"a"}`)))
 	if rec.Code != 409 {
 		t.Fatalf("已有任务应 409, got %d", rec.Code)
-	}
-}
-
-// 目标库可设置:PUT 写 config.json 顶层 sync.target;空值清除、回到默认(exe 同目录)。
-func TestDBSyncTargetSetting(t *testing.T) {
-	p := writeTempConfig(t, `{"hosts":{"sshs":[{"name":"a","host":"1.2.3.4","user":"u","password":"p",
-      "db":{"type":"oracle","host":"1.2.3.4","service":"s","accounts":[{"account":"x","password":"x"}]}}]}}`)
-	s := New(p)
-	s.SetDBTarget(`D:\default-dir\erp_data.db`)
-
-	rec := httptest.NewRecorder()
-	s.hDBSyncGet(rec, httptest.NewRequest("GET", "/api/dbsync", nil))
-	var r1 dbSyncResp
-	if err := json.Unmarshal(rec.Body.Bytes(), &r1); err != nil {
-		t.Fatal(err)
-	}
-	if r1.Configured != "" || r1.Target != `D:\default-dir\erp_data.db` || r1.DefaultTarget != `D:\default-dir\erp_data.db` {
-		t.Fatalf("默认状态不符: %+v", r1)
-	}
-
-	// 设置自定义目标(直接改配置 —— 原先的 PUT /api/dbsync 与 PUT /api/hosts 重复,已删)
-	custom := filepath.Join(t.TempDir(), "sub", "erp.db")
-	setSection(t, p, "sync", map[string]any{"target": custom})
-	rec2 := httptest.NewRecorder()
-	s.hDBSyncGet(rec2, httptest.NewRequest("GET", "/api/dbsync", nil))
-	var r2 dbSyncResp
-	if err := json.Unmarshal(rec2.Body.Bytes(), &r2); err != nil {
-		t.Fatal(err)
-	}
-	if filepath.Clean(r2.Configured) != filepath.Clean(custom) || filepath.Clean(r2.Target) != filepath.Clean(custom) {
-		t.Fatalf("设置后不符: %+v", r2)
-	}
-	if r2.Exists {
-		t.Fatal("目标文件尚不存在,exists 应为 false")
-	}
-	root := readRoot(t, p)
-	if _, ok := root["hosts"]; !ok {
-		t.Fatal("hosts 键应保留")
-	}
-	if sec, _ := root["sync"].(map[string]any); sec == nil || sec["target"] == "" {
-		t.Fatalf("sync.target 未写入: %v", root["sync"])
-	}
-
-	// 清空 sync.target = 回到默认位置
-	clearSectionKey(t, p, "sync", "target")
-	rec3 := httptest.NewRecorder()
-	s.hDBSyncGet(rec3, httptest.NewRequest("GET", "/api/dbsync", nil))
-	var r3 dbSyncResp
-	if err := json.Unmarshal(rec3.Body.Bytes(), &r3); err != nil {
-		t.Fatal(err)
-	}
-	if r3.Configured != "" || r3.Target != `D:\default-dir\erp_data.db` {
-		t.Fatalf("清除后不符: %+v", r3)
 	}
 }

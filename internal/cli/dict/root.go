@@ -40,7 +40,7 @@ var dictEnt string
 func init() {
 	// 字典独有的 persistent flag:--db 只对 tt dict 有意义
 	Group.PersistentFlags().StringVarP(&dbPath, "db", "d", "",
-		"本地 SQLite 数据库路径(本地查询数据源;也可用 TDICT_DB;缺省 = 数据目录下的 erp_data.db)")
+		"本地 SQLite 路径(显式覆盖;缺省 = 数据目录/dict/<环境>.db;旧 TDICT_DB 仅对裸 local 生效)")
 	// --limit 挂在命令组上而不是各命令上:返回条数上限是**全局策略**,不是某个命令的
 	// 显示选项 —— 从前只有 msg/prog/r.t 各自定义了一个,其余命令等于没有防线。
 	Group.PersistentFlags().IntVar(&queryLimit, "limit", -1,

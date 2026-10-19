@@ -63,7 +63,7 @@ func newEnvCmd() *cobra.Command {
 改为**一律点名**:
 
   tt debug start <作业> --env <环境名>      # 调试:点名环境
-  tt dict <命令> --env <环境名>             # 字典:点名环境(或 --env local 查本地副本)
+  tt dict <命令> --env <环境名>             # 字典:点名环境(或 --env local:<环境> 查该环境本地副本)
   tt dev tzs <动词> --env <环境名>          # 表单:环境决定用哪个工作区
 
 Web 端在会话面板里选环境(那个选择是运行时的,同样不写配置文件)。`,

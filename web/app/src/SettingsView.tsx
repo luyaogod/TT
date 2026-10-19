@@ -89,12 +89,11 @@ interface DebugForm {
 }
 
 interface DictForm {
-  /** '' = 在线(默认环境) | 'local' = 本地 SQLite。刻意不留环境名那一档,见「查询数据源」卡片的注释。 */
+  /** '' = 在线 | 'local:<环境>' = 该环境的本地 SQLite | 环境名 = 固定走该环境的在线库。 */
   querySource: string
   mirrorDir: string
   bdldocDir: string
-  // 刻意没有 syncTarget:字典库的落点不让用户在这一页改(它只是一个本地缓存文件,
-  // 位置由服务端算)。位置只在卡片里只读显示,取值来自 /api/config/status。
+  // 刻意没有 syncTarget:字典库按环境分文件,位置由服务端算;卡片里只读显示库目录。
   // **不要**为了"完整性"把它加回来再原样回传 —— 那等于把一个不展示的键交给这一页写。
 }
 
@@ -487,7 +486,7 @@ export function SettingsView() {
       // 界面没有控件，也就**不必读进来再回传** —— 服务端 putSection 会从旧配置原样补回。
       setDbg({ watchdogSeconds: c.debug?.watchdogSeconds || 0 })
       setDict({
-        querySource: c.query?.source || '',
+        querySource: c.query?.source === 'auto' ? '' : (c.query?.source || ''),
         mirrorDir: c.mirror?.dir || '',
         bdldocDir: c.bdldoc?.dir || '',
       })
@@ -978,6 +977,12 @@ export function SettingsView() {
     return () => window.clearInterval(t)
   }, [syncRunning, refreshSync])
 
+  // 任务结束时再取一次：轮询随 running=false 停下，不补这一下的话
+  // 「本地库」列会一直停在“未同步”，直到切分区或刷新页面。
+  useEffect(() => {
+    if (sync?.job?.done && !sync.job.running) void refreshSync()
+  }, [sync?.job?.done, sync?.job?.running, refreshSync])
+
   // 环境名由调用的那一行给出 —— 表格里每行一个按钮,不再有"先选环境"这一步。
   // 全量重建会整目录替换,先弹确认;确认后走 doMirror(动作与确认分开,
   // 弹窗那一侧只负责 setAsk 与描述文案)。
@@ -1020,7 +1025,7 @@ export function SettingsView() {
     if (!env) return
     setAsk({
       title: `同步环境「${env}」的字典数据?`,
-      desc: `目标:${sync?.target || ''}\n将覆盖本地 SQLite(原库自动备份为 .bak),约 85 万行,需数分钟。`,
+      desc: `目标:${(sync?.envs.find((e) => e.name === env)?.dbPath || '')}\n将覆盖本地 SQLite(原库自动备份为 .bak),约 85 万行,需数分钟。`,
       confirmText: '开始同步',
       run: () => void doSync(env),
     })
@@ -1464,23 +1469,48 @@ export function SettingsView() {
                 <SettingRow
                   id="query.source"
                   label="数据源"
-                  description="选「本地」须先同步下面任一环境;连不上远程也不会静默回落本地。"
+                  description="在线走该环境直查；本地只读该环境自己的 SQLite，各环境互不干扰。本地要先同步下面那一行。"
                   control={
-                    <Select value={dict.querySource === 'local' ? 'local' : '__auto__'}
-                      onValueChange={(v) => { setDict((s) => ({ ...s, querySource: v === '__auto__' ? '' : v })); markDirty('query') }}>
+                    <Select
+                      value={dict.querySource === '' ? 'online' : dict.querySource}
+                      onValueChange={(v) => { setDict((s) => ({ ...s, querySource: v === 'online' ? '' : v })); markDirty('query') }}>
                       <SelectTrigger className="h-7 w-full text-xs"><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        {/* 只有两档:**在线(默认环境)** 与 **本地 SQLite**。
-                            原先还按环境列了一遍「在线(主机109)」「在线(尚阳通)」——
-                            但"用哪个环境"在「站点管理」里已经有一个默认环境(左侧那个绿点),
-                            在这里再选一次等于让同一件事有两个出处:两处不一致时该信谁?
-                            所以这里只留"在线/本地"这个**路线**选择,环境一律走默认那个。 */}
-                        <SelectItem value="__auto__">在线(默认环境)</SelectItem>
-                        <SelectItem value="local">本地(SQLite)</SelectItem>
+                        <SelectItem value="online">在线（查询时点名环境）</SelectItem>
+                        {(sync?.envs ?? []).map((e) => (
+                          <SelectItem key={e.name} value={`local:${e.name}`} disabled={!e.exists}>
+                            本地（{e.name}{e.exists ? '' : ' · 未同步'}）
+                          </SelectItem>
+                        ))}
+                        {dict.querySource.startsWith('local:') &&
+                          !(sync?.envs ?? []).some((e) => `local:${e.name}` === dict.querySource) && (
+                          <SelectItem value={dict.querySource}>本地（{dict.querySource.slice(6)}）</SelectItem>
+                        )}
+                        {dict.querySource !== '' && dict.querySource !== 'online' &&
+                          dict.querySource !== 'local' && !dict.querySource.startsWith('local:') && (
+                          <SelectItem value={dict.querySource}>在线（{dict.querySource}）</SelectItem>
+                        )}
+                        {dict.querySource === 'local' && (
+                          <SelectItem value="local" disabled>本地（旧值：未指定环境）</SelectItem>
+                        )}
                       </SelectContent>
                     </Select>
                   }
                 />
+                {dict.querySource === 'local' && (
+                  <p className="text-[11px] leading-relaxed text-amber-600 dark:text-amber-400">
+                    旧配置 query.source = local 没有指定环境；请选「本地（某环境）」或「在线」后再保存。
+                  </p>
+                )}
+                {(() => {
+                  const m = dict.querySource.match(/^local:(.+)$/)
+                  const e = m ? (sync?.envs ?? []).find((x) => x.name === m[1]) : undefined
+                  return m && e && !e.exists
+                    ? <p className="text-[11px] leading-relaxed text-amber-600 dark:text-amber-400">
+                        该环境的本地库还没同步；先点下面「开始同步」，再查本地。
+                      </p>
+                    : null
+                })()}
 
                 {/* 数据同步(原「数据同步」卡片):一个环境一行,每行一个「开始同步」。
                     它必须留在这张卡里 —— 上面选了「本地」就等于声明"我读本地那份",
@@ -1502,6 +1532,7 @@ export function SettingsView() {
                         <TableHead>环境</TableHead>
                         <TableHead className="w-28">类型</TableHead>
                         <TableHead>地址</TableHead>
+                        <TableHead className="w-36">本地库</TableHead>
                         <TableHead className="w-32">状态</TableHead>
                         <TableHead className="w-28">操作</TableHead>
                       </TableRow>
@@ -1518,6 +1549,11 @@ export function SettingsView() {
                             <TableCell className="px-2">{e.type}</TableCell>
                             <TableCell className="px-2">
                               <span className="block truncate font-mono text-[11px] text-muted-foreground" title={e.address}>{e.address}</span>
+                            </TableCell>
+                            <TableCell className="px-2" title={e.dbPath}>
+                              {e.exists
+                                ? <span className="text-emerald-600 dark:text-emerald-400">已同步 · {fmtBytes(e.size)}</span>
+                                : <span className="text-muted-foreground">未同步</span>}
                             </TableCell>
                             <TableCell className="px-2">
                               <EnvStatus busy={busy} running={!!sync.job?.running} idle="空闲"
@@ -1566,11 +1602,11 @@ export function SettingsView() {
 
                 {/* 本地库的落点**只读**:它是个本地缓存文件,位置由服务端算(缺省在数据目录下),
                     让用户在设置页里挑一个路径,除了能把 CLI/Web/查询三边指向不同的库之外没有好处。
-                    要改仍在 config.json 里写 sync.target(后端照旧认它),这里只如实显示生效值。
+                    本地库按环境分文件；这里只读显示库目录。
                     原先这里还跟了一句状态说明(文件在不在、同步会先备份 .bak、位置是否来自配置):
                     那些都是"用户不需要为它做决定"的信息 —— 在不在不影响他点「开始同步」,
                     备份与失败保护是服务端自动行为,位置来源看这个只读值本身也够。 */}
-                <InfoRow label="保存位置" value={status?.sync.target || '—'} />
+                <InfoRow label="库目录" value={sync?.dir || '—'} />
               </Card>
 
               <Card id="card-dict-mirror" title="源码镜像"

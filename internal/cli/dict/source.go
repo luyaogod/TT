@@ -5,20 +5,21 @@ package dict
 // 命令层不感知差异 —— 不再有 --online 开关。
 //
 // 选择优先级:
-//  1. --env/--conn <环境名|local>(覆盖本次调用;**显式指定即强制**);
-//  2. config.json 顶层 query.source(环境名 或 "local";可在 tt serve 的「设置」页切换);
-//  3. 缺省 = **在线**:用默认环境(hosts.activeEnv)直查;一个环境都没配才用本地库。
+//  1. --env/--conn <环境名|local:<环境>>（覆盖本次调用；**显式指定即强制**）；
+//  2. config.json 顶层 query.source（环境名 或 local:<环境>；可在 tt serve 的「设置」页切换）；
+//  3. 都没有 → 报错（没有默认环境，也不猜本地库是哪个环境的）。
 //
 // **明确不做自动降级**:在线就是在线、本地就是本地,连不上直接报错并提示怎么切
-// (--env local,或前端「设置」页把「查询数据源」切成本地)。
+// (--env local:<环境>,或前端「设置」页把「查询数据源」切成本地)。
 //
-// "local" = 现有 erp_data.db(--db / TDICT_DB);环境名 = hosts.sshs 中该环境的
+// "local:<环境>" = <数据目录>/dict/<环境>.db（-d/--db 可显式覆盖）;环境名 = hosts.sshs 中该环境的
 // db(客户端直连,凭据取账号列表首项)。
 
 import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"tt/internal/cli/common"
@@ -50,20 +51,101 @@ var (
 // 远程库直查"会在一台机器配了多个环境时替用户挑一个 —— 挑错的表现与"数据不存在"一样。
 func openQuerySource() error {
 	srcStarted = time.Now()
-	if common.Env != "" { // ① 命令行指定(--env/--conn):强制
-		if common.Env == "local" {
-			return openLocalSource()
+	if env := strings.TrimSpace(common.Env); env != "" { // ① 命令行指定(--env/--conn):强制
+		if name, ok := localEnvName(env); ok {
+			return openLocalSource(name)
 		}
-		return openRemoteSource(common.Env, dictEnt)
+		if strings.EqualFold(env, "local") {
+			if explicitLocalDB() != "" {
+				return openLocalSource("")
+			}
+			return localNeedsEnvErr()
+		}
+		return openRemoteSource(env, dictEnt)
 	}
-	switch cfg := queryCfgSource(); cfg {
-	case "local": // ② 配置指定本地
-		return openLocalSource()
-	case "", "auto": // ③ 未配置:没有默认环境可回落,所以走本地副本
-		return openLocalSource()
-	default: // ② 配置指定了环境名:强制
+	switch cfg := strings.TrimSpace(queryCfgSource()); {
+	case strings.HasPrefix(strings.ToLower(cfg), "local:"): // ② 配置指定 local:<环境>
+		return openLocalSource(strings.TrimSpace(cfg[len("local:"):]))
+	case strings.EqualFold(cfg, "local"): // 旧写法：没有环境，不能猜
+		return localNeedsEnvErr()
+	case cfg == "" || strings.EqualFold(cfg, "auto"): // ③ 未配置：没有默认环境，不能猜
+		return noSourceErr()
+	default: // ② 配置指定了环境名:远程
 		return openRemoteSource(cfg, dictEnt)
 	}
+}
+
+// localEnvName 解析 local:<环境>；第二个返回值表示它是不是本地源写法。
+func localEnvName(s string) (string, bool) {
+	const prefix = "local:"
+	if len(s) < len(prefix) || !strings.EqualFold(s[:len(prefix)], prefix) {
+		return "", false
+	}
+	return strings.TrimSpace(s[len(prefix):]), true
+}
+
+// explicitLocalDB 显式给的本地库路径（TDICT_DB / -d/--db）；空 = 没给。
+func explicitLocalDB() string {
+	if v := strings.TrimSpace(os.Getenv("TDICT_DB")); v != "" {
+		return v
+	}
+	return strings.TrimSpace(dbPath)
+}
+
+// localNeedsEnvErr 裸 local（没有环境）时的报错：列出可选的 local:<环境>，不猜。
+func localNeedsEnvErr() error {
+	names := localDBEnvNames()
+	hint := `本地库按环境分开，必须点名环境：
+  tt dict <命令> --env local:<环境>
+（首次使用先同步： tt dict db sync --env <环境>）`
+	if len(names) > 0 {
+		hint = hint + `
+
+已有本地库：` + strings.Join(names, "、")
+	}
+	return output.Errorf(output.CodeUsage, 2, "数据源 local 缺少环境：%s", hint)
+}
+
+// noSourceErr 没给 --env、配置也没有 query.source 时的报错。
+func noSourceErr() error {
+	return output.Errorf(output.CodeUsage, 2, `没有点名数据源：用 --env <环境> 走在线，或 --env local:<环境> 走本地；
+也可以在设置页把 query.source 固定为某个环境或 local:<环境>。`)
+}
+
+// localDBEnvNames 列出已经有本地库文件的环境（local:<环境> 形式），用于报错提示。
+func localDBEnvNames() []string {
+	path, err := common.ResolveConfig(true)
+	if err != nil {
+		return nil
+	}
+	hosts, err := config.LoadHosts(path)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, name := range hosts.Names() {
+		if _, err := os.Stat(config.LocationsAt(path).DictDBPath(name)); err == nil {
+			out = append(out, "local:"+name)
+		}
+	}
+	return out
+}
+
+// resolveDBPathForEnv 按环境定位本地库（TDICT_DB / -d / <数据目录>/dict/<环境>.db）。
+func resolveDBPathForEnv(env, flagPath string) (string, error) {
+	p, tried, err := config.LocationsAt(srcConfigPath).ResolveDictDBFor(env, flagPath)
+	if err != nil {
+		var msg strings.Builder
+		fmt.Fprintln(&msg, "本地字典库不存在（环境 "+env+"）。")
+		fmt.Fprintln(&msg, "尝试过:")
+		for _, one := range tried {
+			fmt.Fprintln(&msg, "  "+one)
+		}
+		fmt.Fprintln(&msg)
+		fmt.Fprint(&msg, "先同步该环境: tt dict db sync --env "+env)
+		return "", fmt.Errorf("%s", msg.String())
+	}
+	return p, nil
 }
 
 // closeQuerySource 在 Group PersistentPostRun 关闭数据源。
@@ -88,16 +170,35 @@ func queryCfgSource() string {
 	return root.Query.Source
 }
 
-// openLocalSource 打开本地 SQLite 镜像(-d/TDICT_DB 定位,要求文件已存在)。
-func openLocalSource() error {
-	resolvedPath, err := resolveDBPath(dbPath)
+// openLocalSource 打开本地 SQLite 镜像。
+//
+// env 非空：<数据目录>/dict/<env>.db（-d/TDICT_DB 可覆盖）；env 为空：只允许显式
+// -d/TDICT_DB（裸 local 不能猜环境）。
+func openLocalSource(env string) error {
+	var (
+		resolvedPath string
+		err          error
+	)
+	if env == "" {
+		if explicitLocalDB() == "" {
+			return localNeedsEnvErr()
+		}
+		resolvedPath, err = resolveDBPath(dbPath)
+	} else {
+		resolvedPath, err = resolveDBPathForEnv(env, dbPath)
+	}
 	if err != nil {
 		return err
 	}
-	srcTarget = &dbconfig.Target{Env: "local", Route: dbconfig.RouteLocalSQLite, Path: resolvedPath}
+	where := env
+	if where == "" {
+		where = "local"
+	}
+	srcTarget = &dbconfig.Target{Env: where, Route: dbconfig.RouteLocalSQLite, Path: resolvedPath}
 	srcNotes = nil
 	if common.Verbose {
-		fmt.Fprintf(os.Stderr, "[dict] 数据源: 本地 SQLite (%s)\n", resolvedPath)
+		fmt.Fprintf(os.Stderr, "[dict] 数据源: 本地 SQLite (%s) [%s]", resolvedPath, where)
+		fmt.Fprintln(os.Stderr)
 	}
 	database, err := db.Open(resolvedPath)
 	if err != nil {
@@ -178,14 +279,32 @@ func missingHint(subject string) string {
 	if srcLocal {
 		return fmt.Sprintf("本地库尚未包含%s数据。二选一:\n  tt dict db sync                  # 从 ERP 全量刷新(原库自动备份为 .bak)\n  tt dict <命令> --env <环境名>       # 免写盘,直接查远程\n看各数据族缺什么: tt dict db status", subject)
 	}
-	return fmt.Sprintf("远程库缺少%s相关字典表(该环境数据库未同步或账号权限不足);可用 --env local 切回本地库", subject)
+	return fmt.Sprintf("远程库缺少%s相关字典表(该环境数据库未同步或账号权限不足);可用 --env local:<环境> 切回该环境的本地库", subject)
 }
 
 // emptyHint 查询零结果时的提示:本地源沿用"先 db sync"建议,远程源说明语义。
 // subject 如 "校验定义"。
 func emptyHint(subject string) string {
 	if srcLocal {
-		return fmt.Sprintf("暂无%s数据。请先执行: tt dict db sync", subject)
+		return fmt.Sprintf("暂无%s数据。请先执行: tt dict db sync --env <环境>", subject)
 	}
 	return fmt.Sprintf("未查询到%s数据(库中无记录或 --kw 无匹配;可换 --env <其他环境> 再试)", subject)
+}
+
+// dictDataDir 数据目录（config.json 同目录）。
+func dictDataDir() string {
+	path, err := common.ResolveConfig(true)
+	if err != nil {
+		return ""
+	}
+	return config.LocationsAt(path).DataDir()
+}
+
+// dictDBSyncTarget 某环境本地库的写侧目标：<数据目录>/dict/<环境>.db；
+// -d/--db 或 TDICT_DB 显式给了就写那里。
+func dictDBSyncTarget(env string) string {
+	if p := strings.TrimSpace(dbPath); p != "" {
+		return config.AbsPath(p)
+	}
+	return config.DictDBPath(dictDataDir(), env)
 }
