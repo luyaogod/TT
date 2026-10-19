@@ -10,13 +10,13 @@ description: 正在阅读或需要阅读T100代码时自动触发本技能
 1. 区分环境。tt的用户主要是ERP顾问或者ERP开发，他们的电脑上可能配置了多个不同的客户环境。用户提问时可能带了环境信息，比如："帮我看一下XX公司的XX作业的代码"。如果足够明确，可以判断出是哪个客户环境的作业，那么就可以直接去对应的环境中获取源码；如果不够明确，则需要先询问用户，确认客户环境后再去获取源码。
 
 查看环境列表的命令：
-```
+```bash
 tt env list
 ```
 
 2. 找到程序编号。作业编号是用户在客户端看到的功能入口，而程序编号是作业的实现代码。一个作业可能调用多个程序，而一个程序也可能被多个作业复用。作业不等于程序，一个程序也可能被多个作业复用。在处理问题时，我们要优先判断用户说的是作业还是程序。用户大概率讲的是作业，我们需要借助 `tt dict prog <程序编号>` 来找到对应的程序，才能确定去看哪一份源代码。
 
-```
+```bash
 tt dict prog <程序编号> --at <环境>@<企业>
 tt dict prog --kw <业务词> --at <环境>@<企业>
 ```
@@ -24,12 +24,12 @@ tt dict prog --kw <业务词> --at <环境>@<企业>
 3. 优先从本地环境读取代码，节省时间。如果tt没有配置代码，则再去尝试从远程环境读取代码。不要帮用户通过 `mirror` 命令去下载代码，时间会很长。
 
 获取本地源码镜像目录的命令：
-```
+```bash
 tt file mirror path --at <环境>
 ```
 
 从远程SFTP读取源码的命令：
-```
+```bash
 tt file ls --at <环境> erp/<模块>/4gl
 tt file find --at <环境> erp -name '*<程序>*'
 tt file grep -rn --at <环境> --include '*.4gl' '<关键字>' erp/<模块>/4gl
@@ -48,11 +48,13 @@ VALUES (gr_qry[li_i].check,gr_qry[li_i].pmdsdocno,gr_qry[li_i].pmdtseq,gr_qry[li
 ```
 
 从字典中查询表和字段的中文含义的命令：
-```
+```bash
 tt dict r.t --brief "capp115_tmp,pmds_t,pmdt_t,apba_t" --at <环境>@<企业>
 tt dict r.t apba_t --at <环境>@<企业>
 tt dict r.t capp115_tmp --at <环境>@<企业>
 ```
+
+> Tips: 需要配置环境的命令都可以通过`--at-list`命令查看可以使用哪些环境
 
 ## 从系统分类码解读业务逻辑
 
@@ -77,7 +79,7 @@ END CASE
 ```
 
 从系统分类码SCC中查询中文含义的命令：
-```
+```bash
 tt dict scc 75 --at <环境>@<企业>
 tt dict scc 2087 --at <环境>@<企业>
 ```
@@ -88,14 +90,14 @@ tt dict scc 2087 --at <环境>@<企业>
 
 查询系统参数示例：
 
-```
+```bash
 tt dict sysp E-CIR-0759 --at <环境>@<企业>
 tt dict sysp S-BWF-0001 --at <环境>@<企业>
 ```
 
 查询单据参数示例：
 
-```
+```bash
 tt dict docp D-BWF-0004 --at <环境>@<企业>
 ```
 
@@ -112,7 +114,7 @@ CALL cl_err()
 
 查询系统消息、错误消息的命令：
 
-```
+```bash
 tt dict msg asf-00150 --at <环境>@<企业>
 tt dict msg --at <环境>@<企业> -- -3101
 ```
@@ -132,7 +134,7 @@ ON ACTION controlp INFIELD sfajwfdocno
 
 
 查询开窗对应的SQL等信息的命令：
-```
+```bash
 tt dict r.q q_sfajwfdocno_01_wf --at <环境>@<企业>
 tt dict r.q --kw sfajwfdocno --at <环境>@<企业>
 ```
@@ -164,8 +166,10 @@ tt db sql --at <环境>@<企业> "select bmaa001,bmaastus from bmaa_t where bmaa
 
 ## BDL 语言参考
 
+如果有不理解的BDL语法，请优先阅读本地的BDL官方文档
+
+获取BDL文档路径的命令
+
 ```bash
-tt install bdl                 # 首次/升级：解压随包的 BDL-Markdown.zip 到 bdldoc.dir
-tt dict bdldoc dir             # 显示当前 BDL 文档目录
-tt dict bdldoc dir <目录>      # 手动指定文档目录
+tt dict bdldoc dir            
 ```
