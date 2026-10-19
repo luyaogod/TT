@@ -235,9 +235,8 @@ func envValues() ([]contractValue, error) {
 	}
 	out := make([]contractValue, 0, len(envs))
 	for _, e := range envs {
-		out = append(out, contractValue{
-			Handle: e.Name, Env: e.Name, Zone: e.Zone, DBTarget: e.DBTarget,
-		})
+		// 只给环境：不再附带区域/库地址 —— 那些字段会被误读成 @企业。
+		out = append(out, contractValue{Handle: e.Name, Env: e.Name})
 	}
 	return out, nil
 }
