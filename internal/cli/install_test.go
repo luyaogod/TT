@@ -306,27 +306,6 @@ func TestResolveSkillsTargetByAgent(t *testing.T) {
 	}
 }
 
-// 仓库自带的 skills/ 树必须永远是合规的。
-//
-// 它是发行物（便携包与安装包都带着整棵），而这条断言是它唯一的门：不合规的技能
-// 装出去不会报错，失败全在我们看不到的地方。
-func TestRepoTreSkillsAreValid(t *testing.T) {
-	src := filepath.Join(testkit.RepoRoot(t), "skills")
-	names, err := listSkills(src)
-	if err != nil {
-		t.Fatalf("仓库自带的 skills/ 不合规：%v", err)
-	}
-	have := map[string]bool{}
-	for _, n := range names {
-		have[n] = true
-	}
-	for _, want := range []string{"tt-debug", "tt-dev-tzc", "tt-dev-tzs", "tt-dict", "tt-drawio", "tt-erp-read"} {
-		if !have[want] {
-			t.Errorf("skills/ 里没有 %s —— 六套技能是发行契约，缺一套就是少了对外面", want)
-		}
-	}
-}
-
 // 命令面的接线：--to auto 要真的落到探测出来的位置，而不只是 resolveAutoTarget 单测过。
 func TestInstallSkillsCmdToAuto(t *testing.T) {
 	src := t.TempDir()

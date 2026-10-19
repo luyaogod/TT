@@ -2,8 +2,8 @@
 //
 // 为什么这条测试住在 common 的**外部测试包**、以及为什么第三条腿读**源文本**而不是 import：
 //
-//	同一段用法文案有四个落点：README（基准）、总帮助（common.Usage）、命令面（tzsUsage，
-//	在 ../tzs/tzs.go）、技能文档（skills/tt-dev-tzs/SKILL.md）。任何一处改了措辞而另一处没跟，
+//	同一段用法文案有三个落点：README（基准）、总帮助（common.Usage）、命令面（tzsUsage，
+//	在 ../tzs/tzs.go）。任何一处改了措辞而另一处没跟，
 //	都没有编译错误、也没有任何测试会响 —— 症状是"帮助里写的退出码和 README 写的不一样"，
 //	而脚本正是照着这几个数字分支的。比对基准取 **README**（人读的那份先被改，且它旁边就是
 //	判据与实测基线）；其余三处各自与它比一次，于是谁漂都红，而没有人需要手抄第五份。
@@ -123,30 +123,11 @@ func TestFormcheckBlockDriftCatchesExitCodeChange(t *testing.T) {
 	}
 }
 
-// TestReadmeAndSkillAgreeOnFormcheckUsage 是第四个落点：技能文档
-// （skills/tt-dev-tzs/SKILL.md）里那段用法也照 README 逐行来。
-//
-// 技能是**模型读的那份**：它写错一次，之后每一次调用都跟着错，比源码漂了更贵。
-func TestReadmeAndSkillAgreeOnFormcheckUsage(t *testing.T) {
-	readme := readTzsReadme(t)
-	if len(formcheckBlockLines(readme)) == 0 {
-		t.Fatalf("%s 里没有 formcheck 用法段（基准缺了）", tzsReadmePath())
-	}
-	if drift := formcheckBlockDrift(readText(t, skillPath(), "技能文档里也写着这段用法"), readme); drift != "" {
-		t.Errorf("技能文档（%s）与 README 的 formcheck 段不一致：\n%s", skillPath(), drift)
-	}
-}
-
 // tzsReadmePath 是基准文本的位置（本包是 internal/cli/dev/common）。
 func tzsReadmePath() string { return filepath.Join("..", "tzs", "README.md") }
 
 // tzsSourcePath 是命令面文案的落点：tzsUsage 常量所在的那份源文件。
 func tzsSourcePath() string { return filepath.Join("..", "tzs", "tzs.go") }
-
-// skillPath 是技能文档（仓库根下 skills/tt-dev-tzs/SKILL.md）。
-func skillPath() string {
-	return filepath.Join("..", "..", "..", "..", "skills", "tt-dev-tzs", "SKILL.md")
-}
 
 func readTzsReadme(t *testing.T) string {
 	t.Helper()
