@@ -417,7 +417,7 @@ export const api = {
     req<{ ok: boolean }>('/api/dbsync', { method: 'POST', body: JSON.stringify({ env }) }),
   dbsyncStop: () => req<{ ok: boolean; error?: string }>('/api/dbsync/stop', { method: 'POST' }),
   list: () => req<{ sessions: SessionBrief[] }>(`${API_BASE}/sessions`),
-  launch: (module: string, prog: string, opts?: { ssh?: string; zone?: string }) =>
+  launch: (module: string, prog: string, opts?: { ssh?: string; zone?: string; session?: string; ent?: string }) =>
     req<{ sessionId: string; module?: string; prog?: string; runProg?: string }>(`${API_BASE}/sessions`, { method: 'POST', body: JSON.stringify({ module, prog, ...opts }) }),
   snapshot: (id: string) => req<any>(`${API_BASE}/sessions/${id}`),
   // 结束调试:只结束本轮运行,宿主会话保留(idle),可直接再次启动

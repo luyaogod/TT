@@ -1375,7 +1375,12 @@ export const useStore = create<Store>((set, get) => ({
     // 同 replayStart:上一会话(同目标会被复用,ID 与新一轮相同)的收尾事件不得清掉加载态
     beginRetire(get().sessionId)
     try {
-      const r = await api.launch(module, prog)
+      // 带上"当前这条会话"：面板上的「运行」是**在这条空闲会话里起作业**，
+      // 不是再建一条新会话。不带的话服务端只能按"服务当前环境"去组装，而统一服务
+      // 启动时可能还没有生效环境 —— 报的是"必须显式指定企业编号(ENT)"，人看到的就是
+      // "点了没反应"。会话自己的 env/ent 由服务端从目标会话取（hLaunch 的 session 分支）。
+      const sid = get().sessionId
+      const r = await api.launch(module, prog, sid ? { session: sid } : undefined)
       // 作业编号解析:后端连 gzzz_t 后回读模块与实体程序(aint301_wf → aint302_wf)
       const mod = r.module || module
       const rp = r.runProg || prog
