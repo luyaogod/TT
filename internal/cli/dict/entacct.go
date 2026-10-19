@@ -66,7 +66,7 @@ func resolveEntAccount(cc *dbconfig.Connection, ref *config.EnvRef, dataDir, ent
 	maps := snapshotMappings(path, fp)
 	if maps == nil {
 		// 快照没有(冷启动/换环境/过期且从未现查过):直连查一次 gzou_t 并落盘。
-		// 这一次查询用列表首项 —— gzou_t 是系统表,能连上就查得到。
+		// 这一次查询固定用系统账号 ds(见 dbconfig.SystemAccount) —— 不是账号清单首项。
 		m, err := fetchEntMappings(cc)
 		if err != nil {
 			return "", dbconfig.AcctFromPrimary, ent,
@@ -108,13 +108,17 @@ func snapshotMappings(path, fingerprint string) []entdir.Mapping {
 // 这里拿的是两列原始值,空值在 Go 里判 —— 于是这条 SQL 是纯标准 SELECT,
 // 金仓与 Oracle 一个字都不用改。
 func fetchEntMappings(cc *dbconfig.Connection) ([]entdir.Mapping, error) {
-	first := *cc // 用列表首项连:gzou_t 是系统表
+	// 查 gzou_t 固定用系统账号 **ds**（与 tt debug 服务器侧那条完全相同）:
+	// gzou_t 是跨企业共享的系统表，归属由 T100 安装惯例决定；账号清单首项是
+	// “人把哪个账号写在了前面”，两者恰好相同不等于同一条规则（见 dbconfig.SystemAccount）。
+	lookup := *cc
+	lookup.Account = dbconfig.SystemAccount
 	// 加超时:这一步发生在"主连接之前",环境连不上时它就是**第二次**超时等待。
 	// 上限压在 20s,宁可退回账号列表首项,也不要让人对着一个卡住的命令等两遍。
 	ctx, cancel := context.WithTimeout(context.Background(), entLookupTimeout)
 	defer cancel()
 
-	l, err := live.Open(ctx, first)
+	l, err := live.Open(ctx, lookup)
 	if err != nil {
 		return nil, err
 	}

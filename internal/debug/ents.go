@@ -281,8 +281,7 @@ func (c *EntCatalog) resolve(conn *host.SSHConn, d *dbRun, cfg *Config, opt EntL
 //
 // **只读 SQL 走这条**,保持 dbsql.go 立下的规矩:解析不到就报错,不静默回退 ds ——
 // 回退到 ds 会安安静静地查另一个 schema,拿到 0 行,然后被当成"没有这条数据"。
-func (c *EntCatalog) account(conn *host.SSHConn, d *dbRun, cfg *Config, ent int) (string, error) {
-	if ent <= 0 {
+func (c *EntCatalog) account(conn *host.SSHConn, d *dbRun, cfg *Config, ent int) (string, error) {	if ent <= 0 {
 		return "", fmt.Errorf("企业编号无效: %d", ent)
 	}
 	l, err := c.list(conn, d, cfg, EntListOpt{Ent: ent})
@@ -290,6 +289,14 @@ func (c *EntCatalog) account(conn *host.SSHConn, d *dbRun, cfg *Config, ent int)
 		return "", err
 	}
 	return pickEntAccount(l.Ents, ent)
+}
+
+// ListEnts 用**服务端那份** catalog 查企业目录(与 tt debug ents 同一套实现、同一份缓存)。
+//
+// 长驻进程里这份 catalog 的内存缓存与快照是跨调用共享的:接口日志页与「创建会话」的
+// ENT 下拉每开一次都问一次,命中缓存时**一次网络都不发**(见 EntListOpt / resolve)。
+func (m *Manager) ListEnts(cfg *Config, opt EntListOpt) (*EntListing, error) {
+	return m.ents.list(nil, nil, cfg, opt)
 }
 
 func (c *EntCatalog) memGet(fp string, now time.Time) *EntListing {

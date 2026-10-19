@@ -5,8 +5,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Bug, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, ChevronUp, Copy, Fingerprint, RefreshCw, Undo2, X } from 'lucide-react'
 import { useStore } from './store'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../shared/ui'
-import { Checkbox, DatePicker } from '../../shared/ui-radix'
+import { Button, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../shared/ui'
+import { Checkbox, DatePicker, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../shared/ui-radix'
 import type { WSLogItem } from './api'
 import { PayloadEditor } from './PayloadEditor'
 import { copyText } from './clipboard'
@@ -193,17 +193,44 @@ export function WsLogView() {
   const [from, setFrom] = useState(today)
   const [to, setTo] = useState(today)
 
-  // 接口日志按"当前会话所属环境"的数据库查询:没有会话就没有可查的数据源,整页不显示内容
-  const hasSession = !!sessionId && state !== 'exit'
-  useEffect(() => {
-    if (!hasSession) return
-    void loadWsLogs({ ...appliedRef.current, onlyFail: onlyFailRef.current, page: 1, startFrom: from, endTo: to })
-  }, [loadWsLogs, hasSession, from, to])
+  // 接口日志**不再依赖活会话**:查的是环境级库里的 wsfa_t(在系统账号 ds 下),
+  // 企业编号由上面的下拉选(清单本身来自 gzou_t,见 store.loadEnts)。
+  // 环境取"这一页所属的环境"(路由写进 store 的 activeEnv),不是"当前会话的环境"。
+  const activeEnv = useStore((s) => s.activeEnv)
+  const entsView = useStore((s) => s.entsByEnv[activeEnv])
+  const loadEnts = useStore((s) => s.loadEnts)
+  // 选中的企业(0 = 还没选)。它只决定"这次查的是哪个企业"(结果回显 + 重放用的 TOPENT),
+  // 不改 wsfa_t 的查询范围 —— 接口日志不按企业分 schema。
+  const [ent, setEnt] = useState(0)
+  const entRef = useRef(ent)
+  entRef.current = ent
+  // 只有人点过「查询」之后,日期这类后续动作才会自己再发查询;
+  // 首屏不发 —— "打开这一页就往人家的库上拨一次 SSH"不是看日志该有的副作用。
+  const [queried, setQueried] = useState(false)
 
-  // 提交查询:Enter / 点刷新走这里（把草稿变成已提交条件）。
+  useEffect(() => {
+    if (activeEnv) void loadEnts(activeEnv)
+  }, [activeEnv, loadEnts])
+
+  // 企业目录到了就默认选中第一个(常见情形下一个环境只有一两个启用企业)。
+  useEffect(() => {
+    const items = entsView?.items || []
+    if (!ent && items.length) setEnt(items[0].ent)
+  }, [entsView, ent])
+
+  // 日期改了重查:只在已经查过一次之后(见 queried 的注释)
+  useEffect(() => {
+    if (!queried || !entRef.current) return
+    void loadWsLogs({ ...appliedRef.current, onlyFail: onlyFailRef.current, page: 1, startFrom: from, endTo: to, ent: entRef.current })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from, to])
+
+  // 提交查询:Enter / 点「查询」/ 点刷新走这里（把草稿变成已提交条件）。
   const doLoad = (p = 1) => {
+    if (!entRef.current) { toast.error('先选企业编号'); return }
+    if (!queried) setQueried(true)
     setApplied(draft)
-    void loadWsLogs({ ...draft, onlyFail, page: p, startFrom: from, endTo: to })
+    void loadWsLogs({ ...draft, onlyFail, page: p, startFrom: from, endTo: to, ent: entRef.current })
   }
   // 翻页/勾「仅失败」**沿用已提交条件**，不读 draft。
   //
@@ -212,7 +239,7 @@ export function WsLogView() {
   // **另一个查询**的第 2 页，列表变 0 条 —— 看着像"翻页把数据翻没了"。
   // 草稿只在回车/刷新那一下生效，这条边界必须守住。
   const loadPage = (p: number) => {
-    void loadWsLogs({ ...appliedRef.current, onlyFail: onlyFailRef.current, page: p, startFrom: from, endTo: to })
+    void loadWsLogs({ ...appliedRef.current, onlyFail: onlyFailRef.current, page: p, startFrom: from, endTo: to, ent: entRef.current })
   }
   const onEnter = (e: React.KeyboardEvent) => { if (e.key === 'Enter') doLoad(1) }
 
@@ -393,27 +420,45 @@ export function WsLogView() {
     ? (reqDraft || content?.request || '')
     : tab === 'response' ? (content?.response || '') : ''
 
-  // 未连接会话:没有可查的数据源,只给一句引导,不渲染工具条/列表/详情
-  if (!hasSession) {
-    return (
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1.5 p-6 text-center text-xs text-muted-foreground">
-        <span className="text-sm text-foreground">未连接会话</span>
-        <span>接口日志按会话所属环境的数据库查询。</span>
-        <span>第一阶段会话还没接进这一屏:接进来之前,这里没有可查的数据源。</span>
-      </div>
-    )
-  }
+  // （原先这里有一道"没有会话就不渲染整页"的门。已拆除:接口日志查的是环境级的 wsfa_t，
+  //   与有没有调试会话无关 —— 会话只在"重放"时用得上。见上面企业编号下拉的注释。）
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {/* 工具条分两行(条件多,挤一行看不清):
-            第一行 = 五个查询条件(服务名称/作业编号/服务端/发起端/处理结果,对齐 awsq990 QBE)+ 刷新;
+            第一行 = 企业编号(下拉) + 查询 + 五个查询条件(服务名称/作业编号/服务端/发起端/处理结果);
             第二行 = 时间范围 + 仅失败 + 条数/翻页(右对齐)。
           每个条件都是「字段名 + 输入框」两件东西(见 QueryField),不是把字段名写进输入框里。
           下缘分割线与列表连成整体;窄了各自内部换行(flex-wrap)。
           两行之间留出间距(pt/pb),否则输入框与日期行贴在一起显得挤。 */}
       <div className="shrink-0 border-b border-border">
         <div className="flex flex-wrap items-center gap-2 px-2 pt-2 pb-1.5">
+          {/* 企业编号:清单来自 gzou_t(固定用系统账号 ds 查),下拉里带上 gzou003 的账号。
+              选完点「查询」才发请求 —— 不依赖会话,也不在开页时自己拂一次 SSH。 */}
+          <div className="flex items-center gap-1.5"
+            title="企业编号来自 gzou_t(gzoustus='Y' 的 gzou001),用系统账号 ds 查;后面是该企业在 gzou003 里的账号/schema">
+            <span className="shrink-0 text-xs text-muted-foreground">企业编号</span>
+            <Select value={ent ? String(ent) : undefined} onValueChange={(v) => setEnt(Number(v) || 0)}>
+              <SelectTrigger className="h-7 w-40 text-xs" aria-label="企业编号">
+                <SelectValue placeholder={entsView?.loading ? '读取中…' : (entsView?.err ? '读不到企业清单' : '选择企业')} />
+              </SelectTrigger>
+              <SelectContent>
+                {(entsView?.items || []).map((e) => (
+                  <SelectItem key={e.ent} value={String(e.ent)}>
+                    {e.ent}{e.account && e.account !== '-' ? ` · ${e.account}` : ' · 未配账号'}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <button onClick={() => void loadEnts(activeEnv, true)} disabled={!activeEnv || entsView?.loading}
+              title="重新读 gzou_t(固定用系统账号 ds)"
+              className="p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40">
+              <RefreshCw className={`h-3.5 w-3.5 ${entsView?.loading ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
+          <Button size="sm" onClick={() => doLoad(1)} disabled={loading || !ent} title="按当前条件查询（回车同效）">
+            {loading ? '查询中…' : '查询'}
+          </Button>
           <QueryField
             label="服务名称" wide
             value={draft.service}
@@ -454,10 +499,9 @@ export function WsLogView() {
             placeholder="如 000"
             title="处理结果 wsfa006:等值匹配,如 000 成功 / 100 失败;回车生效"
           />
-          <button onClick={() => doLoad(1)} disabled={loading} title="按当前条件重新加载(回车等效)"
-            className="p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40">
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-          </button>
+          {/* 这里原先有一个单独的「刷新」图标（= 按当前条件重查）。
+              现在左边已经有一个写明的「查询」按钮，同一动作留两个入口只会让人猜
+              它们是不是一回事 —— 而且它还经常换行单占一行。 */}
         </div>
         <div className="flex flex-wrap items-center gap-2 px-2 pt-1.5 pb-2">
           <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -475,7 +519,7 @@ export function WsLogView() {
                 // 条件只取**已提交**的那份:输入框里的草稿要等回车才算数(见 loadPage 的说明)。
                 const on = v === true
                 setOnlyFail(on)
-                void loadWsLogs({ ...appliedRef.current, onlyFail: on, page: 1, startFrom: from, endTo: to })
+                void loadWsLogs({ ...appliedRef.current, onlyFail: on, page: 1, startFrom: from, endTo: to, ent: entRef.current })
               }} />
             <label htmlFor="wslog-onlyfail" className="cursor-pointer select-none">仅失败</label>
           </div>
@@ -570,11 +614,23 @@ export function WsLogView() {
               // 失败与"确实没有数据"必须分得开：失败时**结果没被清掉**（store 那条），
               // 所以这里只在真的空列表上说话；有错就照实把错误说出来，并留一个重试出口
               // （原来错误只在右下角活 8 秒，之后界面上再也找不到这次失败的任何痕迹）。
-              err ? (
+              //
+              // 第一档是"还没查过":接口日志不再跟着会话自动拉,要人选企业后点「查询」。
+              !queried ? (
+                <div className="flex flex-col items-center gap-1.5 p-6 text-center text-xs text-muted-foreground">
+                  <span className="text-sm text-foreground">选企业编号，点「查询」</span>
+                  <span>接口日志查的是环境库里的 wsfa_t（系统账号 ds），不需要先建会话。</span>
+                  {entsView?.err && (
+                    <span className="max-w-2xl whitespace-pre-wrap text-red-600 dark:text-red-400">
+                      企业清单读取失败（gzou_t）：{entsView.err}
+                    </span>
+                  )}
+                </div>
+              ) : err ? (
                 <div className="flex flex-col items-center gap-2 p-4 text-center text-xs">
                   <div className="text-red-600 dark:text-red-400">查询失败，没有拿到日志</div>
                   <div className="max-w-2xl whitespace-pre-wrap text-muted-foreground">{err}</div>
-                  <button onClick={() => void loadWsLogs({ ...appliedRef.current, onlyFail: onlyFailRef.current, page: 1, startFrom: from, endTo: to })}
+                  <button onClick={() => void loadWsLogs({ ...appliedRef.current, onlyFail: onlyFailRef.current, page: 1, startFrom: from, endTo: to, ent: entRef.current })}
                     className="rounded-ui border border-border px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground">
                     重试
                   </button>
@@ -619,7 +675,7 @@ export function WsLogView() {
                   </button>
                 )}
                 <button
-                  onClick={() => void replayDebug(sel, reqDirty ? reqDraft : undefined)}
+                  onClick={() => void replayDebug(sel, reqDirty ? reqDraft : undefined, entRef.current || undefined)}
                   disabled={reqDirty && !!content?.requestPartial}
                   title={reqDirty && content?.requestPartial
                     ? '入参内容不完整(被截断或只剩入库前 2000 字符),不能基于它重放'

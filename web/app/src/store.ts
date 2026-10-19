@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { api, API_BASE, type Event, type StopInfo, type Breakpoint, type Frame, type VarItem, type WSLogItem, type WSLogContent, type WSLogQuery, type InflightInfo, type SessionBrief } from './api'
+import { api, API_BASE, type Event, type StopInfo, type Breakpoint, type Frame, type VarItem, type WSLogItem, type WSLogContent, type WSLogQuery, type EntItem, type InflightInfo, type SessionBrief } from './api'
 import { THEME_KEY, applyDark, readStoredTheme, resolveDark, watchSystemTheme, type ThemeMode } from '../../shared/theme'
 // 统一消息出口(零依赖的那个文件,见 toastBus.ts 的说明:store 要能在裸 Node 里加载)
 import { toast } from './toastBus'
@@ -196,6 +196,12 @@ interface Store {
   wsLogContent: WSLogContent | null
   wsLogTab: 'info' | 'request' | 'response'
   wsLogErr: string
+  // 企业目录(ENT → 数据库账号)按环境缓存。接口日志页与「创建会话」的 ENT 下拉
+  // 共用这一份 —— 两处各拉一次会让同一张 gzou_t 被问两遍(每次都可能拨 SSH)。
+  entsByEnv: Record<string, EntsView>
+  // loadEnts 拉一个环境的企业目录。force = 跳过客户端缓存(服务端那边还有一层
+  // 10 分钟缓存 + 快照,所以"刷新"不会每次都真的拨 SSH)。失败不抛错,写进 err。
+  loadEnts: (env: string, force?: boolean) => Promise<EntItem[]>
   // 源码
   sourceContent: string
   sourcePath: string
@@ -220,7 +226,8 @@ interface Store {
   toggleStackAuto: () => void
   toggleAutovarsAuto: () => void
   // 接口日志重放启动(wslogs「调试此调用」与重放会话「重新开始」共用同一上下文)
-  replayStart: (rowid: string, request?: string) => Promise<void>
+  // ent = 重放这一轮的企业编号（接口日志页下拉选的那个）；空 = 不覆盖。
+  replayStart: (rowid: string, request?: string, ent?: number) => Promise<void>
   pushRaw: (line: string) => void
   sendRaw: (cmd: string) => Promise<void>
   pushTimeline: (item: Omit<TimelineItem, 'time'>) => void
@@ -245,7 +252,7 @@ interface Store {
   prefetchWsLog: (item: WSLogItem) => void
   setWsLogTab: (t: 'info' | 'request' | 'response') => void
   closeWsLogDetail: () => void
-  replayDebug: (item: WSLogItem, request?: string) => Promise<void>
+  replayDebug: (item: WSLogItem, request?: string, ent?: number) => Promise<void>
   launch: (module: string, prog: string) => Promise<void>
   refreshSnapshot: () => Promise<void>
   refreshSource: (file?: string, line?: number) => Promise<void>
@@ -815,6 +822,24 @@ let launchWarned = false
 // 接口日志查询的"请求代次"。同上:翻页/改条件会叠出多个在途查询。
 let wsLogsGen = 0
 
+// 企业目录(ENT → 账号)按环境的客户端缓存。
+//
+// 它只是“别同一页反复问”的便利层:真值在服务端(内存 + 快照 + gzou_t),
+// 新鲜度以服务端回的 source/stale 为准,这里记一个本地时间只用于过期判定。
+interface EntsView {
+  items: EntItem[]
+  loading: boolean
+  err: string
+  source: string // live | snapshot | snapshot-stale(来自服务端)
+  stale: boolean
+  fetchedAt: string
+  at: number // 本地拿到这份答案的时间(毫秒);0 = 没拿到过
+}
+const EMPTY_ENTS: EntsView = {
+  items: [], loading: false, err: '', source: '', stale: false, fetchedAt: '', at: 0,
+}
+const ENTS_TTL_MS = 5 * 60_000
+
 // 会话绑定的"代次":每次**权威地绑上一个会话**（launch / replayStart / 接管）自增。
 //
 // 为什么需要它：`syncFromSessions` 与 `adoptExisting` 都是异步的（先 api.list() 再 api.snapshot()），
@@ -885,6 +910,7 @@ export const useStore = create<Store>((set, get) => ({
   dark: resolveDark(initialTheme),
   wsLogs: [], wsLogsLoading: false, wsLogsPage: 1, wsLogsHasMore: false,
   wsLogSel: null, wsLogContent: null, wsLogTab: 'info', wsLogErr: '',
+  entsByEnv: {},
 
   sourceContent: '', sourcePath: '', sourceDVM: '', sourceMissing: false, currentLine: 0, loadingSource: false, lineOffset: 0,
   tabs: [], activeTab: 'debug', revealReq: null,
@@ -1255,8 +1281,45 @@ export const useStore = create<Store>((set, get) => ({
     }
   },
 
-  loadWsLogs: async (q: WSLogQuery) => {
-    // 并发闸:一次查询只允许在途一次。按钮上有 disabled，但**同一个事件循环里连点**时
+  // loadEnts 取一个环境的企业目录(ENT → 数据库账号)。接口日志页与建会话的 ENT 下拉共用。
+  //
+  // 不需要活会话:数据来自服务端的 gzou_t(固定用系统账号 ds 读),与当前有没有会话无关,
+  // 也不用先建一条。失败**不抛**:下拉需要一个“失败态 + 重试”的展示位,
+  // 而不是把整页炸掉 —— 错误写进 entsByEnv[env].err,调用方就地显示。
+  loadEnts: async (env, force) => {
+    const key = (env || get().activeEnv || '').trim()
+    if (!key) return []
+    const cur = get().entsByEnv[key]
+    // 客户端缓存只挡“同一页反复问”;真正的缓存与新鲜度在服务端(内存 + 快照,TTL 10 分钟)。
+    if (!force && cur && cur.items.length && Date.now() - cur.at < ENTS_TTL_MS) return cur.items
+    if (cur?.loading) return cur.items
+    set((s) => ({ entsByEnv: { ...s.entsByEnv, [key]: { ...(cur || EMPTY_ENTS), loading: true, err: '' } } }))
+    try {
+      const r = await api.ents(key, { refresh: !!force })
+      const items = (r.ents || [])
+        .map((e) => ({ ent: Number(e.ent) || 0, account: (e.account || '').trim(), placeholder: !!e.placeholder }))
+        .filter((e) => e.ent > 0)
+        .sort((a, b) => a.ent - b.ent)
+      set((s) => ({
+        entsByEnv: {
+          ...s.entsByEnv,
+          [key]: {
+            items, loading: false, err: '', source: r.source || '',
+            stale: !!r.stale, fetchedAt: r.fetchedAt || '', at: Date.now(),
+          },
+        },
+      }))
+      return items
+    } catch (e: any) {
+      const msg = e?.message || String(e)
+      set((s) => ({
+        entsByEnv: { ...s.entsByEnv, [key]: { ...(s.entsByEnv[key] || EMPTY_ENTS), items: [], loading: false, err: msg, at: 0 } },
+      }))
+      return []
+    }
+  },
+
+  loadWsLogs: async (q: WSLogQuery) => {    // 并发闸:一次查询只允许在途一次。按钮上有 disabled，但**同一个事件循环里连点**时
     // React 还没来得及重渲染，disabled 拦不住（实测 5 连点发出 5 个请求）。
     // 丢掉重复请求的代价只是"这一下没反应"，比叠出多个在途查询好。
     if (get().wsLogsLoading) return
@@ -1326,7 +1389,7 @@ export const useStore = create<Store>((set, get) => ({
   // 接口日志重放启动:立即切到 debug 页进 loading,再请求后端重放该日志
   // (后端按 rowid 重读报文并落临时文件,报文参数在 ArgsOverride 里,随会话保留);
   // request 非空 = 用界面改过的入参(后端写临时文件后优先使用)
-  replayStart: async (rowid, request) => {
+  replayStart: async (rowid, request, ent) => {
     // 已有会话在跑:先结束它(一次只能调一个作业;后端重放也会收口,双保险)。
     // ID 记下来:后面还要用它发 quit,也是收口窗口的判定依据
     const old = get().sessionId
@@ -1344,7 +1407,7 @@ export const useStore = create<Store>((set, get) => ({
     })
     try {
       if (old) void api.quit(old).catch(() => {})
-      const r = await api.wsLogDebug(rowid, request, old || undefined)
+      const r = await api.wsLogDebug(rowid, request, old || undefined, ent)
       const mod = r.module || ''
       const rp = r.runProg || r.prog || ''
       // 响应里的 id 是**本页面自己发起**的那条新会话 —— 权威绑定（人点的动作，不是问服务端）

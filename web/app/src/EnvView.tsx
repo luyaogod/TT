@@ -3,9 +3,11 @@
 // 三个 Tab:创建会话 / 接口日志 / 接口调试。
 // 其中两个是**已有的画面**,原样搬进来;「创建会话」是外壳自己的那一屏 ——
 // 它已经从"只写本机"变成**真的向后端建会话**(见 store.createSession)。
-import { useState, type ReactNode } from 'react'
-import { Bug, Plus } from 'lucide-react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { Bug, Plus, RefreshCw } from 'lucide-react'
 import { Button, Input } from '../../shared/ui'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../shared/ui-radix'
+import { useStore } from './store'
 import type { SessionDraft, EnvBrief, SessionItem } from './store'
 import type { EnvTab } from './routing'
 import { Pane, TabStrip, ViewHeader, Meta, type TabItem } from './Shell'
@@ -67,6 +69,17 @@ function CreateSessionPane({ env, count, onCreate }: {
   const [ent, setEnt] = useState('')
   const [prog, setProg] = useState('')
   const [busy, setBusy] = useState(false)
+  // 企业编号是**下拉选**（2026-10-19 用户要求）：清单就是 gzou_t 里 gzoustus='Y' 的
+  // gzou001，固定用系统账号 ds 查（见后端 /api/ents 与 dbconfig.SystemAccount），
+  // 顺带带出 gzou003（该企业的账号/schema）。不用先建会话，也不用凭记忆背企业号。
+  const entsView = useStore((s) => s.entsByEnv[env.name])
+  const loadEnts = useStore((s) => s.loadEnts)
+  const ents = entsView?.items || []
+  useEffect(() => { void loadEnts(env.name) }, [env.name, loadEnts])
+  // 清单到了就默认选第一个（常见情形下这个环境只有一两个启用企业）；人改过的选择不动。
+  useEffect(() => {
+    if (!ent && ents.length) setEnt(String(ents[0].ent))
+  }, [ents, ent])
   const [step, setStep] = useState('')
   const [err, setErr] = useState('')
   const placeholder = `新会话 ${count + 1}`
@@ -116,13 +129,41 @@ function CreateSessionPane({ env, count, onCreate }: {
 
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
-              <span className="mb-1.5 block text-xs text-muted-foreground">
+              <span className="mb-1.5 flex items-center gap-1 text-xs text-muted-foreground">
                 企业编号 <span className="text-muted-foreground/70">ENT</span>
+                {entsView?.loading && <RefreshCw className="h-3 w-3 animate-spin" />}
+                <button type="button" onClick={() => void loadEnts(env.name, true)}
+                  disabled={busy || entsView?.loading}
+                  title="重新从 gzou_t 读企业清单（固定用系统账号 ds 查）"
+                  className="ml-auto rounded-ui p-1 text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground disabled:opacity-40">
+                  <RefreshCw className="h-3 w-3" />
+                </button>
               </span>
-              <Input value={ent} onChange={(e) => setEnt(e.target.value)} placeholder="如 99"
-                disabled={busy}
-                onKeyDown={(e) => { if (e.key === 'Enter') void submit() }}
-                className="h-8 text-[13px]" />
+              {ents.length > 0 ? (
+                <Select value={ent || undefined} onValueChange={setEnt} disabled={busy}>
+                  <SelectTrigger className="h-8 w-full text-[13px]" aria-label="企业编号">
+                    <SelectValue placeholder="选择企业" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ents.map((e) => (
+                      <SelectItem key={e.ent} value={String(e.ent)}>
+                        {e.ent}{e.account && e.account !== '-' ? ` · ${e.account}` : ' · 未配账号'}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                // 企业清单读不到（没配库/SSH 不通/gzou_t 查不动）时退回手填：
+                // 下拉是便利，不是新的硬前置 —— 后端创建会话那条路本来就不要清单。
+                <Input value={ent} onChange={(e) => setEnt(e.target.value)}
+                  placeholder={entsView?.loading ? '正在读企业清单…' : '如 99（清单读不到，可手填）'}
+                  disabled={busy}
+                  onKeyDown={(e) => { if (e.key === 'Enter') void submit() }}
+                  className="h-8 text-[13px]" />
+              )}
+              {entsView?.err && (
+                <span className="mt-1 block text-[11px] text-red-600 dark:text-red-400">企业清单读取失败（gzou_t）：{entsView.err}</span>
+              )}
             </label>
             <label className="block">
               <span className="mb-1.5 block text-xs text-muted-foreground">

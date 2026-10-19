@@ -11,6 +11,17 @@ package dbconfig
 
 import "fmt"
 
+// SystemAccount 查 T100 系统表(gzou_t 企业目录 / gzzz_t 作业解析 / wsfa_t 接口日志)
+// 固定用的账号名。
+//
+// 为什么写死一个名字而不是"取账号清单首项":这三张表是**跨企业共享**的系统表,
+// 它们的归属只由 T100 的安装惯例决定(ds);账号清单的首项是"人顺手把哪个账号写在了前面",
+// 两者恰好相同不等于同一条规则——换一份配置、调一下顺序,"查企业目录"就会悄悄换到
+// 另一个 schema 上,而结果依旧是一堆数字(或零行),看不出换了地方。
+//
+// 密码依旧查账号清单(按名字 ds),未收录回退 T100 惯例 账号=密码。
+const SystemAccount = "ds"
+
 // ViaSSH SSH 端口转发隧道：客户端不可达 DB、但 DB 对 SSH 服务器（或同网）可达时，
 // 客户端先建到 SSH 的隧道（本地 bindPort → remoteHost:port），驱动改连 127.0.0.1:bindPort。
 type ViaSSH struct {

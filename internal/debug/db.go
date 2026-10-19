@@ -204,7 +204,8 @@ func (d *dbRun) exec(conn *host.SSHConn, connStr, oracleSQL, kbSQL string, timeo
 // 漏掉的那种会在下面那行正则上整行匹配不上、被静默丢掉,于是"企业 907 没配账号"
 // 会被读成"企业 907 不存在"。
 func dbAllMappings(conn *host.SSHConn, d *dbRun) ([]EntMapping, error) {
-	connStr, err := d.dbConnStr("ds")
+	// 企业目录固定用系统账号 ds 读:gzou_t 是跨企业共享的系统表(见 dbconfig.SystemAccount)。
+	connStr, err := d.dbConnStr(dbconfig.SystemAccount)
 	if err != nil {
 		return nil, err
 	}
@@ -255,7 +256,7 @@ type JobResolve struct {
 // SELECT gzza001,gzzz004,gzza004,gzzz005 FROM gzzz_t INNER JOIN gzza_t ON gzza001=gzzz002)。
 // 一个程序(gzzz002)可被多个作业编号共用。无记录返回零值。
 func dbResolveJob(conn *host.SSHConn, d *dbRun, job string) (JobResolve, error) {
-	connStr, err := d.dbConnStr("ds")
+	connStr, err := d.dbConnStr(dbconfig.SystemAccount)
 	if err != nil {
 		return JobResolve{}, err
 	}

@@ -371,6 +371,8 @@ tt dict <原查询> --kw 收窄                          # ③ 加条件重查�
 - **哪个账号是查 `gzou_t` 按企业编号(ENT)算出来的**（与 `tt debug sql` 同一条规则）。
   用 `--ent <企业编号>` 指定；**没给 ENT 时不会去猜**：退回账号列表首项，并在 `notes` 与
   `accountSource` 里标明。环境配置里不再有 `topent` 这个键。
+  **查 `gzou_t` 这一步恒用系统账号 `ds`**（与服务器侧 `tt debug ents` 同一个规则、同一份快照）：
+  它是跨企业共享的系统表，“账号清单首项”只是人写配置时的顺序，两者恰好相同不等于同一条规则。
 - 人的眼睛要用对齐表格看：`--format table`。
 - 要喂给别的工具：`--format csv`，`# ` 开头的是环境头，`grep -v '^# '` 就得到干净 CSV。
 - **出错也是 JSON**：`{"ok":false,"code":"TABLE_MISSING","error":…,"hint":…,"exitCode":3}`，

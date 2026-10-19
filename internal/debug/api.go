@@ -17,6 +17,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"tt/internal/dbconfig"
 	"tt/internal/host"
 	"tt/internal/output"
 	"tt/internal/target"
@@ -235,6 +236,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/sessions/{id}/source", s.hSource)
 	mux.HandleFunc("GET /api/source-preview", s.hSourcePreview)
 	mux.HandleFunc("GET /api/wslogs", s.hWSLogs)
+	mux.HandleFunc("GET /api/ents", s.hEnts)
 	mux.HandleFunc("POST /api/dbsql", s.hDBSQL)
 	mux.HandleFunc("GET /api/wslogs/content", s.hWSLogContent)
 	mux.HandleFunc("POST /api/wslogs/debug", s.hWSLogDebug)
@@ -2047,7 +2049,53 @@ func (s *Server) wsZone() string {
 	return s.cfg.Zone
 }
 
-// hWSLogs GET /api/wslogs?service=&result=&origin=&server=&onlyFail=1&page=&pageSize=&startFrom=&endTo=
+// entOfQuery 解析查询里的企业编号(空 / 非数字 / 非正数 → 0 = 未指定)。
+//
+// 接口日志(wsfa_t)本身**不按企业分 schema**(它在系统账号 ds 下),这个值只用来:
+// ① 在结果里如实回显"这次选的是哪个企业";② 重放时作为那一轮的 TOPENT。
+func entOfQuery(raw string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
+}
+
+// hEnts GET /api/ents?env=<环境名>&refresh=1 —— 企业目录(ENT → 数据库账号)。
+//
+// 这是**不依赖会话**的那条路:接口日志页与「创建会话」的 ENT 下拉都用它。
+// 数据源仍是一张 gzou_t,固定用系统账号 ds 读(见 dbconfig.SystemAccount),
+// 取 gzoustus='Y' 的 gzou001,并把 gzou003(该企业的账号/schema)一并返回 ——
+// 下拉里能直接看到"这个企业用哪个号",不用等一次查询失败再去反推。
+//
+// 新鲜度(live / snapshot / stale / fetchedAt)原样带出:缓存可以旧,但"旧"不能藏着。
+func (s *Server) hEnts(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	cfg := s.cfg
+	if name := strings.TrimSpace(q.Get("env")); name != "" {
+		c := s.envCfgFor(name)
+		if c == nil {
+			fail(w, 404, fmt.Errorf("环境 %q 不存在(设置 → 站点管理 里可看全部)", name))
+			return
+		}
+		cfg = c
+	}
+	opt := EntListOpt{Refresh: q.Get("refresh") == "1", Cached: q.Get("cached") == "1"}
+	l, err := s.mgr.ListEnts(cfg, opt)
+	if err != nil {
+		fail(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"ok": true, "env": l.Env, "zone": l.Zone, "dialect": l.Dialect, "target": l.Target,
+		"account": dbconfig.SystemAccount, // 查 gzou_t 用的系统账号(只是说明)
+		"ents":    l.Ents, "count": l.Count,
+		"source": l.Source, "stale": l.Stale, "fetchedAt": l.FetchedAt,
+		"ageSeconds": l.AgeSeconds, "ttlSeconds": l.TTLSeconds, "notes": l.Notes,
+	})
+}
+
+// hWSLogs GET /api/wslogs?service=&result=&origin=&server=&onlyFail=1&page=&pageSize=&startFrom=&endTo=&env=&ent=
 // 时间窗对齐原生 awsq990:startFrom 是 wsfa003(起始时间)下界,endTo 是 wsfa004(结束时间)上界
 func (s *Server) hWSLogs(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -2083,7 +2131,7 @@ func (s *Server) hWSLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true, "items": items, "hasMore": hasMore,
-		"acct": wslogAcctFor(s.wslogTopent(nil))})
+		"acct": wslogAcctFor(s.wslogTopent(nil)), "ent": entOfQuery(q.Get("ent"))})
 }
 // hWSLogContent GET /api/wslogs/content?rowid=
 func (s *Server) hWSLogContent(w http.ResponseWriter, r *http.Request) {

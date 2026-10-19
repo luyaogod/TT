@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"tt/internal/dbconfig"
 	"tt/internal/host"
 
 	"github.com/pkg/sftp"
@@ -178,7 +179,7 @@ func wslogWhere(f WSLogFilter) (string, error) {
 //
 // 对照:只读 SQL(tt debug sql)查的是**按企业分 schema 的业务表**,那边必须由 TOPENT
 // 解析账号(见 dbsql.go 的 entAccount)。两者不一样,别把规矩搬错方向。
-const wsSysAccount = "ds"
+const wsSysAccount = dbconfig.SystemAccount
 
 // WSLogAcct 说明这次查 wsfa_t 用了哪个账号、为什么,以及当前 TOPENT 是什么情况。
 //
