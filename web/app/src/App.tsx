@@ -8,13 +8,14 @@
 // 路由是本文件唯一管 URL 的地方:状态在 `route`,片段由 `routeHash` 生成;浏览器后退/粘链接
 // 走 `parseRoute` 回到同一个目标。两边都要做,否则"界面在这一页、地址栏还是上一页"。
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { PanelLeft, RotateCcw, WifiOff } from 'lucide-react'
+import { PanelLeft, RotateCcw, WifiOff, X } from 'lucide-react'
 import { connectWS, useStore, type SessionDraft, type SessionItem } from './store'
 import { Sidebar } from './Sidebar'
 import { EnvView } from './EnvView'
 import { SessionView } from './SessionView'
 import { SettingsView } from './SettingsView'
-import { IconBtn, Meta, Pane, ViewHeader } from './Shell'
+import { IconBtn, Pane } from './Shell'
+import { Dialog, DialogContent, DialogTitle } from '../../shared/ui-radix'
 import { api } from './api'
 import { parseRoute, routeHash, routeView, type EnvTab, type Route, type SessionTab } from './routing'
 import { ErrorBoundary } from './ErrorBoundary'
@@ -110,6 +111,22 @@ export function App() {
   })
 
   const [route, setRoute] = useState<Route>(() => parseRoute(location.hash))
+
+  // 设置是**弹窗**(2026-10-19 用户:单独提取成一个 pop 页面),不是主面板的一屏:
+  // 打开时下面的环境页/会话页留在遮罩后面,关掉就回到原来那一屏。
+  // 片段仍然是 `#settings/<分区>`(深链接、前进后退都不变),所以这里另外记一份
+  // "最后一个真正的主路由" —— 它只活在内存里:冷启动直接开 `#settings` 时没有它,
+  // 关掉就落到第一个环境的「创建会话」(一个环境都没有时只能留在设置里)。
+  const lastMainRef = useRef<Route | null>(null)
+  useEffect(() => {
+    if (route.kind === 'env' || route.kind === 'session') lastMainRef.current = route
+  }, [route])
+  // 主面板该显示哪一屏:设置打开时**不换屏**,继续显示上一次的主路由,只是上面多一层弹窗。
+  // 冷启动直接开 `#settings` 时没有上一屏 —— 那就用默认落点(第一个环境的创建页)当背景,
+  // 不然遮罩后面是一片空黑,关掉弹窗还会先闪一下空白。
+  const mainRoute: Route = (route.kind === 'settings'
+    ? lastMainRef.current ?? (envs[0]?.name ? { kind: 'env', env: envs[0].name, tab: 'create' } : null)
+    : null) ?? route
 
   // 首次挂载:认深链接(设置分区)、拉环境清单、连 WS、接管已有会话。
   // 先动 URL 那条路:深链接里的设置分区要落进 store,后面的默认路由才不会覆盖它。
@@ -228,12 +245,14 @@ export function App() {
     if (window.location.hash !== want) window.history.replaceState(null, '', want)
   }, [route, settingsSection])
 
-  // 面板显隐:环境页/会话页/设置页三块都 keep-alive(第一次显示后只改 display)。
+  // 面板显隐:环境页/会话页两块都 keep-alive(第一次显示后只改 display)。
   // 切走再切回时 Monaco 编辑器、日志详情的滚动与输入都还在。
+  // 注意读的是 `mainRoute` 而不是 `route`:设置弹窗打开时这两屏要**继续显示**在遮罩下面,
+  // 否则关掉弹窗的瞬间会看到一片空白、再闪回内容。
   const lastEnvRef = useRef<{ name: string; tab: EnvTab } | null>(null)
-  if (route.kind === 'env') lastEnvRef.current = { name: route.env, tab: route.tab }
+  if (mainRoute.kind === 'env') lastEnvRef.current = { name: mainRoute.env, tab: mainRoute.tab }
   const lastSessionRef = useRef<{ id: string; tab: SessionTab } | null>(null)
-  if (route.kind === 'session') lastSessionRef.current = { id: route.id, tab: route.tab }
+  if (mainRoute.kind === 'session') lastSessionRef.current = { id: mainRoute.id, tab: mainRoute.tab }
 
   const envShown = lastEnvRef.current
   const envBrief = envShown ? (envs.find((e) => e.name === envShown.name) || { name: envShown.name }) : null
@@ -245,14 +264,22 @@ export function App() {
   // 会话页只有一屏：Debug。
   const openSession = (s: SessionItem) => setRoute({ kind: 'session', id: s.id, tab: 'debug' })
   const goSettings = () => setRoute({ kind: 'settings' })
+  // 关闭设置弹窗:回到打开它之前那一屏(内存里那份主路由);冷启动直接开 `#settings`
+  // 时没有上一屏,就落到第一个环境的创建页 —— 一个环境都没有时无处可去(默认落点会
+  // 立刻再把设置打开),那就只能留着它。
+  const closeSettings = () => {
+    if (lastMainRef.current) { setRoute(lastMainRef.current); return }
+    const first = envs[0]?.name
+    if (first) setRoute({ kind: 'env', env: first, tab: 'create' })
+  }
   const goAddEnv = () => {
     useStore.getState().setSettingsSection('sites')
     setRoute({ kind: 'settings' })
   }
   // 「新会话」= 回到所属环境的「创建会话」Tab(那儿才是真正填写名字/选类型的地方)。
   const newSession = () => {
-    const target = route.kind === 'env' ? route.env
-      : route.kind === 'session' ? sessions.find((s) => s.id === route.id)?.env
+    const target = mainRoute.kind === 'env' ? mainRoute.env
+      : mainRoute.kind === 'session' ? sessions.find((s) => s.id === mainRoute.id)?.env
       : envs[0]?.name
     if (!target) { goAddEnv(); return }
     setRoute({ kind: 'env', env: target, tab: 'create' })
@@ -308,7 +335,7 @@ export function App() {
         <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           {/* 环境页 */}
           {envBrief && envShown && (
-            <Pane show={route.kind === 'env'} label="环境">
+            <Pane show={mainRoute.kind === 'env'} label="环境">
               <ErrorBoundary what={`环境「${envBrief.name}」`}>
                 <EnvView
                   env={envBrief}
@@ -324,7 +351,7 @@ export function App() {
 
           {/* 会话页 */}
           {sessionItem && sessionShown && (
-            <Pane show={route.kind === 'session'} label="会话">
+            <Pane show={mainRoute.kind === 'session'} label="会话">
               <ErrorBoundary what={`会话「${sessionItem.name}」`}>
                 <SessionView
                   session={sessionItem}
@@ -337,26 +364,8 @@ export function App() {
             </Pane>
           )}
 
-          {/* 设置页:旧设置页原样放进来(它自己带分区导航),不再占满整屏 */}
-          <Pane show={route.kind === 'settings'} label="设置">
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
-              <ViewHeader
-                title="设置"
-                leading={leading}
-                meta={(
-                  <>
-                    <Meta title="环境与连接都在这里配">环境 / 数据字典 / 调试参数 / 应用</Meta>
-                  </>
-                )}
-              />
-              <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-                <SettingsView />
-              </div>
-            </div>
-          </Pane>
-
-          {/* 首屏兜底:环境清单还在读,或一个环境都没有(随后会跳设置页) */}
-          {route.kind === 'home' && (
+          {/* 首屏兜底:环境清单还在读,或一个环境都没有(随后会跳设置弹窗) */}
+          {mainRoute.kind === 'home' && (
             <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-8 text-center text-xs text-muted-foreground">
               {envsErr ? (
                 <>
@@ -374,6 +383,41 @@ export function App() {
           )}
         </main>
       </div>
+
+      {/* 设置:弹窗(不是一屏)。遮罩后面留着刚才那一页 —— 关掉就回去,不用再猜"我是从哪进来的"。
+          尺寸只给一个区间:宽 min(1120px, 94vw)、高 min(860px, 88vh);内容自己滚,
+          弹窗本身上不出现第二条滚动条(内层 SettingsView 左右两栏各自滚)。 */}
+      <Dialog open={route.kind === 'settings'} onOpenChange={(o) => { if (!o) closeSettings() }}>
+        <DialogContent
+          aria-describedby={undefined}
+          // 弹窗自己要能接住焦点:没有 tabIndex 的 div 上 focus() 是空操作,
+          // 浏览器就把焦点还给了第一个可聚焦元素(X)——聚焦框就画在关闭按钮上了。
+          tabIndex={-1}
+          // 打开时把焦点落在弹窗本身上,而不是第一个可聚焦元素(右上角那个 X):
+          // Radix 默认会聚焦它,于是每开一次设置都有一圈聚焦框挂在关闭按钮上。
+          // 弹窗带 outline-none,焦点留在里面(键盘可达)但不多画一笔。
+          onOpenAutoFocus={(e) => { e.preventDefault(); (e.currentTarget as HTMLElement | null)?.focus?.() }}
+          className="flex h-[min(860px,88vh)] max-h-[88vh] w-[min(1120px,94vw)] max-w-none flex-col gap-0 overflow-hidden rounded-[12px] p-0 shadow-2xl"
+        >
+          <div className="flex h-12 shrink-0 items-center gap-3 border-b border-border px-4">
+            <DialogTitle className="text-[15px] font-semibold tracking-tight">设置</DialogTitle>
+            <span className="min-w-0 truncate text-[11px] text-muted-foreground">
+              环境 / 数据字典 / 调试参数 / 应用
+            </span>
+            <button
+              onClick={closeSettings}
+              aria-label="关闭设置"
+              title="关闭设置（Esc）"
+              className="ml-auto rounded-ui p-1 text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-foreground/40"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+            <SettingsView />
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
