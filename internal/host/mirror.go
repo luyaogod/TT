@@ -245,7 +245,7 @@ func (c *countingReader) Read(p []byte) (int, error) {
 	now := time.Now()
 	// 节流:每 200ms 一次;流结束时(EOF)必报一次最终字节数。
 	// report 可能为 nil —— MirrorPullProgress 的进度回调是可选参数,
-	// 而 CLI(tt dict mirror)就是不传的那个;这里不判空会直接空指针崩。
+	// 而 CLI(tt file mirror)就是不传的那个;这里不判空会直接空指针崩。
 	if c.report != nil && ((n > 0 && now.Sub(c.last) >= 200*time.Millisecond) || err == io.EOF) {
 		c.last = now
 		c.report(MirrorProgress{Phase: "download", Message: "下载并解压…", Bytes: c.n, Total: c.total})

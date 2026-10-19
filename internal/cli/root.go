@@ -5,6 +5,8 @@
 //	tt debug …   原 tdebug（AI 人机协同调试）
 //	tt dev …     原 tdev（设计器包安全编辑）
 //	tt dict …    原 tdict（ERP 数据字典查询）
+//	tt db …      数据库连通性测试与只读 SQL
+//	tt file …    服务器文件只读浏览与离线源码镜像
 //	tt drawio …  原型图（用 T100 组件库画界面草图）
 //
 // 共享的 CLI 上下文在 internal/cli/common（叶子包，避免循环依赖）。
@@ -26,6 +28,7 @@ import (
 	"tt/internal/cli/dev"
 	"tt/internal/cli/dict"
 	"tt/internal/cli/drawio"
+	"tt/internal/cli/file"
 	"tt/internal/cli/form"
 	"tt/internal/cli/session"
 	"tt/internal/output"
@@ -116,6 +119,7 @@ func init() {
 		"列出本命令可用的 --at 取值、来源与示例（纯本地，不联网）")
 
 	debug.Register(rootCmd)
+	file.Register(rootCmd)
 	db.Register(rootCmd)
 	// 把 --env 的读写方式注入 dev 包:它不能直接 import cli/common(与 dev/common 撞包名)。
 	// 读:tzs 用它取该环境的 workspace;写:takeRootFlags 摘到 --env 时落到同一个 common.Env。
@@ -158,6 +162,9 @@ func Execute(web fs.FS) {
 			os.Args[1] = target
 		}
 	}
+
+	// Unix 写法（find -name/-type/-maxdepth）在 pflag 里是非法缩写，先归一化。
+	os.Args = file.NormalizeFindArgs(os.Args)
 
 	// --at-list：cobra 解析之前就处理掉（ValidateArgs 比 pre-run 早，
 	// 而 tt debug start --at-list 本来就不带作业名）。

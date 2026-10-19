@@ -25,7 +25,9 @@ TT/
 │  │  │  │              unlock/rename/newfn/selftest）+ 31 项对抗自检 + 接线清单 Verbs()
 │  │  │  └─ tzs/        .tzs 表单包线：cmdTzs 分发、引擎定位/manifest、
 │  │  │                 detail 渲染；整线 DisableFlagParsing 透传（动词面由引擎定义）
-│  │  ├─ dict/          字典命令组（查询 / db sync / mirror / spill）
+│  │  ├─ db/            tt db 命令组（sql 只读 SQL / ping 本机连库 / probe 服务器连库）
+│  │  ├─ file/          tt file 命令组（ls/cat/head/tail/grep/find/stat/wc/du/get + mirror；只读 SFTP）
+│  │  ├─ dict/          字典命令组（查询 / db sync / spill）
 │  │  ├─ session/        tt session 命令组（会话：建/列/看/改 ENT/结束/收掉/透传/起作业）
 │  │  └─ form/          tt form 命令组（.42f 字段表：ls / show / verify / fetch / cache）
 │  ├─ config/           统一配置层：位置解析、唯一写入口 Edit、原子写、打码、缓存清单

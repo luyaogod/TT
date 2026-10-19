@@ -14,17 +14,17 @@ import (
 )
 
 // TestLayerRegistryIsGroupDefaultsPlusNamedExceptions 钉住 Q8 的形状：
-// 组默认 7 条（`tt-target-levels.md` 的总览那一列）+ 具名例外 17 条。
+// 组默认 8 条（`tt-target-levels.md` 的总览那一列）+ 具名例外 17 条。
 //
 // 登记表只留**改变寻址要求**的条目：`debug` 的组默认按 Q7 定成 L3（寻址层），
 // 于是矩阵里 12 条 `debug xxx: L3` 与组默认同值、改变不了任何行为，
 // 按 Q8「与组默认相同的命令一条都不登」全部摘掉（`debug` 19 → 7）。
-// 例外 = debug 7 + dict 5 + dev tzs 3 + session 2。
+// 例外 = debug 7 + dict 4 + file 1 + dev tzs 3 + session 2。
 func TestLayerRegistryIsGroupDefaultsPlusNamedExceptions(t *testing.T) {
 	r := DefaultLayerRegistry()
 
-	// 组默认：顶层 / debug / dict / dev tzc / dev tzs / session / drawio。
-	const wantGroups = 7
+	// 组默认：顶层 / debug / dict / file / dev tzc / dev tzs / session / drawio。
+	const wantGroups = 8
 	if len(r.Groups) != wantGroups {
 		t.Errorf("组默认该有 %d 条（矩阵总览那一列），实得 %d：%v", wantGroups, len(r.Groups), groupKeys(r))
 	}
@@ -39,12 +39,12 @@ func TestLayerRegistryIsGroupDefaultsPlusNamedExceptions(t *testing.T) {
 				pending++
 			}
 		}
-		t.Errorf("具名例外该有 %d 条（debug 7 / dict 5 / dev tzs 3 / session 2；"+
+		t.Errorf("具名例外该有 %d 条（debug 7 / dict 4 / file 1 / dev tzs 3 / session 2；"+
 			"debug 的 12 条 L3 与组默认同值、按 Q8 不登），实得 %d（其中待定 %d）",
 			wantExceptions, len(r.Exceptions), pending)
 	}
 
-	// 登记表**不是**命令清单：7 + 17 = 24 条，远小于矩阵的 186 行明细。
+	// 登记表**不是**命令清单：8 + 17 = 25 条，远小于矩阵的 186 行明细。
 	if n := len(r.Groups) + len(r.Exceptions); n >= 186 {
 		t.Errorf("登记表有 %d 条 —— Q8 要的是『组默认 + 具名例外』，不是全清单（矩阵明细 186 行）", n)
 	}
@@ -157,6 +157,7 @@ func TestAddressingLayer(t *testing.T) {
 		}
 	}
 }
+
 // TestProvidedLayer 钉住"提供了多少信息 → 提供到第几层"。
 func TestProvidedLayer(t *testing.T) {
 	cases := []struct {
@@ -206,11 +207,11 @@ func TestCheckLayerMismatch(t *testing.T) {
 		p    Provided
 	}{
 		{"debug exec", Provided{Env: "E", HasSession: true}},
-		{"dict r.t", Provided{}},                              // L0 什么都不需要
-		{"debug sql", Provided{Env: "E", Ent: "99"}},          // L2 够了
-		{"session new", Provided{Env: "E"}},     // session 的 L1 例外：环境就够，会话它自己起
-		{"session ls", Provided{}},              // 例外 L0
-		{"dev tzs list_tables", Provided{}},     // 待定不猜：不拦
+		{"dict r.t", Provided{}},                     // L0 什么都不需要
+		{"debug sql", Provided{Env: "E", Ent: "99"}}, // L2 够了
+		{"session new", Provided{Env: "E"}},          // session 的 L1 例外：环境就够，会话它自己起
+		{"session ls", Provided{}},                   // 例外 L0
+		{"dev tzs list_tables", Provided{}},          // 待定不猜：不拦
 	} {
 		if f := CheckLayer(r, c.path, c.p); f != nil {
 			t.Errorf("CheckLayer(%q, %+v) 该放行，却报 %s：%s", c.path, c.p, f.Code, f.Message)

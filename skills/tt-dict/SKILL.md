@@ -387,14 +387,16 @@ tt dict <原查询> --kw 收窄                          # ③ 加条件重查�
 字典数据回答"表/字段/消息/参数是什么";要读 **ERP 实际源码**（.4gl）与前端字段描述（.4fd）时,先确认本地源码镜像:
 
 ```bash
-tt dict mirror path [<环境名>]    # 输出该环境源码镜像目录(第一行即路径;未镜像会提示)
-tt dict mirror pull [<环境名>]    # 下载/更新镜像(增量;--full 全量重建)
-tt dict mirror dir                # 查看镜像根目录(未设置时先 tt dict mirror dir <目录>)
+tt file mirror path --at <环境>   # 输出该环境源码镜像目录(第一行即路径;未镜像会提示)
+tt file mirror pull --at <环境>   # 下载/更新镜像(增量;--full 全量重建)
+tt file mirror dir                # 查看镜像根目录(未设置时先 tt file mirror dir <目录>)
 ```
+
+> 镜像已从 `tt dict` 移到 `tt file`；`tt dict mirror ...` 只剩一个版本的隐藏转发。
 
 - 镜像按**目录白名单**取(不是按扩展名),目录与服务器同构:`<镜像根>/<环境名>/` 下有各模块 `erp/<模块>/{4gl,4fd,42s/zh_CN}`、`com/{lib,sub,qry,wss,lng}/{4gl,4fd}` 与 `*.inc`。含三类内容:**4gl**(源码)、**4fd**(前端字段描述)、**42s**(编译字符串,**只取 `zh_CN` 语言目录**)。
 - **`*/4gl/*` 下的所有文件都会拉** —— 服务器 4gl 树里混放的副产物也跟着进镜像(实测 `erp/azz/4gl/azzi920.4gl.src`、`azzi310_del_str.42r`)。不在镜像内的是:per(界面源)、正常输出位置的编译产物(42m/42r/42f)、42s 的其它语言、备份残留(`*.bak`/`*.bck`,下次 pull 会清掉本地残留)。
-- 拿到路径后用本地文件工具读/搜(ls/rg/按行读),**不要 ssh/scp 去服务器**;镜像更新滞后时先 `mirror pull` 再读。
+- 拿到路径后用本地文件工具读/搜(ls/rg/按行读),**不要 ssh/scp 去服务器**;镜像更新滞后时先 `tt file mirror pull --at <环境>` 再读。
 - 读代码的模块/程序命名规范见 **tt-erp-read** 技能;BDL 语言语法问题见下一节。
 
 ## BDL 语言参考文档

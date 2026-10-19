@@ -54,7 +54,6 @@ func resetDictPackageState(t *testing.T) {
 		&dbPath, &srcConfigPath, &dictEnt,
 		&checkKW, &checkLang,
 		&dbSyncTable, &discoverType, &discoverHost,
-		&mirrorCfgPath,
 		&msgLang, &msgText, &msgType, &msgStatus, &msgProg,
 		&paramLang, &specLang,
 		&progKW, &progLang,
@@ -66,18 +65,18 @@ func resetDictPackageState(t *testing.T) {
 	))
 	// 布尔
 	t.Cleanup(snapVars(
-		&discoverSave, &dbListSecrets, &mirrorFull, &msgFull,
+		&discoverSave, &dbListSecrets, &msgFull,
 		&progSub, &tableBrief, &tableWho, &srcLocal, &fieldtabNoDict,
 		&common.JSON, &common.CSV, &common.Verbose,
 	))
 	// 整数
 	t.Cleanup(snapVars(&queryLimit, &srcQueryLimit))
 	// 剩下的几种类型各占一组（snapVars 是泛型的，每组只能放同一种类型）
-	t.Cleanup(snapVars(&dbCfg, &mirrorCfg)) // *host.Hosts
-	t.Cleanup(snapVars(&dataSrc))           // db.Source（接口）
-	t.Cleanup(snapVars(&srcTarget))         // *dbconfig.Target
-	t.Cleanup(snapVars(&srcNotes))          // []string
-	t.Cleanup(snapVars(&srcStarted))        // time.Time
+	t.Cleanup(snapVars(&dbCfg))      // *host.Hosts
+	t.Cleanup(snapVars(&dataSrc))    // db.Source（接口）
+	t.Cleanup(snapVars(&srcTarget))  // *dbconfig.Target
+	t.Cleanup(snapVars(&srcNotes))   // []string
+	t.Cleanup(snapVars(&srcStarted)) // time.Time
 	t.Cleanup(snapVars(&common.MetaProvider))
 	t.Cleanup(snapVars(&common.WebFS))
 }
@@ -192,7 +191,6 @@ var dictMutableVars = []string{
 	"dbPath", "srcConfigPath", "queryLimit", "srcQueryLimit", "dictEnt",
 	"checkKW", "checkLang",
 	"dbSyncTable", "discoverType", "discoverHost", "discoverSave", "dbListSecrets",
-	"mirrorCfg", "mirrorCfgPath", "mirrorFull",
 	"msgLang", "msgText", "msgType", "msgStatus", "msgProg", "msgFull",
 	"paramLang", "specLang",
 	"progKW", "progLang", "progSub",

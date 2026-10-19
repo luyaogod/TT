@@ -5,18 +5,30 @@ description: 阅读并分析 鼎捷T100 ERP Genero BDL 源代码。使用 TT CLI
 
 # ERP 代码阅读 — Genero BDL 源代码阅读指南
 
-## 获取源码:本地镜像优先
+## 获取源码：在线现读 / 离线镜像
 
-阅读服务器源码前,先确认本地源码镜像是否存在并新鲜:
+**有网时优先现读**（最新、不占磁盘）：
 
 ```bash
-tt dict mirror path [<环境名>]    # 拿到镜像目录绝对路径(如 D:\dev\erp-src\正式区)
-tt dict mirror pull  [<环境名>]   # 下载/更新该环境源码镜像(增量;--full 全量重建)
+tt file ls   --at <环境> erp/apm/4gl        # 目录（默认 $TOP）
+tt file grep -rn --at <环境> 'apmt520' erp/apm/4gl
+tt file head -n 60 --at <环境> erp/apm/4gl/apmi004.4gl
+tt file cat  --at <环境> erp/apm/4gl/apmi004.4gl
+tt file find --at <环境> erp/apm -name '*apmi004*'
 ```
 
+**断网 / 想批量读时用镜像**（只读子集，按白名单）：
+
+```bash
+tt file mirror path --at <环境>   # 拿到镜像目录绝对路径(如 D:\dev\erp-src\主机109)
+tt file mirror pull --at <环境>   # 下载/更新该环境源码镜像(增量;--full 全量重建)
+```
+
+`tt file` 只读、不建会话、不在服务器上执行命令（纯 SFTP）；路径相对 `$TOP`，符号链接默认不跟。
+
 - 镜像按**目录白名单**取(不是按扩展名),目录与服务器同构(`<镜像根>/<环境名>/erp/<模块>/{4gl,4fd,42s/zh_CN}/...`、`com/{lib,sub,qry,wss,lng}/...`):含 **4gl**(源码)、**4fd**(前端字段描述)、**42s**(编译字符串,**只取 `zh_CN`**)、`*.inc`。**`*/4gl/*` 下的所有文件都会拉** —— 服务器 4gl 树里混放的 `.4gl.src`/`.42m`/`.42r` 也跟着来;per(界面源)、正常输出位置的编译产物(42m/42r/42f)、42s 其它语言与备份残留不在镜像内。
-- 拿到路径后用本地文件工具直接读/搜索(ls/rg/按行读),不要 ssh/scp 去服务器;镜像未覆盖的文件(如 per)本地读不到。
-- 镜像更新时间滞后于服务器时(他人改过代码),先 `tt dict mirror pull` 再读。
+- 拿到镜像路径后用本地文件工具直接读/搜索(ls/rg/按行读)；镜像未覆盖的文件(如 per)用 `tt file cat --at <环境> per/...` 在线读。不要 ssh/scp 去服务器。
+- 镜像更新时间滞后于服务器时(他人改过代码),先 `tt file mirror pull --at <环境>` 再读；或者直接 `tt file cat` 现读。
 - 环境清单为三个工具共用(`config.json` 的 `hosts.sshs`,用 `tt env list` 查看):调试台里加过的机器,这里的镜像也能直接用。**没有"默认环境"了**,要环境就点 `--env <环境名>`。
 
 ## 读一个 .4gl 的顺序

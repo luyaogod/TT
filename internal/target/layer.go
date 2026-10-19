@@ -108,10 +108,11 @@ func DefaultLayerRegistry() LayerRegistry {
 			// 于是组内 12 条 `: L3` 的"例外"与默认同值、一条都不改变行为，按 Q8 一律不登。
 			"debug":   Layer3,
 			"dict":    Layer0, // 缺省数据源是本地 SQLite 镜像
+			"file":    Layer1, // 服务器文件只读：要一台点名环境
 			"dev tzc": Layer0,
 			"dev tzs": Layer0, // 本机常驻引擎 + 本地包/工作区
 			"session": Layer3, // 会话级动作（ent/quit/rm/exec/show）都要一条活着的会话
-			"drawio": Layer0, // 形状库是内置的
+			"drawio":  Layer0, // 形状库是内置的
 		},
 		Exceptions: cloneLayerMap(layerExceptions),
 	}
@@ -149,12 +150,14 @@ var layerExceptions = map[string]Layer{
 	"debug sql":     Layer2, // 只读 SQL，按环境 + 企业编号取库账号
 	"debug db":      Layer2, // 探 ENT→账号映射并用该账号连一次库
 
-	// ---- tt dict（5 条例外） ----
-	"dict db ping":     Layer1, // 连库只跑 SELECT version()，不按企业取账号
+	// ---- tt dict（4 条例外） ----
 	"dict db discover": Layer1, // 登录 SSH 探库要素
-	"dict mirror pull": Layer1, // SFTP 增量下载该环境镜像
-	"dict mirror path": Layer1, // 该环境镜像目录（与环境绑定）
+	"dict mirror pull": Layer1, // 隐藏转发：SFTP 增量下载该环境镜像
+	"dict mirror path": Layer1, // 隐藏转发：该环境镜像目录（与环境绑定）
 	"dict db sync":     Layer2, // 账号由企业编号决定
+
+	// ---- tt file（1 条例外） ----
+	"file mirror dir": Layer0, // 设的是全局镜像根目录，与环境无关
 
 	// ---- tt dev tzs（3 条待定，W1） ----
 	"dev tzs list_tables":  LayerUndetermined,
