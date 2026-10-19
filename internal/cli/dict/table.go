@@ -31,6 +31,15 @@ var tableCmd = &cobra.Command{
 --who 反查"哪些程序在用这张表"(数据来自 gzdg_t 程序与应用表格功能分析表,由 T100
 自己维护;参考作业 azzq902「程式編號對應表格查詢」),并给出各程序对它的操作类别
 (S=查询/I=新增/U=修改/D=删除)——改表前的影响分析用它。
+--brief 与 --who 只能二选一。
+
+JSON 形状（单表响应会在 notes 里提示批量写法）：
+  详情（默认）  data = [{表名, 表说明, 模块, 类型, 字段[], 键值[], 索引[]}]
+  --brief       data = [{表名, 表说明, 模块, 类型, 字段数}]
+  --kw/无参数   data = [同上表级项]
+  多表用逗号：tt dict r.t "imaa_t,imaj_t" --brief
+  计数：--brief 的 totalRows 是表数；完整详情的 totalRows 是展平后的字段行数。
+  精确表名不存在时返回 NOT_FOUND（退出码 4）。
 命令名对齐 T100 原生工具 r.t(旧名 rt/table 仍可用)。`,
 	Example: `  tt dict r.t dzea_t
   tt dict r.t "dzea_t,dzeb_t,dzed_t"
@@ -50,39 +59,77 @@ var tableCmd = &cobra.Command{
 			return fmt.Errorf("未指定有效的表名")
 		}
 
+		// --who 与 --brief 回答的是两件事，同时给会让人以为 brief 能裁剪 who 的输出。
+		if tableWho && tableBrief {
+			return fmt.Errorf("--brief 与 --who 只能二选一")
+		}
 		// --who:反查"哪些程序在用这些表"(gzdg_t,参考作业 azzq902),与看字典是两回事
 		if tableWho {
 			return runTableWho(tables)
 		}
 
 		var dicts []*db.TableDict
+		var missing []string
 		for _, t := range tables {
-			d, err := queryTableDict(t)
+			d, found, err := queryTableDict(t)
 			if err != nil {
 				return err
 			}
+			if !found {
+				missing = append(missing, t)
+				continue
+			}
 			dicts = append(dicts, d)
 		}
-
-		if Format() != output.FormatTable {
-			return emitDetail(dicts, tableDetailColumns, tableDetailRows(dicts))
+		if len(missing) > 0 {
+			e := notFoundErr("表不存在: %s", strings.Join(missing, ", "))
+			if len(tables) == 1 {
+				e = e.WithHint("批量查多张表：tt dict r.t \"a,b,c\" --brief")
+			}
+			return e
 		}
 
 		// --brief:只要表级信息。多表同查时默认会打每张表的全部字段(7 张表 ≈ 700 行),
 		// 只想确认"这几张表分别是什么"时用 --brief,和列表模式同样的表。
 		if tableBrief {
 			headers := []string{"表名", "表说明", "模块", "类型", "字段数"}
-			var rows [][]string
+			items := make([]db.TableListItem, 0, len(dicts))
+			rows := make([][]string, 0, len(dicts))
 			for _, d := range dicts {
+				items = append(items, db.TableListItem{
+					TableName: d.TableName, TableDesc: d.TableDesc, Module: d.Module,
+					TableType: d.TableType, FieldCnt: len(d.Fields),
+				})
 				rows = append(rows, []string{d.TableName, d.TableDesc, d.Module, d.TableType,
 					fmt.Sprintf("%d", len(d.Fields))})
 			}
+			var notes []string
+			if len(tables) == 1 {
+				notes = append(notes, "批量查多张表：tt dict r.t \"a,b,c\" --brief（多表只看表级信息）")
+			}
+			if Format() != output.FormatTable {
+				return emitDetailNotes(items, headers, rows, notes...)
+			}
 			output.PrintTable(headers, rows)
+			for _, n := range notes {
+				fmt.Println("提示:" + n)
+			}
 			return nil
+		}
+
+		if Format() != output.FormatTable {
+			var notes []string
+			if len(tables) == 1 {
+				notes = append(notes, "批量查多张表：tt dict r.t \"a,b,c\" --brief（多表只看表级信息）")
+			}
+			return emitDetailNotes(dicts, tableDetailColumns, tableDetailRows(dicts), notes...)
 		}
 
 		for _, d := range dicts {
 			printTableDict(d)
+		}
+		if len(tables) == 1 {
+			fmt.Println("提示:批量查多张表：tt dict r.t \"a,b,c\" --brief（多表只看表级信息）")
 		}
 		return nil
 	},
@@ -97,7 +144,11 @@ func runTableList() error {
 		}
 		return err
 	}
+	headers := []string{"表名", "表说明", "模块", "类型", "字段数"}
 	if len(list) == 0 {
+		if Format() != output.FormatTable {
+			return emit([]db.TableListItem{}, headers, nil)
+		}
 		if tableKW != "" {
 			fmt.Printf("没有匹配 '%s' 的表。\n提示: 表说明有简繁两种写法(zh_CN 与原始繁体档),用字可能是异体(如 对账/对帐/對帳);换个写法或更短的词再试。\n", tableKW)
 		} else {
@@ -106,7 +157,6 @@ func runTableList() error {
 		return nil
 	}
 
-	headers := []string{"表名", "表说明", "模块", "类型", "字段数"}
 	var rows [][]string
 	for _, t := range list {
 		rows = append(rows, []string{t.TableName, t.TableDesc, t.Module, t.TableType, fmt.Sprintf("%d", t.FieldCnt)})
@@ -124,12 +174,12 @@ func runTableList() error {
 }
 
 // queryTableDict assembles a table's complete dictionary (meta + fields + keys + indexes).
-func queryTableDict(name string) (*db.TableDict, error) {
+func queryTableDict(name string) (*db.TableDict, bool, error) {
 	d := &db.TableDict{TableName: name}
 
 	meta, err := GetDB().QueryTableMeta(name)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if meta != nil {
 		d.TableName = meta.TableName
@@ -140,9 +190,13 @@ func queryTableDict(name string) (*db.TableDict, error) {
 
 	fields, err := GetDB().QueryTable(name)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	d.Fields = fields
+	found := meta != nil || len(fields) > 0
+	if !found {
+		return d, false, nil
+	}
 
 	// 键值/索引依赖 dzed_t/dzec_t，部分库可能未含这两张表
 	keys, err := GetDB().QueryKeys(name)
@@ -150,7 +204,7 @@ func queryTableDict(name string) (*db.TableDict, error) {
 		if db.IsMissingTable(err) {
 			keys = nil
 		} else {
-			return nil, err
+			return nil, false, err
 		}
 	}
 	d.Keys = keys
@@ -160,12 +214,12 @@ func queryTableDict(name string) (*db.TableDict, error) {
 		if db.IsMissingTable(err) {
 			indexes = nil
 		} else {
-			return nil, err
+			return nil, false, err
 		}
 	}
 	d.Indexes = indexes
 
-	return d, nil
+	return d, true, nil
 }
 
 // printTableDict prints a table's dictionary as plain text sections.
@@ -249,16 +303,18 @@ func tableDetailRows(dicts []*db.TableDict) [][]string {
 func runTableWho(tables []string) error {
 	var jsonOut []map[string]any
 	var outRows [][]string
+	var missing []string
 	structured := Format() != output.FormatTable
 	for _, t := range tables {
 		meta, err := GetDB().QueryTableMeta(t)
 		if err != nil && !db.IsMissingTable(err) {
 			return err
 		}
-		desc := ""
-		if meta != nil {
-			desc = meta.TableDesc
+		if meta == nil {
+			missing = append(missing, t)
+			continue
 		}
+		desc := meta.TableDesc
 
 		progs, err := GetDB().QueryTablePrograms(t, tableLang)
 		if err != nil {
@@ -303,8 +359,18 @@ func runTableWho(tables []string) error {
 		fmt.Println("操作: S=SELECT 查询 / I=INSERT 新增 / U=UPDATE 修改 / D=DELETE 删除")
 		fmt.Println()
 	}
+	if len(missing) > 0 {
+		return notFoundErr("表不存在: %s", strings.Join(missing, ", "))
+	}
 	if structured {
-		return emit(jsonOut, []string{"表格编号", "表说明", "程序编号", "程序名称", "操作"}, outRows)
+		var notes []string
+		if len(tables) == 1 {
+			notes = append(notes, "批量反查多张表：tt dict r.t \"a,b\" --who")
+		}
+		return emitDetailNotes(jsonOut, []string{"表格编号", "表说明", "程序编号", "程序名称", "操作"}, outRows, notes...)
+	}
+	if len(tables) == 1 {
+		fmt.Println("提示:批量反查多张表：tt dict r.t \"a,b\" --who")
 	}
 	return nil
 }

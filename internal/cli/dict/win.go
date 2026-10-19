@@ -153,8 +153,7 @@ func runWinDetail(id string) error {
 		return err
 	}
 	if len(headers) == 0 {
-		fmt.Printf("未找到开窗定义 '%s'。可执行 tt dict r.q 查看全部开窗。\n", id)
-		return nil
+		return notFoundErr("开窗定义 %s 不存在", id).WithHint("列出全部开窗定义：tt dict r.q")
 	}
 
 	params, err := GetDB().QueryWinParams(id, winLang)

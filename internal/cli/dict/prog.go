@@ -16,8 +16,10 @@ var (
 	progSub  bool
 )
 
+const progBatchTip = `批量查多个程序：tt dict prog "a,b,c"`
+
 var progCmd = &cobra.Command{
-	Use:     "prog [程序编号]",
+	Use:     "prog [程序编号...]",
 	Aliases: []string{"program", "job"},
 	Short:   "查询程序/作业字典 (程序做什么、被哪些作业使用)",
 	Long: `查询 T100 的程序与作业登记(azzi900 程式基本資料 / azzi910 作業基本資料):
@@ -32,13 +34,21 @@ var progCmd = &cobra.Command{
 无参数时列出全部程序(--kw 按程序编号/中文名称搜索,从业务词找程序)。
 程序名称有简体(--lang zh_CN,默认)与繁体(--lang zh_TW)两份,搜索用字要对应;
 一个程序被很多作业使用时(如共用维护程序可达数百个),作业表默认只列前 --limit 行。
+编号可用逗号分隔批量查询：单编号返回程序详情对象，多编号返回 items[] 数组
+（每个编号带 found；缺失的列在 missing[]，单编号缺失则报 NOT_FOUND）。
+
+JSON 形状（单编号响应会在 notes 里提示批量写法）：
+  单编号 data = {程序?, 子程序?, 作业[], 表格[]}
+  多编号 data = {items: [{编号, found, 程序?, 子程序?, 作业[], 表格[]}], missing[]}
+  搜索     data = [{程序编号, 程序名称, 程序类别, 归属模块, 客制, 作业数}]
 数据族为"程序与作业/程序与表格/子程序与元件"(--help 末尾会显示本地是否已同步)。`,
 	Example: `  tt dict prog aapi011          # 程序做什么 + 被哪些作业使用 + 用了哪些表
   tt dict prog aapq110_01       # 子程序:自己的说明 + 它的主程序
   tt dict prog cl_abi           # 库/元件:说明 + 用表清单
   tt dict prog --kw 对帐        # 按中文作业名找程序
   tt dict prog --sub --kw ABI   # 在子程序/元件里按业务词搜
-  tt dict prog aapi011 --json`,
+  tt dict prog aapi011 --json
+  tt dict prog "aapi011,aapq110_01,cl_abi"   # 批量；每个编号一条结果`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
@@ -47,7 +57,14 @@ var progCmd = &cobra.Command{
 			}
 			return runProgList()
 		}
-		return runProgDetail(args[0])
+		codes := splitNames(args[0])
+		if len(codes) == 0 {
+			return fmt.Errorf("未指定有效的程序编号")
+		}
+		if len(codes) > 1 {
+			return runProgBatch(codes)
+		}
+		return runProgDetail(codes[0])
 	},
 }
 
@@ -70,31 +87,34 @@ func runProgDetail(code string) error {
 			return serr
 		}
 		if sub != nil {
+			tables, _ := GetDB().QueryProgTables(code, progLang)
+			if Format() != output.FormatTable {
+				return emitOneNotes(map[string]any{
+					"编号": code, "found": true, "程序": nil, "子程序": sub,
+					"表格": tables, "作业": []any{},
+				}, progBatchTip)
+			}
 			printSubProgInfo(sub)
 			if base := progBaseCode(code); base != "" {
 				if bi, err := GetDB().QueryProgInfo(base, progLang); err == nil && bi != nil && bi.IsProg {
-					fmt.Printf("它的主程序: %s(%s);子程序自己做的事以文件头 `#+ Description:` 为准。\n", base, bi.Name)
+					fmt.Println("它的主程序: " + base + "(" + bi.Name + ");子程序自己做的事以文件头 `#+ Description:` 为准。")
 				}
 			}
 			return printProgTables(code, true)
 		}
-		fmt.Printf("未找到程序/作业/元件 '%s' 的登记。\n", code)
-		if base := progBaseCode(code); base != "" {
-			// 子程序/子元件形态,但两张登记表都没有:只提示主程序
-			if bi, err := GetDB().QueryProgInfo(base, progLang); err == nil && bi != nil && bi.IsProg {
-				fmt.Printf("提示: '%s' 是子程序/子元件形态,主程序为 '%s'(%s)。\n", code, base, bi.Name)
-			} else {
-				fmt.Printf("提示: '%s' 是子程序/子元件形态,主程序代码应是 '%s'(工具里没登记它)。\n", code, base)
-			}
-			fmt.Println("      子程序自己做什么,看它文件头的 `#+ Description:`;别把主程序的用途当成它的。")
-		} else {
-			fmt.Println("提示: 用业务词搜索试试 —— tt dict prog --kw <关键字>")
-			fmt.Println("      库/元件/开窗(cl_abi、s_xxx、q_xxx)不登记为程序与作业,但下面的用表索引里可能有它。")
+		tables, _ := GetDB().QueryProgTables(code, progLang)
+		if len(tables) == 0 {
+			return notFoundErr("程序/作业/元件 %s 不存在", code).WithHint(progBatchTip)
 		}
-		// 没登记为程序≠查不到:gzdg_t(用表索引)覆盖库/元件/开窗等(实测 cl_abi 22 条、s_apcp300 8 条)
+		if Format() != output.FormatTable {
+			return emitOneNotes(map[string]any{
+				"编号": code, "found": false, "程序": nil, "作业": []any{},
+				"表格": tables, "note": "未登记为程序/作业；gzdg_t 有用表索引",
+			}, progBatchTip)
+		}
+		fmt.Println("未找到程序/作业/元件 '" + code + "' 的登记；但 gzdg_t 有用表索引：")
 		return printProgTables(code, true)
 	}
-
 	if Format() != output.FormatTable {
 		jobs, jerr := GetDB().QueryProgJobs(code, progLang)
 		if jerr != nil && !db.IsMissingTable(jerr) {
@@ -104,7 +124,14 @@ func runProgDetail(code string) error {
 		if terr != nil && !db.IsMissingTable(terr) {
 			return terr
 		}
-		return emitOne(map[string]any{"程序": info, "作业": jobs, "表格": tables})
+		notes := []string{progBatchTip}
+		if len(jobs) == 0 {
+			notes = append(notes, "程序存在，但没有作业登记（不是 NOT_FOUND）")
+		}
+		if len(tables) == 0 {
+			notes = append(notes, "gzdg_t 没有该程序的用表登记（可能只用了动态 SQL）")
+		}
+		return emitOneNotes(map[string]any{"程序": info, "作业": jobs, "表格": tables}, notes...)
 	}
 
 	if info.IsProg {
@@ -155,6 +182,104 @@ func runProgDetail(code string) error {
 	return printProgTables(code, false)
 }
 
+// runProgBatch 批量查询多个程序编号。
+// 单个编号缺失是 NOT_FOUND；批量时每个编号带 found，缺失的列在 missing[]，
+// 这样 agent 能一次拿到全部可用的结果，又能准确知道哪些编号没登记。
+func runProgBatch(codes []string) error {
+	headers := []string{"程序编号", "登记状态", "名称", "作业数", "表数"}
+	items := make([]map[string]any, 0, len(codes))
+	rows := make([][]string, 0, len(codes))
+	var missing []string
+	for _, code := range codes {
+		item, found, err := progDetailItem(code)
+		if err != nil {
+			return err
+		}
+		items = append(items, item)
+		status := "未登记"
+		if found {
+			status = "已登记"
+		} else {
+			missing = append(missing, code)
+		}
+		var name string
+		switch p := item["程序"].(type) {
+		case *db.ProgInfo:
+			name = p.Name
+		}
+		if name == "" {
+			switch p := item["子程序"].(type) {
+			case *db.SubProgInfo:
+				name = p.Name
+			}
+		}
+		var jobN, tableN int
+		switch v := item["作业"].(type) {
+		case []db.ProgJob:
+			jobN = len(v)
+		}
+		switch v := item["表格"].(type) {
+		case []db.ProgTableRow:
+			tableN = len(v)
+		}
+		rows = append(rows, []string{code, status, name, fmt.Sprint(jobN), fmt.Sprint(tableN)})
+	}
+	data := map[string]any{"items": items}
+	if len(missing) > 0 {
+		data["missing"] = missing
+	}
+	var notes []string
+	if len(missing) > 0 {
+		notes = append(notes, "未登记编号："+strings.Join(missing, ", ")+"（单编号查询会报 NOT_FOUND）")
+	}
+	if Format() != output.FormatTable {
+		return emitDetailNotes(data, headers, rows, notes...)
+	}
+	output.PrintTable(headers, rows)
+	for _, n := range notes {
+		fmt.Println("注意:" + n)
+	}
+	return nil
+}
+
+// progDetailItem 取一个编号的详情，供批量查询使用；不打印任何东西。
+// found=false 仍可能带“用表索引”（gzdg_t 覆盖库/元件/开窗），但不算程序登记。
+func progDetailItem(code string) (map[string]any, bool, error) {
+	info, err := GetDB().QueryProgInfo(code, progLang)
+	if err != nil && !db.IsMissingTable(err) {
+		return nil, false, err
+	}
+	if info != nil {
+		jobs, jerr := GetDB().QueryProgJobs(code, progLang)
+		if jerr != nil && !db.IsMissingTable(jerr) {
+			return nil, false, jerr
+		}
+		tables, terr := GetDB().QueryProgTables(code, progLang)
+		if terr != nil && !db.IsMissingTable(terr) {
+			return nil, false, terr
+		}
+		return map[string]any{"编号": code, "found": true, "程序": info, "作业": jobs, "表格": tables}, true, nil
+	}
+	sub, serr := GetDB().QuerySubProgInfo(code, progLang)
+	if serr != nil && !db.IsMissingTable(serr) {
+		return nil, false, serr
+	}
+	tables, terr := GetDB().QueryProgTables(code, progLang)
+	if terr != nil && !db.IsMissingTable(terr) {
+		return nil, false, terr
+	}
+	if sub != nil {
+		return map[string]any{"编号": code, "found": true, "程序": nil, "子程序": sub, "作业": []any{}, "表格": tables}, true, nil
+	}
+	item := map[string]any{"编号": code, "found": false, "程序": nil, "作业": []any{}, "表格": tables}
+	if len(tables) > 0 {
+		item["note"] = "未登记为程序/作业；gzdg_t 有用表索引"
+	} else {
+		item["note"] = "没有任何程序/作业/子程序/用表登记"
+	}
+	return item, false, nil
+}
+
 // printSubProgInfo 打印子程序/元件/库的登记(gzde_t + gzdel_t,参考作业 azzi901)。
 func printSubProgInfo(p *db.SubProgInfo) {
 	fmt.Printf("=== %s ===\n", p.Code)
@@ -195,7 +320,11 @@ func runSubProgList() error {
 		}
 		return err
 	}
+	headers := []string{"规格编号", "说明", "规格类别", "归属模块", "客制"}
 	if len(list) == 0 {
+		if Format() != output.FormatTable {
+			return emit([]db.SubProgListItem{}, headers, nil)
+		}
 		if progKW != "" {
 			fmt.Printf("没有匹配 '%s' 的子程序/元件。\n提示: 说明可能只有繁体或其它语言,换 --lang 或更短的词再试。\n", progKW)
 		} else {
@@ -203,7 +332,6 @@ func runSubProgList() error {
 		}
 		return nil
 	}
-	headers := []string{"规格编号", "说明", "规格类别", "归属模块", "客制"}
 	var rows [][]string
 	for _, p := range list {
 		rows = append(rows, []string{p.Code, p.Name, p.Category, p.Module, p.Cust})
@@ -301,7 +429,11 @@ func runProgList() error {
 		}
 		return err
 	}
+	headers := []string{"程序编号", "程序名称", "程序类别", "归属模块", "客制", "作业数"}
 	if len(list) == 0 {
+		if Format() != output.FormatTable {
+			return emit([]db.ProgListItem{}, headers, nil)
+		}
 		if progKW != "" {
 			fmt.Printf("没有匹配 '%s' 的程序。\n提示: 程序名称分简体(--lang zh_CN,默认)与繁体(--lang zh_TW)两份,用字可能是异体(如 对账/对帐/對帳);换个写法、换 --lang 或用更短的词再试。\n", progKW)
 		} else {
@@ -310,7 +442,6 @@ func runProgList() error {
 		return nil
 	}
 
-	headers := []string{"程序编号", "程序名称", "程序类别", "归属模块", "客制", "作业数"}
 	var rows [][]string
 	for _, p := range list {
 		rows = append(rows, []string{p.Code, p.Name, p.Category, p.Module, p.Cust, fmt.Sprintf("%d", p.JobCount)})

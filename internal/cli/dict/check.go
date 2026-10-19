@@ -151,8 +151,7 @@ func runCheckDetail(id string) error {
 		return err
 	}
 	if len(headers) == 0 {
-		fmt.Printf("未找到校验定义 '%s'。可执行 tt dict r.v 查看全部校验定义。\n", id)
-		return nil
+		return notFoundErr("校验定义 %s 不存在", id).WithHint("列出全部校验定义：tt dict r.v")
 	}
 
 	params, err := GetDB().QueryCheckParams(id, checkLang)

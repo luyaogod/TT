@@ -132,6 +132,12 @@ func IsCSV() bool { return common.OutputFormat() == output.FormatCSV }
 // Format 本次的输出形态(命令自己分流时用)。
 func Format() output.Format { return common.OutputFormat() }
 
+// notFoundErr 精确 ID 查不到：成功与否不能混成“查到空”。
+// 退出码 4 与用法错(1)/数据源错(2)/缺表(3)分开，agent 可以直接分支。
+func notFoundErr(format string, a ...any) *output.Error {
+	return output.Errorf("NOT_FOUND", 4, format, a...)
+}
+
 // emit 渲染一次**结果集**查询:JSON 给带环境信息的信封,CSV 给 `# ` 头 + 主体,
 // 人读表格由调用方在 text 分支自己打(各命令的文本输出比一张表丰富)。
 //
@@ -150,14 +156,33 @@ func emit(data any, columns []string, rows [][]string) error {
 // 会把字段切掉一半,而调用方要的就是"这张表完整长什么样"。
 // 条数照报,`--limit` 对它无效。
 func emitDetail(data any, columns []string, rows [][]string) error {
-	return emitCapped(false, data, columns, rows)
+	return emitDetailNotes(data, columns, rows)
+}
+
+// emitDetailNotes 同 emitDetail，并把这些可直接照做的提示放进 notes。
+// 用途：单表查询时顺手告诉 agent 多表/批量的写法，不要求它先读 --help。
+func emitDetailNotes(data any, columns []string, rows [][]string, notes ...string) error {
+	total := len(rows)
+	if rows == nil {
+		total = payloadLen(data)
+	}
+	m := srcMeta()
+	m.TotalRows, m.Returned = total, total
+	m.Notes = append(m.Notes, notes...)
+	return emitWith(m, data, columns, rows)
 }
 
 // emitOne 单实体(如一条校验定义)。它没有"结果集行数"可言,记 1 条 ——
 // 记 0 会让人以为什么都没查到。
 func emitOne(data any) error {
+	return emitOneNotes(data)
+}
+
+// emitOneNotes 同 emitOne，并把可直接照做的批量提示放进 notes。
+func emitOneNotes(data any, notes ...string) error {
 	m := srcMeta()
 	m.TotalRows, m.Returned = 1, 1
+	m.Notes = append(m.Notes, notes...)
 	return emitWith(m, data, nil, nil)
 }
 

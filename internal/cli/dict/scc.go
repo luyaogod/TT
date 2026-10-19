@@ -66,7 +66,12 @@ var sccCmd = &cobra.Command{
 	Long: `查询系统分类码 (SCC):系统里下拉/选项的"选项字典",一个分类码 = 一组
 「值 → 说明」,画面上的下拉选项就来自这里。
 无参数时列出全部分类码(--kw 按分类码/名称过滤);指定分类码显示详情:单头与分类值列表。
-分类码多为数字(如 4);部分分类码的值带扩展数据列,含义按各分类码自己定义。`,
+分类码多为数字(如 4);部分分类码的值带扩展数据列,含义按各分类码自己定义。
+
+JSON 形状：
+  详情 data = {分类码, 单头:{...}, 分类值:[...]}
+  列表/搜索 data = [{分类码, 群组, 状态, 名称, 值数}]
+精确分类码不存在时报 NOT_FOUND（退出码 4）；--kw 无匹配仍是成功空数组。`,
 	Example: `  tt dict scc
   tt dict scc --kw 币别
   tt dict scc 4
@@ -88,7 +93,11 @@ func runSccList() error {
 		}
 		return err
 	}
+	headers := []string{"分类码", "群组", "状态", "名称", "值数"}
 	if len(rows) == 0 {
+		if Format() != output.FormatTable {
+			return emit([]sccListItem{}, headers, nil)
+		}
 		fmt.Println(emptyHint("系统分类码"))
 		return nil
 	}
@@ -104,7 +113,6 @@ func runSccList() error {
 		})
 	}
 
-	headers := []string{"分类码", "群组", "状态", "名称", "值数"}
 	var tableRows [][]string
 	for _, it := range items {
 		tableRows = append(tableRows, []string{it.ID, it.Group, it.Status, it.Name, fmt.Sprint(it.ValCnt)})
@@ -129,8 +137,7 @@ func runSccDetail(id string) error {
 		return err
 	}
 	if header == nil {
-		fmt.Printf("未找到分类码 '%s'。可执行 tt dict scc 查看全部分类码。\n", id)
-		return nil
+		return notFoundErr("分类码 %s 不存在", id).WithHint("列出全部分类码：tt dict scc")
 	}
 
 	values, err := GetDB().QuerySccValues(id, sccLang)
