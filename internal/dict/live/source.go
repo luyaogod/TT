@@ -698,12 +698,13 @@ WHERE a.gzza001 = ` + lit(code)
 		info.RefMain, info.Cust, info.Status = get(r, 3), get(r, 4), get(r, 5)
 		info.Name, info.ShortName = get(r, 6), get(r, 7)
 	}
-	jobRows, err := l.q(`SELECT COALESCE(gzzz002, '') FROM gzzz_t WHERE gzzz001 = ` + lit(code))
+	jobRows, err := l.q(`SELECT COALESCE(gzzz002, ''), COALESCE(TO_CHAR(gzzz003), ''), COALESCE(TO_CHAR(gzzz004), '') FROM gzzz_t WHERE gzzz001 = ` + lit(code))
 	if err != nil {
 		return nil, fmt.Errorf("查询作业 %s: %w", code, err)
 	}
 	if len(jobRows) > 0 {
-		info.IsJob, info.JobProg = true, get(jobRows[0], 0)
+		info.IsJob = true
+		info.JobProg, info.JobParamGrp, info.JobExtra = get(jobRows[0], 0), get(jobRows[0], 1), get(jobRows[0], 2)
 	}
 	if !info.IsProg && !info.IsJob {
 		return nil, nil
@@ -714,7 +715,8 @@ WHERE a.gzza001 = ` + lit(code)
 // QueryProgJobs 查"哪些作业用了这个程序"(作业名称取所挂程序的名称,与 azzi910 取法一致)。
 func (l *Live) QueryProgJobs(code, lang string) ([]db.ProgJob, error) {
 	sql := `SELECT z.gzzz001, COALESCE(l.gzzal003, ''), COALESCE(z.gzzz005, ''),
-       COALESCE(TO_CHAR(z.gzzz003), ''), COALESCE(k.gzzk003, ''), COALESCE(z.gzzz006, ''),
+       COALESCE(TO_CHAR(z.gzzz003), ''), COALESCE(TO_CHAR(z.gzzz004), ''),
+       COALESCE(k.gzzk003, ''), COALESCE(z.gzzz006, ''),
        COALESCE(z.gzzzstus, '')
 FROM gzzz_t z
 LEFT JOIN gzzal_t l ON l.gzzal001 = z.gzzz002 AND l.gzzal002 = ` + lit(lang) + `
@@ -728,7 +730,7 @@ ORDER BY z.gzzz001`
 	out := make([]db.ProgJob, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, db.ProgJob{JobCode: get(r, 0), JobName: get(r, 1), Module: get(r, 2),
-			ParamGrp: get(r, 3), ParamDesc: get(r, 4), DocType: get(r, 5), Status: get(r, 6)})
+			ParamGrp: get(r, 3), Extra: get(r, 4), ParamDesc: get(r, 5), DocType: get(r, 6), Status: get(r, 7)})
 	}
 	return out, nil
 }

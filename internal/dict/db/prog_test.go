@@ -18,7 +18,7 @@ func buildProgDB(t *testing.T) *DB {
 		`CREATE TABLE gzza_t (gzza001 TEXT, gzza002 TEXT, gzza003 TEXT, gzza004 TEXT,
 		   gzza008 TEXT, gzza011 TEXT, gzzastus TEXT)`,
 		`CREATE TABLE gzzal_t (gzzal001 TEXT, gzzal002 TEXT, gzzal003 TEXT, gzzal005 TEXT)`,
-		`CREATE TABLE gzzz_t (gzzz001 TEXT, gzzz002 TEXT, gzzz003 TEXT, gzzz005 TEXT,
+		`CREATE TABLE gzzz_t (gzzz001 TEXT, gzzz002 TEXT, gzzz003 TEXT, gzzz004 TEXT, gzzz005 TEXT,
 		   gzzz006 TEXT, gzzzstus TEXT)`,
 		`CREATE TABLE gzzk_t (gzzk001 TEXT, gzzk002 TEXT, gzzk003 TEXT)`,
 		// 程序↔表格(参考作业 azzq902):主键 程序编号+表格编号+操作类别
@@ -48,9 +48,9 @@ func buildProgDB(t *testing.T) *DB {
 		`INSERT INTO gzzal_t VALUES ('aooi301','zh_CN','应用分类码维护作业(单档多栏)','YYFLMWH')`,
 		`INSERT INTO gzzal_t VALUES ('aapi011','zh_CN','应付账款类别依账套设置科目作业','YFZKLB')`,
 		`INSERT INTO gzzal_t VALUES ('aooi301','zh_TW','應用分類碼維護作業','YYFLMWH')`,
-		`INSERT INTO gzzz_t VALUES ('aapi011','aapi011','0','AAP','','Y')`,
-		`INSERT INTO gzzz_t VALUES ('aooi701','aooi301','0','AOO','','Y')`,
-		`INSERT INTO gzzz_t VALUES ('aooi707','aooi301','1','AOO','','Y')`,
+		`INSERT INTO gzzz_t VALUES ('aapi011','aapi011','0','','AAP','','Y')`,
+		`INSERT INTO gzzz_t VALUES ('aooi701','aooi301','0','','AOO','','Y')`,
+		`INSERT INTO gzzz_t VALUES ('aooi707','aooi301','1','vendor','AOO','','Y')`,
 		`INSERT INTO gzzk_t VALUES ('aooi301','0','预设参数组')`,
 		`INSERT INTO gzzk_t VALUES ('aooi301','1','单档多栏参数组')`,
 	}
@@ -136,8 +136,8 @@ func TestQueryProgJobs(t *testing.T) {
 	if jobs[0].ParamGrp != "0" || jobs[0].ParamDesc != "预设参数组" {
 		t.Errorf("应用参数组关联有误: %+v", jobs[0])
 	}
-	if jobs[1].ParamGrp != "1" || jobs[1].ParamDesc != "单档多栏参数组" {
-		t.Errorf("第二个作业的参数组关联有误: %+v", jobs[1])
+	if jobs[1].ParamGrp != "1" || jobs[1].Extra != "vendor" || jobs[1].ParamDesc != "单档多栏参数组" {
+		t.Errorf("第二个作业的参数组/额外参数关联有误: %+v", jobs[1])
 	}
 
 	only, err := d.QueryProgJobs("aapi011", "zh_CN")

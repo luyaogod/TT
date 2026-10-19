@@ -13,7 +13,8 @@ import (
 //	        gzza008 引用主程序编号、gzza011 客制
 //	gzzal_t 程序名称多语言:gzzal001 程序编号 + gzzal002 语言别 → gzzal003 程序名称
 //	gzzz_t  作业编号设置表:gzzz001 作业编号(PK)、gzzz002 程序编号(作业挂的程序,
-//	        一个程序可被多个作业使用)、gzzz003 应用参数组编号、gzzz005 归属模块
+//	        一个程序可被多个作业使用)、gzzz003 应用参数组编号、gzzz004 额外参数、
+//	        gzzz005 归属模块
 //	gzzk_t  程序应用参数组设置表:gzzk001 程序编号 + gzzk002 参数组编号 → gzzk003 说明
 //
 // 作业的显示名称既不是独立字段也不是独立表:工具链(azzi910)用
@@ -33,6 +34,9 @@ type ProgInfo struct {
 	Status    string `json:"状态码"`    // gzzastus
 	IsJob     bool   `json:"是作业"`
 	JobProg   string `json:"作业挂的程序"` // gzzz002(该编号作为作业登记时)
+	// 下面两项只在“这个编号本身是作业”时有值：同名作业靠它们区分。
+	JobParamGrp string `json:"应用参数组"` // gzzz003
+	JobExtra    string `json:"额外参数"`  // gzzz004
 }
 
 // ProgJob 一个使用某程序的作业(gzzz_t 按 gzzz002 关联到程序)。
@@ -41,6 +45,7 @@ type ProgJob struct {
 	JobName   string `json:"作业名称"`   // gzzal003(经 gzzz002 关联的程序名称)
 	Module    string `json:"归属模块"`   // gzzz005
 	ParamGrp  string `json:"应用参数组"`  // gzzz003
+	Extra     string `json:"额外参数"`   // gzzz004(拼在程序名后的运行参数)
 	ParamDesc string `json:"参数组说明"`  // gzzk003(经 gzzk001/gzzk002)
 	DocType   string `json:"默认单据性质"` // gzzz006
 	Status    string `json:"状态码"`    // gzzzstus
@@ -331,9 +336,12 @@ func (d *DB) QueryProgInfo(code, lang string) (*ProgInfo, error) {
 		return nil, fmt.Errorf("query prog info %s: %w", code, err)
 	}
 
+	var jobProg, jobParam, jobExtra string
 	if err := d.conn.QueryRow(
-		`SELECT COALESCE(gzzz002, '') FROM gzzz_t WHERE gzzz001 = ?`, code).Scan(&info.JobProg); err == nil {
+		`SELECT COALESCE(gzzz002, ''), COALESCE(gzzz003, ''), COALESCE(gzzz004, '')
+		 FROM gzzz_t WHERE gzzz001 = ?`, code).Scan(&jobProg, &jobParam, &jobExtra); err == nil {
 		info.IsJob = true
+		info.JobProg, info.JobParamGrp, info.JobExtra = jobProg, jobParam, jobExtra
 	} else if err != sql.ErrNoRows {
 		return nil, fmt.Errorf("query job info %s: %w", code, err)
 	}
@@ -352,6 +360,7 @@ func (d *DB) QueryProgJobs(code, lang string) ([]ProgJob, error) {
 		       COALESCE(l.gzzal003, ''),
 		       COALESCE(z.gzzz005, ''),
 		       COALESCE(z.gzzz003, ''),
+		       COALESCE(z.gzzz004, ''),
 		       COALESCE(k.gzzk003, ''),
 		       COALESCE(z.gzzz006, ''),
 		       COALESCE(z.gzzzstus, '')
@@ -368,7 +377,7 @@ func (d *DB) QueryProgJobs(code, lang string) ([]ProgJob, error) {
 	var result []ProgJob
 	for rows.Next() {
 		var j ProgJob
-		if err := rows.Scan(&j.JobCode, &j.JobName, &j.Module, &j.ParamGrp,
+		if err := rows.Scan(&j.JobCode, &j.JobName, &j.Module, &j.ParamGrp, &j.Extra,
 			&j.ParamDesc, &j.DocType, &j.Status); err != nil {
 			return nil, fmt.Errorf("scan prog job: %w", err)
 		}

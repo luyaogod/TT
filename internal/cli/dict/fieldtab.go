@@ -24,6 +24,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"tt/internal/cli/common"
+
 	"tt/internal/dict/formfields"
 	"tt/internal/output"
 )
@@ -59,7 +61,8 @@ not-in-dict / ambiguous。
 用 --no-dict 可显式跳过字典(整列「未解析(no-dict)」)。
 两种通道都是只读的;这一轮用的是哪种,JSON 里看 dictSource,人读输出里有一行说明。
 
-输出键(JSON)见 internal/dict/README.md「tt dict fieldtab」;与 tt form show 的键互不影响。`,
+输出键(JSON)见 internal/dict/README.md「tt dict fieldtab」;与 tt form show 的键互不影响。
+本地没有 42f 目录时，可直接用 tt form show 取线上表单字段（不需要本地镜像）。`,
 	Example: `  tt dict fieldtab t100/axmt500_wf --root "D:\tt-fixtures\forms"                     # 缺省:在线
   tt dict fieldtab t100/axmt500_wf --root "D:\tt-fixtures\forms" --source online --env 生产环境
   tt dict fieldtab t100/axmt500_wf --root "D:\tt-fixtures\forms" --source local      # 查本地镜像
@@ -78,8 +81,9 @@ not-in-dict / ambiguous。
 			root = os.Getenv("TT_FORM_DIR")
 		}
 		if strings.TrimSpace(root) == "" {
-			return fmt.Errorf("没有 42f 根目录:给 --root <目录> 或设 TT_FORM_DIR" +
-				"(只读本地目录,不连真机)")
+			return fmt.Errorf("没有 42f 根目录:给 --root <目录> 或设 TT_FORM_DIR"+
+				"(只读本地目录,不连真机)\n\n若只是要表单字段表，可改用：%s",
+				fieldtabFormShowHint(module, form))
 		}
 
 		// 字典通道:**缺省在线**,显式 --source local 才走本地;都打不开就报错并给下一步。
@@ -89,13 +93,13 @@ not-in-dict / ambiguous。
 		}
 		d, err := openFieldtabDict(mode, openFieldtabOnline, openFieldtabLocal)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w\n\n若只是要表单字段表，可改用：%s", err, fieldtabFormShowHint(module, form))
 		}
 		defer d.Close()
 
 		tab, err := formfields.LoadForm(root, module, form, d.Namer)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w\n\n若只是要表单字段表，可改用：%s", err, fieldtabFormShowHint(module, form))
 		}
 
 		rows := fieldtabRows(tab)
@@ -223,6 +227,19 @@ func fieldtabTextRows(tab *formfields.Table) [][]string {
 
 // fieldtabPathHint 之外的东西都留在 fieldtab 里：错误信息由 formfields.FindPath 给全
 // （它会列出尝试过的路径），命令层不重复包装、不吞原始错误。
+
+// fieldtabFormShowHint 当本机没有 42f 目录时，给出同一份字段表的另一条入口。
+// form show 走线上 .42f，不需要本地镜像；不需要让用户在两个命令组之间自己猜。
+func fieldtabFormShowHint(module, form string) string {
+	env := strings.TrimSpace(common.Env)
+	if strings.HasPrefix(strings.ToLower(env), "local:") {
+		env = strings.TrimSpace(env[len("local:"):])
+	}
+	if env == "" {
+		env = "<环境>"
+	}
+	return fmt.Sprintf("tt form show --env %s --module %s --form %s", env, module, form)
+}
 
 func init() { Group.AddCommand(fieldtabCmd) }
 

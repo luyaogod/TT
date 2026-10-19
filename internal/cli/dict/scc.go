@@ -2,6 +2,7 @@ package dict
 
 import (
 	"fmt"
+	"strings"
 
 	"tt/internal/dict/db"
 	"tt/internal/output"
@@ -61,7 +62,7 @@ type sccDetail struct {
 }
 
 var sccCmd = &cobra.Command{
-	Use:   "scc [分类码]",
+	Use:   "scc [分类码...]",
 	Short: "查询系统分类码 (SCC)",
 	Long: `查询系统分类码 (SCC):系统里下拉/选项的"选项字典",一个分类码 = 一组
 「值 → 说明」,画面上的下拉选项就来自这里。
@@ -71,17 +72,23 @@ var sccCmd = &cobra.Command{
 JSON 形状：
   详情 data = {分类码, 单头:{...}, 分类值:[...]}
   列表/搜索 data = [{分类码, 群组, 状态, 名称, 值数}]
+ 批量      data = {items: [{分类码, 单头, 分类值[]}], missing[]}
 精确分类码不存在时报 NOT_FOUND（退出码 4）；--kw 无匹配仍是成功空数组。`,
 	Example: `  tt dict scc
   tt dict scc --kw 币别
   tt dict scc 4
-  tt dict scc 4 --json`,
+  tt dict scc 4 --json
+  tt dict scc "1001,2014,2015"   # 批量；每个分类码一条结果`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) == 1 {
-			return runSccDetail(args[0])
+		if len(args) == 0 {
+			return runSccList()
 		}
-		return runSccList()
+		ids := splitNames(args[0])
+		if len(ids) > 1 {
+			return runSccBatch(ids)
+		}
+		return runSccDetail(ids[0])
 	},
 }
 
@@ -128,24 +135,39 @@ func runSccDetail(id string) error {
 	if IsCSV() {
 		return fmt.Errorf("详情模式不支持 --csv，请使用列表模式或 --json")
 	}
+	detail, found, err := querySccDetail(id)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return notFoundErr("分类码 %s 不存在", id).WithHint("列出全部分类码：tt dict scc")
+	}
+	if Format() == output.FormatTable {
+		printSccDetail(detail)
+		return nil
+	}
+	return emitOneNotes(detail, "批量查多个分类码：tt dict scc \"1001,2014,2015\"")
+}
 
+// querySccDetail 取一个分类码的详情；found=false 表示分类码不存在（不负责输出/报错）。
+func querySccDetail(id string) (*sccDetail, bool, error) {
 	header, err := GetDB().QuerySccHeader(id, sccLang)
 	if err != nil {
 		if db.IsMissingTable(err) {
-			return missingTableErr("系统分类码 (gzca_t 等表)")
+			return nil, false, missingTableErr("系统分类码 (gzca_t 等表)")
 		}
-		return err
+		return nil, false, err
 	}
 	if header == nil {
-		return notFoundErr("分类码 %s 不存在", id).WithHint("列出全部分类码：tt dict scc")
+		return nil, false, nil
 	}
 
 	values, err := GetDB().QuerySccValues(id, sccLang)
 	if err != nil && !db.IsMissingTable(err) {
-		return err
+		return nil, false, err
 	}
 
-	detail := sccDetail{
+	detail := &sccDetail{
 		ID: header.ID,
 		Header: sccHeaderView{
 			Group:  header.Group,
@@ -167,12 +189,46 @@ func runSccDetail(id string) error {
 			B9: v.B9, B10: v.B10, B11: v.B11, B14: v.B14, B15: v.B15,
 		})
 	}
+	return detail, true, nil
+}
 
-	if Format() == output.FormatTable {
-		printSccDetail(&detail)
-		return nil
+// runSccBatch 批量查询多个分类码；缺失项进 missing[]，不把整批成功与否搅成一个布尔值。
+func runSccBatch(ids []string) error {
+	if IsCSV() {
+		return fmt.Errorf("批量详情不支持 --csv，请使用 --json 或 --format table")
 	}
-	return emitOne(detail)
+	items := make([]*sccDetail, 0, len(ids))
+	missing := make([]string, 0)
+	rows := make([][]string, 0, len(ids))
+	for _, id := range ids {
+		d, found, err := querySccDetail(id)
+		if err != nil {
+			return err
+		}
+		if !found {
+			missing = append(missing, id)
+			continue
+		}
+		items = append(items, d)
+		rows = append(rows, []string{d.ID, d.Header.Name, fmt.Sprint(len(d.Values))})
+	}
+	data := map[string]any{"items": items}
+	if len(missing) > 0 {
+		data["missing"] = missing
+	}
+	var notes []string
+	if len(missing) > 0 {
+		notes = append(notes, "不存在的分类码："+strings.Join(missing, ", "))
+	}
+	headers := []string{"分类码", "名称", "值数"}
+	if Format() != output.FormatTable {
+		return emitDetailNotes(data, headers, rows, notes...)
+	}
+	output.PrintTable(headers, rows)
+	for _, n := range notes {
+		fmt.Println("注意:" + n)
+	}
+	return nil
 }
 
 func printSccDetail(d *sccDetail) {

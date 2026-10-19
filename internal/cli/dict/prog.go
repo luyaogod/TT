@@ -39,6 +39,7 @@ var progCmd = &cobra.Command{
 
 JSON 形状（单编号响应会在 notes 里提示批量写法）：
   单编号 data = {程序?, 子程序?, 作业[], 表格[]}
+  作业参数：程序对象上的“应用参数组/额外参数”；程序详情里的作业行也带同名字段
   多编号 data = {items: [{编号, found, 程序?, 子程序?, 作业[], 表格[]}], missing[]}
   搜索     data = [{程序编号, 程序名称, 程序类别, 归属模块, 客制, 作业数}]
 数据族为"程序与作业/程序与表格/子程序与元件"(--help 末尾会显示本地是否已同步)。`,
@@ -125,7 +126,7 @@ func runProgDetail(code string) error {
 			return terr
 		}
 		notes := []string{progBatchTip}
-		if len(jobs) == 0 {
+		if len(jobs) == 0 && !info.IsJob {
 			notes = append(notes, "程序存在，但没有作业登记（不是 NOT_FOUND）")
 		}
 		if len(tables) == 0 {
@@ -138,6 +139,9 @@ func runProgDetail(code string) error {
 		printProgInfo(info)
 	} else {
 		fmt.Printf("=== %s ===\n该编号不是程序登记,是作业:挂的程序 = %s\n", code, orDash(info.JobProg))
+		if info.JobParamGrp != "" || info.JobExtra != "" {
+			fmt.Printf("作业参数: 应用参数组=%s 额外参数=%s\n", orDash(info.JobParamGrp), orDash(info.JobExtra))
+		}
 		if info.JobProg != "" && info.JobProg != code {
 			// 跟到它挂的程序:程序信息 + 作业清单(本作业会出现在其中)
 			pi, err := GetDB().QueryProgInfo(info.JobProg, progLang)
@@ -165,14 +169,14 @@ func runProgDetail(code string) error {
 		fmt.Println("  (无;该程序未被作业登记,或是被作其他用途引用)")
 		return printProgTables(code, false)
 	}
-	headers := []string{"作业编号", "作业名称", "归属模块", "应用参数组", "参数组说明", "默认单据性质"}
+	headers := []string{"作业编号", "作业名称", "归属模块", "应用参数组", "额外参数", "参数组说明", "默认单据性质"}
 	shown := jobs
 	if limitOf() > 0 && len(jobs) > limitOf() {
 		shown = jobs[:limitOf()]
 	}
 	var rows [][]string
 	for _, j := range shown {
-		rows = append(rows, []string{j.JobCode, j.JobName, j.Module, j.ParamGrp, j.ParamDesc, j.DocType})
+		rows = append(rows, []string{j.JobCode, j.JobName, j.Module, j.ParamGrp, j.Extra, j.ParamDesc, j.DocType})
 	}
 	output.PrintTable(headers, rows)
 	if len(shown) < len(jobs) {
