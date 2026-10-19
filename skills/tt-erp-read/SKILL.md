@@ -38,6 +38,20 @@ tt file grep -rn --at <环境> --include '*.4gl' '<关键字>' erp/<模块>/4gl
 tt file head -n 80 --at <环境> erp/<模块>/4gl/<程序>.4gl
 ```
 
+## 获取和阅读程序画面
+
+通过程序编号（同上，不是作业编号哦）在本地或远程中找到对应同样编号的`.42f`文件（一份xml组件树）和`.42s`文件（语言档），然后借助`tt interface`可以通过这两份文件合成组件树，借助其提供的一些列API，可以帮助Agent快速理解画面结构
+
+合成画面的命令：
+ ```bash
+   tt interface fields bsft001_wf `
+     --42f "C:\Users\18526\Desktop\bsft001_wf.42f" `
+     --42s "C:\Users\18526\Desktop\bsft001_wf.42s" `
+     --page page_4 `
+     --limit 20 `
+     --brief
+ ```
+
 ## 通过数据字典理解字段含义
 
 在T100的数据库中，所有的表和字段都是流水号，无法直接理解其含义。我们需要借助数据字典来获取其真实的中文含义。T100中跟数据库相关的字段有很显而易见的特征，具体的编码规则请参考 [tt-erp-architecture/SKILL.md](../tt-erp-architecture/SKILL.md)。
@@ -57,8 +71,6 @@ tt dict r.t capp115_tmp --at <环境>@<企业>
 ```
 
 > Tips: 需要配置环境的命令都可以通过`--at-list`命令查看可以使用哪些环境
-
-## 获取和阅读程序画面
 
 ## 从系统分类码解读业务逻辑
 
