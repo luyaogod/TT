@@ -532,7 +532,7 @@ export function SettingsView() {
   // 分区变化 → 同步到 URL 片段(用 replace 而不是 push:否则浏览器后退会一格一格走遍所有分区)
   //
   // 首跑要**让一次**:本页是 store 的初始视图,于是它比 App 那条深链接解析**先挂载**,
-  // 而 React 的子 effect 先于父 effect 跑 —— 无条件写片段会把 `#record`/`#wstest`/
+  // 而 React 的子 effect 先于父 effect 跑 —— 无条件写片段会把 `#wslogs`/
   // `#settings/data-dict` 覆盖成 `#settings/sites`,深链接等于全废(实测三个都落回站点管理)。
   // 所以片段已经指着某个视图(含设置页的分区)时,这次一个字都不写;往后换分区照旧同步。
   const hashSyncedRef = useRef(false)

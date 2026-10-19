@@ -21,11 +21,11 @@
 
 | 目标 | Tab |
 |---|---|
-| 环境页 | 创建会话 / 接口日志 / 接口调试 |
+| 环境页 | 创建会话 / 接口日志 |
 | 会话页 | Debug |
 | 设置页 | 站点管理 / 数据字典 / DEBUG / 应用设置（`routing.ts` 的 `SETTINGS_SECTIONS`） |
 
-环境页的两个 Tab 是**已有画面原样搬进来的**：接口日志 = `WsLogView`、接口调试 = `WsTestView`。
+环境页的「接口日志」是**已有画面原样搬进来的**（`WsLogView`）。
 「创建会话」是**真动作**：填 ENT + 作业编号 → `POST /api/sessions/new` 建一条空闲会话 →
 等它登录完（loading→idle）→ 跳到它的 Debug 页。会话页只有 Debug 一屏
 （`DebugWorkbench.tsx`，从旧外壳原样拆出来），区别只是它不再自带左侧会话栏。
@@ -56,7 +56,7 @@ terminal（下方面板）、bug-play（调试面板）、list-tree（大纲，�
 ## 路由：哈希
 
 ```
-#env/<环境名>/<Tab>             环境页 create / wslogs / wstest
+#env/<环境名>/<Tab>             环境页 create / wslogs
 #session/<会话 ID>/<Tab>         会话页 debug
 #settings/<分区>
 ```
@@ -141,7 +141,7 @@ URL 停止不动同样是错的：点 Tab 切目标时地址栏不跟，刷新�
 |---|---|
 | 外壳与布局 | `App.tsx`、`main.tsx`、`Shell.tsx`、`Sidebar.tsx`、`EnvView.tsx`、`SessionView.tsx`、`DebugWorkbench.tsx`、`ErrorBoundary.tsx`、`StatusBar.tsx` |
 | 调试区 | `Toolbar.tsx`、`DebugHeader.tsx`、`SourceView.tsx` |
-| 视图 | `SettingsView.tsx`、`WsLogView.tsx`、`WsTestView.tsx` |
+| 视图 | `SettingsView.tsx`、`WsLogView.tsx` |
 | 面板 | `Panels.tsx`、`OutlinePanel.tsx`、`VarTreeUi.tsx` |
 | 编辑器 | `monacoSetup.ts`、`PayloadEditor.tsx` |
 | 4GL 语言工具 | `fglTokens.ts`、`fgloutline.ts`、`fglparse.ts`、`fglPath.ts`、`fglHover.tsx` |

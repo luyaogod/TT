@@ -73,9 +73,6 @@ export interface WSLogQuery {
   endTo?: string
 }
 
-export interface WSTestResult {
-  httpCode: number; durationSec: number; response: string; error?: string
-}
 
 // ---- 共享配置端点 /api/hosts(顶层,无前缀)的读写形状 ----
 // 环境清单只有一份数据源(config.json 的 hosts 节),设置页的各张卡片共用它;
@@ -482,8 +479,7 @@ export const api = {
     req<{ file: string; line: number }>(`${API_BASE}/sessions/${id}/locate`, { method: 'POST', body: JSON.stringify({ word }) }),
   // 行号校准:检测 fgldb(DVM)行号与磁盘源码的偏移(仅停站可用)
   calibrate: (id: string) => req<{ offset: number }>(`${API_BASE}/sessions/${id}/calibrate`, { method: 'POST' }),
-  wsTest: (mode: string, url: string, body: string, soap: boolean) =>
-    req<{ result: WSTestResult }>(`${API_BASE}/wstest`, { method: 'POST', body: JSON.stringify({ mode, url, body, soap }) }),
+
   // 条件用对象传递(参数变多后位置参数太容易错位);空值不发送。
   // 判空要**先 trim**：输入框里看着是空的（几个空格），不 trim 就会发一个 `service=+++`
   // 的空白 LIKE 条件 —— 后端匹配不到，用户得到空列表且界面上没有任何提示（实测单测抓到）。

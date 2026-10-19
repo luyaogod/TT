@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { api, API_BASE, type Event, type StopInfo, type Breakpoint, type Frame, type VarItem, type WSLogItem, type WSLogContent, type WSLogQuery, type WSTestResult, type InflightInfo, type SessionBrief } from './api'
+import { api, API_BASE, type Event, type StopInfo, type Breakpoint, type Frame, type VarItem, type WSLogItem, type WSLogContent, type WSLogQuery, type InflightInfo, type SessionBrief } from './api'
 import { THEME_KEY, applyDark, readStoredTheme, resolveDark, watchSystemTheme, type ThemeMode } from '../../shared/theme'
 // 统一消息出口(零依赖的那个文件,见 toastBus.ts 的说明:store 要能在裸 Node 里加载)
 import { toast } from './toastBus'
@@ -187,12 +187,7 @@ interface Store {
   theme: ThemeMode // 外观选择:暗色/亮色/跟随系统(html.dark 挂点,localStorage tt.theme 持久化)
   dark: boolean // 解析结果(system 时随系统变化);html.dark 与 Monaco 主题都按它渲染
   // 服务测试(复刻 awsq990 集成服务测试)
-  wsTestMode: string // 1/2 awsp900, 3 awsp920, 4 awsp940, 5 awsp930
-  wsTestUrl: string
-  wsTestBody: string
-  wsTestSoap: boolean
-  wsTestResult: WSTestResult | null
-  wsTestRunning: boolean
+
   wsLogs: WSLogItem[]
   wsLogsLoading: boolean
   wsLogsPage: number
@@ -244,8 +239,7 @@ interface Store {
   openSourceTab: (file: string, line?: number) => Promise<void>
   locate: (word: string) => Promise<{ file: string; line: number }>
   calibrate: () => Promise<void>
-  setWsTest: (p: { mode?: string; url?: string; body?: string; soap?: boolean; result?: WSTestResult | null }) => void
-  runWsTest: () => Promise<void>
+
   loadWsLogs: (q: WSLogQuery) => Promise<void>
   selectWsLog: (item: WSLogItem) => Promise<void>
   prefetchWsLog: (item: WSLogItem) => void
@@ -764,8 +758,7 @@ const wsLogContentCache = new Map<string, WSLogContent>()
 // 在途请求合并:同一 rowid 并发点击/预取只发一次(否则悬停+点击会打两次 SSH+sqlplus)
 const wsLogContentInflight = new Map<string, Promise<WSLogContent>>()
 
-// 服务测试的"请求代次":每发一次自增,回来时对不上就丢掉(慢请求不许覆盖新结果)。
-let wsTestGen = 0
+
 // 接口日志查询的"请求代次"。同上:翻页/改条件会叠出多个在途查询。
 let wsLogsGen = 0
 
@@ -839,8 +832,7 @@ export const useStore = create<Store>((set, get) => ({
   dark: resolveDark(initialTheme),
   wsLogs: [], wsLogsLoading: false, wsLogsPage: 1, wsLogsHasMore: false,
   wsLogSel: null, wsLogContent: null, wsLogTab: 'info', wsLogErr: '',
-  wsTestMode: '3', wsTestUrl: '', wsTestBody: '', wsTestSoap: false,
-  wsTestResult: null, wsTestRunning: false,
+
   sourceContent: '', sourcePath: '', sourceDVM: '', sourceMissing: false, currentLine: 0, loadingSource: false, lineOffset: 0,
   tabs: [], activeTab: 'debug', revealReq: null,
 
@@ -1207,48 +1199,6 @@ export const useStore = create<Store>((set, get) => ({
     } catch {
       // 无源码(只有 42m 等):页签保留并标记,内容区给提示
       set((s2) => ({ tabs: s2.tabs.map((t) => t.key === key ? { ...t, loading: false, missing: true } : t) }))
-    }
-  },
-
-  setWsTest: (p) => {
-    const patch: Partial<Store> = {}
-    if (p.mode !== undefined) {
-      patch.wsTestMode = p.mode
-      // 换了接口方式就把 SOAP 勾选**收回去**（只在 SOAP 那几种方式下它才有意义）。
-      // 不收的后果实测过:勾上 SOAP → 切回 RESTful（勾选框从界面消失）→ 执行，
-      // 请求仍被包成 SOAP 信封（Content-Type: text/xml + SOAPAction）打到 RESTful 端点，
-      // 而界面上一点痕迹都没有。状态里不许存在"看不见却生效"的开关。
-      if (!isSoapMode(p.mode)) patch.wsTestSoap = false
-    }
-    if (p.url !== undefined) patch.wsTestUrl = p.url
-    if (p.body !== undefined) patch.wsTestBody = p.body
-    if (p.soap !== undefined) patch.wsTestSoap = p.soap
-    if (p.result !== undefined) patch.wsTestResult = p.result
-    set(patch)
-  },
-
-  runWsTest: async () => {
-    const st = get()
-    // 并发闸:一次执行只允许在途一次。按钮上有 disabled,但它挡不住"同一个事件循环里
-    // 连点两次"(实测会真发两个请求),也挡不住以后新加的快捷键/自动触发。
-    if (st.wsTestRunning) return
-    // 请求代次:先发出去的那次回来时,若已经又发了一轮,就**不许**覆盖新结果
-    // （慢请求盖掉快请求的现场,用户看到的是一次并不存在的响应）。
-    const gen = ++wsTestGen
-    // 开跑就把上一次的响应清掉:失败时界面还挂着上一次的 HTTP 200 与旧报文,
-    // 看着像"这次也是成功的"(实测),而错误只在一条 8 秒后消失的 toast 里。
-    set({ wsTestRunning: true, wsTestResult: null })
-    try {
-      const { result } = await api.wsTest(st.wsTestMode, st.wsTestUrl, st.wsTestBody, st.wsTestSoap)
-      if (gen === wsTestGen) set({ wsTestResult: result ?? null })
-    } catch (e: any) {
-      // 走统一消息出口:原先这段错误内联在服务测试页的顶栏下面,一出现就把
-      // 请求/响应两个编辑区整体下推(见 WsTestView 原先那条 err 横幅)。
-      if (gen === wsTestGen) toast.error('服务测试失败', { description: e?.message || String(e) })
-    } finally {
-      // 只有"最新那一轮"才许把 running 清零:否则先回来的旧请求会把还在跑的新请求
-      // 标成"已完成",按钮随之解禁(实测)。
-      if (gen === wsTestGen) set({ wsTestRunning: false })
     }
   },
 

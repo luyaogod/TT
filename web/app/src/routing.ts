@@ -1,8 +1,7 @@
 // 工作站的哈希路由:左边是「环境 → 会话」两级目录,右边是所选目标的那一屏(带 Tab)。
 //
 // 片段形态:
-//   #env/<环境名>/<Tab>                环境页:create 创建会话 / wslogs 接口日志 /
-//                                      wstest 接口调试
+//   #env/<环境名>/<Tab>                环境页:create 创建会话 / wslogs 接口日志
 //   #session/<会话 ID>/<Tab>           会话页:debug 调试
 //   #settings/<分区>                   设置页的某个分区
 //
@@ -26,7 +25,7 @@ export const SETTINGS_SECTIONS: { key: SettingsSectionKey; label: string }[] = [
 export const DEFAULT_SETTINGS_SECTION: SettingsSectionKey = 'sites'
 
 /** 环境页的三个 Tab */
-export type EnvTab = 'create' | 'wslogs' | 'wstest'
+export type EnvTab = 'create' | 'wslogs'
 
 /** 会话页的 Tab（只剩调试） */
 export type SessionTab = 'debug'
@@ -36,7 +35,7 @@ export type SessionTab = 'debug'
  * 供接口日志/设置页那些"进来就重拉一次"的 effect 判断自己是不是当前那一屏。
  * 新增的 create 是**外壳的 Tab**,不是新功能页 —— 它只用于让旧的判断落空。
  */
-export type ViewKey = 'debug' | 'wslogs' | 'wstest' | 'settings' | 'create'
+export type ViewKey = 'debug' | 'wslogs' | 'settings' | 'create'
 
 /** 外壳当前该显示什么。`home` = 片段为空或认不出来,由 App 落到默认目标。 */
 export type Route =
@@ -50,7 +49,7 @@ export function isSettingsSection(v: string): v is SettingsSectionKey {
 }
 
 function isEnvTab(v: string): v is EnvTab {
-  return v === 'create' || v === 'wslogs' || v === 'wstest'
+  return v === 'create' || v === 'wslogs'
 }
 
 function isSessionTab(v: string): v is SessionTab {
