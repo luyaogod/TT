@@ -215,7 +215,6 @@ func TestHostsPut_Validation(t *testing.T) {
 		active string
 		want   string
 	}{
-		{"空列表", []any{}, "", "至少要配置一个 SSH 环境"},
 		{"缺名称", []any{map[string]any{"host": "h", "user": "u"}}, "", "缺少名称"},
 		{"重名", []any{
 			map[string]any{"name": "a", "host": "h", "user": "u"},
@@ -255,7 +254,7 @@ func TestHostsPut_RejectedWriteDoesNotTouchFile(t *testing.T) {
 	before, _ := os.ReadFile(path)
 
 	rec, _ := doJSON(t, s, http.MethodPut, "/api/hosts", map[string]any{
-		"hosts": map[string]any{"activeEnv": "", "sshs": []any{}},
+		"hosts": map[string]any{"activeEnv": "", "sshs": []any{map[string]any{"name": "a"}}},
 	})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("应当被拒, 得到 HTTP %d", rec.Code)
@@ -558,5 +557,29 @@ func TestDiscoverEnvsEndpoint(t *testing.T) {
 	}
 	if r, _ := out["reason"].(string); r == "" {
 		t.Error("应当给出 reason,否则用户看到空列表不知道是'没装'还是'读坏了'")
+	}
+}
+
+// 空清单是合法状态：首次运行没有环境，设置页也要能把最后一个环境删掉。
+func TestHostsPut_EmptyListAllowed(t *testing.T) {
+	s, path := newTestServer(t, seededConfig)
+	rec, _ := doJSON(t, s, http.MethodPut, "/api/hosts", map[string]any{
+		"hosts": map[string]any{"sshs": []any{}},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("空清单应允许: HTTP %d %s", rec.Code, rec.Body.String())
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root map[string]any
+	if err := json.Unmarshal(b, &root); err != nil {
+		t.Fatal(err)
+	}
+	hosts, _ := root["hosts"].(map[string]any)
+	sshs, _ := hosts["sshs"].([]any)
+	if len(sshs) != 0 {
+		t.Fatalf("sshs 应为空，实得 %v", sshs)
 	}
 }

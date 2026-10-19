@@ -896,9 +896,8 @@ func structToSection(v any) (map[string]any, error) {
 // validateHosts 校验环境清单。环境页保存前调用 —— 拦在这里，比让命令在几秒后
 // 拿着一个错端口去连要好得多。
 func validateHosts(h *config.Hosts) error {
-	if len(h.SSHs) == 0 {
-		return fmt.Errorf("至少要配置一个 SSH 环境")
-	}
+	// 允许空清单：设置页要能删到零个环境（首次运行本来就是空的），
+	// 命令侧仍由 config.LoadHosts 负责报「尚未配置环境」。
 	seen := map[string]bool{}
 	for i := range h.SSHs {
 		e := &h.SSHs[i]

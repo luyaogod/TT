@@ -498,7 +498,7 @@ export function SettingsView() {
       })
       setListen(c.listen || '')
       setLoadErr('')
-      cleanDirty(); setSaveState('idle')
+      cleanDirty()
     }).catch((e) => {
       // 读不到配置要**留在界面上**（loadErr），不能只发一条会自己消失的 toast：
       // 那会让人永远停在"加载配置中…"，看着像还在读，其实早就失败了（实测）。
@@ -514,23 +514,8 @@ export function SettingsView() {
   }, [])
 
   useEffect(() => { loadSettings() }, [loadSettings])
-  // 有未保存的修改时，刷新/关标签页要说一声（浏览器原生那一下）。
-  //
-  // 判据用渲染期现算的值（见 baselineRef 的说明），所以把它提到这里算一次、下面复用。
-  // 只在本页**可见**时才拦：本页是 keep-alive 常驻的，别的视图上刷新时弹出
-  // "设置页有未保存的修改"会让人莫名其妙。
   const anyDirty = dirtyRefAny()
   const view = useStore((s) => s.view)
-  const settingsVisible = view === 'settings'
-  useEffect(() => {
-    if (!settingsVisible || !anyDirty) return
-    const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      e.preventDefault()
-      e.returnValue = '' // 现代浏览器只认这一句（文案由浏览器自己给，不能自定义）
-    }
-    window.addEventListener('beforeunload', onBeforeUnload)
-    return () => window.removeEventListener('beforeunload', onBeforeUnload)
-  }, [settingsVisible, anyDirty])
 
   // 本页被 keep-alive 常驻挂载(切走只是 display:none),所以**不能轮询** ——
   // 改为"每次切回本页、且没有未保存修改时"回读一次,拿别处(命令行)改过的值。
@@ -602,7 +587,7 @@ export function SettingsView() {
     if (keys.includes('query')) body.query = { source: forms.dict.querySource }
     if (keys.includes('mirror')) body.mirror = { dir: forms.dict.mirrorDir.trim() }
     if (keys.includes('bdldoc')) body.bdldoc = { dir: forms.dict.bdldocDir.trim() }
-    setSaveState('saving')
+
     try {
       const next = await api.saveSettings(body)
       setCfg(next)
@@ -628,10 +613,10 @@ export function SettingsView() {
         baselineRef.current[k] = sent[k]
         dirtyRef.current[k] = sectionSnapOf(k, formsRef.current) !== sent[k]
       })
-      setSaveState('saved')
+
       void api.configStatus().then(setStatus).catch(() => {})
     } catch (ex: any) {
-      setSaveState('idle')
+
       toast.error('保存失败', { description: ex?.message || String(ex), duration: 0 })
     }
   }
@@ -998,12 +983,7 @@ export function SettingsView() {
     } finally { setCacheBusy(false) }
   }
 
-  // 「已保存」提示短暂停留后回到空闲
-  useEffect(() => {
-    if (saveState !== 'saved') return
-    const t = window.setTimeout(() => setSaveState('idle'), 2000)
-    return () => window.clearTimeout(t)
-  }, [saveState])
+
 
   // ---- 源码镜像 / 字典同步(动作) ----
   // 只在「数据字典」分区且正在跑的时候轮询:本页是常驻挂载的,无脑轮询会一直打后端。
@@ -1176,20 +1156,6 @@ export function SettingsView() {
             <h2 className="text-sm font-medium text-foreground">
               {SETTINGS_SECTIONS.find((s) => s.key === section)?.label}
             </h2>
-            {/* 这里原先挂了一个「从 config.json 重新读取」的刷新按钮,已去掉:
-                本页切走再切回来就会自动回读一次(见上面 view 的那个 effect),而按钮只在
-                没有未保存修改时才可点 —— 也就是说它唯一能覆盖的场景是"人一直停在本页、
-                同时在命令行改了配置",代价却是每个分区标题右侧都常驻一个用不上的图标。 */}
-            <span className="flex min-w-0 items-center gap-2">
-              {/* 这里原先还有一格 `err`(截断成一行、title 里挂全文的红色错误)。
-                  保存/读取的错误改走统一 toast 了 —— 那里能完整显示多行说明,
-                  也不再把这一行挤得忽宽忽窄(见 toast.tsx 的判据)。 */}
-              <span className={cn('text-[11px]',
-                saveState === 'saved' ? 'text-emerald-600 dark:text-emerald-400'
-                  : anyDirty ? 'text-amber-600 dark:text-amber-400' : '')}>
-                {saveState === 'saving' ? '保存中…' : saveState === 'saved' ? '已保存 ✓' : anyDirty ? '修改将自动保存…' : ''}
-              </span>
-            </span>
           </div>
 
           {/* ============ 站点管理(左右两栏:环境清单 | 连接表单) ============ */}
