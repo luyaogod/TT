@@ -17,6 +17,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -74,13 +75,11 @@ func newInstallSkillsCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "skills",
-		Short: "把 exe 同目录的 skills/ 复制到目标目录",
-		Long: `把与 tt 可执行文件同目录的 skills/ 复制过去，默认落到 <当前目录>/skills。
+		Short: "把 exe 同目录的 skills/ 合并到目标目录（默认 .agents/skills）",
+		Long: `把与 tt 可执行文件同目录的 skills/ 合并到目标目录，默认是 <当前目录>/.agents/skills。
 
-skills/ 是普通可编辑的 markdown 文件（不内嵌二进制），每个技能是一个带 SKILL.md 的目录。
-合并后这里同时装着六套技能：tt-debug（调试）、tt-dev-tzc（设计器代码包 .tzc）、
-tt-dev-tzs（设计器表单包 .tzs）、tt-dict（数据字典）、tt-drawio（原型图）与
-tt-erp-read（读 ERP 代码）。
+skills/ 是普通可编辑的 markdown 文件（不内嵌二进制），每个技能是一个带 SKILL.md 的目录；
+具体有几套技能由 exe 同目录的 skills/ 决定。
 
 要装到 agent 会去读的位置，用 --to auto 或点名一个 agent：
 
@@ -93,8 +92,9 @@ tt-erp-read（读 ERP 代码）。
 --to auto 的探测顺序：.agents/skills 优先（读它的 agent 最多），其次 .claude/skills、
 .github/skills、.cursor/skills；当前目录一个都没有就新建 .agents/skills。
 
-目标已存在同名技能目录时默认拒绝（列出冲突）；确认要刷新再加 --force
-（只删目标里名字来自源树的那些技能目录，不碰其它内容）。
+目标目录不存在就新建；已经存在就**追加**：同名的条目默认跳过（不覆盖目标里已有的技能，
+方便多个来源共用 .agents/skills），不冲突的技能照常加进去。要刷新同名条目（例如升级后
+把技能刷成与 tt 同版）再加 --force（只删目标里名字来自源树的那些条目，不碰其它内容）。
 
 安装前逐个校验技能：每个技能目录要有 SKILL.md，且里面 frontmatter 的 name 必须等于
 目录名、description 非空且 ≤1024 字符。不合规的技能，失败都落在我们看不到的地方（description 缺失时
@@ -117,7 +117,7 @@ tt-erp-read（读 ERP 代码）。
 			if terr != nil {
 				return terr
 			}
-			copied, err := installSkillsTree(src, dst, force)
+			copied, skipped, err := installSkillsTree(src, dst, force)
 			if err != nil {
 				return err
 			}
@@ -134,7 +134,7 @@ tt-erp-read（读 ERP 代码）。
 			}
 			if common.JSON {
 				return common.PrintJSON(map[string]any{"ok": true, "source": src, "target": dst,
-					"why": why, "files": copied})
+					"why": why, "files": copied, "skipped": skipped})
 			}
 			fmt.Printf("技能安装完成: %d 个文件\n  来源: %s\n  目标: %s\n", len(copied), src, dst)
 			if why != "" {
@@ -143,16 +143,16 @@ tt-erp-read（读 ERP 代码）。
 			for _, f := range copied {
 				fmt.Printf("    %s\n", f)
 			}
-			if to == "" && agent == "" {
-				// 默认那个位置与 exe 旁边同形，是给人读的；会去扫它的 agent 很少
-				fmt.Println("提示: 这个位置几乎没有 agent 会读；要让 agent 直接加载，用 --to auto")
+			if len(skipped) > 0 {
+				fmt.Printf("  跳过 %d 个已存在的条目（不覆盖；要刷新加 --force）: %s\n",
+					len(skipped), strings.Join(skipped, ", "))
 			}
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&to, "to", "", "目标目录；auto = 自动挑一个 agent 会读的位置（默认 <当前目录>/skills）")
+	cmd.Flags().StringVar(&to, "to", "", "目标目录；auto = 自动挑一个 agent 会读的位置（默认 <当前目录>/.agents/skills）")
 	cmd.Flags().StringVar(&agent, "agent", "", "按 agent 名落到它读的位置："+agentSkillNames())
-	cmd.Flags().BoolVar(&force, "force", false, "覆盖已存在的同名技能目录")
+	cmd.Flags().BoolVar(&force, "force", false, "刷新已存在的同名条目（默认跳过）")
 	return cmd
 }
 
@@ -247,7 +247,7 @@ func resolveSkillsTarget(to, agent string) (dst, why string, err error) {
 	if to == autoSkillsTarget {
 		return resolveAutoTarget(cwd)
 	}
-	return filepath.Join(cwd, skillsDirName), "", nil
+	return filepath.Join(cwd, ".agents", skillsDirName), "", nil
 }
 
 // resolveAutoTarget 挑一个落点：当前目录已经为某个 agent 初始化过就别另起一个，
@@ -448,76 +448,107 @@ func topLevelEntries(src string) ([]string, error) {
 	return out, nil
 }
 
-// installSkillsTree 把 src 这棵技能树复制进 dst（合并式），返回复制到的文件路径（相对 dst，/ 分隔）。
-// 已存在同名条目时：默认拒绝（列出冲突），--force 时只删该条目自己的那一层再复制。
-func installSkillsTree(src, dst string, force bool) ([]string, error) {
+// installSkillsTree 把 src 这棵技能树合并进 dst，返回 (copied, skipped, err)。
+//
+// 目标已存在同名条目时默认**跳过**（追加模式：不覆盖用户已有的技能，方便多个来源共用
+// .agents/skills）；force=true 时删掉该条目再复制（刷新成 exe 同版）。只动「名字来自源树」
+// 的顶层条目，目标里的其它内容一律保留。
+func installSkillsTree(src, dst string, force bool) (copied, skipped []string, err error) {
 	if _, err := listSkills(src); err != nil { // 只为校验；列名字用下面的 top
-		return nil, err
+		return nil, nil, err
 	}
-	// 顶层**全部**条目（不只技能目录）：根级文件（如 README.md）也是要复制的东西，
-	// 而 os.CopyFS 用 O_EXCL —— 撞上一样失败，只是错误杧得多。
 	top, err := topLevelEntries(src)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	absSrc, err := filepath.Abs(src)
 	if err != nil {
-		return nil, fmt.Errorf("解析源目录失败 %s: %w", src, err)
+		return nil, nil, fmt.Errorf("解析源目录失败 %s: %w", src, err)
 	}
 	absDst, err := filepath.Abs(dst)
 	if err != nil {
-		return nil, fmt.Errorf("解析目标目录失败 %s: %w", dst, err)
+		return nil, nil, fmt.Errorf("解析目标目录失败 %s: %w", dst, err)
 	}
 	if strings.EqualFold(absSrc, absDst) {
-		return nil, fmt.Errorf("目标目录与源目录相同: %s\nskills 已经在这里了；要装到别处请用 --to <dir>", absDst)
+		return nil, nil, fmt.Errorf("目标目录与源目录相同: %s\nskills 已经在这里了；要装到别处请用 --to <dir>", absDst)
+	}
+	if err := os.MkdirAll(absDst, 0o755); err != nil {
+		return nil, nil, fmt.Errorf("建目标目录失败 %s: %w", absDst, err)
 	}
 
-	var conflicts []string
 	for _, n := range top {
-		if _, lerr := os.Lstat(filepath.Join(absDst, n)); lerr == nil {
-			conflicts = append(conflicts, filepath.Join(dst, n))
-		}
-	}
-	if len(conflicts) > 0 {
-		if !force {
-			shown := conflicts
-			if len(shown) > 5 {
-				shown = shown[:5]
-			}
-			return nil, fmt.Errorf("目标已存在 %d 个同名条目，拒绝覆盖: %s\n确认要刷新请加 --force",
-				len(conflicts), strings.Join(shown, ", "))
-		}
-		// --force：只删「目标根目录下、名字来自源树」的那一层，绝不递归删别的东西
-		for _, n := range top {
-			p := filepath.Join(absDst, n)
-			if filepath.Dir(p) != absDst {
+		srcEntry := filepath.Join(absSrc, n)
+		dstEntry := filepath.Join(absDst, n)
+		if _, lerr := os.Lstat(dstEntry); lerr == nil {
+			if !force {
+				skipped = append(skipped, n)
 				continue
 			}
-			if err := os.RemoveAll(p); err != nil {
-				return nil, fmt.Errorf("删除旧条目失败 %s: %w", p, err)
+			if err := os.RemoveAll(dstEntry); err != nil {
+				return nil, nil, fmt.Errorf("删除旧条目失败 %s: %w", dstEntry, err)
 			}
+		} else if !os.IsNotExist(lerr) {
+			return nil, nil, fmt.Errorf("检查目标条目失败 %s: %w", dstEntry, lerr)
 		}
+		if err := copySkillEntry(srcEntry, dstEntry); err != nil {
+			return nil, nil, err
+		}
+		files, ferr := filesUnder(absDst, n)
+		if ferr != nil {
+			return nil, nil, ferr
+		}
+		copied = append(copied, files...)
 	}
+	sort.Strings(copied)
+	sort.Strings(skipped)
+	return copied, skipped, nil
+}
 
-	if err := os.MkdirAll(absDst, 0o755); err != nil {
-		return nil, fmt.Errorf("建目标目录失败 %s: %w", absDst, err)
+// copySkillEntry 复制源树的一个顶层条目（技能目录或根级文件）。
+func copySkillEntry(src, dst string) error {
+	st, err := os.Stat(src)
+	if err != nil {
+		return fmt.Errorf("读取源条目失败 %s: %w", src, err)
 	}
-	// os.CopyFS：纯 stdlib 复制（目标文件用 O_EXCL，所以冲突必须在上一步处理掉）
-	if err := os.CopyFS(absDst, os.DirFS(absSrc)); err != nil {
-		return nil, fmt.Errorf("复制 skills 失败: %w", err)
+	if st.IsDir() {
+		// os.CopyFS 建目录并逐文件复制；目标此时不存在（同名条目已在上层跳过/删掉）。
+		if err := os.CopyFS(dst, os.DirFS(src)); err != nil {
+			return fmt.Errorf("复制 %s 失败: %w", src, err)
+		}
+		return nil
 	}
-	var copied []string
-	if err := fs.WalkDir(os.DirFS(absDst), ".", func(p string, d fs.DirEntry, werr error) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("读取源文件失败 %s: %w", src, err)
+	}
+	defer in.Close()
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return fmt.Errorf("建目标目录失败 %s: %w", filepath.Dir(dst), err)
+	}
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, st.Mode().Perm())
+	if err != nil {
+		return fmt.Errorf("建目标文件失败 %s: %w", dst, err)
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return fmt.Errorf("复制 %s 失败: %w", src, err)
+	}
+	return out.Close()
+}
+
+// filesUnder 列出 root 下 entry 内的全部文件（相对 root，/ 分隔）。
+func filesUnder(root, entry string) ([]string, error) {
+	var out []string
+	if err := fs.WalkDir(os.DirFS(root), entry, func(p string, d fs.DirEntry, werr error) error {
 		if werr != nil || d.IsDir() {
 			return werr
 		}
-		copied = append(copied, p)
+		out = append(out, p)
 		return nil
 	}); err != nil {
 		return nil, fmt.Errorf("列复制结果失败: %w", err)
 	}
-	sort.Strings(copied)
-	return copied, nil
+	return out, nil
 }
 
 func isDir(p string) bool {

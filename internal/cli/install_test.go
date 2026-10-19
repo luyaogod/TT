@@ -71,7 +71,7 @@ func TestInstallSkillsTreeCopies(t *testing.T) {
 	mkSkills(t, src, "alpha", "beta")
 	dst := filepath.Join(t.TempDir(), "skills")
 
-	copied, err := installSkillsTree(src, dst, false)
+	copied, _, err := installSkillsTree(src, dst, false)
 	if err != nil {
 		t.Fatalf("installSkillsTree: %v", err)
 	}
@@ -86,26 +86,44 @@ func TestInstallSkillsTreeCopies(t *testing.T) {
 	}
 }
 
-// 目标已有同名技能目录时默认拒绝，--force 才覆盖。
-// 这条是"手滑把别人的技能目录冲掉"的唯一防线。
-func TestInstallSkillsTreeConflict(t *testing.T) {
+// 目标已有同名条目时默认跳过（追加模式），--force 才刷新。
+// 追加模式是为了让 .agents/skills 能与其它来源共存，不手滑冲掉别人的技能。
+func TestInstallSkillsTreeAppendsAndSkips(t *testing.T) {
 	src := t.TempDir()
-	mkSkills(t, src, "alpha")
+	mkSkills(t, src, "alpha", "beta")
 	dst := t.TempDir()
 	mkSkills(t, dst, "alpha")
-
-	if _, err := installSkillsTree(src, dst, false); err == nil {
-		t.Fatal("目标已存在同名技能目录时，不加 --force 应拒绝")
+	userAlpha := filepath.Join(dst, "alpha", "SKILL.md")
+	if err := os.WriteFile(userAlpha, []byte("用户改过的\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := installSkillsTree(src, dst, true); err != nil {
-		t.Fatalf("--force 应覆盖: %v", err)
+
+	copied, skipped, err := installSkillsTree(src, dst, false)
+	if err != nil {
+		t.Fatalf("追加安装不该报错: %v", err)
+	}
+	if len(skipped) != 1 || skipped[0] != "alpha" {
+		t.Errorf("skipped = %v, want [alpha]", skipped)
+	}
+	if len(copied) != 1 || copied[0] != "beta/SKILL.md" {
+		t.Errorf("copied = %v, want [beta/SKILL.md]", copied)
+	}
+	if b, _ := os.ReadFile(userAlpha); string(b) != "用户改过的\n" {
+		t.Errorf("默认安装覆盖了目标里已有的技能: %q", b)
+	}
+
+	if _, skipped, err = installSkillsTree(src, dst, true); err != nil {
+		t.Fatalf("--force 应刷新: %v", err)
+	}
+	if len(skipped) != 0 {
+		t.Errorf("--force 不该跳过，skipped = %v", skipped)
+	}
+	if b, _ := os.ReadFile(userAlpha); string(b) == "用户改过的\n" {
+		t.Error("--force 没有刷新同名技能")
 	}
 }
 
-// 再装一次必须还是好的：根级文件（README.md）也要算冲突。
-//
-// 为什么值得一条：os.CopyFS 用 O_EXCL，而 --force 从前只删「技能目录」那一层 ——
-// 于是第二次 --force 会撞在根级的 README.md 上，报一句 "The file exists"。
+// 再装一次必须还是好的：默认跳过已存在条目，--force 刷新；根级文件也要算。
 func TestInstallSkillsTreeForceIsIdempotent(t *testing.T) {
 	src := t.TempDir()
 	mkSkills(t, src, "alpha")
@@ -116,28 +134,33 @@ func TestInstallSkillsTreeForceIsIdempotent(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "skills")
 
 	for i := 1; i <= 2; i++ {
-		if _, err := installSkillsTree(src, dst, true); err != nil {
+		if _, skipped, err := installSkillsTree(src, dst, true); err != nil {
 			t.Fatalf("第 %d 次 --force 安装失败: %v", i, err)
+		} else if len(skipped) != 0 {
+			t.Fatalf("第 %d 次 --force 不该跳过: %v", i, skipped)
 		}
 	}
 	if _, err := os.Stat(filepath.Join(dst, "README.md")); err != nil {
 		t.Errorf("根级 README.md 没复制过去: %v", err)
 	}
 
-	// 不加 --force 的第二次必须被闸门拦住（而不是靠 O_EXCL 报一个裸 OS 错误），
-	// 且拒绝时不能动目标里的东西。
+	// 不加 --force 的第二次：跳过同名条目，不报错，也不动目标里的东西。
 	if err := os.WriteFile(filepath.Join(dst, "README.md"), []byte("用户改过的\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := installSkillsTree(src, dst, false); err == nil {
-		t.Error("目标已有同名条目时，不加 --force 应拒绝")
+	_, skipped, err := installSkillsTree(src, dst, false)
+	if err != nil {
+		t.Fatalf("追加安装不该报错: %v", err)
+	}
+	if len(skipped) != 2 {
+		t.Errorf("skipped = %v, want [README.md alpha]（两个同名条目都跳过）", skipped)
 	}
 	got, err := os.ReadFile(filepath.Join(dst, "README.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(got) != "用户改过的\n" {
-		t.Errorf("拒绝时不该动目标文件，实得 %q", got)
+		t.Errorf("跳过的条目不该被覆盖，实得 %q", got)
 	}
 }
 
@@ -149,7 +172,7 @@ func TestInstallSkillsTreeForceKeepsOthers(t *testing.T) {
 	mkSkills(t, dst, "alpha")
 	mkSkills(t, dst, "别人的技能")
 
-	if _, err := installSkillsTree(src, dst, true); err != nil {
+	if _, _, err := installSkillsTree(src, dst, true); err != nil {
 		t.Fatalf("--force: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dst, "别人的技能", "SKILL.md")); err != nil {
@@ -160,7 +183,7 @@ func TestInstallSkillsTreeForceKeepsOthers(t *testing.T) {
 func TestInstallSkillsTreeRejectsSameDir(t *testing.T) {
 	src := t.TempDir()
 	mkSkills(t, src, "alpha")
-	if _, err := installSkillsTree(src, src, true); err == nil {
+	if _, _, err := installSkillsTree(src, src, true); err == nil {
 		t.Fatal("目标与源相同应报错（而不是自我覆盖）")
 	}
 }
@@ -295,14 +318,14 @@ func TestResolveSkillsTargetByAgent(t *testing.T) {
 	if _, _, err := resolveSkillsTarget(".x", "cursor"); err == nil {
 		t.Error("--to 与 --agent 同时给应报错")
 	}
-	// 不给就是原来的默认：<当前目录>/skills
+	// 不给就是默认：<当前目录>/.agents/skills
 	dst, why, err := resolveSkillsTarget("", "")
 	if err != nil {
 		t.Fatalf("默认落点: %v", err)
 	}
 	cwd, _ := os.Getwd()
-	if dst != filepath.Join(cwd, skillsDirName) || why != "" {
-		t.Errorf("默认落点 = %q（why=%q）, want %q（无解释）", dst, why, filepath.Join(cwd, skillsDirName))
+	if want := filepath.Join(cwd, ".agents", skillsDirName); dst != want || why != "" {
+		t.Errorf("默认落点 = %q（why=%q）, want %q（无解释）", dst, why, want)
 	}
 }
 
