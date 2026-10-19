@@ -1,8 +1,7 @@
 # internal/form42f — `.42f` 表单文件解析（纯函数，零 IO）
 
 只做一件事：把编译后的 `.42f`（明文 XML）解析成**字段表** —— 每个字段的
-`colName` / `fieldId` / 控件类型 / 几何 / 必填等，供 `tt form` / `tt dict fieldtab` /
-`tt drawio` / `tt dev tzs` 共用。
+`colName` / `fieldId` / 控件类型 / 几何 / 必填等，供 `tt interface` / `tt drawio` / `tt dev tzs` 共用。
 
 ```go
 f, err := form42f.ParseForm42F("axmt500_wf", xmlText)
@@ -29,7 +28,7 @@ f.ByColName[form42f.ColName("sfajwf012")] // → fieldId 等
 ## 边界
 
 本包**不许** import 命令层或任何带 IO 的包（`internal/host` / `internal/cli/*`）——
-"取 `.42f` 的字节"是调用方的事（见 `internal/host/formsource.go`）。
+"取 `.42f` 的字节"是调用方的事（`tt interface` 读镜像/显式文件）。
 
 ## 页面布局（ParseLayout）
 
@@ -50,4 +49,4 @@ l.Fields      // 字段 → 页面 + 标签键
   这个 Label 不再配给更远的 `_desc` 字段（避免把主字段标签抢给说明字段）；
 - 页面外字段保留在 `l.Fields`，`PageID` 为空。
 
-`ParseForm42F` 的输出不变，`tt form show` 不因页面布局新增字段。
+`ParseForm42F` 的输出不变；界面合成走 `ParseLayout`，不改变字段表契约。

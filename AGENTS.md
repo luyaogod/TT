@@ -30,7 +30,6 @@ TT/
 │  │  ├─ interfacecmd/  tt interface 命令组（.42f + .42s → 页面/字段/中文标签）
 │  │  ├─ dict/          字典命令组（查询 / db sync / spill）
 │  │  ├─ session/        tt session 命令组（会话：建/列/看/改 ENT/结束/收掉/透传/起作业）
-│  │  └─ form/          tt form 命令组（.42f 字段表：ls / show / verify / fetch / cache）
 │  ├─ config/           统一配置层：位置解析、唯一写入口 Edit、原子写、打码、缓存清单
 │  │                    + 统一路径管理器 Locations（数据目录/缓存/服务状态/字典库/引擎 exe 落点）
 │  ├─ debug/            调试子系统：会话管理、断点存档、源码镜像 srccache、执行日志、企业快照

@@ -28,7 +28,7 @@ var scopes = map[string]Scope{
 	"debug sql":     EnvEntReq,
 	"debug db":      EnvEnt,
 	"debug ents":    EnvEnt,
-	// dict 的查询子命令（r.t/r.q/r.v/scc/desc/prog/msg/sysp/docp/fieldtab）要有企业才能解析账号
+	// dict 的查询子命令（r.t/r.q/r.v/scc/desc/prog/msg/sysp/docp）要有企业才能解析账号
 	"dict": EnvEnt,
 	// 但 dict 下的“连接/镜像/本地文件”这几支不要企业
 	"dict db":         Env,
@@ -47,9 +47,7 @@ var scopes = map[string]Scope{
 	"debug wslogs": Env,
 	"debug probe":  Env,
 	"session ls":   Env,
-	"form":         Env,
 	"interface":    Env,
-	"form cache":   None,
 	"env ents":     Env,
 
 	// ---- 会话寻址：<环境> 只用来收窄 ----

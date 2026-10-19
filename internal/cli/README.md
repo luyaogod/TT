@@ -13,31 +13,11 @@
 | `tt dict …` | [./dict](./dict/README.md) | 字典线 |
 | `tt drawio …` | [./drawio](./drawio/README.md) | 原型图线 |
 | `tt session …` | [./session](./session) | 会话：建 / 列 / 看 / 改 ENT / 结束本轮 / 收掉 / 透传 |
-| `tt form …` | [./form](./form/README.md) | 出厂表单线（`.42f` 字段表：`ls` / `show` / `verify` / `fetch` / `cache`） |
 | `tt interface …` | [./interfacecmd](./interfacecmd/README.md) | 前端画面线（`.42f` + `.42s` 合成页面/字段/中文标签） |
 | `tt env / config / cache / serve / install / version` | 本包 | 各组共用 |
 
 各能力组各自独立子包、**互不 import**；共享的 CLI 上下文在
 [./common](./common/README.md)（叶子包，所以不会与根命令成环）。旧的命令名仍作为别名被接受。
-
-`tt form` 的用法（细节见 [./form](./form/README.md)）：
-
-```
-tt form ls     --env <环境> --module <模块>                     列出该模块下的表单名
-tt form show   --env … --module … --form <表单名> [--json]      字段表：工号 colName / 表单内
-                                                                编号 fieldId / 控件 / 几何 / 必填
-tt form verify --env … --module … --form … --map <语料表.json>  与归档语料表逐条比 →
-                                                                打印「可比 N 条 / 一致 N 条」
-tt form fetch  --env … --module … [--force] [--json]            批量取进缓存：新取 / 命中缓存 /
-                                                                失败（逐条列名+原因）
-tt form cache  [--json]                                         缓存只读概览：多少张 / 多少字节 /
-                                                                最旧·最新（不删任何东西）
-```
-
-取件按需单取、**只读**（`--dir <本地目录>` 可离线；`fetch` 也只是 list + get，绝不写服务器）；
-`--json` 里 `show` 的键名冻结在 `tt-genero-formdef-contract.md` 的 C5.2，`fetch` / `cache`
-用的是各自新增的信封（`failures[]` / `forms,bytes,oldest,newest`）。缓存落 `<数据目录>/forms/`
-（`config.CacheSubdirs` 里已登记），清理走统一的 `tt cache clear`。
 
 ## 退出码：同一个数字在不同线上含义不同
 
@@ -56,15 +36,12 @@ tt drawio     0 成功 / 1 用法或运行失败 / 2 输入错（spec 不合法�
 
 tt interface  0 成功 / 1 表单或 42s 不合法 / 2 用法或同名歧义 / 4 精确页面/字段不存在
 
-tt form       0 一致 / 1 取件失败（FORM_UNKNOWN：取不到表单，或它不是合法 .42f）
-              2 用法错或无基线（缺 --env/--module/--form 或 --map；语料里没有那一节窗口）
-              / 6 与语料逐条比对不一致（体检不过）
 顶层          0 成功 / 1 用法错（未知命令、未知开关）
 ```
 
 **包装脚本要按子命令辨认，别只看码**：`3` 在 `.tzc` 线是"校验失败"、在字典线是"缺表"、
 在 drawio 线是"产物自查未通过"、在 `.tzs` 线根本不用；`4` 只在设计器两条线上有；
-`6` 在 `tt session` 是"环境体检不过"（权限不一致）、在 `tt form` 是"字段表与语料不一致"。
+`6` 在 `tt session` 是"环境体检不过"（权限不一致）。
 各线的细化含义在各自 README 里。
 
 ## 统一的错误出口
@@ -77,14 +54,6 @@ tt form       0 一致 / 1 取件失败（FORM_UNKNOWN：取不到表单，或�
   本身更难猜。
 - **`tt dev` 不经过这里**：它自己是一套完整的 CLI（自己的用法、退出码、失败形状），
   返回的错误标记为"已报告"。否则同一个失败会在 stdout 上出现两份信封。
-
-## 字典通道（`tt dict fieldtab`，缺省在线）
-
-`tt dict fieldtab` 的字典有**两条通道**，开关 `--source online|local`，**缺省 `online`**：
-在线 = 直查服务器字典表（只发 `select`），本地 = 本地 SQLite 镜像（只读）。
-**不静默降级**：在线没环境/连不上 ⇒ 报错并给出下一步（`--env <环境名>` 或 `--source local`），
-绝不偷用本地库；本地库不存在 ⇒ 报错并指向 `tt dict db sync --env <环境>`（契约 A15/A31）。
-用了哪条写在输出里：JSON 的 `dictSource`、人读的一行 `字典源: …`。细节见 [./dict](./dict/README.md)。
 
 ## 统一服务（`tt serve`）
 

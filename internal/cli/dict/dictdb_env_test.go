@@ -1,6 +1,7 @@
 package dict
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,8 @@ import (
 
 	"tt/internal/cli/common"
 	"tt/internal/config"
+
+	_ "modernc.org/sqlite"
 )
 
 // 每个环境必须落到自己的 .db；同步/查询都不该再碰共享的 erp_data.db。
@@ -142,5 +145,26 @@ func TestQuerySourceConfigLocalEnv(t *testing.T) {
 	defer closeQuerySource()
 	if srcTarget == nil || srcTarget.Path != want || srcTarget.Env != "主机109" {
 		t.Fatalf("target = %+v, want path=%s env=主机109", srcTarget, want)
+	}
+}
+
+// makeLocalDict 建一张最小可用的字典库，供本地源测试打开。
+func makeLocalDict(t *testing.T, path string) {
+	t.Helper()
+	conn, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("建本地字典库失败：%v", err)
+	}
+	defer conn.Close()
+	for _, stmt := range []string{
+		`CREATE TABLE dzeb_t (dzeb001 TEXT, dzeb002 TEXT, dzeb003 TEXT, dzeb004 TEXT,
+			dzeb005 TEXT, dzeb007 TEXT, dzeb008 TEXT, dzeb021 TEXT, dzeb024 TEXT)`,
+		`CREATE TABLE dzebl_t (dzebl001 TEXT, dzebl002 TEXT, dzebl003 TEXT)`,
+		`INSERT INTO dzeb_t (dzeb001, dzeb002, dzeb003, dzeb021)
+			VALUES ('demo_t', 'demo001', '演示栏位', '1')`,
+	} {
+		if _, err := conn.Exec(stmt); err != nil {
+			t.Fatalf("建本地字典库失败（%s）：%v", stmt, err)
+		}
 	}
 }

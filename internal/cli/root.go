@@ -30,7 +30,6 @@ import (
 	"tt/internal/cli/dict"
 	"tt/internal/cli/drawio"
 	"tt/internal/cli/file"
-	"tt/internal/cli/form"
 	"tt/internal/cli/interfacecmd"
 	"tt/internal/cli/session"
 	"tt/internal/output"
@@ -41,7 +40,7 @@ var rootCmd = &cobra.Command{
 	Use:   "tt",
 	Short: "TT 鼎捷T100开发CLI",
 	Long: `TT 是面向 T100 ERP 的命令行工具：把实施/开发日常要用的「查数据字典、连库看数、
-读服务器源码、调试作业、改设计器包、看表单、画原型图」收进同一个二进制、同一份
+读服务器源码、调试作业、改设计器包、看前端画面、画原型图」收进同一个二进制、同一份
 config.json、同一个本地 Web 服务（tt serve）。
 
 给人和 AI agent 共用：输出简体中文，数据类命令默认 JSON 信封；目标一律点名
@@ -56,7 +55,6 @@ config.json、同一个本地 Web 服务（tt serve）。
   tt dev tzc …   .tzc 代码包：export 渲染围栏工作区，apply 走三道闸门写回
   tt dev tzs …   .tzs 表单包：export 只读解压；读写表单走引擎的具名动词
                  （tt dev tzs <动词> --args '<JSON 对象>'），不是拼 XML
-  tt form …      出厂表单：列 / 看字段表 / 与语料核对 / 预热缓存
   tt interface … 前端画面：合成 .42f + .42s（页面 / 字段 / 中文标签）
   tt drawio …    原型图：用 T100 组件库生成 .drawio
   tt env / config / serve / install / update   环境、配置、本地服务、安装、自更新
@@ -66,13 +64,7 @@ file 没有 put/rm；调试重放与镜像打包在服务器上留下的临时�
 
 退出码按命令线各自定义（同一个数字在不同组含义不同，包装脚本按子命令辨认）。
 tt interface 的码表：
-  tt interface  0 成功 / 1 表单或 42s 不合法 / 2 用法或同名歧义 / 4 精确页面/字段不存在
-
-tt form 的码表：
-  tt form       0 一致 / 1 取件失败（FORM_UNKNOWN：取不到表单，或它不是合法 .42f）
-                2 用法错或无基线（缺 --env/--module/--form 或 --map；语料里没有那一节窗口）
-                / 6 与语料逐条比对不一致（体检不过）
-`,
+  tt interface  0 成功 / 1 表单或 42s 不合法 / 2 用法或同名歧义 / 4 精确页面/字段不存在`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }
@@ -121,7 +113,6 @@ func init() {
 	dev.Register(rootCmd)
 	dict.Register(rootCmd)
 	session.Register(rootCmd)
-	form.Register(rootCmd)
 	interfacecmd.Register(rootCmd)
 	drawio.Register(rootCmd)
 
