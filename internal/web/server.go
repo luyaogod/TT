@@ -152,6 +152,9 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/config/meta", s.hConfigMeta)
 	m.HandleFunc("GET /api/config/status", s.hConfigStatus)
 	m.HandleFunc("POST /api/cache/clear", s.hCacheClear)
+	// 原生“选择文件夹”对话框。浏览器拿不到本地绝对路径，只有服务端能弹系统对话框；
+	// 只允许本机请求（服务可能被配置成监听非回环地址）。
+	m.HandleFunc("POST /api/pickdir", s.hPickDir)
 	// 命令行安装(PATH):应用级动作,归统一层 —— 合并前它在 /dict/api/install 下,
 	// 于是共用的设置页要用它就得去调字典子系统的私有 API。
 	m.HandleFunc("GET /api/install", s.hInstallGet)

@@ -425,6 +425,12 @@ export const api = {
     req<{ removed: number; freed: number; cache: CacheStatus }>('/api/cache/clear', { method: 'POST' }),
   // 配置元信息:配置文件缺省落点、便携标记、schema 版本、支持的库类型…
   configMeta: () => req<ConfigMeta>('/api/config/meta'),
+  // 原生文件夹选择器：浏览器拿不到绝对路径，必须由本机服务端弹对话框。
+  // 取消时返回 {ok:true,canceled:true}（不是错误，不要 toast）。
+  pickDir: (initial: string, title = '选择文件夹') =>
+    req<{ ok: boolean; path?: string; canceled?: boolean }>('/api/pickdir', {
+      method: 'POST', body: JSON.stringify({ initial, title }),
+    }),
   // 命令行安装(PATH):应用级动作,统一层提供(合并前在字典子系统的私有 API 下)
   installStatus: () => req<InstallStatus>('/api/install'),
   installAdd: () => req<InstallStatus>('/api/install', { method: 'POST' }),

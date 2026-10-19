@@ -20,7 +20,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   AlertCircle, CheckCircle2, Copy, Download, Eye, EyeOff,
-  Monitor, Plus, RefreshCw, Search, Sun, Moon,
+  FolderOpen, Monitor, Plus, RefreshCw, Search, Sun, Moon,
   Terminal, Trash2, Zap,
 } from 'lucide-react'
 import {
@@ -414,6 +414,8 @@ export function SettingsView() {
   const [mirror, setMirror] = useState<MirrorResp | null>(null)
   const [sync, setSync] = useState<DBSyncResp | null>(null)
   const [opBusy, setOpBusy] = useState('')
+  // 正在弹原生文件夹选择器的环境名；弹窗期间只禁用该行的文件夹按钮。
+  const [picking, setPicking] = useState('')
 
   // 源码镜像 / 字典同步等长跑动作的结果,统一走 toast(见 toast.tsx 的判据):
   // 失败原来是一段内联在卡片里的红字 —— 它出现/消失会顶动卡片高度,
@@ -1040,6 +1042,22 @@ export function SettingsView() {
       run: () => void doMirror(true, env),
     })
   }
+  // 原生文件夹选择器（服务端弹 Windows 对话框）：浏览器拿不到绝对路径。
+  // 取消不报错；选中后写回该环境的 mirrorDir，走 hosts 的自动保存。
+  const pickMirrorDir = async (env: string, index: number, initial: string) => {
+    if (index < 0) return
+    setPicking(env)
+    try {
+      const r = await api.pickDir(initial, `选择环境「${env}」的镜像目录`)
+      if (r.canceled || !r.path) return
+      patchSsh(index, { mirrorDir: r.path })
+    } catch (ex: any) {
+      toast.error('选择文件夹失败', { description: ex?.message || String(ex) })
+    } finally {
+      setPicking('')
+    }
+  }
+
   const doMirror = async (full: boolean, env: string) => {
     setOpBusy('mirror')
     try {
@@ -1683,16 +1701,29 @@ export function SettingsView() {
                                 idle={e.ready ? '已有镜像' : '未拉取'}
                                 error={failed ? (mirror.job.error || mirror.job.message || '失败') : undefined} />
                             </TableCell>
-                            <TableCell className="px-2">
-                              <Input className="h-7 w-full text-xs font-mono"
-                                value={ssh?.mirrorDir || ''}
-                                placeholder={e.path || '留空 = 用全局根目录/<环境名>'}
-                                onChange={(ev) => {
-                                  if (sshIndex < 0) return
-                                  patchSsh(sshIndex, { mirrorDir: ev.target.value })
-                                }} />
-                              <div className="mt-1 truncate text-[10px] text-muted-foreground" title={e.path}>
-                                {e.path || '未设置镜像目录'}
+                            <TableCell className="px-1 py-1">
+                              {/* 输入框不画自己的边框，整个单元格就是输入区；hover/focus 时才浮出边界。
+                                  右侧文件夹按钮是原生选择器的入口 —— 浏览器拿不到绝对路径，只能让本机服务弹框。 */}
+                              <div className="group flex h-8 min-w-0 items-center rounded-ui border border-transparent transition-colors hover:border-border/70 focus-within:border-border focus-within:bg-background/30">
+                                <input
+                                  className="min-w-0 flex-1 bg-transparent px-2 font-mono text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70"
+                                  value={ssh?.mirrorDir || ''}
+                                  placeholder={e.path || '留空 = 用全局根目录/<环境名>'}
+                                  title={e.path || '未设置镜像目录'}
+                                  onChange={(ev) => {
+                                    if (sshIndex < 0) return
+                                    patchSsh(sshIndex, { mirrorDir: ev.target.value })
+                                  }} />
+                                <button
+                                  type="button"
+                                  className="mr-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
+                                  title="选择文件夹"
+                                  aria-label="选择文件夹"
+                                  disabled={sshIndex < 0 || picking === e.name}
+                                  onClick={() => void pickMirrorDir(
+                                    e.name, sshIndex, ssh?.mirrorDir || e.path || dict.mirrorDir)}>
+                                  <FolderOpen className="h-3.5 w-3.5" />
+                                </button>
                               </div>
                             </TableCell>
                             <TableCell className="px-2">
