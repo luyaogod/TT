@@ -45,15 +45,24 @@ var dbSyncCmd = &cobra.Command{
 		// 目标 SQLite：按环境分文件；-d/TDICT_DB 显式覆盖。
 		target := dictDBSyncTarget(envName)
 
-		fmt.Printf("正在从 ERP 拉取字典数据 (环境: %s) -> %s\n", envName, target)
+		jsonOut := common.IsJSON()
+		if !jsonOut {
+			fmt.Printf("正在从 ERP 拉取字典数据 (环境: %s) -> %s\n", envName, target)
+		}
 		st, err := dbsync.Run(context.Background(), *conn, target, tables, func(p dbsync.Progress) {
-			// 每张表完成时打印一行(开始回调 TableDur=0,跳过)
-			if p.Phase == "table" && p.TableDur > 0 {
+			// 每张表完成时打印一行(开始回调 TableDur=0,跳过)；JSON 模式不往 stdout 写进度。
+			if !jsonOut && p.Phase == "table" && p.TableDur > 0 {
 				fmt.Printf("  %-10s %8d 行 (%v)\n", p.Table, p.TableRows, p.TableDur.Round(time.Millisecond))
 			}
 		})
 		if err != nil {
 			return err
+		}
+		if jsonOut {
+			return common.PrintJSON(map[string]any{
+				"ok": true, "env": envName, "target": st.Target, "tables": st.Tables,
+				"rows": st.Rows, "backup": st.Backup, "warnings": st.Warnings,
+			})
 		}
 		for _, w := range st.Warnings {
 			fmt.Println(w)

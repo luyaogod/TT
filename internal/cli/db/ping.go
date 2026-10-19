@@ -54,7 +54,7 @@ func newPingCmd() *cobra.Command {
 			}
 			oneLine := strings.TrimSpace(strings.SplitN(ver, "\n", 2)[0])
 
-			if common.JSON {
+			if common.IsJSON() {
 				return common.PrintJSON(map[string]any{
 					"ok": true, "env": cfg.EnvName(), "ent": ent,
 					"account": cc.Account, "dialect": cc.Type, "target": cc.Address(),

@@ -28,9 +28,16 @@ type grepOptions struct {
 	include    []string
 }
 
+type grepMatch struct {
+	Path string `json:"path"`
+	Line int    `json:"line,omitempty"`
+	Text string `json:"text,omitempty"`
+}
+
 type grepFileResult struct {
 	idx     int
 	out     []byte
+	matches []grepMatch
 	matched bool
 	binary  bool
 	skipped bool
@@ -43,7 +50,7 @@ func newGrepCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "grep [-rinl] [-m N] [--include G] <模式> <路径...>",
 		Short: "在文件里找内容（RE2 语法；服务端零进程）",
-		Long: `在文件里按正则找内容。默认输出 "路径:内容"；-n 带行号。
+		Long: `在文件里按正则找内容。默认 JSON（matches[]）；--human 才是 "路径:内容" 文本。
 
   -r             递归目录
   -i             忽略大小写
@@ -94,6 +101,15 @@ func newGrepCmd() *cobra.Command {
 				return silentExit{code: 1}
 			}
 			results := grepAll(files, re, opt)
+			if wantJSON(cmd) {
+				matches := []grepMatch{}
+				for _, r := range results {
+					if r.err == nil && r.matched {
+						matches = append(matches, r.matches...)
+					}
+				}
+				return commonPrintJSON(map[string]any{"ok": true, "matches": matches, "count": len(matches)})
+			}
 			any := false
 			for _, r := range results {
 				if r.err != nil {
@@ -260,10 +276,12 @@ func grepOne(p string, re *regexp.Regexp, opt grepOptions) grepFileResult {
 		}
 		res.matched = true
 		if opt.listOnly {
+			res.matches = append(res.matches, grepMatch{Path: displayPath})
 			out.WriteString(displayPath)
 			out.WriteByte('\n')
 			break
 		}
+		res.matches = append(res.matches, grepMatch{Path: displayPath, Line: line, Text: text})
 		if opt.lineNumber {
 			out.WriteString(displayPath)
 			out.WriteByte(':')

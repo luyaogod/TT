@@ -53,7 +53,7 @@ func ProbeOnce(ent int) error {
 	if err != nil {
 		return output.Errorf("DB_FAILED", 4, "%v", err)
 	}
-	if common.JSON {
+	if common.IsJSON() {
 		return common.PrintJSON(rep)
 	}
 

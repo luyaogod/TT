@@ -83,6 +83,7 @@ func init() {
 	pf.StringVar(&common.ConfigPath, "config", "", "配置文件路径 (JSON;缺省取统一用户目录 "+common.ConfigHint()+")")
 	pf.BoolVar(&common.JSON, "json", false, "以 JSON 输出（--format json 的语法糖，也是默认）")
 	pf.BoolVar(&common.CSV, "csv", false, "以 CSV 输出（--format csv 的语法糖）")
+	pf.BoolVar(&common.Human, "human", false, "以人读格式输出（默认 JSON；等价 --format table）")
 	pf.StringVar(&common.Format, "format", "json",
 		"输出形态: json(默认,带环境信息的信封) | csv(带 # 环境头) | table(人读表格)")
 	pf.BoolVarP(&common.Verbose, "verbose", "v", false, "显示解析细节（如实际使用的数据源路径）")

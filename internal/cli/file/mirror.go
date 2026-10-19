@@ -124,7 +124,7 @@ func newMirrorDirCmd() *cobra.Command {
 		Example: `  tt file mirror dir
   tt file mirror dir D:\dev\erp-src`,
 		Args: cobra.MaximumNArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			cfgPath, err := common.ResolveConfig(false)
 			if err != nil {
 				return err
@@ -137,10 +137,16 @@ func newMirrorDirCmd() *cobra.Command {
 				if err := writeMirrorDir(cfgPath, abs); err != nil {
 					return err
 				}
+				if common.IsJSON() {
+					return common.PrintJSON(map[string]any{"ok": true, "dir": abs, "updated": true})
+				}
 				fmt.Printf("镜像根目录已设置: %s\n(镜像将保存在 %s\\<环境名>\\ 下；执行 tt file mirror pull --at <环境> 拉取)\n", abs, abs)
 				return nil
 			}
 			dir, ok := readMirrorDir(cfgPath)
+			if common.IsJSON() {
+				return common.PrintJSON(map[string]any{"ok": true, "dir": dir, "configured": ok})
+			}
 			if !ok {
 				fmt.Println("镜像根目录未设置。请执行: tt file mirror dir <目录>")
 				return nil
@@ -186,10 +192,21 @@ func newMirrorPullCmd(full *bool) *cobra.Command {
 			if *full {
 				mode = "全量"
 			}
-			fmt.Printf("正在拉取 %s 源码镜像（%s）: %s -> %s\n", e.Name, mode, e.Host, filepath.Join(dir, e.Name))
+			jsonOut := common.IsJSON()
+			if !jsonOut {
+				fmt.Printf("正在拉取 %s 源码镜像（%s）: %s -> %s\n", e.Name, mode, e.Host, filepath.Join(dir, e.Name))
+			}
 			st, err := host.MirrorPull(cmd.Context(), e, dir, *full)
 			if err != nil {
 				return outputErrConn(err)
+			}
+			if jsonOut {
+				return common.PrintJSON(map[string]any{
+					"ok": true, "env": e.Name, "dir": filepath.Join(dir, e.Name),
+					"files": st.Files, "bytes": st.Bytes, "pruned": st.Pruned,
+					"elapsed": st.Elapsed, "topDir": st.TopDir, "note": st.Note,
+					"full": st.Full,
+				})
 			}
 			if st.Note != "" {
 				fmt.Printf("%s\n", st.Note)
@@ -239,8 +256,13 @@ func newMirrorPathCmd() *cobra.Command {
 				return err
 			}
 			p := filepath.Join(dir, e.Name)
+			_, statErr := os.Stat(p)
+			exists := statErr == nil
+			if common.IsJSON() {
+				return common.PrintJSON(map[string]any{"ok": true, "env": e.Name, "path": p, "exists": exists})
+			}
 			fmt.Println(p)
-			if fi, err := os.Stat(p); err != nil || !fi.IsDir() {
+			if !exists {
 				fmt.Printf("(该环境尚未拉取；先执行 tt file mirror pull --at %s)\n", e.Name)
 			}
 			return nil

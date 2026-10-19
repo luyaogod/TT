@@ -8,15 +8,16 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"tt/internal/cli/common"
 	"tt/internal/host"
 )
 
 func newDuCmd() *cobra.Command {
-	var summary, human bool
+	var summary bool
 	c := &cobra.Command{
 		Use:   "du [-s] [--human] [<路径>]",
 		Short: "统计占用大小（按文件大小累计，1K 块）",
-		Long: `统计一个目录（默认 $TOP）占用的大小。默认逐目录打印；-s 只打印汇总。
+		Long: `统计一个目录（默认 $TOP）占用的大小。默认 JSON；--human 逐目录打印文本。
 
   -s        只输出汇总
   --human   人性化大小（-h 被 help 占用）
@@ -25,7 +26,7 @@ SFTP 拿不到磁盘块占用，所以这里按文件大小累计（与 du 的�
 		Example: `  tt file du -s --at 主机109 erp/apm/4gl
   tt file du --at 主机109 erp/apm`,
 		Args: cobra.MaximumNArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			arg := ""
 			if len(args) == 1 {
 				arg = args[0]
@@ -42,8 +43,31 @@ SFTP 拿不到磁盘块占用，所以这里按文件大小累计（与 du 的�
 			if err != nil {
 				return err
 			}
+			if wantJSON(cmd) {
+				type duEntry struct {
+					Path   string `json:"path"`
+					Bytes  int64  `json:"bytes"`
+					Blocks int64  `json:"blocks"`
+				}
+				entry := func(d string, n int64) duEntry {
+					return duEntry{Path: display(cur.top, d), Bytes: n, Blocks: (n + 1023) / 1024}
+				}
+				if summary {
+					return commonPrintJSON(map[string]any{"ok": true, "total": entry(p, sums[p])})
+				}
+				dirs := make([]string, 0, len(sums))
+				for d := range sums {
+					dirs = append(dirs, d)
+				}
+				sort.Strings(dirs)
+				out := make([]duEntry, 0, len(dirs))
+				for _, d := range dirs {
+					out = append(out, entry(d, sums[d]))
+				}
+				return commonPrintJSON(map[string]any{"ok": true, "dirs": out})
+			}
 			if summary {
-				printDu(sums[p], display(cur.top, p), human)
+				printDu(sums[p], display(cur.top, p), common.Human)
 				return nil
 			}
 			dirs := make([]string, 0, len(sums))
@@ -52,13 +76,12 @@ SFTP 拿不到磁盘块占用，所以这里按文件大小累计（与 du 的�
 			}
 			sort.Strings(dirs)
 			for _, d := range dirs {
-				printDu(sums[d], display(cur.top, d), human)
+				printDu(sums[d], display(cur.top, d), common.Human)
 			}
 			return nil
 		},
 	}
 	c.Flags().BoolVarP(&summary, "summarize", "s", false, "只输出汇总")
-	c.Flags().BoolVar(&human, "human", false, "人性化大小（-h 被 help 占用）")
 	return c
 }
 
@@ -67,12 +90,15 @@ SFTP 拿不到磁盘块占用，所以这里按文件大小累计（与 du 的�
 // 先按目录收集直属文件大小，再按深度从深到浅把子目录的和加到父目录
 // （并发的 BFS 拿不到后序遍历，这一步补上）。
 func duSums(root string) (map[string]int64, error) {
-	_, err := cur.fs.Lstat(root)
+	self, err := cur.fs.Lstat(root)
 	if err != nil {
 		if host.NotFound(err) {
 			return nil, notFoundErr(cur.top, root)
 		}
 		return nil, ioErr("%v", host.WrapPathErr(display(cur.top, root), err))
+	}
+	if !self.IsDir() {
+		return map[string]int64{root: self.Size}, nil
 	}
 	sums := map[string]int64{root: 0}
 	parent := map[string]string{}

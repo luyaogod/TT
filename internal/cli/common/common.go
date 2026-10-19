@@ -27,6 +27,8 @@ var (
 	CSV bool
 	// Format --format：输出形态 json(默认) | csv | table。--json/--csv 是它的语法糖。
 	Format string
+	// Human --human：人读表格/文本（数据类命令默认 JSON）。
+	Human bool
 	// Verbose -v：显示解析细节（如实际使用的数据源路径）
 	Verbose bool
 	// Env --env 指定的环境名；--conn 是其别名（合并前 tdict 的写法）
@@ -67,6 +69,8 @@ func WebFrontend() fs.FS {
 // --json / --csv 保留为语法糖：既有脚本与 skill 文档里的例子不改即可用。
 func OutputFormat() output.Format {
 	switch {
+	case Human:
+		return output.FormatTable
 	case JSON:
 		return output.FormatJSON
 	case CSV:
@@ -93,6 +97,9 @@ func CurrentMeta() output.Meta {
 	}
 	return MetaProvider()
 }
+
+// IsJSON 本次是否输出 JSON：数据类命令的默认形态（--human 才切文本）。
+func IsJSON() bool { return OutputFormat() == output.FormatJSON }
 
 // PrintJSON 以缩进 JSON 输出 v。查询命令请用 output.Emit —— 裸值没有地方放
 // "这次查的是哪个环境、哪个账号"。

@@ -147,16 +147,14 @@ func requireModuleForm(verb, module, form string) (string, string, error) {
 
 // wantJSON 判本次是不是要走 JSON。
 //
-// 为什么要自己判一刀（而不是直接用 common.OutputFormat）：本仓 `--format` 的**默认值**
-// 就是 json，于是"没给任何开关"与"显式 --format json"在 common 那个函数里长得一样。
-// 本组的默认是**给人读**（契约 C5 的命令面），所以只有显式给了才走 JSON：
+// 数据类命令默认 JSON；--human 或 --format table 才走人读形态。
+// 保留 CSV 判断：--csv 不是 JSON，走 CSV 分支。
 //
-//	--json            → JSON（语法糖）
-//	--format json     → JSON（显式）
-//	--csv / --format table → 人读
-//	什么都没给         → 人读
+//	--json / 默认       → JSON
+//	--human / --format table → 人读
+//	--csv               → CSV
 func wantJSON(cmd *cobra.Command) bool {
-	if common.JSON {
+	if common.IsJSON() {
 		return true
 	}
 	if common.CSV {

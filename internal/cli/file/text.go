@@ -101,30 +101,16 @@ func tailLines(ra io.ReaderAt, size int64, n int) ([]string, error) {
 	return lines, nil
 }
 
-// writeFileText 打印一个文件的行（head/tail 共用）。
-func writeTextLines(f *host.RemoteFile, useTail bool, n int) error {
+// readTextLines 取一个文件的前/后 n 行（head/tail 共用）。
+func readTextLines(f *host.RemoteFile, useTail bool, n int) ([]string, error) {
 	if useTail {
 		st, err := f.Stat()
 		if err != nil {
-			return err
+			return nil, err
 		}
-		lines, err := tailLines(f, st.Size, n)
-		if err != nil {
-			return err
-		}
-		for _, ln := range lines {
-			fmt.Fprintln(os.Stdout, ln)
-		}
-		return nil
+		return tailLines(f, st.Size, n)
 	}
-	lines, err := headLines(f, n)
-	if err != nil {
-		return err
-	}
-	for _, ln := range lines {
-		fmt.Fprintln(os.Stdout, ln)
-	}
-	return nil
+	return headLines(f, n)
 }
 
 // runText 执行 head/tail：多个文件时按 GNU 的 `==> 文件 <==` 分段。
@@ -140,8 +126,12 @@ func runText(cmd *cobra.Command, args []string, useTail bool, n int) error {
 		}
 		files = append(files, matches...)
 	}
-	multi := len(files) > 1
-	for i, arg := range files {
+	type lineFile struct {
+		Path  string   `json:"path"`
+		Lines []string `json:"lines"`
+	}
+	out := make([]lineFile, 0, len(files))
+	for _, arg := range files {
 		p, err := cur.argPath(arg)
 		if err != nil {
 			return err
@@ -164,16 +154,25 @@ func runText(cmd *cobra.Command, args []string, useTail bool, n int) error {
 		if err != nil {
 			return err
 		}
-		if multi {
+		lines, readErr := readTextLines(f, useTail, n)
+		f.Close()
+		if readErr != nil {
+			return ioErr("%v", host.WrapPathErr(display(cur.top, p), readErr))
+		}
+		out = append(out, lineFile{Path: display(cur.top, p), Lines: lines})
+	}
+	if wantJSON(cmd) {
+		return commonPrintJSON(map[string]any{"ok": true, "files": out})
+	}
+	for i, f := range out {
+		if len(out) > 1 {
 			if i > 0 {
 				fmt.Fprintln(os.Stdout)
 			}
-			fmt.Fprintf(os.Stdout, "==> %s <==\n", display(cur.top, p))
+			fmt.Fprintln(os.Stdout, "==> "+f.Path+" <==")
 		}
-		err = writeTextLines(f, useTail, n)
-		f.Close()
-		if err != nil {
-			return ioErr("%v", host.WrapPathErr(display(cur.top, p), err))
+		for _, ln := range f.Lines {
+			fmt.Fprintln(os.Stdout, ln)
 		}
 	}
 	return nil

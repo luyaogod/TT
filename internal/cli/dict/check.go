@@ -92,6 +92,9 @@ func runCheckList() error {
 	}
 	items := mergeCheckList(rows)
 	if len(items) == 0 {
+		if Format() != output.FormatTable {
+			return emit([]checkListItem{}, []string{"识别码", "客制", "说明", "型态", "错误讯息", "备注"}, nil)
+		}
 		fmt.Println(emptyHint("校验定义"))
 		return nil
 	}

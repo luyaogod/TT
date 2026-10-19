@@ -42,7 +42,7 @@ debug / query / mirror / bdldoc / sync / tdev 是各命令组自己的设置。
 		Short: "打印配置文件的解析结果",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if common.JSON {
+			if common.IsJSON() {
 				path, err := common.ResolveConfig(true)
 				if err != nil {
 					return err
@@ -99,7 +99,7 @@ debug / query / mirror / bdldoc / sync / tdev 是各命令组自己的设置。
 					shown = config.RedactValue(v)
 				}
 			}
-			if common.JSON {
+			if common.IsJSON() {
 				return common.PrintJSON(shown)
 			}
 			return printScalarOrJSON(cmd, shown)
@@ -134,6 +134,9 @@ debug / query / mirror / bdldoc / sync / tdev 是各命令组自己的设置。
 			if err != nil {
 				return err
 			}
+			if common.IsJSON() {
+				return common.PrintJSON(map[string]any{"ok": true, "key": keyPath, "value": value})
+			}
 			cmd.Printf("%s = %s\n", keyPath, compactJSON(value))
 			return nil
 		},
@@ -155,7 +158,7 @@ func newConfigValidateCmd() *cobra.Command {
 				return err
 			}
 			problems := validateConfig(path)
-			if common.JSON {
+			if common.IsJSON() {
 				return common.PrintJSON(map[string]any{
 					"config":   path,
 					"problems": problems,

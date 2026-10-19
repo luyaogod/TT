@@ -154,6 +154,19 @@ func newUpdateLogCmd() *cobra.Command {
 			}
 			dataDir := filepath.Dir(cfgPath)
 			st := update.LoadState(dataDir)
+			if common.IsJSON() {
+				var tailText string
+				if st != nil {
+					logPath := st.LogPath
+					if logPath == "" {
+						logPath = update.LogPath(dataDir)
+					}
+					if b, err := os.ReadFile(logPath); err == nil {
+						tailText = tailLines(string(b), tail)
+					}
+				}
+				return common.PrintJSON(map[string]any{"ok": true, "state": st, "log": tailText})
+			}
 			if st == nil {
 				fmt.Fprintln(cmd.OutOrStdout(), "还没有升级记录。")
 				return nil

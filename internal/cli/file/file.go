@@ -73,6 +73,8 @@ func Register(root *cobra.Command) {
   --at <环境> 点名目标（不猜环境）；tt file --at-list 可看取值。
   $TOP 来自登录探测（缓存 30 分钟，--refresh 强制重探）。
 
+数据默认 JSON；人读用 --human（等价 --format table）。
+
 退出码：0 成功 / 1 无匹配或无此文件 / 2 用法或越界 / 4 连接或传输失败 / 5 本地写失败`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
@@ -254,17 +256,8 @@ func display(top, p string) string {
 
 // ---- 输出与错误 ----
 
-// wantJSON 判断本次要不要 JSON：--json 明确给了，或 --format 被显式改成 json。
-// 本组默认是纯文本（Unix 习惯），不能因为根命令 --format 的默认值 json 就把 ls 变成 JSON。
-func wantJSON(cmd *cobra.Command) bool {
-	if common.JSON {
-		return true
-	}
-	if f := cmd.Flags().Lookup("format"); f != nil && f.Changed && common.OutputFormat() == output.FormatJSON {
-		return true
-	}
-	return false
-}
+// wantJSON 数据类命令默认 JSON；--human（或 --format table/csv）才走人读形态。
+func wantJSON(_ *cobra.Command) bool { return common.IsJSON() }
 
 func usageErr(format string, a ...any) *output.Error {
 	return output.Errorf(output.CodeUsage, 2, format, a...)

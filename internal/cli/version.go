@@ -96,12 +96,18 @@ func newVersionCmd() *cobra.Command {
 完全离线：它只读本地的构建信息与 <数据目录>/update/check.json 里上一次检查的
 结果（` + "`tt update check`" + ` 写的），不联网。`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cmd.Println("tt " + versionString())
-			// 两行离线提示（有才打）：上次 `tt update check` 的结论、技能树与二进制是否同版。
+			hints := []string{}
 			for _, msg := range []string{updateHint(), skillsHint()} {
 				if msg != "" {
-					cmd.Println(msg)
+					hints = append(hints, msg)
 				}
+			}
+			if common.IsJSON() {
+				return common.PrintJSON(map[string]any{"ok": true, "version": versionString(), "hints": hints})
+			}
+			cmd.Println("tt " + versionString())
+			for _, msg := range hints {
+				cmd.Println(msg)
 			}
 			return nil
 		},

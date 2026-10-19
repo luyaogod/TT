@@ -76,7 +76,7 @@ func runLib(out string, catalog bool) error {
 		written = append(written, p)
 	}
 
-	if common.JSON {
+	if common.IsJSON() {
 		return common.PrintJSON(map[string]any{"ok": true, "dir": dir, "files": written})
 	}
 

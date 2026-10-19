@@ -82,10 +82,16 @@ var bdldocDirCmd = &cobra.Command{
 			if err := setBdldocDir(abs); err != nil {
 				return err
 			}
-			fmt.Printf("BDL 文档目录已设置: %s\n", abs)
+			if common.IsJSON() {
+				return common.PrintJSON(map[string]any{"ok": true, "dir": abs, "updated": true})
+			}
+			fmt.Println("BDL 文档目录已设置: " + abs)
 			return nil
 		}
 		dir, ok := bdldocDir()
+		if common.IsJSON() {
+			return common.PrintJSON(map[string]any{"ok": true, "dir": dir, "configured": ok})
+		}
 		if !ok {
 			fmt.Println("BDL 文档目录未设置。请执行: tt dict bdldoc dir <目录>")
 			return nil

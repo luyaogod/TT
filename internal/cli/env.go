@@ -141,7 +141,7 @@ func runEnvList(cmd *cobra.Command) error {
 	}
 	h := root.Hosts
 
-	if common.JSON {
+	if common.IsJSON() {
 		return common.PrintJSON(map[string]any{
 			"config": path,
 			"sshs":   envViews(&h),
@@ -189,7 +189,7 @@ func runEnvShow(cmd *cobra.Command, name string) error {
 		return fmt.Errorf("没有名为 %q 的环境（用 tt env list 看全部）", name)
 	}
 
-	if common.JSON {
+	if common.IsJSON() {
 		v := envViews(&h)
 		for i := range v {
 			if v[i].Name == e.Name {

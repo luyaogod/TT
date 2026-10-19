@@ -192,7 +192,7 @@ func runEnvEnts(name string, refresh bool, onlyEnt int) error {
 		views = append(views, v)
 	}
 
-	if common.JSON {
+	if common.IsJSON() {
 		env := map[string]any{
 			"ok": failed == 0, "count": len(views), "failed": failed,
 			"source": map[bool]string{true: "live", false: "config"}[refresh],

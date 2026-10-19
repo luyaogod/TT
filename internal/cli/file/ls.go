@@ -7,12 +7,14 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"tt/internal/cli/common"
 	"tt/internal/host"
 	"tt/internal/output"
 )
 
 // ls 一条记录（--json 用）。
 type lsJSON struct {
+	OK      bool      `json:"ok"`
 	Path    string    `json:"path"`
 	Entries []lsEntry `json:"entries"`
 }
@@ -40,7 +42,7 @@ func entryType(e host.Entry) string {
 }
 
 func newLsCmd() *cobra.Command {
-	var long, all, human bool
+	var long, all bool
 	c := &cobra.Command{
 		Use:   "ls [-la] [--human] [<路径>]",
 		Short: "列出目录（默认 $TOP）",
@@ -87,7 +89,7 @@ func newLsCmd() *cobra.Command {
 				shown = append(shown, e)
 			}
 			if wantJSON(cmd) {
-				out := lsJSON{Path: display(cur.top, p), Entries: make([]lsEntry, 0, len(shown))}
+				out := lsJSON{OK: true, Path: display(cur.top, p), Entries: make([]lsEntry, 0, len(shown))}
 				for _, e := range shown {
 					out.Entries = append(out.Entries, lsEntry{
 						Name: e.Name, Type: entryType(e), Size: e.Size,
@@ -107,7 +109,7 @@ func newLsCmd() *cobra.Command {
 					continue
 				}
 				size := fmt.Sprintf("%d", e.Size)
-				if human {
+				if common.Human {
 					size = humanBytes(e.Size)
 				}
 				fmt.Fprintf(os.Stdout, "%s %8s %s  %s\n",
@@ -118,7 +120,6 @@ func newLsCmd() *cobra.Command {
 	}
 	c.Flags().BoolVarP(&long, "long", "l", false, "长格式（权限/大小/时间/名字）")
 	c.Flags().BoolVarP(&all, "all", "a", false, "含隐藏文件")
-	c.Flags().BoolVar(&human, "human", false, "大小人性化（配合 -l；-h 被 help 占用）")
 	return c
 }
 

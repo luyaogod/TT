@@ -133,7 +133,7 @@ skills/ 是普通可编辑的 markdown 文件（不内嵌二进制），每个�
 					_ = update.RecordSkillsTarget(filepath.Dir(cfgPath), dst, Version)
 				}
 			}
-			if common.JSON {
+			if common.IsJSON() {
 				return common.PrintJSON(map[string]any{"ok": true, "source": src, "target": dst,
 					"why": why, "files": copied, "skipped": skipped})
 			}
@@ -580,7 +580,7 @@ func newInstallPathCmd() *cobra.Command {
 				return err
 			}
 			if !st.Supported {
-				if common.JSON {
+				if common.IsJSON() {
 					return common.PrintJSON(st)
 				}
 				fmt.Printf("%s\n手动命令: %s\n", st.Note, st.Manual)
@@ -588,7 +588,7 @@ func newInstallPathCmd() *cobra.Command {
 			}
 
 			if dryRun {
-				if common.JSON {
+				if common.IsJSON() {
 					return common.PrintJSON(map[string]any{"ok": true, "dryRun": true, "exeDir": st.ExeDir,
 						"changed": changed, "old": st.UserPath, "new": next})
 				}
@@ -604,7 +604,7 @@ func newInstallPathCmd() *cobra.Command {
 			}
 
 			if !changed {
-				if common.JSON {
+				if common.IsJSON() {
 					return common.PrintJSON(map[string]any{"ok": true, "changed": false, "exeDir": st.ExeDir, "userPath": st.UserPath})
 				}
 				fmt.Printf("用户 PATH 里已经有 %s，无需改动\n", st.ExeDir)
@@ -613,7 +613,7 @@ func newInstallPathCmd() *cobra.Command {
 			if _, err := pathinstall.Add(); err != nil {
 				return err
 			}
-			if common.JSON {
+			if common.IsJSON() {
 				return common.PrintJSON(map[string]any{"ok": true, "changed": true, "exeDir": st.ExeDir, "userPath": next})
 			}
 			fmt.Printf("已把 %s 追加到用户 PATH（HKCU\\Environment\\Path，不需要管理员）\n", st.ExeDir)

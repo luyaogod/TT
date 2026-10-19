@@ -23,7 +23,7 @@ func newFindCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "find <路径...> [-name G] [-type f|d|l] [-maxdepth N]",
 		Short: "按名字/类型找文件（只读元数据，服务端零进程）",
-		Long: `遍历目录找文件，一行一个路径（相对 $TOP，可直接回喂给本组命令）。
+		Long: `遍历目录找文件。默认 JSON（数组）；--human 才一行一个路径（相对 $TOP，可直接回喂给本组命令）。
 
   -name G       基名匹配 G（支持 * ? 通配）
   -type f|d|l   只看普通文件 / 目录 / 符号链接

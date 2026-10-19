@@ -98,7 +98,7 @@ ENT 必填：企业编号决定用哪个账号连库与据点校验，不再沿�
 			if lerr != nil {
 				return lerr
 			}
-			var out []map[string]any
+			out := []map[string]any{}
 			var rows [][]string
 			wantEnv := strings.TrimSpace(lsEnv)
 			if wantEnv == "" {

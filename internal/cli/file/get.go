@@ -59,16 +59,15 @@ func newGetCmd() *cobra.Command {
 			defer f.Close()
 
 			if outPath == "-" {
-				n, truncated, err := host.CopyN(os.Stdout, f, limit)
+				_, truncated, err := host.CopyN(os.Stdout, f, limit)
 				if err != nil {
 					return ioErr("读取失败: %v", err)
 				}
 				if truncated {
 					return usageErr("超过 --max %d MB：输出已截断", maxMB)
 				}
-				if wantJSON(cmd) {
-					return commonPrintJSON(map[string]any{"ok": true, "path": display(cur.top, p), "bytes": n})
-				}
+				// -o - 是“把字节流交给调用方”（管道/重定向），不能再追加 JSON，
+				// 否则文件内容后面会多一段信封，二进制直接损坏。
 				return nil
 			}
 

@@ -47,10 +47,6 @@ func newComposeCmd() *cobra.Command {
 }
 
 func runCompose(specPath, out string) error {
-	if common.JSON && out == "" {
-		return fmt.Errorf("--json 要配合 -o：不带 -o 时输出就是 .drawio 本身，没有别的可报")
-	}
-
 	b, err := os.ReadFile(specPath)
 	if err != nil {
 		return inputErr("读不到规格文件 %q：%v", specPath, err)
@@ -96,7 +92,7 @@ func runCompose(specPath, out string) error {
 		return fmt.Errorf("写不了 %s: %w", target, err)
 	}
 
-	if common.JSON {
+	if common.IsJSON() {
 		return common.PrintJSON(map[string]any{
 			"ok": true, "out": target, "shapes": res.Count, "cells": res.Cells, "report": res.Report,
 		})

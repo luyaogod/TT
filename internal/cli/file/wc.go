@@ -24,11 +24,11 @@ func newWcCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "wc [-l] <文件...>",
 		Short: "统计行/词/字节",
-		Long:  `统计行数、词数、字节数（-l 只输出行数），格式与 Unix wc 一致。`,
+		Long:  `统计行数、词数、字节数（-l 只输出行数）。默认 JSON；--human 使用 Unix wc 文本格式。`,
 		Example: `  tt file wc --at 主机109 erp/apm/4gl/apm_apmt520.4gl
   tt file wc -l --at 主机109 erp/apm/4gl/*.4gl`,
 		Args: cobra.MinimumNArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			var files []string
 			for _, arg := range args {
 				matches, err := cur.expandArg(arg)
@@ -68,6 +68,23 @@ func newWcCmd() *cobra.Command {
 				total.lines += cnt.lines
 				total.words += cnt.words
 				total.bytes += cnt.bytes
+			}
+			type wcJSON struct {
+				Path  string `json:"path"`
+				Lines int64  `json:"lines"`
+				Words int64  `json:"words"`
+				Bytes int64  `json:"bytes"`
+			}
+			if wantJSON(cmd) {
+				out := make([]wcJSON, 0, len(counts))
+				for _, c := range counts {
+					out = append(out, wcJSON{Path: c.name, Lines: c.lines, Words: c.words, Bytes: c.bytes})
+				}
+				payload := map[string]any{"ok": true, "files": out}
+				if len(counts) > 1 {
+					payload["total"] = wcJSON{Path: "总计", Lines: total.lines, Words: total.words, Bytes: total.bytes}
+				}
+				return commonPrintJSON(payload)
 			}
 			for _, c := range counts {
 				printWc(c, onlyLines)
