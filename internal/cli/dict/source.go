@@ -277,7 +277,7 @@ func missingTableErr(subject string) error {
 // 远程源说明库的问题与回退方式。subject 如 "校验定义 (dzcd_t 等表)"。
 func missingHint(subject string) string {
 	if srcLocal {
-		return fmt.Sprintf("本地库尚未包含%s数据。二选一:\n  tt dict db sync                  # 从 ERP 全量刷新(原库自动备份为 .bak)\n  tt dict <命令> --env <环境名>       # 免写盘,直接查远程\n看各数据族缺什么: tt dict db status", subject)
+		return fmt.Sprintf("本地库尚未包含%s数据。二选一:\n  tt dict db sync --env <环境>   # 从该环境 ERP 全量刷新(原库自动备份为 .bak)\n  tt dict <命令> --env <环境名>       # 免写盘,直接查远程\n看各数据族缺什么: tt dict db status", subject)
 	}
 	return fmt.Sprintf("远程库缺少%s相关字典表(该环境数据库未同步或账号权限不足);可用 --env local:<环境> 切回该环境的本地库", subject)
 }

@@ -1222,7 +1222,7 @@ func (s *Server) hSessionCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	env := strings.TrimSpace(req.Env)
 	if env == "" {
-		fail(w, 400, fmt.Errorf("需要 env：新会话落在哪个环境（tt env ls 可看全部）"))
+		fail(w, 400, fmt.Errorf("需要 env：新会话落在哪个环境（tt env list 可看全部）"))
 		return
 	}
 
@@ -2411,8 +2411,8 @@ func (s *Server) hDBSQL(w http.ResponseWriter, r *http.Request) {
 	if req.Ent <= 0 {
 		writeJSON(w, 400, failureEnvelope{
 			OK: false, Code: output.CodeUsage,
-			Error: "ent 必填(要查哪个企业编号):tt debug sql --ent <企业编号> " +
-				"（不给 --ent 时，CLI 会用这条会话当前生效的企业编号替你填）",
+			Error: "ent 必填(要查哪个企业编号):tt db sql --at <环境>@<企业编号> " +
+				"（旧 tt debug sql 才会从会话补；新命令请显式点名）",
 		})
 		return
 	}

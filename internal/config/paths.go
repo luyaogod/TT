@@ -163,7 +163,7 @@ func ResolvePath(flagPath string, allowMissing bool) (string, error) {
 	}
 
 	return "", fmt.Errorf(
-		"配置文件未找到。\n\n尝试了以下路径:\n%s\n\n缺省位置: %s\n设置 TT_CONFIG 环境变量或使用 --config 指定正确路径:\n  setx TT_CONFIG \"D:\\path\\to\\config.json\"\n  tt --config \"D:\\path\\to\\config.json\" debug status",
+		"配置文件未找到。\n\n尝试了以下路径:\n%s\n\n缺省位置: %s\n设置 TT_CONFIG 环境变量或使用 --config 指定正确路径:\n  setx TT_CONFIG \"D:\\path\\to\\config.json\"\n  tt --config \"D:\\path\\to\\config.json\" config path",
 		FormatTriedPaths(tried), DefaultConfigPath(),
 	)
 }

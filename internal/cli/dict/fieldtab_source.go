@@ -8,9 +8,9 @@ package dict
 //  2. **不静默降级**（契约 A15：拿不准不猜）：`--source online` 而连不上/没环境 ⇒
 //     明确报错 + 可执行的下一步，**绝不**开本地库假装在线成功；
 //  3. **本地库不存在是确定缺失**（契约 A31 的 missing），不是"查不了"（unknown）——
-//     两者后续动作不同：前者去 `tt dict sync`，后者去查权限/网络；
+//     两者后续动作不同：前者去 `tt dict db sync --env <环境>`，后者去查权限/网络；
 //  4. **只读**：在线只发 SELECT（live 包，见 internal/dict/live），本地只开读；
-//     本文件不写任何库、不下任何同步指令（`tt dict sync` 是另一条命令）。
+//     本文件不写任何库、不下任何同步指令（`tt dict db sync --env <环境>` 是另一条命令）。
 //
 // 两条通道都**复用既有实现**（`openRemoteSource` / `openLocalSource`，见 source.go），
 // 不另起一套连库/解析代码；本文件只做"选哪条 + 选不到怎么说话"。

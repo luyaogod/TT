@@ -38,7 +38,7 @@ func openChecked(p string) (*host.RemoteFile, []byte, error) {
 	if !allowBinary && isBinary(prefix) {
 		f.Close()
 		return nil, nil, usageErr("二进制文件（含 NUL 字节），不往终端喷：%s", display(cur.top, p)).
-			WithHint("要落盘用 tt file get -o；确要输出加 --binary")
+			WithHint("要落盘用 tt file get <路径> -o <本地文件>；确要输出原始字节加 --human --binary（或 tt file get <路径> -o -）")
 	}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		f.Close()

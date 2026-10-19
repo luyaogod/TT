@@ -99,7 +99,7 @@ func mirrorEnvName(args []string) (string, error) {
 		name = arg
 	}
 	if name == "" {
-		return "", usageErr("需要点名环境：tt file mirror pull|path --at <环境>（tt env list 看全部）")
+		return "", usageErr("需要点名环境：tt file mirror pull --at <环境>（或 tt file mirror path --at <环境>；可用环境见 tt env list）")
 	}
 	return name, nil
 }

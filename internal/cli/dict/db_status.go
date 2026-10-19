@@ -127,7 +127,7 @@ func inspectOne(path, env string) error {
 			fmt.Printf("建立: tt dict db sync --env %s\n", env)
 		} else {
 			fmt.Printf("本地库不存在: %s\n", st.Path)
-			fmt.Println("建立: tt dict db sync -d <路径>")
+			fmt.Println("建立: tt dict db sync --env <环境> -d <路径>")
 		}
 		return nil
 	}

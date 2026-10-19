@@ -112,7 +112,7 @@ skills/ 是普通可编辑的 markdown 文件（不内嵌二进制），每个�
 			}
 			if !isDir(src) {
 				return fmt.Errorf("找不到 skills 目录: %s\n\nskills/ 与 tt.exe 同目录（免安装包里自带）；"+
-					"从源码运行时请先构建到仓库根目录再执行", src)
+					"从源码运行时先执行 make build（产物 tt.exe 与 skills/ 同目录）", src)
 			}
 			dst, why, terr := resolveSkillsTarget(to, agent)
 			if terr != nil {

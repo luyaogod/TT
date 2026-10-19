@@ -57,10 +57,10 @@
   | 通道 | 读哪儿 | 不可用时 |
   |---|---|---|
   | `online`（**缺省**） | 直查服务器字典表，只发 `select`；环境取 `--env/--conn`，其次配置 `query.source` | **报错 + 下一步**（`--env <环境名>` 或 `--source local`），**绝不**偷用本地库（A15） |
-  | `local` | 本地 SQLite 镜像（`-d/--db` / `TDICT_DB` / 数据目录下的 `erp_data.db`），只读 | 报错并指向 `tt dict sync`；按 **A31 归 `missing`（确定缺失）**，不是 `unknown` |
+  | `local` | 本地 SQLite 镜像（`-d/--db` / `TDICT_DB` / 数据目录下的 `dict/<环境>.db`），只读 | 报错并指向 `tt dict db sync --env <环境>`；按 **A31 归 `missing`（确定缺失）**，不是 `unknown` |
   | `none`（`--no-dict`） | 不接字典，整列 `unresolved/no-dict` | 不算错误（显式要求）；优先于 `--source` |
 
-  两条通道**都只读**：查询路径里不写任何东西（同步是另一条命令 `tt dict sync`）。
+  两条通道**都只读**：查询路径里不写任何东西（同步是另一条命令 `tt dict db sync --env <环境>`）。
   "这一轮用的是哪种"必须写在脸上：JSON 看 `dictSource`，人读输出多一行 `字典源: …`。
 * **不猜**（契约 A15/A18/A31）：字典查不到 → `label` 为**空串**、`labelState=unresolved`，
   并在 `labelReason` 写清是哪一种"查不到"。**绝不**回落成 `colName` / `cmt_*` / `lbl_*`

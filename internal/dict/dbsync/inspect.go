@@ -43,7 +43,7 @@ func (s *LocalStatus) Summary(keys ...string) string {
 		}
 	}
 	if !s.Exists {
-		return "本地库不存在(先 tt dict db sync)"
+		return "本地库不存在(先 tt dict db sync --env <环境>)"
 	}
 	parts := make([]string, 0, len(fams))
 	all := true
@@ -61,7 +61,7 @@ func (s *LocalStatus) Summary(keys ...string) string {
 		}
 		return strings.Join(parts, " · ")
 	}
-	return strings.Join(parts, " · ") + " → 补齐: tt dict db sync"
+	return strings.Join(parts, " · ") + " → 补齐: tt dict db sync --env <环境>"
 }
 
 // InspectLocal 只读检查本地库对各数据族的覆盖情况(表是否存在 + 行数)。

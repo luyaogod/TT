@@ -613,8 +613,8 @@ func requireExplicitEnt(cfg *Config, prev *Session) error {
 		}
 	}
 	f := target.NewFailure(target.CodeUsage,
-		"必须显式指定企业编号(ENT)：tt debug start <作业> --ent <企业编号>，"+
-			"或先 tt debug topent <编号> 再启动。"+
+		"必须显式指定企业编号(ENT)：tt debug start <作业> --ent <企业编号>。"+
+			"若这条环境已有空闲会话，也可先 tt debug topent <编号> 再启动。"+
 			"**不再**沿用登录 shell 的 $TOPENT —— 那会让「忘了点名」与「点错了」长得一样，"+
 			"而 ENT 决定用哪个账号连库、以及据点校验过不过。")
 	// 老写法（不带 --ent）也要报这一条：它正是这次要禁掉的静默行为，不是"新场景"。

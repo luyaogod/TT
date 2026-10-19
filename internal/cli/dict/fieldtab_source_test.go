@@ -9,7 +9,7 @@ package dict
 //  2. `--source local` / `--source online` 各自走对应通道（反过来也验）；
 //  3. 在线不可用（没环境 / 连不上）⇒ 明确报错、指引里含 `--source local`，
 //     且**本地通道调用 0 次**（契约 A15：拿不准不猜，不许拿本地库假装在线成功）；
-//  4. 本地库不存在 ⇒ 报错、指引含 `tt dict sync`，并按 A31 归 **missing（确定缺失）**，
+//  4. 本地库不存在 ⇒ 报错、指引含 `tt dict db sync`，并按 A31 归 **missing（确定缺失）**，
 //     不是 unknown；
 //  5. 输出里看得见模式：JSON 的新键 + 人读的一行；
 //  6. 既有契约不破：`fieldtab` 原有的键一个不少；
@@ -175,7 +175,7 @@ func TestFieldtabOnlineUnavailableIsErrorNotFallback(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 4. 本地库不存在：报错 + 指引 tt dict sync（A31 的 missing，不是 unknown）
+// 4. 本地库不存在：报错 + 指引 tt dict db sync（A31 的 missing，不是 unknown）
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestFieldtabLocalMissingSaysHowToSync(t *testing.T) {

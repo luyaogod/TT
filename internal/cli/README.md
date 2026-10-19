@@ -80,7 +80,7 @@ tt form       0 一致 / 1 取件失败（FORM_UNKNOWN：取不到表单，或�
 `tt dict fieldtab` 的字典有**两条通道**，开关 `--source online|local`，**缺省 `online`**：
 在线 = 直查服务器字典表（只发 `select`），本地 = 本地 SQLite 镜像（只读）。
 **不静默降级**：在线没环境/连不上 ⇒ 报错并给出下一步（`--env <环境名>` 或 `--source local`），
-绝不偷用本地库；本地库不存在 ⇒ 报错并指向 `tt dict sync`（契约 A15/A31）。
+绝不偷用本地库；本地库不存在 ⇒ 报错并指向 `tt dict db sync --env <环境>`（契约 A15/A31）。
 用了哪条写在输出里：JSON 的 `dictSource`、人读的一行 `字典源: …`。细节见 [./dict](./dict/README.md)。
 
 ## 统一服务（`tt serve`）

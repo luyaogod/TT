@@ -48,7 +48,7 @@ func newCatCmd() *cobra.Command {
 					if isBinary(data) || !utf8.Valid(data) {
 						if !allowBinary {
 							return usageErr("二进制文件（含 NUL 或非 UTF-8），不往终端喷：%s", f.Path).
-								WithHint("要落盘用 tt file get -o；确要输出加 --binary")
+								WithHint("要落盘用 tt file get <路径> -o <本地文件>；确要输出原始字节加 --human --binary（或 tt file get <路径> -o -）")
 						}
 						f.Content = base64.StdEncoding.EncodeToString(data)
 						f.Encoding = "base64"
@@ -96,7 +96,8 @@ func readWhole(arg string) ([]byte, string, error) {
 		return nil, "", ioErr("%v", host.WrapPathErr(display(cur.top, p), err))
 	}
 	if self.IsDir() {
-		return nil, "", usageErr("cat 不支持目录：%s", display(cur.top, p))
+		return nil, "", usageErr("cat 不支持目录：%s", display(cur.top, p)).
+			WithHint("用 tt file ls <目录> 看有哪些文件；逐一下载用 tt file get <路径> -o <本地文件>")
 	}
 	f, _, err := openChecked(p)
 	if err != nil {

@@ -45,7 +45,7 @@ var debugEntsCmd = &cobra.Command{
   tt debug ents --cached        只用快照,完全不连网
   tt debug ents --env 示例测试区  问指定环境,而不是当前环境
 
-agent 用法:先 --json 取 ents[].account,再用 tt debug sql --ent <N> "..." 查数据。
+agent 用法:先 --json 取 ents[].account,再用 tt db sql --at <环境>@<N> "..." 查数据。
 查不到数据时**先核对 current 那一段**:企业编号不对会连到另一个 schema 拿到 0 行,
 那看起来和"数据不存在"一模一样。`,
 	Args: cobra.NoArgs,

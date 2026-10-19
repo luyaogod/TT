@@ -100,7 +100,7 @@ var newClient = func() (*debugclient.Client, error) {
 // resolve 把 --session 的取值解析成一条会话。
 func resolve(cl *debugclient.Client, want string) (debugclient.Brief, error) {
 	if strings.TrimSpace(want) == "" {
-		return debugclient.Brief{}, failUsage("需要 --session（别名 / 环境#序号 / 句柄）")
+		return debugclient.Brief{}, failUsage("需要 --session（别名 / 环境#序号 / 句柄）；先 tt session ls 看现有会话")
 	}
 	return cl.Resolve(want)
 }

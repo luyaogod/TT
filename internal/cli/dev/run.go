@@ -84,12 +84,12 @@ func devFormat(v string) (string, error) {
 	case "csv":
 		return "", devFormatErr("csv")
 	default:
-		return "", fmt.Errorf("--format 不认识 %q：可用 json / csv / table（`tt dev` 这条线只支持 json 与 table）", v)
+		return "", fmt.Errorf("--format 不认识 %q：可用 json / table（`tt dev` 这条线不支持 csv）", v)
 	}
 }
 
 func devFormatErr(v string) error {
-	return fmt.Errorf("`tt dev` 这条线没有 %s 输出：要机器可读加 --json，要看人读文本去掉这个开关", strings.ToUpper(v))
+	return fmt.Errorf("`tt dev` 这条线没有 %s 输出：要机器可读用 --format json（或 --json），要看人读文本用 --format table", strings.ToUpper(v))
 }
 
 // exitCode 是带退出码的错误，由根命令的 exitCodeOf 解出。

@@ -69,7 +69,7 @@ func newEnvCmd() *cobra.Command {
 Web 端在会话面板里选环境(那个选择是运行时的,同样不写配置文件)。`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("`tt env use` 已移除:默认环境不再存在,请用 --env %s 点名(见 tt env use --help)", args[0])
+			return fmt.Errorf("`tt env use` 已移除:默认环境不再存在,请用 --env %s 点名(tt env list 看全部)", args[0])
 		},
 	})
 
@@ -84,7 +84,7 @@ Web 端在会话面板里选环境(那个选择是运行时的,同样不写配�
 所以 ENT 改为**每次显式给**:
 
   tt debug start <作业> --env <环境名> --ent <企业编号>
-  tt debug sql "<SQL>" --ent <企业编号>
+  tt db sql --at <环境>@<企业> "<SQL>"
   tt dict <命令> --env <环境名> --ent <企业编号>
 
 不给 ENT 时:调试沿用登录 shell 里已有的 TOPENT(不覆盖),字典查询用账号列表首项

@@ -45,7 +45,7 @@ func newGetCmd() *cobra.Command {
 				return ioErr("%v", host.WrapPathErr(display(cur.top, p), err))
 			}
 			if self.IsDir() {
-				return usageErr("get 不支持目录：%s（先用 find 收窄）", display(cur.top, p))
+				return usageErr("get 不支持目录：%s（先用 tt file find <目录> 收窄，或 tt file ls <目录> 看文件）", display(cur.top, p))
 			}
 			limit := maxMB << 20
 			if maxMB > 0 && self.Size > limit {

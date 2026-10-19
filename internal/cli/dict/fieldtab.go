@@ -15,7 +15,7 @@ package dict
 //  3. **不改 `tt form show` 的契约**：本命令在 `tt dict` 组下，输出键是**另一套**（见 README），
 //     只新增 `dictSource`，既有键一个不改名、不删除。
 //  4. **不猜**（契约 A15/A18/A31）：字典查不到就写"未解析"并列原因，绝不拿 colName 充中文名；
-//     "本地库没同步"是确定缺失（missing），如实说明并指向 `tt dict sync`。
+//     "本地库没同步"是确定缺失（missing），如实说明并指向 `tt dict db sync --env <环境>`。
 
 import (
 	"fmt"

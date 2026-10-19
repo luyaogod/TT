@@ -144,7 +144,7 @@ func Apply(cmd *cobra.Command, _ []string) error {
 
 	if v.Env == "local" {
 		if !allowsLocal(cmd) {
-			return fmt.Errorf("--at local 只对 tt dict 有效（它表示本地字典副本）；%s 不接受", cmd.CommandPath())
+			return fmt.Errorf("--at local 只对 tt dict 的查询命令有效（表示本地字典副本）；%s 不接受，改用 --at <环境>", cmd.CommandPath())
 		}
 	} else if err := checkEnv(cmd, v.Env); err != nil {
 		return err

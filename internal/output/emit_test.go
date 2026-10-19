@@ -173,7 +173,7 @@ func TestEmitNoResultSet(t *testing.T) {
 func TestWriteError(t *testing.T) {
 	var buf bytes.Buffer
 	err := Errorf(CodeTableMissing, ExitMissing, "本地库没有该族数据").
-		WithHint("先 tt dict db sync").WithMeta(sampleMeta())
+		WithHint("先 tt dict db sync --env <环境>").WithMeta(sampleMeta())
 	if e := WriteError(&buf, err); e != nil {
 		t.Fatalf("WriteError: %v", e)
 	}
@@ -184,7 +184,7 @@ func TestWriteError(t *testing.T) {
 	if got["ok"] != false || got["code"] != CodeTableMissing || got["exitCode"] != float64(ExitMissing) {
 		t.Errorf("错误信封不符: %#v", got)
 	}
-	if got["hint"] != "先 tt dict db sync" {
+	if got["hint"] != "先 tt dict db sync --env <环境>" {
 		t.Errorf("hint 应单独给出: %#v", got["hint"])
 	}
 	if got["env"] != "主机正式区" {
