@@ -1533,9 +1533,10 @@ export function SettingsView() {
                         <TableHead>环境</TableHead>
                         <TableHead className="w-28">类型</TableHead>
                         <TableHead>地址</TableHead>
-                        <TableHead className="w-36">本地库</TableHead>
-                        <TableHead className="w-32">状态</TableHead>
-                        <TableHead className="w-28">操作</TableHead>
+                        <TableHead className="w-32">本地库文件</TableHead>
+                        <TableHead className="w-28">同步结果</TableHead>
+                        <TableHead className="w-24">状态</TableHead>
+                        <TableHead className="w-24">操作</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1550,6 +1551,11 @@ export function SettingsView() {
                             <TableCell className="px-2">{e.type}</TableCell>
                             <TableCell className="px-2">
                               <span className="block truncate font-mono text-[11px] text-muted-foreground" title={e.address}>{e.address}</span>
+                            </TableCell>
+                            <TableCell className="px-2">
+                              <span className="block truncate font-mono text-[11px] text-muted-foreground" title={e.dbPath}>
+                                {e.dbPath.split(/[\\/]/).pop()}
+                              </span>
                             </TableCell>
                             <TableCell className="px-2" title={e.dbPath}>
                               {e.exists
