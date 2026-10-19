@@ -97,7 +97,7 @@ interface DictForm {
   // **不要**为了"完整性"把它加回来再原样回传 —— 那等于把一个不展示的键交给这一页写。
 }
 
-/** 可保存的配置节。脏标记与保存按钮都按它划分。 */
+/** 可自动保存的配置节。脏标记与提交范围都按它划分。 */
 type ConfigKey = 'hosts' | 'debug' | 'listen' | 'query' | 'mirror' | 'bdldoc'
 
 // 主题切换卡片(shadcn 主题切换卡样式):三张卡各带一张迷你界面预览,选中卡描边+底色高亮。
@@ -433,17 +433,23 @@ export function SettingsView() {
   // 基线:上一次读到 / 保存成功时那一节的表单值(序列化后的样子)。
   //
   // 为什么要基线:只记"碰过没有"的话,改一下再改回原值仍然显示"有未保存的修改"、
-  // 还常驻一个保存按钮(实测)。脏 = **碰过 且 现在的值与基线不同**。
+  // 还常驻一个保存控件(实测)。脏 = **碰过 且 现在的值与基线不同**。
   // 判断放在渲染期算(而不是 onChange 里同步算):onChange 里此刻的 state 还是更新前那份,
   // 差一拍会让"改回原值"晚一步才认出来。
   const baselineRef = useRef<Partial<Record<ConfigKey, string>>>({})
-  const sectionSnap = (k: ConfigKey): string => JSON.stringify(
-    k === 'hosts' ? hostsPatchOf(sshs)
-      : k === 'debug' ? debugPatchOf(dbg)
-        : k === 'listen' ? listen.trim()
-          : k === 'query' ? { source: dict.querySource }
-            : k === 'mirror' ? { dir: dict.mirrorDir.trim() }
-              : { dir: dict.bdldocDir.trim() })
+  // 自动保存要在**最新一份表单**上算；setState 之后同一次事件里读到的还是旧值，
+  // 所以每次渲染都把 ref 对齐。保存动作在 500ms 之后执行，读这里就是用户最后看到的那份。
+  const formsRef = useRef({ sshs, dbg, dict, listen })
+  formsRef.current = { sshs, dbg, dict, listen }
+  const saveChainRef = useRef<Promise<void>>(Promise.resolve())
+  const sectionSnapOf = (k: ConfigKey, f: { sshs: SshItem[]; dbg: DebugForm; dict: DictForm; listen: string }): string => JSON.stringify(
+    k === 'hosts' ? hostsPatchOf(f.sshs)
+      : k === 'debug' ? debugPatchOf(f.dbg)
+        : k === 'listen' ? f.listen.trim()
+          : k === 'query' ? { source: f.dict.querySource }
+            : k === 'mirror' ? { dir: f.dict.mirrorDir.trim() }
+              : { dir: f.dict.bdldocDir.trim() })
+  const sectionSnap = (k: ConfigKey): string => sectionSnapOf(k, formsRef.current)
   const dirtyRefAny = () => (Object.keys(dirtyRef.current) as ConfigKey[])
     .some((k) => dirtyRef.current[k] && sectionSnap(k) !== baselineRef.current[k])
   const markDirty = (...keys: ConfigKey[]) => {
@@ -555,7 +561,7 @@ export function SettingsView() {
     if (window.location.hash !== want) window.history.replaceState(null, '', want)
   }, [section])
 
-  // ---- 统一保存:按节提交;keys 指明这次要提交哪些节 ----
+  // ---- 自动保存：按节提交；keys 指明这次要提交哪些节 ----
   //
   // 提交环境清单前先拦一道**只有前端才看得见**的事：`hostsPatchOf` 是整节提交，它会
   // `filter(x => x.host)` 掉没有服务器地址的条目 —— 于是界面照旧列着它、还显示"已保存 ✓"，
@@ -572,51 +578,95 @@ export function SettingsView() {
     return null
   }
 
-  const save = async (keys: ConfigKey[], list?: SshItem[]) => {
-    if (saveState === 'saving' || !cfg) return
+  const save = async (requested: ConfigKey[], list?: SshItem[]): Promise<void> => {
+    if (!cfg) return
+    const forms = formsRef.current
+    // 排队期间可能已经被前一次保存清掉；只提交仍然有差异的节，避免重复 PUT。
+    const keys = requested.filter((k) => dirtyRef.current[k] && sectionSnapOf(k, forms) !== baselineRef.current[k])
+    if (keys.length === 0) return
+    const hostsList = list || forms.sshs
+    const sent: Partial<Record<ConfigKey, string>> = {}
+    keys.forEach((k) => { sent[k] = sectionSnapOf(k, forms) })
+    if (keys.includes('hosts')) sent.hosts = JSON.stringify(hostsPatchOf(hostsList))
     const body: HostsPatch = {}
     if (keys.includes('hosts')) {
-      const blocker = hostsSaveBlocker(list || sshs)
+      const blocker = hostsSaveBlocker(hostsList)
       if (blocker) {
         toast.error('保存失败', { description: blocker, duration: 0 })
         return
       }
-      body.hosts = hostsPatchOf(list || sshs)
+      body.hosts = hostsPatchOf(hostsList)
     }
-    if (keys.includes('debug')) body.debug = debugPatchOf(dbg)
-    if (keys.includes('listen')) body.listen = listen.trim()
-    if (keys.includes('query')) body.query = { source: dict.querySource }
-    if (keys.includes('mirror')) body.mirror = { dir: dict.mirrorDir.trim() }
-    // 刻意不提交 sync 节:字典库的落点这一页不可编辑,交出去只会把服务端算好的值覆盖掉。
-    // 后端约定"省略的节保持原样",所以不写它才是保留原值。
-    if (keys.includes('bdldoc')) body.bdldoc = { dir: dict.bdldocDir.trim() }
+    if (keys.includes('debug')) body.debug = debugPatchOf(forms.dbg)
+    if (keys.includes('listen')) body.listen = forms.listen.trim()
+    if (keys.includes('query')) body.query = { source: forms.dict.querySource }
+    if (keys.includes('mirror')) body.mirror = { dir: forms.dict.mirrorDir.trim() }
+    if (keys.includes('bdldoc')) body.bdldoc = { dir: forms.dict.bdldocDir.trim() }
     setSaveState('saving')
     try {
       const next = await api.saveSettings(body)
       setCfg(next)
       if (keys.includes('hosts')) {
-        // 用**服务端返回的**环境清单重建表单：名字会被补成 host-zone、没填主机的条目根本
-        // 不会存进去 —— 本地那份"提交前的意图"照旧显示，就成了"界面列着、配置里没有"的幽灵行。
-        const list = sshsFormOf(next)
-        const keepName = sshs[selSsh] ? sshName(sshs[selSsh]) : ''
-        const same = list.findIndex((x) => sshName(x) === keepName)
-        setSshs(list)
-        // 下标必须落回范围内：删掉最后一个环境之后它还指着旧位置，界面就成了"表单与保存按钮
-        // 一起消失、列表也没有高亮"（实测）。先按名字找回来（改名也不丢选中），否则按原位置收敛。
-        setSelSsh(same >= 0 ? same : Math.min(selSsh, Math.max(0, list.length - 1)))
+        const serverList = sshsFormOf(next)
+        const sentHosts = sent.hosts || ''
+        const nowHosts = JSON.stringify(hostsPatchOf(formsRef.current.sshs))
+        if (nowHosts === sentHosts) {
+          const keepName = formsRef.current.sshs[selSsh] ? sshName(formsRef.current.sshs[selSsh]) : ''
+          const same = serverList.findIndex((x) => sshName(x) === keepName)
+          setSshs(serverList)
+          formsRef.current = { ...formsRef.current, sshs: serverList }
+          setSelSsh(same >= 0 ? same : Math.min(selSsh, Math.max(0, serverList.length - 1)))
+          baselineRef.current.hosts = JSON.stringify(hostsPatchOf(serverList))
+          dirtyRef.current.hosts = false
+        } else {
+          // 保存期间用户又改了：服务端那份不能回灌，保留本地并等下一次自动保存。
+          baselineRef.current.hosts = sentHosts
+          dirtyRef.current.hosts = true
+        }
       }
-      if (keys.includes('listen')) setListen(next.listen || '')
-      cleanDirty(keys); setSaveState('saved')
-      // 路径型取值的 exists 是服务端算的,保存后要回读一次才对得上新值
-      void api.configStatus().then(setStatus).catch(() => { /* 提示性信息,取不到不影响 */ })
+      keys.filter((k) => k !== 'hosts').forEach((k) => {
+        baselineRef.current[k] = sent[k]
+        dirtyRef.current[k] = sectionSnapOf(k, formsRef.current) !== sent[k]
+      })
+      setSaveState('saved')
+      void api.configStatus().then(setStatus).catch(() => {})
     } catch (ex: any) {
-      // 服务端是校验的权威(环境名重复 / 端口越界 / 至少要有一个环境…),
-      // 它给的中文说明原样显示,不要用本地判断把它盖掉。
-      // 走 toast 且**不自动关**:保存被拒是"必须看见"的失败,而这段说明往往有多行
-      // (后端会把该怎么改一并写出来),塞在标题右侧只能截断成一行看不全。
       setSaveState('idle')
       toast.error('保存失败', { description: ex?.message || String(ex), duration: 0 })
     }
+  }
+
+  // 所有自动保存串行：同一次输入风暴只留最后一次，且不会两个 PUT 互相覆盖。
+  const enqueueSave = (keys: ConfigKey[], list?: SshItem[]): Promise<void> => {
+    const run = saveChainRef.current.then(() => save(keys, list))
+    saveChainRef.current = run.catch(() => {})
+    return run
+  }
+
+  const dirtyKeys = (): ConfigKey[] =>
+    (Object.keys(dirtyRef.current) as ConfigKey[])
+      .filter((k) => dirtyRef.current[k] && sectionSnap(k) !== baselineRef.current[k])
+
+  // 自动保存：任何表单变化后 500ms 合并提交；保存期间的新改动排进同一条链。
+  useEffect(() => {
+    if (!cfg) return
+    // 新加的空环境没有 host：先不自动保存（也没有必要每 500ms 弹一次“没有服务器地址”），
+    // 等用户填上地址再走；显式的 ENT 同步/删除仍会经过 save 的校验并给出提示。
+    const keys = dirtyKeys().filter((k) => !(k === 'hosts' && sshs.some((x) => !x.host.trim())))
+    if (keys.length === 0) return
+    const t = window.setTimeout(() => { void enqueueSave(keys) }, 500)
+    return () => window.clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sshs, dbg, dict, listen, cfg])
+
+  // ENT 同步会重读配置：先把当前（可能是新建、还没保存的）环境落盘。
+  const flushHosts = async (): Promise<boolean> => {
+    await saveChainRef.current
+    if (dirtyRef.current.hosts && sectionSnap('hosts') !== baselineRef.current.hosts) {
+      await enqueueSave(['hosts'])
+      await saveChainRef.current
+    }
+    return !dirtyRef.current.hosts || sectionSnap('hosts') === baselineRef.current.hosts
   }
 
   // ---- 环境编辑 ----
@@ -656,11 +706,13 @@ export function SettingsView() {
   const syncEnts = async () => {
     const s0 = sshs[selSsh]
     if (!s0?.host) { toast.error('先填 SSH 主机'); return }
-    if (isDirty('hosts')) {
-      toast.error('先把 SSH/数据库的修改保存', { description: '同步会重读配置，未保存的改动会被丢弃' })
+    if (!(await flushHosts())) {
+      toast.error('环境还没保存成功', { description: '同步会重读配置；先把上面的错误处理掉再试' })
       return
     }
-    const name = sshName(s0)
+    // flush 可能把服务器补全后的环境名写回 formsRef，用最新那份点名。
+    const saved = formsRef.current.sshs[selSsh] || s0
+    const name = sshName(saved)
     setEntsBusy(true)
     try {
       const r = await api.entsSync(name)
@@ -783,7 +835,9 @@ export function SettingsView() {
     const next = sshs.filter((_, j) => j !== i)
     setSelSsh(Math.max(0, Math.min(i, next.length - 1)))
     setSshs(next)
-    await save(['hosts'], next) // 点击「确定」= 删除并直接保存,不再需要手动点保存
+    formsRef.current = { ...formsRef.current, sshs: next }
+    markDirty('hosts')
+    await enqueueSave(['hosts'], next) // 确认删除 = 立即落盘（自动保存不会等 500ms）
   }
 
   // ---- 数据库页操作(针对当前环境的 db) ----
@@ -1081,18 +1135,6 @@ export function SettingsView() {
   // 渲染期现算的 anyDirty 已在上面算过（它同时给"刷新确认"那条 effect 用），这里不再重复
   const mirrorDirOk = !!dict.mirrorDir.trim() && !isDirty('mirror')
 
-  // 卡片的保存按钮:只在真的有改动时才出现。
-  // 常驻一个灰着的「保存」挂在每张卡右上角,既不传达信息(它一直是灰的),又让人以为
-  // 有什么东西没保存。有没有未保存的改动看内容区右上角那行状态文字就够了,这条按钮
-  // 是「动手保存」的入口,没得保存时它就不该在。
-  const SaveBtn = ({ keys }: { keys: ConfigKey[] }) => {
-    if (!isDirty(...keys)) return null
-    return (
-      <Button size="sm" disabled={saveState === 'saving'} onClick={() => void save(keys)}>
-        {saveState === 'saving' ? '保存中…' : '保存'}
-      </Button>
-    )
-  }
 
   return (
     // flex-1 + min-w-0:填满活动栏右侧的整块区域。少了它这个根会按内容宽度撑开,
@@ -1128,8 +1170,8 @@ export function SettingsView() {
           px-1 不是给排版留白,是给**输入框的聚焦环**留位置:内层 mx-auto 的宽度就等于卡片宽度,
           卡片里贴边的输入框 focus 时 ring 要往外扩约 2px,没有这点余量就会被本层的
           overflow-auto 裁掉 —— 表现是"选中时高亮缺一条边/一角"。 */}
-      <div className="min-h-0 flex-1 overflow-auto px-1">
-        <div className={cn('mx-auto space-y-3 p-4', section === 'sites' ? 'max-w-5xl' : 'max-w-3xl')}>
+      <div className={cn('min-h-0 flex-1 px-1', section === 'sites' ? 'overflow-hidden' : 'overflow-auto')}>
+        <div className={cn('mx-auto p-4', section === 'sites' ? 'flex h-full min-h-0 max-w-5xl flex-col gap-3' : 'max-w-3xl space-y-3')}>
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-sm font-medium text-foreground">
               {SETTINGS_SECTIONS.find((s) => s.key === section)?.label}
@@ -1145,19 +1187,16 @@ export function SettingsView() {
               <span className={cn('text-[11px]',
                 saveState === 'saved' ? 'text-emerald-600 dark:text-emerald-400'
                   : anyDirty ? 'text-amber-600 dark:text-amber-400' : '')}>
-                {saveState === 'saving' ? '保存中…' : saveState === 'saved' ? '已保存 ✓' : anyDirty ? '有未保存的修改' : ''}
+                {saveState === 'saving' ? '保存中…' : saveState === 'saved' ? '已保存 ✓' : anyDirty ? '修改将自动保存…' : ''}
               </span>
             </span>
           </div>
 
           {/* ============ 站点管理(左右两栏:环境清单 | 连接表单) ============ */}
           {section === 'sites' && (
-            <div className="grid h-[40rem] grid-cols-[16rem_1fr] gap-3">
-              {/* 两栏定高:跟环境数量、表单长短都无关,两栏永远一样高,页面也不会跟着内容忽长忽短。
-                  高度取 40rem —— 常见窗口高度下装得下,也不需要跟着视口算。
-                  这张卡**没有**自己的「保存」:左右两栏改的是同一个 hosts 节
-                  (清单里的增删与默认环境、右边那个环境的连接信息),各挂一个按钮时
-                  同一屏会出现两个"保存",点哪个、会不会互相覆盖都说不清。保存只留右侧那一个。 */}
+            <div className="grid min-h-0 flex-1 grid-cols-[16rem_1fr] gap-3">
+              {/* 两栏一起填满弹窗余下的高度:环境再多也不顶高页面,列表/表单各自在卡片里滚。
+                  不再定死 40rem —— 那会让小窗口出现外层滚动、把页签行和底部按钮推出视野。 */}
               <Card
                 id="card-sites-list"
                 panel
@@ -1200,11 +1239,9 @@ export function SettingsView() {
                   <div className="py-2 text-muted-foreground">先在左边的「环境清单」里选一个环境,或新增一个。</div>
                 ) : (
                   <>
-                    {/* 一行放完:页签在左、操作在右,右边跟着这张卡的「保存」。
-                        卡片头部（Card 的 right 位）是右对齐的,单独放页签会偏到最右边,
-                        而它下面还要再起一行放按钮 —— 上下两块都占宽度,中间空出一大片。
-                        这里合成一行,页面少一行高度,视线也不用上下折返。 */}
-                    <Tabs value={envTab} onValueChange={(v) => setEnvTab(v as 'ssh' | 'db' | 'ents')}>
+                    {/* 一行放完:页签在左、复制/删除在右。这一行固定在卡片顶部，
+                        滚动的是下面的 TabsContent —— 按钮不会被表单内容顶出去。 */}
+                    <Tabs value={envTab} onValueChange={(v) => setEnvTab(v as 'ssh' | 'db' | 'ents')} className="flex min-h-0 flex-1 flex-col">
                       <div className="flex items-center gap-2">
                         <TabsList>
                           <TabsTrigger value="ssh">SSH 服务器</TabsTrigger>
@@ -1219,11 +1256,10 @@ export function SettingsView() {
                           <Button variant="ghost" size="sm" title="删除该环境" onClick={askDelSsh}>
                             <Trash2 className="h-3.5 w-3.5" />删除
                           </Button>
-                          <SaveBtn keys={['hosts']} />
                         </span>
                       </div>
 
-                      <TabsContent value="ssh" forceMount className="mt-3 space-y-3 data-[state=inactive]:hidden">
+                      <TabsContent value="ssh" forceMount className="mt-3 flex min-h-0 flex-1 flex-col space-y-3 overflow-auto data-[state=inactive]:hidden">
                         <div className="grid grid-cols-2 gap-x-4 gap-y-3">
                           <Field label="环境名称">
                             <Input className={input} value={cur.name} placeholder="如 正式区"
@@ -1266,7 +1302,7 @@ export function SettingsView() {
                         </div>
                       </TabsContent>
 
-                      <TabsContent value="db" forceMount className="mt-3 space-y-3 data-[state=inactive]:hidden">
+                      <TabsContent value="db" forceMount className="mt-3 flex min-h-0 flex-1 flex-col space-y-3 overflow-auto data-[state=inactive]:hidden">
                         {curDb == null ? (
                           <div className="border border-dashed border-border p-4 text-center text-muted-foreground">
                             <p className="mb-2">该环境尚未挂载数据库连接</p>
@@ -1402,7 +1438,7 @@ export function SettingsView() {
 
                       {/* ENT：只读清单 + 同步按钮。不提供任何手工编辑控件 —— 清单的来源
                           只有一个（gzou_t），同步动作也只有一个。 */}
-                      <TabsContent value="ents" forceMount className="mt-3 space-y-3 data-[state=inactive]:hidden">
+                      <TabsContent value="ents" forceMount className="mt-3 flex min-h-0 flex-1 flex-col space-y-3 overflow-auto data-[state=inactive]:hidden">
                         <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
                           <span>
                             上次同步：{cur.entsSyncedAt
@@ -1423,7 +1459,7 @@ export function SettingsView() {
                             之后 <span className="font-mono">tt env ents</span> / <span className="font-mono">--at-list</span> 都只读配置、不再连网。
                           </div>
                         ) : (
-                          <div className="max-h-[24rem] overflow-auto rounded-ui border border-border">
+                          <div className="min-h-0 flex-1 overflow-auto rounded-ui border border-border">
                             <Table container={false}>
                               <TableHeader>
                                 <TableRow className="hover:bg-transparent">
@@ -1464,8 +1500,7 @@ export function SettingsView() {
                   本地那份 SQLite 从哪来、查的时候走哪条路。原先分成两张卡,第一张只放一个下拉,
                   第二张才是"这份数据怎么来的",读的人得自己把两处接起来。 */}
               <Card id="card-dict-query" title="查询数据源"
-                description="r.t / r.v / desc / scc / r.q 等查询命令走哪条路取数。"
-                right={<SaveBtn keys={['query']} />}>
+                description="r.t / r.v / desc / scc / r.q 等查询命令走哪条路取数。">
                 <SettingRow
                   id="query.source"
                   label="数据源"
@@ -1499,7 +1534,7 @@ export function SettingsView() {
                 />
                 {dict.querySource === 'local' && (
                   <p className="text-[11px] leading-relaxed text-amber-600 dark:text-amber-400">
-                    旧配置 query.source = local 没有指定环境；请选「本地（某环境）」或「在线」后再保存。
+                    旧配置 query.source = local 没有指定环境；请选「本地（某环境）」或「在线」，选完自动保存。
                   </p>
                 )}
                 {(() => {
@@ -1610,8 +1645,7 @@ export function SettingsView() {
               </Card>
 
               <Card id="card-dict-mirror" title="源码镜像"
-                description="把 T100 源码(4gl / 4fd / 42s / *.inc)拉到本地,供 AI 检索。"
-                right={<SaveBtn keys={['mirror']} />}>
+                description="把 T100 源码(4gl / 4fd / 42s / *.inc)拉到本地,供 AI 检索。">
                 <SettingRow
                   id="mirror.dir"
                   label="镜像根目录"
@@ -1705,8 +1739,7 @@ export function SettingsView() {
               </Card>
 
               <Card id="card-dict-bdldoc" title="BDL 文档"
-                description="Genero BDL 文档的本地目录。"
-                right={<SaveBtn keys={['bdldoc']} />}>
+                description="Genero BDL 文档的本地目录。">
                 <SettingRow
                   id="bdldoc.dir"
                   label="文档目录"
@@ -1737,8 +1770,7 @@ export function SettingsView() {
                   「默认环境」那张卡整张去掉 —— 调试会话不指定环境时继承站点默认
                   (站点管理里那个绿点),这一层覆盖没必要暴露。 */}
               <Card id="card-debug-params" title="调试参数"
-                description="本机调试会话的默认参数。"
-                right={<SaveBtn keys={['debug']} />}>
+                description="本机调试会话的默认参数。">
                 <SettingRow id="debug.watchdogSeconds" label="停站看门狗(秒)"
                   description="停站后超过该时长无响应即判定失联。"
                   control={<Input className={input} type="number" value={dbg.watchdogSeconds || ''} placeholder="1800"
@@ -1756,8 +1788,7 @@ export function SettingsView() {
               </Card>
 
               <Card id="card-app-service" title="服务"
-                description="统一 Web 服务的监听地址。"
-                right={<SaveBtn keys={['listen']} />}>
+                description="统一 Web 服务的监听地址。">
                 <SettingRow id="listen" label="监听地址"
                   description="改完需重启 tt serve;端口占用时自动向后顺延。"
                   control={<Input className={input} value={listen} placeholder="127.0.0.1:28670"

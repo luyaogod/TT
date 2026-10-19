@@ -30,13 +30,13 @@ export function Card({ id, title, description, right, children, className, panel
   /** 卡片标题。省掉 = 这张卡不要头部标题(与 description/right 一起都不给时头部整块不渲染) */
   title?: React.ReactNode
   description?: React.ReactNode
-  /** 右侧操作位:通常是这张卡的「保存」按钮 */
+  /** 右侧操作位（可选）：卡片标题旁的按钮/状态 */
   right?: React.ReactNode
   children: React.ReactNode
   className?: string
   /**
    * 当"定高面板"用:自带高度的卡片(站点管理那两栏)必须打开它,否则内容一多就顶出边框。
-   * 打开后卡片是个可收缩的 flex 列,内容区 `flex-1 min-h-0 overflow-auto` —— 长了就在卡片内滚。
+   * 打开后卡片是个可收缩的 flex 列,内容区 `flex-1 min-h-0 overflow-hidden` —— 滚动由卡片里的列表/页签自己管（顶部操作行不会跟着滚走）。
    * 左栏那种"列表滚、底部按钮钉住"的还要在内容里再分一层(flex-1 min-h-0 overflow-auto 的列表 +
    * 固定高度的按钮行);里面分好之后内容区自己就不会溢出了,滚动条只出现在列表上。
    * 不传就是普通的内容流盒子,跟着内容长高(默认)。
@@ -57,7 +57,7 @@ export function Card({ id, title, description, right, children, className, panel
           {right && <div className="flex shrink-0 items-center gap-1.5">{right}</div>}
         </div>
       )}
-      <div className={cn('space-y-3', hasHeader && 'mt-3', panel && 'flex min-h-0 flex-1 flex-col overflow-auto')}>{children}</div>
+      <div className={cn('space-y-3', hasHeader && 'mt-3', panel && 'flex min-h-0 flex-1 flex-col overflow-hidden')}>{children}</div>
     </section>
   )
 }
