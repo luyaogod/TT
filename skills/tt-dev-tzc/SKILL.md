@@ -1,6 +1,6 @@
 ---
 name: tt-dev-tzc
-description: 需要操作`.tzc`文件时，请激活此技能
+description: 有关`.tzc`文件操作时，请激活此技能
 ---
 
 # tt dev tzc：T100 设计器代码包的安全编辑
