@@ -1,10 +1,6 @@
 ---
 name: tt-dev-tzc
-description: 安全编辑 T100 设计器**代码包**（.tzc/.tzf/.tzx）：export 渲染成带围栏的 4GL/TGL 工作区 → 只改围栏内正文 → verify 预检 → apply 原子写回。当用户要改 T100 客制程序、新增/改名/改签名自订函数、解锁只读框架区段、或查看 .tzc 包里有什么时使用。**表单包（.tzs/.tzv）不归这里，用 tt-dev-tzs。**
-license: 与 tt 仓库一致（见随包 README.md）
-metadata:
-  tool: tdev
-  command: tt dev tzc / tt install
+description: 需要操作`.tzc`文件时，请激活此技能
 ---
 
 # tt dev tzc：T100 设计器代码包的安全编辑
