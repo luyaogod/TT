@@ -122,7 +122,13 @@ func prepare() error {
 	if err != nil {
 		return output.Errorf(output.CodeConfigBroken, 2, "%v", err)
 	}
-	ref, err := hosts.Resolve(strings.TrimSpace(common.Env))
+	env := strings.TrimSpace(common.Env)
+	if env == "" {
+		return output.Errorf(output.CodeUsage, 2,
+			"需要 --at <环境>（或 --env <环境名>）；可用环境：%s；不知道填什么：tt file --at-list",
+			strings.Join(hosts.Names(), "、"))
+	}
+	ref, err := hosts.Resolve(env)
 	if err != nil {
 		return output.Errorf(output.CodeEnvUnknown, 2, "%v", err)
 	}

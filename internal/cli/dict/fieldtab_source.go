@@ -182,7 +182,7 @@ func onlineEnvName() string {
 // fieldtabOnlineGuidance 在线不可用时的下一步：两条**能直接照抄**的命令。
 func fieldtabOnlineGuidance() string {
 	return `怎么办（二选一）：
-  tt dict fieldtab <模块>/<表单> --source online --env <环境名>   # 指一个配了数据库的环境
+  tt dict fieldtab <模块>/<表单> --source online --at <环境>      # 指一个配了数据库的环境
   tt dict fieldtab <模块>/<表单> --source local --env <环境名>    # 查该环境的本地库（先 tt dict db sync --env <环境名>）`
 }
 

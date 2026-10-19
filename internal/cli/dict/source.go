@@ -108,8 +108,8 @@ func localNeedsEnvErr() error {
 
 // noSourceErr 没给 --env、配置也没有 query.source 时的报错。
 func noSourceErr() error {
-	return output.Errorf(output.CodeUsage, 2, `没有点名数据源：用 --env <环境> 走在线，或 --env local:<环境> 走本地；
-也可以在设置页把 query.source 固定为某个环境或 local:<环境>。`)
+	return output.Errorf(output.CodeUsage, 2, `没有点名数据源：用 --at <环境> 或 --env <环境> 走在线；
+本地用 --env local:<环境>。也可以在设置页把 query.source 固定为某个环境或 local:<环境>。`)
 }
 
 // localDBEnvNames 列出已经有本地库文件的环境（local:<环境> 形式），用于报错提示。

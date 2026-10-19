@@ -49,7 +49,7 @@ func (h *Hosts) pickName(name string) (string, string) {
 func (h *Hosts) Resolve(name string) (*EnvRef, error) {
 	if strings.TrimSpace(name) == "" {
 		if names := h.Names(); len(names) > 0 {
-			return nil, fmt.Errorf("必须指定环境(--env <环境名>);可用环境: %s", strings.Join(names, "、"))
+			return nil, fmt.Errorf("必须指定环境：--at <环境> 或 --env <环境名>；可用环境: %s", strings.Join(names, "、"))
 		}
 		return nil, fmt.Errorf("尚未配置 SSH 环境(运行 tt serve 添加,或编辑 config.json hosts.sshs)")
 	}
@@ -60,7 +60,7 @@ func (h *Hosts) Resolve(name string) (*EnvRef, error) {
 		}
 	}
 	if names := h.Names(); len(names) > 0 {
-		return nil, fmt.Errorf("未找到环境 %q;可用环境: %s", target, strings.Join(names, "、"))
+		return nil, fmt.Errorf("未找到环境 %q；可用环境: %s（用 --at <环境> 或 --env <环境名>）", target, strings.Join(names, "、"))
 	}
 	return nil, fmt.Errorf("未找到环境 %q(配置里没有任何环境,运行 tt serve 添加)", target)
 }

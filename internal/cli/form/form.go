@@ -131,7 +131,7 @@ func formUnknown(hint, format string, a ...any) error {
 func requireEnv() (string, error) {
 	env := strings.TrimSpace(common.Env)
 	if env == "" {
-		return "", failUsage("需要 --env <环境名>（本仓没有默认环境可回落；离线可以用 --dir 指向本地镜像/目录）")
+		return "", failUsage("需要 --at <环境> 或 --env <环境名>（本仓没有默认环境可回落；离线可以用 --dir 指向本地镜像/目录）")
 	}
 	return env, nil
 }
