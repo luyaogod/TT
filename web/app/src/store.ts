@@ -1886,17 +1886,20 @@ export const useStore = create<Store>((set, get) => ({
   },
   setActiveEnv: (env) => set({ activeEnv: env }),
 
-  // 建一条**真的** Debug 会话（企业编号 + 作业编号），默认把画面通道（proxy）一起挂上。
+  // 建一条**真的** Debug 会话（企业编号 + 作业编号），作业编号填了就把作业直接起起来。
   //
-  // 三步都是必须的，顺序也不能换：
+  // 两步顺序不能换：
   //   ① `POST /sessions/new` 建**空闲**会话（登录是服务端的另一条异步路）；
-  //   ② 等它登录完（loading → idle）—— 挂画面的前置就是"空闲"；
-  //   ③ `POST /sessions/{id}/screen` 起画面通道：那是一个脱离本进程的
-  //      建立/接管这条会话，作业才在里面跑。
+  //   ② 等它登录完（loading → idle）—— 起作业的前置就是“空闲”。
   //
-  // 失败的分寸：①失败 = 没建出来，抛错（界面不跳转）；②失败 = 会话在、但连不上，也抛错
-  // （它会留在树里，因为服务端确实有这条，人得能看见它、能删它）；③失败 = 会话能用，
-  // **只报警不抛错** —— 会话已经建好这个事实不该被一句"建会话失败"盖掉。
+  // **作业编号填了就直接起作业**（用户 2026-10-19：“我既然填写了作业编号，就应该直接起作业，
+  // 除非我没填”）。从前这里建完只留一条空闲会话，人还得在会话页再点一次 ▶ —— 而那个 ▶ 在
+  // 状态停在 loading 时根本不显示，于是“填了作业编号却什么也没起”。
+  // 只有没填（空着，或者只写了模块）才是“只建会话”那一档。
+  //
+  // 失败的分寸：①建不出来 / 登录不上 → 抛错（界面不跳转，错误原样显示）；
+  // ②会话建好了但作业没起来 → **只报警不抛错** —— 会话能用这个事实不该被一句“启动失败”
+  // 盖掉，跳到会话页看 `launchError`，改作业编号按 ▶ 重试就好。
   createSession: async (input, onStep) => {
     const env = (input.env || '').trim()
     const ent = (input.ent || '').trim()
@@ -1907,9 +1910,16 @@ export const useStore = create<Store>((set, get) => ({
     const name = (input.name || '').trim()
       || `新会话 ${get().sessions.filter((s) => s.env === env).length + 1}`
     // 前置校验放在请求之前:与服务端同一套判据，但错误当场说、不白花一次 SSH 握手。
+    //
+    // **作业编号可以不填**：填了就在建好的会话里直接起作业（见下面那段 `launch`），
+    // 空着就只建空闲宿主会话。这一格从前是必填 —— 于是“先挂一条会话、作业待会儿再起”这条路根本不存在。
     if (!env) throw new Error('没有点名环境')
     if (!ent) throw new Error('必须填企业编号（ENT）：它决定用哪个账号连库，环境配置里已经没有它了')
-    if (!prog) throw new Error('必须填作业编号：它就是这条会话要启动的作业')
+    // 作业编号也接受「模块/作业」（与右侧「运行」那个输入框同一种写法）。
+    // 只写了模块（结尾是 `/`）按“没填作业”算，不拿一个空程序名去起作业。
+    const slash = prog.indexOf('/')
+    const mod = slash > 0 ? prog.slice(0, slash).trim() : ''
+    const progName = (slash > 0 ? prog.slice(slash + 1) : prog).trim()
 
     onStep?.('正在建会话（连 ' + env + '）…')
     const res = await api.sessionCreate(env, ent, name)
@@ -1935,9 +1945,25 @@ export const useStore = create<Store>((set, get) => ({
       throw e
     }
 
+    // 先绑上这条新建的会话：`launch` 是“在**当前**会话里起作业”，它读 `get().sessionId`；
+    // 不先绑就会起在别处（或又新建一条）。
+    await get().selectSession(id)
+    if (progName) {
+      onStep?.(`会话已就绪，正在启动作业 ${progName}（等它停在入口）…`)
+      try {
+        await get().launch(mod, progName)
+      } catch (e: any) {
+        // 会话已经建好并绑上了：作业没起来 ≠ 会话没建成 —— 不 throw。
+        // 落在会话页上看 `launchError`，改个作业编号按 ▶ 就能重试。
+        get().pushTimeline({ origin: 'system', kind: 'warn', text: `作业 ${progName} 没起来：${e?.message || e}` })
+      }
+    }
+
     get().pushTimeline({
       origin: 'system', kind: 'info',
-      text: `新建会话 ${item.ref || id}（作业 ${prog}，ENT ${ent}）`,
+      text: progName
+        ? `新建会话 ${item.ref || id}（作业 ${mod ? mod + '/' : ''}${progName}，ENT ${ent}）`
+        : `新建会话 ${item.ref || id}（空闲，未指定作业；ENT ${ent}）`,
     })
     return item
   },

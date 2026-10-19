@@ -54,7 +54,9 @@ export function EnvView({ env, tab, sessions, onTab, onCreate, leading }: {
  *
  * 为什么 ENT 在这里填:企业编号已经**不从环境配置里来**了(hosts.sshs[].topent 已移除),
  * 它决定用哪个账号连库,而"忘了点名"与"点错了"表现完全一样 —— 所以它必须显式给。
- * 作业编号则是"这条会话要调哪个作业"。
+ * 作业编号则是"这条会话要调哪个作业":**填了就建完直接起作业**(停在入口),
+ * **留空只建空闲会话**(之后在会话页右侧「运行」里再起) —— 两档都真实存在,
+ * 填了就起、留空就只建会话 —— 人填的值必须真的被用上,否则填它就没有意义。
  */
 function CreateSessionPane({ env, count, onCreate }: {
   env: EnvBrief
@@ -71,9 +73,9 @@ function CreateSessionPane({ env, count, onCreate }: {
 
   const submit = async () => {
     if (busy) return
-    // 两道硬前置先在界面拦一下:后端也会拒,但不必为一句"没填"白花一次 SSH 握手。
+    // 一道硬前置先在界面拦一下:后端也会拒,但不必为一句"没填"白花一次 SSH 握手。
+    // 作业编号**不是必填**:填了就建完直接起作业,留空就只建空闲会话(见 store.createSession)。
     if (!ent.trim()) { setErr('企业编号（ENT）必填：它决定用哪个账号连库，环境配置里已经没有它了'); return }
-    if (!prog.trim()) { setErr('作业编号必填：它就是这条会话要启动的作业'); return }
     setErr('')
     setBusy(true)
     setStep('')
@@ -123,20 +125,23 @@ function CreateSessionPane({ env, count, onCreate }: {
                 className="h-8 text-[13px]" />
             </label>
             <label className="block">
-              <span className="mb-1.5 block text-xs text-muted-foreground">作业编号</span>
-              <Input value={prog} onChange={(e) => setProg(e.target.value)} placeholder="如 axmt500_wf"
+              <span className="mb-1.5 block text-xs text-muted-foreground">
+                作业编号 <span className="text-muted-foreground/70">可留空</span>
+              </span>
+              <Input value={prog} onChange={(e) => setProg(e.target.value)} placeholder="如 axmt500_wf（留空 = 只建会话）"
                 disabled={busy}
                 onKeyDown={(e) => { if (e.key === 'Enter') void submit() }}
                 className="h-8 text-[13px]" />
             </label>
           </div>
           <p className="-mt-2 text-[11px] text-muted-foreground/80">
-            ENT 决定用哪个账号连库（不再沿用登录 shell 的 $TOPENT）；作业编号决定要启动哪个作业。
+            ENT 决定用哪个账号连库（不再沿用登录 shell 的 $TOPENT）；作业编号填了就在建好的会话里直接起作业，
+            留空只建空闲会话（之后在右侧「运行」里再起）。
           </p>
 
           <div className="flex items-start gap-2 rounded-[8px] border border-border bg-muted/30 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
             <Bug className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-70" />
-            <span>建出来的是<b className="font-medium text-foreground">调试会话</b>：停在作业入口，可以下断点、单步、看变量。</span>
+            <span>建出来的是<b className="font-medium text-foreground">调试会话</b>：填了作业编号就直接起作业、停在入口，可以下断点、单步、看变量。</span>
           </div>
 
           {err && (
