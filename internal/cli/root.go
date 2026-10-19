@@ -37,52 +37,36 @@ import (
 // rootCmd is the base command.
 var rootCmd = &cobra.Command{
 	Use:   "tt",
-	Short: "TT - T100 工具集（调试 / 设计器包 / 数据字典）",
-	Long: `TT 是 TDebug、TDev、TDictCli 三个工具合并后的统一入口。
+	Short: "TT 鼎捷T100开发CLI",
+	Long: `TT 是面向 T100 ERP 的命令行工具：把实施/开发日常要用的「查数据字典、连库看数、
+读服务器源码、调试作业、改设计器包、看表单、画原型图」收进同一个二进制、同一份
+config.json、同一个本地 Web 服务（tt serve）。
 
-同一个二进制、同一份配置（config.json）、同一个本地 Web 服务：
+给人和 AI agent 共用：输出简体中文，数据类命令默认 JSON 信封；目标一律点名
+（--at <环境>[@<企业>] 或 --env，没有默认环境；不知道填什么就加 --at-list）。
 
-  tt debug …   作业调试器：SSH 驱动 fglrun -d 的 (fgldb) 文本调试协议，
-               提供本地 Web 调试界面（源码/断点/调用栈/变量/接口日志）与命令行控制端
-  tt dev tzc … T100 设计器代码包（.tzc/.tzf/.tzx）：export 渲染带围栏的 4GL 工作区，
-               apply 走三道闸门写回
-  tt dev tzs … T100 设计器表单包（.tzs/.tzv）：export 纯解压只读；读写表单走具名动词
-               （tt dev tzs <动词> --args '<JSON 对象>'），由设计器自己的引擎算，不是拼 XML
-  tt dict …    ERP 数据字典查询：r.t / desc / scc / r.q / prog 等，支持本地镜像与远程直查
-  tt drawio …  画原型图：把 T100 组件库交给 drawio，按设计器惯例拼界面草图
+能力分组：
+  tt dict …      数据字典：表/字段/校验/开窗/消息/参数/程序与作业
+  tt db …        数据库：连通性测试（ping / probe）与只读 SQL（sql）
+  tt file …      服务器文件：ls/find/grep/head/cat 只读浏览（纯 SFTP）+ 离线源码镜像
+  tt debug …     作业调试：起会话、停站现场、断点、步进、接口日志重放
+  tt session …   会话：建 / 列 / 看 / 改 ENT / 结束 / 收掉
+  tt dev tzc …   .tzc 代码包：export 渲染围栏工作区，apply 走三道闸门写回
+  tt dev tzs …   .tzs 表单包：export 只读解压；读写表单走引擎的具名动词
+                 （tt dev tzs <动词> --args '<JSON 对象>'），不是拼 XML
+  tt form …      出厂表单：列 / 看字段表 / 与语料核对 / 预热缓存
+  tt drawio …    原型图：用 T100 组件库生成 .drawio
+  tt env / config / serve / install / update   环境、配置、本地服务、安装、自更新
 
-  tt session … 会话：建 / 列 / 看 / 改 ENT / 结束本轮 / 收掉 / 透传（会话是一级对象，
-               目标一律用 --session 点名，多条不替你挑）
-  
-  tt env …     环境管理：列出/查看/切换 SSH 环境（三个工具共用同一份环境清单）
-  tt config …  配置管理：位置/查看/读写/校验
-  tt serve     启动本地 Web 配置服务（调试工作台，含覆盖所有命令组的统一设置页）
-  tt install   把 AI skills 装到 agent 会读的位置，或把 tt 加进用户 PATH
-  tt update    更新 tt 自身：查新版、下载校验、交棒给更新器（默认问一句才装）
+远程操作默认只读：服务器上的写只有 tzc 的三道闸门与 tzs 引擎动词；
+file 没有 put/rm；调试重放与镜像打包在服务器上留下的临时文件除外。
 
-所有输出使用简体中文 (zh_CN)。
-
-退出码 —— **同一个数字在各家含义不同，读哪条线就以那条线为准**：
-
-  tt debug      0 成功 / 1 用法或运行失败（这条线未定义更细的码）
-  tt dev tzc    0 成功 / 2 包格式或用法错 / 3 校验失败 / 4 拒绝写入 / 5 IO·环境失败
-  tt dev tzs    0 成功 / 1 引擎内部错 / 2 参数或环境错 / 4 设计器拒绝 / 5 传输或环境失败
-                （**没有 3**；2 也包括"manifest 拉不到"）
-  tt dict       0 成功（含"查无结果"）/ 1 用法错 / 2 数据源错 / 3 缺表
-  tt drawio     0 成功 / 1 用法或运行失败 / 2 输入错（spec 不合法、包读不出）/ 3 产物自查未通过
-  tt update     0 已是最新或已交棒 / 10 有可用更新 / 2 用法错 / 3 校验失败 /
-                4 拒绝自装（源码态、认不出的布局）/ 5 出网或落盘失败
+退出码按命令线各自定义（同一个数字在不同组含义不同，包装脚本按子命令辨认）。
+tt form 的码表：
   tt form       0 一致 / 1 取件失败（FORM_UNKNOWN：取不到表单，或它不是合法 .42f）
                 2 用法错或无基线（缺 --env/--module/--form 或 --map；语料里没有那一节窗口）
                 / 6 与语料逐条比对不一致（体检不过）
-  顶层          0 成功 / 1 用法错（未知命令、未知开关）
-
-3 在 tzc 是"校验失败"、在 dict 是"缺表"、在 drawio 是"产物自查未通过"、在 tzs 根本不用；
-4 只在 tzs 与 update 有（设计器拒绝 / 拒绝自装）；10 只有 update 用（它得区分"查到了
-新版"与"命令失败"，而 3 在这条线上已经是别的意思）。包装脚本要按子命令辨认，别只看码。
-
-合并前的命令名仍可直接当子命令组用：tt tdebug … = tt debug …，
-tt tdev … = tt dev …，tt tdict … = tt dict …。`,
+`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }
