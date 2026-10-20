@@ -2,16 +2,12 @@ package host
 
 // 本地源码镜像引擎:把某环境(T100 服务器)的源码拉到本地镜像目录。
 //
-// 白名单原则(与调试读码一致):只收
-//   find erp com -type f \( -path '*/4gl/*' -o -path '*/42f/*' \
-//        -o -path '*/42s/zh_CN/*' -o -path '*/42s/*/zh_CN/*' -o -iname '*.inc' \)
-//   - 4gl(源码)、42f(编译后的表单)、42s(编译字符串;只取简体中文目录 zh_CN,
-//     即文件所在目录的最后一个目录必须是 zh_CN)、*.inc(4GL include,任意位置)。
-// 4fd 是设计期字段描述,fieldId 会随保存重排,不再拉取;界面合成使用 42f+42s。
-// per(界面源)/42m/42r/其它语言/设计器辅助等一概不拉 —— AI 只读源代码、
-// 编译表单、包含文件与中文字符串,本地目录与服务器同构(erp/、com/)。
-// profile=interface 时只取 42f/42s（interface 合成画面不需要 4gl/inc）。
-// 备份/临时文件(x.42f.bak、x.bck、x.bck1、*~ 等)不拉,并会清理本地残留。
+// 两个 profile 的白名单严格分开：
+//   - source（默认）：只取 4gl 目录下后缀为 .4gl 的文件；
+//     .4gl.src、.4gltest、.str、.42s、脚本、备份和 4gl 里的其它文件都不取；
+//   - interface：只取 42f 与 42s/zh_CN（供 tt interface 合成画面）。
+// 4fd 是设计期字段描述，fieldId 会随保存重排，两个 profile 都不取。
+// 备份/临时文件(x.4gl.bak、x.bck、x.bck1、*~ 等)不拉,并会清理本地残留。
 //
 // 传输:服务器侧 tar 打包(绝对路径,exec 通道不经登录 profile) → SFTP 流式
 // 下载 → 本地标准库解压(gzip+tar),全程不进内存。
@@ -59,7 +55,7 @@ func (p MirrorProfile) Label() string {
 	if p == MirrorInterface {
 		return "42f/42s"
 	}
-	return "4gl/42f/42s/inc"
+	return "4gl/*.4gl"
 }
 
 // MirrorStats 一次镜像拉取的统计结果(CLI 打印用)。
@@ -99,7 +95,7 @@ type MirrorProgress struct {
 // ProgressFunc 进度回调(可能被多次调用,实现需自行加锁)。
 type ProgressFunc func(MirrorProgress)
 
-// MirrorPull 拉取/更新指定环境(NamedSsh)的源码镜像(4gl/42f/42s-zh_CN/*.inc)到 mirrorDir/<环境名>/。
+// MirrorPull 拉取/更新指定环境(NamedSsh)的 source 镜像(4gl/**/*.4gl)到 mirrorDir/<环境名>/。
 // full=true 全量重建;否则增量(服务器 marker 记录基线)。
 // 增量只在本地已有完整基线(envDir 内存在 .tdict-mirror.ok 标记)时允许;
 // 本地首次/目录被清/旧版无标记 → 自动转全量,防止"服务器 marker 存在而本地
@@ -135,7 +131,7 @@ func MirrorPullToDirProgress(ctx context.Context, e *NamedSsh, envDir string, fu
 
 // MirrorPullToDirProfileProgress 是镜像拉取的实现：envDir 就是本环境的最终目录。
 //
-// profile 只影响服务器侧 find 的白名单：source=4gl/42f/42s/inc，interface=42f/42s。
+// profile 只影响服务器侧 find 的白名单：source=4gl/**/*.4gl，interface=42f/42s。
 // 落点、基线、增量、取消语义完全一致 —— 同一目录切 profile 不会自动删除旧类型，
 // 需要干净目录时先 --full 或换目录。
 //
@@ -424,18 +420,15 @@ func logfMirror(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "[mirror] "+format+"\n", args...)
 }
 
-// mirrorWhitelistFindExpr 服务器侧 find 的白名单:各模块 4gl(源码)、42f(编译表单)、
-// 42s 编译字符串(只取 zh_CN 语言目录 —— 文件所在目录的最后一个目录必须是 zh_CN;
-// 浅层 <模块>/42s/zh_CN/* 与更深层 <模块>/42s/<...>/zh_CN/* 都覆盖)、
-// 以及 *.inc 包含文件(4GL include,不限定目录,erp/com 下任意位置都收)。
-// 4fd 明确排除：它是设计期字段描述，fieldId 不稳定；前端画面用 42f+42s。
+// mirrorWhitelistFindExpr 服务器侧 find 的白名单。
+//
+// source 用后缀级限制 `-path '*/4gl/*' -iname '*.4gl'`：
+// 因此 a.4gl.src、a.4gltest、a.4gl.20201110 都不会进来。
 func mirrorWhitelistFindExpr(profile MirrorProfile) string {
 	if profile == MirrorInterface {
 		return `\( -path '*/42f/*' -o -path '*/42s/zh_CN/*' -o -path '*/42s/*/zh_CN/*' \)`
 	}
-	return `\( -path '*/4gl/*' -o -path '*/42f/*' ` +
-		`-o -path '*/42s/zh_CN/*' -o -path '*/42s/*/zh_CN/*' ` +
-		`-o -iname '*.inc' \)`
+	return `\( -path '*/4gl/*' -iname '*.4gl' \)`
 }
 
 // mirrorWhitelistVersion 白名单版本:新增文件类型时 +1。
@@ -445,7 +438,8 @@ func mirrorWhitelistFindExpr(profile MirrorProfile) string {
 //	v1: 4gl/4fd
 //	v2: +42s/zh_CN、*.inc
 //	v3: 4fd → 42f（前端画面改为 42f+42s；4fd 不再镜像）
-const mirrorWhitelistVersion = 3
+//	v4: source 收紧为 4gl/**/*.4gl；interface 保留 42f/42s
+const mirrorWhitelistVersion = 4
 
 // mirrorBackupSuffixes 备份/临时文件名特征(不含点全名包含即算备份)。
 // 服务器侧打包排除与本地残留清理共用同一份列表,避免两边规则漂移:
@@ -520,7 +514,7 @@ func shdq(s string) string {
 	return `"` + s + `"`
 }
 
-// mirrorPack 在服务器 TOP 下打包白名单文件(4gl/42f/42s-zh_CN/*.inc)。返回 (文件数, 归档字节);
+// mirrorPack 在服务器 TOP 下打包 profile 白名单文件。返回 (文件数, 归档字节);
 // 无变更时返回 (0, 0) 且不产生归档。marker 保留在 TOP 下供下次增量。
 func mirrorPack(conn *SSHConn, base, top string, full bool, profile MirrorProfile) (int, int64, error) {
 	m := shdq(base + ".mark")
@@ -528,7 +522,7 @@ func mirrorPack(conn *SSHConn, base, top string, full bool, profile MirrorProfil
 	l := shdq(base + ".list")
 	t := shdq(top)
 	// 注意:exec 通道不经过登录 profile,但这里只依赖绝对路径与标准工具
-	// 白名单树(4gl/42f/42s-zh_CN/*.inc)+ 排除备份/临时文件(如 x.4gl.bak、x.bck、x.bck1)
+	// 白名单树(按 profile)+ 排除备份/临时文件(如 x.4gl.bak、x.bck、x.bck1)
 	findExpr := mirrorWhitelistFindExpr(profile) + " " + mirrorBackupFindExpr()
 	fullFlag := "0"
 	if full {
@@ -674,7 +668,7 @@ func extractTarGz(r io.Reader, dest string) (int, error) {
 			_ = os.Chtimes(target, hdr.ModTime, hdr.ModTime)
 			files++
 		default:
-			// 符号链接/设备等不落盘(4gl/42f/42s/.inc 白名单内不会出现)
+			// 符号链接/设备等不落盘(白名单内不会出现)
 		}
 	}
 	return files, nil

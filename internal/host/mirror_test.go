@@ -98,16 +98,17 @@ func TestMirrorBackupFindExpr(t *testing.T) {
 	}
 }
 
-// 服务器侧 find 白名单:4gl/42f + 42s 的 zh_CN 语言目录 + *.inc。
+// 服务器侧 find 白名单:source 只收 4gl 目录下后缀为 .4gl 的文件。
 func TestMirrorWhitelistFindExpr(t *testing.T) {
 	expr := mirrorWhitelistFindExpr(MirrorSource)
-	if strings.Contains(expr, "4fd") {
-		t.Fatalf("白名单不应再包含 4fd: %s", expr)
-	}
-	for _, want := range []string{`-path '*/4gl/*'`, `-path '*/42f/*'`,
-		`-path '*/42s/zh_CN/*'`, `-path '*/42s/*/zh_CN/*'`, `-iname '*.inc'`} {
+	for _, want := range []string{`-path '*/4gl/*'`, `-iname '*.4gl'`} {
 		if !strings.Contains(expr, want) {
 			t.Errorf("白名单缺少 %s: %s", want, expr)
+		}
+	}
+	for _, bad := range []string{"4fd", "42f", "42s", ".inc", ".src"} {
+		if strings.Contains(expr, bad) {
+			t.Errorf("source 白名单不应含 %s: %s", bad, expr)
 		}
 	}
 }
