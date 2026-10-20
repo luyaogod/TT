@@ -46,6 +46,11 @@ type Meta struct {
 	TruncReason   string `json:"truncReason,omitempty"`
 	ServerLimited bool   `json:"serverLimited,omitempty"`
 
+	// TruncHint 只影响人读/CSV 的"行数"提示，不进入 JSON 信封。
+	// 不同命令的全量入口不同（ACC 用 query.limit，SQL 用 --limit 0），
+	// 不能让人读头写死一个错的下一步。
+	TruncHint string `json:"-"`
+
 	// ---- 落盘与杂项 ----
 	LocalPath    string   `json:"localPath,omitempty"`
 	SpillPartial bool     `json:"spillPartial,omitempty"`
@@ -122,8 +127,12 @@ func (m Meta) countLine() string {
 		if m.LocalPath != "" {
 			where = ",完整结果见落盘文件"
 		}
-		return fmt.Sprintf("行数 %d(已截断:%s%d 条,只回了前 %d 条%s;要直接看全量加 --limit 0)",
-			m.Returned, count, m.TotalRows, m.Returned, where)
+		action := "要直接看全量加 --limit 0"
+		if m.TruncHint != "" {
+			action = m.TruncHint
+		}
+		return fmt.Sprintf("行数 %d(已截断:%s%d 条,只回了前 %d 条%s;%s)",
+			m.Returned, count, m.TotalRows, m.Returned, where, action)
 	case m.TotalRows == 0:
 		return "行数 0(注意:上错号/上错环境也会是 0 行,先核对上面的企业编号)"
 	default:

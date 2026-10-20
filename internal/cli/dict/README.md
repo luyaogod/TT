@@ -53,6 +53,8 @@ tt dict acc query <作业|分类> --spec <文件|-> # 校验并执行 query 框�
 `ref1..ref20`）和空 `query`；AI 只填 `query`，字段/操作符由工具校验，绝不把
 字段名或值拼进 SQL。`--template` 的完整 JSON 输出可以直接保存后交给 `--spec`，工具会取其中的 `query`。
 
+`--human` 只换渲染，不丢信封：来源、计数、截断和 notes 会以 `#` 头打在表格前。
+
 值查询默认最多 20 条，结果带 `total/returned/truncated`。值表是业务数据，
 默认不进入字典同步；本地库只同步 ACC 定义/注册元数据，值请用
 `--at <环境>@<企业>` 直查。代码扫描不属于 ACC 查询：它只能产生候选证据，不能

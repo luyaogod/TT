@@ -76,8 +76,15 @@ func newAccShowCmd() *cobra.Command {
 				srcDetail = "full"
 			}
 			data := accShowData(meta, full)
+			// --human 只换渲染，不丢信封：来源、计数、notes 都先落进 m。
+			m := srcMeta()
+			m.TotalRows, m.Returned = 1, 1
+			m.Notes = append(m.Notes, "值查询：tt dict acc query "+args[0]+" --template")
 			if Format() != output.FormatTable {
-				return emitOneNotes(data, "值查询：tt dict acc query "+args[0]+" --template")
+				return emitWith(m, data, nil, nil)
+			}
+			if err := output.WriteMeta(os.Stdout, m); err != nil {
+				return err
 			}
 			printAccShow(meta, full)
 			return nil
@@ -147,13 +154,21 @@ func newAccQueryCmd() *cobra.Command {
 			if truncated {
 				notes = append(notes, fmt.Sprintf("结果已截断：返回 %d / %d；加大 query.limit 或 query.offset 继续", returned, total))
 			}
+			// 先建信封，再按格式分流。--human 只换渲染，绝不丢计数/截断/notes。
+			m := srcMeta()
+			m.TotalRows, m.Returned = total, returned
+			m.Truncated = truncated
+			if truncated {
+				m.TruncHint = "加大 query.limit 或 query.offset 继续"
+			}
+			m.Notes = append(m.Notes, notes...)
 			if Format() == output.FormatTable {
+				if err := output.WriteMeta(os.Stdout, m); err != nil {
+					return err
+				}
 				printAccQuery(meta, spec, data)
 				return nil
 			}
-			m := srcMeta()
-			m.TotalRows, m.Returned = total, returned
-			m.Notes = append(m.Notes, notes...)
 			return emitWith(m, data, nil, nil)
 		},
 	}

@@ -244,3 +244,43 @@ func TestDetailIsVisibleInJSONAndCSV(t *testing.T) {
 		t.Fatalf("CSV 头应回显视图: %v", comments)
 	}
 }
+
+// TestTruncHintOnlyAffectsHumanHeader 截断后的“下一步”因命令而异：
+// ACC 用 query.limit，SQL 用 --limit 0。TruncHint 只改人读/CSV 头，不进 JSON。
+func TestTruncHintOnlyAffectsHumanHeader(t *testing.T) {
+	m := Meta{TotalRows: 22, Returned: 3, Truncated: true, TruncHint: "加大 query.limit 或 query.offset 继续"}
+	line := m.countLine()
+	if !strings.Contains(line, "加大 query.limit") || strings.Contains(line, "--limit 0") {
+		t.Fatalf("人读头应使用命令自己的提示: %q", line)
+	}
+	if !strings.Contains(line, "共 22 条") || !strings.Contains(line, "只回了前 3 条") {
+		t.Fatalf("截断头必须同时给总数和返回数: %q", line)
+	}
+
+	var buf bytes.Buffer
+	if err := Emit(&buf, Options{Format: FormatJSON, Meta: m, Data: []string{"x"}}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "truncHint") {
+		t.Fatalf("TruncHint 不应进入 JSON 信封: %s", buf.String())
+	}
+}
+
+// TestWriteMetaKeepsNotes 人读模式也必须保留 notes；--human 只换渲染，不丢信息。
+func TestWriteMetaKeepsNotes(t *testing.T) {
+	var buf bytes.Buffer
+	m := Meta{
+		TotalRows: 22, Returned: 3, Truncated: true,
+		TruncHint: "加大 query.limit 或 query.offset 继续",
+		Notes:     []string{"已包含停用值"},
+	}
+	if err := WriteMeta(&buf, m); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{"# 行数 3", "加大 query.limit", "# 注:已包含停用值"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("人读头缺少 %q:\n%s", want, out)
+		}
+	}
+}
