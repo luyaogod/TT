@@ -48,6 +48,7 @@ var scopes = map[string]Scope{
 	"debug probe":  Env,
 	"session ls":   Env,
 	"interface":    Env,
+	"outline":      Env,
 	"env ents":     Env,
 
 	// ---- 会话寻址：<环境> 只用来收窄 ----

@@ -1,6 +1,6 @@
 // Package cli 装配 tt 的根命令。
 //
-// 四个能力组并存，各自实现在独立子包里，互不 import：
+// 各能力组并存，各自实现在独立子包里，互不 import：
 //
 //	tt debug …   原 tdebug（AI 人机协同调试）
 //	tt dev …     原 tdev（设计器包安全编辑）
@@ -8,6 +8,7 @@
 //	tt db …      数据库连通性测试与只读 SQL
 //	tt file …    服务器文件只读浏览与离线源码镜像
 //	tt interface … 用 .42f + .42s 合成前端页面/字段/中文标签
+//	tt outline …  4GL 源码大纲（块树 / 行范围）
 //	tt drawio …  原型图（用 T100 组件库画界面草图）
 //
 // 共享的 CLI 上下文在 internal/cli/common（叶子包，避免循环依赖）。
@@ -31,6 +32,7 @@ import (
 	"tt/internal/cli/drawio"
 	"tt/internal/cli/file"
 	"tt/internal/cli/interfacecmd"
+	"tt/internal/cli/outline"
 	"tt/internal/cli/session"
 	"tt/internal/output"
 )
@@ -56,6 +58,7 @@ config.json、同一个本地 Web 服务（tt serve）。
   tt dev tzs …   .tzs 表单包：export 只读解压；读写表单走引擎的具名动词
                  （tt dev tzs <动词> --args '<JSON 对象>'），不是拼 XML
   tt interface … 前端画面：合成 .42f + .42s（页面 / 字段 / 中文标签）
+  tt outline …   4GL 源码大纲：函数 / UI 块与行范围
   tt drawio …    原型图：用 T100 组件库生成 .drawio
   tt env / config / serve / install / update   环境、配置、本地服务、安装、自更新
 
@@ -63,8 +66,9 @@ config.json、同一个本地 Web 服务（tt serve）。
 file 没有 put/rm；调试重放与镜像打包在服务器上留下的临时文件除外。
 
 退出码按命令线各自定义（同一个数字在不同组含义不同，包装脚本按子命令辨认）。
-tt interface 的码表：
-  tt interface  0 成功 / 1 表单或 42s 不合法 / 2 用法或同名歧义 / 4 精确页面/字段不存在`,
+部分命令的码表：
+  tt interface  0 成功 / 1 表单或 42s 不合法 / 2 用法或同名歧义 / 4 精确页面/字段不存在
+  tt outline    0 成功 / 2 用法或文件名歧义 / 4 文件不存在`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }
@@ -114,6 +118,7 @@ func init() {
 	dict.Register(rootCmd)
 	session.Register(rootCmd)
 	interfacecmd.Register(rootCmd)
+	outline.Register(rootCmd)
 	drawio.Register(rootCmd)
 
 	rootCmd.AddCommand(newEnvCmd())

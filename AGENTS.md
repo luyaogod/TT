@@ -11,8 +11,10 @@ TT/
 ├─ config.example.json  配置文件样例（字段说明入口之一）
 ├─ VERSION              版本号唯一出处（两个打包脚本读它，make version-check 对照 web）
 │
+├─ .agents/             项目 Agent 技能与说明（tt-add-cli / tt-test / asd-ste100）
+│
 ├─ internal/            Go 后端全部实现
-│  ├─ cli/              cobra 命令树装配处：五条线 + 共用命令；唯一的接线处
+│  ├─ cli/              cobra 命令树装配处：各能力线 + 共用命令；唯一的接线处
 │  │  ├─ common/        命令组间共享上下文（全局开关、MetaProvider、WebFS；叶子包防成环）
 │  │  ├─ debug/         调试命令组门面（fgldb 那条线）
 │  │  ├─ dev/           tt dev 命令组（三层，目录即分层）
@@ -28,6 +30,7 @@ TT/
 │  │  ├─ db/            tt db 命令组（sql 只读 SQL / ping 本机连库 / probe 服务器连库）
 │  │  ├─ file/          tt file 命令组（ls/cat/head/tail/grep/find/stat/wc/du/get + mirror；只读 SFTP）
 │  │  ├─ interfacecmd/  tt interface 命令组（.42f + .42s → 页面/字段/中文标签）
+│  │  ├─ outline/       tt outline 命令（.4gl → 函数/UI 块树）
 │  │  ├─ dict/          字典命令组（查询 / db sync / spill）
 │  │  ├─ session/        tt session 命令组（会话：建/列/看/改 ENT/结束/收掉/透传/起作业）
 │  ├─ config/           统一配置层：位置解析、唯一写入口 Edit、原子写、打码、缓存清单
