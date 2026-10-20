@@ -11,9 +11,10 @@ import (
 )
 
 var (
-	progKW   string
-	progLang string
-	progSub  bool
+	progKW         string
+	progLang       string
+	progSub        bool
+	progTablesMode string
 )
 
 const progBatchTip = `批量查多个程序：tt dict prog "a,b,c"`
@@ -34,6 +35,8 @@ var progCmd = &cobra.Command{
 无参数时列出全部程序(--kw 按程序编号/中文名称搜索,从业务词找程序)。
 程序名称有简体(--lang zh_CN,默认)与繁体(--lang zh_TW)两份,搜索用字要对应;
 一个程序被很多作业使用时(如共用维护程序可达数百个),作业表默认只列前 --limit 行。
+用 --tables none|names|full 控制用表矩阵：none 不查/不返回，names 只回表格编号，
+full 保留表说明与操作类别（默认）。
 编号可用逗号分隔批量查询：单编号返回程序详情对象，多编号返回 items[] 数组
 （每个编号带 found；缺失的列在 missing[]，单编号缺失则报 NOT_FOUND）。
 
@@ -48,10 +51,15 @@ JSON 形状（单编号响应会在 notes 里提示批量写法）：
   tt dict prog cl_abi           # 库/元件:说明 + 用表清单
   tt dict prog --kw 对帐        # 按中文作业名找程序
   tt dict prog --sub --kw ABI   # 在子程序/元件里按业务词搜
+  tt dict prog aapi011 --tables names  # 只要用表编号
+  tt dict prog aapi011 --tables none   # 不看用表矩阵
   tt dict prog aapi011 --json
   tt dict prog "aapi011,aapq110_01,cl_abi"   # 批量；每个编号一条结果`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if _, err := normalizeProgTables(progTablesMode); err != nil {
+			return err
+		}
 		if len(args) == 0 {
 			if progSub {
 				return runSubProgList()
@@ -90,10 +98,14 @@ func runProgDetail(code string) error {
 		if sub != nil {
 			tables, _ := GetDB().QueryProgTables(code, progLang)
 			if Format() != output.FormatTable {
-				return emitOneNotes(map[string]any{
+				item := map[string]any{
 					"编号": code, "found": true, "程序": nil, "子程序": sub,
 					"表格": tables, "作业": []any{},
-				}, progBatchTip)
+				}
+				if err := shapeProgTables(item); err != nil {
+					return err
+				}
+				return emitOneNotes(item, progBatchTip)
 			}
 			printSubProgInfo(sub)
 			if base := progBaseCode(code); base != "" {
@@ -108,10 +120,14 @@ func runProgDetail(code string) error {
 			return notFoundErr("程序/作业/元件 %s 不存在", code).WithHint(progBatchTip)
 		}
 		if Format() != output.FormatTable {
-			return emitOneNotes(map[string]any{
+			item := map[string]any{
 				"编号": code, "found": false, "程序": nil, "作业": []any{},
 				"表格": tables, "note": "未登记为程序/作业；gzdg_t 有用表索引",
-			}, progBatchTip)
+			}
+			if err := shapeProgTables(item); err != nil {
+				return err
+			}
+			return emitOneNotes(item, progBatchTip)
 		}
 		fmt.Println("未找到程序/作业/元件 '" + code + "' 的登记；但 gzdg_t 有用表索引：")
 		return printProgTables(code, true)
@@ -132,7 +148,11 @@ func runProgDetail(code string) error {
 		if len(tables) == 0 {
 			notes = append(notes, "gzdg_t 没有该程序的用表登记（可能只用了动态 SQL）")
 		}
-		return emitOneNotes(map[string]any{"程序": info, "作业": jobs, "表格": tables}, notes...)
+		item := map[string]any{"程序": info, "作业": jobs, "表格": tables}
+		if err := shapeProgTables(item); err != nil {
+			return err
+		}
+		return emitOneNotes(item, notes...)
 	}
 
 	if info.IsProg {
@@ -225,6 +245,8 @@ func runProgBatch(codes []string) error {
 		switch v := item["表格"].(type) {
 		case []db.ProgTableRow:
 			tableN = len(v)
+		case []string:
+			tableN = len(v)
 		}
 		rows = append(rows, []string{code, status, name, fmt.Sprint(jobN), fmt.Sprint(tableN)})
 	}
@@ -246,6 +268,57 @@ func runProgBatch(codes []string) error {
 	return nil
 }
 
+// normalizeProgTables 校验 --tables 投影。
+func normalizeProgTables(s string) (string, error) {
+	mode := strings.ToLower(strings.TrimSpace(s))
+	switch mode {
+	case "", "full":
+		return "full", nil
+	case "none", "names":
+		return mode, nil
+	default:
+		return "", fmt.Errorf("--tables 只接受 none | names | full（当前 %q）", s)
+	}
+}
+
+// shapeProgTables 把详情里的“表格”按投影改成 []string / []ProgTableRow / 空。
+func shapeProgTables(item map[string]any) error {
+	mode, err := normalizeProgTables(progTablesMode)
+	if err != nil {
+		return err
+	}
+	switch mode {
+	case "none":
+		item["表格"] = []string{}
+		return nil
+	case "full":
+		return nil
+	}
+	var names []string
+	switch rows := item["表格"].(type) {
+	case []db.ProgTableRow:
+		for _, r := range rows {
+			names = append(names, r.Table)
+		}
+	case []string:
+		names = rows
+	}
+	item["表格"] = names
+	return nil
+}
+
+// queryProgTablesForDetail 在 --tables none 时不查用表矩阵。
+func queryProgTablesForDetail(code string) ([]db.ProgTableRow, error) {
+	mode, err := normalizeProgTables(progTablesMode)
+	if err != nil {
+		return nil, err
+	}
+	if mode == "none" {
+		return []db.ProgTableRow{}, nil
+	}
+	return GetDB().QueryProgTables(code, progLang)
+}
+
 // progDetailItem 取一个编号的详情，供批量查询使用；不打印任何东西。
 // found=false 仍可能带“用表索引”（gzdg_t 覆盖库/元件/开窗），但不算程序登记。
 func progDetailItem(code string) (map[string]any, bool, error) {
@@ -258,24 +331,35 @@ func progDetailItem(code string) (map[string]any, bool, error) {
 		if jerr != nil && !db.IsMissingTable(jerr) {
 			return nil, false, jerr
 		}
-		tables, terr := GetDB().QueryProgTables(code, progLang)
+		tables, terr := queryProgTablesForDetail(code)
 		if terr != nil && !db.IsMissingTable(terr) {
 			return nil, false, terr
 		}
-		return map[string]any{"编号": code, "found": true, "程序": info, "作业": jobs, "表格": tables}, true, nil
+		item := map[string]any{"编号": code, "found": true, "程序": info, "作业": jobs, "表格": tables}
+		if err := shapeProgTables(item); err != nil {
+			return nil, false, err
+		}
+		return item, true, nil
 	}
 	sub, serr := GetDB().QuerySubProgInfo(code, progLang)
 	if serr != nil && !db.IsMissingTable(serr) {
 		return nil, false, serr
 	}
-	tables, terr := GetDB().QueryProgTables(code, progLang)
+	tables, terr := queryProgTablesForDetail(code)
 	if terr != nil && !db.IsMissingTable(terr) {
 		return nil, false, terr
 	}
 	if sub != nil {
-		return map[string]any{"编号": code, "found": true, "程序": nil, "子程序": sub, "作业": []any{}, "表格": tables}, true, nil
+		item := map[string]any{"编号": code, "found": true, "程序": nil, "子程序": sub, "作业": []any{}, "表格": tables}
+		if err := shapeProgTables(item); err != nil {
+			return nil, false, err
+		}
+		return item, true, nil
 	}
 	item := map[string]any{"编号": code, "found": false, "程序": nil, "作业": []any{}, "表格": tables}
+	if err := shapeProgTables(item); err != nil {
+		return nil, false, err
+	}
 	if len(tables) > 0 {
 		item["note"] = "未登记为程序/作业；gzdg_t 有用表索引"
 	} else {
@@ -357,6 +441,13 @@ func runSubProgList() error {
 // fromNotFound=true 表示调用方刚说过"未登记为程序/作业":索引里没记录就静默,
 // 有记录则说明它是库/元件/开窗之类——照样给出来(实测 cl_abi 22 条、s_apcp300 8 条)。
 func printProgTables(code string, fromNotFound bool) error {
+	mode, err := normalizeProgTables(progTablesMode)
+	if err != nil {
+		return err
+	}
+	if mode == "none" {
+		return nil
+	}
 	tables, err := GetDB().QueryProgTables(code, progLang)
 	if err != nil {
 		if db.IsMissingTable(err) {
@@ -371,6 +462,17 @@ func printProgTables(code string, fromNotFound bool) error {
 			return nil
 		}
 		fmt.Println("\n使用的表格 (0):\n  (无登记;该程序未在 gzdg_t 登记用表,或只用了动态 SQL)")
+		return nil
+	}
+	if mode == "names" {
+		fmt.Printf("\n使用的表格 (%d): ", len(tables))
+		for i, t := range tables {
+			if i > 0 {
+				fmt.Print(", ")
+			}
+			fmt.Print(t.Table)
+		}
+		fmt.Println()
 		return nil
 	}
 	fmt.Printf("\n使用的表格 (%d):\n", len(tables))
@@ -545,5 +647,6 @@ func init() {
 	progCmd.Flags().StringVar(&progKW, "kw", "", "按程序编号/中文名称搜索 (无编号时的列表模式)")
 	progCmd.Flags().StringVar(&progLang, "lang", "zh_CN", "程序名称语言别 (gzzal002, 默认 zh_CN)")
 	progCmd.Flags().BoolVar(&progSub, "sub", false, "无编号时:列出/搜索子程序与元件(gzde_t)而不是主程序")
+	progCmd.Flags().StringVar(&progTablesMode, "tables", "full", "用表矩阵: none | names | full")
 	Group.AddCommand(progCmd)
 }

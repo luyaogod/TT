@@ -44,6 +44,9 @@ func newSQLCmd() *cobra.Command {
 --format csv 给"注释头 + 纯净 CSV"：注释行全以「# 」开头且全在头部，
 grep -v '^# ' 切下去就是一个标准 CSV（逗号/引号/换行按 RFC4180 转义）。
 
+列名从 SQL*Plus 的 CSV 元数据取，保留完整别名；旧版 sqlplus 不支持 CSV 模式时会明确报错，
+不会把截断的文本表头当成列名返回。
+
 限制（都是刻意的）：
   - 只允许**单条** SELECT / WITH；写操作、DDL、PL/SQL 块、多语句、sqlplus 命令一律拒绝；
   - 库会话是只读事务，常规写会被库自己挡回去；

@@ -55,17 +55,17 @@ func resetDictPackageState(t *testing.T) {
 		&checkKW, &checkLang,
 		&dbSyncTable, &discoverType, &discoverHost,
 		&msgLang, &msgText, &msgType, &msgStatus, &msgProg,
-		&paramLang, &specLang,
-		&progKW, &progLang,
+		&paramLang, &specLang, &docListMode,
+		&progKW, &progLang, &progTablesMode,
 		&sccKW, &sccLang,
-		&tableKW, &tableLang,
+		&tableKW, &tableLang, &tableCols,
 		&winKW, &winLang,
 		&common.ConfigPath, &common.Env, &common.Format, &common.Version,
 	))
 	// 布尔
 	t.Cleanup(snapVars(
 		&discoverSave, &dbListSecrets, &msgFull,
-		&progSub, &tableBrief, &tableWho, &srcLocal,
+		&progSub, &tableBrief, &tableWho, &sccBrief, &srcLocal,
 		&common.JSON, &common.CSV, &common.Verbose,
 	))
 	// 整数
@@ -191,10 +191,10 @@ var dictMutableVars = []string{
 	"checkKW", "checkLang",
 	"dbSyncTable", "discoverType", "discoverHost", "discoverSave", "dbListSecrets",
 	"msgLang", "msgText", "msgType", "msgStatus", "msgProg", "msgFull",
-	"paramLang", "specLang",
-	"progKW", "progLang", "progSub",
+	"paramLang", "specLang", "docListMode",
+	"progKW", "progLang", "progTablesMode", "progSub",
 	"sccKW", "sccLang",
-	"tableKW", "tableLang", "tableBrief", "tableWho",
+	"tableKW", "tableLang", "tableCols", "tableBrief", "tableWho", "sccBrief",
 	"winKW", "winLang",
 	"dataSrc", "srcLocal", "srcTarget", "srcNotes", "srcStarted",
 	"dbCfg",

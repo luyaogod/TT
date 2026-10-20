@@ -15,6 +15,7 @@ package debug
 // 所以这里绝不硬编码账号,解析不到就直接拒绝,并把「企业→账号」回显在结果里。
 
 import (
+	"encoding/csv"
 	"fmt"
 	"strings"
 	"time"
@@ -240,7 +241,9 @@ func oraReadonlyScript(sql string) string {
 		"set linesize 32767",
 		"set trimspool on",
 		"set feedback off",
-		"set colsep '|'",
+		// 12.2+ 的 CSV 模式：表头保留完整列名，不会被 sqlplus 按数据宽度截断。
+		// 旧版 sqlplus 若不认这个选项，会报 SP2-0158；宁可失败，不能拿截断的列名当结果。
+		"set markup csv on",
 		"set define off",
 		"set verify off",
 		"set long 4000",
@@ -269,28 +272,22 @@ func kbReadonlyScript(sql string, timeoutSec int) string {
 // "-----+-----" 分隔线。统一下去噪。
 func parseSQLOut(dialect, out string) ([]string, [][]string, error) {
 	if e := sqlErrOf(out); e != "" {
+		if strings.Contains(e, "SP2-0158") {
+			return nil, nil, fmt.Errorf("列名不可信: 当前 sqlplus 不支持 SET MARKUP CSV ON（%s）；请升级 SQL*Plus，不能用截断的文本表头代替", e)
+		}
 		return nil, nil, fmt.Errorf("查询失败: %s", e)
 	}
-	var lines []string
-	for _, ln := range strings.Split(strings.ReplaceAll(out, "\r\n", "\n"), "\n") {
-		t := strings.TrimRight(ln, " \t")
-		if strings.TrimSpace(t) == "" {
-			continue
-		}
-		// sqlplus 的回显与统计行
-		if strings.HasPrefix(t, "SQL>") || strings.HasPrefix(t, "PL/SQL") ||
-			strings.Contains(t, "rows selected") || strings.Contains(t, "row selected") {
-			continue
-		}
-		// ksql 的表头分隔线:全是 - + 空格
-		if isRuleLine(t) {
-			continue
-		}
-		lines = append(lines, t)
-	}
+	lines := cleanSQLOutLines(out)
 	lines = stripLoginBanner(lines)
 	if len(lines) == 0 {
 		return nil, nil, nil
+	}
+	// Oracle 12.2+ 的 CSV 输出：完整表头 + RFC4180 转义。旧格式（| 分隔）
+	// 继续保留解析，兼容测试夹具与不支持 CSV 的 sqlplus。
+	if dialect == "oracle" {
+		if cols, rows, ok := parseCSVOut(lines); ok {
+			return cols, rows, nil
+		}
 	}
 	cols := splitRow(lines[0])
 	rows := make([][]string, 0, len(lines)-1)
@@ -298,6 +295,55 @@ func parseSQLOut(dialect, out string) ([]string, [][]string, error) {
 		rows = append(rows, splitRow(ln))
 	}
 	return cols, rows, nil
+}
+
+// cleanSQLOutLines 去掉 sqlplus/ksql 的噪声行，保留供 CSV 或旧格式解析的文本行。
+func cleanSQLOutLines(out string) []string {
+	var lines []string
+	for _, ln := range strings.Split(strings.ReplaceAll(out, "\r\n", "\n"), "\n") {
+		t := strings.TrimRight(ln, " \t")
+		if strings.TrimSpace(t) == "" {
+			continue
+		}
+		if strings.HasPrefix(t, "SQL>") || strings.HasPrefix(t, "PL/SQL") ||
+			strings.Contains(t, "rows selected") || strings.Contains(t, "row selected") {
+			continue
+		}
+		if isRuleLine(t) {
+			continue
+		}
+		lines = append(lines, t)
+	}
+	return lines
+}
+
+// parseCSVOut 解析 SQL*Plus 12.2+ 的 CSV 输出。
+//
+// 只有“确实像 CSV”的输入才返回 ok：至少有一段逗号，或首行是带引号的表头。
+// 这样旧的 | 分隔输出仍走 splitRow，不会被 csv.Reader 误读成一列。
+func parseCSVOut(lines []string) (cols []string, rows [][]string, ok bool) {
+	if len(lines) == 0 {
+		return nil, nil, false
+	}
+	looksCSV := strings.HasPrefix(strings.TrimSpace(lines[0]), "\"") || strings.Contains(lines[0], ",")
+	if !looksCSV {
+		return nil, nil, false
+	}
+	r := csv.NewReader(strings.NewReader(strings.Join(lines, "\n")))
+	r.FieldsPerRecord = -1
+	r.TrimLeadingSpace = true
+	recs, err := r.ReadAll()
+	if err != nil || len(recs) == 0 || len(recs[0]) == 0 {
+		return nil, nil, false
+	}
+	if len(recs[0]) == 1 && !strings.HasPrefix(strings.TrimSpace(lines[0]), "\"") {
+		return nil, nil, false
+	}
+	cols = recs[0]
+	if len(recs) > 1 {
+		rows = recs[1:]
+	}
+	return cols, rows, true
 }
 
 // isRuleLine 判断是不是表头下的分隔线。

@@ -45,6 +45,39 @@ BMAA001 | BMAASTUS
 	}
 }
 
+func TestParseSQLOutOracleCSVKeepsFullColumnNames(t *testing.T) {
+	// SQL*Plus 12.2+ `set markup csv on` 的真实形态：表头带引号、完整列名。
+	raw := `"ABCDEF","NM","GHIJKL"
+"Y",42,"xxxxx"
+`
+	cols, rows, err := parseSQLOut("oracle", raw)
+	if err != nil {
+		t.Fatalf("不该报错: %v", err)
+	}
+	if strings.Join(cols, ",") != "ABCDEF,NM,GHIJKL" {
+		t.Fatalf("CSV 表头被截断: %v", cols)
+	}
+	if len(rows) != 1 || rows[0][0] != "Y" || rows[0][2] != "xxxxx" {
+		t.Fatalf("CSV 数据行解析错了: %v", rows)
+	}
+}
+
+func TestParseSQLOutOracleCSVWithBanner(t *testing.T) {
+	raw := `GLOBAL_NAME
+--------------------------------------------------------------------------------
+top109ind/dsdemo@T35PRD
+"ABCDEF","NM"
+"Y",42
+`
+	cols, _, err := parseSQLOut("oracle", raw)
+	if err != nil {
+		t.Fatalf("不该报错: %v", err)
+	}
+	if strings.Join(cols, ",") != "ABCDEF,NM" {
+		t.Fatalf("登录横幅后的 CSV 表头解析错了: %v", cols)
+	}
+}
+
 func TestParseSQLOutKingbase(t *testing.T) {
 	// psql -A -F '|' 的形态:表头 + 一条全横线的分隔行 + 数据
 	raw := "bmaa001|bmaastus\n--------+--------\nFCPU010100003|Y\n"
@@ -145,7 +178,7 @@ func TestClampSQLTimeout(t *testing.T) {
 // 脚本里那几行是"不设就会出鬼"的,单独钉住别被人顺手删掉。
 func TestReadonlyScripts(t *testing.T) {
 	ora := oraReadonlyScript("select 1 from dual")
-	for _, must := range []string{"set define off", "long 4000", "SET TRANSACTION READ ONLY", "set colsep '|'"} {
+	for _, must := range []string{"set define off", "long 4000", "SET TRANSACTION READ ONLY", "set markup csv on"} {
 		if !strings.Contains(ora, must) {
 			t.Errorf("Oracle 脚本缺少 %q —— 少了它 SQL 里的 & 会挂住 / CLOB 会被静默截断", must)
 		}

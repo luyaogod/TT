@@ -11,8 +11,9 @@ import (
 )
 
 var (
-	sccKW   string
-	sccLang string
+	sccKW    string
+	sccLang  string
+	sccBrief bool
 )
 
 // sccListItem is the display form of one SCC in list mode.
@@ -61,6 +62,19 @@ type sccDetail struct {
 	Values []sccValueView `json:"分类值"`
 }
 
+// sccBriefDetail / sccBriefValue 是 --brief 的稳定投影：只留业务最常要的
+// “值 → 说明”，不把单头维护字段、扩展列和来源信息带出来。
+type sccBriefDetail struct {
+	ID     string          `json:"分类码"`
+	Name   string          `json:"名称,omitempty"`
+	Values []sccBriefValue `json:"分类值"`
+}
+
+type sccBriefValue struct {
+	Val  string `json:"值"`
+	Desc string `json:"说明"`
+}
+
 var sccCmd = &cobra.Command{
 	Use:   "scc [分类码...]",
 	Short: "查询系统分类码 (SCC)",
@@ -72,12 +86,16 @@ var sccCmd = &cobra.Command{
 JSON 形状：
   详情 data = {分类码, 单头:{...}, 分类值:[...]}
   列表/搜索 data = [{分类码, 群组, 状态, 名称, 值数}]
+  --brief   data = {分类码, 名称, 分类值:[{值,说明}]}
  批量      data = {items: [{分类码, 单头, 分类值[]}], missing[]}
-精确分类码不存在时报 NOT_FOUND（退出码 4）；--kw 无匹配仍是成功空数组。`,
+ 批量+--brief data = {items: [{分类码, 名称, 分类值:[{值,说明}]}], missing[]}
+精确分类码不存在时报 NOT_FOUND（退出码 4）；--kw 无匹配仍是成功空数组。
+--human 批量不会再降级成摘要：不加 --brief 时逐条展示详情。`,
 	Example: `  tt dict scc
   tt dict scc --kw 币别
   tt dict scc 4
   tt dict scc 4 --json
+  tt dict scc 4 --brief          # 只留值→说明
   tt dict scc "1001,2014,2015"   # 批量；每个分类码一条结果`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -142,6 +160,14 @@ func runSccDetail(id string) error {
 	if !found {
 		return notFoundErr("分类码 %s 不存在", id).WithHint("列出全部分类码：tt dict scc")
 	}
+	if sccBrief {
+		brief := briefSccDetail(detail)
+		if Format() == output.FormatTable {
+			printSccBrief(brief)
+			return nil
+		}
+		return emitOneNotes(brief, "批量查多个分类码：tt dict scc \"1001,2014,2015\" --brief")
+	}
 	if Format() == output.FormatTable {
 		printSccDetail(detail)
 		return nil
@@ -197,9 +223,44 @@ func runSccBatch(ids []string) error {
 	if IsCSV() {
 		return fmt.Errorf("批量详情不支持 --csv，请使用 --json 或 --format table")
 	}
-	items := make([]*sccDetail, 0, len(ids))
 	missing := make([]string, 0)
+	notes := make([]string, 0)
 	rows := make([][]string, 0, len(ids))
+	if sccBrief {
+		items := make([]*sccBriefDetail, 0, len(ids))
+		for _, id := range ids {
+			d, found, err := querySccDetail(id)
+			if err != nil {
+				return err
+			}
+			if !found {
+				missing = append(missing, id)
+				continue
+			}
+			b := briefSccDetail(d)
+			items = append(items, b)
+			rows = append(rows, []string{b.ID, b.Name, fmt.Sprint(len(b.Values))})
+			if Format() == output.FormatTable {
+				printSccBrief(b)
+			}
+		}
+		if len(missing) > 0 {
+			notes = append(notes, "不存在的分类码："+strings.Join(missing, ", "))
+		}
+		data := map[string]any{"items": items}
+		if len(missing) > 0 {
+			data["missing"] = missing
+		}
+		if Format() != output.FormatTable {
+			return emitDetailNotes(data, []string{"分类码", "名称", "值数"}, rows, notes...)
+		}
+		for _, n := range notes {
+			fmt.Println("注意:" + n)
+		}
+		return nil
+	}
+
+	items := make([]*sccDetail, 0, len(ids))
 	for _, id := range ids {
 		d, found, err := querySccDetail(id)
 		if err != nil {
@@ -211,24 +272,46 @@ func runSccBatch(ids []string) error {
 		}
 		items = append(items, d)
 		rows = append(rows, []string{d.ID, d.Header.Name, fmt.Sprint(len(d.Values))})
+		if Format() == output.FormatTable {
+			printSccDetail(d)
+		}
+	}
+	if len(missing) > 0 {
+		notes = append(notes, "不存在的分类码："+strings.Join(missing, ", "))
 	}
 	data := map[string]any{"items": items}
 	if len(missing) > 0 {
 		data["missing"] = missing
 	}
-	var notes []string
-	if len(missing) > 0 {
-		notes = append(notes, "不存在的分类码："+strings.Join(missing, ", "))
-	}
-	headers := []string{"分类码", "名称", "值数"}
 	if Format() != output.FormatTable {
-		return emitDetailNotes(data, headers, rows, notes...)
+		return emitDetailNotes(data, []string{"分类码", "名称", "值数"}, rows, notes...)
 	}
-	output.PrintTable(headers, rows)
 	for _, n := range notes {
 		fmt.Println("注意:" + n)
 	}
 	return nil
+}
+
+func briefSccDetail(d *sccDetail) *sccBriefDetail {
+	b := &sccBriefDetail{ID: d.ID, Name: d.Header.Name, Values: make([]sccBriefValue, 0, len(d.Values))}
+	for _, v := range d.Values {
+		b.Values = append(b.Values, sccBriefValue{Val: v.Val, Desc: v.Desc})
+	}
+	return b
+}
+
+func printSccBrief(d *sccBriefDetail) {
+	fmt.Printf("=== %s ===\n", d.ID)
+	if d.Name != "" {
+		fmt.Printf("名称: %s\n", d.Name)
+	}
+	headers := []string{"值", "说明"}
+	rows := make([][]string, 0, len(d.Values))
+	for _, v := range d.Values {
+		rows = append(rows, []string{v.Val, v.Desc})
+	}
+	output.PrintTable(headers, rows)
+	fmt.Println()
 }
 
 func printSccDetail(d *sccDetail) {
@@ -302,5 +385,6 @@ const sccExtNote = `
 func init() {
 	sccCmd.Flags().StringVar(&sccKW, "kw", "", "按分类码/名称过滤 (仅列表模式)")
 	sccCmd.Flags().StringVar(&sccLang, "lang", "zh_CN", "说明语言别 (gzcal002/gzcbl003, 默认 zh_CN)")
+	sccCmd.Flags().BoolVar(&sccBrief, "brief", false, "只输出值→说明（详情/批量均可用）")
 	Group.AddCommand(sccCmd)
 }

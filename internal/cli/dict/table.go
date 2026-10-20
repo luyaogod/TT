@@ -15,6 +15,7 @@ var (
 	tableLang  string
 	tableBrief bool
 	tableWho   bool
+	tableCols  string
 )
 
 var tableCmd = &cobra.Command{
@@ -32,11 +33,15 @@ var tableCmd = &cobra.Command{
 自己维护;参考作业 azzq902「程式編號對應表格查詢」),并给出各程序对它的操作类别
 (S=查询/I=新增/U=修改/D=删除)——改表前的影响分析用它。
 --brief 与 --who 只能二选一。
+指定表名时可用字段投影：--col 精确选字段（逗号分隔），--kw 按字段名/说明筛选；
+投影只缩短 fields[]，表级信息与每个字段对象仍完整。
 
 JSON 形状（单表响应会在 notes 里提示批量写法）：
   详情（默认）  data = [{表名, 表说明, 模块, 类型, 字段[], 键值[], 索引[]}]
   --brief       data = [{表名, 表说明, 模块, 类型, 字段数}]
   --kw/无参数   data = [同上表级项]
+  --col         data = [表级项 + 只含指定字段的 字段[]]
+  --kw(有表名)  data = [表级项 + 按字段名/说明/备注筛选后的 字段[]]
   多表用逗号：tt dict r.t "imaa_t,imaj_t" --brief
   计数：--brief 的 totalRows 是表数；完整详情的 totalRows 是展平后的字段行数。
   精确表名不存在时返回 NOT_FOUND（退出码 4）。
@@ -46,6 +51,8 @@ JSON 形状（单表响应会在 notes 里提示批量写法）：
   tt dict r.t --kw 应收        # 按中文说明找表(列表模式)
   tt dict r.t --brief "apca_t,apcb_t,glab_t"   # 多表只解语义,不打字段明细
   tt dict r.t glab_t --who                     # 反查:哪些程序在用 glab_t(含操作类别)
+  tt dict r.t apca_t --col apca035,apca036   # 只看两个字段
+  tt dict r.t apca_t --kw 暂估                # 按字段名/说明筛字段
   tt dict r.t dzea_t --json
   tt dict r.t dzea_t --env 正式区          # 直查该环境的远程库
   tt dict r.t dzea_t --env local:正式区    # 查该环境的本地库`,
@@ -62,6 +69,12 @@ JSON 形状（单表响应会在 notes 里提示批量写法）：
 		// --who 与 --brief 回答的是两件事，同时给会让人以为 brief 能裁剪 who 的输出。
 		if tableWho && tableBrief {
 			return fmt.Errorf("--brief 与 --who 只能二选一")
+		}
+		if tableBrief && tableCols != "" {
+			return fmt.Errorf("--brief 与 --col 只能二选一：--brief 是表级摘要，--col 是字段投影")
+		}
+		if tableKW != "" && tableCols != "" {
+			return fmt.Errorf("--kw 与 --col 只能二选一：--kw 按字段名/说明筛，--col 按列名精确选")
 		}
 		// --who:反查"哪些程序在用这些表"(gzdg_t,参考作业 azzq902),与看字典是两回事
 		if tableWho {
@@ -87,6 +100,11 @@ JSON 形状（单表响应会在 notes 里提示批量写法）：
 				e = e.WithHint("批量查多张表：tt dict r.t \"a,b,c\" --brief")
 			}
 			return e
+		}
+
+		// 字段投影：只改 fields[]，表级信息和每个被选字段对象都保持完整。
+		if err := projectTableFields(dicts, tableCols, tableKW); err != nil {
+			return err
 		}
 
 		// --brief:只要表级信息。多表同查时默认会打每张表的全部字段(7 张表 ≈ 700 行),
@@ -133,6 +151,56 @@ JSON 形状（单表响应会在 notes 里提示批量写法）：
 		}
 		return nil
 	},
+}
+
+// projectTableFields 对详情结果做字段投影。--col 是精确列名、全有或全无；
+// --kw 是字段名/说明/备注的模糊筛选，零命中保留表级信息并返回空字段数组。
+func projectTableFields(dicts []*db.TableDict, colSpec, kw string) error {
+	kw = strings.ToLower(strings.TrimSpace(kw))
+	if strings.TrimSpace(colSpec) == "" && kw == "" {
+		return nil
+	}
+	var wanted []string
+	if strings.TrimSpace(colSpec) != "" {
+		wanted = splitNames(colSpec)
+		if len(wanted) == 0 {
+			return fmt.Errorf("--col 没有有效列名")
+		}
+	}
+	for _, d := range dicts {
+		if len(wanted) > 0 {
+			byName := make(map[string]db.TableInfo, len(d.Fields))
+			for _, f := range d.Fields {
+				byName[strings.ToLower(f.FieldName)] = f
+			}
+			picked := make([]db.TableInfo, 0, len(wanted))
+			var missing []string
+			for _, name := range wanted {
+				f, ok := byName[strings.ToLower(name)]
+				if !ok {
+					missing = append(missing, d.TableName+"."+name)
+					continue
+				}
+				picked = append(picked, f)
+			}
+			if len(missing) > 0 {
+				return notFoundErr("字段不存在: %s", strings.Join(missing, ", ")).
+					WithHint("看可用字段：tt dict r.t " + d.TableName + " --brief")
+			}
+			d.Fields = picked
+			continue
+		}
+		picked := make([]db.TableInfo, 0)
+		for _, f := range d.Fields {
+			if strings.Contains(strings.ToLower(f.FieldName), kw) ||
+				strings.Contains(strings.ToLower(f.FieldDesc), kw) ||
+				strings.Contains(strings.ToLower(f.Remark), kw) {
+				picked = append(picked, f)
+			}
+		}
+		d.Fields = picked
+	}
+	return nil
 }
 
 // runTableList 列表模式:列出/搜索表(3,882 张),按中文表说明找表时用它。
@@ -390,10 +458,11 @@ func keyTypeLabel(code string) string {
 }
 
 func init() {
-	tableCmd.Flags().StringVar(&tableKW, "kw", "", "按表名/中文表说明搜索 (无表名时的列表模式)")
+	tableCmd.Flags().StringVar(&tableKW, "kw", "", "无表名时按表名/说明搜索；有表名时按字段名/说明筛选")
 	tableCmd.Flags().StringVar(&tableLang, "lang", "zh_CN", "表说明语言别 (dzeal002, 默认 zh_CN)")
 	tableCmd.Flags().BoolVar(&tableBrief, "brief", false, "只给表级信息(表名/说明/模块/类型/字段数),不打字段明细")
 	tableCmd.Flags().BoolVar(&tableWho, "who", false, "反查哪些程序在用这些表(含操作类别 S/I/U/D)")
+	tableCmd.Flags().StringVar(&tableCols, "col", "", "只看指定字段(逗号分隔，如 apca035,apca036)")
 	Group.AddCommand(tableCmd)
 }
 

@@ -20,12 +20,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var paramLang string
+var (
+	paramLang   string
+	docListMode string
+)
 
 // docpObj 单据别参数的 JSON 展示对象。
 type docpObj struct {
-	Param db.ParamDefRow  `json:"参数"`
-	Docs  []db.DocTypeRow `json:"单据性质"`
+	Param    db.ParamDefRow  `json:"参数"`
+	Docs     []db.DocTypeRow `json:"单据性质,omitempty"`
+	DocCount int             `json:"单据性质数,omitempty"`
 }
 
 var syspCmd = &cobra.Command{
@@ -55,10 +59,13 @@ var docpCmd = &cobra.Command{
 并附它适用的单据性质清单(模块 + 单据性质)。
 返回: 名称/说明(多语言)、型态(同 sysp:1=Y/N 2=整数选项 3=范围设定
 4=字符或SCC 5=日期)、领域、预设值、值域、SCC 选项、校核/开窗引用等定义,
-以及单据性质绑定表;参数实际设定值在各单据别的参数值维护作业,不在查询范围。`,
+以及单据性质绑定表（--doclist none|count|full 控制展开程度）;
+参数实际设定值在各单据别的参数值维护作业,不在查询范围。`,
 	Example: `  tt dict docp D-MFG-0076
   tt dict docp D-BAS-0058 --lang zh_TW
   tt dict docp "D-MFG-0076,D-BAS-0058" --json
+  tt dict docp D-MFG-0076 --doclist count  # 只给引用数量，不展开清单
+  tt dict docp D-MFG-0076 --doclist none   # 不查引用清单
   tt dict docp A-SYS-0100            # 系统参数会提示改用 sysp`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -70,10 +77,16 @@ func init() {
 	Group.AddCommand(syspCmd, docpCmd)
 	syspCmd.Flags().StringVar(&paramLang, "lang", "zh_CN", "说明语言别 (gzszl003, 缺省 zh_CN)")
 	docpCmd.Flags().StringVar(&paramLang, "lang", "zh_CN", "说明语言别 (gzszl003, 缺省 zh_CN)")
+	docpCmd.Flags().StringVar(&docListMode, "doclist", "full", "单据性质清单: none | count | full")
 }
 
 // runParamQuery 按视域查询并输出:docOnly=true 走 docp(ooac_t 群 + gzsy 子行)。
 func runParamQuery(arg string, docOnly bool) error {
+	if docOnly {
+		if _, err := normalizeDocListMode(docListMode); err != nil {
+			return err
+		}
+	}
 	codes := splitNames(arg)
 	if len(codes) == 0 {
 		return fmt.Errorf("未指定有效的参数编号")
@@ -125,22 +138,32 @@ func runParamQuery(arg string, docOnly bool) error {
 		if !docOnly {
 			pickedSys = append(pickedSys, *match)
 			if !structured {
-				printParam(match, nil)
+				printParam(match, nil, 0)
 			}
 			continue
 		}
-		// docp:附带单据性质绑定(gzsy_t 缺表时静默降级为空)
-		docs, err := GetDB().QueryDocTypes(code, match.Lang)
-		if err != nil && !db.IsMissingTable(err) {
-			return err
-		}
-		if err != nil {
-			docs = nil
+		// docp:附带单据性质绑定(gzsy_t 缺表时静默降级为空)。
+		// --doclist none 不查；count 查但只留数量；full 保留明细。
+		mode, _ := normalizeDocListMode(docListMode)
+		var docs []db.DocTypeRow
+		docCount := 0
+		if mode != "none" {
+			docs, err = GetDB().QueryDocTypes(code, match.Lang)
+			if err != nil && !db.IsMissingTable(err) {
+				return err
+			}
+			if err != nil {
+				docs = nil
+			}
+			docCount = len(docs)
+			if mode == "count" {
+				docs = nil
+			}
 		}
 		if structured {
-			pickedDoc = append(pickedDoc, docpObj{Param: *match, Docs: docs})
+			pickedDoc = append(pickedDoc, docpObj{Param: *match, Docs: docs, DocCount: docCount})
 		} else {
-			printParam(match, docs)
+			printParam(match, docs, docCount)
 		}
 	}
 
@@ -151,6 +174,19 @@ func runParamQuery(arg string, docOnly bool) error {
 		return emitOne(pickedSys)
 	}
 	return nil
+}
+
+// normalizeDocListMode 校验 docp 的引用清单投影。
+func normalizeDocListMode(s string) (string, error) {
+	mode := strings.ToLower(strings.TrimSpace(s))
+	switch mode {
+	case "", "full":
+		return "full", nil
+	case "none", "count":
+		return mode, nil
+	default:
+		return "", fmt.Errorf("--doclist 只接受 none | count | full（当前 %q）", s)
+	}
 }
 
 // paramKind 参数群 → 级别说明(命令提示用)。
@@ -183,7 +219,7 @@ func paramLevelLabel(group string) string {
 	return ""
 }
 
-func printParam(m *db.ParamDefRow, docs []db.DocTypeRow) {
+func printParam(m *db.ParamDefRow, docs []db.DocTypeRow, docCount int) {
 	fmt.Printf("=== %s (%s) ===\n", m.Code, m.Lang)
 	if m.Name != "" {
 		fmt.Printf("名称:     %s\n", m.Name)
