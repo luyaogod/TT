@@ -80,25 +80,38 @@ var sccCmd = &cobra.Command{
 	Short: "查询系统分类码 (SCC)",
 	Long: `查询系统分类码 (SCC):系统里下拉/选项的"选项字典",一个分类码 = 一组
 「值 → 说明」,画面上的下拉选项就来自这里。
-无参数时列出全部分类码(--kw 按分类码/名称过滤);指定分类码显示详情:单头与分类值列表。
-分类码多为数字(如 4);部分分类码的值带扩展数据列,含义按各分类码自己定义。
+无参数时列出全部分类码(--kw 按分类码/名称过滤);指定分类码默认显示 summary:
+分类码、名称、值→说明。分类码多为数字(如 4);部分分类码的值带扩展数据列,
+含义按各分类码自己定义,需要时加 --full。
 
 JSON 形状：
-  详情 data = {分类码, 单头:{...}, 分类值:[...]}
-  列表/搜索 data = [{分类码, 群组, 状态, 名称, 值数}]
-  --brief   data = {分类码, 名称, 分类值:[{值,说明}]}
- 批量      data = {items: [{分类码, 单头, 分类值[]}], missing[]}
- 批量+--brief data = {items: [{分类码, 名称, 分类值:[{值,说明}]}], missing[]}
+  详情（默认）data = {分类码, 名称, 分类值:[{值,说明}]}
+  --full        data = {分类码, 单头:{...}, 分类值:[...]}
+  列表/搜索     data = [{分类码, 群组, 状态, 名称, 值数}]
+  批量（默认）  data = {items: [{分类码, 名称, 分类值:[{值,说明}]}], missing[]}
+  批量 + --full data = {items: [{分类码, 单头, 分类值[]}], missing[]}
 精确分类码不存在时报 NOT_FOUND（退出码 4）；--kw 无匹配仍是成功空数组。
---human 批量不会再降级成摘要：不加 --brief 时逐条展示详情。`,
+--human 批量默认逐条展示 summary；加 --full 展示完整详情。`,
 	Example: `  tt dict scc
   tt dict scc --kw 币别
   tt dict scc 4
   tt dict scc 4 --json
-  tt dict scc 4 --brief          # 只留值→说明
+  tt dict scc 4                # summary：只留值→说明
+  tt dict scc 4 --full         # 完整单头与扩展列
   tt dict scc "1001,2014,2015"   # 批量；每个分类码一条结果`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) > 0 {
+			if dictFull && sccBrief {
+				return fmt.Errorf("--full 与 --brief 只能二选一")
+			}
+			srcDetail = "summary"
+			if dictFull {
+				srcDetail = "full"
+			} else {
+				sccBrief = true
+			}
+		}
 		if len(args) == 0 {
 			return runSccList()
 		}
@@ -166,7 +179,7 @@ func runSccDetail(id string) error {
 			printSccBrief(brief)
 			return nil
 		}
-		return emitOneNotes(brief, "批量查多个分类码：tt dict scc \"1001,2014,2015\" --brief")
+		return emitOneNotes(brief, "批量查多个分类码：tt dict scc \"1001,2014,2015\"；完整单头加 --full")
 	}
 	if Format() == output.FormatTable {
 		printSccDetail(detail)
@@ -385,6 +398,7 @@ const sccExtNote = `
 func init() {
 	sccCmd.Flags().StringVar(&sccKW, "kw", "", "按分类码/名称过滤 (仅列表模式)")
 	sccCmd.Flags().StringVar(&sccLang, "lang", "zh_CN", "说明语言别 (gzcal002/gzcbl003, 默认 zh_CN)")
-	sccCmd.Flags().BoolVar(&sccBrief, "brief", false, "只输出值→说明（详情/批量均可用）")
+	sccCmd.Flags().BoolVar(&sccBrief, "brief", false, "只输出值→说明（详情/批量均可用；默认已是 summary）")
+	sccCmd.Flags().BoolVar(&dictFull, "full", false, "完整视图：单头、排序、扩展列全部返回")
 	Group.AddCommand(sccCmd)
 }

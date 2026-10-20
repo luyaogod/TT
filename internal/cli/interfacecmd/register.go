@@ -35,6 +35,7 @@ type flags struct {
 	col   string
 	kw    string
 	limit int
+	full  bool
 }
 
 var f flags
@@ -49,7 +50,7 @@ func Register(root *cobra.Command) {
 
   tt interface show  <form>     页面结构（默认不展开字段）
   tt interface pages <form>     所有页面的扁平索引
-  tt interface fields <form>    字段扁平表，可按页/列名/关键词过滤
+  tt interface fields <form>    字段扁平表，可按页/列名/关键词过滤（默认每页最多 30 个字段）
 
 数据源（优先级从上到下）：
   --42f <文件> [--42s <文件>]   直接读一对文件
@@ -141,9 +142,12 @@ func newFieldsCmd() *cobra.Command {
 		Use:   "fields <form>",
 		Short: "字段扁平表，可按页/列名/关键词过滤",
 		Args:  cobra.RangeArgs(0, 1),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := noCSV(); err != nil {
 				return err
+			}
+			if f.full && cmd.Flags().Changed("limit") {
+				return usage("--full 与 --limit 不能同时给：--full 表示取全部字段，--limit 表示截断")
 			}
 			if f.col != "" && f.kw != "" {
 				return usage("--col 与 --kw 不能同时给：--col 是精确列名，--kw 是模糊搜索")
@@ -177,13 +181,25 @@ func newFieldsCmd() *cobra.Command {
 			if f.kw != "" {
 				selected = filterKW(selected, f.kw)
 			}
+			limit := f.limit
+			if f.full {
+				limit = 0
+			}
 			total := len(selected)
 			truncated := false
-			if f.limit > 0 && len(selected) > f.limit {
-				selected = selected[:f.limit]
+			if limit > 0 && len(selected) > limit {
+				selected = selected[:limit]
 				truncated = true
 			}
 			out := fieldsData(v, src, selected, page, total, truncated, f.brief)
+			if f.full {
+				out["detail"] = "full"
+			} else {
+				out["detail"] = "summary"
+			}
+			if truncated {
+				out["hint"] = "默认最多 30 个字段；看全量加 --full 或 --limit 0"
+			}
 			if !common.IsJSON() {
 				return printFieldsHuman(v, selected, f.brief)
 			}
@@ -193,7 +209,8 @@ func newFieldsCmd() *cobra.Command {
 	c.Flags().StringVar(&f.page, "page", "", "只取某页字段（页面 id；_global 表示未归页字段）")
 	c.Flags().StringVar(&f.col, "col", "", "精确列名（colName）；零命中 NOT_FOUND")
 	c.Flags().StringVar(&f.kw, "kw", "", "模糊搜索 label/colName/textKey；零命中仍成功")
-	c.Flags().IntVar(&f.limit, "limit", 500, "最多返回字段数；0 表示不截断")
+	c.Flags().IntVar(&f.limit, "limit", 30, "最多返回字段数；0 表示不截断（默认 30）")
+	c.Flags().BoolVar(&f.full, "full", false, "完整视图：等同 --limit 0")
 	return c
 }
 

@@ -39,6 +39,9 @@ var (
 	srcTarget *dbconfig.Target
 	// srcNotes 打开数据源时产生的降级提示(如企业账号解析失败改用了列表首项)。
 	srcNotes []string
+	// srcDetail 本次查询的 detail 契约（summary | full）；空 = 不区分。
+	// 由命令在 RunE 里设置，srcMeta 会带进信封。
+	srcDetail string
 	// srcStarted 数据源打开的时刻,用来算信封里的"用时" —— 它含连接与环境解析,
 	// 不只是查询本身,那正是"这条命令为什么慢"要看的数。
 	srcStarted time.Time

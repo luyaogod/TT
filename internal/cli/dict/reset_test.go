@@ -51,7 +51,7 @@ func resetDictPackageState(t *testing.T) {
 
 	// 字符串
 	t.Cleanup(snapVars(
-		&dbPath, &srcConfigPath, &dictEnt,
+		&dbPath, &srcConfigPath, &dictEnt, &srcDetail,
 		&checkKW, &checkLang,
 		&dbSyncTable, &discoverType, &discoverHost,
 		&msgLang, &msgText, &msgType, &msgStatus, &msgProg,
@@ -65,7 +65,7 @@ func resetDictPackageState(t *testing.T) {
 	// 布尔
 	t.Cleanup(snapVars(
 		&discoverSave, &dbListSecrets, &msgFull,
-		&progSub, &tableBrief, &tableWho, &sccBrief, &srcLocal,
+		&progSub, &tableBrief, &tableWho, &tableFields, &sccBrief, &srcLocal, &dictFull,
 		&common.JSON, &common.CSV, &common.Verbose,
 	))
 	// 整数
@@ -187,14 +187,14 @@ func TestOpenQuerySourceLocalSucceedsWhenDBExists(t *testing.T) {
 // 所以它有残余缺口：往清单里加了名字却忘了真的在函数里还原，这条测不出来。
 // 但它挡得住最常见的那种：**新加一个包级 var，两处都忘了**。
 var dictMutableVars = []string{
-	"dbPath", "srcConfigPath", "queryLimit", "srcQueryLimit", "dictEnt",
+	"dbPath", "srcConfigPath", "queryLimit", "srcQueryLimit", "dictEnt", "dictFull", "srcDetail",
 	"checkKW", "checkLang",
 	"dbSyncTable", "discoverType", "discoverHost", "discoverSave", "dbListSecrets",
 	"msgLang", "msgText", "msgType", "msgStatus", "msgProg", "msgFull",
 	"paramLang", "specLang", "docListMode",
 	"progKW", "progLang", "progTablesMode", "progSub",
 	"sccKW", "sccLang",
-	"tableKW", "tableLang", "tableCols", "tableBrief", "tableWho", "sccBrief",
+	"tableKW", "tableLang", "tableCols", "tableBrief", "tableWho", "tableFields", "sccBrief",
 	"winKW", "winLang",
 	"dataSrc", "srcLocal", "srcTarget", "srcNotes", "srcStarted",
 	"dbCfg",
@@ -205,7 +205,7 @@ var dictMutableVars = []string{
 var dictReadOnlyVars = []string{
 	"helpCmdFamilies", "baseHelpFunc",
 	"msgTypeValues", "msgStatusValues",
-	"msgColumns", "specCSVHeaders", "tableDetailColumns",
+	"msgColumns", "specCSVHeaders", "tableDetailColumns", "tableSummaryColumns",
 }
 
 var (

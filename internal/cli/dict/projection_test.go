@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"tt/internal/dict/db"
 	"tt/internal/output"
 )
@@ -62,7 +64,7 @@ func TestBriefSccDetail(t *testing.T) {
 }
 
 func TestNormalizeProgTables(t *testing.T) {
-	for in, want := range map[string]string{"": "full", "full": "full", "none": "none", "names": "names"} {
+	for in, want := range map[string]string{"": "names", "full": "full", "none": "none", "names": "names"} {
 		if got, err := normalizeProgTables(in); err != nil || got != want {
 			t.Fatalf("normalizeProgTables(%q) = %q,%v", in, got, err)
 		}
@@ -94,5 +96,40 @@ func TestNormalizeDocListMode(t *testing.T) {
 	}
 	if _, err := normalizeDocListMode("bad"); err == nil {
 		t.Fatal("非法 --doclist 应报错")
+	}
+}
+
+func TestTableSummaryOnlyIncludesFieldsWhenAsked(t *testing.T) {
+	d := sampleTable()
+	summary := tableSummaryOf(d, false, len(d.Fields))
+	if summary.FieldCnt != 3 || len(summary.Fields) != 0 {
+		t.Fatalf("默认 summary 只应有字段数: %+v", summary)
+	}
+	withFields := tableSummaryOf(d, true, len(d.Fields))
+	if len(withFields.Fields) != 3 || withFields.Fields[0].FieldName != "apca035" {
+		t.Fatalf("--fields 应包含字段骨架: %+v", withFields)
+	}
+}
+
+func TestTableWhoSummaryAggregates(t *testing.T) {
+	progs := []db.TableProgRow{
+		{Prog: "aapp131", ProgName: "暂估应付", Ops: "S"},
+		{Prog: "aapp132", ProgName: "对账", Ops: "S/I/U/D"},
+	}
+	s := tableWhoSummaryOf("apca_t", "应付凭单单头", progs)
+	if s.ProgramCount != 2 || s.Ops["S"] != 2 || s.Ops["D"] != 1 || len(s.Sample) != 2 {
+		t.Fatalf("影响摘要不对: %+v", s)
+	}
+}
+
+func TestSummaryCommandsExposeFullFlag(t *testing.T) {
+	for name, cmd := range map[string]interface{ Flags() interface{} }{} {
+		_ = name
+		_ = cmd
+	}
+	for name, cmd := range map[string]*cobra.Command{"prog": progCmd, "scc": sccCmd, "r.t": tableCmd} {
+		if cmd.Flags().Lookup("full") == nil {
+			t.Errorf("%s 缺少 --full", name)
+		}
 	}
 }

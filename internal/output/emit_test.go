@@ -212,3 +212,35 @@ func TestWriteTableCJKWidth(t *testing.T) {
 		t.Errorf("分隔线宽度 = %d, 期望 9(按显示宽度取两列最大值): %q", len(sep), lines[1])
 	}
 }
+
+// TestDetailIsVisibleInJSONAndCSV 钉住 detail 契约：JSON 顶层可见，CSV 头也回显。
+func TestDetailIsVisibleInJSONAndCSV(t *testing.T) {
+	var buf bytes.Buffer
+	m := sampleMeta()
+	m.Detail = "summary"
+	if err := Emit(&buf, Options{Format: FormatJSON, Meta: m, Data: []string{"x"}}); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["detail"] != "summary" {
+		t.Fatalf("JSON 应带 detail: %#v", got)
+	}
+
+	buf.Reset()
+	if err := Emit(&buf, Options{Format: FormatCSV, Meta: m, Columns: []string{"列"}, Rows: [][]string{{"值"}}}); err != nil {
+		t.Fatal(err)
+	}
+	comments, _ := splitHeader(t, buf.String())
+	found := false
+	for _, c := range comments {
+		if c == "视图 summary" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("CSV 头应回显视图: %v", comments)
+	}
+}

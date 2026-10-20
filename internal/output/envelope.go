@@ -13,6 +13,12 @@ import (
 // 字段**全可空,空的整段不打印** —— 本地源拿不到 SSH 就不出现 SSH 段,
 // 绝不打出 `环境  · SSH  · 区域 ` 这种一个值都没有的空壳。
 type Meta struct {
+	// ---- 视图 ----
+	// Detail 本次结果是摘要还是完整视图（summary | full）；空 = 不区分。
+	// 它不是截断标志：截断看 Truncated/Returned；Detail 让 agent 知道默认结果是否
+	// 省略了详细字段，下一步该不该加 --full。
+	Detail string `json:"detail,omitempty"`
+
 	// ---- 出处 ----
 	Source        string `json:"source,omitempty"` // local | live
 	Env           string `json:"env,omitempty"`
@@ -52,6 +58,9 @@ type Meta struct {
 // 每行都是"非空才拼",整行无值就不出现 —— 与 tt debug sql 的头部同一条规矩。
 func (m Meta) headerLines() []string {
 	var out []string
+	if m.Detail != "" {
+		out = append(out, "视图 "+m.Detail)
+	}
 
 	// 第一行:环境在哪台机器上(本地源没有这些,整行不出现)
 	if l := joinNonEmpty(" · ", kv("环境", m.Env), kv("SSH", m.SSHHost), kv("区域", m.Zone)); l != "" {

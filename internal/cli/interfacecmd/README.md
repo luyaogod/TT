@@ -8,7 +8,7 @@
 ```text
 tt interface show  <form>     页面结构；默认 depth=2，不展开字段；--fields 展开
 tt interface pages <form>     页面扁平索引
-tt interface fields <form>    字段扁平表；--page/--col/--kw/--limit
+tt interface fields <form>    字段扁平表；默认最多 30 个字段（--page/--col/--kw/--limit/--full）
 tt interface labels <form>    隐藏诊断：42s token 表
 ```
 
@@ -32,6 +32,9 @@ interface.show | interface.pages | interface.fields | interface.labels
 页面 id/textKey/label/fieldCount；字段 fieldId/colName/label/labelState/widget/sqlType/required；
 标签问题在 `labelState`、`labelReason`、`unresolved[]` 中显式给出，不猜。
 
+`fields` 默认是 summary（最多 30 条，`data.detail=summary`），超过时带
+`truncated/returned/total` 与 `hint`；`--full` 等同 `--limit 0`，`--brief` 继续控制字段属性。
+
 ## 退出码
 
 ```text
@@ -54,6 +57,7 @@ go test ./internal/cli/interfacecmd -count=1
 ```bash
 tt interface show --42f <bsft001_wf.42f> --42s <bsft001_wf.42s>
 tt interface fields --42f <...> --42s <...> --page page_4 --limit 3 --brief
+# 或直接走环境镜像：tt interface fields aapt320 --at 109tst --page page2 --limit 3 --brief
 ```
 
 ## 细节去哪

@@ -27,6 +27,9 @@ import (
 )
 
 // dbPath -d/--db:本地 SQLite 镜像路径(查询命令读它,db sync 写它)。
+
+// dictFull 本次查询是否要完整视图。默认 summary；只有 --full 才回到旧的全量形状。
+var dictFull bool
 var dbPath string
 
 // srcConfigPath 本次用的配置文件路径(PreRunE 里解析一次):它所在的目录既是
@@ -316,7 +319,10 @@ func loadQueryPolicy() {
 // srcMeta 把当前数据源的落脚点转成输出信封的环境信息块。
 func srcMeta() output.Meta {
 	// 字典查询全是只读的:本地 SQLite 是只读副本,远程库走只读语句 —— 如实标出来。
-	m := output.Meta{Notes: srcNotes, Source: srcKind(), Readonly: true}
+	m := output.Meta{Detail: srcDetail, Notes: append([]string(nil), srcNotes...), Source: srcKind(), Readonly: true}
+	if srcDetail == "summary" {
+		m.Notes = append(m.Notes, "当前为摘要视图；完整字段/关系加 --full")
+	}
 	if srcTarget != nil {
 		t := srcTarget
 		m.Env, m.SSHHost, m.Zone, m.Topent = t.Env, t.SSHHost, t.Zone, t.Topent

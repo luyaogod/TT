@@ -35,8 +35,9 @@ var progCmd = &cobra.Command{
 无参数时列出全部程序(--kw 按程序编号/中文名称搜索,从业务词找程序)。
 程序名称有简体(--lang zh_CN,默认)与繁体(--lang zh_TW)两份,搜索用字要对应;
 一个程序被很多作业使用时(如共用维护程序可达数百个),作业表默认只列前 --limit 行。
+默认是 summary：保留程序/作业身份，用表只回编号。
 用 --tables none|names|full 控制用表矩阵：none 不查/不返回，names 只回表格编号，
-full 保留表说明与操作类别（默认）。
+full 保留表说明与操作类别。--full 回到完整视图（默认用表也展开为 full）。
 编号可用逗号分隔批量查询：单编号返回程序详情对象，多编号返回 items[] 数组
 （每个编号带 found；缺失的列在 missing[]，单编号缺失则报 NOT_FOUND）。
 
@@ -51,14 +52,24 @@ JSON 形状（单编号响应会在 notes 里提示批量写法）：
   tt dict prog cl_abi           # 库/元件:说明 + 用表清单
   tt dict prog --kw 对帐        # 按中文作业名找程序
   tt dict prog --sub --kw ABI   # 在子程序/元件里按业务词搜
-  tt dict prog aapi011 --tables names  # 只要用表编号
+  tt dict prog aapi011 --tables names  # 只要用表编号（默认）
   tt dict prog aapi011 --tables none   # 不看用表矩阵
+  tt dict prog aapi011 --full          # 完整程序/作业/用表矩阵
   tt dict prog aapi011 --json
   tt dict prog "aapi011,aapq110_01,cl_abi"   # 批量；每个编号一条结果`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if _, err := normalizeProgTables(progTablesMode); err != nil {
 			return err
+		}
+		if len(args) > 0 {
+			srcDetail = "summary"
+			if dictFull {
+				srcDetail = "full"
+				if !cmd.Flags().Changed("tables") {
+					progTablesMode = "full"
+				}
+			}
 		}
 		if len(args) == 0 {
 			if progSub {
@@ -272,9 +283,9 @@ func runProgBatch(codes []string) error {
 func normalizeProgTables(s string) (string, error) {
 	mode := strings.ToLower(strings.TrimSpace(s))
 	switch mode {
-	case "", "full":
-		return "full", nil
-	case "none", "names":
+	case "":
+		return "names", nil
+	case "full", "none", "names":
 		return mode, nil
 	default:
 		return "", fmt.Errorf("--tables 只接受 none | names | full（当前 %q）", s)
@@ -647,6 +658,7 @@ func init() {
 	progCmd.Flags().StringVar(&progKW, "kw", "", "按程序编号/中文名称搜索 (无编号时的列表模式)")
 	progCmd.Flags().StringVar(&progLang, "lang", "zh_CN", "程序名称语言别 (gzzal002, 默认 zh_CN)")
 	progCmd.Flags().BoolVar(&progSub, "sub", false, "无编号时:列出/搜索子程序与元件(gzde_t)而不是主程序")
-	progCmd.Flags().StringVar(&progTablesMode, "tables", "full", "用表矩阵: none | names | full")
+	progCmd.Flags().StringVar(&progTablesMode, "tables", "names", "用表矩阵: none | names | full（默认 names）")
+	progCmd.Flags().BoolVar(&dictFull, "full", false, "完整视图：用表展开为 full（等同于显式 --tables full）")
 	Group.AddCommand(progCmd)
 }
