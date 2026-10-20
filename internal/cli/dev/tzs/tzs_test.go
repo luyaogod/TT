@@ -159,7 +159,7 @@ func TestTzsExportJSON(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("--json 退出码 %d", code)
 	}
-	for _, want := range []string{`"ok": true`, `"readonly": true`, `"count": 4`, `"entries"`, `adzi999.tsd`} {
+	for _, want := range []string{`"ok":true`, `"readonly":true`, `"count":4`, `"entries"`, `adzi999.tsd`} {
 		if !strings.Contains(text, want) {
 			t.Errorf("JSON 里缺 %s：\n%s", want, text)
 		}

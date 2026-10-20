@@ -152,8 +152,8 @@ func TestWebFrontendReturnsWhateverWasInjected(t *testing.T) {
 	}
 }
 
-// TestPrintJSONEmitsIndentedJSON 打印是纯输出，可以抓回来对。
-func TestPrintJSONEmitsIndentedJSON(t *testing.T) {
+// TestPrintJSONEmitsCompactJSON 打印是纯输出，可以抓回来对；stdout 的 JSON 必须是一行。
+func TestPrintJSONEmitsCompactJSON(t *testing.T) {
 	_, out := testkit.CaptureStdout(t, func() int {
 		if err := PrintJSON(map[string]any{"a": 1}); err != nil {
 			t.Errorf("PrintJSON: %v", err)
@@ -167,8 +167,8 @@ func TestPrintJSONEmitsIndentedJSON(t *testing.T) {
 	if got["a"] != float64(1) {
 		t.Errorf("内容不对：%v", got)
 	}
-	if !strings.Contains(out, "\n  ") {
-		t.Errorf("该是缩进过的（给人读的），得 %q", out)
+	if got := strings.TrimSpace(out); got != `{"a":1}` {
+		t.Errorf("该是紧凑单行 JSON，得 %q", got)
 	}
 }
 

@@ -92,10 +92,9 @@ func maxColWidth(rows [][]string, col int) int {
 // 而那正是排查"查错了地方"唯一的信息。这里保留它是给非查询类输出用的。
 func PrintJSON(v interface{}) error { return WriteJSONValue(os.Stdout, v) }
 
-// WriteJSONValue 把任意值写成缩进 JSON。
+// WriteJSONValue 把任意值写成紧凑 JSON（单行，末尾换行）。
 func WriteJSONValue(w io.Writer, v interface{}) error {
 	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
 	enc.SetEscapeHTML(false) // 保留 < > & 原样输出(校验 SQL 含 <field> 等标签)
 	return enc.Encode(v)
 }

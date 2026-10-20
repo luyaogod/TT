@@ -107,7 +107,6 @@ type errorEnvelope struct {
 // 所以"哪个环境出的错"在两种情况下是同一组键。
 func WriteError(w io.Writer, e *Error) error {
 	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
 	enc.SetEscapeHTML(false)
 	return enc.Encode(errorEnvelope{
 		OK: false, Code: e.Code, Error: e.Message, Hint: e.Hint, Exit: e.Exit, Meta: e.Meta,

@@ -112,7 +112,7 @@ func TestSessionNewIdle(t *testing.T) {
 	f.install(t)
 
 	out := runCmd(t, "new", "--env", "主机109", "--ent", "99", "--name", "A")
-	if !strings.Contains(out, `"ref": "主机109#1"`) {
+	if !strings.Contains(out, `"ref":"主机109#1"`) {
 		t.Fatalf("应回显落在哪条会话（ref）：%s", out)
 	}
 	got := f.snapshot()
@@ -162,12 +162,12 @@ func TestSessionLsAndShow(t *testing.T) {
 	f.install(t)
 
 	out := runCmd(t, "ls")
-	if !strings.Contains(out, `"ref": "主机109#1"`) {
+	if !strings.Contains(out, `"ref":"主机109#1"`) {
 		t.Fatalf("ls 应列出会话：%s", out)
 	}
 
 	out = runCmd(t, "show", "--session", "A")
-	if !strings.Contains(out, `"line": 812`) {
+	if !strings.Contains(out, `"line":812`) {
 		t.Fatalf("show 应给出停站现场：%s", out)
 	}
 
@@ -227,7 +227,7 @@ func TestSessionJob(t *testing.T) {
 	f.install(t)
 
 	out := runCmd(t, "job", "--session", "A", "--prog", "bsft001_wf", "-m", "asf", "--ent", "99")
-	if !strings.Contains(out, `"ok": true`) || !strings.Contains(out, "bsft001_wf") {
+	if !strings.Contains(out, `"ok":true`) || !strings.Contains(out, "bsft001_wf") {
 		t.Fatalf("输出不对：%s", out)
 	}
 	var hit map[string]any

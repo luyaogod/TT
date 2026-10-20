@@ -7,8 +7,8 @@ package debugclient
 import (
 	"bytes"
 	"encoding/json"
-	"io"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -261,12 +261,12 @@ func TestFailureWritesItsOwnEnvelope(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out struct {
-		OK         bool                `json:"ok"`
-		Code       string              `json:"code"`
-		Error      string              `json:"error"`
-		Hint       string              `json:"hint"`
-		ExitCode   int                 `json:"exitCode"`
-		Candidates []target.Candidate  `json:"candidates"`
+		OK         bool               `json:"ok"`
+		Code       string             `json:"code"`
+		Error      string             `json:"error"`
+		Hint       string             `json:"hint"`
+		ExitCode   int                `json:"exitCode"`
+		Candidates []target.Candidate `json:"candidates"`
 	}
 	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
 		t.Fatalf("信封不是合法 JSON：%v", err)

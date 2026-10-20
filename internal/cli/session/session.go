@@ -108,7 +108,6 @@ func resolve(cl *debugclient.Client, want string) (debugclient.Brief, error) {
 // emit 打印 JSON（本组统一：默认 JSON，人读另说）。
 func emit(v any) error {
 	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
 	return enc.Encode(v)
 }
 

@@ -45,6 +45,9 @@ func TestEmitJSONEnvelope(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Emit: %v", err)
 	}
+	if strings.Contains(strings.TrimSpace(buf.String()), "\n") {
+		t.Fatalf("JSON 信封应是紧凑单行: %s", buf.String())
+	}
 
 	var got map[string]any
 	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
@@ -176,6 +179,9 @@ func TestWriteError(t *testing.T) {
 		WithHint("先 tt dict db sync --env <环境>").WithMeta(sampleMeta())
 	if e := WriteError(&buf, err); e != nil {
 		t.Fatalf("WriteError: %v", e)
+	}
+	if strings.Contains(strings.TrimSpace(buf.String()), "\n") {
+		t.Fatalf("错误信封应是紧凑单行: %s", buf.String())
 	}
 	var got map[string]any
 	if e := json.Unmarshal(buf.Bytes(), &got); e != nil {

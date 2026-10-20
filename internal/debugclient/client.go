@@ -217,8 +217,6 @@ type Brief struct {
 	N       int    `json:"n"`
 	Epoch   string `json:"epoch"`
 	Prog    string `json:"prog"`
-
-
 }
 
 // Sessions 列出全部会话。
@@ -272,8 +270,8 @@ func (c *Client) Resolve(want string) (Brief, error) {
 			})
 		}
 		return Brief{}, &Failure{Code: target.CodeAmbiguous,
-			Message: fmt.Sprintf("%q 命中了 %d 条会话，无法确定是哪一条", want, len(hits)),
-			Hint:    "照抄 <ref> 那一列重发 --session",
+			Message:    fmt.Sprintf("%q 命中了 %d 条会话，无法确定是哪一条", want, len(hits)),
+			Hint:       "照抄 <ref> 那一列重发 --session",
 			Candidates: cands,
 		}
 	}
@@ -519,14 +517,13 @@ func (c *Client) Close(id string) error {
 	return err
 }
 
-
-
 // WriteEnvelope 让 `*Failure` 能**自己打信封**（CLI 的错误出口认这个接口，见 cli/root.go）。
 //
 // 为什么要它：CLI 只把 `*output.Error` 认成"带码的错误"，其余一律打成通用码
 // `USAGE`。于是同一个失败 —
 //   - 在 REST 上是 `{"code":"SESSION_NOT_FOUND"}`；
 //   - 在 CLI 输出里却成了 `{"code":"USAGE","error":"没有这条会话…"}`。
+//
 // 靠 code 分支的调用方（Agent、脚本）只能去啃中文，这正是契约里要消灭的东西。
 //
 // 形状与 `internal/output` 的信封一致（ok/code/error/hint/exitCode），
@@ -548,7 +545,6 @@ func (f *Failure) WriteEnvelope(w io.Writer) error {
 		payload["candidates"] = f.Candidates
 	}
 	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
 	return enc.Encode(payload)
 }
 

@@ -128,7 +128,6 @@ func PrintContract(w io.Writer, cmd *cobra.Command) (int, error) {
 
 	if common.JSON {
 		enc := json.NewEncoder(w)
-		enc.SetIndent("", "  ")
 		enc.SetEscapeHTML(false)
 		return exit, enc.Encode(c)
 	}

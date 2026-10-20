@@ -6,12 +6,13 @@
 //
 // 这几件是**契约件**，只此一份，谁都不许在包外再写：
 //   - Fail：--json 下 stdout 恰好一个 {"ok":false,"exit_code":N,"error":"…"}，否则 stderr 散文；
-//   - EmitJSON：稳定键序的 JSON 输出（模型侧 MarshalJSONStable）；
+//   - EmitJSON：稳定键序的紧凑 JSON 输出（stdout 一行；文件仍用模型侧 MarshalJSONStable）；
 //   - ParseArgs：「位置参数 + 选项」任意顺序（标准库 flag 做不到，先稳定重排）；
 //   - StripIdentitySuffix：包主名（去扩展名、去设计器身份后缀 (c)/(s)）。
 package common
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -22,7 +23,6 @@ import (
 	"strings"
 
 	"tt/internal/config"
-	"tt/internal/dev/model"
 )
 
 // reIdentitySuffix 匹配设计器给包名加的客制/标准身份后缀，如 capt110(c).tzc 的 "(c)"。
@@ -58,14 +58,14 @@ func ParseArgs(fs *flag.FlagSet, args []string, valueFlags ...string) error {
 	return fs.Parse(append(flags, pos...))
 }
 
-// EmitJSON 以稳定键序输出一个 JSON 对象。
+// EmitJSON 以稳定键序输出一个紧凑 JSON 对象（一行）。
 func EmitJSON(w io.Writer, v any) {
-	b, err := model.MarshalJSONStable(v)
+	b, err := json.Marshal(v)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "JSON 序列化失败: %v\n", err)
 		return
 	}
-	w.Write(b)
+	w.Write(append(b, '\n'))
 }
 
 // Line 是人读输出的一行（自动补换行）。

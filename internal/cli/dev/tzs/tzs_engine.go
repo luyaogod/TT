@@ -838,7 +838,7 @@ func cmdTzsDoctor(args []string, envName string) int {
 	}
 	rep := tzs.Doctor(tzsCtx(), o)
 	if *asJSON {
-		b, _ := json.MarshalIndent(rep, "", "  ")
+		b, _ := json.Marshal(rep)
 		os.Stdout.Write(append(b, '\n'))
 	} else {
 		// 命令层渲染：Report 只带结构化条目，措辞留给这里。

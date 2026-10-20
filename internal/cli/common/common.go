@@ -101,7 +101,7 @@ func CurrentMeta() output.Meta {
 // IsJSON 本次是否输出 JSON：数据类命令的默认形态（--human 才切文本）。
 func IsJSON() bool { return OutputFormat() == output.FormatJSON }
 
-// PrintJSON 以缩进 JSON 输出 v。查询命令请用 output.Emit —— 裸值没有地方放
+// PrintJSON 以紧凑 JSON 输出 v。查询命令请用 output.Emit —— 裸值没有地方放
 // "这次查的是哪个环境、哪个账号"。
 func PrintJSON(v any) error { return output.WriteJSONValue(os.Stdout, v) }
 

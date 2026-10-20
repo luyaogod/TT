@@ -55,8 +55,8 @@ type envelope struct {
 
 // WriteJSON 输出成功信封。
 func WriteJSON(w io.Writer, opt Options) error {
+	// JSON 输出一律紧凑单行：这些输出主要给 agent/管道消费，缩进只增加 token，不增加信息。
 	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
 	enc.SetEscapeHTML(false) // 保留 < > & 原样输出(校验 SQL 含 <field> 等标签)
 	return enc.Encode(envelope{OK: true, Meta: opt.Meta, Data: opt.Data})
 }

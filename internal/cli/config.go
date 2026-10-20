@@ -295,7 +295,7 @@ func runConfigShow(cmd *cobra.Command, raw bool) error {
 	if !raw {
 		shown = redactSecrets(root)
 	}
-	out, err := json.MarshalIndent(shown, "", "  ")
+	out, err := json.Marshal(shown)
 	if err != nil {
 		return err
 	}
@@ -401,7 +401,7 @@ func printScalarOrJSON(cmd *cobra.Command, v any) error {
 		cmd.Println("null")
 		return nil
 	default:
-		out, err := json.MarshalIndent(v, "", "  ")
+		out, err := json.Marshal(v)
 		if err != nil {
 			return err
 		}
