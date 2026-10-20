@@ -36,12 +36,35 @@
 
 帮助末尾会附一行"本地数据齐不齐"（依赖哪个数据族、哪些表缺）—— 那与数据族定义同源。
 
+## ACC 应用分类码
+
+ACC 不是 SCC 那种固定下拉字典，而是由 `gzaa/gzaal`（分类）、`gzac/gzad`
+（参考字段）、`gzzz/gzzal`（维护作业）共同描述的“可配置维护作业”；值在
+`oocq/oocql`，按企业隔离。
+
+```text
+tt dict acc show  <作业|分类> [--full]        # 定义 + 维护作业 + 参考字段
+tt dict acc query <作业|分类> --template      # 输出可填充的 query 框架
+tt dict acc query <作业|分类> --spec <文件|-> # 校验并执行 query 框架
+```
+
+`show` 不需要企业；`query --spec` 必须点名企业（`--at <环境>@<企业>` 或 `--ent`）。
+`query --template` 输出 `fields[].key`（`value` / `desc` / `status` / `parent` /
+`ref1..ref20`）和空 `query`；AI 只填 `query`，字段/操作符由工具校验，绝不把
+字段名或值拼进 SQL。`--template` 的完整 JSON 输出可以直接保存后交给 `--spec`，工具会取其中的 `query`。
+
+值查询默认最多 20 条，结果带 `total/returned/truncated`。值表是业务数据，
+默认不进入字典同步；本地库只同步 ACC 定义/注册元数据，值请用
+`--at <环境>@<企业>` 直查。代码扫描不属于 ACC 查询：它只能产生候选证据，不能
+证明“谁在用这个 ACC”。
+
 ## 命令一览
 
 | 组 | 命令 |
 |---|---|
 | 表与字段 | `r.t`（表字典）、`r.v`（校验带值）、`desc`（字段画面规格） |
 | 分类与开窗 | `scc`（系统分类码）、`r.q`（可复用开窗） |
+| 应用分类码 | `acc show`（定义/作业/参考字段）、`acc query --template` / `--spec`（受约束的值查询） |
 | 程序 | `prog`（程序与作业、程序↔表格、子程序与元件） |
 | 消息与参数 | `msg`、`sysp`、`docp` |
 | 数据维护 | `db status`（按环境总览/单环境详情）/ `db sync` / `db list` / `db discover`；连库测试在 `tt db` |

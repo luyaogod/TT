@@ -21,6 +21,7 @@ var Group = &cobra.Command{
   --env local:<环境>        查该环境自己的本地 SQLite 镜像
                             （<数据目录>/dict/<环境>.db，由 tt dict db sync --env <环境> 同步）
   本地库按环境分文件，各环境互不覆盖。
+ACC（应用分类码）：tt dict acc show / query --template / query --spec
 也可用 config.json 顶层 query.source 固定数据源（local:<环境> 或环境名）。`,
 
 	// RunE：**收到不认识的子命令必须非 0**（见 common.UnknownSubcommand）。
