@@ -36,6 +36,9 @@ type Source interface {
 	QuerySccList(lang, keyword string) ([]SccListRow, error)
 	QuerySccHeader(id, lang string) (*SccHeaderRow, error) // 未命中返回 (nil, nil)
 	QuerySccValues(id, lang string) ([]SccValueRow, error)
+	// 应用分类码 ACC：定义在 gzaa/gzac/gzad，作业注册在 gzzz，值在 oocq/oocql。
+	QueryACCMeta(input, lang string) (*ACCMeta, error) // 未命中返回 (nil, nil)
+	QueryACCValues(category string, ent int, lang string, includeInactive bool) ([]ACCValue, error)
 	// rq 可复用开窗:dzca_t/dzcb_t/dzcc_t
 	QueryWinList(lang, keyword string) ([]WinListRow, error)
 	QueryWinHeaders(id, lang string) ([]WinHeaderRow, error)
