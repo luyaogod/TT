@@ -82,7 +82,7 @@ tt dict r.t capp115_tmp --at <环境>@<企业>
 
 > Tips: 需要配置环境的命令都可以通过`--at-list`命令查看可以使用哪些环境
 
-## 从系统分类码解读业务逻辑
+## 系统分类码SCC
 
 系统分类码SCC是T100中所有下拉框的数据来源。示例 `CALL cl_set_combo_scc("gzpa003","75")`、`CALL cl_set_combo_scc('b_pmds048','2087')`，这是一个常见的绑定下拉框的函数调用，`gzpa003` 和 `b_pmds048` 就是前端控件的编号，而 `75` 和 `2087` 就是系统分类码SCC的值。我们可以通过查询系统分类码SCC来获取其对应的中文含义。
 
@@ -104,10 +104,39 @@ CASE
 END CASE  
 ```
 
+如何识别代码中的SCC码? 
+
+遇到 `cl_set_combo_scc*`、`s_desc_gzcbl004_desc`、`s_fin_get_scc_value`、`q_gzcb001`，或字段定义写成 `LIKE gzcbl_t.gzcbl004` 时，就是 SCC；它的值在 `gzcb_t`。
+
 从系统分类码SCC中查询中文含义的命令：
 ```bash
 tt dict scc 75 --at <环境>@<企业>
 tt dict scc 2087 --at <环境>@<企业>
+```
+
+## 应用分类码ACC
+
+ACC（应用分类码）是 T100 的配置驱动基础资料框架：azzi650 在 gzaa/gzaal定义分类、在 gzac/gzad 配置最多 20 个参考字段，azzi910 再通过 gzzz_t 把分类注册成由 aooi300/301/310 等通用程序渲染的维护作业，实际值按企业存放在oocq_t/oocql_t（oocq001 区分分类、oocq002 表示值），因此它是“一个分类 =一个可配置的小型维护作业”，不是 SCC 那种固定下拉字典；判断编号类型要看它落在 gzaa/gzzz 还是 gzca/gzcb，而不是看数字长度。
+
+如何识别代码中的ACC码?
+
+遇到 `s_desc_get_acc_desc`、`s_azzi650_chk_exist*`、`q_oocq002(_号)`（即 `q_oocq002_<分类号>`）、`cl_set_combo_acc`，或字段定义写成 `LIKE oocql_t.oocql004` 时，就是 ACC；它的值在 `oocq_t`（所有分类共用一张表）。
+
+在`tt dict acc`中查看某个acc码相关信息的命令：
+
+```bash
+tt dict acc show 3211 --at <环境>        # 直接按 ACC 分类号
+tt dict acc show aapi010 --at <环境>     # 或按维护作业号
+tt dict acc query 3211 --template --at <环境> > 3211-acc.json
+# 填好 3211-acc.json 的 query 后
+tt dict acc query 3211 --spec 3211-acc.json --at <环境>@<企业>
+```
+
+在`tt dict scc`中对某个scc做数据查询的命令：
+
+```bash
+tt dict scc 75 --at <环境>@<企业>
+tt dict scc 75 --full --at <环境>@<企业>
 ```
 
 ## 系统参数和单据参数
