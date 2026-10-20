@@ -21,9 +21,7 @@ tt dict prog <程序编号> --at <环境>@<企业>
 tt dict prog --kw <业务词> --at <环境>@<企业>
 ```
 
-3. 优先从本地环境读取代码，节省时间。不同环境下的代码有差异，如果指定环境没有代码镜像可以优先考虑本地的其他环境代码。不得已再去尝试从远程环境读取代码。不要帮用户通过 `mirror` 命令去下载代码，时间会很长。
-
-> 通过远程`file`命令读取代码如果多次速度慢要提醒用户拉取代码镜像
+3. 优先从本地环境读取代码，如果用户指定环境没有代码镜像可以从本地的其他环境镜像获取代码，代码总体差异不会太大，本地没有镜像，不要帮用户通过 `mirror` 命令去下载代码，时间会很长，彻底没有办法时才尝试从远程获取代码，优先提醒用户拉取环境代码镜像。
 
 获取本地源码镜像目录的命令：
 ```bash
@@ -36,6 +34,18 @@ tt file ls --at <环境> erp/<模块>/4gl
 tt file find --at <环境> erp -name '*<程序>*'
 tt file grep -rn --at <环境> --include '*.4gl' '<关键字>' erp/<模块>/4gl
 tt file head -n 80 --at <环境> erp/<模块>/4gl/<程序>.4gl
+```
+
+4.使用代码大纲工具`tt outline`可以辅助快速阅读代码
+
+```bash
+tt outline testdata/fgl-fixtures/input-on-key.4gl --human
+```
+
+```text
+FUNCTION inp_key  [2-7]
+  INPUT BY NAME g_cust  [3-6]
+    ON KEY (F1, Control-z)  [4-5]
 ```
 
 ## 获取和阅读程序画面
