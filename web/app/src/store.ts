@@ -227,7 +227,8 @@ interface Store {
   toggleAutovarsAuto: () => void
   // 接口日志重放启动(wslogs「调试此调用」与重放会话「重新开始」共用同一上下文)
   // ent = 重放这一轮的企业编号（接口日志页下拉选的那个）；空 = 不覆盖。
-  replayStart: (rowid: string, request?: string, ent?: number) => Promise<void>
+  // env = 这条日志所属的环境名（`activeEnv`）；空 = 不点名（落在服务端当前环境上）。
+  replayStart: (rowid: string, request?: string, ent?: number, env?: string) => Promise<void>
   pushRaw: (line: string) => void
   sendRaw: (cmd: string) => Promise<void>
   pushTimeline: (item: Omit<TimelineItem, 'time'>) => void
@@ -1382,14 +1383,18 @@ export const useStore = create<Store>((set, get) => ({
   // 关闭日志详情面板:回到"只显示列表"的默认态
   closeWsLogDetail: () => set({ wsLogSel: null, wsLogContent: null }),
 
-  replayDebug: async (item, request) => {
-    await get().replayStart(item.rowid, request)
+  replayDebug: async (item, request, ent) => {
+    // 把「这一页所属的环境」一起带上：日志列表那条路早就送了（`loadWsLogs` 的 `env`），
+    // 只有重放漏了 —— 而重放要拨号读 `wsfa_t` 并**起一条会话**，环境必须点名
+    // （统一服务刚启动时没有生效环境，不点名就是一句"没有生效环境"）。
+    // ent 同理：它是这一轮跑在哪个企业的唯一来源，漏掉就等于沿用登录 shell 的 TOPENT。
+    await get().replayStart(item.rowid, request, ent, get().activeEnv)
   },
 
   // 接口日志重放启动:立即切到 debug 页进 loading,再请求后端重放该日志
   // (后端按 rowid 重读报文并落临时文件,报文参数在 ArgsOverride 里,随会话保留);
   // request 非空 = 用界面改过的入参(后端写临时文件后优先使用)
-  replayStart: async (rowid, request, ent) => {
+  replayStart: async (rowid, request, ent, env) => {
     // 已有会话在跑:先结束它(一次只能调一个作业;后端重放也会收口,双保险)。
     // ID 记下来:后面还要用它发 quit,也是收口窗口的判定依据
     const old = get().sessionId
@@ -1407,7 +1412,7 @@ export const useStore = create<Store>((set, get) => ({
     })
     try {
       if (old) void api.quit(old).catch(() => {})
-      const r = await api.wsLogDebug(rowid, request, old || undefined, ent)
+      const r = await api.wsLogDebug(rowid, request, old || undefined, ent, env)
       const mod = r.module || ''
       const rp = r.runProg || r.prog || ''
       // 响应里的 id 是**本页面自己发起**的那条新会话 —— 权威绑定（人点的动作，不是问服务端）
@@ -1777,7 +1782,9 @@ export const useStore = create<Store>((set, get) => ({
     // 结束本轮(会话保留 idle),再启动新的一轮——宿主复用,免重新登录。
     // 重放会话必须按原日志重放(报文参数在服务端 ArgsOverride 里,普通启动会丢参数)
     set({ state: 'idle', started: false, stop: null, breakpoints: [], frames: [], adjustedBps: {}, autovars: [], selectedFrame: -1, currentLine: 0 })
-    if (lastReplayRowid) await get().replayStart(lastReplayRowid, lastReplayRequest || undefined)
+    // env 取「这一页所属的环境」：重新开始时本地可能已经没有任何会话，服务端也就没有
+    // 可沿用的生效环境（服务重启过就更没有）—— 环境一律点名，这一次也一样。
+    if (lastReplayRowid) await get().replayStart(lastReplayRowid, lastReplayRequest || undefined, undefined, st.activeEnv)
     else await get().launch(module, prog)
   },
 

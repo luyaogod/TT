@@ -552,15 +552,22 @@ export const api = {
   ents: (env: string, opt?: { refresh?: boolean }) =>
     req<EntsReply>(`${API_BASE}/ents?env=${encodeURIComponent(env)}${opt?.refresh ? '&refresh=1' : ''}`),
   // 重放调试:request 非空 = 用界面里改过的入参(后端落临时文件后作为入参文件)。
-  // **必须带上"要收掉的那条会话"**（WP4b / Q4 / C8.2）：服务端不再自己找当前会话，
-  // 池里多条又不带目标时回 409 + SESSION_AMBIGUOUS，不会随机收掉别人的会话。
+  // sessionId = 本地已绑定的那条会话（要收掉的那条，可空）：服务端不自己找当前会话
+  // （WP4b / Q4 / C8.2），池里多条又不带目标时回 409 + SESSION_AMBIGUOUS，不会随机收掉别人的会话。
+  // **没有会话时照样能调**：重放自己就是造会话的命令（池空 = 冷启动，服务端起一条新的），
+  // 所以这里 `old || undefined` —— 让"点一下这条日志就开始重放"在任何时候都点得动。
   // ent = 重放这一轮的企业编号（接口日志页下拉选的那个），空则不覆盖。
-  wsLogDebug: (rowid: string, request?: string, sessionId?: string, ent?: number) =>
+  // env = **这条日志所属的环境名**（`activeEnv`），空则不点名。非空时必须送：
+  //   重放要拨号读 `wsfa_t` 并起一条会话，而统一服务刚启动时**没有生效环境**
+  //   （环境一律点名）—— 不送就会得到"服务当前没有生效环境"，
+  //   而日志列表那条路早就送了（`wsLogs` 的 `env`），只有重放漏了。
+  wsLogDebug: (rowid: string, request?: string, sessionId?: string, ent?: number, env?: string) =>
     req<{ sessionId: string; module?: string; prog?: string; runProg?: string }>(`${API_BASE}/wslogs/debug`, {
       method: 'POST',
       body: JSON.stringify({
         rowid, ...(request ? { request } : {}), ...(sessionId ? { session: sessionId } : {}),
         ...(ent && ent > 0 ? { ent: String(ent) } : {}),
+        ...(env ? { ssh: env } : {}),
       }),
     }),
   sourcePreview: (module: string, prog: string) =>

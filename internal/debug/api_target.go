@@ -156,10 +156,16 @@ func (s *Server) mustTarget(w http.ResponseWriter, r *http.Request, targetID, wh
 
 // mustTargetOrEmpty 是 `mustTarget` 的**冷启动档**：池子空且没点名时返回 (nil, true)。
 //
-// 为什么需要它（真机踩到的）：「连到该环境」= **创建**一条会话，Web 上那个按钮就叫
-// 「创建会话」，命令行是 `tt debug env <环境>`。可是它在池子空时会撞上 `mustTarget` 的
-// `NO_SESSION` —— 于是"先建会话、再设 ENT、再调试"这条正确流程在**第一步**就断了，
-// 用户被迫先"起个作业"凑一条会话出来（顺序完全反了）。
+// 为什么需要它（真机踩到的，两次、同一形状）：**要新建一条会话的端点**在池子空时撞上
+// `mustTarget` 的 `NO_SESSION`，而池空恰恰是它们最正常的起点 ——
+//   - 「连到该环境」= 创建一条会话（Web 上那个按钮就叫「创建会话」，命令行是
+//     `tt debug env <环境>`）：报 `NO_SESSION` 等于让"先建会话、再设 ENT、再调试"
+//     这条正确流程在**第一步**就断；
+//   - 按接口日志重放（`hWSLogDebug` / `tt debug wsdebug`）= 用它自己建的那条会话重跑一遍
+//     （`LaunchReplay` → `prepareSession`）：报 `NO_SESSION` 等于让人先去"起个作业"
+//     凑一条会话，而重放**不需要**一条既有会话。
+//
+// 两处的错误提示都把人往"先运行 tt debug start"引，顺序被彻底反过来。
 //
 // 边界一字不让:
 //   - **点名了**（targetID 非空）→ 交给 `mustTarget`：点名的不存在就是 `SESSION_NOT_FOUND`；
@@ -200,7 +206,11 @@ func sessionsToCandidates(briefs []SessionBrief) []target.Candidate {
 //
 //   - `targetAmbiguous` → **409** + `SESSION_AMBIGUOUS` + 候选清单（F1 的形状）；
 //   - `targetMissing`   → **404** + `SESSION_NOT_FOUND`（指名的那条不在池里）；
-//   - `targetEmptyPool` → **409** + `NO_SESSION`（调用方这一步**必须**有一条会话才做得下去）；
+//   - `targetEmptyPool` → **409** + `NO_SESSION`（调用方这一步**必须**有一条会话才做得下去）。
+//     **今天没有端点产出这一档**：要新建会话的两条端点（切环境 / 按日志重放）都走
+//     `mustTargetOrEmpty`（见它的注释）。这一支仍留着，是因为 `resolveTarget` 的四种结局
+//     与四种信封一一对应 —— 将来新增一条真的"必须有既有会话"的端点，拿 `mustTarget`
+//     得到的码当场就是对的。形状由 `TestContractNoSessionEnvelopeIsStillPinned` 钉住。
 //   - `targetOK`        → 调用方判错了状态，如实说一句（不当成静默成功）。
 //
 // `what` 是"哪个端点在哪一步要目标"和（点名时的）那个句柄，两样都要进文案：

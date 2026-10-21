@@ -597,8 +597,16 @@ func TestContractInvalidFormsCodeSequence(t *testing.T) {
 //	| 谁判 | 哪些 F | 判据在哪 |
 //	|---|---|---|
 //	| `internal/target`（纯函数） | F1/F3–F15/F18–F20 的文法、落位、码与退出码 | 那个包的 resolve_test / selector_test / values_test |
-//	| **服务端这一层（本测试）** | **F1/F2/F18/F19/F20 的 HTTP 信封**（状态码 + code + candidates） | 本测试逐条发真请求 |
+//	| **服务端这一层（本测试）** | **F1/F18/F19/F20 的 HTTP 信封**（状态码 + code + candidates） | 本测试逐条发真请求 |
 //	| `internal/cli/debug` | F1 的"多会话不取第一项"、退出码分档、标志落点（F16/F17） | 那个包的 target_test |
+//
+// **F2 不在服务端这一层了**：它曾经以 `/api/wslogs/debug`（按日志重放）当 HTTP 载体，
+// 而那条端点干的是**创建**一条会话来重跑日志（`LaunchReplay` → `prepareSession`）——
+// 池里 0 条会话恰恰是它最正常的起点，报 `NO_SESSION` 等于让人先去起个作业凑一条会话。
+// 现在它与"切环境"一样走冷启动档（判据见 `session_named_host_test.go` 的
+// `TestWSLogDebugColdStartIsNotNoSession`），F2 这一档留在 CLI 目标层
+// （`internal/target` 的 `failureNoSession`），信封形状见下面那条
+// `TestContractNoSessionEnvelopeIsStillPinned`。
 //
 // **本测试不碰真 SSH**：它只走"落不上目标 / 别名不对"这些**在拨号之前**就判掉的分支
 // （这正是 C2.8 那条纪律：一个字节都不该白花）。要真会话才走得到的分支
@@ -610,8 +618,8 @@ func TestContractInvalidFormsServerSideEnvelopes(t *testing.T) {
 	for _, id := range []string{"s-a", "s-b"} {
 		sTwo.mgr.sessions[id] = fakeIdleSession(id, "h1", "36")
 	}
-	// 池空的服务：F2（没有会话）用它。
-	hsEmpty, _ := actionTestDebugServer(t)
+	// 池空的服务：**本测试不再需要它** —— F2 的 HTTP 载体（按日志重放）已改成冷启动档，
+	// 理由见上面那张表下面的注。
 
 	// 一条**正在跑**的同名会话：F20 的"别名指向的会话不能复用"要它。
 	hsBusy, sBusy := actionTestDebugServer(t)
@@ -637,8 +645,6 @@ func TestContractInvalidFormsServerSideEnvelopes(t *testing.T) {
 	}{
 		{"F1 省略目标 + 池里两条", hsTwo, "/api/sessions/switch", `{"env":"h1","ent":"99"}`,
 			http.StatusConflict, "F1", 2},
-		{"F2 池空", hsEmpty, "/api/wslogs/debug", `{"rowid":"1"}`,
-			http.StatusConflict, "F2", -1},
 		{"F19 别名取值非法（含 /）", hsTwo, "/api/sessions", `{"prog":"apmt520","name":"不合/法"}`,
 			http.StatusBadRequest, "F19", -1},
 		{"F20 别名指向的会话不能复用", hsBusy, "/api/sessions", `{"prog":"apmt520","name":"汇率单","ssh":"h1"}`,
@@ -697,6 +703,53 @@ func TestContractInvalidFormsServerSideEnvelopes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestContractNoSessionEnvelopeIsStillPinned 钉住 F2 的**信封**（`NO_SESSION` + 那句"先起一条"）。
+//
+// 生产里**已经没有端点产出这一档**：要一条**既有**会话的两条端点（切环境 / 按日志重放）
+// 都改成了冷启动（它们本来就是**创建**会话的命令，池空是最正常的起点 —— 判据见
+// `session_named_host_test.go` 的两条 `ColdStartIsNotNoSession`）。F2 这一档仍活在 CLI
+// 目标层（`internal/target` 的 `failureNoSession`：`tt debug exec --session …` 那类
+// "必须有既有会话"的命令），判据在那个包的 `resolve_test`。
+//
+// 那为什么还在这里钉它：`failTarget` 里 `targetEmptyPool` 那一支仍在（`resolveTarget` 的
+// 四种结局与四种信封一一对应 —— 将来新增一条真的"必须有既有会话"的端点，拿 `mustTarget`
+// 得到的码当场就是对的）。既然留着，就不能让它烂在那儿没人跑；所以像 F18 那样
+// **直接驱动写信封的那一层**，把 409 + `NO_SESSION` + "不带候选"（C5.11）钉死。
+func TestContractNoSessionEnvelopeIsStillPinned(t *testing.T) {
+	rec := httptest.NewRecorder()
+	failTarget(rec, targetEmptyPool, nil, "按接口日志重放")
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("F2 该退 409（C5.16 的「缺目标/状态不符」那一档），实得 %d（%s）",
+			rec.Code, strings.TrimSpace(rec.Body.String()))
+	}
+	var raw map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&raw); err != nil {
+		t.Fatalf("失败信封不是合法 JSON：%v", err)
+	}
+	if raw["ok"] != false {
+		t.Errorf("ok 必须是 false（C5.15），实得 %v", raw["ok"])
+	}
+	want := debugContractCodeNoSession
+	if got := raw["code"]; got != want {
+		t.Errorf("code = %v；契约 2.4 的 F2 行写的是 %q（4.1.1 是唯一清单）", got, want)
+	}
+	// 文案要能照做：池空时人/Agent 能看懂下一步是什么。
+	msg, _ := raw["error"].(string)
+	for _, wantText := range []string{"按接口日志重放", "没有 SSH 会话", "tt debug start"} {
+		if !strings.Contains(msg, wantText) {
+			t.Errorf("文案里该有 %q（哪个端点 + 现状 + 下一步），实得 %q", wantText, msg)
+		}
+	}
+	// C5.11：F2 是"候选不出现"的那一档（表里 Candidates=false）。
+	if _, has := raw["candidates"]; has {
+		t.Errorf("F2（code=%s）不该带候选清单（C5.11），实得 %v", want, raw["candidates"])
+	}
+	if got := target.ExitFor(want, true, true); got != byKeyExit(t, "F2") {
+		t.Errorf("F2 的退出码 = %d，契约 2.4 写的是 %d", got, byKeyExit(t, "F2"))
 	}
 }
 
@@ -1254,7 +1307,7 @@ func TestContractHTTPFailureEnvelopeKeepsItsShape(t *testing.T) {
 //
 // 上一版这条是 `t.Skip`（那时 HTTP 侧只有 `{ok,error}` 两键）。WP4c 补上之后
 // 按它自己的交代改成断言 —— 逐条的实测在
-// `TestContractInvalidFormsServerSideEnvelopes`（F1/F2/F19/F20）与
+// `TestContractInvalidFormsServerSideEnvelopes`（F1/F19/F20）与
 // `TestActionEndpointsRequireExplicitTarget`（池空 / 歧义 / 指名不存在）里，
 // 这里只钉住"这个键从此必给"这一条。
 func TestContractHTTPFailureCodeIsLanded(t *testing.T) {

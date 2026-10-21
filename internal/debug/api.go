@@ -2235,7 +2235,8 @@ func (s *Server) hWSLogContent(w http.ResponseWriter, r *http.Request) {
 // **本批的定稿（Q4 / C8.2 硬切 + 契约 C7.1-3）**：服务端不再用 `Manager.Current()` 找
 // "当前会话"来收口（从前那一处不经模式闸门，是五处里最隐蔽的一处 —— 见计划开头 A–E 表的 B）。
 // 要收掉的那一条由请求体可选的 `session`（服务端原始句柄 `{id}`）给出，
-// 缺目标/歧义按 `mustTarget` 的口径报 409 + `SESSION_AMBIGUOUS` + 候选清单。
+// 缺目标/歧义按 `mustTargetOrEmpty` 的口径报 409 + `SESSION_AMBIGUOUS` + 候选清单
+// （池空 = 冷启动：这一轮要的那条会话由重放**自己**建）。
 func (s *Server) hWSLogDebug(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		RowID   string `json:"rowid"`
@@ -2285,11 +2286,21 @@ func (s *Server) hWSLogDebug(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// 目标先落位、闸门按那一条判 —— 这两件事收在 mustTarget 里（见 api_target.go）。
-	// **这里不走 mustTargetOrEmpty**：契约 2.4 的 F2（池里 0 条会话 → 409 `NO_SESSION`）
-	// 就是以这条端点当载体的（判据见 contract_debug_test.go 的「F2 池空」）。重放要不要
-	// 也能从零建会话，是契约问题，不该由一次修复顺手改掉。
-	cur, ok := s.mustTarget(w, r, req.Session, "按接口日志重放")
+	// 目标先落位、闸门按那一条判 —— 这两件事收在 mustTargetOrEmpty 里（见 api_target.go）。
+	//
+	// **走冷启动档**（与 `hSessionSwitch` 同一条规矩、同一个理由）：重放干的是**创建**一条
+	// 新会话（`LaunchReplay` → `prepareSession`），会话池空恰恰是它最正常的起点。
+	// 从前这一处用 mustTarget，于是界面上点「调试此调用」（或 `tt debug wsdebug <rowid>`）
+	// 在一台还没有任何会话的机器上**必失败**：409 + `NO_SESSION`「先运行 tt debug start
+	// <作业> 起一条」—— 可它自己就是造会话的命令，那条提示等于让人先绕一圈去凑一条，
+	// 而重放要的那一条由它自己建才对。
+	//
+	// 契约 2.4 的 F2（`NO_SESSION`）因此**不再由这两条端点产出**（切环境与按日志重放都是
+	// 造会话的命令）。这一档仍活在 CLI 目标层（`internal/target` 的 `failureNoSession`：
+	// `tt debug exec --session …` 那类"必须有既有会话"的命令），判据在那个包的 resolve_test，
+	// 信封形状由 `TestContractNoSessionEnvelopeIsStillPinned` 钉住。
+	// **冷启动档只放松"池空"**：点名了不存在的会话仍是 `SESSION_NOT_FOUND`、多条仍报歧义。
+	cur, ok := s.mustTargetOrEmpty(w, r, req.Session, "按接口日志重放")
 	if !ok {
 		return
 	}

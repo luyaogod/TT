@@ -366,6 +366,38 @@ func TestSessionSwitchColdStartStillRejectsNamedMissing(t *testing.T) {
 	}
 }
 
+// TestWSLogDebugColdStartIsNotNoSession：「调试此调用」（池空 + 没点名）= **自己造那一条**，
+// 不是 `NO_SESSION`。
+//
+// 真机踩到的（界面「接口日志」页 → 点「调试此调用」，命令行是 `tt debug wsdebug <rowid>`）：
+// 一台还没有任何会话的机器上，点下去当场报
+// `查询失败 按接口日志重放：没有 SSH 会话 —— 先运行 tt debug start <作业> --env <环境> 起一条`。
+// 而重放干的就是**创建**一条会话来重跑日志（`LaunchReplay` → `prepareSession`）：
+// 它要的那一条本来就该由它自己建（与「创建会话」`tt debug env <环境>` 同一个理由，
+// 见上面那条 `TestSessionSwitchColdStartIsNotNoSession`）。
+//
+// 判据同上：不钉状态码（越过闸门后它会真去拨号，测试的拨号桩必然失败 → 500），
+// 只钉"**不许**是 409 + `NO_SESSION`"这一件事本身。
+func TestWSLogDebugColdStartIsNotNoSession(t *testing.T) {
+	hs, s := actionTestDebugServer(t)
+	giveServerNamedEnv(s, "h1", "127.0.0.1", "36")
+
+	// 界面那条请求的形状：rowid + ent，**没有** session 键（池空，前端拿不到旧会话）。
+	resp := doReq(t, "POST", hs.URL+"/api/wslogs/debug", "", `{"rowid":"1","ent":"99"}`)
+	var raw struct {
+		Code string `json:"code"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&raw)
+	if resp.StatusCode == 409 && raw.Code == target.CodeNoSession {
+		t.Fatalf("池空且没点名时按日志重放不该报 %s —— 重放自己就是造会话的命令",
+			target.CodeNoSession)
+	}
+	// 失败也只能是因为拨号（测试桩），不能因为"没有会话可供收掉"；更不能留下半条会话。
+	if n := len(s.mgr.Snapshot()); n != 0 {
+		t.Errorf("拨号失败不该留下半条会话，实得 %d 条", n)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Bug B：`wsdebug` 的 `--name`
 // ---------------------------------------------------------------------------

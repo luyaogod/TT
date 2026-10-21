@@ -104,8 +104,9 @@ func TestActionEndpointsRejectMalformedBody(t *testing.T) {
 // **WP4b 之后这两条请求体必须各带一个前置条件**（否则它们会被更早的那道闸门拦下，
 // 测不到拨号那一层）：
 //
-//   - `/api/wslogs/debug` 现在要求"能落一条会话"（`mustTarget`：池空 → 409 + `NO_SESSION`）。
-//     所以服务里**先放一条**空宿主会话（`actionTestServerWithSession`），请求体带上它的句柄。
+//   - `/api/wslogs/debug` 现在要求"能落一条会话"（`mustTargetOrEmpty`：池空 = 冷启动 → 放行，
+//     多条 → 409 + `SESSION_AMBIGUOUS`）。这里先放一条空宿主会话（`actionTestServerWithSession`）
+//     并带上它的句柄，只是为了把这一层闸门过得干净：这条测试要测的是拨号那一层。
 //   - `/api/dbsql` 现在要求 `ent` 必填（C7.1-5），给 0 会被 400 拦在拨号之前。
 func TestActionEndpointsReportDialFailure(t *testing.T) {
 	hs, sid := actionTestServerWithSession(t)
@@ -141,31 +142,32 @@ func TestActionEndpointsReportDialFailure(t *testing.T) {
 // 从前这几条路静默取"当前会话"（`Manager.Current()` 取的是 map 里**任意一条**），
 // 多会话下就是"随机落一条而输出看起来成功"。现在它们必须报错、且信封里带稳定 `code`：
 //
-//	① 池空 + 不带目标          → 409 + NO_SESSION（**只适用于"要一条既有会话"的端点**，
-//	                              见下面那条注：切环境不在此列）
-//	② 池里 2 条 + 不带目标      → 409 + SESSION_AMBIGUOUS + 候选清单（F1 的形状）
-//	③ 点名了一条不在池里的会话   → 404 + SESSION_NOT_FOUND
-//	④ /api/dbsql 不给 ent       → 400 + USAGE（C7.1-5：不再回落会话的 TOPENT）
+//	① 池里 2 条 + 不带目标      → 409 + SESSION_AMBIGUOUS + 候选清单（F1 的形状）
+//	② 点名了一条不在池里的会话   → 404 + SESSION_NOT_FOUND
+//	③ /api/dbsql 不给 ent       → 400 + USAGE（C7.1-5：不再回落会话的 TOPENT）
 //
-// **「池空 + 切环境」曾经也在这张表里（409 NO_SESSION），现在不是了**：切环境干的是
-// **创建**一条会话（Web 上那个按钮就叫「创建会话」，命令行是 `tt debug env <环境>`），
-// 池子空恰恰是它最正常的起点 —— 报 `NO_SESSION` 等于让"先建会话、再设 ENT、再调试"
-// 这条正确流程**第一步**就断，用户只能先起个作业去凑一条会话（顺序完全反了）。
-// 它的新判据搬到了 `session_named_host_test.go` 的
-// `TestSessionSwitchColdStartIsNotNoSession`；按日志重放仍留在这张表里（契约 F2 的载体）。
+// **「池空 + 不带目标 → 409 NO_SESSION」这一档已经不在这张表里**，因为它现在**没有任何端点**：
+// 从前占着它的是两条路线，而它们都是**创建**会话的命令，池子空恰恰是最正常的起点 ——
+//   - 切环境：Web 上那个按钮就叫「创建会话」，命令行是 `tt debug env <环境>`；
+//   - 按日志重放：「调试此调用」/ `tt debug wsdebug <rowid>`，它自己建那条会话来重跑一遍。
+//
+// 报 `NO_SESSION` 等于让"先建会话、再设 ENT、再调试"这条正确流程**第一步**就断，
+// 用户只能先起个作业去凑一条会话（顺序完全反了）。两处的新判据都在
+// `session_named_host_test.go` 的 `TestSessionSwitchColdStartIsNotNoSession` /
+// `TestWSLogDebugColdStartIsNotNoSession`；F2 这一档仍活在 CLI 目标层
+// （`internal/target` 的 `failureNoSession`），信封形状见
+// `contract_debug_test.go` 的 `TestContractNoSessionEnvelopeIsStillPinned`。
 //
 // 为什么断言 `code` 而不是状态码：Q15 写死了「Agent 读 `code`，不读数字」。
 func TestActionEndpointsRequireExplicitTarget(t *testing.T) {
-	// ① 池空
-	hsEmpty, _ := actionTestDebugServer(t)
-	// ② 池里两条（并给它一个具名环境：切环境那条会把"环境不存在"判在"缺目标"之前）
+	// 池里两条（并给它一个具名环境：切环境那条会把"环境不存在"判在"缺目标"之前）
 	hsTwo, sTwo := actionTestDebugServer(t)
 	giveServerNamedEnv(sTwo, "h1", "127.0.0.1", "36")
 	for _, id := range []string{"s-a", "s-b"} {
 		sTwo.mgr.sessions[id] = fakeIdleSession(id, "h1", "36")
 	}
-	// ③ 池空 + **配了环境**的那套服务不再需要：切环境的冷启动判据已搬到
-	//    `session_named_host_test.go`（它是"创建会话"，池空不是错误）。
+	// 池空 + **配了环境**的那套服务不再需要：切环境与按日志重放的冷启动判据都在
+	// `session_named_host_test.go`（它们都是"创建会话"，池空不是错误）。
 
 	cases := []struct {
 		name     string
@@ -177,8 +179,6 @@ func TestActionEndpointsRequireExplicitTarget(t *testing.T) {
 		candLen  int
 		wantText string
 	}{
-		{"池空 + 按日志重放", hsEmpty, "/api/wslogs/debug", `{"rowid":"1"}`,
-			http.StatusConflict, target.CodeNoSession, -1, "没有 SSH 会话"},
 		{"两条 + 切环境（歧义）", hsTwo, "/api/sessions/switch", `{"env":"h1","ent":"99"}`,
 			http.StatusConflict, target.CodeAmbiguous, 2, "无法确定你要哪一条"},
 		{"两条 + 按日志重放（歧义）", hsTwo, "/api/wslogs/debug", `{"rowid":"1"}`,
