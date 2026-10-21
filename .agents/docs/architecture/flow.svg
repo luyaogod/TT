@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 620" role="img" aria-labelledby="title desc">
+  <title id="title">TT 的两条核心链路</title>
+  <desc id="desc">上半部是 --at 身份链，下半部是 Source 数据链与统一输出信封。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 z" fill="#7c8fa2"/>
+    </marker>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 z" fill="#4c8cf0"/>
+    </marker>
+    <marker id="arrow-teal" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 z" fill="#28a895"/>
+    </marker>
+    <style>
+      text{font-family:"Microsoft YaHei","PingFang SC","Segoe UI",sans-serif;fill:#1d2f43}
+      .kicker{font:700 11px ui-monospace,Consolas,monospace;letter-spacing:.15em;fill:#4d7fb8}
+      .h{font-size:15px;font-weight:700}
+      .n{font-size:13px;font-weight:650}
+      .s{font-size:11px;fill:#64778b}
+      .xs{font-size:10px;fill:#7d8fa2}
+      .box{fill:#fff;stroke:#cbd8e6;stroke-width:1.2}
+      .blue{fill:#eef5ff;stroke:#9fc0ff}
+      .teal{fill:#edf9f5;stroke:#8bd8c8}
+      .violet{fill:#f2efff;stroke:#b8a9f2}
+      .warn{fill:#fff2f1;stroke:#f0b4ae}
+      .wire{fill:none;stroke:#7c8fa2;stroke-width:1.5;marker-end:url(#arrow)}
+      .wblue{fill:none;stroke:#4c8cf0;stroke-width:1.5;marker-end:url(#arrow-blue)}
+      .wteal{fill:none;stroke:#28a895;stroke-width:1.5;marker-end:url(#arrow-teal)}
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1200" height="620" fill="#f8fbff"/>
+  <rect x="16" y="16" width="1168" height="588" rx="24" fill="#fbfdff" stroke="#dbe6f1"/>
+
+  <text class="kicker" x="46" y="48">TT / TWO CHAINS</text>
+  <text class="h" x="46" y="73">先定位，再取数，最后带着出处返回</text>
+  <text class="s" x="46" y="94">坐标决定“连哪里、用谁的身份”；Source 决定“数据从哪来”；信封决定“能不能信”。</text>
+
+  <text class="kicker" x="46" y="132">01 / IDENTITY</text>
+  <text class="s" x="176" y="132">显式坐标；没有默认环境</text>
+
+  <rect class="box blue" x="46" y="148" width="220" height="70" rx="12"/>
+  <text class="n" x="156" y="174" text-anchor="middle">--at 环境@企业</text>
+  <text class="xs" x="156" y="194" text-anchor="middle">例：109tst@2222</text>
+  <path class="wblue" d="M266 183 L294 183"/>
+
+  <rect class="box" x="302" y="148" width="210" height="70" rx="12"/>
+  <text class="n" x="407" y="174" text-anchor="middle">环境 → SSH</text>
+  <text class="xs" x="407" y="194" text-anchor="middle">主机 / 区域 / 运行环境</text>
+  <path class="wire" d="M512 183 L540 183"/>
+
+  <rect class="box teal" x="548" y="148" width="220" height="70" rx="12"/>
+  <text class="n" x="658" y="174" text-anchor="middle">企业 ENT → 账号</text>
+  <text class="xs" x="658" y="194" text-anchor="middle">entdir / gzou_t，取不足就报错</text>
+  <path class="wteal" d="M768 183 L796 183"/>
+
+  <rect class="box violet" x="804" y="148" width="320" height="70" rx="12"/>
+  <text class="n" x="964" y="174" text-anchor="middle">库 / schema</text>
+  <text class="xs" x="964" y="194" text-anchor="middle">Oracle / Kingbase · 会话 / 查询的终点</text>
+
+  <rect class="box warn" x="46" y="236" width="1078" height="28" rx="7"/>
+  <text class="xs" x="64" y="254">不猜默认环境 · 不取账号列表首项 · 不拿别的环境顶替</text>
+
+  <text class="kicker" x="46" y="312">02 / DATA + OUTPUT</text>
+  <text class="s" x="194" y="312">同一接口；本地和远程可互换</text>
+
+  <rect class="box blue" x="46" y="330" width="180" height="66" rx="12"/>
+  <text class="n" x="136" y="354" text-anchor="middle">tt dict …</text>
+  <text class="xs" x="136" y="374" text-anchor="middle">命令层不判断数据源</text>
+  <path class="wblue" d="M226 363 L254 363"/>
+
+  <rect class="box teal" x="262" y="330" width="196" height="66" rx="12"/>
+  <text class="n" x="360" y="354" text-anchor="middle">db.Source</text>
+  <text class="xs" x="360" y="374" text-anchor="middle">同一组方法 / 同一批结构</text>
+
+  <path class="wteal" d="M458 352 L486 300"/>
+  <path class="wteal" d="M458 374 L486 426"/>
+
+  <rect class="box" x="498" y="260" width="260" height="74" rx="12"/>
+  <text class="n" x="628" y="286" text-anchor="middle">本地 SQLite</text>
+  <text class="xs" x="628" y="306" text-anchor="middle">--env local:环境 · 离线 / 快</text>
+  <text class="xs" x="628" y="322" text-anchor="middle">字典同步后可用</text>
+
+  <rect class="box" x="498" y="390" width="260" height="74" rx="12"/>
+  <text class="n" x="628" y="416" text-anchor="middle">远程 ERP 库</text>
+  <text class="xs" x="628" y="436" text-anchor="middle">--at 环境@企业 · 最新值</text>
+  <text class="xs" x="628" y="452" text-anchor="middle">Oracle / Kingbase</text>
+
+  <path class="wire" d="M758 297 L786 330"/>
+  <path class="wire" d="M758 427 L786 394"/>
+
+  <rect class="box violet" x="794" y="330" width="300" height="66" rx="12"/>
+  <text class="n" x="944" y="354" text-anchor="middle">output 信封</text>
+  <text class="xs" x="944" y="374" text-anchor="middle">ok · 来源 · 计数 · 截断 · notes · data</text>
+
+  <text class="xs" x="46" y="530">本地副本和远程直查只是两个实现；调用方看到的是同一套查询和同一套输出契约。</text>
+  <text class="xs" x="46" y="552">默认紧凑 JSON；--human 只换渲染，不改变来源、计数、截断和 notes。</text>
+</svg>

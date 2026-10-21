@@ -1,6 +1,6 @@
 # AGENTS.md
 
-TT 是用于开发鼎捷数智旗下的大型ERP系统（T100）所构建的CLI工具。修改代码前请阅读[docs/DESIGN.md](docs/DESIGN.md)；编写文档请遵循[docs/AGENTS.md](docs/AGENTS.md)
+TT 是用于开发鼎捷数智旗下的大型ERP系统（T100）所构建的CLI工具。
 
 ## 项目结构
 
@@ -10,79 +10,106 @@ TT/
 ├─ Makefile             必跑命令的快捷方式（make = build + test；深档目标自带副本闸门）
 ├─ config.example.json  配置文件样例（字段说明入口之一）
 ├─ VERSION              版本号唯一出处（两个打包脚本读它，make version-check 对照 web）
+├─ build_portable.bat   便携包构建：前端 + Go 二进制 + skills/ + 引擎 + 设计器
+├─ build_msi.bat        MSI 构建：复用便携载荷，生成 perUser 安装包
+├─ BDL-Markdown.zip     内置 BDL 文档包，首次运行自动解压
 │
-├─ .agents/             项目 Agent 技能与说明（tt-add-cli / tt-test / asd-ste100）
+├─ .agents/             项目 Agent 技能与说明（不随发行包装到用户目录）
+│  ├─ docs/             协作者共享文档与项目架构图
+│  └─ skills/           项目内技能
+│     ├─ asd-ste100/    技术英语/简化英语写作与检查
+│     ├─ tt-add-cli/    新增 CLI 命令的设计指南
+│     └─ tt-test/       真机集成测试与链路验证指南
 │
 ├─ internal/            Go 后端全部实现
 │  ├─ cli/              cobra 命令树装配处：各能力线 + 共用命令；唯一的接线处
+│  │  ├─ at/            --at 文法、作用域与 --at-list 契约
 │  │  ├─ common/        命令组间共享上下文（全局开关、MetaProvider、WebFS；叶子包防成环）
-│  │  ├─ debug/         调试命令组门面（fgldb 那条线）
-│  │  ├─ dev/           tt dev 命令组（三层，目录即分层）
-│  │  │  ├─ register.go/run.go   cobra 树：路由、组级帮助、未知命令退 2、install 墓碑
-│  │  │  │                       + 根开关桥 takeRootFlags + 退出码透传 exitCode
-│  │  │  ├─ common/     两条线共用的脚手架（契约件只此一份）：错误信封 Fail、
-│  │  │  │              稳定 JSON、ParseArgs、StripIdentitySuffix、
-│  │  │  │              config `tdev` 节接缝、总帮助 Usage
-│  │  │  ├─ tzc/        .tzc 代码包线：八个动词核心（export/status/verify/apply/
-│  │  │  │              unlock/rename/newfn/selftest）+ 31 项对抗自检 + 接线清单 Verbs()
-│  │  │  └─ tzs/        .tzs 表单包线：cmdTzs 分发、引擎定位/manifest、
-│  │  │                 detail 渲染；整线 DisableFlagParsing 透传（动词面由引擎定义）
 │  │  ├─ db/            tt db 命令组（sql 只读 SQL / ping 本机连库 / probe 服务器连库）
-│  │  ├─ file/          tt file 命令组（ls/cat/head/tail/grep/find/stat/wc/du/get + mirror；只读 SFTP）
-│  │  ├─ interfacecmd/  tt interface 命令组（.42f + .42s → 页面/字段/中文标签）
-│  │  ├─ outline/       tt outline 命令（.4gl → 函数/UI 块树）
-│  │  ├─ dict/          字典命令组（查询 / db sync / spill）
-│  │  ├─ session/        tt session 命令组（会话：建/列/看/改 ENT/结束/收掉/透传/起作业）
+│  │  ├─ debug/         调试命令组门面（fgldb 那条线）
+│  │  ├─ dev/           tt dev 命令组（tzc/tzs 两条线，目录即分层）
+│  │  │  ├─ common/     两条线共用脚手架：错误信封、稳定紧凑 JSON、参数重排、身份后缀
+│  │  │  ├─ tzc/        .tzc 代码包线：八个动词 + 31 项对抗自检 + Verbs() 接线清单
+│  │  │  └─ tzs/        .tzs 表单包线：cmdTzs 分发、引擎定位、manifest、detail 渲染
+│  │  ├─ dict/          字典命令组：表/字段/校验/开窗/消息/参数/ACC 查询
+│  │  ├─ drawio/        tt drawio 命令组：原型图与形状库
+│  │  ├─ file/          tt file 命令组：只读 SFTP 与离线镜像
+│  │  ├─ interfacecmd/  tt interface 命令组：.42f + .42s → 页面/字段/中文标签
+│  │  ├─ outline/       tt outline 命令：.4gl → 函数/UI 块树
+│  │  └─ session/       tt session 命令组：建/列/看/改 ENT/结束/收掉/透传/起作业
 │  ├─ config/           统一配置层：位置解析、唯一写入口 Edit、原子写、打码、缓存清单
-│  │                    + 统一路径管理器 Locations（数据目录/缓存/服务状态/字典库/引擎 exe 落点）
+│  ├─ dbconfig/         配置里“库”那一节的连接模型
 │  ├─ debug/            调试子系统：会话管理、断点存档、源码镜像 srccache、执行日志、企业快照
-│  ├─ debugclient/      调试面 REST 的**唯一**客户端（cli/debug 与 cli/session 共用；码/候选/信封）
-│  ├─ form42f/          .42f（编译后的表单文件）解析：字段表 + 页面布局（纯函数，零 IO）
-│  ├─ str42s/           .42s 编译字符串表解析（纯函数，零 IO）
-│  ├─ screen/           .42f 布局 + .42s 标签 → 前端画面模型
-│  ├─ session/          会话身份规则（序号分配、世代号）—— 不 import 调试线
-│  ├─ dev/              .tzc 设计器包管线（纯管线，无命令层）
+│  ├─ debugclient/      调试面 REST 唯一客户端（cli/debug 与 cli/session 共用；码/候选/信封）
+│  ├─ designer/         从设计器 sites.xml 只读导入环境站点
+│  ├─ dict/             字典子系统
+│  │  ├─ db/            本地 SQLite 查询与 ACC 元模型/值查询
+│  │  ├─ dbsync/        表与数据族同步（含 ACC 定义族）
+│  │  ├─ live/          远程 ERP 直查（Oracle/金仓）
+│  │  └─ server/        Web 字典接口
+│  ├─ dev/              .tzc/.tzs 设计器包管线（纯管线，无命令层）
 │  │  ├─ fence/         围栏协议：渲染/解析/字节级写回编辑
 │  │  ├─ verify/        三道闸门 + 不变量 I1–I15
 │  │  ├─ store/         工作区落盘：manifest、基线、原子写、锁
-│  │  ├─ tzs/           .tzs 引擎客户端（管道协议、manifest、doctor；不 import cli/dev）
-│  │  └─ split/ tapfile/ tglfile/ fgl/ model/ pkgfile/ synth/ testutil/
-│  │                    写回计划、TAP/TGL 格式、FGL 处理、包模型、包格式、合成、语料夹具
-│  ├─ dict/             字典子系统：db(本地 SQLite 查询) / dbsync(同步) / live(远程直查) / server(web 面)
-│  ├─ host/             唯一的 SSH/远程服务器能力层（连接、登录、服务器侧只读探测）
+│  │  ├─ tzs/           .tzs 引擎客户端：管道协议、manifest、doctor
+│  │  ├─ split/         写回计划与源码拆分
+│  │  ├─ tapfile/       TAP 文件格式
+│  │  ├─ tglfile/       TGL 文件格式
+│  │  ├─ fgl/           FGL 语法/块/大纲处理
+│  │  ├─ model/         包模型与稳定 JSON
+│  │  ├─ pkgfile/       .tzc/.tzs 包格式
+│  │  ├─ synth/         合成测试包
+│  │  └─ testutil/      管线测试夹具
+│  ├─ drawio/           drawio 图形与形状库支持
+│  │  └─ shapes/        内置形状库（business/controls/icons/raw）
+│  ├─ entdir/           企业目录（ENT→账号）快照、指纹、新鲜期（debug 与 dict 共用）
 │  ├─ erpdb/            客户端直连库封装（Oracle / 金仓，一个接口两个实现）
-│  ├─ dbconfig/         配置里"库"那一节的连接模型
-│  ├─ sshtun/           SSH 端口转发隧道（本地监听 → 远端 host:port）
-│  ├─ entdir/           企业目录（ENT→账号）共享件：快照、指纹、新鲜期（debug 与 dict 共用）
-│  ├─ web/              统一 Web 服务端：REST + WebSocket，嵌入前端 SPA，挂载调试/字典子系统
-│  │                   （会话附件由接线层注入）
-│  ├─ update/           tt 自身的更新：查新版/下载校验/交棒给脱离的更新器进程（不自动更新）
-│  ├─ output/           唯一的输出出口（表格 / JSON / CSV 一个入口）
-│  ├─ safesql/          只读 SQL 的文本层防线（远端查询入口用）
+│  ├─ form42f/          .42f 编译表单解析：字段表 + 页面布局（纯函数，零 IO）
+│  ├─ host/             唯一 SSH/远程服务器能力层（连接、登录、服务器侧只读探测）
+│  ├─ output/           唯一输出出口（紧凑 JSON / CSV / 表格）
 │  ├─ pathinstall/      用户 PATH（HKCU）增删，永不碰系统 PATH
-│  ├─ winproc/          起/判/杀不随本进程死的子进程（Windows）
+│  ├─ safesql/          只读 SQL 文本层防线（远端查询入口用）
+│  ├─ screen/           .42f 布局 + .42s 标签 → 前端画面模型
+│  ├─ session/          会话身份规则（序号分配、世代号），不 import 调试线
+│  ├─ sshtun/           SSH 端口转发隧道（本地监听 → 远端 host:port）
+│  ├─ str42s/           .42s 编译字符串表解析（纯函数，零 IO）
+│  ├─ target/           调试目标解析与候选信封
 │  ├─ testenv/          本机测试环境解析（config.local.json + 环境变量，不带 testing）
-│  └─ testkit/          测试助手（stdout 捕获、吞输出 Silent、跳过台账、单源检查）
+│  ├─ testkit/          测试助手（stdout 捕获、吞输出、跳过台账、单源检查）
+│  ├─ update/           tt 自身更新：查新版/下载校验/交棒给脱离进程（不自动更新）
+│  ├─ view/             窗口枚举、抓图、阴影裁切、标注与交付体检
+│  ├─ web/              统一 Web 服务端：REST + WebSocket，嵌入 SPA，挂载调试/字典子系统
+│  └─ winproc/          起/判/杀不随本进程死的子进程（Windows）
 │
 ├─ web/                 前端（npm workspaces，根）
 │  ├─ app/              唯一 workspace 成员：React + vite 调试工作台/设置页
-│  ├─ shared/           前端共享层（主题、设计系统；被 @source 扫描，动它要小心）
-│  └─ dist/             构建产物，被 Go 嵌入（.gitkeep 是承重墙，删了 go build 失败）
+│  │  ├─ src/           页面、组件、状态与 API 客户端
+│  │  └─ scripts/       前端语料/校验脚本（含 fgl-fixtures）
+│  ├─ shared/           共享主题与设计系统（被 @source 扫描，改动要谨慎）
+│  └─ dist/             构建产物，被 Go 嵌入（.gitkeep 是承重墙）
 │
 ├─ engine/              .tzs 表单引擎（C#，csc.exe 单独构建，只在改 engine/ 时重编）
 │  ├─ src/              引擎 C# 源码（tzs-server）
-│  ├─ designer/         设计器 28 个程序集（≈10.5MB，有意入库，保证全网同版设计器）
-│  ├─ out/              构建产物 + 十几个探测程序（不进发行包、不能落 dist/ 下）
-│  └─ test/ + build.sh / SPEC.md / HANDOFF.md  引擎测试、构建脚本、冻结契约、交接
+│  │  └─ Designer/Fns/  设计器函数/组件操作面（读、校验、语义、会话）
+│  ├─ designer/         设计器 28 个程序集（≈10.5MB，有意入库，保证全网同版）
+│  ├─ out/              构建产物 + 探测程序（不进发行包、不能落 dist/ 下）
+│  └─ test/             引擎测试
 │
-├─ designer-src/        设计器反编译源码（只读）：16 工程 + 12 子包代码地图，
-│                       引擎注释里的 file:line 核对落点
+├─ designer-src/        设计器反编译源码（只读）：16 工程 + 子包地图，注释 file:line 的核对落点
 ├─ installer/           MSI 安装包定义（WiX v3；perUser 装到 %LOCALAPPDATA%\Programs\TT）
-├─ tools/               Go 小工具：zip(打包) / wixremovefolders(卸载清目录) / tzsmini(语料构建)
-├─ testdata/            测试语料：tzs-mini(3.2MB 筛小钉住的标准件) / fgl-fixtures
-├─ skills/              对外技能手册（tt-debug / tt-dict / tt-dev-tzc / tt-dev-tzs / tt-drawio / tt-erp-read），
-│                       评测中执行者唯一能读的东西，与源代码同级重要
-└─ docs/                AGENTS（文档规范：住哪、写什么、什么不许写）+ DESIGN（整体结构分层）
+├─ tools/               构建辅助 Go 工具
+│  ├─ zip/              跨平台确定性打包
+│  ├─ wixremovefolders/ MSI 卸载时补空目录清理
+│  └─ tzsmini/          从语料构建 tzs-mini 夹具
+├─ testdata/            测试语料
+│  ├─ tzs-mini/         3.2MB 筛小标准件工作区
+│  ├─ fgl-fixtures/     FGL 解析/写回夹具
+│  └─ drawio/           drawio 形状/原型夹具
+└─ skills/              对外技能手册（评测中执行者唯一能读的东西）
+   ├─ tt-dev-tzc/       .tzc 代码包安全编辑
+   ├─ tt-erp-architecture/  T100 整体架构与代码地图
+   ├─ tt-erp-debug/     T100 作业调试
+   └─ tt-erp-read/      T100 代码阅读（含 SCC/ACC 识别）
 ```
 
 ## 开发命令

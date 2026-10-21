@@ -1,7 +1,6 @@
 ---
 name: tt-add-cli
 description: 在 TT 中新增或改造 CLI 命令时使用。触发词：加命令、命令组、Agent 友好、JSON 输出、--brief、投影、批量、错误码、CLI 契约。
-version: 0.1.2
 ---
 
 # 给 TT 加 CLI：只做 Agent 真正需要的命令
@@ -147,7 +146,6 @@ tt <cmd> --kw <无匹配词>
 
 ## 参考
 
-- [docs/DESIGN.md](../../../docs/DESIGN.md)
 - [internal/cli/README.md](../../../internal/cli/README.md)
 - [internal/output/README.md](../../../internal/output/README.md)
 - [internal/cli/at/scopes.go](../../../internal/cli/at/scopes.go)
