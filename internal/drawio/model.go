@@ -19,8 +19,8 @@ type LibraryConfig struct {
 // 六种写法只能用一个（style / preset / parts / table / xml / xmlFile），
 // 由 validate 拦下 —— 同时写两种在渲染时是静默取其一，那种 bug 最难查。
 type Shape struct {
-	ID         string    `json:"id"`
-	Title      string    `json:"title"`
+	ID    string `json:"id"`
+	Title string `json:"title"`
 	// Label 是单图元控件真正显示的文字；不写就用 Title（原实现是 `shape.label ?? shape.title`）。
 	Label      *string   `json:"label"`
 	Tags       []string  `json:"tags"`
@@ -47,12 +47,12 @@ func (s *Shape) Key() string {
 
 // Part 是组合控件里的一个部件 —— 一个矩形图元，坐标为**相对外层 group**。
 type Part struct {
-	Kind string   `json:"kind"`
-	Style string  `json:"style"`
-	X    *float64 `json:"x"`
-	Y    *float64 `json:"y"`
-	W    *float64 `json:"w"`
-	H    *float64 `json:"h"`
+	Kind  string   `json:"kind"`
+	Style string   `json:"style"`
+	X     *float64 `json:"x"`
+	Y     *float64 `json:"y"`
+	W     *float64 `json:"w"`
+	H     *float64 `json:"h"`
 
 	// Text 为 nil = 这个部件不参与文字替换，也不占用槽位；指向空串则是"占一个空槽位"。
 	Text *string `json:"text"`
@@ -104,17 +104,17 @@ type MultiTab struct {
 // 与原实现一致：Slots 是「文字槽位 → 单元格 id」，XML 是**已经展开好的** mxGraphModel
 // 片段（组合控件在合成期就摊平，compose 只负责换字、重编号、摆位置与拉伸）。
 type CatalogShape struct {
-	ID     string            `json:"id"`
-	Title  string            `json:"title"`
-	W      float64           `json:"w"`
-	H      float64           `json:"h"`
-	Tags   []string          `json:"tags"`
-	Slots  map[string]string `json:"slots"`
-	XML    string            `json:"xml"`
-	Table  *Table            `json:"table,omitempty"`
-	PFill  []int             `json:"pfill,omitempty"`
-	PDeco  []int             `json:"pdeco,omitempty"`
-	MultiTab *MultiTab       `json:"multiTab,omitempty"`
+	ID       string            `json:"id"`
+	Title    string            `json:"title"`
+	W        float64           `json:"w"`
+	H        float64           `json:"h"`
+	Tags     []string          `json:"tags"`
+	Slots    map[string]string `json:"slots"`
+	XML      string            `json:"xml"`
+	Table    *Table            `json:"table,omitempty"`
+	PFill    []int             `json:"pfill,omitempty"`
+	PDeco    []int             `json:"pdeco,omitempty"`
+	MultiTab *MultiTab         `json:"multiTab,omitempty"`
 
 	// Aspect 只在合成 mxlibrary 时用得上，**不进 catalog JSON** —— 原实现的 catalog
 	// 里没有这个字段，多写一个就不是等价移植了。

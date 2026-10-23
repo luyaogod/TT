@@ -100,9 +100,9 @@ func (r Rule) Title() string {
 // 但它**不是**差异（`Consistent()` 不看它 ⇒ 退出码不受影响），也**不许**被当成"没有问题"：
 // 报告里必须真的印出来（A37 的"信息没丢"）。
 type Note struct {
-	Rule  Rule          `json:"rule"`            // 挂在哪条规则下（目前只有 RuleFieldID）
-	Text  string        `json:"text"`            // 人读的说明（措辞只陈述事实，不猜哪一侧是 0 基）
-	Pairs int           `json:"pairs,omitempty"` // 这个事实覆盖了多少对唯一配对
+	Rule  Rule              `json:"rule"`            // 挂在哪条规则下（目前只有 RuleFieldID）
+	Text  string            `json:"text"`            // 人读的说明（措辞只陈述事实，不猜哪一侧是 0 基）
+	Pairs int               `json:"pairs,omitempty"` // 这个事实覆盖了多少对唯一配对
 	Cols  []form42f.ColName `json:"cols,omitempty"`  // 样例 colName（人抽查用：说明降级了，但线索还在）
 }
 
@@ -111,25 +111,25 @@ type Note struct {
 // 两侧的值**都要写出来**，因为"哪侧是应然、哪侧是实然"是排障的全部：F42 = `.42f`（应然/权威），
 // Tzs = tzs 生成物（实然/待校对）。
 type Finding struct {
-	Rule      Rule        `json:"rule"`
+	Rule      Rule            `json:"rule"`
 	ColName   form42f.ColName `json:"colName"`
-	F42       string      `json:"f42,omitempty"` // 应然侧的值（人可读：`fieldId=23` / `noEntry=false` / `Edit`）
-	Tzs       string      `json:"tzs,omitempty"` // 实然侧的值
-	Why       string      `json:"why"`           // 为什么算差异 / 为什么拿不准
-	Undecided bool        `json:"undecided,omitempty"`
+	F42       string          `json:"f42,omitempty"` // 应然侧的值（人可读：`fieldId=23` / `noEntry=false` / `Edit`）
+	Tzs       string          `json:"tzs,omitempty"` // 实然侧的值
+	Why       string          `json:"why"`           // 为什么算差异 / 为什么拿不准
+	Undecided bool            `json:"undecided,omitempty"`
 }
 
 // FormCheck 是一次校验的全部结果。
 type FormCheck struct {
-	Form            string        `json:"form"`               // 表单名（两侧同一口径：调用方给的名字）
-	DeclaredName42F string        `json:"declared_name_42f"`  // `.42f` 里 `<Form name>` 的原值（实测是 `*.tmp`，不能当 scope）
-	ProgTzs         string        `json:"prog_tzs"`           // tzs 侧程序名（从 `.4fd` 文件名推）
-	F42Fields       int           `json:"f42_fields"`         // `.42f` 条目数（含明细列/幻影列）
-	TzsFields       int           `json:"tzs_fields"`         // tzs 侧条目数（带 `fieldId` 的元素）
-	TzsUnnamed      int           `json:"tzs_unnamed"`        // tzs 侧没有 `colName` 的条目（不可比，只记数）
-	Pairs           int           `json:"pairs"`              // 真正配成对的 colName 数
-	Notes           []Note        `json:"notes,omitempty"`    // 聚合说明（A37）：不是差异，也不是未判定
-	Findings        []Finding     `json:"findings,omitempty"` // 全部（差异 + 未判定），按文档顺序
+	Form            string            `json:"form"`               // 表单名（两侧同一口径：调用方给的名字）
+	DeclaredName42F string            `json:"declared_name_42f"`  // `.42f` 里 `<Form name>` 的原值（实测是 `*.tmp`，不能当 scope）
+	ProgTzs         string            `json:"prog_tzs"`           // tzs 侧程序名（从 `.4fd` 文件名推）
+	F42Fields       int               `json:"f42_fields"`         // `.42f` 条目数（含明细列/幻影列）
+	TzsFields       int               `json:"tzs_fields"`         // tzs 侧条目数（带 `fieldId` 的元素）
+	TzsUnnamed      int               `json:"tzs_unnamed"`        // tzs 侧没有 `colName` 的条目（不可比，只记数）
+	Pairs           int               `json:"pairs"`              // 真正配成对的 colName 数
+	Notes           []Note            `json:"notes,omitempty"`    // 聚合说明（A37）：不是差异，也不是未判定
+	Findings        []Finding         `json:"findings,omitempty"` // 全部（差异 + 未判定），按文档顺序
 	F42Only         []form42f.ColName `json:"f42_only,omitempty"` // 只在 `.42f` 里出现（信息，不算差异）
 }
 
@@ -276,23 +276,23 @@ func (c *FormCheck) JSONReport() map[string]any {
 // 三个布尔属性**保留原文**（`"" = 未声明`）：比对时"未声明"与"声明为 false"不是一回事，
 // 压成 bool 就再也分不开了（A15）。
 type TzsField struct {
-	Tag      string      // 元素名（Edit / ComboBox / TableColumn / Phantom …，仅诊断用）
-	Name     string      // 协议名（如 formonly.pmdl001）
+	Tag      string          // 元素名（Edit / ComboBox / TableColumn / Phantom …，仅诊断用）
+	Name     string          // 协议名（如 formonly.pmdl001）
 	ColName  form42f.ColName // 栏位身份
 	FieldID  form42f.FieldID // 表单内编号（设计期分配 —— 与 `.42f` 的编号**可能不同物**，见 B5）
-	Widget   string      // `widget` 属性（缺省退元素名）
-	NoEntry  string      // `noEntry` 原值
-	Required string      // `required` 原值
-	NotNull  string      // `notNull` 原值
+	Widget   string          // `widget` 属性（缺省退元素名）
+	NoEntry  string          // `noEntry` 原值
+	Required string          // `required` 原值
+	NotNull  string          // `notNull` 原值
 }
 
 // TzsForm 是 tzs 侧一张表单的字段表。
 type TzsForm struct {
-	Prog         string        // 程序名（`.4fd` 文件名不含扩展名；读包时从 zip 条目推）
-	DeclaredName string        // `<Form name=…>` 原值（与 `.42f` 的 DeclaredName 对照用）
-	Fields       []TzsField    // 文档顺序
+	Prog         string            // 程序名（`.4fd` 文件名不含扩展名；读包时从 zip 条目推）
+	DeclaredName string            // `<Form name=…>` 原值（与 `.42f` 的 DeclaredName 对照用）
+	Fields       []TzsField        // 文档顺序
 	Duplicates   []form42f.ColName // 同名 colName（重名 ⇒ 无法唯一对应，见 CheckForm42F）
-	Skipped      int           // 有 `fieldId` 但不是整数（或空）而被跳过的元素数；不猜、不 panic
+	Skipped      int               // 有 `fieldId` 但不是整数（或空）而被跳过的元素数；不猜、不 panic
 }
 
 // Unnamed 返回没有 `colName` 的条目数（`NON_DATABASE` 字段：没有栏位身份，不可比）。

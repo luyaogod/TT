@@ -110,6 +110,12 @@ export interface HostsDb {
   accounts?: { account: string; password: string }[]
   // 是否允许 AI 执行只读 SQL。undefined = 未配置 = 开启;显式 false 才关。
   readonlySql?: boolean
+  // SSH 隧道：客户端不可达 DB 时经它转发（表单不编辑，手工写在 config.json；
+  // 设置页保存时原样保留）。「测试连接」必须带上它，否则测的是另一条链路。
+  viaSsh?: {
+    host: string; port?: number; user: string; password?: string
+    bindPort?: number; remoteHost?: string; remotePort?: number
+  }
 }
 export interface HostsEnt { ent: number; account: string; password?: string }
 
@@ -129,6 +135,11 @@ export interface HostsSsh {
   workspace?: string
   // mirrorDir 该环境自己的源码镜像目录；空 = 使用全局 mirror.dir/<环境名>。
   mirrorDir?: string
+  // kbDir 该环境自己的知识库目录；空 = 使用全局 kb.dir。
+  kbDir?: string
+  // dictDir 该环境自己的本地字典库目录；空 = 使用全局 dict.dir。
+  // 只到目录这一级，文件名始终是 <环境>.db。
+  dictDir?: string
   db?: HostsDb | null
 }
 // 调试节(debug.*):本机参数,不随环境走
@@ -150,6 +161,9 @@ export interface HostsView {
   query: { source?: string }
   mirror: { dir?: string }
   bdldoc: { dir?: string }
+  kb: { dir?: string }
+  // dict 本地字典库根目录；空 = 缺省 <数据目录>/dict
+  dict: { dir?: string }
   sync: { target?: string }
   tdev: { workspaceSuffix?: string; defaultOut?: string }
   version: string
@@ -183,8 +197,21 @@ export interface HostsPatch {
   query?: { source?: string }
   mirror?: { dir?: string }
   bdldoc?: { dir?: string }
+  kb?: { dir?: string }
+  dict?: { dir?: string }
   sync?: { target?: string }
   tdev?: { workspaceSuffix?: string; defaultOut?: string }
+}
+
+// 目录选择器（前端自绘）用的目录项 / 列表
+export interface FsEntry { name: string; path: string }
+export interface FsList {
+  ok: boolean
+  path: string
+  parent: string
+  drives: FsEntry[]
+  dirs: FsEntry[]
+  truncated?: boolean
 }
 
 // 一个"目录型"配置值的状态:配置里的值 + 它在本机是否真的存在
@@ -252,6 +279,8 @@ export interface ConfigStatus {
   config: string
   mirror: DirStatus
   bdldoc: DirStatus
+  kb: DirStatus
+  dict: DirStatus
   sync: FileStatus
   install: InstallStatus
   cache: CacheStatus
@@ -412,7 +441,7 @@ export const api = {
   // 客户端直连测试(按表单显式字段连库,凭据取账号列表首项)。
   // 共享端点要求 {connection: …} 包一层(沿用字典侧的请求形状),不再是平铺连接字段。
   connTest: (connection: HostsDb) =>
-    req<{ ok: boolean; type?: string; serverVersion?: string; address?: string; stage?: string; error?: string }>('/api/conntest', { method: 'POST', body: JSON.stringify({ connection }) }),
+    req<{ ok: boolean; type?: string; serverVersion?: string; address?: string; stage?: string; error?: string; via?: string }>('/api/conntest', { method: 'POST', body: JSON.stringify({ connection }) }),
   // 账号清单「验证」:SSH 上服务器以该账号+密码连显式目标库 select 1(只读)
   dbAccVerify: (body: { host: string; port: number; user: string; password: string; zone: string; type: string; account: string; acctPassword: string; dbHost?: string; dbPort?: number; dbSvc?: string; dbDatabase?: string }) =>
     req<{ ok: boolean; error?: string }>('/api/dbaccverify', { method: 'POST', body: JSON.stringify(body) }),
@@ -431,6 +460,10 @@ export const api = {
     req<{ ok: boolean; path?: string; canceled?: boolean }>('/api/pickdir', {
       method: 'POST', body: JSON.stringify({ initial, title }),
     }),
+  // 列本机目录（只列目录，只接受本机请求）。浏览器拿不到绝对路径，
+  // 所以"选目录"要由服务端列出来、前端画成自己的选择器。
+  listDirs: (path: string) =>
+    req<FsList>('/api/fs/list?path=' + encodeURIComponent(path)),
   // 命令行安装(PATH):应用级动作,统一层提供(合并前在字典子系统的私有 API 下)
   installStatus: () => req<InstallStatus>('/api/install'),
   installAdd: () => req<InstallStatus>('/api/install', { method: 'POST' }),

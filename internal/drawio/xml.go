@@ -12,7 +12,9 @@ import (
 //
 // 为什么不用 encoding/xml 的 EscapeText：它会把 " 写成 &#34;、还会把制表符与换行
 // 转成实体，输出与原来不一致。drawio 加载一个库走的是
-//     mxUtils.parseXml(data) → JSON.parse(mxUtils.getTextContent(root))
+//
+//	mxUtils.parseXml(data) → JSON.parse(mxUtils.getTextContent(root))
+//
 // 也就是「先当 XML 解析、再取文本当 JSON」两层。哪一层少转了、或者多转了，
 // 轻则形状显示错，重则整个库打不开（原项目为此踩过两次，报错是
 // `Unexpected token 'T', "This page" ... is not valid JSON`）。

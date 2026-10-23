@@ -30,6 +30,7 @@ import (
 // 注:从前靠配置里的 hosts.activeEnv 触发选择;默认环境已移除,
 // 所以现在必须 `--env` 点名 —— 这条用例顺带把"点名才连"钉住了。
 func TestDBGProbeReportsConfiguredHost(t *testing.T) {
+	t.Setenv("TT_CONFIG", "") // 隔离真实 TT_CONFIG,否则会连到生产环境清单里的主机
 	oldPath := common.ConfigPath
 	common.ConfigPath = writeProbeConfig(t)
 	t.Cleanup(func() { common.ConfigPath = oldPath })

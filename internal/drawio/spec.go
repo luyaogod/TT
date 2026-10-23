@@ -18,10 +18,10 @@ import (
 // Spec 是一份排版规格。
 type Spec struct {
 	// Library 用哪个库：`controls`（表单控件，缺省）或 `business`（业务组件）。
-	Library string `json:"library"`
-	Title   string `json:"title"`
-	Grid    *Grid  `json:"grid"`
-	Page    *Page  `json:"page"`
+	Library string     `json:"library"`
+	Title   string     `json:"title"`
+	Grid    *Grid      `json:"grid"`
+	Page    *Page      `json:"page"`
 	Items   []SpecItem `json:"items"`
 }
 

@@ -407,10 +407,10 @@ func estimateTextWidth(text string, fontSize float64) float64 {
 // catalogEntry 把一份定义 + 它展开好的 XML 变成 catalog 条目。
 func catalogEntry(shape *Shape, xml string) CatalogShape {
 	entry := CatalogShape{
-		ID:    shape.Key(),
-		Title: shape.Title,
-		W:     num(shape.W),
-		H:     num(shape.H),
+		ID:     shape.Key(),
+		Title:  shape.Title,
+		W:      num(shape.W),
+		H:      num(shape.H),
 		Tags:   shape.Tags,
 		Slots:  textSlots(shape),
 		XML:    xml,

@@ -1050,6 +1050,15 @@ func (s *Session) SetRun(cfg *Config, module, prog, runProg, launchRef, extra st
 	if cfg != nil {
 		cc := *cfg
 		cc.Runtime = s.cfg.Runtime // 会话内动态路径保留(同一宿主/区域)
+		// **别把这条会话的 ENT 弄丢**：整份替换会把它抹成空（本轮请求常常没带 --ent，
+		// 前端「运行/重新开始」就是这样）。变空之后 `requireExplicitEnt` 的三个来源
+		// （本次 --ent / 会话 override / 会话建立时的值）全部落空 —— 于是**第一次启动成功、
+		// 之后每次启动都 409**，界面停在 idle，人看到的是"重新开始之后步入/步过全灰"
+		// （实测：鼎捷1/鼎捷2 首次启动后 cfg.Topent 变空，再启动必 409）。
+		// 会话建立时显式给的 ENT 是这条会话自己的事实（TopentSession 的语义），保留它。
+		if strings.TrimSpace(string(cc.Topent)) == "" {
+			cc.Topent = s.cfg.Topent
+		}
 		s.cfg = &cc
 		s.envName = cc.EnvName() // 环境名跟着配置走,不然快照会报旧环境
 	}
@@ -1431,13 +1440,12 @@ func (s *Session) EndRun() error {
 	if s.State() == StateExit || s.State() == StateIdle {
 		return nil
 	}
-	// 已经有一次收口在跑就**等它**（见 quitDone 的注释）；否则我当执行者。
-	done, mine := s.beginQuit()
-	if !mine {
-		return s.waitQuit(done)
-	}
-	defer close(done)
+	// 收口互斥（执行者 / 等待者）由 withQuit 承包：**复位写在那里，调用方漏不掉**。
+	return s.withQuit(s.endRunAsOwner)
+}
 
+// endRunAsOwner 是"已经拿到执行权"之后的本体。
+func (s *Session) endRunAsOwner() error {
 	st := s.State()
 	if st == StateRunning {
 		_ = s.Interrupt()
@@ -1481,6 +1489,42 @@ func (s *Session) beginQuit() (chan struct{}, bool) {
 	return s.quitDone, true
 }
 
+// withQuit 以"收口执行者"的身份跑 fn：**保证**无论 fn 从哪条路径返回都会复位标志。
+//
+// 为什么不让调用方自己 beginQuit/endQuit：2026-10-23 的 bug 正是"只置 true、忘了复位"，
+// 结果每条会话的「结束调试 / 重新开始」只有第一次真的生效，之后全返回假成功（200），
+// 状态留在 stopped，紧接着的启动撞"已存在调试会话"。靠"记得写 defer"防不住下一个人
+// 再加一条返回路径，所以把配对关系收进这个函数 —— 结构上漏不掉。
+func (s *Session) withQuit(fn func() error) error {
+	done, mine := s.beginQuit()
+	if !mine {
+		return s.waitQuit(done)
+	}
+	defer s.endQuit(done)
+	return fn()
+}
+
+// endQuit 收口执行者返回时调用：**先清标志，再关信号**。
+//
+// 顺序不能反。等待者（`beginQuit` 拿到 `!mine` 的那一方）是在 `<-done` 上等的，
+// 一旦被唤醒它会立刻按"收口已完成"往下走；若此刻 `quitting` 还是 true，它会再进
+// `beginQuit` 又拿到那个**已经关闭**的 done，于是 `waitQuit` 立刻返回 nil —— 报成功，
+// 而实际上一次收口都没发生。
+//
+// 这个 bug 的实际后果（2026-10-23 实测）：`quitting` 从前**只置 true、从不复位**，
+// 于是每条会话的「结束调试 / 重新开始」只有**第一次**真的生效；之后再点都返回 200
+// 假成功，状态留在 stopped，紧接着的启动撞上"已存在调试会话"，界面停在 idle，
+// 人看到的是"重新开始之后步入/步过全灰"。
+func (s *Session) endQuit(done chan struct{}) {
+	s.mu.Lock()
+	s.quitting = false
+	s.quitDone = nil
+	s.mu.Unlock()
+	if done != nil {
+		close(done)
+	}
+}
+
 // waitQuit 等一次在飞的收口做完，并把"做完之后状态是否真的可以干活"如实报出来。
 func (s *Session) waitQuit(done chan struct{}) error {
 	if done == nil {
@@ -1501,12 +1545,7 @@ func (s *Session) waitQuit(done chan struct{}) error {
 // Close 彻底结束会话并释放 SSH(切换环境/重启会话/服务退出/异常兜底用):
 // 必要时先中断,再向 fgldb quit,最后关闭连接。
 func (s *Session) Close() error {
-	done, mine := s.beginQuit()
-	if !mine {
-		return s.waitQuit(done)
-	}
-	defer close(done)
-	return s.closeNow()
+	return s.withQuit(s.closeNow)
 }
 
 // closeNow 是 Close 的实体：**不带**"已有人在收口"的前置判断。

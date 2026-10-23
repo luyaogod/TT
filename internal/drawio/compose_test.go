@@ -126,9 +126,10 @@ func TestComposeSimpleGrid(t *testing.T) {
 // 形状源里那两个 1 基的部件序号（pfill / pdeco）。
 //
 // 拿 Folder 当样本（400×244，两个部件）：拉成两倍后，
-//   p1 是 containerBox（fill）→ 框体跟着撑开，但要**减去另三边的内缩**（这里是 0，因为
-//      它本来就从 y=24 贴到 y=244）
-//   p2 是 tab（deco）→ 页签是装饰件，**一个像素都不许动**
+//
+//	p1 是 containerBox（fill）→ 框体跟着撑开，但要**减去另三边的内缩**（这里是 0，因为
+//	   它本来就从 y=24 贴到 y=244）
+//	p2 是 tab（deco）→ 页签是装饰件，**一个像素都不许动**
 func TestComposeStretchClasses(t *testing.T) {
 	res := composeJSON(t, `{
 	  "title": "拉伸",

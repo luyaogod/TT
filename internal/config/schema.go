@@ -87,8 +87,20 @@ type NamedSsh struct {
 	// 真实客户目录，配错就等于拿别人的表单当草稿纸。
 	Workspace string `json:"workspace,omitempty"`
 	// MirrorDir 这个环境的源码镜像目录（绝对路径）；空 = 用顶层 mirror.dir/<环境名>。
-	MirrorDir string               `json:"mirrorDir,omitempty"`
-	DB        *dbconfig.Connection `json:"db,omitempty"` // 该环境的数据库连接（与 SSH 一对一）
+	MirrorDir string `json:"mirrorDir,omitempty"`
+	// KbDir 这个环境的知识库目录（绝对路径）；空 = 用顶层 kb.dir。
+	//
+	// 与 MirrorDir 同构但语义不同：镜像**必须**按环境分（同一作业在不同环境的代码版本不同），
+	// 知识库通常是**一套**（正式区口径），所以这项多数环境留空、只有要给某环境单独一套
+	// 笔记时才配。解析走 KbDirOf。
+	KbDir string `json:"kbDir,omitempty"`
+	// DictDir 这个环境的本地字典库目录（绝对路径）；空 = 用顶层 dict.dir，再空 = <数据目录>/dict。
+	//
+	// 只到**目录**这一级：文件名始终是 <环境>.db（见 DictDBFileName）。不允许直接指到某个 .db ——
+	// 那样同一个环境可能被 CLI 指向 A、被界面指向 B，而"读到另一个库"与"数据不存在"
+	// 在输出上分不出来。
+	DictDir string               `json:"dictDir,omitempty"`
+	DB      *dbconfig.Connection `json:"db,omitempty"` // 该环境的数据库连接（与 SSH 一对一）
 	// Ents 这个环境支持的企业编号与各自的账号（gzou_t 的 gzou001/gzou003）。
 	//
 	// 为什么存进配置（而不是每次现查 gzou_t）：企业清单是**慢变量**，而“能不能看
@@ -248,12 +260,32 @@ func (q QuerySettings) EffectiveLimit() int {
 
 // MirrorSettings 源码镜像落点（绝对路径）。
 type MirrorSettings struct {
-	Dir string `json:"dir,omitempty"`
+	// 不带 omitempty：空串是**有意义的取值**（"没配，走缺省"）。带 omitempty 时
+	// 清空这个输入框会让 sec 里没有 dir 键，而 putSection 会把旧值补回来 ——
+	// 用户看到的就是"清了保存，还是原样"。
+	Dir string `json:"dir"`
 }
 
 // BdldocSettings BDL 文档落点（绝对路径）。
 type BdldocSettings struct {
-	Dir string `json:"dir,omitempty"`
+	Dir string `json:"dir"` // 同 MirrorSettings：空串有意义，不能 omitempty
+}
+
+// KbSettings 知识库（源码解析笔记等）的根目录（绝对路径）。
+//
+// 注意与 MirrorDir 的分工：镜像目录是**代码**、由 tt file mirror 拉取并整目录替换；
+// 知识库是**人写的笔记**，tt 刻意不碰它（既不拉取也不清理）。所以这两条路径不能
+// 互为子目录 —— 全量拉取会整目录替换镜像目录，放在里面的笔记会被一起删掉。
+type KbSettings struct {
+	Dir string `json:"dir"` // 同 MirrorSettings：空串有意义，不能 omitempty
+}
+
+// DictSettings 本地字典库（SQLite）的根目录（绝对路径）。
+//
+// 空 = 缺省落点 `<数据目录>/dict`。各环境仍是 `<根目录>/<环境>.db` —— 只挪根、
+// 不按环境各指一个文件：CLI、Web、查询三边读同一份配置才不会各读各的库。
+type DictSettings struct {
+	Dir string `json:"dir"` // 同 MirrorSettings：空串有意义，不能 omitempty
 }
 
 // SyncSettings 旧版单文件字典库落点（绝对路径）。
@@ -314,6 +346,8 @@ type Root struct {
 	Query         QuerySettings
 	Mirror        MirrorSettings
 	Bdldoc        BdldocSettings
+	Kb            KbSettings
+	Dict          DictSettings
 	Sync          SyncSettings
 	Tdev          TdevSettings
 	Tzs           TzsSettings
@@ -347,6 +381,12 @@ func Load(path string) (*Root, error) {
 		return nil, err
 	}
 	if err := decodeSection(root, "bdldoc", &r.Bdldoc); err != nil {
+		return nil, err
+	}
+	if err := decodeSection(root, "kb", &r.Kb); err != nil {
+		return nil, err
+	}
+	if err := decodeSection(root, "dict", &r.Dict); err != nil {
 		return nil, err
 	}
 	if err := decodeSection(root, "sync", &r.Sync); err != nil {

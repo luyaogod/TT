@@ -12,6 +12,19 @@ import { PayloadEditor } from './PayloadEditor'
 import { copyText } from './clipboard'
 import { useToast } from './toast'
 
+// 每个环境各记一份"这一页的输入"（查询条件/日期/企业/是否已查询）。
+// 与 store 里的 wsLogsByEnv（结果）配套：结果 + 输入都按环境分开，切回来才是原样。
+type WsLogViewState = {
+  draft: { service: string; job: string; result: string; origin: string; server: string }
+  applied: { service: string; job: string; result: string; origin: string; server: string }
+  onlyFail: boolean
+  from: string
+  to: string
+  ent: number
+  queried: boolean
+}
+const wsLogViewStateByEnv = new Map<string, WsLogViewState>()
+
 // 列表列定义:完整模式(未选中)与紧凑模式(详情展开,只留状态/服务)共用同一套渲染。
 // 每个列都给出排序键,表头点击即排序。注意:排序只作用于**当前页**——分页在后端做,
 // 未排序时的顺序就是服务端的 `order by wsfa003 desc`(最新在前)。
@@ -208,6 +221,36 @@ export function WsLogView() {
   // 首屏不发 —— "打开这一页就往人家的库上拨一次 SSH"不是看日志该有的副作用。
   const [queried, setQueried] = useState(false)
 
+  // 切环境:**各存一份**,切走再切回原样还在(与多会话同一条原则)。
+  // 结果那半份在 store(wsLogsByEnv,见 setActiveEnv),这半份是这一页自己的输入:
+  // 查询条件/日期/企业/是否已查询 —— 都按环境记在模块级 map 里。
+  //
+  // 为什么不能共用:环境页 keep-alive,甲环境的企业编号在乙环境未必存在,
+  // 甲环境的"已查询"状态套到乙环境上就会出现"空列表却没有查询按钮提示"这类怪相。
+  const envRef = useRef(activeEnv)
+  const viewStateRef = useRef<WsLogViewState>({ draft, applied, onlyFail, from, to, ent, queried })
+  viewStateRef.current = { draft, applied, onlyFail, from, to, ent, queried }
+  const suppressRequeryRef = useRef(false)
+  useEffect(() => {
+    if (envRef.current === activeEnv) return
+    const prev = envRef.current
+    envRef.current = activeEnv
+    wsLogViewStateByEnv.set(prev, viewStateRef.current)
+    const saved = wsLogViewStateByEnv.get(activeEnv)
+    suppressRequeryRef.current = true
+    if (saved) {
+      setDraft(saved.draft); setApplied(saved.applied); setOnlyFail(saved.onlyFail)
+      setFrom(saved.from); setTo(saved.to); setEnt(saved.ent); setQueried(saved.queried)
+    } else {
+      const d = today()
+      const blank = { service: '', job: '', result: '', origin: '', server: '' }
+      setDraft(blank); setApplied(blank); setOnlyFail(false)
+      setFrom(d); setTo(d); setEnt(0); setQueried(false)
+    }
+    // 还原这一轮里 from/to 的变化不算"用户改日期",放掉抑制标记给下一次用。
+    window.setTimeout(() => { suppressRequeryRef.current = false }, 0)
+  }, [activeEnv])
+
   useEffect(() => {
     if (activeEnv) void loadEnts(activeEnv)
   }, [activeEnv, loadEnts])
@@ -218,8 +261,11 @@ export function WsLogView() {
     if (!ent && items.length) setEnt(items[0].ent)
   }, [entsView, ent])
 
-  // 日期改了重查:只在已经查过一次之后(见 queried 的注释)
+  // 日期改了重查:只在已经查过一次之后(见 queried 的注释)。
+  // 切环境还原状态时会同时改 from/to/ent/queried —— 那一下**不该**触发重查
+  // (那是"恢复上次的画面",不是"用户改了日期";重查等于白拨一次 SSH)。
   useEffect(() => {
+    if (suppressRequeryRef.current) return
     if (!queried || !entRef.current) return
     void loadWsLogs({ ...appliedRef.current, onlyFail: onlyFailRef.current, page: 1, startFrom: from, endTo: to, ent: entRef.current })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -242,6 +288,21 @@ export function WsLogView() {
     void loadWsLogs({ ...appliedRef.current, onlyFail: onlyFailRef.current, page: p, startFrom: from, endTo: to, ent: entRef.current })
   }
   const onEnter = (e: React.KeyboardEvent) => { if (e.key === 'Enter') doLoad(1) }
+
+  // 一条都没有时给个台阶:默认查的是"今天",而有的环境(如测试区)最近一条日志是一个多月前的
+  // (实测 2026-10-23:测试区 wsfa_t 只到 2026-08-05),用户看到空列表只会以为"日志坏了"。
+  // 放宽到最近一年 —— 日志表通常按月清理,一年足够覆盖;仍然是按 wsfa003 倒序取前 200 条,
+  // 走索引,不会因为范围大而变慢。
+  const widenToLastYear = () => {
+    if (!entRef.current) { toast.error('先选企业编号'); return }
+    const end = today()
+    const d = new Date(); d.setDate(d.getDate() - 365)
+    const start = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    suppressRequeryRef.current = true
+    window.setTimeout(() => { suppressRequeryRef.current = false }, 0)
+    setFrom(start); setTo(end); setQueried(true)
+    void loadWsLogs({ ...appliedRef.current, onlyFail: onlyFailRef.current, page: 1, startFrom: start, endTo: end, ent: entRef.current })
+  }
 
   // ---- 宽度分配:左右两栏按比例分(默认 1:1),之和恒等于容器宽度 ----
   // 容器宽度实测。用 **callback ref** 而不是"挂载时读一次"：这一块**可能后出现**
@@ -636,7 +697,15 @@ export function WsLogView() {
                   </button>
                 </div>
               ) : (
-                <div className="p-4 text-center text-xs text-muted-foreground">暂无日志记录</div>
+                <div className="flex flex-col items-center gap-1.5 p-6 text-center text-xs text-muted-foreground">
+                  <span className="text-sm text-foreground">这段日期没有接口调用记录</span>
+                  <span>{from} ~ {to}{activeEnv ? ` · ${activeEnv}` : ''}</span>
+                  <span>有些环境的日志是较早的（默认只查今天），放宽日期范围再看看。</span>
+                  <button onClick={widenToLastYear}
+                    className="mt-1 rounded-ui border border-border px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground">
+                    查最近一年
+                  </button>
+                </div>
               )
             )}
           </div>

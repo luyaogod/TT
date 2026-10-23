@@ -267,7 +267,7 @@ func TestCheckReadOnlyStatementBlocksTheReadOnlyTransactionBypass(t *testing.T) 
 // 那两个目录下每一段以 `SELECT` / `WITH` 开头的**反引号字符串字面量**都要过闸门。
 //
 // 覆盖面与它的边界（如实写）：
-//   - 抓的是**整段**字面量（那正是 live 那一路的写法：`sql := \`SELECT …\``，拼值在末尾
+//   - 抓的是**整段**字面量（那正是 live 那一路的写法：`sql := \`SELECT …\“，拼值在末尾
 //     用 `+ lit(x)`），所以扫到的就是真正送进 `erpdb.Query` 的那条语句；
 //   - `internal/dict/db`（本地 SQLite 镜像）不在范围内：它不走 `erpdb`，闸门也管不着它；
 //   - 反面判据在下面：扫到的条数必须够多，否则这条测试是空转。
