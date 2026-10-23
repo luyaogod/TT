@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"strings"
 
 	"tt/internal/cli"
 )
@@ -31,6 +32,23 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "内嵌前端目录异常(web/dist): %v\n", err)
 		os.Exit(1)
+	}
+	// 开发覆盖：TT_WEB_DIR 指向一份磁盘 dist 时优先用它。
+	//
+	// 为什么需要它：前端产物内嵌在二进制里，换掉 web/dist 后不重新编译就还是旧界面，
+	// 而重编又必须重启 serve —— 重启会清掉**内存里的调试会话**（实测代价很痛：
+	// 会话池不落盘，正在调的两条作业全丢）。设了这个变量之后，改前端只要重建 dist、
+	// 刷新页面就生效，后端与会话都不动。
+	//
+	// 发布场景不设它，行为与从前完全一致（仍用内嵌产物）。
+	if d := strings.TrimSpace(os.Getenv("TT_WEB_DIR")); d != "" {
+		if st, statErr := os.Stat(d); statErr != nil || !st.IsDir() {
+			fmt.Fprintf(os.Stderr, "TT_WEB_DIR 不是目录(%s)，继续用内嵌前端\n", d)
+		} else if disk := os.DirFS(d); func() bool { _, e := fs.Stat(disk, "index.html"); return e == nil }() {
+			dist = disk
+		} else {
+			fmt.Fprintf(os.Stderr, "TT_WEB_DIR 下没有 index.html(%s)，继续用内嵌前端\n", d)
+		}
 	}
 	cli.Execute(dist)
 }
