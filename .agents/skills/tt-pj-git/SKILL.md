@@ -1,9 +1,11 @@
 ---
 name: tt-pj-git
-description: 在 TT 中涉任何和git相关的命令时，请激活此技能来加载项目管理规范
+description: 在TT中涉任何代码修改和git相关的命令时，请激活此技能来加载项目管理规范
 ---
 
 # TT的项目规范
+
+涉及任何修改必须创建自己的分支，完成工作后向远程仓库推送PR
 
 ## commit
 
@@ -19,4 +21,3 @@ refactor(scope): title
 ```
 
 > Body、Footer内容格式不设要求
-
