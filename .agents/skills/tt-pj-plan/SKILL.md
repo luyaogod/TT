@@ -1,5 +1,5 @@
 ---
-name: tt-plan
+name: tt-pj-plan
 description: Agent在当前项目中进入计划（plan）模式或创建计划`plan`文件时自动激活此技能
 ---
 
