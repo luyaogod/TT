@@ -1,5 +1,5 @@
 ---
-name: tt-add-cli
+name: tt-pj-add-cli
 description: 在 TT 中新增或改造 CLI 命令时使用。触发词：加命令、命令组、Agent 友好、JSON 输出、--brief、投影、批量、错误码、CLI 契约。
 ---
 

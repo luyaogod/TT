@@ -335,13 +335,9 @@ const actorHeader = "X-Actor"
 // 不是攻击者 —— 与既有两道闸门同一档。
 const ActorSystem = "system"
 
-// ActorEnv 是"这次调用算谁的动作"的环境变量开关，由**发起方**在起子进程时设置。
-//
-// 为什么需要它：那条链路是"人点界面按钮 → serve 起 tt 子进程 → 子进程再调调试线 REST"，
-// 而 CLI 默认声明 X-Actor: ai（命令行本来是 AI 的接口）。于是纯人工模式下，人点出来的动作
-// 会被自己设的模式闸门拦下（实测 2026-10-16："纯人工模式:AI 不可操作"）。
-// serve 起这条链路时把 TT_ACTOR=human 传下去，子进程逐层继承（exec.Command 默认继承环境）。
-const ActorEnv = "TT_ACTOR"
+// 环境变量 TT_ACTOR（"这次调用算谁的动作"）的常量定义在 internal/target.ActorEnv，
+// 调试面不再重复定义一份 —— 两边读的必须字面相同，两份定义就会漂。
+// 为什么需要它、serve 起链路时怎么传，见那处的注释。
 
 func actorOf(r *http.Request) string {
 	switch strings.ToLower(strings.TrimSpace(r.Header.Get(actorHeader))) {

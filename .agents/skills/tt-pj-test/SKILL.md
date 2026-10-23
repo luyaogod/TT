@@ -1,9 +1,13 @@
 ---
-name: tt-test
-description: 选择并执行 TT 的测试档位：Go 单包/全量、前端、.tzc/.tzs、真机链路；包含环境准备、隔离和收口要求。
+name: tt-pj-test
+description: 在TT中涉及任何和测试(test)相关的内容都要激活此SKILL
 ---
 
 # TT 测试
+
+## 关于Makefile
+
+`Makefile`在本项目中是集中管理test命令的入口也是一份文档，能通过`Makefile`管理的测试命令尽可能封装到Makefile中
 
 ## 先按改动选档位
 

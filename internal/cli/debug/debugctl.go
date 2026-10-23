@@ -91,9 +91,9 @@ func joinAPIBase(url, prefix string) string {
 
 // actorSelf 这次调用算谁的动作：TT_ACTOR 环境变量优先（serve 起"人点的按钮"那条链路时
 // 会传 human），否则按 ai 算 —— 命令行本来就是 AI 的接口。取值与 internal/debug 的
-// actorHeader 同一套词汇（ai / human）。
+// actorHeader 同一套词汇（ai / human）。常量取自 internal/target，不在命令层另立一份。
 func actorSelf() string {
-	if v := strings.TrimSpace(os.Getenv(debug.ActorEnv)); v != "" {
+	if v := strings.TrimSpace(os.Getenv(target.ActorEnv)); v != "" {
 		return v
 	}
 	return "ai"

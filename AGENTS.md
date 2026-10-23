@@ -77,7 +77,6 @@ TT/
 │  ├─ testenv/          本机测试环境解析（config.local.json + 环境变量，不带 testing）
 │  ├─ testkit/          测试助手（stdout 捕获、吞输出、跳过台账、单源检查）
 │  ├─ update/           tt 自身更新：查新版/下载校验/交棒给脱离进程（不自动更新）
-│  ├─ view/             窗口枚举、抓图、阴影裁切、标注与交付体检
 │  ├─ web/              统一 Web 服务端：REST + WebSocket，嵌入 SPA，挂载调试/字典子系统
 │  └─ winproc/          起/判/杀不随本进程死的子进程（Windows）
 │

@@ -32,7 +32,6 @@ import (
 	"time"
 
 	"tt/internal/config"
-	"tt/internal/debug"
 	"tt/internal/target"
 )
 
@@ -75,7 +74,7 @@ func Discover(dir, listenFallback string) string {
 		if l := strings.TrimSpace(listenFallback); l != "" {
 			url = "http://" + l
 		} else {
-			url = "http://" + debug.DefaultListen
+			url = "http://" + config.DefaultListen
 		}
 	}
 	return joinBase(url, prefix)
@@ -145,8 +144,9 @@ func New(base string) *Client {
 
 // actorDefault 与 `internal/cli/debug` 的 actorSelf 同一套取值：
 // TT_ACTOR 由"人点的按钮"那条链路注入（serve 起子进程时带上），默认按 ai 算。
+// 常量取自 internal/target（与调试面读的是同一个环境变量），本包不另立一份。
 func actorDefault() string {
-	if v := strings.TrimSpace(os.Getenv(debug.ActorEnv)); v != "" {
+	if v := strings.TrimSpace(os.Getenv(target.ActorEnv)); v != "" {
 		return v
 	}
 	return "ai"

@@ -54,3 +54,6 @@ Thumbs.db
 # Python 的字节码缓存（tools/ 下有脚本，跑一下就冒出来）
 __pycache__/
 *.pyc
+
+# agent plan：本机的工作计划，不进公共仓库（.agents/skills 与 .agents/docs 仍入库）
+/.agents/plan/
