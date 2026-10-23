@@ -150,8 +150,8 @@ go list -f '{{.ImportPath}}: {{join .Imports " "}}' ./internal/... \
 
 | # | 位置 | 不符在哪 |
 |---|---|---|
-| 1 | `debug` | 持有配置的强类型模型（`Config` + `LoadConfig`）。于是 `cli/at`、`cli/db` 为了读配置必须 import 调试子系统 |
-| 2 | `debug` | 扛着企业清单获取（`ents.go`）和只读 SQL 执行（`db.go`、`dbsql.go`）。这两件与"调试"无关 |
+| 1 | `cli/db` / `cli/at` | 为了拿「环境 X 的连接」而构造整个调试运行时视图（`debug.Config`），而 `config.Hosts.Resolve` 直接就能回答 |
+| 2 | `debug` | 扛着企业清单获取（`ents.go`）和只读 SQL 执行（`db.go`、`dbsql.go`，后者还挂在调试会话管理器 `Manager` 上）。这两件与"调试"无关 |
 | 3 | `host` / `debug` / `cli/db` | 数据库探测与连接的能力散在三处，三份都在做「连一次库验证账号」 |
 | 4 | `cli/db` / `cli/file` | 住在命令层，却被别的命令组当库用（`cli/debug → cli/db`、`cli/dict → cli/file`）。它们是能力，名字挂在了命令层 |
 
