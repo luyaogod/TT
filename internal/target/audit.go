@@ -18,8 +18,14 @@ import (
 
 // ActorEnv 是"谁"的缺省来源：环境变量 `TT_ACTOR`。
 //
-// 与 `internal/debug/api.go` 用的是**同一个**环境变量（那里把它当作 HTTP 调用者身份），
-// 不另立第二个开关。
+// 它是"这次调用算谁的动作"的唯一开关，由**发起方**在起子进程时设置。为什么需要它：那条链路是
+// "人点界面按钮 → serve 起 tt 子进程 → 子进程再调调试线 REST"，而 CLI 默认声明 X-Actor: ai
+// （命令行本来是 AI 的接口）。于是纯人工模式下，人点出来的动作会被自己设的模式闸门拦下
+// （实测 2026-10-16："纯人工模式:AI 不可操作"）。serve 起这条链路时把 TT_ACTOR=human 传下去，
+// 子进程逐层继承（exec.Command 默认继承环境）。
+//
+// 调试面（`internal/debug`）、它的客户端（`internal/debugclient`）与审计行都读这一份，
+// **不另立第二个开关**，也不在各自包里重复定义常量。
 const ActorEnv = "TT_ACTOR"
 
 // AuditEntry 是一条会话操作审计。

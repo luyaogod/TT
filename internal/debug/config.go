@@ -18,10 +18,6 @@ import (
 	"tt/internal/host"
 )
 
-// DefaultListen 是 serve 未显式配置监听地址时的默认地址。
-// 缺省值只在统一配置层定义一次(internal/config),这里引用而不重复硬编码。
-const DefaultListen = config.DefaultListen
-
 // Config debug 功能配置,由统一配置的三段组装而成:
 // 调试设置取自 debug 节,监听地址取自顶层 listen,环境清单取自顶层 hosts。
 // SSH/Zone/Topent/DB/Runtime 为运行时合并结果(ApplyDefaultEnv 由环境 + dbConn 引用生成),
