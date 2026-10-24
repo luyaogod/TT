@@ -770,7 +770,13 @@ func (m *Manager) resolveJobWith(cfg *Config, module, job string) (mod, prog, la
 			if module != "" {
 				return module, p, launchRef, extra, nil // 用户显式指定模块:尊重指定,仅采纳实体程序
 			}
-			return strings.ToLower(jr.Module), p, launchRef, extra, nil
+			// 模块码缺失或写成 "-"（gzzz005 的口径）**不能**当模块名用：远程链路对这两种
+			// 都走"搜 42r"兜底（见下面 mod == "" || mod == "-" 那一支），本地这条只做加速、
+			// 不做远端校验，所以要交回远程 —— 否则会拼出 <top>/erp/- 这种启动目录，
+			// 启动失败且报错点跟真因（模块码缺失）看不出关系。
+			if lm := strings.ToLower(strings.TrimSpace(jr.Module)); lm != "" && lm != "-" {
+				return lm, p, launchRef, extra, nil
+			}
 		}
 	}
 	// 分段计时：这条链路是"点启动到弹画面"最重的一段（2026-10-23 用户反馈启动慢）。

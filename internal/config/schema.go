@@ -92,7 +92,7 @@ type NamedSsh struct {
 	//
 	// 与 MirrorDir 同构但语义不同：镜像**必须**按环境分（同一作业在不同环境的代码版本不同），
 	// 知识库通常是**一套**（正式区口径），所以这项多数环境留空、只有要给某环境单独一套
-	// 笔记时才配。解析走 KbDirOf。
+	// 笔记时才配。解析走 KbPath。
 	KbDir string `json:"kbDir,omitempty"`
 	// DictDir 这个环境的本地字典库目录（绝对路径）；空 = 用顶层 dict.dir，再空 = <数据目录>/dict。
 	//

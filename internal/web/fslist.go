@@ -2,6 +2,7 @@ package web
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -42,7 +43,7 @@ const fsListLimit = 800
 // 原来那种"服务端弹 Windows 对话框"虽然能拿到路径，但每次都要起 PowerShell（慢）。
 // 这个端点让选择器变成纯 HTTP：几十毫秒，且外观跟设置页一致。
 func (s *Server) hFsList(w http.ResponseWriter, r *http.Request) {
-	if !isLoopback(r.RemoteAddr) {
+	if !isLoopback(r.RemoteAddr) || !hostIsLocal(r) {
 		writeErr(w, http.StatusForbidden, fmt.Errorf("/api/fs/list 只接受本机请求"))
 		return
 	}
@@ -92,6 +93,29 @@ func (s *Server) hFsList(w http.ResponseWriter, r *http.Request) {
 	}
 	resp.Dirs = dirs
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// hostIsLocal 判断请求的 Host 头是否指向本机。
+//
+// 只查 RemoteAddr 挡不住 DNS rebinding：攻击者的域名解析到 127.0.0.1 之后，浏览器发出的
+// 请求确实来自 127.0.0.1（RemoteAddr 过得了那道校验），但 Host 是 evil.com —— 同源策略
+// 因此把响应归给 evil.com，攻击者能直接读到本机目录名。所以 Host 必须是回环地址或
+// localhost。局域网用 IP 访问的请求在这步之前已经被 RemoteAddr 挡掉，不会误伤。
+func hostIsLocal(r *http.Request) bool {
+	h := strings.ToLower(r.Host)
+	if h == "" {
+		return false
+	}
+	if host, _, err := net.SplitHostPort(h); err == nil {
+		h = host
+	}
+	// IPv6 的方括号、DNS 名的结尾点都得先去掉再比对。
+	h = strings.Trim(strings.TrimSuffix(h, "."), "[]")
+	if h == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
 }
 
 // normalizeDrivePath 把 "D" / "D:" / "D:." / "D:\" 都补成盘根 "D:\"。

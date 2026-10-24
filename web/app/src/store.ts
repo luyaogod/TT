@@ -1454,7 +1454,20 @@ export const useStore = create<Store>((set, get) => ({
       // 一字不差（实测真 500 现场）。也不动选中行/明细面板 —— 成功清、失败留，两副面孔最费解。
       // 错误必须**留在界面上**（wsLogErr），不能只发一条 8 秒后消失的 toast。
       const msg = e?.message || String(e)
-      get().patchWsLog({ err: msg })
+      // 失败也要按**发起时的环境**写槽：`patchWsLog` 固定写当前环境，如果用户在这段时间
+      // 里切走了，乙环境的报错就会甩到甲环境的页面上，而且从此写进甲那一槽。
+      const patch: Partial<WsLogSnap> = { err: msg }
+      if (!targetEnv || get().activeEnv === targetEnv) {
+        get().patchWsLog(patch)
+      } else {
+        const st = get()
+        set({
+          wsLogsByEnv: {
+            ...st.wsLogsByEnv,
+            [targetEnv]: { ...(st.wsLogsByEnv[targetEnv] || emptyWsLogSnap()), ...patch },
+          },
+        })
+      }
       toast.error('查询接口日志失败', { description: msg })
     } finally {
       // 只有最新那一轮才许把 loading 关掉:否则慢请求还在途时转圈就没了，
