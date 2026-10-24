@@ -1,32 +1,41 @@
-// 设置页「技能」分区。
+// 设置页「技能」分区：卡片墙 + 一条安装栏。
 //
-// 两套来源在这里第一次同时可见：
-//   官方   随 tt 发布包自带（<exe 目录>\skills），走专用路径，只读；
-//   第三方 用户在下面登记的任意路径，一行一个技能目录。
+// 只放三件事：有哪些技能（卡片）、加/删（卡片上的动作）、装到哪（底部那一条）。
+// 刻意不摆说明书：来源路径、assets 指针规则、撞名优先级这些都在
+// internal/skill/README.md 与 `tt install skills --help` 里，页面上重复一遍只会把
+// 真正要操作的东西挤下去。
 //
-// 这一页的每个按钮都是**立即生效**的动作（增删登记 / 安装），不参与设置页那套
-// 「改了再保存」的脏标记 —— 所以它不 markDirty，页头的保存按钮也不该因它亮起。
+// 一次安装的结果走 toast（成功/告警），只有「有技能这次没装成」才在页面上留一条
+// 可读的清单 —— 那是唯一需要人动手的信息，不能靠 8 秒后消失的提示。
 //
-// 为什么安装按钮必须是人点：它会往磁盘写一整棵技能树。和「检查更新」同一条纪律 ——
-// 服务启动不装、没有定时器，页面上这一次点击就是那次显式命令。
+// 每个按钮都是立即生效的动作（增删登记 / 安装），不参与设置页那套「改了再保存」的
+// 脏标记 —— 所以它不 markDirty，页头的保存按钮也不该因它亮起。
 import { useCallback, useEffect, useState } from 'react'
 import { AlertCircle, FolderOpen, Plus, RefreshCw, Trash2 } from 'lucide-react'
-import { api, type SkillReport, type SkillRow, type SkillsResp } from './api'
-import { Button, Input, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../shared/ui'
-import { Card, InfoRow, SettingRow } from '../../shared/settings'
+import { api, type SkillInfo, type SkillRow, type SkillsResp } from './api'
+import { Badge, Button, Input } from '../../shared/ui'
+import { SectionTitle } from '../../shared/settings'
 import { Checkbox } from '../../shared/ui-radix'
 import { DirPicker } from './DirPicker'
 import { useToast } from './toast'
 import { cn } from '../../shared/utils'
 
-const input = 'h-7 text-xs'
+/** 安装目标记在本地：换页签再回来不用重填（它不属于 config.json）。 */
+const TARGET_KEY = 'tt.skills.target'
 
-/** 状态 → 中文与颜色。四个状态里只有 ok 是"这次会装上"。 */
-const STATE_UI: Record<string, { text: string; cls: string }> = {
-  ok: { text: '正常', cls: 'text-emerald-600 dark:text-emerald-400' },
-  missing: { text: '找不到', cls: 'text-amber-600 dark:text-amber-400' },
-  invalid: { text: '不合规', cls: 'text-red-600 dark:text-red-400' },
-  conflict: { text: '撞名', cls: 'text-red-600 dark:text-red-400' },
+// 隐私模式/禁用存储时 localStorage 会直接抛，页面不该因此崩掉。
+const readTarget = () => {
+  try { return localStorage.getItem(TARGET_KEY) || '' } catch { return '' }
+}
+const saveTarget = (v: string) => {
+  try { localStorage.setItem(TARGET_KEY, v) } catch { /* 记不住就算了，不影响功能 */ }
+}
+
+/** 非 ok 的三个状态各给一个徽标；ok 什么都不显示（正常状态不需要提示）。 */
+const BADGE: Record<string, { text: string; tone: 'yellow' | 'red' }> = {
+  missing: { text: '找不到', tone: 'yellow' },
+  invalid: { text: '不合规', tone: 'red' },
+  conflict: { text: '撞名', tone: 'red' },
 }
 
 export function SkillsPanel() {
@@ -35,14 +44,13 @@ export function SkillsPanel() {
   const [loadErr, setLoadErr] = useState('')
   const [busy, setBusy] = useState('')
 
-  // 安装：目标目录（agent 读技能的位置）+ 覆盖开关 + 上一次的结果
-  const [to, setTo] = useState('')
+  // 安装栏：目标目录 + 覆盖开关
+  const [to, setTo] = useState(readTarget)
   const [force, setForce] = useState(false)
-  const [report, setReport] = useState<SkillReport | null>(null)
-  const [warns, setWarns] = useState<string[]>([])
   // 一个选择器，两种意图：'add' 挑要登记的技能目录，'to' 挑安装目标。
-  // 不靠“哪个输入框是空的”去猜 —— 猜错就会把工程目录当成技能登记进去。
   const [pickMode, setPickMode] = useState<'' | 'add' | 'to'>('')
+  // 这次安装里没装成的那些（唯一需要在页面上留下来的信息）
+  const [warns, setWarns] = useState<string[]>([])
 
   const load = useCallback(async () => {
     try {
@@ -55,13 +63,18 @@ export function SkillsPanel() {
 
   useEffect(() => { void load() }, [load])
 
+  const setTarget = (v: string) => {
+    setTo(v)
+    saveTarget(v)
+  }
+
   const addPath = async (path: string) => {
     setBusy('add')
     try {
       const r = await api.skillsAdd(path)
       // 失联允许存下来，但要当场说一声 —— 否则用户会以为它已经装上了。
       if (r.warning) toast.info(r.warning)
-      else toast.success(r.unchanged ? '这个目录已经登记过了' : `已登记 ${r.entry?.name || path}`)
+      else toast.success(r.unchanged ? '这个目录已经登记过了' : `已添加 ${r.entry?.name || path}`)
       await load()
     } catch (e: any) {
       toast.error(e?.message || String(e))
@@ -71,10 +84,10 @@ export function SkillsPanel() {
   }
 
   const removePath = async (path: string) => {
-    setBusy('remove:' + path)
+    setBusy('remove')
     try {
       await api.skillsRemove(path)
-      toast.success('已从登记表移除（磁盘上的文件没动）')
+      toast.success('已移除登记（磁盘上的目录没动）')
       await load()
     } catch (e: any) {
       toast.error(e?.message || String(e))
@@ -83,22 +96,22 @@ export function SkillsPanel() {
     }
   }
 
-  const install = async (dryRun: boolean) => {
+  const install = async () => {
     if (!to.trim()) {
-      toast.error('先给出目标目录 —— agent 会去读技能的那个位置')
+      toast.error('先填安装目标目录')
       return
     }
-    setBusy(dryRun ? 'dry' : 'install')
+    setBusy('install')
     try {
-      const r = await api.skillsInstall(to.trim(), force, dryRun)
-      setReport(r.report)
-      setWarns(r.warningTexts || [])
-      if (!dryRun) await load()
-      if ((r.warningTexts || []).length > 0) {
-        toast.error(`装完了，但有 ${r.warningTexts.length} 条告警（见下方列表）`)
-      } else {
-        toast.success(dryRun ? '试算完成（没写任何文件）' : `已装到 ${r.report.target}`)
-      }
+      const r = await api.skillsInstall(to.trim(), force)
+      const texts = r.warningTexts || []
+      const n = r.report.files.length
+      const skipped = (r.report.skipped ?? []).length
+      setWarns(texts)
+      if (texts.length > 0) toast.error(`装了 ${n} 个文件，${texts.length} 个技能没装成`)
+      else if (n === 0 && skipped > 0) toast.info(`${skipped} 个技能目标里已经是最新的（要刷新就勾「覆盖同名」）`)
+      else toast.success(`已装 ${n} 个文件到 ${r.report.target}`)
+      await load()
     } catch (e: any) {
       toast.error(e?.message || String(e))
     } finally {
@@ -108,178 +121,92 @@ export function SkillsPanel() {
 
   if (loadErr) {
     return (
-      <Card title="技能" description="读不到技能登记。">
+      <div className="space-y-2 rounded-ui border border-border p-3">
         <div className="flex items-start gap-2 text-[11px] text-red-600 dark:text-red-400">
           <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span className="break-all">{loadErr}</span>
         </div>
-        <div className="pt-2">
-          <Button size="sm" variant="outline" onClick={() => void load()}>
-            <RefreshCw className="mr-1 h-3.5 w-3.5" />重试
-          </Button>
-        </div>
-      </Card>
+        <Button size="sm" variant="outline" onClick={() => void load()}>
+          <RefreshCw className="h-3.5 w-3.5" />重试
+        </Button>
+      </div>
     )
   }
 
+  const official = data?.official ?? []
+  const externals = data?.externals ?? []
+
   return (
-    <>
-      <Card id="card-skills-official" title="官方技能"
-        description={`随 tt 发布包自带（${data?.officialDir || '<exe 目录>\\skills'}）。走专用路径，不受本机配置影响，这里只读。`}>
-        {data?.officialError && (
-          <div className="flex items-start gap-2 pb-2 text-[11px] text-red-600 dark:text-red-400">
-            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <span className="break-all">{data.officialError}</span>
-          </div>
-        )}
-        {(data?.official ?? []).map((s) => (
-          <div key={s.name} className="border-t border-border py-1.5 first:border-t-0">
-            <div className="font-mono text-[11px] text-foreground">{s.name}</div>
-            <div className="mt-0.5 text-[11px] leading-4 text-muted-foreground">{s.description || '（无 description）'}</div>
-          </div>
-        ))}
-        {(data?.official ?? []).length === 0 && !data?.officialError && (
-          <p className="text-[11px] text-muted-foreground">没有官方技能目录。</p>
-        )}
-      </Card>
+    <div className="space-y-4">
+      {/* 顶部：一眼看清有几张卡，右边是唯一的新增入口 */}
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] text-muted-foreground">
+          官方 {official.length} · 第三方 {externals.length}
+        </span>
+        <Button size="sm" variant="outline" disabled={busy !== ''} onClick={() => setPickMode('add')}>
+          <Plus className="h-3.5 w-3.5" />添加技能
+        </Button>
+      </div>
 
-      <Card id="card-skills-external" title="第三方技能"
-        description="登记硬盘上的技能目录（一行一个，目录里必须有 SKILL.md）。安装时整目录复制过去，但根级 assets/ 不复制 —— 目标里的 SKILL.md 首行会写一行指回这里的绝对路径，避免知识库把目标目录撑大。"
-        right={
-          <Button size="sm" variant="outline" disabled={busy !== ''} onClick={() => setPickMode('add')}>
-            <Plus className="mr-1 h-3.5 w-3.5" />添加目录
-          </Button>
-        }>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>目录</TableHead>
-              <TableHead className="w-28">技能名</TableHead>
-              <TableHead className="w-24">状态</TableHead>
-              <TableHead className="w-10" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {(data?.externals ?? []).map((s: SkillRow) => {
-              const ui = STATE_UI[s.state] || { text: s.state, cls: '' }
-              const key = s.path || s.dir
-              return (
-                <TableRow key={key}>
-                  <TableCell className="max-w-0">
-                    <div className="truncate font-mono text-[11px]" title={s.dir}>{s.path || s.dir}</div>
-                    {s.why && <div className="mt-0.5 break-all text-[11px] text-muted-foreground">{s.why}</div>}
-                  </TableCell>
-                  <TableCell className="font-mono text-[11px]">{s.name || s.label || '—'}</TableCell>
-                  <TableCell className={cn('text-[11px]', ui.cls)}>{ui.text}</TableCell>
-                  <TableCell>
-                    <Button size="sm" variant="ghost" disabled={busy !== ''}
-                      title="只从登记表移除，不动磁盘上的文件"
-                      onClick={() => void removePath(s.path || s.dir)}>
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              )
-            })}
-            {(data?.externals ?? []).length === 0 && (
-              <TableRow>
-                <TableCell colSpan={4} className="text-[11px] text-muted-foreground">
-                  还没有登记任何第三方技能。点右上角「添加目录」挑一个带 SKILL.md 的目录。
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-        <p className="pt-2 text-[11px] leading-4 text-muted-foreground">
-          「找不到」「不合规」「撞名」都不影响其它技能安装：跑安装时它们只告警并跳过。
-          撞名时官方优先，两条第三方同名时先登记的优先。
-        </p>
-      </Card>
-
-      <Card id="card-skills-install" title="安装到 agent 目录"
-        description="把官方技能与上面登记的一起复制过去。目标目录通常是 <工程目录>\.agents\skills（pi、Codex、Cursor、Gemini CLI 等都读它）。">
-        <SettingRow id="skills.install.to" label="目标目录"
-          description="已经是 agent 技能目录就追加：同名条目默认跳过，不覆盖。"
-          control={
-            <div className="flex items-center gap-1.5">
-              <Input className={input} value={to} placeholder="D:\项目\.agents\skills"
-                onChange={(e) => setTo(e.target.value)} />
-              <Button size="sm" variant="outline" onClick={() => setPickMode('to')} title="选择文件夹">
-                <FolderOpen className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-          } />
-        <SettingRow id="skills.install.force" label="覆盖同名条目"
-          description="刷新目标里已有的同名技能（升级后想跟当前版本对齐时打开）。"
-          control={
-            <label className="flex cursor-pointer items-center gap-2 text-[11px] text-muted-foreground">
-              <Checkbox checked={force} onCheckedChange={(v) => setForce(v === true)} />
-              覆盖
-            </label>
-          } />
-        <div className="flex flex-wrap items-center gap-1.5 pt-2">
-          <Button size="sm" disabled={busy !== ''} onClick={() => void install(false)}>
-            <RefreshCw className={cn('mr-1 h-3.5 w-3.5', busy === 'install' && 'animate-spin')} />
-            {busy === 'install' ? '安装中…' : '安装'}
-          </Button>
-          <Button size="sm" variant="outline" disabled={busy !== ''} onClick={() => void install(true)}>
-            {busy === 'dry' ? '试算中…' : '只算不装'}
-          </Button>
-          <span className="text-[11px] text-muted-foreground">只算不装会列出会复制哪些文件，一个字节都不写。</span>
+      {data?.officialError && (
+        <div className="flex items-start gap-2 rounded-ui border border-red-500/40 p-2 text-[11px] text-red-600 dark:text-red-400">
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span className="break-all">{data.officialError}</span>
         </div>
+      )}
 
-        {report && (
-          <div className="mt-3 space-y-1 border-t border-border pt-2">
-            <InfoRow label={report.dryRun ? '试算目标' : '已装到'} value={report.target} />
-            <InfoRow label="文件" value={`${report.files.length} 个`} />
-            {(report.skipped ?? []).length > 0 && (
-              <InfoRow label="跳过" value={(report.skipped ?? []).join(', ')} />
-            )}
-            {(report.rewritten ?? []).length > 0 && (
-              <InfoRow label="改写指针" value={(report.rewritten ?? []).join(', ')} />
-            )}
-            {warns.length > 0 && (
-              <div className="space-y-1 pt-1">
-                <div className="flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400">
-                  <AlertCircle className="h-3.5 w-3.5" />{warns.length} 条告警（这些没装，其余照装）
-                </div>
-                {warns.map((w, i) => (
-                  <div key={i} className="break-all text-[11px] leading-4 text-muted-foreground">{w}</div>
-                ))}
-              </div>
-            )}
-            {report.files.length > 0 && (
-              <details className="pt-1">
-                <summary className="cursor-pointer text-[11px] text-muted-foreground">
-                  看文件清单（{report.files.length}）
-                </summary>
-                <pre className="mt-1 max-h-56 overflow-auto border border-border bg-muted/30 p-2 text-[11px]">
-                  {report.files.join('\n')}
-                </pre>
-              </details>
-            )}
-          </div>
-        )}
-      </Card>
+      <section>
+        <SectionTitle>官方</SectionTitle>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {official.map((s) => <SkillCard key={s.name} s={s} />)}
+        </div>
+      </section>
 
-      <Card id="card-skills-last" title="上次装到过哪些地方">
-        {(data?.targets ?? []).length > 0 ? (
-          <>
-            <InfoRow label="装的版本" value={data?.stampVersion || '(未知)'} />
-            {(data?.targets ?? []).map((t) => <InfoRow key={t} label="目录" value={t} />)}
-          </>
-        ) : (
-          <p className="text-[11px] text-muted-foreground">
-            还没装过（或这份构建没有版本号，不记这笔账）。升级 tt 之后会把这几处刷成同版。
-          </p>
-        )}
-        {data?.drift && (
-          <div className="flex items-start gap-2 pt-2 text-[11px] text-amber-600 dark:text-amber-400">
-            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <span className="break-all">{data.drift}</span>
+      <section>
+        <SectionTitle>第三方</SectionTitle>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {externals.map((s) => (
+            <SkillCard key={s.path || s.dir} s={s}
+              onRemove={busy === '' ? () => void removePath(s.path || s.dir) : undefined} />
+          ))}
+          <button type="button" disabled={busy !== ''} onClick={() => setPickMode('add')}
+            className={cn(
+              'flex min-h-[4.75rem] items-center justify-center gap-1.5 rounded-ui border border-dashed border-border text-[11px] text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground disabled:opacity-40',
+              externals.length === 0 && 'sm:col-span-2',
+            )}>
+            <Plus className="h-3.5 w-3.5" />添加技能目录
+          </button>
+        </div>
+      </section>
+
+      {/* 只在有技能没装成时出现：那是唯一需要人动手的信息 */}
+      {warns.length > 0 && (
+        <div className="space-y-1 rounded-ui border border-amber-500/40 p-2">
+          <div className="flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400">
+            <AlertCircle className="h-3.5 w-3.5 shrink-0" />这次有 {warns.length} 个技能没装成
           </div>
-        )}
-      </Card>
+          {warns.map((w, i) => (
+            <div key={i} className="break-all text-[11px] leading-4 text-muted-foreground">{w}</div>
+          ))}
+        </div>
+      )}
+
+      {/* 安装栏：目标 + 覆盖 + 装 */}
+      <div className="flex flex-wrap items-center gap-1.5 border-t border-border pt-3">
+        <Input className="h-7 min-w-0 flex-1 text-xs" value={to}
+          placeholder="安装目标目录，如 D:\项目\.agents\skills"
+          onChange={(e) => setTarget(e.target.value)} />
+        <Button size="icon" variant="outline" title="选择文件夹" onClick={() => setPickMode('to')}>
+          <FolderOpen className="h-3.5 w-3.5" />
+        </Button>
+        <label className="flex cursor-pointer items-center gap-1.5 px-1 text-[11px] text-muted-foreground">
+          <Checkbox checked={force} onCheckedChange={(v) => setForce(v === true)} />覆盖同名
+        </label>
+        <Button size="sm" disabled={busy !== ''} onClick={() => void install()}>
+          <RefreshCw className={cn('h-3.5 w-3.5', busy === 'install' && 'animate-spin')} />
+          {busy === 'install' ? '安装中…' : '安装'}
+        </Button>
+      </div>
 
       <DirPicker
         open={pickMode !== ''}
@@ -289,10 +216,43 @@ export function SkillsPanel() {
           const mode = pickMode
           setPickMode('')
           if (mode === 'add') void addPath(p)
-          else if (mode === 'to') setTo(p)
+          else if (mode === 'to') setTarget(p)
         }}
         onClose={() => setPickMode('')}
       />
-    </>
+    </div>
+  )
+}
+
+/** 一张技能卡：名字 + 一句话说明（不 ok 时换成原因）+ 第三方才有目录与删除。 */
+function SkillCard({ s, onRemove }: { s: SkillInfo | SkillRow; onRemove?: () => void }) {
+  const badge = BADGE[s.state]
+  // 失联的第三方读不到 name，退回登记时留的 label；都没有就明确显示“未命名”。
+  const label = 'label' in s && s.label ? s.label : ''
+  const title = s.name || label || '未命名'
+  return (
+    <div className={cn(
+      'group relative flex min-h-[4.75rem] flex-col gap-1 rounded-ui border bg-card p-2.5',
+      badge ? (badge.tone === 'red' ? 'border-red-500/40' : 'border-amber-500/40') : 'border-border',
+      onRemove && 'pr-8',
+    )}>
+      <div className="flex min-w-0 items-center gap-1.5">
+        <span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground" title={title}>{title}</span>
+        {badge && <Badge tone={badge.tone}>{badge.text}</Badge>}
+      </div>
+      <p className="line-clamp-2 text-[11px] leading-4 text-muted-foreground">
+        {(s.state === 'ok' ? s.description : s.why) || '（无说明）'}
+      </p>
+      {/* 目录只对第三方有意义（官方的路径是固定的，写出来只是噪声） */}
+      {onRemove && (
+        <p className="mt-auto truncate pt-1 font-mono text-[10px] text-muted-foreground/70" title={s.dir}>{s.dir}</p>
+      )}
+      {onRemove && (
+        <button type="button" title="移除登记（不动磁盘文件）" onClick={onRemove}
+          className="absolute right-1.5 top-1.5 rounded-ui p-1 text-muted-foreground opacity-50 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100">
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
   )
 }
