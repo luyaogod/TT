@@ -44,7 +44,6 @@ go list -f '{{.ImportPath}}|{{join .Imports " "}}' ./internal/... | grep 'tt/int
 | `dev/fence` | 围栏协议：Document ⇄ 带围栏的文本，字节级写回 |
 | `dev/pkgfile` | `.tzc` / `.tzs` 包格式的只读视图 |
 | `dev/testutil` | 合成测试包夹具（不依赖真语料） |
-| `drawio` | 内置形状库合成 + 两条出图路径（spec → `.drawio`、`.tzs` → 原型图） |
 | `erpdb` | 客户端直连库封装：Oracle / 金仓，一个接口两个实现 |
 | `screen` | `.42f` 布局 + `.42s` 标签 → 前端画面模型 |
 
@@ -78,7 +77,6 @@ go list -f '{{.ImportPath}}|{{join .Imports " "}}' ./internal/... | grep 'tt/int
 | `cli/interfacecmd` | `tt interface`：42f + 42s → 画面 |
 | `cli/outline` | `tt outline`：4GL → 块树 |
 | `cli/dev/tzs` | `tt dev tzs` 的动词（经引擎读写表单） |
-| `cli/drawio` | `tt drawio`：用 T100 组件库画原型图 |
 
 ### L4–L7 · 命令层（9 个）
 

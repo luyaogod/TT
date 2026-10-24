@@ -7,7 +7,7 @@ SHELL := sh
 .SHELLFLAGS := -c
 
 .DEFAULT_GOAL := all
-.PHONY: all help build test check-web web-build engine selftest doctor deep-tzc deep-tzs fns e2e skips drawio-lib version-check update-live-check package msi
+.PHONY: all help build test check-web web-build engine selftest doctor deep-tzc deep-tzs fns e2e skips version-check update-live-check package msi
 
 all: build test
 
@@ -58,8 +58,6 @@ update-live-check: ## tt update 的真联网自检（要能访问 GitHub；代�
 	@go build -ldflags "-X tt/internal/cli.Version=0.0.0" -o "$$TEMP/tt-updcheck.exe" .
 	@$$TEMP/tt-updcheck.exe update check --format table --proxy "$$TT_PROXY" ; code=$$? ; rm -f "$$TEMP/tt-updcheck.exe" ; if [ "$$code" = "0" ] || [ "$$code" = "10" ] ; then echo "live-check OK (exit $$code)" ; else echo "live-check FAILED (exit $$code)" ; exit 1 ; fi
 
-drawio-lib: build ## drawio 形状库 → dist/ 下两个 mxlibrary .xml（File → Open Library from 加载）
-	./tt.exe drawio lib
 
 # 调 .bat 为什么长这样（两处都别退回去）：
 #   1) 配方不是从交互式 shell 而是从 make 经 `sh -c` 下来，`cmd //c X` 在这种走法下

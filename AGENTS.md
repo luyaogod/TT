@@ -31,7 +31,6 @@ TT/
 │  │  │  ├─ tzc/        .tzc 代码包线：八个动词 + 31 项对抗自检 + Verbs() 接线清单
 │  │  │  └─ tzs/        .tzs 表单包线：cmdTzs 分发、引擎定位、manifest、detail 渲染
 │  │  ├─ dict/          字典命令组：表/字段/校验/开窗/消息/参数/ACC 查询
-│  │  ├─ drawio/        tt drawio 命令组：原型图与形状库
 │  │  ├─ file/          tt file 命令组：只读 SFTP 与离线镜像
 │  │  ├─ interfacecmd/  tt interface 命令组：.42f + .42s → 页面/字段/中文标签
 │  │  ├─ outline/       tt outline 命令：.4gl → 函数/UI 块树
@@ -59,7 +58,6 @@ TT/
 │  │  ├─ pkgfile/       .tzc/.tzs 包格式
 │  │  ├─ synth/         合成测试包
 │  │  └─ testutil/      管线测试夹具
-│  ├─ drawio/           drawio 图形与形状库支持
 │  │  └─ shapes/        内置形状库（business/controls/icons/raw）
 │  ├─ entdir/           企业目录（ENT→账号）快照、指纹、新鲜期（debug 与 dict 共用）
 │  ├─ erpdb/            客户端直连库封装（Oracle / 金仓，一个接口两个实现）
@@ -102,7 +100,6 @@ TT/
 ├─ testdata/            测试语料
 │  ├─ tzs-mini/         3.2MB 筛小标准件工作区
 │  ├─ fgl-fixtures/     FGL 解析/写回夹具
-│  └─ drawio/           drawio 形状/原型夹具
 └─ skills/              对外技能手册（评测中执行者唯一能读的东西）
    ├─ tt-dev-tzc/       .tzc 代码包安全编辑
    ├─ tt-erp-architecture/  T100 整体架构与代码地图

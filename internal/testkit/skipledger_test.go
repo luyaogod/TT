@@ -197,13 +197,12 @@ var skipLedger = []skipSite{
 	//   · `form42f_realpair_test.go` 那条要两个开关同时指对（TT_TZS_REAL_DIR +
 	//     TT_FORM_42F）：要的不是一份 .42f，而是**同一个现场**打出来的 .tzs 与 .42f。
 	//
-	// 注意这批文件的归属：`dev/tzs`、`drawio`、`form42f` 都另有切片在改。
+	// 注意这批文件的归属：`dev/tzs`、`form42f` 都另有切片在改。
 	// 台账只登记**当前源文件里的字面量**；那些文件里的跳过文案一改（含标点），
 	// 这里就会红 —— 那是对的：文案是"这条跳过在说什么"。
 	{file: "internal/dev/tzs/form42f_check_test.go", msg: "没有真样本（%s 打不开：%v）—— 设 TT_FORM_SAMPLE_DIR 指向 fixtures/forms/", layer: layL3, why: "需真样本：开关 TT_FORM_SAMPLE_DIR"},
 	{file: "internal/dev/tzs/form42f_check_test.go", msg: "没有仓库自带的最小语料（%s：%v）—— 它是仓库本体，缺了用 `go run ./tools/tzsmini` 重新生成", layer: layL3Missing, why: "仓库自带的最小语料缺了：它是仓库本体，补救是重新生成（go run ./tools/tzsmini），没有开关可点名"},
 	{file: "internal/dev/tzs/form42f_realpair_test.go", msg: "没有现场真配对样本：%s —— 设 TT_TZS_REAL_DIR 与 TT_FORM_42F 指向真 .tzs 目录与真 .42f（契约 C7.3：缺样本写明原因，不拿合成件顶替）", layer: layL3, why: "需真现场配对样本：开关 TT_TZS_REAL_DIR + TT_FORM_42F"},
-	{file: "internal/drawio/proto42f_test.go", msg: "真样本不在 %s（用 TT_FORM_SAMPLE_DIR 覆盖）；跳过：%v", layer: layL3, why: "需真样本：开关 TT_FORM_SAMPLE_DIR"},
 	// D8：本机 bash 会展开**单引号内**的命令替换（WSL/中间层特性），`$(…)` 与反引号那两类
 	// 用例在这台机器上测不出真结果。不是 `shQuote` 的问题（它是标准写法），换一台 POSIX 环境
 	// 就有意义 —— 所以归 L0-环境，不是"缺开关"。

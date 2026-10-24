@@ -6,7 +6,7 @@ package form42f
 //   - 字段属于哪个 <Page>；
 //   - 字段的中文标签引用是哪个 lbl_*（字段自己的 text，或同页同容器的独立 <Label>）。
 //
-// 为什么不改 ParseForm42F 的输出：tt interface / tzs / drawio 都依赖它，
+// 为什么不改 ParseForm42F 的输出：tt interface / tzs 都依赖它，
 // 页面归属只是 interface 的消费需求，不能顺手改变已有命令的 JSON。
 
 import (

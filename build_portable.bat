@@ -37,7 +37,7 @@ rem here would quietly become a bogus `tt version` string and a bogus asset name
 powershell -NoProfile -Command "exit ([int]((Get-Content VERSION -Raw).Trim() -notmatch '^\d+\.\d+\.\d+$'))" || (echo BAD VERSION in VERSION file: %VERSION% -- expected MAJOR.MINOR.PATCH & exit /b 1)
 
 rem Only the portable stage is ours to rebuild. dist\ also holds other products
-rem (tt drawio lib writes its .xml there; build_msi.bat keeps its staging and the
+rem (build_msi.bat keeps its staging and the
 rem MSI there), so never wipe dist\ as a whole.
 if exist "%STAGE%" rmdir /s /q "%STAGE%"
 mkdir "%STAGE%"

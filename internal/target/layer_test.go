@@ -23,8 +23,8 @@ import (
 func TestLayerRegistryIsGroupDefaultsPlusNamedExceptions(t *testing.T) {
 	r := DefaultLayerRegistry()
 
-	// 组默认：顶层 / debug / dict / file / dev tzc / dev tzs / session / drawio。
-	const wantGroups = 8
+	// 组默认：顶层 / debug / dict / file / dev tzc / dev tzs / session。
+	const wantGroups = 7
 	if len(r.Groups) != wantGroups {
 		t.Errorf("组默认该有 %d 条（矩阵总览那一列），实得 %d：%v", wantGroups, len(r.Groups), groupKeys(r))
 	}
@@ -93,7 +93,6 @@ func TestLayerRegistryDoesNotEnumerateTheCommandTree(t *testing.T) {
 		"dev tzc export", "dev tzc apply", "dev tzc verify", // tzc 全 L0
 		"dev tzs open", "dev tzs field_add", "dev tzs save", // tzs 组默认 L0
 
-		"drawio lib", "drawio compose", // drawio 无例外
 		"config show", "version", "cache clear", // 顶层 L0
 
 		"debug locate", "debug why", "debug wait", // debug 组默认 L3（Q7 的寻址层）
