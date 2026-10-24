@@ -135,8 +135,6 @@ export interface HostsSsh {
   workspace?: string
   // mirrorDir 该环境自己的源码镜像目录；空 = 使用全局 mirror.dir/<环境名>。
   mirrorDir?: string
-  // kbDir 该环境自己的知识库目录；空 = 使用全局 kb.dir。
-  kbDir?: string
   // dictDir 该环境自己的本地字典库目录；空 = 使用全局 dict.dir。
   // 只到目录这一级，文件名始终是 <环境>.db。
   dictDir?: string
@@ -160,8 +158,6 @@ export interface HostsView {
   debug: HostsDebug
   query: { source?: string }
   mirror: { dir?: string }
-  bdldoc: { dir?: string }
-  kb: { dir?: string }
   // dict 本地字典库根目录；空 = 缺省 <数据目录>/dict
   dict: { dir?: string }
   sync: { target?: string }
@@ -196,8 +192,6 @@ export interface HostsPatch {
   debug?: HostsDebug
   query?: { source?: string }
   mirror?: { dir?: string }
-  bdldoc?: { dir?: string }
-  kb?: { dir?: string }
   dict?: { dir?: string }
   sync?: { target?: string }
   tdev?: { workspaceSuffix?: string; defaultOut?: string }
@@ -278,8 +272,6 @@ export interface ConfigStatus {
   ok: boolean
   config: string
   mirror: DirStatus
-  bdldoc: DirStatus
-  kb: DirStatus
   dict: DirStatus
   sync: FileStatus
   install: InstallStatus

@@ -23,7 +23,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -305,8 +304,6 @@ func (s *Server) hHostsGet(w http.ResponseWriter, r *http.Request) {
 		"debug":   root.Debug,
 		"query":   root.Query,
 		"mirror":  root.Mirror,
-		"bdldoc":  root.Bdldoc,
-		"kb":      root.Kb,
 		"dict":    root.Dict,
 		"sync":    root.Sync,
 		"tdev":    root.Tdev,
@@ -324,8 +321,6 @@ type hostsPutReq struct {
 	Debug  *config.DebugSettings `json:"debug,omitempty"`
 	Query  *config.QuerySettings `json:"query,omitempty"`
 	Mirror *config.MirrorSettings
-	Bdldoc *config.BdldocSettings
-	Kb     *config.KbSettings
 	Dict   *config.DictSettings
 	Sync   *config.SyncSettings
 	Tdev   *config.TdevSettings
@@ -395,18 +390,6 @@ func (s *Server) hHostsPut(w http.ResponseWriter, r *http.Request) {
 				}
 				return putSection(root, "mirror", req.Mirror)
 			}},
-			{"bdldoc", func() error {
-				if req.Bdldoc == nil {
-					return nil
-				}
-				return putSection(root, "bdldoc", req.Bdldoc)
-			}},
-			{"kb", func() error {
-				if req.Kb == nil {
-					return nil
-				}
-				return putSection(root, "kb", req.Kb)
-			}},
 			{"dict", func() error {
 				if req.Dict == nil {
 					return nil
@@ -430,11 +413,6 @@ func (s *Server) hHostsPut(w http.ResponseWriter, r *http.Request) {
 			if err := p.set(); err != nil {
 				return err
 			}
-		}
-		// schema 里写了「kb 与 mirror 不能互为子目录」，但之前只写在注释里：
-		// 全量拉取会整目录替换镜像目录，把放在里面的笔记一起删掉。这里真的执行。
-		if err := rejectNestedKbMirror(root); err != nil {
-			return err
 		}
 		root["schemaVersion"] = config.SchemaVersion
 		return nil
@@ -917,51 +895,6 @@ func decodeBody(r *http.Request, v any) error {
 //
 // 代价：这些字段也就**没法从配置页删掉**（想删就手改 config.json 或 `tt config`）——
 // 与 preserveUngovernedFields 同一笔权衡：宁可"删不掉"，不要"保存一次就静默丢配置"。
-// sectionDir 读 <section>.dir；缺节、缺键、不是字符串或空串都返回空串。
-func sectionDir(root map[string]any, section string) string {
-	sec, ok := root[section].(map[string]any)
-	if !ok {
-		return ""
-	}
-	d, _ := sec["dir"].(string)
-	return strings.TrimSpace(d)
-}
-
-// rejectNestedKbMirror 拒绝「知识库目录与镜像目录互为子目录」的配置。
-//
-// schema 里早就写了这条约束（见 config.KbSettings），但之前只是注释：镜像目录由
-// tt file mirror 全量拉取并整目录替换，知识库是人写的笔记、tt 刻意不碰 —— 一旦笔记
-// 落在镜像目录里，下一次全量拉取就把它们一起删掉，而用户完全看不出发生过什么。
-// 两道取空（没配就谈不上冲突），不阻止「只配了其中一个」的常规状态。
-func rejectNestedKbMirror(root map[string]any) error {
-	kb, mirror := sectionDir(root, "kb"), sectionDir(root, "mirror")
-	if kb == "" || mirror == "" {
-		return nil
-	}
-	kbAbs, err1 := filepath.Abs(kb)
-	mAbs, err2 := filepath.Abs(mirror)
-	if err1 != nil || err2 != nil {
-		return nil // 路径解析不了就不在这里拦，让真正用到它的人报错
-	}
-	if pathWithin(kbAbs, mAbs) || pathWithin(mAbs, kbAbs) {
-		return fmt.Errorf("知识库目录与镜像目录不能互为子目录（镜像全量拉取会整目录替换，笔记会一起被删掉）: kb=%s mirror=%s", kb, mirror)
-	}
-	return nil
-}
-
-// pathWithin 报告 child 是否就是 parent 或在 parent 之下（纯字面判定，不碰文件系统）。
-func pathWithin(child, parent string) bool {
-	rel, err := filepath.Rel(parent, child)
-	if err != nil {
-		return false
-	}
-	if rel == "." {
-		return true
-	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
-}
-
-// putSection 把某节写回配置（保留本节里表单不管理的键）。
 func putSection(root map[string]any, key string, v any) error {
 	sec, err := structToSection(v)
 	if err != nil {

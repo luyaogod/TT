@@ -40,8 +40,7 @@ var scopes = map[string]Scope{
 	"file":            Env,
 	"file mirror dir": Env, // 不带 --at=全局根；带 --at=该环境单独目录
 	// 本地目录/本地文件类：连环境都不需要
-	"dict bdldoc": None,
-	"dict spill":  None,
+	"dict spill": None,
 
 	// ---- 只连环境（<环境>）----
 	"debug wslogs": Env,

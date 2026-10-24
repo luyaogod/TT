@@ -70,7 +70,6 @@ tt dict acc query <作业|分类> --spec <文件|-> # 校验并执行 query 框�
 | 程序 | `prog`（程序与作业、程序↔表格、子程序与元件） |
 | 消息与参数 | `msg`、`sysp`、`docp` |
 | 数据维护 | `db status`（按环境总览/单环境详情）/ `db sync` / `db list` / `db discover`；连库测试在 `tt db` |
-| 文档 | `bdldoc dir`；离线镜像已迁到 `tt file mirror` |
 | 结果 | `spill list` / `spill show <文件\|latest>` |
 
 **技能由维护者单独管理**；这里只记契约。

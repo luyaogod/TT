@@ -100,10 +100,6 @@ func newServeCmd() *cobra.Command {
 				return err
 			}
 
-			// 便携包第一次 serve 时把随包的 BDL 文档解压到 bdldoc.dir；
-			// MSI 的安装动作也会调用同一个 tt install bdl（marker 命中就跳过）。
-			ensureBDLDocs()
-
 			// 启动清理缓存:只删超过 CacheMaxAge 的,不动手上的东西 ——
 			// spill 里那些文件的用途正是"刚才那条查询的完整结果",启动即全清会把
 			// 上一条命令刚告诉用户的东西删掉(见 internal/config/cache.go)。

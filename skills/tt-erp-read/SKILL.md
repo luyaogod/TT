@@ -219,12 +219,3 @@ tt db sql --at <环境>@<企业> "select count(*) from capp115_tmp"
 tt db sql --at <环境>@<企业> "select bmaa001,bmaastus from bmaa_t where bmaa001='FCPU010100003'"
 ```
 
-## BDL 语言参考
-
-如果有不理解的BDL语法，请优先阅读本地的BDL官方文档
-
-获取BDL文档路径的命令
-
-```bash
-tt dict bdldoc dir            
-```

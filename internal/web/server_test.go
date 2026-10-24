@@ -274,7 +274,7 @@ func TestHostsGet(t *testing.T) {
 		t.Fatalf("HTTP %d", rec.Code)
 	}
 	// activeEnv 已不在响应里:没有默认环境了(环境一律点名)。
-	for _, k := range []string{"config", "sshs", "listen", "debug", "query", "mirror", "bdldoc", "sync", "tdev"} {
+	for _, k := range []string{"config", "sshs", "listen", "debug", "query", "mirror", "sync", "tdev"} {
 		if _, has := out[k]; !has {
 			t.Errorf("响应缺少 %q", k)
 		}
@@ -422,7 +422,7 @@ func TestConfigStatus_NoConfig(t *testing.T) {
 	if out["ok"] != true {
 		t.Error("ok 应为 true")
 	}
-	for _, k := range []string{"config", "mirror", "bdldoc", "sync", "install"} {
+	for _, k := range []string{"config", "mirror", "sync", "install"} {
 		if _, has := out[k]; !has {
 			t.Errorf("响应缺少 %q", k)
 		}
@@ -436,7 +436,6 @@ func TestConfigStatus_DerivedFromDisk(t *testing.T) {
 	if err := os.MkdirAll(realDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	missingDir := filepath.Join(dir, "nope")
 	syncFile := filepath.Join(dir, "erp_data.db")
 	if err := os.WriteFile(syncFile, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
@@ -444,7 +443,6 @@ func TestConfigStatus_DerivedFromDisk(t *testing.T) {
 
 	seed := `{"schemaVersion":2,"hosts":{"sshs":[]},
 	  "mirror":{"dir":` + jsonStr(realDir) + `},
-	  "bdldoc":{"dir":` + jsonStr(missingDir) + `},
 	  "sync":{"target":` + jsonStr(syncFile) + `}}`
 	s, _ := newTestServer(t, seed)
 
@@ -455,10 +453,6 @@ func TestConfigStatus_DerivedFromDisk(t *testing.T) {
 	mirror, _ := out["mirror"].(map[string]any)
 	if mirror["exists"] != true {
 		t.Errorf("存在的镜像目录应报 exists=true: %v", mirror)
-	}
-	bdldoc, _ := out["bdldoc"].(map[string]any)
-	if bdldoc["exists"] != false {
-		t.Errorf("不存在的目录应报 exists=false: %v", bdldoc)
 	}
 	sync, _ := out["sync"].(map[string]any)
 	if sync["exists"] != true {
@@ -584,63 +578,3 @@ func TestHostsPut_EmptyListAllowed(t *testing.T) {
 	}
 }
 
-// 知识库目录与镜像目录不能互为子目录 —— schema 里写了这条约束，这次真的执行。
-//
-// 镜像目录由 tt file mirror 全量拉取并整目录替换，知识库是人写的笔记、tt 刻意不碰。
-// 笔记一旦落在镜像目录里，下一次全量拉取就把它们一并删掉，而用户看不出发生过什么。
-func TestHostsPut_RejectsNestedKbMirror(t *testing.T) {
-	base := t.TempDir()
-	mirror := filepath.Join(base, "mirror")
-
-	nested := []struct {
-		name          string
-		kb, mirrorDir string
-	}{
-		{"kb 在镜像目录里", filepath.Join(mirror, "notes"), mirror},
-		{"镜像目录在 kb 里", mirror, filepath.Join(mirror, "code")},
-		{"两个配成同一个目录", mirror, mirror},
-	}
-	for _, c := range nested {
-		t.Run(c.name, func(t *testing.T) {
-			s, path := newTestServer(t, seededConfig)
-			before, _ := os.ReadFile(path)
-			rec, out := doJSON(t, s, http.MethodPut, "/api/hosts", map[string]any{
-				"kb":     map[string]any{"dir": c.kb},
-				"mirror": map[string]any{"dir": c.mirrorDir},
-			})
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("应当被拒，却得到 HTTP %d: %s", rec.Code, rec.Body.String())
-			}
-			msg, _ := out["error"].(string)
-			if !contains(msg, "不能互为子目录") {
-				t.Errorf("错误信息 %q 里没有说明原因", msg)
-			}
-			after, _ := os.ReadFile(path)
-			if !bytes.Equal(before, after) {
-				t.Error("被拒绝的写入改动了配置文件")
-			}
-		})
-	}
-
-	// 互不相干的两个目录必须放行，只配其中一个也要放行。
-	ok := []struct {
-		name          string
-		kb, mirrorDir string
-	}{
-		{"互不相干", filepath.Join(base, "kb"), filepath.Join(base, "mirror2")},
-		{"只配 kb", filepath.Join(base, "kb3"), ""},
-		{"只配镜像", "", filepath.Join(base, "mirror4")},
-	}
-	for _, c := range ok {
-		t.Run(c.name, func(t *testing.T) {
-			s, _ := newTestServer(t, seededConfig)
-			rec, out := doJSON(t, s, http.MethodPut, "/api/hosts", map[string]any{
-				"kb":     map[string]any{"dir": c.kb},
-				"mirror": map[string]any{"dir": c.mirrorDir},
-			})
-			if rec.Code != http.StatusOK {
-				t.Fatalf("应当放行，却得到 HTTP %d: %v", rec.Code, out)
-			}
-		})
-	}
-}

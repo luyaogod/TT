@@ -72,14 +72,9 @@
     "dir": ""
   },
 
-  "bdldoc": {
-    "dir": ""
-  },
-
   "sync": {
     "target": ""
   },
-
   "net": {
     "proxy": ""
   },
