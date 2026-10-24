@@ -9,7 +9,6 @@
 //	tt file …    服务器文件只读浏览与离线源码镜像
 //	tt interface … 用 .42f + .42s 合成前端页面/字段/中文标签
 //	tt outline …  4GL 源码大纲（块树 / 行范围）
-//	tt drawio …  原型图（用 T100 组件库画界面草图）
 //
 // 共享的 CLI 上下文在 internal/cli/common（叶子包，避免循环依赖）。
 package cli
@@ -29,7 +28,6 @@ import (
 	"tt/internal/cli/debug"
 	"tt/internal/cli/dev"
 	"tt/internal/cli/dict"
-	"tt/internal/cli/drawio"
 	"tt/internal/cli/file"
 	"tt/internal/cli/interfacecmd"
 	"tt/internal/cli/outline"
@@ -59,7 +57,6 @@ config.json、同一个本地 Web 服务（tt serve）。
                  （tt dev tzs <动词> --args '<JSON 对象>'），不是拼 XML
   tt interface … 前端画面：合成 .42f + .42s（页面 / 字段 / 中文标签）
   tt outline …   4GL 源码大纲：函数 / UI 块与行范围
-  tt drawio …    原型图：用 T100 组件库生成 .drawio
   tt env / config / serve / install / update   环境、配置、本地服务、安装、自更新
 
 远程操作默认只读：服务器上的写只有 tzc 的三道闸门与 tzs 引擎动词；
@@ -119,7 +116,6 @@ func init() {
 	session.Register(rootCmd)
 	interfacecmd.Register(rootCmd)
 	outline.Register(rootCmd)
-	drawio.Register(rootCmd)
 
 	rootCmd.AddCommand(newEnvCmd())
 	rootCmd.AddCommand(newConfigCmd())

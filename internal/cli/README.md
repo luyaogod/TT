@@ -11,7 +11,6 @@
 | `tt debug …` | [./debug](./debug/README.md) | 调试线 |
 | `tt dev …` | [./dev](./dev/README.md) | 设计器包线（cobra 树挂动词；参数解析权在 tdev 自己的解析器，见其 README） |
 | `tt dict …` | [./dict](./dict/README.md) | 字典线 |
-| `tt drawio …` | [./drawio](./drawio/README.md) | 原型图线 |
 | `tt session …` | [./session](./session) | 会话：建 / 列 / 看 / 改 ENT / 结束本轮 / 收掉 / 透传 |
 | `tt interface …` | [./interfacecmd](./interfacecmd/README.md) | 前端画面线（`.42f` + `.42s` 合成页面/字段/中文标签） |
 | `tt outline …` | [./outline](./outline/README.md) | 4GL 源码大纲（本地文件/镜像块树） |
@@ -33,7 +32,6 @@ tt dict       0 成功（搜索无结果也是成功）/ 1 用法错 / 2 数据�
 tt session    0 成功 / 1 运行失败（IO·网络·环境）/ 2 用法错 / 3 无会话
               4 状态不符（会话没空 / 不是空闲 / 端口被占）/ 5 目标不存在 / 6 环境体检不过
 
-tt drawio     0 成功 / 1 用法或运行失败 / 2 输入错（spec 不合法、包读不出）/ 3 产物自查未通过
 
 tt interface  0 成功 / 1 表单或 42s 不合法 / 2 用法或同名歧义 / 4 精确页面/字段不存在
 tt outline    0 成功 / 2 用法或文件名歧义 / 4 文件不存在
@@ -42,7 +40,7 @@ tt outline    0 成功 / 2 用法或文件名歧义 / 4 文件不存在
 ```
 
 **包装脚本要按子命令辨认，别只看码**：`3` 在 `.tzc` 线是"校验失败"、在字典线是"缺表"、
-在 drawio 线是"产物自查未通过"、在 `.tzs` 线根本不用；`4` 在 `.tzc` 线是拒绝写入，
+在 `.tzs` 线是"产物自查未通过"；`4` 在 `.tzc` 线是拒绝写入，
 在 dict/interface/outline 是精确目标不存在；`6` 在 `tt session` 是"环境体检不过"（权限不一致）。
 各线的细化含义在各自 README 里。
 

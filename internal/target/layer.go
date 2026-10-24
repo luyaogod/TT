@@ -112,7 +112,6 @@ func DefaultLayerRegistry() LayerRegistry {
 			"dev tzc": Layer0,
 			"dev tzs": Layer0, // 本机常驻引擎 + 本地包/工作区
 			"session": Layer3, // 会话级动作（ent/quit/rm/exec/show）都要一条活着的会话
-			"drawio":  Layer0, // 形状库是内置的
 		},
 		Exceptions: cloneLayerMap(layerExceptions),
 	}

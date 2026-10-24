@@ -10,7 +10,7 @@
 // 设计取舍：
 //   - skills **不进二进制**（不用 go:embed）：技能内容是文档，随包发布、可被人直接改；
 //     每个技能是一个带 SKILL.md 的目录。合并后 skills/ 下同时放 tt-debug、tt-dev-tzc、
-//     tt-dev-tzs、tt-dict、tt-drawio、tt-erp-read 六套技能，本命令整棵树一起装。
+//     tt-dev-tzs、tt-dict、tt-erp-read 五套技能，本命令整棵树一起装。
 //   - PATH 只动 HKCU\Environment，绝不碰 HKLM/系统 PATH；实现在 internal/pathinstall，
 //     与 Web 设置页的「加入 PATH」共用同一份。
 package cli
