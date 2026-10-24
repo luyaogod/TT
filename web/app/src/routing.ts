@@ -11,14 +11,15 @@
 // 原因:check:store 用裸打包器把它打进 Node 里跑(桩 window/document),顶层碰 DOM 会在
 // 测试启动前就抛错。所以 DOM 访问全部留在函数体内、由 React effect 调用。
 
-/** 设置页的四个分区 */
-export type SettingsSectionKey = 'sites' | 'data-dict' | 'debug' | 'app'
+/** 设置页的五个分区 */
+export type SettingsSectionKey = 'sites' | 'data-dict' | 'debug' | 'skills' | 'app'
 
 /** 分区清单(键 + 显示名)。左树与深链接校验共用这一份,免得两处各列一遍。 */
 export const SETTINGS_SECTIONS: { key: SettingsSectionKey; label: string }[] = [
   { key: 'sites', label: '站点管理' },
   { key: 'data-dict', label: '数据字典' },
   { key: 'debug', label: 'DEBUG' },
+  { key: 'skills', label: '技能' },
   { key: 'app', label: '应用设置' },
 ]
 

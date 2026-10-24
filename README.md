@@ -42,6 +42,51 @@ MCP/Agent 环境里注意：默认会问一句再装，脚本里要用 `tt updat
 
 ---
 
+## 技能（skills）
+
+tt 的技能有两套来源，`tt install skills` 一次装完：
+
+| 来源 | 从哪来 |
+|---|---|
+| 官方 | 与 `tt.exe` 同目录的 `skills/`，随包发布，走专用路径 |
+| 第三方 | 你登记在 `config.json` 的 `skills.externals` 里的路径，一行一个技能目录 |
+
+登记第三方技能在设置页「技能」分区，或直接编辑配置：
+
+```jsonc
+"skills": {
+  "externals": [
+    { "path": "D:\\我的技能库\\kb-faq", "label": "kb-faq" }
+  ]
+}
+```
+
+技能目录放在硬盘任意位置，tt 只记路径：
+
+```
+kb-faq/
+├── SKILL.md      # 必须有；frontmatter 的 name 要等于目录名
+└── assets/       # 可选
+```
+
+```powershell
+tt install skills --to auto          # 装到 agent 会读的位置（.agents/skills 优先）
+tt install skills --dry-run          # 只列计划与告警，不写盘
+tt install skills --to <dir> --force # 刷新目标里的同名技能
+```
+
+三条要知道的事：
+
+1. **第三方路径失效只告警，不拦安装**。路径换过位置、移动硬盘没插、`SKILL.md` 不合规、
+   跟别的技能撞名 —— 都只跳过那一条，官方技能与其它第三方照装，退出码仍是 0。
+   要在 CI 里把「装漏了一个」当失败，加 `--strict`。
+2. **根级 `assets/` 不复制**。目标里的 `SKILL.md` 正文首行会写一行指回源目录的绝对路径
+   （重复安装会替换那行，不会堆）。这样知识库型技能不会把目标目录撑大；
+   代价是那行路径是本机的、挪了目录就失效。
+3. **撞名时官方优先**；两条第三方同名，先登记的优先（顺序就是配置里的顺序）。
+
+---
+
 ## 初次配置
 
 ```

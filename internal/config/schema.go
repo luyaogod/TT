@@ -11,7 +11,9 @@ import (
 
 // SchemaVersion 当前配置结构版本。随新配置文件写入（见 NewSkeleton / ensureSchemaVersion）。
 // 旧结构的配置不做自动迁移 —— 读侧按当前结构解析，缺的节取缺省值。
-const SchemaVersion = 3
+//
+// 4：新增 skills 节（第三方技能登记的路径清单）。
+const SchemaVersion = 4
 
 // 缺省值。合并前三处各自硬编码，现在只有这一份。
 const (
@@ -291,6 +293,57 @@ func (t *TdevSettings) WorkspaceSuffixOrDefault() string {
 	return DefaultWorkspaceSuffix
 }
 
+// SkillsSettings 第三方技能登记（官方技能不走这里）。
+//
+// 官方技能是发版包的一部分（<exe 目录>\skills），走专用路径，不在这张表里 —— 它们
+// 不需要登记、也不能被禁用。这里只放用户自己攒的那些：一行一个**技能目录**（目录里有
+// SKILL.md），路径可以是硬盘上的任意位置。
+//
+// **顺序即优先级**：两条登记解析出同一个技能名时，先登记者赢，后者告警丢弃。
+// 不要把这里当成“父目录清单”—— 装什么必须能在这张表里看全，否则往文件夹里丢一个技能
+// 就会静默改变安装结果。
+//
+// 这里刻意不存“装到哪儿了”：那是 update.SkillsStamp 的事（一次安装的事实，不属于
+// 某条登记），两处都记会养出两个互相矛盾的真相源。
+type SkillsSettings struct {
+	Externals []SkillExternal `json:"externals,omitempty"`
+}
+
+// Entries 按登记顺序返回有效条目（对齐同一个过滤：路径为空的丢掉）。
+//
+// Web 的「技能」页靠它把 label 与磁盘判定结果一一对上 —— Paths() 已经丢过空条目，
+// 直接拿原下标对齐会错位。
+func (s *SkillsSettings) Entries() []SkillExternal {
+	out := make([]SkillExternal, 0, len(s.Externals))
+	for _, e := range s.Externals {
+		if strings.TrimSpace(e.Path) != "" {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// Paths 按登记顺序取出路径清单（给 skill.BuildPlan 用）。
+//
+// 只给路径：技能名、合规性、冲突一律由 skill 包从磁盘上判，配置里的 label 不参与。
+func (s *SkillsSettings) Paths() []string {
+	entries := s.Entries()
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, strings.TrimSpace(e.Path))
+	}
+	return out
+}
+
+// SkillExternal 一条第三方技能登记。
+//
+// Path 是**唯一身份**（绝对路径）；Label 只是路径失效时的显示名，永远不是权威 ——
+// 技能叫什么只认 SKILL.md 的 frontmatter，两处不一致时以磁盘为准。
+type SkillExternal struct {
+	Path  string `json:"path"`
+	Label string `json:"label,omitempty"`
+}
+
 // NetSettings 出网设置。目前只有代理一件事。
 //
 // 为什么放配置里而不是只认环境变量：代理地址是**机器级事实**（内网部署的常态就是
@@ -330,6 +383,7 @@ type Root struct {
 	Tdev          TdevSettings
 	Tzs           TzsSettings
 	Net           NetSettings
+	Skills        SkillsSettings
 }
 
 // Load 读取并解析配置，返回类型化视图。
@@ -371,6 +425,9 @@ func Load(path string) (*Root, error) {
 		return nil, err
 	}
 	if err := decodeSection(root, "net", &r.Net); err != nil {
+		return nil, err
+	}
+	if err := decodeSection(root, "skills", &r.Skills); err != nil {
 		return nil, err
 	}
 	return r, nil

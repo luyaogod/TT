@@ -11,8 +11,7 @@ import (
 )
 
 // mkSkills 在 dir 下建一个技能源树：每个技能一个目录 + SKILL.md。
-// 写的是**合规**的 frontmatter（name 等于目录名、description 非空），
-// 因为 listSkills 现在会校验这两项。
+// 写的是**合规**的 frontmatter（name 等于目录名、description 非空）。
 func mkSkills(t *testing.T, dir string, names ...string) {
 	t.Helper()
 	for _, n := range names {
@@ -20,11 +19,11 @@ func mkSkills(t *testing.T, dir string, names ...string) {
 		if err := os.MkdirAll(p, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		writeSkill(t, dir, n, "---\nname: "+n+"\ndescription: 测试技能。\n---\n")
+		writeSkill(t, dir, n, "---\nname: "+n+"\ndescription: 测试技能。\n---\n# "+n+"\n")
 	}
 }
 
-// writeSkill 往 <dir>/<name>/SKILL.md 写任意内容（建目录），用于造不合规的样子。
+// writeSkill 往 <dir>/<name>/SKILL.md 写任意内容（建目录）。
 func writeSkill(t *testing.T, dir, name, body string) {
 	t.Helper()
 	p := filepath.Join(dir, name)
@@ -36,231 +35,16 @@ func writeSkill(t *testing.T, dir, name, body string) {
 	}
 }
 
-// 合并前 TDebug 与 TDictCli 各有一份等价测试。三份 install 命令合成一个
-// `tt install` 后，那三份测试随旧命令一起被丢弃 —— 这里把语义补回来，
-// 否则合并后的安装命令一个测试都没有。
-func TestListSkills(t *testing.T) {
-	src := t.TempDir()
-	mkSkills(t, src, "beta", "alpha")
-
-	got, err := listSkills(src)
-	if err != nil {
-		t.Fatalf("listSkills: %v", err)
-	}
-	if len(got) != 2 || got[0] != "alpha" || got[1] != "beta" {
-		t.Fatalf("listSkills = %v, want [alpha beta]（按名字排序）", got)
-	}
-
-	// 技能目录缺 SKILL.md 必须报错 —— Agent Skills 规范要求每个技能目录里有它，
-	// 装过去只会得到一个不会被加载的目录。
-	if err := os.MkdirAll(filepath.Join(src, "broken"), 0o755); err != nil {
+// writeConfig 在临时数据目录里落一份配置，并让本进程的 ResolveConfig 指过去。
+func writeConfig(t *testing.T, body string) string {
+	t.Helper()
+	dataDir := t.TempDir()
+	cfg := filepath.Join(dataDir, "config.json")
+	if err := os.WriteFile(cfg, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := listSkills(src); err == nil {
-		t.Fatal("技能目录缺 SKILL.md 时应报错")
-	}
-
-	// 空源目录必须报错
-	if _, err := listSkills(t.TempDir()); err == nil {
-		t.Fatal("skills 源目录为空时应报错")
-	}
-}
-
-func TestInstallSkillsTreeCopies(t *testing.T) {
-	src := t.TempDir()
-	mkSkills(t, src, "alpha", "beta")
-	dst := filepath.Join(t.TempDir(), "skills")
-
-	copied, _, err := installSkillsTree(src, dst, false)
-	if err != nil {
-		t.Fatalf("installSkillsTree: %v", err)
-	}
-	if len(copied) != 2 {
-		t.Fatalf("copied = %v, want 2 项", copied)
-	}
-	// 装完必须是「技能名/SKILL.md」形态，不是扁平的一堆 .md
-	for _, n := range []string{"alpha", "beta"} {
-		if _, err := os.Stat(filepath.Join(dst, n, "SKILL.md")); err != nil {
-			t.Fatalf("%s/SKILL.md 不存在: %v", n, err)
-		}
-	}
-}
-
-// 目标已有同名条目时默认跳过（追加模式），--force 才刷新。
-// 追加模式是为了让 .agents/skills 能与其它来源共存，不手滑冲掉别人的技能。
-func TestInstallSkillsTreeAppendsAndSkips(t *testing.T) {
-	src := t.TempDir()
-	mkSkills(t, src, "alpha", "beta")
-	dst := t.TempDir()
-	mkSkills(t, dst, "alpha")
-	userAlpha := filepath.Join(dst, "alpha", "SKILL.md")
-	if err := os.WriteFile(userAlpha, []byte("用户改过的\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	copied, skipped, err := installSkillsTree(src, dst, false)
-	if err != nil {
-		t.Fatalf("追加安装不该报错: %v", err)
-	}
-	if len(skipped) != 1 || skipped[0] != "alpha" {
-		t.Errorf("skipped = %v, want [alpha]", skipped)
-	}
-	if len(copied) != 1 || copied[0] != "beta/SKILL.md" {
-		t.Errorf("copied = %v, want [beta/SKILL.md]", copied)
-	}
-	if b, _ := os.ReadFile(userAlpha); string(b) != "用户改过的\n" {
-		t.Errorf("默认安装覆盖了目标里已有的技能: %q", b)
-	}
-
-	if _, skipped, err = installSkillsTree(src, dst, true); err != nil {
-		t.Fatalf("--force 应刷新: %v", err)
-	}
-	if len(skipped) != 0 {
-		t.Errorf("--force 不该跳过，skipped = %v", skipped)
-	}
-	if b, _ := os.ReadFile(userAlpha); string(b) == "用户改过的\n" {
-		t.Error("--force 没有刷新同名技能")
-	}
-}
-
-// 再装一次必须还是好的：默认跳过已存在条目，--force 刷新；根级文件也要算。
-func TestInstallSkillsTreeForceIsIdempotent(t *testing.T) {
-	src := t.TempDir()
-	mkSkills(t, src, "alpha")
-	readme := filepath.Join(src, "README.md")
-	if err := os.WriteFile(readme, []byte("索引\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	dst := filepath.Join(t.TempDir(), "skills")
-
-	for i := 1; i <= 2; i++ {
-		if _, skipped, err := installSkillsTree(src, dst, true); err != nil {
-			t.Fatalf("第 %d 次 --force 安装失败: %v", i, err)
-		} else if len(skipped) != 0 {
-			t.Fatalf("第 %d 次 --force 不该跳过: %v", i, skipped)
-		}
-	}
-	if _, err := os.Stat(filepath.Join(dst, "README.md")); err != nil {
-		t.Errorf("根级 README.md 没复制过去: %v", err)
-	}
-
-	// 不加 --force 的第二次：跳过同名条目，不报错，也不动目标里的东西。
-	if err := os.WriteFile(filepath.Join(dst, "README.md"), []byte("用户改过的\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	_, skipped, err := installSkillsTree(src, dst, false)
-	if err != nil {
-		t.Fatalf("追加安装不该报错: %v", err)
-	}
-	if len(skipped) != 2 {
-		t.Errorf("skipped = %v, want [README.md alpha]（两个同名条目都跳过）", skipped)
-	}
-	got, err := os.ReadFile(filepath.Join(dst, "README.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != "用户改过的\n" {
-		t.Errorf("跳过的条目不该被覆盖，实得 %q", got)
-	}
-}
-
-// --force 只该删「名字来自源树」的那一层，目标目录里的其它内容必须留着。
-func TestInstallSkillsTreeForceKeepsOthers(t *testing.T) {
-	src := t.TempDir()
-	mkSkills(t, src, "alpha")
-	dst := t.TempDir()
-	mkSkills(t, dst, "alpha")
-	mkSkills(t, dst, "别人的技能")
-
-	if _, _, err := installSkillsTree(src, dst, true); err != nil {
-		t.Fatalf("--force: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(dst, "别人的技能", "SKILL.md")); err != nil {
-		t.Errorf("--force 误删了不在源树里的技能目录: %v", err)
-	}
-}
-
-func TestInstallSkillsTreeRejectsSameDir(t *testing.T) {
-	src := t.TempDir()
-	mkSkills(t, src, "alpha")
-	if _, _, err := installSkillsTree(src, src, true); err == nil {
-		t.Fatal("目标与源相同应报错（而不是自我覆盖）")
-	}
-}
-
-// 源目录不是技能树（比如后端开发态 exe 旁边还没有 skills/）时要给出可操作的提示，
-// 而不是一句"文件不存在"。
-func TestListSkills_NotADirectory(t *testing.T) {
-	if _, err := listSkills(filepath.Join(t.TempDir(), "nope")); err == nil {
-		t.Fatal("源目录不存在时应报错")
-	}
-}
-
-// 不合规的 frontmatter 必须当场拒绝，而不是装出去。
-//
-// 为什么值得一条：name 与 description 是别的 agent 拿来当索引的两个字段（name 决定技能
-// 身份、description 决定何时加载）。装过去不会报错 —— 失败都在我们看不到的地方：
-// description 缺失时客户端直接跳过，name 不匹配则各家宽容度不一。
-func TestListSkillsRejectsBadFrontmatter(t *testing.T) {
-	long := strings.Repeat("长", skillDescriptionMax+1)
-	cases := []struct {
-		name string // 技能目录名
-		body string // SKILL.md 内容
-		want string // 报错里必须出现的片段
-	}{
-		{"alpha", "---\nname: beta\ndescription: x\n---\n", "必须等于目录名"},
-		{"alpha", "---\nname: Alpha\ndescription: x\n---\n", "只允许小写字母"},
-		{"_alpha", "---\nname: _alpha\ndescription: x\n---\n", "只允许小写字母"},
-		{"alpha", "---\nname: alpha-\ndescription: x\n---\n", "只允许小写字母"},
-		{"alpha", "---\ndescription: x\n---\n", "没有 name"},
-		{"alpha", "---\nname: alpha\n---\n", "description 是空的"},
-		{"alpha", "---\nname: alpha\ndescription: \"\"\n---\n", "description 是空的"},
-		{"alpha", "---\nname: alpha\ndescription: " + long + "\n---\n", "超过规范上限"},
-		{"alpha", "name: alpha\ndescription: x\n", "没有 YAML frontmatter"},
-		{"alpha", "---\nname: alpha\ndescription: x\n", "没有闭合"},
-	}
-	for _, c := range cases {
-		src := t.TempDir()
-		writeSkill(t, src, c.name, c.body)
-		_, err := listSkills(src)
-		if err == nil {
-			t.Errorf("%s: 不合规的 frontmatter 应被拒绝", c.body)
-			continue
-		}
-		if !strings.Contains(err.Error(), c.want) {
-			t.Errorf("%s: 报错里应有 %q，实得:\n%v", c.body, c.want, err)
-		}
-	}
-}
-
-// frontmatter 的几种合法写法都要认，尤其是：缩进行属于 metadata 嵌套块，
-// 不能把它底下的 name/description 当成技能自己的。
-func TestListSkillsAcceptsFrontmatterShapes(t *testing.T) {
-	src := t.TempDir()
-	writeSkill(t, src, "quoted", "---\nname: \"quoted\"\ndescription: '带引号的说明'\n---\n")
-	writeSkill(t, src, "block", "---\nname: block\ndescription: |\n  第一行\n  第二行\n---\n")
-	writeSkill(t, src, "nested", "---\nname: nested\nmetadata:\n  name: 不算\n  description: 也不算\ndescription: 正经说明\n---\n")
-
-	got, err := listSkills(src)
-	if err != nil {
-		t.Fatalf("这几种写法都合规，不该报错: %v", err)
-	}
-	if len(got) != 3 || got[0] != "block" || got[1] != "nested" || got[2] != "quoted" {
-		t.Fatalf("listSkills = %v, want [block nested quoted]", got)
-	}
-
-	// 嵌套块里的 name/description 不能顶替顶层那两个
-	b, err := os.ReadFile(filepath.Join(src, "nested", "SKILL.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	m, err := parseSkillFrontmatter(b)
-	if err != nil {
-		t.Fatalf("parseSkillFrontmatter: %v", err)
-	}
-	if m.Name != "nested" || m.Description != "正经说明" {
-		t.Errorf("解析出 %+v，want {nested 正经说明}", m)
-	}
+	t.Setenv("TT_CONFIG", cfg)
+	return dataDir
 }
 
 // --to auto：当前目录已经为某个 agent 初始化过就别另起一个。
@@ -338,6 +122,7 @@ func TestInstallSkillsCmdToAuto(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Chdir(cwd)
+	writeConfig(t, `{"schemaVersion":4}`)
 
 	old := skillsSource
 	skillsSource = func() (string, error) { return src, nil }
@@ -368,9 +153,8 @@ func TestInstallSkillsCmdToAuto(t *testing.T) {
 func TestInstallSkillsRecordsStamp(t *testing.T) {
 	src := t.TempDir()
 	mkSkills(t, src, "alpha")
-	dataDir := t.TempDir()
+	dataDir := writeConfig(t, `{"schemaVersion":4}`)
 	target := filepath.Join(dataDir, "agent-skills")
-	t.Setenv("TT_CONFIG", filepath.Join(dataDir, "config.json"))
 
 	oldSrc, oldVer := skillsSource, Version
 	skillsSource = func() (string, error) { return src, nil }
@@ -412,8 +196,7 @@ func TestInstallSkillsRecordsStamp(t *testing.T) {
 func TestInstallSkillsSkipsStampWithoutVersion(t *testing.T) {
 	src := t.TempDir()
 	mkSkills(t, src, "alpha")
-	dataDir := t.TempDir()
-	t.Setenv("TT_CONFIG", filepath.Join(dataDir, "config.json"))
+	dataDir := writeConfig(t, `{"schemaVersion":4}`)
 
 	oldSrc, oldVer := skillsSource, Version
 	skillsSource = func() (string, error) { return src, nil }
@@ -434,4 +217,136 @@ func TestInstallSkillsSkipsStampWithoutVersion(t *testing.T) {
 	if st := update.LoadSkillsStamp(dataDir); st != nil {
 		t.Errorf("没有版本号时不该写戳，却写下了 %+v", st)
 	}
+}
+
+// 登记的第三方技能要跟官方一起装；它的根级 assets/ 不复制，改成在 SKILL.md 首行写指针。
+func TestInstallSkillsCmdInstallsRegisteredExternal(t *testing.T) {
+	official := t.TempDir()
+	mkSkills(t, official, "alpha")
+
+	lib := t.TempDir()
+	kb := filepath.Join(lib, "kb-faq")
+	writeSkill(t, lib, "kb-faq", "---\nname: kb-faq\ndescription: 知识库\n---\n# kb-faq\n")
+	if err := os.MkdirAll(filepath.Join(kb, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(kb, "assets", "big.bin"), []byte("大文件"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeConfig(t, `{"schemaVersion":4,"skills":{"externals":[{"path":`+quoteJSON(t, kb)+`,"label":"kb-faq"}]}}`)
+
+	old := skillsSource
+	skillsSource = func() (string, error) { return official, nil }
+	defer func() { skillsSource = old }()
+
+	dst := filepath.Join(t.TempDir(), "skills")
+	code := testkit.Silent(t, func() int {
+		cmd := newInstallSkillsCmd()
+		cmd.SetArgs([]string{"--to", dst})
+		if err := cmd.Execute(); err != nil {
+			t.Errorf("install skills: %v", err)
+			return 1
+		}
+		return 0
+	})
+	if code != 0 {
+		t.Fatalf("退出码 = %d, want 0", code)
+	}
+
+	for _, n := range []string{"alpha", "kb-faq"} {
+		if _, err := os.Stat(filepath.Join(dst, n, "SKILL.md")); err != nil {
+			t.Fatalf("%s 没装上: %v", n, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dst, "kb-faq", "assets")); !os.IsNotExist(err) {
+		t.Errorf("assets/ 被复制过去了（err=%v）", err)
+	}
+	md, err := os.ReadFile(filepath.Join(dst, "kb-faq", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(md), filepath.Join(kb, "assets")) {
+		t.Errorf("SKILL.md 里没有指回源 assets 的那一行:\n%s", md)
+	}
+}
+
+// 登记的路径失效：官方照装、退出码 0；--strict 才变成非零。这是用户明确要的语义
+// ——「警告不影响其它技能安装」，同时给 CI 一条能发现"装漏了一个"的路。
+func TestInstallSkillsCmdWarnsOnMissingExternal(t *testing.T) {
+	official := t.TempDir()
+	mkSkills(t, official, "alpha")
+	gone := filepath.Join(t.TempDir(), "gone")
+	writeConfig(t, `{"schemaVersion":4,"skills":{"externals":[{"path":`+quoteJSON(t, gone)+`}]}}`)
+
+	old := skillsSource
+	skillsSource = func() (string, error) { return official, nil }
+	defer func() { skillsSource = old }()
+
+	dst := filepath.Join(t.TempDir(), "skills")
+	code := testkit.Silent(t, func() int {
+		cmd := newInstallSkillsCmd()
+		cmd.SetArgs([]string{"--to", dst})
+		if err := cmd.Execute(); err != nil {
+			t.Errorf("第三方失联不该让命令失败: %v", err)
+			return 1
+		}
+		return 0
+	})
+	if code != 0 {
+		t.Fatalf("退出码 = %d, want 0", code)
+	}
+	if _, err := os.Stat(filepath.Join(dst, "alpha", "SKILL.md")); err != nil {
+		t.Fatalf("官方技能没装上: %v", err)
+	}
+
+	// --strict：同样的输入，退出码非零，但技能照装。
+	dst2 := filepath.Join(t.TempDir(), "skills")
+	var code2 int
+	testkit.Silent(t, func() int {
+		cmd := newInstallSkillsCmd()
+		cmd.SetArgs([]string{"--to", dst2, "--strict"})
+		err := cmd.Execute()
+		code2 = exitCodeOf(err)
+		return 0
+	})
+	if code2 == 0 {
+		t.Error("--strict 下有告警该返回非零退出码")
+	}
+	if _, err := os.Stat(filepath.Join(dst2, "alpha", "SKILL.md")); err != nil {
+		t.Errorf("--strict 不该阻止其它技能安装: %v", err)
+	}
+}
+
+// --dry-run：一个字节都不写（连目标目录都不建）。
+func TestInstallSkillsCmdDryRun(t *testing.T) {
+	official := t.TempDir()
+	mkSkills(t, official, "alpha")
+	writeConfig(t, `{"schemaVersion":4}`)
+
+	old := skillsSource
+	skillsSource = func() (string, error) { return official, nil }
+	defer func() { skillsSource = old }()
+
+	dst := filepath.Join(t.TempDir(), "skills")
+	code := testkit.Silent(t, func() int {
+		cmd := newInstallSkillsCmd()
+		cmd.SetArgs([]string{"--to", dst, "--dry-run"})
+		if err := cmd.Execute(); err != nil {
+			t.Errorf("--dry-run: %v", err)
+			return 1
+		}
+		return 0
+	})
+	if code != 0 {
+		t.Fatalf("退出码 = %d, want 0", code)
+	}
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Fatalf("--dry-run 建了目标目录: %v", err)
+	}
+}
+
+// quoteJSON 把 Windows 路径塞进 JSON 字符串（反斜杠要转义）。
+func quoteJSON(t *testing.T, s string) string {
+	t.Helper()
+	return `"` + strings.ReplaceAll(s, `\`, `\\`) + `"`
 }

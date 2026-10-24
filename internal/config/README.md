@@ -66,7 +66,8 @@ config.Edit(path, validate, mutate)   // Open → validate → mutate → Save
 
 ## 结构版本与缺省值
 
-`SchemaVersion = 2`，随新配置文件写入（骨架与 `ensureSchemaVersion`）；旧结构不做自动迁移。
+`SchemaVersion = 4`，随新配置文件写入（骨架与 `ensureSchemaVersion`）；旧结构不做自动迁移。
+以下两版是"加可选节"：3 加了 `net`，4 加了 `skills`（第三方技能登记表）。
 
 各节都有自己的缺省常量（监听地址、调试参数、终端宽高、打印上限、SSH 端口、工作区后缀…），
 由 `FillDefaults` 在内存里补齐 —— **不写盘**。缺省值只在一处定义。
@@ -102,6 +103,11 @@ config.Edit(path, validate, mutate)   // Open → validate → mutate → Save
 配置里那些"这是个路径"的值（`sync.target`、`mirror.dir`、`dict.dir`、`hosts.sshs[].workspace`…），
 解析规则同样只有一份（绝对化、派生状态、同步目标缺省位置）。
 理由：同一个值在两处各算一遍，会解析成不同结果 —— 那是最难查的一类 bug。
+
+`skills.externals[].path` 是唯一**解析规则不在这里**的路径值：它由
+[../skill](../skill/README.md) 自己绝对化并使用（可能指向一个今天没插的移动硬盘，
+所以**存下来时不做存在性校验** —— 那是安装时才判的事，且只告警）。配置层只负责
+原样读写与保持顺序（顺序即优先级）。
 
 ## 判据
 

@@ -416,6 +416,52 @@ async function req<T>(url: string, opts?: RequestInit & { timeoutMs?: number }):
   }
 }
 
+/** 一个技能目录的判定结果（官方与第三方共用）。state != ok 都不是错误，是“这个不装”。 */
+export interface SkillInfo {
+  origin: 'official' | 'external'
+  name: string
+  description?: string
+  dir: string
+  index?: number
+  state: 'ok' | 'missing' | 'invalid' | 'conflict'
+  why?: string
+}
+
+/** 第三方那一行：磁盘判定 + 登记表里的原值。 */
+export interface SkillRow extends SkillInfo {
+  /** 登记时给的显示名；路径失联时靠它认人（永远不是权威，技能只认 frontmatter） */
+  label?: string
+  /** 登记表里的原值（未绝对化），删除时按它匹配 */
+  path?: string
+}
+
+/** GET /api/skills */
+export interface SkillsResp {
+  ok: boolean
+  config: string
+  official?: SkillInfo[]
+  officialDir?: string
+  /** 官方那一棵读不到/不合规时的原因（不会影响第三方那一栏） */
+  officialError?: string
+  externals: SkillRow[]
+  /** 上次装到过哪些目录（.tt-skills.json） */
+  targets?: string[]
+  stampVersion?: string
+  /** 技能与二进制不同版时的一句话 */
+  drift?: string
+}
+
+/** 一次安装的结果（与后端的 skill.Report 对齐）。 */
+export interface SkillReport {
+  target: string
+  dryRun?: boolean
+  files: string[]
+  skipped?: string[]
+  /** 被写入了静态文件指针的技能（那几份 SKILL.md 与源文件故意不一致） */
+  rewritten?: string[]
+  warnings?: { kind: string; index?: number; path?: string; name?: string; why: string; text: string }[]
+}
+
 export const api = {
   status: () => req<any>(`${API_BASE}/status`),
   // 环境清单:读共享端点。合并前这里调 /api/settings(旧 debug 节的 sshs),
@@ -597,5 +643,20 @@ export const api = {
     }),
   sourcePreview: (module: string, prog: string) =>
     req<{ source: { path: string; content: string; dvmFile?: string } }>(`${API_BASE}/source-preview?module=${encodeURIComponent(module)}&prog=${encodeURIComponent(prog)}`),
+
+  // ---- 技能(官方随包 + 第三方登记) ----
+  // 与 `tt install skills` 是同一份实现:列表、增删、安装都走共享层 /api/skills。
+  skills: () => req<SkillsResp>('/api/skills'),
+  // 添加时**当场校验**:不合规/撞名会被后端直接拒(400),失联允许存下来(ok + warning)。
+  skillsAdd: (path: string, label?: string) =>
+    req<{ ok: boolean; unchanged?: boolean; entry: SkillRow; warning?: string }>(
+      '/api/skills/add', { method: 'POST', body: JSON.stringify({ path, label }) }),
+  // 只从登记表里去掉,不碰磁盘。removed=false 表示本来就没这条(幂等)。
+  skillsRemove: (path: string) =>
+    req<{ ok: boolean; removed: boolean }>('/api/skills/remove', { method: 'POST', body: JSON.stringify({ path }) }),
+  // 安装会写文件系统,只接受本机请求。dryRun=true 时只算不写。
+  skillsInstall: (to: string, force: boolean, dryRun = false) =>
+    req<{ ok: boolean; report: SkillReport; warningTexts: string[] }>(
+      '/api/skills/install', { method: 'POST', body: JSON.stringify({ to, force, dryRun }), timeoutMs: 120000 }),
 
 }

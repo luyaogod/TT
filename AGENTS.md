@@ -68,6 +68,7 @@ TT/
 │  ├─ safesql/          只读 SQL 文本层防线（远端查询入口用）
 │  ├─ screen/           .42f 布局 + .42s 标签 → 前端画面模型
 │  ├─ session/          会话身份规则（序号分配、世代号），不 import 调试线
+│  ├─ skill/            技能（官方 + 第三方登记）：frontmatter 校验、冲突、assets 指针、安装
 │  ├─ sshtun/           SSH 端口转发隧道（本地监听 → 远端 host:port）
 │  ├─ str42s/           .42s 编译字符串表解析（纯函数，零 IO）
 │  ├─ target/           调试目标解析与候选信封

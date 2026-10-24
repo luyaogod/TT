@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "listen": "127.0.0.1:28670",
   "hosts": {
     "activeEnv": "",
@@ -7,6 +7,9 @@
   },
   "query": {
     "source": "auto"
+  },
+  "skills": {
+    "externals": []
   },
   "tzs": {
     "serverExe": ""
