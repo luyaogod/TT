@@ -183,6 +183,33 @@ func TestPrepareSessionRejectsActiveRun(t *testing.T) {
 	}
 }
 
+// 复用宿主时**不得把会话自己的 ENT 弄丢**。
+//
+// 事故背景（2026-10-23）：`SetRun` 整份替换 cfg，而本轮请求常常没带 `--ent`
+// （前端「运行 / 重新开始」就是这样），新 cfg 的 Topent 是空的。于是会话的
+// `TopentSession()` 变空 → 下一轮 `requireExplicitEnt` 的三个来源（本次 --ent /
+// 会话 override / 会话建立时的值）全部落空 → 409。
+// 表现出来就是："建会话后第一次能启动，之后每次启动都报必须指定 ENT"。
+func TestSetRunKeepsSessionEnt(t *testing.T) {
+	s := fakeIdleSession("s1", "h1", "36")
+	s.cfg.Topent = host.EntValue("99")
+
+	noEnt := cfgFor("h1", "36")
+	noEnt.Topent = host.EntValue("") // 本轮请求没点名 ENT
+	s.SetRun(noEnt, "axm", "axmt500", "axmt500", "", "")
+	if got := s.TopentSession(); got != "99" {
+		t.Fatalf("复用宿主时把会话自己的 ENT 弄丢了（got %q）：下一轮启动会 409", got)
+	}
+
+	// 本轮显式给了新 ENT：以新值为准，不能被旧值盖住
+	withEnt := cfgFor("h1", "36")
+	withEnt.Topent = host.EntValue("200")
+	s.SetRun(withEnt, "axm", "axmt500", "axmt500", "", "")
+	if got := s.TopentSession(); got != "200" {
+		t.Fatalf("本轮显式给的 ENT 应当生效，got %q", got)
+	}
+}
+
 func TestTopentForRun(t *testing.T) {
 	c := cfgFor("h1", "36")
 	c.Topent = "7" // 会话级 ENT(启动 --ent 给的那个);不再是环境配置值

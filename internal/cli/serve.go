@@ -120,13 +120,11 @@ func newServeCmd() *cobra.Command {
 			// 页面由 internal/web 提供；这份 FS 是为了 `tt debug serve` 单独跑时也能出页面。
 			debugSrv := debug.NewServer(cfg, common.WebFrontend(), path)
 
-			// 本地字典库按环境分文件：<数据目录>/dict/<环境>.db。这个目录同时交给
-			// 字典子系统与前端（设置页显示「库目录」），两边算一次就够。
-			dictDir := config.LocationsAt(path).DictDBDir()
+			// 库目录**不在这里注入**：dictserver 每次访问时按配置算（顶层 dict.dir，
+			// 空则 <数据目录>/dict），这样设置页改完立即生效，不会"改了还写老地方"。
 			// 统一层的配置状态仍用「单文件」口径；设置页已改为按环境显示库目录。
 			syncDefault := config.LocationsAt(path).SyncTarget("", "")
 			dictSrv := dictserver.New(path)
-			dictSrv.SetDBDir(dictDir)
 
 			return debugcli.RunForeground(path, debugcli.ServeSpec{
 				Prefix:   "TT",

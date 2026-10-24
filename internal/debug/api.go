@@ -67,6 +67,12 @@ func NewServer(cfg *Config, web fs.FS, cfgPath string) *Server {
 	// 重复调用无副作用(CLI 的 serve 路径本来就会先调一次)。
 	cfg.ApplyDefaultEnv()
 	s := &Server{cfg: cfg, cfgPath: cfgPath, web: web, mgr: NewManager(cfg), dial: host.Dial}
+	// 本地字典库优先的作业解析（2026-10-23）：<数据目录>/dict/<环境>.db 里有同一张
+	// gzzz_t/gzza_t，本地命中就省掉每次启动的 SSH+连库（实测约 3s）。CLI 的 serve
+	// 路径（servebg.go）同样走 NewServer，这里装配一次两条路都生效。
+	s.mgr.LocalJobLookup = func(envName, job string) (JobResolve, bool) {
+		return lookupJobLocalDB(config.DictDBPathForEnv(cfgPath, envName), job)
+	}
 	if web != nil {
 		if f, err := web.Open("index.html"); err == nil {
 			f.Close()

@@ -45,7 +45,7 @@ var dbStatusCmd = &cobra.Command{
 			return inspectOne(config.AbsPath(p), "")
 		}
 		if env != "" {
-			p := config.DictDBPath(dictDataDir(), env)
+			p := config.DictDBPathForEnv(dictCfgPath(), env)
 			if x := strings.TrimSpace(dbPath); x != "" {
 				p = config.AbsPath(x)
 			}
@@ -97,10 +97,10 @@ func listLocalDBs() ([]localDBRow, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	dir := config.LocationsAt(path).DictDBDir()
+	dir := config.DictDBDirFor(path)
 	rows := make([]localDBRow, 0, len(hosts.SSHs))
 	for _, name := range hosts.Names() {
-		p := config.DictDBPathIn(dir, name)
+		p := config.DictDBPathForEnv(path, name)
 		r := localDBRow{Env: name, Path: p}
 		if st, err := os.Stat(p); err == nil {
 			r.Exists = true

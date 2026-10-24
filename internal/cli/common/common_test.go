@@ -120,6 +120,7 @@ func TestCurrentMetaDelegatesToProvider(t *testing.T) {
 // TestConfigHintAndResolveConfigDelegate 钉的是**接线**，不是取值：
 // 这两个函数的取值依赖环境（便携包判定、用户配置目录），断言具体值会在别人的机器上红。
 func TestConfigHintAndResolveConfigDelegate(t *testing.T) {
+	t.Setenv("TT_CONFIG", "") // 隔离开发机上的真实 TT_CONFIG,否则会盖过显式 --config(见 config.ResolvePath)
 	resetCommon(t)
 	if got, want := ConfigHint(), config.DefaultConfigPathHint(); got != want {
 		t.Errorf("ConfigHint 该原样转发 config.DefaultConfigPathHint：得 %q，想 %q", got, want)

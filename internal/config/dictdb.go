@@ -79,6 +79,52 @@ func (l *Locations) DictDBDir() string { return DictDBDir(l.DataDir()) }
 // DictDBPath 某环境的本地字典库文件。
 func (l *Locations) DictDBPath(env string) string { return DictDBPath(l.DataDir(), env) }
 
+// DictDBDirFor 本地字典库根目录（读配置）：顶层 dict.dir 优先，否则 <数据目录>/dict。
+//
+// 库位置一旦可配，CLI 与 Web 必须读**同一处**配置，才不会出现"命令行读 A、界面读 B"。
+// 所以这里统一传配置路径、内部 Load，而不是让各调用点自己算。
+// 配置读不到 / 写坏时安静回退到缺省落点 —— 库位置不该因为配置有问题就变成空串。
+func DictDBDirFor(cfgPath string) string {
+	if strings.TrimSpace(cfgPath) != "" {
+		if r, err := Load(cfgPath); err == nil {
+			if d := strings.TrimSpace(r.Dict.Dir); d != "" {
+				return AbsPath(d)
+			}
+		}
+	}
+	return LocationsAt(cfgPath).DictDBDir()
+}
+
+// DictDBDirForEnv 某环境实际使用的库目录：环境 dictDir > 顶层 dict.dir > <数据目录>/dict。
+//
+// 只有目录能按环境覆盖，**文件名始终是 <环境>.db** ——「每环境一个任意文件路径」会让
+// 命令行、Web、查询三边可能指向不同的库，而"读到另一个环境的库"与"数据不存在"
+// 在输出上完全一样，排查时无从下手。
+func DictDBDirForEnv(cfgPath, env string) string {
+	if strings.TrimSpace(cfgPath) != "" && strings.TrimSpace(env) != "" {
+		if r, err := Load(cfgPath); err == nil {
+			for i := range r.Hosts.SSHs {
+				if r.Hosts.SSHs[i].Name != env {
+					continue
+				}
+				if d := strings.TrimSpace(r.Hosts.SSHs[i].DictDir); d != "" {
+					return AbsPath(d)
+				}
+				break
+			}
+			if d := strings.TrimSpace(r.Dict.Dir); d != "" {
+				return AbsPath(d)
+			}
+		}
+	}
+	return LocationsAt(cfgPath).DictDBDir()
+}
+
+// DictDBPathForEnv 某环境的本地字典库文件（读配置，含环境级覆盖）。
+func DictDBPathForEnv(cfgPath, env string) string {
+	return DictDBPathIn(DictDBDirForEnv(cfgPath, env), env)
+}
+
 // DictDBCandidatesFor 某环境本地库的候选：-d/--db → <数据目录>/dict/<环境>.db。
 //
 // **不认 TDICT_DB**：那是旧版“一个共享库”的全局开关，留着它会让一个环境变量

@@ -59,20 +59,27 @@ func New(cfgPath string) *Server {
 	return &Server{cfgPath: cfgPath}
 }
 
-// SetDBDir 注入本地字典库目录（每个环境一个 .db）。空 = config.Locations 的缺省（数据目录/dict）。
+// SetDBDir 注入本地字典库目录（每个环境一个 .db）。空 = 按配置算（见 localDBDir）。
 func (s *Server) SetDBDir(dir string) { s.dbDir = dir }
 
 // localDBDir 返回本地字典库目录。
+//
+// 没有注入值时**每次读配置**（顶层 dict.dir，空则 <数据目录>/dict）：库根目录是设置页
+// 可改的，若只在启动时算一次，用户改完会看到「设置里改了、同步还写到老地方」——
+// 而且不报错，只是文件落在别处。读一次配置是微秒级，这条路径不在热循环里。
 func (s *Server) localDBDir() string {
 	if s.dbDir != "" {
 		return s.dbDir
 	}
-	return config.DictDBDir(config.LocationsAt(s.cfgPath).DataDir())
+	return config.DictDBDirFor(s.cfgPath)
 }
 
-// dbPathFor 某环境的本地库文件。
+// dbPathFor 某环境的本地库文件（含该环境的 dictDir 覆盖）。
 func (s *Server) dbPathFor(env string) string {
-	return config.DictDBPathIn(s.localDBDir(), env)
+	if s.dbDir != "" {
+		return config.DictDBPathIn(s.dbDir, env)
+	}
+	return config.DictDBPathForEnv(s.cfgPath, env)
 }
 
 // Handler 返回字典侧的 HTTP 面(镜像/同步/BDL 文档的 REST 接口)。
