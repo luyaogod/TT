@@ -39,6 +39,9 @@ func lookupJobLocalDB(dbPath, job string) (JobResolve, bool) {
 		return JobResolve{}, false
 	}
 	defer d.Close()
+	// 字典同步是「写临时库 → 原子替换」，替换那一瞬可能撞上 SQLITE_BUSY。等一小会儿再放弃，
+	// 别让一次偶发占用就把本地优先降级成远程（那条路要多花约 3 秒）。
+	_, _ = d.Exec("PRAGMA busy_timeout=2000")
 	t0 := time.Now()
 	// 与 dbResolveJob 同一查询语义（gendbg.4gl 口径）：
 	//   gzza001=实体程序 | gzzz004=额外参数 | gzza004=启动引用 | gzzz005=模块
