@@ -125,7 +125,12 @@ func DictDBPathForEnv(cfgPath, env string) string {
 	return DictDBPathIn(DictDBDirForEnv(cfgPath, env), env)
 }
 
-// DictDBCandidatesFor 某环境本地库的候选：-d/--db → <数据目录>/dict/<环境>.db。
+// DictDBCandidatesFor 某环境本地库的候选：-d/--db → 该环境的库文件
+// （环境 dictDir > 顶层 dict.dir > <数据目录>/dict 下的 <环境>.db）。
+//
+// 这里**必须**走 DictDBPathForEnv 而不是 DictDBPath：同步/状态/Web 写的都是前者，
+// 查询若用后者，用户把 dict.dir 改到新目录之后就是"同步写 A、查询读 B" —— 表现成
+// "本地字典库不存在"，或者在旧位置还留着旧库时静默读到过期数据。
 //
 // **不认 TDICT_DB**：那是旧版“一个共享库”的全局开关，留着它会让一个环境变量
 // 悄悄覆盖所有环境（隔离失效）。点名了 local:<环境> 就只看这个环境的文件；
@@ -135,7 +140,7 @@ func (l *Locations) DictDBCandidatesFor(env, flagPath string) []string {
 	if p := AbsPath(flagPath); p != "" {
 		out = append(out, p)
 	}
-	if p := l.DictDBPath(env); p != "" {
+	if p := DictDBPathForEnv(l.ConfigPath, env); p != "" {
 		out = append(out, p)
 	}
 	return out
