@@ -40,6 +40,13 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("ping database (%s, 父目录 %s 存在=%v): %w",
 			path, filepath.Dir(path), dirExists(filepath.Dir(path)), err)
 	}
+	// 临时表/临时索引走内存。两件事：
+	//  1. 本地库都是只读镜像查询，临时存储放内存少一次磁盘往返（大 GROUP BY 明显更快）；
+	//  2. 趟过一个环境问题：exe 放在某些目录下时 SQLite 建临时文件会失败，
+	//     大 GROUP BY 直接报 `unable to open database file (14)`（2026-10 实测，
+	//     与本包代码无关，换一个目录跑同一个二进制就正常）。
+	// 失败就按 SQLite 默认走 —— 一条 pragma 不该让打开库本身失败。
+	_, _ = conn.Exec("PRAGMA temp_store=MEMORY")
 	return &DB{conn: conn}, nil
 }
 

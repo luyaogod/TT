@@ -747,7 +747,9 @@ func (m *Manager) resolveJobWith(cfg *Config, module, job string) (mod, prog, la
 	}
 	// **先查缓存**：命中就完全不碰 SSH/数据库（远程 ksql 冷启动一次约 3s，见 jobCache 注释）。
 	// key 带上 module —— 显式模块会改变返回值（尊重指定、仅采纳实体程序），不能共用。
-	ckey := cfg.SSH.Host + "|" + cfg.SSH.User + "|" + zoneOf(cfg) + "|" + module + "|" + strings.ToLower(job)
+	// key 带上**环境名**：缓存值来自该环境的 gzzz_t/gzza_t，同一台服务器上不同环境
+	// （甚至不同库）的作业表内容可以不同，只用 host|user|zone 会把两边的结果混成一份。
+	ckey := cfg.SSH.Host + "|" + cfg.SSH.User + "|" + zoneOf(cfg) + "|" + cfg.EnvName() + "|" + module + "|" + strings.ToLower(job)
 	m.jobMu.Lock()
 	if c, ok := m.jobCache[ckey]; ok && time.Since(c.at) < 5*time.Minute {
 		m.jobMu.Unlock()
