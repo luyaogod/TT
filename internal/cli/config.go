@@ -27,7 +27,7 @@ func newConfigCmd() *cobra.Command {
 		Long: `管理唯一的 config.json。
 
 顶层的 hosts 节是共用环境清单，
-debug / query / mirror / bdldoc / sync / tdev 是各命令组自己的设置。
+debug / query / mirror / dict / sync / tdev 是各命令组自己的设置。
 
 配置位置按以下顺序确定（第一个存在的胜出）：
   1. TT_CONFIG 环境变量

@@ -22,10 +22,6 @@ type configStatus struct {
 	Config string `json:"config"`
 	// Mirror 源码镜像根目录。
 	Mirror config.DirStatus `json:"mirror"`
-	// Bdldoc BDL 文档目录。
-	Bdldoc config.DirStatus `json:"bdldoc"`
-	// Kb 知识库（笔记）根目录。只回报顶层 kb.dir；环境级 kbDir 由前端按环境拼。
-	Kb config.DirStatus `json:"kb"`
 	// Dict 本地字典库根目录（空 = 缺省 <数据目录>/dict）。
 	Dict config.DirStatus `json:"dict"`
 	// Sync 字典同步的本地 SQLite。
@@ -49,8 +45,6 @@ func (s *Server) hConfigStatus(w http.ResponseWriter, r *http.Request) {
 	root, err := config.Load(path)
 	if err == nil {
 		st.Mirror = config.DirStatusOf(root.Mirror.Dir)
-		st.Bdldoc = config.DirStatusOf(root.Bdldoc.Dir)
-		st.Kb = config.DirStatusOf(root.Kb.Dir)
 		st.Dict = config.DirStatusOf(root.Dict.Dir)
 		st.Sync = config.FileStatusOf(root.Sync.Target, s.syncDefaultTarget())
 		tzsCfg = root.Tzs

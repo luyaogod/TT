@@ -49,7 +49,7 @@ func spillCmd() *cobra.Command {
   tt dict spill show latest
   tt dict spill show latest --offset 20 --limit 20
   tt dict spill show latest --limit 0        # 全量`,
-		// 只读文件，不碰数据源：与 bdldoc/mirror/db 一样覆盖组的查询钩子。
+		// 只读文件，不碰数据源：与 mirror/db 一样覆盖组的查询钩子。
 		PersistentPreRunE: skipQuerySource,
 	}
 	c.AddCommand(spillListCmd(), spillShowCmd())

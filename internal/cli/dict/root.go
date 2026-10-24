@@ -55,7 +55,7 @@ func init() {
 		"企业编号(ENT):据此解析该环境用哪个账号(schema);不给 = 用账号列表首项")
 
 	// 打开/关闭查询数据源:本地 SQLite(--db/TDICT_DB)或远程库(--env/query.source)。
-	// 不依赖本地字典库的子命令(bdldoc/db/mirror/spill)各自覆盖本钩子。
+	// 不依赖本地字典库的子命令(db/mirror/spill)各自覆盖本钩子。
 	Group.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		if err := runRootPreRun(cmd, args); err != nil {
 			return err

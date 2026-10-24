@@ -1,7 +1,7 @@
 // 统一设置页:左侧四个分区的导航,右侧按分区渲染卡片。
 //
 // 「站点管理」环境清单 + SSH/数据库(原调试页「环境」节与原字典页「环境配置」的并集,只留一份);
-// 「数据字典」查询数据源 / 源码镜像 / 数据同步 / BDL 文档;
+// 「数据字典」查询数据源 / 源码镜像 / 数据同步;
 // 「DEBUG」调试参数 / 默认环境;
 // 「应用设置」外观 / 服务 / 运行信息。
 //
@@ -85,8 +85,6 @@ interface SshItem {
   workspace: string
   // 该环境自己的源码镜像目录；空 = 使用全局 mirror.dir/<环境名>。
   mirrorDir: string
-  // 该环境自己的知识库目录；空 = 使用全局 kb.dir。
-  kbDir: string
   // 该环境自己的本地字典库目录；空 = 使用全局 dict.dir。
   dictDir: string
   db: SshDb | null
@@ -105,8 +103,6 @@ interface DictForm {
   /** '' = 在线 | 'local:<环境>' = 该环境的本地 SQLite | 环境名 = 固定走该环境的在线库。 */
   querySource: string
   mirrorDir: string
-  bdldocDir: string
-  kbDir: string
   // dictDir 本地字典库根目录；空 = 缺省 <数据目录>/dict
   dictDir: string
   // 刻意没有 syncTarget:字典库按环境分文件,位置由服务端算;卡片里只读显示库目录。
@@ -114,7 +110,7 @@ interface DictForm {
 }
 
 /** 可自动保存的配置节。脏标记与提交范围都按它划分。 */
-type ConfigKey = 'hosts' | 'debug' | 'listen' | 'query' | 'mirror' | 'bdldoc' | 'kb' | 'dict'
+type ConfigKey = 'hosts' | 'debug' | 'listen' | 'query' | 'mirror' | 'dict'
 
 // 主题切换卡片(shadcn 主题切换卡样式):三张卡各带一张迷你界面预览,选中卡描边+底色高亮。
 const THEME_OPTIONS: { value: ThemeMode; label: string; icon: typeof Sun }[] = [
@@ -296,7 +292,7 @@ const defaultAccounts = () => ['ds', 'dsdata', 'dsdemo'].map((a) => ({ account: 
 // 先填上能省掉每次手敲(不对再改)。注意 service 是**真值**不是占位符:
 // placeholder 在框里是灰字、不会被提交,而这里要的是"保存下去就是它"。
 const blankSsh = (): SshItem => ({
-  name: '', host: '', port: 22, user: '', password: '', zone: '1', workspace: '', mirrorDir: '', kbDir: '', dictDir: '',
+  name: '', host: '', port: 22, user: '', password: '', zone: '1', workspace: '', mirrorDir: '', dictDir: '',
   db: { ...blankDb(), accounts: defaultAccounts() },
 })
 
@@ -326,8 +322,6 @@ function hostsPatchOf(list: SshItem[]) {
     if (x.workspace.trim()) o.workspace = x.workspace.trim()
     // 环境自己的镜像目录：留空不写，后端回退到全局 mirror.dir/<环境名>。
     if (x.mirrorDir.trim()) o.mirrorDir = x.mirrorDir.trim()
-    // 环境自己的知识库目录：留空不写，后端回退到全局 kb.dir。
-    if (x.kbDir.trim()) o.kbDir = x.kbDir.trim()
     // 环境自己的库目录：留空不写，后端回退到全局 dict.dir（再回退数据目录/dict）。
     if (x.dictDir.trim()) o.dictDir = x.dictDir.trim()
     // ENT 清单原样带回：hosts 是整节提交的，这里漏了 → 改一次密码就把清单抹了。
@@ -385,7 +379,6 @@ function sshsFormOf(c: HostsView): SshItem[] {
       zone: e.zone || '',
       workspace: e.workspace || '',
       mirrorDir: e.mirrorDir || '',
-      kbDir: e.kbDir || '',
       dictDir: e.dictDir || '',
       // ENT 清单必须跟着表单走：hosts 是整节提交的，表单里没有它 = 保存一次就抹掉。
       ents: (e.ents || []).map((x) => ({ ent: x.ent, account: x.account, password: x.password })),
@@ -423,7 +416,7 @@ export function SettingsView() {
   const [cfg, setCfg] = useState<HostsView | null>(null)
   const [sshs, setSshs] = useState<SshItem[]>([])
   const [dbg, setDbg] = useState<DebugForm>({ watchdogSeconds: 0 })
-  const [dict, setDict] = useState<DictForm>({ querySource: '', mirrorDir: '', bdldocDir: '', kbDir: '', dictDir: '' })
+  const [dict, setDict] = useState<DictForm>({ querySource: '', mirrorDir: '', dictDir: '' })
   const [listen, setListen] = useState('')
   // 派生状态(路径存不存在只有服务端算得出来)与配置元信息,以及 PATH 安装状态
   const [status, setStatus] = useState<ConfigStatus | null>(null)
@@ -464,7 +457,7 @@ export function SettingsView() {
   // 脏标记按**配置节**记。保存时只提交改过的节 —— 设置页的各张卡片共用 /api/hosts,
   // 把没改的节一起发过去就是用陈旧快照覆盖别张卡片刚改好的节。
   const dirtyRef = useRef<Record<ConfigKey, boolean>>({
-    hosts: false, debug: false, listen: false, query: false, mirror: false, bdldoc: false, kb: false, dict: false,
+    hosts: false, debug: false, listen: false, query: false, mirror: false, dict: false,
   })
   // 基线:上一次读到 / 保存成功时那一节的表单值(序列化后的样子)。
   //
@@ -484,9 +477,7 @@ export function SettingsView() {
         : k === 'listen' ? f.listen.trim()
           : k === 'query' ? { source: f.dict.querySource }
             : k === 'mirror' ? { dir: f.dict.mirrorDir.trim() }
-              : k === 'kb' ? { dir: f.dict.kbDir.trim() }
-                : k === 'dict' ? { dir: f.dict.dictDir.trim() }
-                : { dir: f.dict.bdldocDir.trim() })
+                : { dir: f.dict.dictDir.trim() })
   const sectionSnap = (k: ConfigKey): string => sectionSnapOf(k, formsRef.current)
   const dirtyRefAny = () => (Object.keys(dirtyRef.current) as ConfigKey[])
     .some((k) => dirtyRef.current[k] && sectionSnap(k) !== baselineRef.current[k])
@@ -532,8 +523,6 @@ export function SettingsView() {
       setDict({
         querySource: c.query?.source === 'auto' ? '' : (c.query?.source || ''),
         mirrorDir: c.mirror?.dir || '',
-        bdldocDir: c.bdldoc?.dir || '',
-        kbDir: c.kb?.dir || '',
         dictDir: c.dict?.dir || '',
       })
       setListen(c.listen || '')
@@ -626,8 +615,6 @@ export function SettingsView() {
     if (keys.includes('listen')) body.listen = forms.listen.trim()
     if (keys.includes('query')) body.query = { source: forms.dict.querySource }
     if (keys.includes('mirror')) body.mirror = { dir: forms.dict.mirrorDir.trim() }
-    if (keys.includes('bdldoc')) body.bdldoc = { dir: forms.dict.bdldocDir.trim() }
-    if (keys.includes('kb')) body.kb = { dir: forms.dict.kbDir.trim() }
     if (keys.includes('dict')) body.dict = { dir: forms.dict.dictDir.trim() }
 
     try {
@@ -1079,24 +1066,6 @@ export function SettingsView() {
       desc: '将整目录替换本地镜像(删除服务器上已不存在的残留)。\n首次或按需执行,耗时较长。',
       confirmText: '全量重建',
       run: () => void doMirror(true, env),
-    })
-  }
-  // 原生文件夹选择器（服务端弹 Windows 对话框）：浏览器拿不到绝对路径。
-  // 取消不报错；选中后写回该环境的 kbDir，走 hosts 的自动保存。
-  // index < 0 表示顶层"知识库根目录"（写 kb 节，不是 hosts）。
-  const pickKbDir = (env: string, index: number, initial: string) => {
-    setDirPick({
-      open: true,
-      initial,
-      title: index < 0 ? '选择知识库根目录' : `选择环境「${env}」的知识库目录`,
-      onPick: (path) => {
-        if (index < 0) {
-          setDict((s) => ({ ...s, kbDir: path }))
-          markDirty('kb')
-        } else {
-          patchSsh(index, { kbDir: path })
-        }
-      },
     })
   }
   // 目录选择器（前端自绘，后端 /api/fs/list 列目录）；选中后写回该环境的 mirrorDir。
@@ -1873,90 +1842,6 @@ export function SettingsView() {
                 )}
               </Card>
 
-              <Card id="card-dict-bdldoc" title="BDL 文档"
-                description="Genero BDL 文档的本地目录。">
-                <SettingRow
-                  id="bdldoc.dir"
-                  label="文档目录"
-                  description={
-                    !dict.bdldocDir.trim()
-                      ? '留空 = 未设置。'
-                      : status?.bdldoc.exists
-                        ? '目录已存在。'
-                        : '目录不存在。'
-                  }
-                  control={<Input className={input} value={dict.bdldocDir} placeholder="如 D:\t100\bdldoc"
-                    onChange={(e) => { setDict((s) => ({ ...s, bdldocDir: e.target.value })); markDirty('bdldoc') }} />}
-                />
-              </Card>
-
-              {/* 知识库与源码镜像是两回事：镜像是**代码**（tt 拉取、整目录替换），
-                  知识库是**笔记**（tt 只读不写）。所以这块没有任何"拉取"动作，
-                  也不该出现"更新/同步"这类按钮 —— 它只回答"笔记在哪"。 */}
-              <Card id="card-dict-kb" title="知识库"
-                description="源码解析笔记等资料的本地目录；每个环境可单独指定。镜像拉取不会影响它（两者不能互为子目录）。">
-                <SettingRow
-                  id="kb.dir"
-                  label="知识库根目录（默认）"
-                  description={
-                    !dict.kbDir.trim()
-                      ? '留空 = 未设置；下方每个环境仍可单独指定。'
-                      : status?.kb.exists
-                        ? '目录已存在；下方每个环境可单独覆盖。'
-                        : '目录不存在，请改成实际路径。'
-                  }
-                  control={
-                    <div className="flex min-w-0 items-center gap-1">
-                      <Input className={input} value={dict.kbDir} placeholder="如 D:\t100\kb"
-                        onChange={(e) => { setDict((s) => ({ ...s, kbDir: e.target.value })); markDirty('kb') }} />
-                      <Button variant="outline" size="sm" className="h-7 shrink-0 px-2 text-[11px]"
-                        onClick={() => void pickKbDir('', -1, dict.kbDir)}>
-                        选择
-                      </Button>
-                    </div>
-                  }
-                />
-                {sshs.length > 0 && (
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="hover:bg-transparent">
-                        <TableHead className="w-40">环境</TableHead>
-                        <TableHead>生效目录</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {sshs.map((x, i) => {
-                        const env = sshName(x)
-                        const eff = x.kbDir.trim() || dict.kbDir.trim()
-                        return (
-                          <TableRow key={env + i} className="hover:bg-transparent">
-                            <TableCell className="px-2">{env}</TableCell>
-                            <TableCell className="px-1 py-1">
-                              <div className="group flex h-8 min-w-0 items-center rounded-ui border border-transparent transition-colors hover:border-border/70 focus-within:border-border focus-within:bg-background/30">
-                                <input
-                                  className="min-w-0 flex-1 bg-transparent px-2 font-mono text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70"
-                                  value={x.kbDir}
-                                  placeholder={dict.kbDir.trim() || '留空 = 用根目录；也可单独指定'}
-                                  title={eff || '未设置知识库目录'}
-                                  onChange={(ev) => patchSsh(i, { kbDir: ev.target.value })} />
-                                <button
-                                  type="button"
-                                  className="mr-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
-                                  title="选择文件夹"
-                                  aria-label="选择文件夹"
-                                  disabled={false}
-                                  onClick={() => void pickKbDir(env, i, eff || dict.kbDir)}>
-                                  <FolderOpen className="h-3.5 w-3.5" />
-                                </button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        )
-                      })}
-                    </TableBody>
-                  </Table>
-                )}
-              </Card>
             </>
           )}
 
@@ -2227,7 +2112,7 @@ export function SettingsView() {
       </Dialog>
 
       {/* 目录选择器：前端自绘（后端列目录）。比服务端弹 Windows 对话框快一个数量级，
-          而且外观跟设置页一致 —— 镜像目录与知识库目录两个按钮共用它。 */}
+          而且外观跟设置页一致 —— 镜像目录的按钮就用它。 */}
       <DirPicker
         open={dirPick.open}
         initial={dirPick.initial}

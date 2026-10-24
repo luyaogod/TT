@@ -12,7 +12,6 @@ TT/
 ├─ VERSION              版本号唯一出处（两个打包脚本读它，make version-check 对照 web）
 ├─ build_portable.bat   便携包构建：前端 + Go 二进制 + skills/ + 引擎 + 设计器
 ├─ build_msi.bat        MSI 构建：复用便携载荷，生成 perUser 安装包
-├─ BDL-Markdown.zip     内置 BDL 文档包，首次运行自动解压
 │
 ├─ .agents/             项目 Agent 技能与说明（不随发行包装到用户目录）
 │  ├─ docs/             协作者共享文档与项目架构图
