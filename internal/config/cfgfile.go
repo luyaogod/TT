@@ -178,6 +178,9 @@ func NewSkeleton() map[string]any {
 			"sshs": []any{},
 		},
 		"query": map[string]any{"source": "auto"},
+		// 第三方技能登记表：空表是正常态（不下发任何第三方技能）。
+		// 官方技能不在这里 —— 它们随包走，见 internal/skill 的 Origin 说明。
+		"skills": map[string]any{"externals": []any{}},
 		// 骨架里没有环境，所以也没有工作区 —— 工作区按环境配（hosts.sshs[].workspace），
 		// 而它是引擎的必填项：配错等于拿别的客户的表单当草稿纸（见 NamedSsh.Workspace）。
 		// 设计器目录也不在这里 —— 它由发行包自带，见 engine/src/Designer/Bootstrap.cs 的 Install。

@@ -84,6 +84,12 @@
     "defaultOut": ""
   },
 
+  "skills": {
+    "externals": [
+      { "path": "D:\\我的技能库\\kb-faq", "label": "kb-faq" }
+    ]
+  },
+
   "tzs": {
     "serverExe": ""
   }

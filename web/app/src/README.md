@@ -23,7 +23,7 @@
 |---|---|
 | 环境页 | 创建会话 / 接口日志 |
 | 会话页 | Debug |
-| 设置页 | 站点管理 / 数据字典 / DEBUG / 应用设置（`routing.ts` 的 `SETTINGS_SECTIONS`） |
+| 设置页 | 站点管理 / 数据字典 / DEBUG / 技能 / 应用设置（`routing.ts` 的 `SETTINGS_SECTIONS`） |
 
 环境页的「接口日志」是**已有画面原样搬进来的**（`WsLogView`）。
 「创建会话」是**真动作**：填 ENT + 作业编号 → `POST /api/sessions/new` 建一条空闲会话 →

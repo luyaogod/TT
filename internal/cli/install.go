@@ -1,7 +1,7 @@
 // `tt install` —— 把 tt 装进使用者的环境。
 //
-//	tt install skills [--to <dir>|auto] [--agent <名字>] [--force]
-//	                                           把 exe 同目录的 skills/ 复制到目标目录
+//	tt install skills [--to <dir>|auto] [--agent <名字>] [--force] [--dry-run] [--strict]
+//	                                           把官方技能 + 登记的第三方技能复制到目标目录
 //	tt install path   [--dry-run]              把 exe 所在目录追加到**用户** PATH(HKCU，不需要管理员)
 //
 // 合并前 TDebug / TDev / TDictCli 各有一份同形实现，注释里写着"命令形态与另外两个一致
@@ -9,26 +9,26 @@
 //
 // 设计取舍：
 //   - skills **不进二进制**（不用 go:embed）：技能内容是文档，随包发布、可被人直接改；
-//     每个技能是一个带 SKILL.md 的目录。合并后 skills/ 下同时放 tt-debug、tt-dev-tzc、
-//     tt-dev-tzs、tt-dict、tt-erp-read 五套技能，本命令整棵树一起装。
+//     每个技能是一个带 SKILL.md 的目录。
+//   - **两套来源彻底分开**：官方技能只来自 `<exe 目录>\skills`（发版包的一部分，走专用
+//     路径）；第三方只来自用户在设置页登记的路径（config.json 的 skills.externals）。
+//     装着陆后的合并、校验、冲突判定都在 internal/skill —— 设置页用的是同一份实现。
 //   - PATH 只动 HKCU\Environment，绝不碰 HKLM/系统 PATH；实现在 internal/pathinstall，
 //     与 Web 设置页的「加入 PATH」共用同一份。
 package cli
 
 import (
 	"fmt"
-	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
 	"tt/internal/cli/common"
+	"tt/internal/config"
 	"tt/internal/pathinstall"
+	"tt/internal/skill"
 	"tt/internal/update"
 )
 
@@ -51,8 +51,8 @@ func newInstallCmd() *cobra.Command {
 		Short: "把 tt 装进你的环境（skills / path）",
 		Long: `把 tt 装进你的环境：
 
-  tt install skills [--to <dir>|auto] [--agent <名字>] [--force]
-                                             把 exe 同目录的 skills/ 复制到目标目录
+  tt install skills [--to <dir>|auto] [--agent <名字>] [--force] [--dry-run] [--strict]
+                                             把官方技能 + 登记的第三方技能复制到目标目录
   tt install path   [--dry-run]              把 exe 所在目录追加到用户 PATH(HKCU)`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -69,17 +69,31 @@ func newInstallCmd() *cobra.Command {
 
 func newInstallSkillsCmd() *cobra.Command {
 	var (
-		to    string
-		agent string
-		force bool
+		to     string
+		agent  string
+		force  bool
+		dryRun bool
+		strict bool
 	)
 	cmd := &cobra.Command{
 		Use:   "skills",
-		Short: "把 exe 同目录的 skills/ 合并到目标目录（默认 .agents/skills）",
-		Long: `把与 tt 可执行文件同目录的 skills/ 合并到目标目录，默认是 <当前目录>/.agents/skills。
+		Short: "把官方技能与登记的第三方技能合并到目标目录（默认 .agents/skills）",
+		Long: `把技能合并到目标目录，默认是 <当前目录>/.agents/skills。
 
-skills/ 是普通可编辑的 markdown 文件（不内嵌二进制），每个技能是一个带 SKILL.md 的目录；
-具体有几套技能由 exe 同目录的 skills/ 决定。
+技能有两个来源：
+
+  官方    与 tt 可执行文件同目录的 skills/。随包发布、走专用路径，不受本机配置影响。
+  第三方  设置页「技能」里登记的路径（config.json 的 skills.externals），一行一个技能
+          目录，位置任选。装它们之前会逐个校验 SKILL.md 的 frontmatter。
+
+第三方里出问题的（路径找不到、没有 SKILL.md、name 与目录名不符、与别的技能同名）
+只**告警并跳过**，官方技能与其它第三方照装 —— 用户勾在配置里的路径可能指向一块今天
+没插的移动硬盘，那不该让整次安装失败。官方技能不合规则是硬错误：那是发版包坏了。
+
+同一批技能里名字撞车时，官方优先；两条第三方同名，先登记的优先（顺序写在配置里）。
+
+第三方技能根级的 assets/ **不复制**：目标里的 SKILL.md 正文首行会被写一行指针，指回
+源目录的 assets（重复安装会替换那一行，不会堆）。这样知识库型技能不会把目标目录撑大。
 
 要装到 agent 会去读的位置，用 --to auto 或点名一个 agent：
 
@@ -94,15 +108,16 @@ skills/ 是普通可编辑的 markdown 文件（不内嵌二进制），每个�
 
 目标目录不存在就新建；已经存在就**追加**：同名的条目默认跳过（不覆盖目标里已有的技能，
 方便多个来源共用 .agents/skills），不冲突的技能照常加进去。要刷新同名条目（例如升级后
-把技能刷成与 tt 同版）再加 --force（只删目标里名字来自源树的那些条目，不碰其它内容）。
+把技能刷成与 tt 同版）再加 --force（只删目标里名字来自来源树 or 登记表的那些条目，
+不碰其它内容）。
 
-安装前逐个校验技能：每个技能目录要有 SKILL.md，且里面 frontmatter 的 name 必须等于
-目录名、description 非空且 ≤1024 字符。不合规的技能，失败都落在我们看不到的地方（description 缺失时
-客户端直接跳过；name 不匹配各家宽容度不一），所以这里当场拒绝，而不是装一棵半成品树过去。`,
+--dry-run 只打印计划与告警，一个字节都不写。--strict 时有告警就返回非零退出码（给 CI 用）。`,
 		Example: `  tt install skills --to auto
   tt install skills --agent claude-code
   tt install skills --to .agents/skills
-  tt install skills --force`,
+  tt install skills --force
+  tt install skills --dry-run
+  tt install skills --to auto --strict`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			src, err := skillsSource()
@@ -117,35 +132,37 @@ skills/ 是普通可编辑的 markdown 文件（不内嵌二进制），每个�
 			if terr != nil {
 				return terr
 			}
-			copied, skipped, err := installSkillsTree(src, dst, force)
+			externals, err := externalSkillPaths()
 			if err != nil {
 				return err
 			}
+			plan, err := skill.BuildPlan(src, externals)
+			if err != nil {
+				return err
+			}
+			rep, err := skill.Apply(plan, dst, skill.Options{Force: force, DryRun: dryRun})
+			if err != nil {
+				return err
+			}
+
 			// 记下"技能装到了哪、装它们的是哪个版本"。升级后靠它把 agent 目录里那份刷成
 			// 与二进制同版 —— 不记的话它会永远停在装它的那个版本（见 update.SkillsStamp）。
 			//
 			// 没有版本号的构建（`make build` / `go test`）**不写**：戳的全部意义是"哪个
 			// 版本装的"，记一个空版本只会让漂移提示说不清话，还会让测试在开发者的真实
 			// 数据目录里留垃圾（它落的是 ResolveConfig 解析出的那个目录）。
-			if Version != "" {
+			// dry-run 也不写：它承诺了一个字节都不动。
+			if !dryRun && Version != "" {
 				if cfgPath, cerr := common.ResolveConfig(true); cerr == nil {
-					_ = update.RecordSkillsTarget(filepath.Dir(cfgPath), dst, Version)
+					_ = update.RecordSkillsTarget(filepath.Dir(cfgPath), rep.Target, Version)
 				}
 			}
-			if common.IsJSON() {
-				return common.PrintJSON(map[string]any{"ok": true, "source": src, "target": dst,
-					"why": why, "files": copied, "skipped": skipped})
-			}
-			fmt.Printf("技能安装完成: %d 个文件\n  来源: %s\n  目标: %s\n", len(copied), src, dst)
-			if why != "" {
-				fmt.Printf("  为什么是它: %s\n", why)
-			}
-			for _, f := range copied {
-				fmt.Printf("    %s\n", f)
-			}
-			if len(skipped) > 0 {
-				fmt.Printf("  跳过 %d 个已存在的条目（不覆盖；要刷新加 --force）: %s\n",
-					len(skipped), strings.Join(skipped, ", "))
+
+			printInstallReport(rep, src, why)
+			if strict && len(rep.Warnings) > 0 {
+				// 告警已经打出去了，这里只需要一个非零码收场（AlreadyReported 让根命令
+				// 不再补一份错误信封，否则 stdout 上会出现两个 JSON 对象）。
+				return exitStatus(1)
 			}
 			return nil
 		},
@@ -153,7 +170,78 @@ skills/ 是普通可编辑的 markdown 文件（不内嵌二进制），每个�
 	cmd.Flags().StringVar(&to, "to", "", "目标目录；auto = 自动挑一个 agent 会读的位置（默认 <当前目录>/.agents/skills）")
 	cmd.Flags().StringVar(&agent, "agent", "", "按 agent 名落到它读的位置："+agentSkillNames())
 	cmd.Flags().BoolVar(&force, "force", false, "刷新已存在的同名条目（默认跳过）")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "只打印计划与告警，不写盘")
+	cmd.Flags().BoolVar(&strict, "strict", false, "有告警时返回非零退出码（CI 用）")
 	return cmd
+}
+
+// externalSkillPaths 读配置里登记的第三方技能路径（按登记顺序）。
+//
+// 读不到配置不是错误：便携包第一次运行、或者压根不用第三方技能时，官方技能照样要能装。
+// 但配置**存在却解析不了**要如实报错 —— 那种状态下"第三方装了什么"无从回答，静默跳过
+// 会让人以为登记表是空的。
+func externalSkillPaths() ([]string, error) {
+	cfgPath, err := common.ResolveConfig(true)
+	if err != nil {
+		return nil, nil // 连落点都解析不出 = 没有配置 = 没有第三方技能
+	}
+	root, err := config.Load(cfgPath)
+	if err != nil {
+		return nil, fmt.Errorf("读不到第三方技能登记（配置文件解析失败）: %w", err)
+	}
+	return root.Skills.Paths(), nil
+}
+
+// printInstallReport 打安装结果。
+//
+// 告警走 stderr、放在最后：夹在一长串文件列表中间会被刷走，而"哪个技能没装上"正是
+// 用户唯一需要动手的事。
+func printInstallReport(rep skill.Report, src, why string) {
+	if common.IsJSON() {
+		warns := make([]map[string]any, 0, len(rep.Warnings))
+		for _, w := range rep.Warnings {
+			warns = append(warns, map[string]any{
+				"kind": w.Kind, "index": w.Index, "path": w.Path,
+				"name": w.Name, "why": w.Why, "text": w.Text(),
+			})
+		}
+		_ = common.PrintJSON(map[string]any{
+			"ok": true, "source": src, "target": rep.Target, "why": why,
+			"dryRun": rep.DryRun, "files": rep.Copied, "skipped": rep.Skipped,
+			"rewritten": rep.Rewritten, "warnings": warns,
+		})
+		return
+	}
+
+	if rep.DryRun {
+		fmt.Println("(--dry-run，未写入任何文件)")
+	}
+	if len(rep.Copied) == 0 {
+		fmt.Println("没有复制任何文件（目标里已经有全部同名条目）")
+	} else {
+		fmt.Printf("技能安装完成: %d 个文件\n", len(rep.Copied))
+	}
+	fmt.Printf("  来源: %s\n  目标: %s\n", src, rep.Target)
+	if why != "" {
+		fmt.Printf("  为什么是它: %s\n", why)
+	}
+	for _, f := range rep.Copied {
+		fmt.Printf("    %s\n", f)
+	}
+	if len(rep.Rewritten) > 0 {
+		fmt.Printf("  已改写 %d 份 SKILL.md 的静态文件指针（assets/ 没复制）: %s\n",
+			len(rep.Rewritten), strings.Join(rep.Rewritten, ", "))
+	}
+	if len(rep.Skipped) > 0 {
+		fmt.Printf("  跳过 %d 个已存在的条目（不覆盖；要刷新加 --force）: %s\n",
+			len(rep.Skipped), strings.Join(rep.Skipped, ", "))
+	}
+	if len(rep.Warnings) > 0 {
+		fmt.Fprintf(os.Stderr, "告警 %d 条（这些技能这次没装，其余照装）:\n", len(rep.Warnings))
+		for _, w := range rep.Warnings {
+			fmt.Fprintf(os.Stderr, "  %s\n", w.Text())
+		}
+	}
 }
 
 //---------------------------------------------------------------------------
@@ -266,289 +354,6 @@ func resolveAutoTarget(cwd string) (dst, why string, err error) {
 		return "", "", err
 	}
 	return filepath.Join(cwd, a.Dir()), "当前目录还没有 agent 目录，新建 " + a.Dir() + "（" + a.Who + "）", nil
-}
-
-// listSkills 列出源目录下的技能目录（按名字排序），并逐个校验它是一份**合规**的技能：
-// 有 SKILL.md，且里面 frontmatter 的 name 等于目录名、description 非空。
-//
-// 校验在这里而不是复制之后：装到一半失败会在目标目录留下一棵半成品树。
-func listSkills(src string) ([]string, error) {
-	ents, err := os.ReadDir(src)
-	if err != nil {
-		return nil, fmt.Errorf("读不到 skills 源目录 %s: %w", src, err)
-	}
-	var names, probs []string
-	for _, ent := range ents {
-		if !ent.IsDir() {
-			continue
-		}
-		b, rerr := os.ReadFile(filepath.Join(src, ent.Name(), "SKILL.md"))
-		if rerr != nil {
-			probs = append(probs, fmt.Sprintf("%s: 技能目录缺少 SKILL.md —— 规范要求每个技能目录里有它", ent.Name()))
-			continue
-		}
-		meta, perr := parseSkillFrontmatter(b)
-		if perr != nil {
-			probs = append(probs, fmt.Sprintf("%s/SKILL.md: %v", ent.Name(), perr))
-			continue
-		}
-		for _, p := range validateSkillMeta(ent.Name(), meta) {
-			probs = append(probs, fmt.Sprintf("%s/SKILL.md: %s", ent.Name(), p))
-		}
-		names = append(names, ent.Name())
-	}
-	if len(probs) > 0 {
-		return nil, fmt.Errorf("技能不合规，拒绝安装（%d 处）:\n  %s\n\n"+
-			"Agent Skills 规范 → https://agentskills.io/specification（name 必须等于目录名；description 非空、≤1024 字符）",
-			len(probs), strings.Join(probs, "\n  "))
-	}
-	if len(names) == 0 {
-		return nil, fmt.Errorf("skills 源目录里没有任何技能: %s", src)
-	}
-	sort.Strings(names)
-	return names, nil
-}
-
-// skillMeta 是规范要求必填的两个字段 —— 也是别的 agent 拿来当索引的两个字段：
-// name 决定技能身份，description 决定它何时被加载。
-type skillMeta struct {
-	Name        string
-	Description string
-}
-
-// validateSkillMeta 按 Agent Skills 规范逐条检查，返回全部问题（一次说完，别让人改一处跑一次）。
-//
-// 为什么是硬失败：不合规的技能装出去**不会报错**，失败都在我们看不到的地方 ——
-// description 缺失时客户端直接跳过该技能；name 不等于目录名是规范的硬约束，
-// 但各家客户端的宽容度不一（有的警告后照装）。两种都不该由我们发出去。
-func validateSkillMeta(dir string, m skillMeta) []string {
-	var probs []string
-	switch {
-	case m.Name == "":
-		probs = append(probs, "frontmatter 里没有 name")
-	case m.Name != dir:
-		probs = append(probs, fmt.Sprintf("name 是 %q，必须等于目录名 %q", m.Name, dir))
-	}
-	if m.Name != "" && !validSkillName(m.Name) {
-		probs = append(probs, fmt.Sprintf("name %q 不合规：只允许小写字母、数字与连字符，"+
-			"不能有连续或首尾连字符，最长 64 字符", m.Name))
-	}
-	switch n := utf8.RuneCountInString(m.Description); {
-	case m.Description == "":
-		probs = append(probs, "description 是空的：别的 agent 靠它决定何时加载这个技能")
-	case n > skillDescriptionMax:
-		probs = append(probs, fmt.Sprintf("description 有 %d 个字符，超过规范上限 %d", n, skillDescriptionMax))
-	}
-	return probs
-}
-
-const skillDescriptionMax = 1024
-
-// validSkillName 是规范的 name 字符集：小写字母、数字、连字符，最长 64 字符，
-// 不能以连字符开头或结尾，不能有连续连字符。
-func validSkillName(s string) bool {
-	if utf8.RuneCountInString(s) > 64 {
-		return false
-	}
-	prevHyphen := true // 首字符不许是连字符
-	for _, r := range s {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			prevHyphen = false
-		case r == '-':
-			if prevHyphen {
-				return false
-			}
-			prevHyphen = true
-		default:
-			return false
-		}
-	}
-	return !prevHyphen // 末字符不许是连字符
-}
-
-// parseSkillFrontmatter 从 SKILL.md 里抠出 name 与 description。
-//
-// 不引 YAML 依赖：这里要判的是两个标量字符串，不是完整解析。只认**顶层**的 `键: 值` ——
-// 缩进行属于 metadata 之类的嵌套块，一律跳过（否则 `metadata:` 底下的 name 会被当成技能的 name）。
-// 值是 `|` / `>` 块标量时收拢后面的缩进行；两边成对的引号去掉。
-func parseSkillFrontmatter(b []byte) (skillMeta, error) {
-	s := strings.TrimPrefix(string(b), "\ufeff") // BOM
-	lines := strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
-	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
-		return skillMeta{}, fmt.Errorf("开头没有 YAML frontmatter（规范要求第一行是 ---，里面写 name 与 description）")
-	}
-	end := -1
-	for i := 1; i < len(lines); i++ {
-		if strings.TrimSpace(lines[i]) == "---" {
-			end = i
-			break
-		}
-	}
-	if end < 0 {
-		return skillMeta{}, fmt.Errorf("frontmatter 没有闭合的 ---")
-	}
-
-	body := lines[1:end]
-	var m skillMeta
-	for i := 0; i < len(body); i++ {
-		line := body[i]
-		if line == "" || line[0] == ' ' || line[0] == '\t' || strings.HasPrefix(strings.TrimSpace(line), "#") {
-			continue
-		}
-		key, val, ok := strings.Cut(line, ":")
-		if !ok {
-			continue
-		}
-		val = strings.TrimSpace(val)
-		switch strings.TrimSpace(key) {
-		case "name":
-			m.Name = unquoteYAML(val)
-		case "description":
-			if val == "|" || val == ">" || val == "|-" || val == ">-" {
-				var parts []string
-				for j := i + 1; j < len(body); j++ {
-					l := body[j]
-					if strings.TrimSpace(l) == "" {
-						continue
-					}
-					if l[0] != ' ' && l[0] != '\t' {
-						break
-					}
-					parts = append(parts, strings.TrimSpace(l))
-					i = j
-				}
-				m.Description = strings.Join(parts, " ")
-			} else {
-				m.Description = unquoteYAML(val)
-			}
-		}
-	}
-	return m, nil
-}
-
-func unquoteYAML(s string) string {
-	if len(s) >= 2 && ((s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'')) {
-		return s[1 : len(s)-1]
-	}
-	return s
-}
-
-// topLevelEntries 返回源树顶层的全部条目名（技能目录与根级文件如 README.md 都算）。
-func topLevelEntries(src string) ([]string, error) {
-	ents, err := os.ReadDir(src)
-	if err != nil {
-		return nil, fmt.Errorf("读不到 skills 源目录 %s: %w", src, err)
-	}
-	out := make([]string, 0, len(ents))
-	for _, ent := range ents {
-		out = append(out, ent.Name())
-	}
-	sort.Strings(out)
-	return out, nil
-}
-
-// installSkillsTree 把 src 这棵技能树合并进 dst，返回 (copied, skipped, err)。
-//
-// 目标已存在同名条目时默认**跳过**（追加模式：不覆盖用户已有的技能，方便多个来源共用
-// .agents/skills）；force=true 时删掉该条目再复制（刷新成 exe 同版）。只动「名字来自源树」
-// 的顶层条目，目标里的其它内容一律保留。
-func installSkillsTree(src, dst string, force bool) (copied, skipped []string, err error) {
-	if _, err := listSkills(src); err != nil { // 只为校验；列名字用下面的 top
-		return nil, nil, err
-	}
-	top, err := topLevelEntries(src)
-	if err != nil {
-		return nil, nil, err
-	}
-	absSrc, err := filepath.Abs(src)
-	if err != nil {
-		return nil, nil, fmt.Errorf("解析源目录失败 %s: %w", src, err)
-	}
-	absDst, err := filepath.Abs(dst)
-	if err != nil {
-		return nil, nil, fmt.Errorf("解析目标目录失败 %s: %w", dst, err)
-	}
-	if strings.EqualFold(absSrc, absDst) {
-		return nil, nil, fmt.Errorf("目标目录与源目录相同: %s\nskills 已经在这里了；要装到别处请用 --to <dir>", absDst)
-	}
-	if err := os.MkdirAll(absDst, 0o755); err != nil {
-		return nil, nil, fmt.Errorf("建目标目录失败 %s: %w", absDst, err)
-	}
-
-	for _, n := range top {
-		srcEntry := filepath.Join(absSrc, n)
-		dstEntry := filepath.Join(absDst, n)
-		if _, lerr := os.Lstat(dstEntry); lerr == nil {
-			if !force {
-				skipped = append(skipped, n)
-				continue
-			}
-			if err := os.RemoveAll(dstEntry); err != nil {
-				return nil, nil, fmt.Errorf("删除旧条目失败 %s: %w", dstEntry, err)
-			}
-		} else if !os.IsNotExist(lerr) {
-			return nil, nil, fmt.Errorf("检查目标条目失败 %s: %w", dstEntry, lerr)
-		}
-		if err := copySkillEntry(srcEntry, dstEntry); err != nil {
-			return nil, nil, err
-		}
-		files, ferr := filesUnder(absDst, n)
-		if ferr != nil {
-			return nil, nil, ferr
-		}
-		copied = append(copied, files...)
-	}
-	sort.Strings(copied)
-	sort.Strings(skipped)
-	return copied, skipped, nil
-}
-
-// copySkillEntry 复制源树的一个顶层条目（技能目录或根级文件）。
-func copySkillEntry(src, dst string) error {
-	st, err := os.Stat(src)
-	if err != nil {
-		return fmt.Errorf("读取源条目失败 %s: %w", src, err)
-	}
-	if st.IsDir() {
-		// os.CopyFS 建目录并逐文件复制；目标此时不存在（同名条目已在上层跳过/删掉）。
-		if err := os.CopyFS(dst, os.DirFS(src)); err != nil {
-			return fmt.Errorf("复制 %s 失败: %w", src, err)
-		}
-		return nil
-	}
-	in, err := os.Open(src)
-	if err != nil {
-		return fmt.Errorf("读取源文件失败 %s: %w", src, err)
-	}
-	defer in.Close()
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return fmt.Errorf("建目标目录失败 %s: %w", filepath.Dir(dst), err)
-	}
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, st.Mode().Perm())
-	if err != nil {
-		return fmt.Errorf("建目标文件失败 %s: %w", dst, err)
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		return fmt.Errorf("复制 %s 失败: %w", src, err)
-	}
-	return out.Close()
-}
-
-// filesUnder 列出 root 下 entry 内的全部文件（相对 root，/ 分隔）。
-func filesUnder(root, entry string) ([]string, error) {
-	var out []string
-	if err := fs.WalkDir(os.DirFS(root), entry, func(p string, d fs.DirEntry, werr error) error {
-		if werr != nil || d.IsDir() {
-			return werr
-		}
-		out = append(out, p)
-		return nil
-	}); err != nil {
-		return nil, fmt.Errorf("列复制结果失败: %w", err)
-	}
-	return out, nil
 }
 
 func isDir(p string) bool {

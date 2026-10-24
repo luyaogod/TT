@@ -320,7 +320,7 @@ func TestNetSettingsProxy(t *testing.T) {
 	dir := t.TempDir()
 
 	full := filepath.Join(dir, "full.json")
-	seed := `{"schemaVersion": 3, "net": {"proxy": "http://127.0.0.1:10808"}}`
+	seed := `{"schemaVersion": 4, "net": {"proxy": "http://127.0.0.1:10808"}}`
 	if err := os.WriteFile(full, []byte(seed), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -331,8 +331,8 @@ func TestNetSettingsProxy(t *testing.T) {
 	if r.Net.Proxy != "http://127.0.0.1:10808" {
 		t.Errorf("net.proxy = %q，想要 http://127.0.0.1:10808", r.Net.Proxy)
 	}
-	if r.SchemaVersion != 3 {
-		t.Errorf("schemaVersion = %d，想要 3", r.SchemaVersion)
+	if r.SchemaVersion != SchemaVersion {
+		t.Errorf("schemaVersion = %d，想要 %d", r.SchemaVersion, SchemaVersion)
 	}
 
 	old := filepath.Join(dir, "old.json")
@@ -403,5 +403,44 @@ func TestPerEnvWorkspace(t *testing.T) {
 		if _, has := sec["workspace"]; has {
 			t.Error("机器级的 tzs.workspace 又回来了 —— 工作区只该按环境配")
 		}
+	}
+}
+
+// skills 节：第三方技能登记是可选的，缺节读成空表；顺序必须原样保留（顺序即优先级）。
+func TestSkillsExternals(t *testing.T) {
+	dir := t.TempDir()
+
+	empty := filepath.Join(dir, "empty.json")
+	if err := os.WriteFile(empty, []byte(`{"schemaVersion": 4}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Load(empty)
+	if err != nil {
+		t.Fatalf("缺 skills 节该照读: %v", err)
+	}
+	if len(r.Skills.Externals) != 0 || len(r.Skills.Paths()) != 0 {
+		t.Errorf("缺省该是空表，得到 %+v", r.Skills)
+	}
+
+	full := filepath.Join(dir, "full.json")
+	seed := `{"schemaVersion":4,"skills":{"externals":[
+		{"path":"D:/my-skills/b","label":"b"},
+		{"path":"D:/my-skills/a"},
+		{"path":"  "}
+	]}}`
+	if err := os.WriteFile(full, []byte(seed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r2, err := Load(full)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got := r2.Skills.Paths()
+	want := []string{`D:/my-skills/b`, `D:/my-skills/a`} // 空白路径被丢掉，顺序不变
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("Paths() = %v, want %v", got, want)
+	}
+	if r2.Skills.Externals[0].Label != "b" {
+		t.Errorf("label 没读出来: %+v", r2.Skills.Externals[0])
 	}
 }

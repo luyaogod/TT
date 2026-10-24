@@ -2,7 +2,8 @@
 //
 // 「站点管理」环境清单 + SSH/数据库(原调试页「环境」节与原字典页「环境配置」的并集,只留一份);
 // 「数据字典」查询数据源 / 源码镜像 / 数据同步;
-// 「DEBUG」调试参数 / 默认环境;
+// 「DEBUG」调试参数 / 默认环境；
+// 「技能」官方技能（只读）+ 第三方技能的登记与安装；
 // 「应用设置」外观 / 服务 / 运行信息。
 //
 // 环境清单走**共享**端点 /api/hosts(顶层,不带 API_BASE 前缀):一个进程里它是唯一的数据源
@@ -43,6 +44,7 @@ import {
 } from '../../shared/ui-radix'
 import { Card, Field, InfoRow, SectionTitle, SettingRow } from '../../shared/settings'
 import { DirPicker } from './DirPicker'
+import { SkillsPanel } from './SkillsPanel'
 import { useToast } from './toast'
 import { useStore, type ThemeMode } from './store'
 import { cn } from '../../shared/utils'
@@ -1866,6 +1868,9 @@ export function SettingsView() {
               </Card>
             </>
           )}
+
+          {/* ============ 技能 ============ */}
+          {section === 'skills' && <SkillsPanel />}
 
           {/* ============ 应用设置 ============ */}
           {section === 'app' && (
