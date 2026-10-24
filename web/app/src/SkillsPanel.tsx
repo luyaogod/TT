@@ -1,35 +1,23 @@
-// 设置页「技能」分区：卡片墙 + 一条安装栏。
+// 设置页「技能」分区：卡片墙，只管「登记了哪些技能」。
 //
-// 只放三件事：有哪些技能（卡片）、加/删（卡片上的动作）、装到哪（底部那一条）。
-// 刻意不摆说明书：来源路径、assets 指针规则、撞名优先级这些都在
-// internal/skill/README.md 与 `tt install skills --help` 里，页面上重复一遍只会把
-// 真正要操作的东西挤下去。
+// 这里**不提供安装**：装到哪个目录、要不要覆盖、要不要试算，是 `tt install skills`
+// 的事（一条命令，带 --to/--force/--dry-run）。前端再摆一份目标路径的输入框，就成了
+// 第二条安装入口 —— 两条路各有各的默认值，出了问题还要先问"你从哪儿点的"。
 //
-// 一次安装的结果走 toast（成功/告警），只有「有技能这次没装成」才在页面上留一条
-// 可读的清单 —— 那是唯一需要人动手的信息，不能靠 8 秒后消失的提示。
+// 所以这一页只有：有哪些技能（卡片）、加（选目录）、删（卡片右上角）。
+// 一次增删的结果走 toast；来源路径、assets 指针规则、撞名优先级这些说明性内容
+// 都在 internal/skill/README.md 与 `tt install skills --help` 里，不在页面上重复。
 //
-// 每个按钮都是立即生效的动作（增删登记 / 安装），不参与设置页那套「改了再保存」的
-// 脏标记 —— 所以它不 markDirty，页头的保存按钮也不该因它亮起。
+// 增删都是立即生效的动作，不参与设置页那套「改了再保存」的脏标记 —— 所以它不
+// markDirty，页头的保存按钮也不该因它亮起。
 import { useCallback, useEffect, useState } from 'react'
-import { AlertCircle, FolderOpen, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { AlertCircle, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { api, type SkillInfo, type SkillRow, type SkillsResp } from './api'
-import { Badge, Button, Input } from '../../shared/ui'
+import { Badge, Button } from '../../shared/ui'
 import { SectionTitle } from '../../shared/settings'
-import { Checkbox } from '../../shared/ui-radix'
 import { DirPicker } from './DirPicker'
 import { useToast } from './toast'
 import { cn } from '../../shared/utils'
-
-/** 安装目标记在本地：换页签再回来不用重填（它不属于 config.json）。 */
-const TARGET_KEY = 'tt.skills.target'
-
-// 隐私模式/禁用存储时 localStorage 会直接抛，页面不该因此崩掉。
-const readTarget = () => {
-  try { return localStorage.getItem(TARGET_KEY) || '' } catch { return '' }
-}
-const saveTarget = (v: string) => {
-  try { localStorage.setItem(TARGET_KEY, v) } catch { /* 记不住就算了，不影响功能 */ }
-}
 
 /** 非 ok 的三个状态各给一个徽标；ok 什么都不显示（正常状态不需要提示）。 */
 const BADGE: Record<string, { text: string; tone: 'yellow' | 'red' }> = {
@@ -43,14 +31,7 @@ export function SkillsPanel() {
   const [data, setData] = useState<SkillsResp | null>(null)
   const [loadErr, setLoadErr] = useState('')
   const [busy, setBusy] = useState('')
-
-  // 安装栏：目标目录 + 覆盖开关
-  const [to, setTo] = useState(readTarget)
-  const [force, setForce] = useState(false)
-  // 一个选择器，两种意图：'add' 挑要登记的技能目录，'to' 挑安装目标。
-  const [pickMode, setPickMode] = useState<'' | 'add' | 'to'>('')
-  // 这次安装里没装成的那些（唯一需要在页面上留下来的信息）
-  const [warns, setWarns] = useState<string[]>([])
+  const [picking, setPicking] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -62,11 +43,6 @@ export function SkillsPanel() {
   }, [])
 
   useEffect(() => { void load() }, [load])
-
-  const setTarget = (v: string) => {
-    setTo(v)
-    saveTarget(v)
-  }
 
   const addPath = async (path: string) => {
     setBusy('add')
@@ -88,29 +64,6 @@ export function SkillsPanel() {
     try {
       await api.skillsRemove(path)
       toast.success('已移除登记（磁盘上的目录没动）')
-      await load()
-    } catch (e: any) {
-      toast.error(e?.message || String(e))
-    } finally {
-      setBusy('')
-    }
-  }
-
-  const install = async () => {
-    if (!to.trim()) {
-      toast.error('先填安装目标目录')
-      return
-    }
-    setBusy('install')
-    try {
-      const r = await api.skillsInstall(to.trim(), force)
-      const texts = r.warningTexts || []
-      const n = r.report.files.length
-      const skipped = (r.report.skipped ?? []).length
-      setWarns(texts)
-      if (texts.length > 0) toast.error(`装了 ${n} 个文件，${texts.length} 个技能没装成`)
-      else if (n === 0 && skipped > 0) toast.info(`${skipped} 个技能目标里已经是最新的（要刷新就勾「覆盖同名」）`)
-      else toast.success(`已装 ${n} 个文件到 ${r.report.target}`)
       await load()
     } catch (e: any) {
       toast.error(e?.message || String(e))
@@ -143,7 +96,7 @@ export function SkillsPanel() {
         <span className="text-[11px] text-muted-foreground">
           官方 {official.length} · 第三方 {externals.length}
         </span>
-        <Button size="sm" variant="outline" disabled={busy !== ''} onClick={() => setPickMode('add')}>
+        <Button size="sm" variant="outline" disabled={busy !== ''} onClick={() => setPicking(true)}>
           <Plus className="h-3.5 w-3.5" />添加技能
         </Button>
       </div>
@@ -169,7 +122,7 @@ export function SkillsPanel() {
             <SkillCard key={s.path || s.dir} s={s}
               onRemove={busy === '' ? () => void removePath(s.path || s.dir) : undefined} />
           ))}
-          <button type="button" disabled={busy !== ''} onClick={() => setPickMode('add')}
+          <button type="button" disabled={busy !== ''} onClick={() => setPicking(true)}
             className={cn(
               'flex min-h-[4.75rem] items-center justify-center gap-1.5 rounded-ui border border-dashed border-border text-[11px] text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground disabled:opacity-40',
               externals.length === 0 && 'sm:col-span-2',
@@ -179,46 +132,12 @@ export function SkillsPanel() {
         </div>
       </section>
 
-      {/* 只在有技能没装成时出现：那是唯一需要人动手的信息 */}
-      {warns.length > 0 && (
-        <div className="space-y-1 rounded-ui border border-amber-500/40 p-2">
-          <div className="flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400">
-            <AlertCircle className="h-3.5 w-3.5 shrink-0" />这次有 {warns.length} 个技能没装成
-          </div>
-          {warns.map((w, i) => (
-            <div key={i} className="break-all text-[11px] leading-4 text-muted-foreground">{w}</div>
-          ))}
-        </div>
-      )}
-
-      {/* 安装栏：目标 + 覆盖 + 装 */}
-      <div className="flex flex-wrap items-center gap-1.5 border-t border-border pt-3">
-        <Input className="h-7 min-w-0 flex-1 text-xs" value={to}
-          placeholder="安装目标目录，如 D:\项目\.agents\skills"
-          onChange={(e) => setTarget(e.target.value)} />
-        <Button size="icon" variant="outline" title="选择文件夹" onClick={() => setPickMode('to')}>
-          <FolderOpen className="h-3.5 w-3.5" />
-        </Button>
-        <label className="flex cursor-pointer items-center gap-1.5 px-1 text-[11px] text-muted-foreground">
-          <Checkbox checked={force} onCheckedChange={(v) => setForce(v === true)} />覆盖同名
-        </label>
-        <Button size="sm" disabled={busy !== ''} onClick={() => void install()}>
-          <RefreshCw className={cn('h-3.5 w-3.5', busy === 'install' && 'animate-spin')} />
-          {busy === 'install' ? '安装中…' : '安装'}
-        </Button>
-      </div>
-
       <DirPicker
-        open={pickMode !== ''}
-        initial={pickMode === 'to' ? to : ''}
-        title={pickMode === 'add' ? '选择技能目录（里面要有 SKILL.md）' : '选择安装目标目录'}
-        onPick={(p) => {
-          const mode = pickMode
-          setPickMode('')
-          if (mode === 'add') void addPath(p)
-          else if (mode === 'to') setTarget(p)
-        }}
-        onClose={() => setPickMode('')}
+        open={picking}
+        initial=""
+        title="选择技能目录（里面要有 SKILL.md）"
+        onPick={(p) => { setPicking(false); void addPath(p) }}
+        onClose={() => setPicking(false)}
       />
     </div>
   )
