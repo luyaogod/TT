@@ -127,7 +127,7 @@ func localDBEnvNames() []string {
 	}
 	var out []string
 	for _, name := range hosts.Names() {
-		if _, err := os.Stat(config.LocationsAt(path).DictDBPath(name)); err == nil {
+		if _, err := os.Stat(config.DictDBPathForEnv(path, name)); err == nil {
 			out = append(out, "local:"+name)
 		}
 	}
@@ -303,11 +303,20 @@ func dictDataDir() string {
 	return config.LocationsAt(path).DataDir()
 }
 
-// dictDBSyncTarget 某环境本地库的写侧目标：<数据目录>/dict/<环境>.db；
+// dictCfgPath 当前生效的配置文件路径（解析不到返回空）。
+func dictCfgPath() string {
+	path, err := common.ResolveConfig(true)
+	if err != nil {
+		return ""
+	}
+	return path
+}
+
+// dictDBSyncTarget 某环境本地库的写侧目标：<该环境的库目录>/<环境>.db；
 // -d/--db 或 TDICT_DB 显式给了就写那里。
 func dictDBSyncTarget(env string) string {
 	if p := strings.TrimSpace(dbPath); p != "" {
 		return config.AbsPath(p)
 	}
-	return config.DictDBPath(dictDataDir(), env)
+	return config.DictDBPathForEnv(dictCfgPath(), env)
 }

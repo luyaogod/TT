@@ -21,15 +21,42 @@ function LaunchSection() {
   const launching = useStore((s) => s.launching)
   const sessionId = useStore((s) => s.sessionId)
   const prog = useStore((s) => s.prog)
+  const sessions = useStore((s) => s.sessions)
   const state = useStore((s) => s.state)
   const sessionEnv = useStore((s) => s.sessionEnv)
   const calibrate = useStore((s) => s.calibrate)
   // 协作模式下启动/校准归 AI(你选的边界)
   const collab = useStore((s) => s.mode) === 'collab'
-  const [v, setV] = useState(() => localStorage.getItem('tt.launchTarget') || 'bsft001_wf')
+  // 没有会话时它就是个"上次输过什么"的记忆，方便反复起同一个作业。
+  const [v, setV] = useState(() => localStorage.getItem('tt.launchTarget') || '')
+  // 这个框**就是"当前会话的作业"**，不是全局记忆。
+  // 从前这里拿全局 prog 兜底 —— 而切换会话的瞬间全局 prog 还是上一条会话的值，
+  // 于是鼎捷2（aglq510）的框里写着鼎捷1 的 asf/bsft001_wf（实测反馈）。
+  // 现在只认 sessions 里**这条会话自己**的 prog/module：它没起过作业就留空。
+  const prevSidRef = useRef<string | null>(null)
+  const editedRef = useRef(false)
+  useEffect(() => {
+    const switched = prevSidRef.current !== sessionId
+    if (switched) { prevSidRef.current = sessionId; editedRef.current = false }
+    if (!sessionId) {
+      if (switched) setV(localStorage.getItem('tt.launchTarget') || '')
+      return
+    }
+    const item = sessions.find((x) => x.id === sessionId)
+    const p = item?.prog || ''
+    const mod = item?.module || ''
+    if (switched) {
+      // 切到新会话：只认它自己的作业；没有就留空，绝不带上一条的名字。
+      setV(p ? (mod ? `${mod}/${p}` : p) : '')
+      return
+    }
+    // 同一条会话内：列表刷新（启动后 prog 落定）时跟上；用户正在改就不打扰。
+    if (!editedRef.current && p) setV(mod ? `${mod}/${p}` : p)
+  }, [sessionId, sessions])
   const doLaunch = () => {
     const t = v.trim()
     if (!t || launching) return
+    editedRef.current = false // 启动后以服务端落定的作业为准
     localStorage.setItem('tt.launchTarget', t)
     const i = t.indexOf('/')
     if (i > 0) void launch(t.slice(0, i).trim(), t.slice(i + 1).trim())
@@ -75,7 +102,7 @@ function LaunchSection() {
             </button>
             <Input
               value={v}
-              onChange={(e) => setV(e.target.value)}
+              onChange={(e) => { editedRef.current = true; setV(e.target.value) }}
               onKeyDown={(e) => { if (e.key === 'Enter') doLaunch() }}
               placeholder="作业编号,如 bsft001_wf 或 asf/bsft001_wf"
               className="h-6 flex-1 px-1.5 text-xs"

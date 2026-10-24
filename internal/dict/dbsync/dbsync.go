@@ -16,6 +16,7 @@ import (
 	"tt/internal/dbconfig"
 	"tt/internal/dict/db"
 	"tt/internal/erpdb"
+	"tt/internal/sshtun"
 )
 
 // Family 一个数据族:一族 = 一个查询命令所需的一组字典表。
@@ -133,6 +134,33 @@ func Run(ctx context.Context, conn dbconfig.Connection, target string, tables []
 	// 客户端直连凭据 = 账号列表首项(SelectAllSQL 用它限定 user.table schema)
 	if err := conn.FillDialCred(); err != nil {
 		return nil, err
+	}
+
+	// viaSsh:有的环境 DB 只对服务器开放(客户端到 5432x 不通、SSH 22 通),
+	// 这时必须先起 SSH 端口转发,再把连接指向 127.0.0.1:本地端口 ——
+	// 与 live.Open(`tt db ping`/直查)走同一条链路,否则 sync 会直连超时。
+	// 同步是流式读,隧道不会长时间空闲;结束(含出错)时一并关闭。
+	var tun *sshtun.Tunnel
+	if conn.ViaSSH != nil {
+		remoteHost, remotePort := conn.ViaSSH.EffectiveRemote(conn.Host, conn.Port)
+		report(Progress{Phase: "open", Message: fmt.Sprintf("建立 SSH 隧道 (%s:%d)…", conn.ViaSSH.Host, conn.ViaSSH.Port)})
+		t, err := sshtun.Dial(sshtun.Options{
+			Host:       conn.ViaSSH.Host,
+			Port:       conn.ViaSSH.Port,
+			User:       conn.ViaSSH.User,
+			Password:   conn.ViaSSH.Password,
+			RemoteHost: remoteHost,
+			RemotePort: remotePort,
+			LocalPort:  conn.ViaSSH.BindPort,
+		})
+		if err != nil {
+			return nil, err
+		}
+		tun = t
+		defer tun.Close()
+		conn.Host = "127.0.0.1"
+		conn.Port = tun.LocalPort
+		report(Progress{Phase: "open", Message: fmt.Sprintf("SSH 隧道已通 (127.0.0.1:%d → %s:%d)", tun.LocalPort, remoteHost, remotePort)})
 	}
 
 	report(Progress{Phase: "open", Message: "连接远程数据库…"})

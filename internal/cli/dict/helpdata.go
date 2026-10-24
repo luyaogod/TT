@@ -59,10 +59,10 @@ func helpLocalDBPath() string {
 		return config.AbsPath(p)
 	}
 	if name, ok := localEnvName(strings.TrimSpace(common.Env)); ok && name != "" {
-		return config.DictDBPath(dictDataDir(), name)
+		return config.DictDBPathForEnv(dictCfgPath(), name)
 	}
 	if name, ok := localEnvName(strings.TrimSpace(queryCfgSource())); ok && name != "" {
-		return config.DictDBPath(dictDataDir(), name)
+		return config.DictDBPathForEnv(dictCfgPath(), name)
 	}
 	return ""
 }

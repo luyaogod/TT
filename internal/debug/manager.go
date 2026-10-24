@@ -65,6 +65,18 @@ type Manager struct {
 	envMu    sync.Mutex
 	envCache map[string]cachedEnv
 
+	// 作业→实体程序的解析缓存,TTL 5 分钟;与 envCache 同一条策略。
+	// 为什么要有它:每次启动都要经 SSH 起 ksql 连库查 gzzz_t JOIN gzza_t（2026-10-23
+	// 实测约 3s，是"点启动到弹画面"等待的大头），而调试场景里**同一个作业会反复启动**
+	// （改断点再跑），映射在服务器上变化极低频 —— 5 分钟的陈旧窗口可接受。
+	jobMu    sync.Mutex
+	jobCache map[string]cachedJob
+
+	// LocalJobLookup 本地字典库的作业解析（先于远程 ksql 链路，本地命中零远程往返）。
+	// 注入式（与 auditActor 同风格）：debug 包不直接依赖 config 的落点计算，
+	// 由 NewServer 装配；单测注入 fake 验证"本地命中时不拨 SSH"。可为 nil（回退远程）。
+	LocalJobLookup func(envName, job string) (JobResolve, bool)
+
 	// 会话外源码读取共用的连接(见 srcmirror.go):
 	// 每次 tt debug source/grep 重新握手太贵,按 SSH 目标缓存一条长连接。
 	//
@@ -88,6 +100,12 @@ const maxBufferedEvents = 4000
 type cachedEnv struct {
 	env *host.RuntimeEnv
 	at  time.Time
+}
+
+// cachedJob 作业解析缓存的一行（resolveJobWith 的成功返回四元组）。
+type cachedJob struct {
+	mod, prog, launchRef, extra string
+	at                          time.Time
 }
 
 func NewManager(cfg *Config) *Manager {
@@ -727,7 +745,45 @@ func (m *Manager) resolveJobWith(cfg *Config, module, job string) (mod, prog, la
 	if cfg.DB == nil || !reProgName.MatchString(job) {
 		return "", "", "", "", nil
 	}
+	// **先查缓存**：命中就完全不碰 SSH/数据库（远程 ksql 冷启动一次约 3s，见 jobCache 注释）。
+	// key 带上 module —— 显式模块会改变返回值（尊重指定、仅采纳实体程序），不能共用。
+	ckey := cfg.SSH.Host + "|" + cfg.SSH.User + "|" + zoneOf(cfg) + "|" + module + "|" + strings.ToLower(job)
+	m.jobMu.Lock()
+	if c, ok := m.jobCache[ckey]; ok && time.Since(c.at) < 5*time.Minute {
+		m.jobMu.Unlock()
+		log.Printf("[launch-timing] 作业解析 %s: 缓存命中，跳过 SSH+连库", job)
+		return c.mod, c.prog, c.launchRef, c.extra, nil
+	}
+	m.jobMu.Unlock()
+	// **本地字典库优先**：本地有这条作业就直接用（零远程往返），查不到才走远程链路。
+	// 与缓存同语义：本地命中不做 42r 目录校验（那需要 SSH，见下）。
+	if m.LocalJobLookup != nil {
+		if jr, ok := m.LocalJobLookup(cfg.EnvName(), job); ok && jr.Prog != "" {
+			p := jr.Prog
+			// 与远程路径同一条规范化：剥 $FGLRUN 前缀（幂等，防两个实现漂移），
+			// 非 $ 开头的启动引用清空（gendbg 语义：交由选区 shell 展开的才算数）。
+			jr.LaunchRef = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(jr.LaunchRef), "$FGLRUN"))
+			if !strings.HasPrefix(jr.LaunchRef, "$") {
+				jr.LaunchRef, jr.Extra = "", ""
+			}
+			launchRef, extra = jr.LaunchRef, jr.Extra
+			if module != "" {
+				return module, p, launchRef, extra, nil // 用户显式指定模块:尊重指定,仅采纳实体程序
+			}
+			return strings.ToLower(jr.Module), p, launchRef, extra, nil
+		}
+	}
+	// 分段计时：这条链路是"点启动到弹画面"最重的一段（2026-10-23 用户反馈启动慢）。
+	// 每一步都是一次**独立的远程往返**，日志里拼出耗时分布才能对症下药。
+	tAll := time.Now()
+	tDial, tRuntime, tDBConn, tQuery, tCheck := time.Duration(0), time.Duration(0), time.Duration(0), time.Duration(0), time.Duration(0)
+	defer func() {
+		log.Printf("[launch-timing] 作业解析 %s: dial=%v runtime探针=%v 连库探测=%v gzzz查询=%v 42r校验=%v 总计=%v",
+			job, tDial.Round(time.Millisecond), tRuntime.Round(time.Millisecond), tDBConn.Round(time.Millisecond), tQuery.Round(time.Millisecond), tCheck.Round(time.Millisecond), time.Since(tAll).Round(time.Millisecond))
+	}()
+	t0 := time.Now()
 	conn, err := host.Dial(cfg.SSH)
+	tDial = time.Since(t0)
 	if err != nil {
 		return "", "", "", "", fmt.Errorf("SSH 连接失败: %w", err)
 	}
@@ -736,15 +792,21 @@ func (m *Manager) resolveJobWith(cfg *Config, module, job string) (mod, prog, la
 	// 全局 active 区域),结果写进**调用方自己那一份** cfg（缺陷 Y / T5.2:
 	// 不再落到共享的 `m.cfg.Runtime` 上）——预会话模块解析/42r 校验直接用真实路径。
 	// 失败即报错:T100 路径只来自登录动态获取,无静态配置可回退
+	t0 = time.Now()
 	if _, err := m.ensureRuntimeEnvOn(conn, cfg); err != nil {
 		return "", "", "", "", err
 	}
+	tRuntime = time.Since(t0)
 	// 显式连接(SSH 页 dbConn 引用)连库解析作业;失败静默,由调用方回退文件搜索
+	t0 = time.Now()
 	d, err := resolveDBRun(conn, cfg)
+	tDBConn = time.Since(t0)
 	if err != nil {
 		return "", "", "", "", nil
 	}
+	t0 = time.Now()
 	jr, err := dbResolveJob(conn, d, job)
+	tQuery = time.Since(t0)
 	if err != nil || jr.Prog == "" {
 		return "", "", "", "", nil
 	}
@@ -755,9 +817,11 @@ func (m *Manager) resolveJobWith(cfg *Config, module, job string) (mod, prog, la
 	}
 	launchRef, extra = jr.LaunchRef, jr.Extra
 	if module != "" {
+		m.cacheJob(ckey, module, p, launchRef, extra)
 		return module, p, launchRef, extra, nil // 用户显式指定模块:尊重指定,仅采纳实体程序
 	}
 	mod = strings.ToLower(jr.Module)
+	t0 = time.Now()
 	if jr.Module == "" || jr.Module == "-" || !modHas42r(conn, cfg.TopDirActual(), mod, p) {
 		// 模块码缺失或目录对不上:全模块搜索实体程序的 42r;0/多命中留给会话内兜底报错
 		if cands := searchModule42r(conn, cfg.ModuleRootsActual(), p); len(cands) == 1 {
@@ -766,7 +830,19 @@ func (m *Manager) resolveJobWith(cfg *Config, module, job string) (mod, prog, la
 			mod = ""
 		}
 	}
+	tCheck = time.Since(t0)
+	m.cacheJob(ckey, mod, p, launchRef, extra)
 	return mod, p, launchRef, extra, nil
+}
+
+// cacheJob 写一行解析缓存；懒初始化（Manager 构造时不必记得 new 这个 map）。
+func (m *Manager) cacheJob(key, mod, prog, launchRef, extra string) {
+	m.jobMu.Lock()
+	if m.jobCache == nil {
+		m.jobCache = make(map[string]cachedJob)
+	}
+	m.jobCache[key] = cachedJob{mod: mod, prog: prog, launchRef: launchRef, extra: extra, at: time.Now()}
+	m.jobMu.Unlock()
 }
 
 // LaunchReplay 接口日志重放调试:等价 T100 日志内嵌的 `r.dg <作业> '<req>' '<rsp>'`。

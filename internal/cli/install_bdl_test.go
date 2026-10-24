@@ -68,6 +68,7 @@ func TestInstallBDLDocsExtractsAndSkips(t *testing.T) {
 }
 
 func TestInstallBdlCmdWritesBDLDocDir(t *testing.T) {
+	t.Setenv("TT_CONFIG", "") // 隔离真实 TT_CONFIG,否则配置读写会落到生产 config.json
 	src := filepath.Join(t.TempDir(), bdlZipName)
 	makeBDLZip(t, src)
 	cfgPath := filepath.Join(t.TempDir(), "config.json")

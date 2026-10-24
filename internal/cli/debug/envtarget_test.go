@@ -94,6 +94,7 @@ func TestDBGReusedHost(t *testing.T) {
 //
 // 两行**缺一个字段都不行**（C5.9：取不到写字面量，不省整段 —— 否则字段位置会随会话漂）。
 func TestDBGIdentity(t *testing.T) {
+	t.Setenv("TT_CONFIG", "") // 隔离真实 TT_CONFIG,否则 dbgIdentity 查库会读到生产 config.json
 	oldPath := common.ConfigPath
 	common.ConfigPath = writeIdentityConfig(t)
 	t.Cleanup(func() { common.ConfigPath = oldPath })
@@ -204,6 +205,7 @@ func TestDBGIdentityEntIsTheSnapshotsEntOnly(t *testing.T) {
 // C5.9 起账号住在**第二行**（`  账号 <acct> · 库 <target> · 区域 <zone>`）：
 // 第一行按契约只有四个身份字段，多塞一段就会让"对账用 ref、认领看 display"那条规矩失效。
 func TestDBGIdentityWithEntSnapshot(t *testing.T) {
+	t.Setenv("TT_CONFIG", "") // 隔离真实 TT_CONFIG,否则查库/账号会读到生产 config.json
 	dir := t.TempDir()
 	cfgPath := writeIdentityConfigIn(t, dir)
 

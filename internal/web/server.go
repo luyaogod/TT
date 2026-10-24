@@ -31,6 +31,7 @@ import (
 	"tt/internal/designer"
 	"tt/internal/erpdb"
 	"tt/internal/host"
+	"tt/internal/sshtun"
 )
 
 // DefaultListen 是 serve 未显式配置监听地址时的默认地址。
@@ -155,6 +156,9 @@ func (s *Server) routes() {
 	// 原生“选择文件夹”对话框。浏览器拿不到本地绝对路径，只有服务端能弹系统对话框；
 	// 只允许本机请求（服务可能被配置成监听非回环地址）。
 	m.HandleFunc("POST /api/pickdir", s.hPickDir)
+	// 前端选择器用的"列目录"：浏览器拿不到本地绝对路径，只能由服务端列出子目录，
+	// 前端画成自己的选择器（比服务端弹 Windows 对话框快一个数量级）。
+	m.HandleFunc("GET /api/fs/list", s.hFsList)
 	// 命令行安装(PATH):应用级动作,归统一层 —— 合并前它在 /dict/api/install 下,
 	// 于是共用的设置页要用它就得去调字典子系统的私有 API。
 	m.HandleFunc("GET /api/install", s.hInstallGet)
@@ -301,6 +305,8 @@ func (s *Server) hHostsGet(w http.ResponseWriter, r *http.Request) {
 		"query":   root.Query,
 		"mirror":  root.Mirror,
 		"bdldoc":  root.Bdldoc,
+		"kb":      root.Kb,
+		"dict":    root.Dict,
 		"sync":    root.Sync,
 		"tdev":    root.Tdev,
 		"version": s.opt.Version,
@@ -318,6 +324,8 @@ type hostsPutReq struct {
 	Query  *config.QuerySettings `json:"query,omitempty"`
 	Mirror *config.MirrorSettings
 	Bdldoc *config.BdldocSettings
+	Kb     *config.KbSettings
+	Dict   *config.DictSettings
 	Sync   *config.SyncSettings
 	Tdev   *config.TdevSettings
 }
@@ -391,6 +399,18 @@ func (s *Server) hHostsPut(w http.ResponseWriter, r *http.Request) {
 					return nil
 				}
 				return putSection(root, "bdldoc", req.Bdldoc)
+			}},
+			{"kb", func() error {
+				if req.Kb == nil {
+					return nil
+				}
+				return putSection(root, "kb", req.Kb)
+			}},
+			{"dict", func() error {
+				if req.Dict == nil {
+					return nil
+				}
+				return putSection(root, "dict", req.Dict)
 			}},
 			{"sync", func() error {
 				if req.Sync == nil {
@@ -748,10 +768,37 @@ func (s *Server) hConnTest(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 
+	// viaSsh：客户端不可达 DB 时，真实查询（dict live）走 SSH 隧道再连。
+	// 测试若只直连，就会出现「测试一直超时、实际查询却正常」——测的不是同一条链路。
+	// 这里复用 sshtun：起隧道 → host/port 换成 127.0.0.1:本地转发端口 → 再连。
+	via := "direct"
+	if c.ViaSSH != nil {
+		remoteHost, remotePort := c.ViaSSH.EffectiveRemote(c.Host, c.Port)
+		tun, err := sshtun.Dial(sshtun.Options{
+			Host:       c.ViaSSH.Host,
+			Port:       c.ViaSSH.Port,
+			User:       c.ViaSSH.User,
+			Password:   c.ViaSSH.Password,
+			RemoteHost: remoteHost,
+			RemotePort: remotePort,
+			LocalPort:  c.ViaSSH.BindPort,
+		})
+		if err != nil {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"ok": false, "stage": "tunnel", "error": err.Error(), "via": "tunnel",
+			})
+			return
+		}
+		defer tun.Close()
+		c.Host = "127.0.0.1"
+		c.Port = tun.LocalPort
+		via = "tunnel"
+	}
+
 	conn, err := s.openDB(ctx, c)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"ok": false, "stage": "connect", "error": err.Error(),
+			"ok": false, "stage": "connect", "error": err.Error(), "via": via,
 		})
 		return
 	}
@@ -760,12 +807,12 @@ func (s *Server) hConnTest(w http.ResponseWriter, r *http.Request) {
 	ver, err := conn.ServerVersion(ctx)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"ok": false, "stage": "version", "error": err.Error(),
+			"ok": false, "stage": "version", "error": err.Error(), "via": via,
 		})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok": true, "type": conn.Type(), "serverVersion": ver, "address": c.Address(),
+		"ok": true, "type": conn.Type(), "serverVersion": ver, "address": c.Address(), "via": via,
 	})
 }
 

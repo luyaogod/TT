@@ -280,6 +280,7 @@ func TestLocations_ResolveDictDB(t *testing.T) {
 
 // 字典库写侧（SyncTarget）：sync.target 优先 → 已存在的库 → 绝对 -d → 数据目录缺省。
 func TestLocations_SyncTarget(t *testing.T) {
+	t.Setenv("TDICT_DB", "") // 隔离开发机上的真实 TDICT_DB,否则缺省目标会变成它
 	dir := t.TempDir()
 	l := LocationsAt(filepath.Join(dir, "tt", "config.json"))
 	dataDir := filepath.Dir(l.ConfigPath)

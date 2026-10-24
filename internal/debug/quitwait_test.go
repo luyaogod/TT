@@ -49,6 +49,30 @@ func TestBeginQuitSharesOneTeardown(t *testing.T) {
 	}
 }
 
+// 收口做完之后，**下一轮必须能重新拿到执行权**。
+//
+// 事故背景（2026-10-23，用户报"点了重新开始，步入/步过全灰"）：`quitting` 从前只置
+// true、**从不复位**，于是每条会话的「结束调试 / 重新开始」只有**第一次**真的生效。
+// 之后再点，`beginQuit` 一律返回 `!mine` + 一个**已经关闭**的 done，`waitQuit` 立刻
+// 返回 nil（报成功），状态却留在 stopped —— 紧接着的启动撞"已存在调试会话"，
+// 界面停在 idle，人看到的就是"步进整排变灰"。
+//
+// 这条用例走**真实入口** `withQuit`（不是手工调 begin/end），所以它能抓住"调用方
+// 忘了复位"这一类错误：把 withQuit 里的 `defer endQuit` 去掉，它立刻红（calls 停在 1）。
+// 只测一次 begin/end 是发现不了这个 bug 的 —— 这也是上一轮"全绿却仍有 bug"的原因之一。
+func TestWithQuitRunsEveryRound(t *testing.T) {
+	s := &Session{state: StateStopped}
+	calls := 0
+	for i := 0; i < 3; i++ {
+		if err := s.withQuit(func() error { calls++; return nil }); err != nil {
+			t.Fatalf("第 %d 轮: %v", i+1, err)
+		}
+	}
+	if calls != 3 {
+		t.Fatalf("收口只执行了 %d 次（应当每轮一次）—— quitting 没有复位就会这样", calls)
+	}
+}
+
 // 收口做完但状态仍是 running/loading（收口没生效）时要说出来，不能当成功。
 func TestWaitQuitReportsIneffectiveTeardown(t *testing.T) {
 	s := &Session{state: StateLoading}

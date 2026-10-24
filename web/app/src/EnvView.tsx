@@ -82,7 +82,8 @@ function CreateSessionPane({ env, count, onCreate }: {
   }, [ents, ent])
   const [step, setStep] = useState('')
   const [err, setErr] = useState('')
-  const placeholder = `新会话 ${count + 1}`
+  // 默认名跟着站点走：不同站点各建一条时，"新会话 1"会互相撞（别名在服务端是全局唯一的）。
+  const placeholder = `${env.name} ${count + 1}`
 
   const submit = async () => {
     if (busy) return

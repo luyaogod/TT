@@ -29,8 +29,33 @@ export interface SessionItem {
   // 作业编号是"这条会话要调哪个作业"——后面起作业都从这两个值往下走。
   ent: string
   prog: string
+  // module 是该会话当前作业所属模块（服务端 brief 直接给）。
+  // 不能从作业编号前缀推：bsft001_wf 属于 asf 模块，前缀却是 bsf。
+  module: string
   // 服务端给的规范 id「环境#序号」（建会话时就分配了）。空串 = 服务端没给（不该发生）。
   ref: string
+}
+
+/**
+ * 默认会话名：`<环境> <序号>`。
+ *
+ * 为什么不能沿用「新会话 N」：别名在服务端是**全池唯一（不区分大小写）**，而 N 是按
+ * "本环境已有条数"算的 —— 正式区建一条叫「新会话 1」，到测试区再建又是一条「新会话 1」，
+ * 第二条会被"别名已被占用"直接拒掉（用户的原话：另一个站点也是新会话 1，还不能直接创建）；
+ * 就算建成了，树里两条同名也分不出谁是谁。
+ *
+ * 序号仍从本环境的条数起算（同一个站点里连续建是 1、2、3），再跳过已被占用的名字 ——
+ * 历史遗留的「新会话 1」、或者别处手工起的同名，都不会撞上。
+ */
+function defaultSessionName(sessions: SessionItem[], env: string): string {
+  const used = new Set(sessions.map((s) => (s.name || '').trim().toLowerCase()))
+  let n = sessions.filter((s) => s.env === env).length + 1
+  for (let i = 0; i < 999; i += 1) {
+    const cand = `${env} ${n}`
+    if (!used.has(cand.toLowerCase())) return cand
+    n += 1
+  }
+  return `${env} ${Date.now()}`
 }
 
 /**
@@ -196,6 +221,13 @@ interface Store {
   wsLogContent: WSLogContent | null
   wsLogTab: 'info' | 'request' | 'response'
   wsLogErr: string
+  // 接口日志**按环境分开记**(与多会话同一条原则):上面这组扁平字段只代表
+  // "当前所在环境的那一页",切环境时整组存进/取自本表。
+  //
+  // 为什么不能共用一个槽:环境页是 keep-alive 的,切回来时列表还是上一个环境的内容
+  // —— 2026-10-23 实测:测试区/正式区的接口日志都显示成鼎捷的(反之亦然)。
+  // 当时先做的是"切环境就清空",但那是把用户刚查好的结果扔掉;正确做法是各存一份。
+  wsLogsByEnv: Record<string, WsLogSnap>
   // 企业目录(ENT → 数据库账号)按环境缓存。接口日志页与「创建会话」的 ENT 下拉
   // 共用这一份 —— 两处各拉一次会让同一张 gzou_t 被问两遍(每次都可能拨 SSH)。
   entsByEnv: Record<string, EntsView>
@@ -249,6 +281,9 @@ interface Store {
   calibrate: () => Promise<void>
 
   loadWsLogs: (q: WSLogQuery) => Promise<void>
+  resetWsLogs: () => void
+  // 写"当前环境这一页"的日志状态,并同步镜像到 wsLogsByEnv(供切回来时还原)。
+  patchWsLog: (patch: Partial<WsLogSnap>) => void
   selectWsLog: (item: WSLogItem) => Promise<void>
   prefetchWsLog: (item: WSLogItem) => void
   setWsLogTab: (t: 'info' | 'request' | 'response') => void
@@ -383,6 +418,7 @@ function itemFromBrief(b: SessionBrief): SessionItem {
     createdAt: 0,
     ent: b.ent || '',
     prog: b.prog || '',
+    module: b.module || '',
     ref: b.ref || '',
   }
 }
@@ -696,14 +732,16 @@ async function alignSelected(set: (p: Partial<Store>) => void, get: () => Store,
       state: s.state, sessionEnv: s.env || '', mode: modeOf(s.mode),
     })
     if (s.state === 'idle') {
-      // 空闲宿主(idle)：只绑定，不刷源码；等下一次启动直接复用宿主。
-      // **但要清掉上一条会话的源码** —— 不清的话界面上是 A 的代码、绑的是 B，最误导。
+      // 空闲宿主(idle)：先清现场（不清的话界面上是 A 的代码、绑的是 B，最误导），
+      // 但**不要在这里 return** —— `sessionList` 是列表那一刻的快照，可能已经过期：
+      // 会话早已停在断点上，列表还写着 idle。这时若直接定案成"空闲"，工具栏的
+      // 继续/步过/步入会整排变灰，而右侧还写着"会话空闲"（实测：鼎捷2 明明停在
+      // aglq510 上，界面却点不动）。所以继续往下走一次 snapshot，由它定案。
       set({
         started: false, stop: null, currentLine: 0, breakpoints: [], frames: [],
         autovars: [], selectedFrame: -1, holdingSeconds: 0, loadingSource: false,
         sourceContent: '', sourcePath: '', sourceDVM: '', sourceMissing: false,
       })
-      return
     }
     if (s.state === 'loading') {
       // 还在登录：**自己轮询到它落定**，再走下面的常规对齐。
@@ -728,17 +766,39 @@ async function alignSelected(set: (p: Partial<Store>) => void, get: () => Store,
   try {
     const snap: any = await api.snapshot(id)
     if (get().sessionId !== id) return // 期间人家又点了一条:这一轮结果作废
+    // **不回退到 `get().x`**：快照没给就是没有，拿上一条会话的值兜底正是"切到 B 却显示 A
+    // 的作业/环境"的来源（多会话下 A 的值一直有效，于是错得很安静）。
     set({
-      state: snap.state || get().state,
-      module: snap.module || get().module,
-      prog: snap.prog || get().prog,
-      runProg: snap.runProg || get().runProg,
-      sessionEnv: snap.env || get().sessionEnv,
+      state: snap.state || '',
+      module: snap.module || '',
+      prog: snap.prog || '',
+      runProg: snap.runProg || snap.prog || '',
+      sessionEnv: snap.env || '',
       stop: snap.stop, breakpoints: snap.breakpoints || [], started: !!snap.started,
       currentLine: snap.stop?.line ?? 0, holdingSeconds: snap.holdingSeconds || 0,
       // 快照里的模式比列表更新（选中期间可能刚被切换过）
       mode: modeOf(snap.mode),
     })
+    // 顺带纠正这条会话的运行时索引：列表快照可能过期（会话早已停站，列表还写着 idle），
+    // 而 runtimeFromBrief 按"事件比列表新"的假设**不用 brief 覆盖已有值** —— 于是树上
+    // 那个状态点会一直停在建会话时的样子。快照是刚取的，拿它把这条会话的索引对齐。
+    patchRuntime(id, {
+      state: snap.state || '',
+      prog: snap.prog || '',
+      module: snap.module || '',
+      stop: snap.stop || null,
+      mode: modeOf(snap.mode),
+    })
+    // 空闲会话**必须清掉上一条的源码**：它没有停站，下面不会走 refreshSource，
+    // 不清就一直是 A 的代码配 B 的标题（实测：鼎捷2 里显示 aglq510）。
+    // 与上面 idle 分支同一套字段，两处都得清 —— 只清一处会漏掉"列表还没刷到这条"的路径。
+    if (snap.state === 'idle') {
+      set({
+        started: false, stop: null, currentLine: 0, breakpoints: [], frames: [],
+        autovars: [], selectedFrame: -1, holdingSeconds: 0, loadingSource: false,
+        sourceContent: '', sourcePath: '', sourceDVM: '', sourceMissing: false,
+      })
+    }
     if (snap.state === 'stopped') {
       // 有停站就去取源码。入口停站可能不带文件名(WS 服务程序在 gzzz_t 里解析不到实体程序),
       // refreshSource 会按「模块_程序.4gl」兜底合成 —— 这是它已有的能力。
@@ -822,6 +882,41 @@ let launchStartedAt = 0
 let launchWarned = false
 // 接口日志查询的"请求代次"。同上:翻页/改条件会叠出多个在途查询。
 let wsLogsGen = 0
+
+// ---------- 接口日志:按环境分槽 ----------
+//
+// 扁平字段(wsLogs/wsLogSel/wsLogErr/…)只代表"当前环境那一页";每次写都镜像进
+// wsLogsByEnv,切环境时整组换出/换入(见 setActiveEnv)。
+//
+// 为什么要这样:环境页 keep-alive,而日志结果只有一个槽 —— 切到乙环境时页面还挂着
+// 甲环境的行(2026-10-23 实测:测试区/正式区的接口日志都显示成鼎捷的)。
+// 另一种"切环境就清空"的做法虽然不会看错,但会把用户刚查好的结果扔掉;
+// 这里按"一个站点一份、互不覆盖"来。
+export type WsLogSnap = {
+  items: WSLogItem[]
+  page: number
+  hasMore: boolean
+  sel: WSLogItem | null
+  content: WSLogContent | null
+  tab: 'info' | 'request' | 'response'
+  err: string
+}
+
+const emptyWsLogSnap = (): WsLogSnap => ({
+  items: [], page: 1, hasMore: false, sel: null, content: null, tab: 'info', err: '',
+})
+
+type WsLogFlat = Pick<Store, 'wsLogs' | 'wsLogsPage' | 'wsLogsHasMore' | 'wsLogSel' | 'wsLogContent' | 'wsLogTab' | 'wsLogErr'>
+
+const wsLogSnapOf = (s: WsLogFlat): WsLogSnap => ({
+  items: s.wsLogs, page: s.wsLogsPage, hasMore: s.wsLogsHasMore,
+  sel: s.wsLogSel, content: s.wsLogContent, tab: s.wsLogTab, err: s.wsLogErr,
+})
+
+const wsLogFlatOf = (sn: WsLogSnap) => ({
+  wsLogs: sn.items, wsLogsPage: sn.page, wsLogsHasMore: sn.hasMore,
+  wsLogSel: sn.sel, wsLogContent: sn.content, wsLogTab: sn.tab, wsLogErr: sn.err,
+})
 
 // 企业目录(ENT → 账号)按环境的客户端缓存。
 //
@@ -911,6 +1006,7 @@ export const useStore = create<Store>((set, get) => ({
   dark: resolveDark(initialTheme),
   wsLogs: [], wsLogsLoading: false, wsLogsPage: 1, wsLogsHasMore: false,
   wsLogSel: null, wsLogContent: null, wsLogTab: 'info', wsLogErr: '',
+  wsLogsByEnv: {},
   entsByEnv: {},
 
   sourceContent: '', sourcePath: '', sourceDVM: '', sourceMissing: false, currentLine: 0, loadingSource: false, lineOffset: 0,
@@ -1328,20 +1424,37 @@ export const useStore = create<Store>((set, get) => ({
     // 实测过一次:慢查询（空结果）落地把已经拿到的 6 行冲成 0 条 +「暂无日志记录」，
     // 而输入框里写着的是新条件 —— 用户看到的是一次并不存在的查询。
     const gen = ++wsLogsGen
+    // 这次查的是**哪个环境**：响应回来时若用户已经切走，结果只能写进那个环境的槽，
+    // 不许落在当前页上（否则又变成"乙环境显示甲环境数据"）。
+    const targetEnv = (q.env || get().activeEnv || '').trim()
     set({ wsLogsLoading: true, wsLogErr: '' })
     try {
       // 带上"我在哪个环境"：统一服务启动时可能还没有生效环境（环境一律点名），
       // 而后端的接口日志要连 SSH —— 不点名就会报 "没有生效环境"。
       const r = await api.wsLogs({ ...q, env: q.env || get().activeEnv || undefined })
       if (gen !== wsLogsGen) return
-      set({ wsLogs: r.items || [], wsLogsHasMore: !!r.hasMore, wsLogsPage: q.page ?? 1, wsLogSel: null, wsLogContent: null })
+      const patch: Partial<WsLogSnap> = {
+        items: r.items || [], page: q.page ?? 1, hasMore: !!r.hasMore, sel: null, content: null, err: '',
+      }
+      if (!targetEnv || get().activeEnv === targetEnv) {
+        get().patchWsLog(patch)
+      } else {
+        // 已经切到别的环境了:只更新它自己的那份。
+        const st = get()
+        set({
+          wsLogsByEnv: {
+            ...st.wsLogsByEnv,
+            [targetEnv]: { ...(st.wsLogsByEnv[targetEnv] || emptyWsLogSnap()), ...patch },
+          },
+        })
+      }
     } catch (e: any) {
       if (gen !== wsLogsGen) return
       // 失败**不清上一次的结果**：那条路会让界面显示成"暂无日志记录"，与"确实没有数据"
       // 一字不差（实测真 500 现场）。也不动选中行/明细面板 —— 成功清、失败留，两副面孔最费解。
       // 错误必须**留在界面上**（wsLogErr），不能只发一条 8 秒后消失的 toast。
       const msg = e?.message || String(e)
-      set({ wsLogErr: msg })
+      get().patchWsLog({ err: msg })
       toast.error('查询接口日志失败', { description: msg })
     } finally {
       // 只有最新那一轮才许把 loading 关掉:否则慢请求还在途时转圈就没了，
@@ -1350,16 +1463,37 @@ export const useStore = create<Store>((set, get) => ({
     }
   },
 
+  // 把"当前环境那一页"重置成空白(不动别的环境的槽)。
+  // 推进代次:在途的旧查询回来时不许再覆盖。
+  resetWsLogs: () => {
+    wsLogsGen++
+    get().patchWsLog(emptyWsLogSnap())
+    set({ wsLogsLoading: false })
+  },
+
+  // 写"当前环境这一页"并镜像进 wsLogsByEnv —— 所有对扁平字段的写入都必须走这里,
+  // 否则切回来时看到的是旧快照(只写扁平不写槽 = 分槽失效)。
+  patchWsLog: (patch) => {
+    const env = get().activeEnv
+    set((st) => {
+      const flat = { ...wsLogSnapOf(st), ...patch }
+      return {
+        ...wsLogFlatOf(flat),
+        wsLogsByEnv: env ? { ...st.wsLogsByEnv, [env]: flat } : st.wsLogsByEnv,
+      }
+    })
+  },
+
   // 点击行即取报文(接口一次返回 request+response,不是切页签才取)。
   // 命中预取缓存时瞬时显示;同一行的并发请求会被合并(见 loadWsLogContent)。
   selectWsLog: async (item) => {
     const cached = wsLogContentCache.get(item.rowid)
-    set({ wsLogSel: item, wsLogContent: cached ?? null, wsLogErr: '' })
+    get().patchWsLog({ sel: item, content: cached ?? null, err: '' })
     if (cached) return
     try {
       const content = await loadWsLogContent(item)
       // 期间可能已切到别的行:只在仍是当前选中时写回
-      if (get().wsLogSel?.rowid === item.rowid) set({ wsLogContent: content })
+      if (get().wsLogSel?.rowid === item.rowid) get().patchWsLog({ content })
     } catch (e: any) {
       if (get().wsLogSel?.rowid === item.rowid) {
         toast.error('读取报文详情失败', { description: e?.message || String(e) })
@@ -1373,15 +1507,15 @@ export const useStore = create<Store>((set, get) => ({
     if (wsLogContentCache.has(item.rowid) || wsLogContentInflight.has(item.rowid)) return
     void loadWsLogContent(item)
       .then((content) => {
-        if (get().wsLogSel?.rowid === item.rowid) set({ wsLogContent: content })
+        if (get().wsLogSel?.rowid === item.rowid) get().patchWsLog({ content })
       })
       .catch(() => { /* 预取失败不打扰用户:真点下去时会再报错 */ })
   },
 
-  setWsLogTab: (t) => set({ wsLogTab: t }),
+  setWsLogTab: (t) => get().patchWsLog({ tab: t }),
 
   // 关闭日志详情面板:回到"只显示列表"的默认态
-  closeWsLogDetail: () => set({ wsLogSel: null, wsLogContent: null }),
+  closeWsLogDetail: () => get().patchWsLog({ sel: null, content: null }),
 
   replayDebug: async (item, request, ent) => {
     // 把「这一页所属的环境」一起带上：日志列表那条路早就送了（`loadWsLogs` 的 `env`），
@@ -1451,9 +1585,16 @@ export const useStore = create<Store>((set, get) => ({
       // 带上"当前这条会话"：面板上的「运行」是**在这条空闲会话里起作业**，
       // 不是再建一条新会话。不带的话服务端只能按"服务当前环境"去组装，而统一服务
       // 启动时可能还没有生效环境 —— 报的是"必须显式指定企业编号(ENT)"，人看到的就是
-      // "点了没反应"。会话自己的 env/ent 由服务端从目标会话取（hLaunch 的 session 分支）。
+      // "点了没反应"。
+      //
+      // **ENT 也要显式带上**：服务端的 ENT 纪律是"本次显式给 或 会话自己的 cfg.Topent"，
+      // 而会话那个值在"收口重建"之后可能已经丢了（实测：鼎捷1/鼎捷2 都是 idle 且
+      // cfg.Topent 为空，于是任何启动都 409，状态停在 idle，步入/步过整排变灰）。
+      // 会话列表里的 ent 是服务端回读的**当前生效值**，拿它兜住这条链。
       const sid = get().sessionId
-      const r = await api.launch(module, prog, sid ? { session: sid } : undefined)
+      const cur = sid ? get().sessions.find((x) => x.id === sid) : undefined
+      const ent = (cur?.ent || '').trim()
+      const r = await api.launch(module, prog, sid ? { session: sid, ...(ent ? { ent } : {}) } : undefined)
       // 作业编号解析:后端连 gzzz_t 后回读模块与实体程序(aint301_wf → aint302_wf)
       const mod = r.module || module
       const rp = r.runProg || prog
@@ -1469,8 +1610,10 @@ export const useStore = create<Store>((set, get) => ({
       // 同步失败(如 prog 缺失/配置非法):HTTP 直接报错,同样必须退出加载态
       cancelRetire()
       get().pushTimeline({ origin: 'system', kind: 'warn', text: `启动失败: ${e.message}` })
-      setBoundSession(null)
-      set({ launchError: `启动失败: ${e.message}`, state: '', loadingSource: false, stop: null, currentLine: 0 })
+      // **不要在这里解绑**：会话本身还在（只是这一轮没起来）。解绑会换走整份现场，
+      // 人看到的是"会话没了/界面空了"，比错误原文更难理解（实测反馈：点了重新开始，
+      // 之后步入/步过全灰，以为多会话坏了）。保留绑定 + 落回 idle，可以直接重试。
+      set({ launchError: `启动失败: ${e.message}`, state: get().sessionId ? 'idle' : '', loadingSource: false, stop: null, currentLine: 0 })
       throw e
     } finally {
       endRetire()
@@ -1954,7 +2097,16 @@ export const useStore = create<Store>((set, get) => ({
       set({ envsLoaded: true, envsErr: e?.message || String(e) })
     }
   },
-  setActiveEnv: (env) => set({ activeEnv: env }),
+  // 切环境(路由驱动):把"当前这一页"的接口日志整组存回自己的槽,再把目标环境的槽
+  // 换出来 —— 一个站点一份,切走再切回原样还在。
+  setActiveEnv: (env) => {
+    const cur = get()
+    if (cur.activeEnv === env) { set({ activeEnv: env }); return }
+    const byEnv = { ...cur.wsLogsByEnv }
+    if (cur.activeEnv) byEnv[cur.activeEnv] = wsLogSnapOf(cur)
+    const next = byEnv[env] || emptyWsLogSnap()
+    set({ activeEnv: env, wsLogsByEnv: byEnv, ...wsLogFlatOf(next), wsLogsLoading: false })
+  },
 
   // 建一条**真的** Debug 会话（企业编号 + 作业编号），作业编号填了就把作业直接起起来。
   //
@@ -1975,10 +2127,9 @@ export const useStore = create<Store>((set, get) => ({
     const ent = (input.ent || '').trim()
     const prog = (input.prog || '').trim()
     // 建会话只有一个入口（不再有"用途"这一层）：
-    // 名字留空就在**发请求之前**落成「新会话 N」，而不是只在界面上显示一个
+    // 名字留空就在**发请求之前**落成「<环境> <序号>」，而不是只在界面上显示一个
     // 服务端根本不知道的名字。
-    const name = (input.name || '').trim()
-      || `新会话 ${get().sessions.filter((s) => s.env === env).length + 1}`
+    const name = (input.name || '').trim() || defaultSessionName(get().sessions, env)
     // 前置校验放在请求之前:与服务端同一套判据，但错误当场说、不白花一次 SSH 握手。
     //
     // **作业编号可以不填**：填了就在建好的会话里直接起作业（见下面那段 `launch`），
@@ -2002,7 +2153,7 @@ export const useStore = create<Store>((set, get) => ({
     const item: SessionItem = get().sessions.find((s) => s.id === id) || {
       // 极端情况：列表还没刷到它（服务端刚建、聚合有延迟）。用应答里的事实拼一条，
       // 只用于**导航**；下一轮 List / 事件会把树换成权威那份。
-      id, env, type: 'debug', createdAt: Date.now(), ent, prog,
+      id, env, type: 'debug', createdAt: Date.now(), ent, prog, module: mod,
       name: (res?.name || '').trim() || name,
       ref: (res?.ref || '').trim(),
     }
