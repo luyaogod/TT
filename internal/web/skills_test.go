@@ -1,17 +1,13 @@
 package web
 
 import (
-	"bytes"
-	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"tt/internal/config"
-	"tt/internal/skill"
 )
 
 // withOfficialSkills 在临时目录造一棵官方技能树，并让本包把它当成 <exe>/skills。
@@ -46,25 +42,6 @@ func mkExternal(t *testing.T, name string) string {
 		t.Fatal(err)
 	}
 	return dir
-}
-
-// doLocal 与 doJSON 相同，但把来源标成本机回环 —— /api/skills/install 会校验它。
-func doLocal(t *testing.T, s *Server, method, target string, body any) (*httptest.ResponseRecorder, map[string]any) {
-	t.Helper()
-	var buf bytes.Buffer
-	if body != nil {
-		if err := json.NewEncoder(&buf).Encode(body); err != nil {
-			t.Fatal(err)
-		}
-	}
-	req := httptest.NewRequest(method, target, &buf)
-	req.RemoteAddr = "127.0.0.1:51000"
-	rec := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rec, req)
-
-	out := map[string]any{}
-	_ = json.Unmarshal(rec.Body.Bytes(), &out)
-	return rec, out
 }
 
 func rows(t *testing.T, out map[string]any) []map[string]any {
@@ -188,71 +165,6 @@ func TestSkillsRemove(t *testing.T) {
 	rec, out = doJSON(t, s, "POST", "/api/skills/remove", map[string]any{"path": kb})
 	if rec.Code != http.StatusOK || out["removed"] != false {
 		t.Fatalf("重复删除该是 ok/removed=false: %s", rec.Body.String())
-	}
-}
-
-// 安装：官方 + 第三方一起落地，assets 不复制、SKILL.md 里留指针，非本机请求被拒。
-func TestSkillsInstall(t *testing.T) {
-	withOfficialSkills(t, "tt-erp-read")
-	kb := mkExternal(t, "kb-faq")
-	if err := os.MkdirAll(filepath.Join(kb, "assets"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(kb, "assets", "big.bin"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	s, _ := newTestServer(t, `{"schemaVersion":4,"skills":{"externals":[{"path":`+jsonQuote(kb)+`}]}}`)
-	dst := filepath.Join(t.TempDir(), "agent-skills")
-
-	// 非本机请求：403
-	if rec, _ := doJSON(t, s, "POST", "/api/skills/install", map[string]any{"to": dst}); rec.Code != http.StatusForbidden {
-		t.Fatalf("非本机请求该被拒，实得 %d", rec.Code)
-	}
-
-	rec, out := doLocal(t, s, "POST", "/api/skills/install", map[string]any{"to": dst})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("安装失败: %d %s", rec.Code, rec.Body.String())
-	}
-	rep, _ := out["report"].(map[string]any)
-	files, _ := rep["files"].([]any)
-	if len(files) != 2 { // tt-erp-read/SKILL.md + kb-faq/SKILL.md
-		t.Errorf("报告的文件清单 = %v, want 2 项", files)
-	}
-	if _, err := os.Stat(filepath.Join(dst, "tt-erp-read", "SKILL.md")); err != nil {
-		t.Fatalf("官方技能没装上: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(dst, "kb-faq", "assets")); !os.IsNotExist(err) {
-		t.Errorf("assets/ 被复制了: %v", err)
-	}
-	md, err := os.ReadFile(filepath.Join(dst, "kb-faq", "SKILL.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(md), skill.AssetsDir(kb)) {
-		t.Errorf("SKILL.md 里没有指回源 assets 的那一行:\n%s", md)
-	}
-}
-
-// 第三方路径失效时安装仍然成功，告警原样带在响应里 —— 页面据此显示"这次少了哪些"。
-func TestSkillsInstallSurfacesWarnings(t *testing.T) {
-	withOfficialSkills(t, "tt-erp-read")
-	gone := filepath.Join(t.TempDir(), "gone")
-	s, _ := newTestServer(t, `{"schemaVersion":4,"skills":{"externals":[{"path":`+jsonQuote(gone)+`}]}}`)
-	dst := filepath.Join(t.TempDir(), "agent-skills")
-
-	rec, out := doLocal(t, s, "POST", "/api/skills/install", map[string]any{"to": dst})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("失联的第三方不该让安装失败: %d %s", rec.Code, rec.Body.String())
-	}
-	warns, _ := out["warningTexts"].([]any)
-	if len(warns) != 1 {
-		t.Fatalf("warningTexts = %v, want 1 条", warns)
-	}
-	if !strings.Contains(warns[0].(string), "skills.externals") {
-		t.Errorf("告警该带修复动作: %v", warns[0])
-	}
-	if _, err := os.Stat(filepath.Join(dst, "tt-erp-read", "SKILL.md")); err != nil {
-		t.Errorf("官方技能照装才对: %v", err)
 	}
 }
 

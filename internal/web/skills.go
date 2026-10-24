@@ -17,7 +17,6 @@ import (
 
 	"tt/internal/config"
 	"tt/internal/skill"
-	"tt/internal/update"
 )
 
 // officialSkillsDirFn 是官方技能目录：<exe 目录>\skills，与命令行走同一个落点。
@@ -91,12 +90,6 @@ func (s *Server) hSkillsGet(w http.ResponseWriter, r *http.Request) {
 	}
 	out["externals"] = rows
 
-	dataDir := filepath.Dir(cfgPath)
-	if st := update.LoadSkillsStamp(dataDir); st != nil {
-		out["targets"] = st.Targets
-		out["stampVersion"] = st.Version
-	}
-	out["drift"] = update.SkillsDriftHint(dataDir, s.opt.BareVersion)
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -228,69 +221,6 @@ func (s *Server) hSkillsRemove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "removed": removed})
-}
-
-// hSkillsInstall POST /api/skills/install {to, force, dryRun}：装到指定目录。
-//
-// 目标必须**显式给出**：Web 进程的当前目录与服务使用者的工程目录没有关系，替人猜一个
-// （--to auto 那套探测）只会把技能装到服务的启动目录里。
-func (s *Server) hSkillsInstall(w http.ResponseWriter, r *http.Request) {
-	if !isLoopback(r.RemoteAddr) {
-		// 和 /api/pickdir、/api/shutdown 同一条边界：这会按请求里的路径往磁盘写文件。
-		writeErr(w, http.StatusForbidden, fmt.Errorf("/api/skills/install 只接受本机请求"))
-		return
-	}
-	cfgPath, err := s.configPath(true)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	var req struct {
-		To     string `json:"to"`
-		Force  bool   `json:"force"`
-		DryRun bool   `json:"dryRun"`
-	}
-	if err := decodeBody(r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	to := strings.TrimSpace(req.To)
-	if to == "" {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("请给出目标目录（agent 读技能的位置，如 <工程目录>\\.agents\\skills）"))
-		return
-	}
-
-	officialDir, err := officialSkillsDirFn()
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	root, err := config.Load(cfgPath)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	plan, err := skill.BuildPlan(officialDir, root.Skills.Paths())
-	if err != nil {
-		// 官方技能坏了 = 这个包不完整，不是用户的路径问题，所以是 500。
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	rep, err := skill.Apply(plan, to, skill.Options{Force: req.Force, DryRun: req.DryRun})
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	if !req.DryRun && s.opt.BareVersion != "" {
-		// 与命令行同一个戳：升级后靠它把 agent 目录里那份刷成同版。
-		_ = update.RecordSkillsTarget(filepath.Dir(cfgPath), rep.Target, s.opt.BareVersion)
-	}
-
-	warns := make([]string, 0, len(rep.Warnings))
-	for _, wn := range rep.Warnings {
-		warns = append(warns, wn.Text())
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "report": rep, "warningTexts": warns})
 }
 
 // officialSkillNames 取官方技能名（撞名判定用）。官方目录读不到时返回 nil ——
