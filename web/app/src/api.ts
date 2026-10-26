@@ -51,9 +51,11 @@ export interface WSLogItem {
 }
 export interface WSLogContent {
   request: string; response: string
-  // 请求报文内容不完整(超读取上限被截断 / 源文件已清理只剩前 2000 字符):
+  // 请求报文内容不完整(超读取上限被截断 / 拿不到原文):
   // 按原报文重放不受影响,但不能基于它编辑后重放(会送出残缺报文)
   requestPartial?: boolean
+  // 响应报文同理:只影响展示,不影响重放
+  responsePartial?: boolean
 }
 
 // 企业目录(ENT → 数据库账号)。
