@@ -10,7 +10,7 @@ import (
 // 这里直接拿 SqlplusCmd / KbCmd 的真实产出当输入,而不是手写样例:手写的会跟实现漂移,
 // 而这两个构造器正是口令出现在命令行里的唯一两条路。
 func TestRedactCmd(t *testing.T) {
-	ora, err := SqlplusCmd("36", "/u2/oracle/product/19.0.0/dbhome_1/bin/sqlplus",
+	ora, err := SqlplusCmd("36", "", "/u2/oracle/product/19.0.0/dbhome_1/bin/sqlplus",
 		"dsdemo/Secret123@//10.0.0.5:1521/t35prd", 0)
 	if err != nil {
 		t.Fatalf("SqlplusCmd: %v", err)

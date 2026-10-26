@@ -40,6 +40,10 @@ func ZoneTNSName(zone string) string {
 // reToolPath 服务器上工具(sqlplus/ksql)的绝对路径白名单
 var reToolPath = regexp.MustCompile(`^[A-Za-z0-9_./-]{1,200}$`)
 
+// reOracleHome ORACLE_HOME 白名单:必须是绝对路径,且不含引号/空白/元字符 ——
+// 它会原样拼进远端脚本(见 SqlplusCmd)。
+var reOracleHome = regexp.MustCompile(`^/[A-Za-z0-9_./-]{1,200}$`)
+
 // shQuote 单引号包裹并把内部的单引号按 POSIX 惯例闭合-转义-重开。
 // 凡是要作为"一个词"交给 shell 的值都走它。
 func shQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
@@ -67,14 +71,42 @@ func ChenvCmd(zone string) (string, error) {
 	return fmt.Sprintf("source /u3/pub/bin/chenv %s >/dev/null 2>&1", zone), nil
 }
 
-// probeDBEnv 在服务器上探测 ORACLE_HOME / sqlplus / TWO_TASK(chenv zone 后)
+// sqlplusFind 是「找 Oracle 客户端」的脚本片段(chenv 之后执行)。
+//
+// 为什么不能只靠 `command -v sqlplus` + `$ORACLE_HOME`:实测某客户的 /u1 安装
+// (2026-10)chenv 只设 DGENV/CUST/TOPIND,既没有 ORACLE_HOME 也不把
+// $ORACLE_HOME/bin 放进 PATH,机器上却有 /u2/oracle/product/19.0.0/dbhome_1/bin/sqlplus。
+// 只靠 PATH 的结果是 `bash: line 0: exec: sqlplus: not found`(status 127);
+// 而 sqlplus 本身又必须带 ORACLE_HOME 才能启动(否则 SP2-0750 / SP2-0667)。
+// 所以这里把**两样**都探出来:sqlplus 的绝对路径,以及由它反推的 ORACLE_HOME。
+const sqlplusFind = `
+SQLP=$(command -v sqlplus 2>/dev/null)
+if [ -n "$SQLP" ]; then SQLP=$(readlink -f "$SQLP" 2>/dev/null || printf %s "$SQLP"); fi
+if [ -z "$SQLP" ] && [ -n "$ORACLE_HOME" ] && [ -x "$ORACLE_HOME/bin/sqlplus" ]; then SQLP=$ORACLE_HOME/bin/sqlplus; fi
+if [ -z "$SQLP" ]; then
+  for h in "$ORACLE_HOME" /u2/oracle/product/*/dbhome_* /u1/app/oracle/product/*/dbhome_* /u1/oracle/product/*/dbhome_* /u3/oracle/product/*/dbhome_* /oracle/product/*/dbhome_* /opt/oracle/product/*/dbhome_*; do
+    if [ -x "$h/bin/sqlplus" ]; then SQLP=$h/bin/sqlplus; break; fi
+  done
+fi
+if [ -z "$SQLP" ]; then
+  SQLP=$(find /u2 /u1 /u3 /oracle /opt /home -maxdepth 8 -name sqlplus -type f 2>/dev/null | head -1)
+fi
+OH=$ORACLE_HOME
+if [ -n "$SQLP" ] && { [ -z "$OH" ] || [ ! -x "$OH/bin/sqlplus" ]; }; then OH=$(dirname "$(dirname "$SQLP")"); fi
+echo ORA=$OH
+echo SQLP=$SQLP
+`
+
+// probeDBEnv 在服务器上探测 ORACLE_HOME / sqlplus / TWO_TASK(chenv zone 后)。
+// 找不到 Oracle 客户端才算失败 —— 只认 chenv 是否加载过环境,会让
+// "/u3/pub/bin/chenv 不存在,但 /u2/oracle 下有客户端"的机器直接退化成裸 sqlplus。
 func ProbeDBEnv(conn *SSHConn, zone string) (map[string]string, error) {
 	cenv, err := ChenvCmd(zone)
 	if err != nil {
 		return nil, err
 	}
-	cmd := bashLC(fmt.Sprintf(`%s; echo ORA=$ORACLE_HOME; echo SQLP=$(command -v sqlplus); echo TNSADM=$TNS_ADMIN; echo TWOTASK=$TWO_TASK`, cenv))
-	out, err := conn.Output(cmd, 25*time.Second)
+	cmd := bashLC(fmt.Sprintf(`%s; %s; echo TNSADM=$TNS_ADMIN; echo TWOTASK=$TWO_TASK`, cenv, sqlplusFind))
+	out, err := conn.Output(cmd, 40*time.Second)
 	if err != nil && out == "" {
 		return nil, fmt.Errorf("探测数据库环境失败: %w", err)
 	}
@@ -84,8 +116,8 @@ func ProbeDBEnv(conn *SSHConn, zone string) (map[string]string, error) {
 			env[m[1]] = m[2]
 		}
 	}
-	if env["ORA"] == "" {
-		return nil, fmt.Errorf("未探测到 ORACLE_HOME(zone %s 环境未加载?)", zone)
+	if env["ORA"] == "" && env["SQLP"] == "" {
+		return nil, fmt.Errorf("未找到 Oracle 客户端(zone %s:chenv 未加载环境,常见安装路径下也没有 sqlplus)", zone)
 	}
 	return env, nil
 }
@@ -174,12 +206,19 @@ func KbCmd(ksqlPath, host, port, db, connStr string) (string, error) {
 // `echo "<SQL>" | sqlplus` 再整体套 `bash -lc '...'`:两层解析,第二层里 $()/反引号
 // 照常展开,一个引号就能把后面的 ; | 变成命令分隔符 —— 是完整的命令注入,不是理论风险。
 //
+// oracleHome 非空时先 export 它再 exec:sqlplus 没有 ORACLE_HOME 起不来
+// (SP2-0667/SP2-0750),而有些站点(见 sqlplusFind 的注释)的 chenv 根本不设它。
+// 路径来自探测,但仍过白名单 —— 它会原样拼进远端 shell。
+//
 // killAfterSec > 0 时套一层远端 `timeout -s TERM N`:Oracle 侧没有任何服务端超时机制,
 // 本地 SSH 层的超时又只是"不再等"、不杀进程(靠 sshd 回收,不确定),所以这一步是必须的。
-func SqlplusCmd(zone, sqlplusPath, connStr string, killAfterSec int) (string, error) {
+func SqlplusCmd(zone, oracleHome, sqlplusPath, connStr string, killAfterSec int) (string, error) {
 	env, err := ChenvCmd(zone)
 	if err != nil {
 		return "", err
+	}
+	if oracleHome != "" && !reOracleHome.MatchString(oracleHome) {
+		return "", fmt.Errorf("ORACLE_HOME 路径非法: %q", oracleHome)
 	}
 	p := sqlplusPath
 	if p == "" {
@@ -195,7 +234,13 @@ func SqlplusCmd(zone, sqlplusPath, connStr string, killAfterSec int) (string, er
 	if killAfterSec > 0 {
 		tool = fmt.Sprintf("timeout -s TERM %d %s", killAfterSec, p)
 	}
-	return bashLC(fmt.Sprintf("%s; exec %s -S %s", env, tool, shQuote(connStr))), nil
+	script := env + "; "
+	if oracleHome != "" {
+		// ${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH} 避免尾随冒号(那等于把当前目录塞进 ld 搜索路径)
+		script += fmt.Sprintf(`export ORACLE_HOME=%s; export PATH="$ORACLE_HOME/bin:$PATH"; export LD_LIBRARY_PATH="$ORACLE_HOME/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; `, oracleHome)
+	}
+	script += fmt.Sprintf("exec %s -S %s", tool, shQuote(connStr))
+	return bashLC(script), nil
 }
 
 // parseTNS 解析服务器 tnsnames.ora 里 TNS 别名的地址/服务(「从服务器获取」辅助用)
@@ -386,7 +431,14 @@ func VerifyDBAcct(req DBAccVerifyReq) error {
 			port = 1521
 		}
 		addr := net.JoinHostPort(host, strconv.Itoa(port)) + "/" + req.DBSvc
-		spCmdLine, serr := SqlplusCmd(zone, "", creds+"@//"+addr, 0)
+		// 与运行时同一条路:先探 sqlplus/ORACLE_HOME 再连 —— 否则"验证"按钮
+		// 在一台没把 Oracle 放进 PATH 的服务器上永远失败,而同步 ENT 也已失败,
+		// 用户看到的是两个不相干的错。
+		env, perr := ProbeDBEnv(conn, zone)
+		if perr != nil {
+			return perr
+		}
+		spCmdLine, serr := SqlplusCmd(zone, env["ORA"], env["SQLP"], creds+"@//"+addr, 0)
 		if serr != nil {
 			return serr
 		}

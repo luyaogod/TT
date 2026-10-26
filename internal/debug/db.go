@@ -57,10 +57,11 @@ var (
 
 // dbRun 服务器侧数据库执行上下文:绑定一条显式连接 + 服务器工具路径。
 type dbRun struct {
-	conn *dbconfig.Connection // 显式连接(host/port/service|database/accounts/sqlplus…);nil=未挂库
-	zone string               // 服务器登录区域(chenv 环境前缀)
-	ksql string               // kingbase: ksql 绝对路径(探测缓存)
-	oraT string               // oracle: sqlplus 路径(conn.Sqlplus 或探测;空=PATH 找)
+	conn    *dbconfig.Connection // 显式连接(host/port/service|database/accounts/sqlplus…);nil=未挂库
+	zone    string               // 服务器登录区域(chenv 环境前缀)
+	ksql    string               // kingbase: ksql 绝对路径(探测缓存)
+	oraT    string               // oracle: sqlplus 绝对路径(探测;空=PATH 找)
+	oraHome string               // oracle: ORACLE_HOME(由 sqlplus 反推;sqlplus 没它起不来)
 }
 
 // connAddrOracle 返回 oracle 显式地址 host:port/service(EZCONNECT 用)
@@ -93,9 +94,10 @@ func acctConnStr(c *dbconfig.Connection, account string) string {
 // 接口日志这类"每次点击都查一次库"的路径上,省掉这次探测是最大的一笔开销。
 // 与 Manager.envCache 同风格:互斥 + TTL;只缓存探测成功的路径(失败不缓存,下次重试)。
 type dbProbeEntry struct {
-	oraT string // Oracle:sqlplus 绝对路径
-	ksql string // 金仓:ksql 绝对路径
-	at   time.Time
+	oraT    string // Oracle:sqlplus 绝对路径
+	oraHome string // Oracle:ORACLE_HOME
+	ksql    string // 金仓:ksql 绝对路径
+	at      time.Time
 }
 
 var (
@@ -114,7 +116,7 @@ func resolveDBRun(sshConn *host.SSHConn, cfg *Config) (*dbRun, error) {
 	key := cc.Host + "|" + cc.User + "|" + cfg.Zone + "|" + cfg.DB.Type
 	dbProbeMu.Lock()
 	if e, ok := dbProbeCache[key]; ok && time.Since(e.at) < dbProbeTTL {
-		d.ksql, d.oraT = e.ksql, e.oraT
+		d.ksql, d.oraT, d.oraHome = e.ksql, e.oraT, e.oraHome
 		dbProbeMu.Unlock()
 		return d, nil
 	}
@@ -127,20 +129,22 @@ func resolveDBRun(sshConn *host.SSHConn, cfg *Config) (*dbRun, error) {
 			return nil, err
 		}
 	} else {
-		// oracle:sqlplus 路径一律自动探测(chenv zone 后 command -v;失败留空由 PATH 兜底)
+		// oracle:sqlplus 路径与 ORACLE_HOME 一律自动探测(chenv zone 后先找 PATH,
+		// 再按常见 Oracle 安装根找 —— 见 host.ProbeDBEnv 的 sqlplusFind)。
 		zone := cfg.Zone
 		if zone == "" {
 			zone = "36"
 		}
-		if env, e := host.ProbeDBEnv(sshConn, zone); e == nil {
-			d.oraT = env["SQLP"]
-		} else {
-			// 探测失败:本次按 PATH 兜底,且不写缓存(下次重试,避免把偶发失败固化 10 分钟)
-			return d, nil
+		env, e := host.ProbeDBEnv(sshConn, zone)
+		if e != nil {
+			// 探测不到客户端就没有"PATH 兜底"可退:裸 sqlplus 只会得到
+			// `exec: sqlplus: not found`(status 127),把真正的原因盖掉。
+			return nil, fmt.Errorf("服务器侧 Oracle 环境不可用(%s): %w", sshConn.Cfg().Host, e)
 		}
+		d.oraT, d.oraHome = env["SQLP"], env["ORA"]
 	}
 	dbProbeMu.Lock()
-	dbProbeCache[key] = dbProbeEntry{oraT: d.oraT, ksql: d.ksql, at: time.Now()}
+	dbProbeCache[key] = dbProbeEntry{oraT: d.oraT, oraHome: d.oraHome, ksql: d.ksql, at: time.Now()}
 	dbProbeMu.Unlock()
 	return d, nil
 }
@@ -190,7 +194,7 @@ func (d *dbRun) exec(conn *host.SSHConn, connStr, oracleSQL, kbSQL string, timeo
 		}
 		return conn.OutputStdin(cmd, []byte(kbSQL), timeout)
 	}
-	cmd, err := host.SqlplusCmd(d.zone, d.oraT, connStr, 0)
+	cmd, err := host.SqlplusCmd(d.zone, d.oraHome, d.oraT, connStr, 0)
 	if err != nil {
 		return "", err
 	}
@@ -331,10 +335,11 @@ func ProbeDB(cfg *Config, ent int, opt EntListOpt) (*DBReport, error) {
 		report.Env = map[string]string{"ksql": d.ksql, "host": h, "port": p, "database": db}
 	} else {
 		report.Env = map[string]string{
-			"host":    cfg.DB.Host,
-			"port":    strconv.Itoa(cfg.DB.Port),
-			"service": cfg.DB.Svc(),
-			"sqlplus": d.oraT,
+			"host":       cfg.DB.Host,
+			"port":       strconv.Itoa(cfg.DB.Port),
+			"service":    cfg.DB.Svc(),
+			"sqlplus":    d.oraT,
+			"oracleHome": d.oraHome,
 		}
 	}
 	opt.Ent = ent // 让报告里的"当前企业"与请求一致
