@@ -178,7 +178,7 @@ func (m *Manager) RunReadonlyQuery(conn *host.SSHConn, req ReadonlyQueryReq) (*D
 		}
 		// 远端 timeout 比本地早一点动手:这样能拿到"被服务端终止"这个明确结论,
 		// 而不是本地超时后只剩一句笼统的"命令超时"
-		cmd, err := host.SqlplusCmd(d.zone, d.oraT, connStr, timeout)
+		cmd, err := host.SqlplusCmd(d.zone, d.oraHome, d.oraT, connStr, timeout)
 		if err != nil {
 			return nil, err
 		}

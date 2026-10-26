@@ -120,7 +120,7 @@ func TestChenvCmdRejectsInjection(t *testing.T) {
 // 这里用"把一段 SQL 当连接串传进去"来模拟最坏情况:它必须被完整引用住。
 func TestSqlplusCmdHasNoSqlAndQuotesValues(t *testing.T) {
 	nasty := "ds/p'; id; echo 'x@//h:1521/s"
-	cmd, err := SqlplusCmd("36", "/u2/oracle/bin/sqlplus", nasty, 30)
+	cmd, err := SqlplusCmd("36", "", "/u2/oracle/bin/sqlplus", nasty, 30)
 	if err != nil {
 		t.Fatalf("不该报错: %v", err)
 	}
@@ -140,22 +140,62 @@ func TestSqlplusCmdHasNoSqlAndQuotesValues(t *testing.T) {
 }
 
 func TestSqlplusCmdRejectsBadInputs(t *testing.T) {
-	if _, err := SqlplusCmd("36; id", "/u2/bin/sqlplus", "ds/x", 0); err == nil {
+	if _, err := SqlplusCmd("36; id", "", "/u2/bin/sqlplus", "ds/x", 0); err == nil {
 		t.Error("非法 zone 应被拒绝")
 	}
-	if _, err := SqlplusCmd("36", "/u2/bin/sqlplus; id", "ds/x", 0); err == nil {
+	if _, err := SqlplusCmd("36", "", "/u2/bin/sqlplus; id", "ds/x", 0); err == nil {
 		t.Error("非法工具路径应被拒绝")
 	}
-	if _, err := SqlplusCmd("36", "/u2/bin/sqlplus", "ds/x\nid", 0); err == nil {
+	if _, err := SqlplusCmd("36", "", "/u2/bin/sqlplus", "ds/x\nid", 0); err == nil {
 		t.Error("连接串含换行应被拒绝")
 	}
+	// ORACLE_HOME 会原样拼进远端脚本,相对路径/元字符/空白一律拒绝
+	for _, oh := range []string{"/u2/oracle; id", "/u2/oracle home", "u2/oracle", "/u2/oracle/../x`id`", "/u2/oracle/$HOME"} {
+		if _, err := SqlplusCmd("36", oh, "/u2/bin/sqlplus", "ds/x", 0); err == nil {
+			t.Errorf("非法 ORACLE_HOME %q 应被拒绝", oh)
+		}
+	}
 	// killAfterSec=0 时不套 timeout
-	cmd, err := SqlplusCmd("36", "/u2/bin/sqlplus", "ds/x@//h:1521/s", 0)
+	cmd, err := SqlplusCmd("36", "", "/u2/bin/sqlplus", "ds/x@//h:1521/s", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(cmd, "timeout") {
 		t.Errorf("未要求超时包装却出现了 timeout: %s", cmd)
+	}
+}
+
+// 有的站点 sqlplus 不在 PATH、chenv 也不设 ORACLE_HOME(实测 /u1 安装):
+// 命令必须把探测到的 ORACLE_HOME 显式 export 出去,否则 sqlplus 起不来
+// (SP2-0667/SP2-0750),而只靠 PATH 会得到 status 127。
+func TestSqlplusCmdExportsOracleHome(t *testing.T) {
+	const home = "/u2/oracle/product/19.0.0/dbhome_1"
+	const connStr = "ds/x@//h:1521/s"
+	cmd, err := SqlplusCmd("36", home, home+"/bin/sqlplus", connStr, 0)
+	if err != nil {
+		t.Fatalf("不该报错: %v", err)
+	}
+	// 命令整体经 bashLC 包过一层,连接串里的单引号已按 POSIX 惯例转义 —— 断言用同一份转义。
+	quoted := strings.ReplaceAll(shQuote(connStr), "'", `'\''`)
+	for _, want := range []string{
+		"export ORACLE_HOME=" + home,
+		`export PATH="$ORACLE_HOME/bin:$PATH"`,
+		"exec " + home + "/bin/sqlplus -S " + quoted,
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("命令里缺少 %q\n得到: %s", want, cmd)
+		}
+	}
+	// 没探到 ORACLE_HOME 时不该凭空 export,保留 chenv 的 PATH 兜底
+	cmd, err = SqlplusCmd("36", "", "", connStr, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(cmd, "ORACLE_HOME") {
+		t.Errorf("ORACLE_HOME 为空时不该 export: %s", cmd)
+	}
+	if !strings.Contains(cmd, "exec sqlplus -S "+quoted) {
+		t.Errorf("路径为空时应回退 PATH 上的 sqlplus: %s", cmd)
 	}
 }
 
