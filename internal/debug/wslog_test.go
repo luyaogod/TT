@@ -214,6 +214,116 @@ func TestWSLogAcctFor(t *testing.T) {
 	}
 }
 
+// parseWSLogChunks 的表驱动单测。分块读 CLOB 的关键不在"读多少",而在**块边界**:
+// sqlplus 会裁行尾空格、并在每条语句后多打一个空行,所以每块的值都以 STX 结尾;
+// 解析必须去掉哨兵、保留块内换行与块尾空格,块数还要能对上。
+func TestParseWSLogChunks(t *testing.T) {
+	cases := []struct {
+		name             string
+		out              string
+		wantReq, wantRsp string
+		wantReqN         int
+	}{
+		{
+			name:     "单块",
+			out:      "@@TTCHUNK:req:0@@\n{\n  \"a\": 1\n}\x02\n\n",
+			wantReq:  "{\n  \"a\": 1\n}",
+			wantReqN: 1,
+		},
+		{
+			name:     "两块在同一行内续接:块边界不引入换行",
+			out:      "@@TTCHUNK:req:0@@\nabc\x02\n\n@@TTCHUNK:req:1@@\ndef\x02\n\n",
+			wantReq:  "abcdef",
+			wantReqN: 2,
+		},
+		{
+			name:     "块本身以换行结尾:保留报文自己的换行",
+			out:      "@@TTCHUNK:req:0@@\na\n\x02\n\n@@TTCHUNK:req:1@@\nb\x02\n\n",
+			wantReq:  "a\nb",
+			wantReqN: 2,
+		},
+		{
+			name:     "块边界落在缩进中间:块尾空格不能被吃掉",
+			out:      "@@TTCHUNK:req:0@@\n{\n    \x02\n\n@@TTCHUNK:req:1@@\n    \"a\": 1\n}\x02\n\n",
+			wantReq:  "{\n        \"a\": 1\n}",
+			wantReqN: 2,
+		},
+		{
+			name:     "请求/响应分开,各自多块",
+			out:      "@@TTCHUNK:req:0@@\n<re\x02\n\n@@TTCHUNK:req:1@@\nq/>\x02\n\n@@TTCHUNK:rsp:0@@\n<rs\x02\n\n@@TTCHUNK:rsp:1@@\np/>\x02\n\n",
+			wantReq:  "<req/>",
+			wantRsp:  "<rsp/>",
+			wantReqN: 2,
+		},
+		{
+			name:     "第一个块之前是 sqlplus 噪声:一律不算内容",
+			out:      "set echo off\n\n@@TTCHUNK:req:0@@\nX\x02\n\n",
+			wantReq:  "X",
+			wantReqN: 1,
+		},
+		{
+			name:     "CRLF 行尾",
+			out:      "@@TTCHUNK:req:0@@\r\nA\r\nB\x02\r\n\r\n",
+			wantReq:  "A\nB",
+			wantReqN: 1,
+		},
+		{
+			name:     "空输出",
+			out:      "",
+			wantReq:  "",
+			wantRsp:  "",
+			wantReqN: 0,
+		},
+	}
+	for _, c := range cases {
+		req, rsp, reqN, rspN := parseWSLogChunks(c.out)
+		if req != c.wantReq {
+			t.Errorf("[%s] 请求 = %q, 期望 %q", c.name, req, c.wantReq)
+		}
+		if rsp != c.wantRsp {
+			t.Errorf("[%s] 响应 = %q, 期望 %q", c.name, rsp, c.wantRsp)
+		}
+		if reqN != c.wantReqN {
+			t.Errorf("[%s] 请求块数 = %d, 期望 %d", c.name, reqN, c.wantReqN)
+		}
+		if c.wantRsp == "" && rspN != 0 {
+			t.Errorf("[%s] 响应块数 = %d, 期望 0", c.name, rspN)
+		}
+	}
+}
+
+// wslogChunkCount:块数要能整除向上取整,调用方用它判断"有没有块没读到"。
+func TestWSLogChunkCount(t *testing.T) {
+	cases := []struct{ n, want int }{{0, 0}, {1, 1}, {2000, 1}, {2001, 2}, {3967, 2}, {4000, 2}, {4001, 3}}
+	for _, c := range cases {
+		if got := wslogChunkCount(c.n); got != c.want {
+			t.Errorf("wslogChunkCount(%d) = %d, 期望 %d", c.n, got, c.want)
+		}
+	}
+}
+
+// parseWSLogClobLengths:只认 "数字|数字" 那一行,sqlplus 的回显/空行/报错都不该被当成长度。
+func TestParseWSLogClobLengths(t *testing.T) {
+	cases := []struct {
+		name    string
+		out     string
+		wantReq int
+		wantRsp int
+	}{
+		{"正常", "set heading off\n4007|1035\n", 4007, 1035},
+		{"前面有空行", "\n\n3967|719\n", 3967, 719},
+		{"没有入库", "0|0\n", 0, 0},
+		{"报错行", "ORA-00942: table or view does not exist\n", 0, 0},
+		{"空输出", "", 0, 0},
+	}
+	for _, c := range cases {
+		req, rsp := parseWSLogClobLengths(c.out)
+		if req != c.wantReq || rsp != c.wantRsp {
+			t.Errorf("[%s] 得到 %d|%d, 期望 %d|%d", c.name, req, rsp, c.wantReq, c.wantRsp)
+		}
+	}
+}
+
 // 数据库报错行不能只认 ORA-:金仓报的是 `ERROR: relation "wsfa_t" does not exist`,
 // 漏掉它会让"表不存在"被静默当成"这段时间没有日志"。
 // 反过来也要挡住:数据行里的报文字段本身可能带 ORA- 字样,那不该让整次查询失败。

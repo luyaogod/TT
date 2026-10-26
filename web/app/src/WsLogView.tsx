@@ -747,7 +747,7 @@ export function WsLogView() {
                   onClick={() => void replayDebug(sel, reqDirty ? reqDraft : undefined, entRef.current || undefined)}
                   disabled={reqDirty && !!content?.requestPartial}
                   title={reqDirty && content?.requestPartial
-                    ? '入参内容不完整(被截断或只剩入库前 2000 字符),不能基于它重放'
+                    ? '入参内容不完整(超过读取上限被截断,或未完整入库),不能基于它重放'
                     : reqDirty
                       ? '用上面编辑器里改过的入参重放此接口调用'
                       : '用该日志的原始报文重放此接口调用(T100 r.dg 同款;现有会话会自动收口)'}
@@ -789,7 +789,12 @@ export function WsLogView() {
               {/* 内容不完整时点明:按原报文重放没问题,但不能在编辑器里改完再重放 */}
               {tab === 'request' && content?.requestPartial && (
                 <div className="shrink-0 border-b border-border bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-600 dark:text-amber-400">
-                  入参内容不完整(超过读取上限被截断,或源文件已清理只剩入库前 2000 字符):可以按原报文重放,但不能用修改后的入参重放。
+                  入参内容不完整(超过读取上限被截断,或源文件已清理且未完整入库):可以按原报文重放,但不能用修改后的入参重放。
+                </div>
+              )}
+              {tab === 'response' && content?.responsePartial && (
+                <div className="shrink-0 border-b border-border bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-600 dark:text-amber-400">
+                  响应报文不完整(超过读取上限被截断,或未完整入库),仅供查看。
                 </div>
               )}
               {/* 基本信息是普通内容流,需要外层滚动;报文页交给 Monaco 自己滚(嵌套滚动容器会出多余滚动条) */}

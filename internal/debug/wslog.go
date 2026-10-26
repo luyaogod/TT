@@ -16,6 +16,7 @@ package debug
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -49,10 +50,33 @@ type WSLogItem struct {
 type WSLogContent struct {
 	Request  string `json:"request"`
 	Response string `json:"response"`
-	// RequestPartial 请求报文内容不完整(超过读取上限被截断,或源文件已清理只剩入库前 2000 字符)。
-	// 按原文件重放不受影响,但**基于该内容编辑后重放会送出残缺报文**,故界面据此禁用"用修改后的入参重放"。
+	// RequestPartial 请求报文内容不完整:读到了文件/入库文本的上限,或压根拿不到。
+	// **基于该内容编辑后重放会送出残缺报文**,故界面据此禁用"用修改后的入参重放"。
+	// 注意:内容里不再追加"(仅显示前 N 字符)"之类的说明 —— 那是报文文本,
+	// 源文件缺失时会被原样当成入参写回服务器。
 	RequestPartial bool `json:"requestPartial,omitempty"`
+	// ResponsePartial 响应报文同理(只影响展示,不影响重放)。
+	ResponsePartial bool `json:"responsePartial,omitempty"`
 }
+
+// 报文读取上限:文件按字节截,CLOB 回退按字符截(两者同量级)。
+// 超过上限的报文只读到这里,并把 *Partial 置真。
+const (
+	wslogFileMax    = 262144     // 报文文件单次读取上限(字节)
+	wslogPayloadMax = 256 * 1024 // CLOB 回退单份上限(字符)
+	// wslogClobChunk 一次从 CLOB 取多少字符。
+	// Oracle 的 dbms_lob.substr 单次最多 32767 字符,而 sqlplus 会按 linesize 折行;
+	// 取 2000 足够小,保证一个块自身不会被折断(块里的换行是报文自己的,原样保留)。
+	wslogClobChunk = 2000
+	// wslogChunkEnd 每块值的结束哨兵。sqlplus 会裁掉行尾空格,块边界正好落在缩进
+	// 中间时那几个空格会被静默吃掉;把哨兵拼在值末尾,行尾就不是空白了。
+	wslogChunkEnd = "\x02"
+)
+
+// reWSLogChunk 块分隔行:每块之前输出一行 @@TTCHUNK:<req|rsp>:<序号>@@。
+// 解析时按它切块 —— 块内(报文自己的)换行原样保留,而 sqlplus 在块尾补的那一个
+// 换行会被按行切分吃掉,不会混进报文。
+var reWSLogChunk = regexp.MustCompile(`^@@TTCHUNK:(req|rsp):[0-9]+@@$`)
 
 // reRowid 行标识白名单(拼 SQL 防注入):Oracle rowid / 金仓 ctid「(页,元组)」
 var reRowid = regexp.MustCompile(`^(\([0-9]+,[0-9]+\)|[A-Za-z0-9./]{1,20})$`)
@@ -340,7 +364,7 @@ from wsfa_t wsfa where rowid='%s';`, sqlWSLogCols(false), rowid)
 	//    两个文件共用一个 SFTP 通道并发读:此前是"每文件各开一次 SFTP 子通道 + 串行",
 	//    每次都要一次子系统握手;pkg/sftp 的 Client 明确支持多 goroutine 并发(内部请求 id 多路复用),
 	//    但不可与 Close 并发,故先 Wait 再 Close。
-	//    返回值第二个布尔 = 是否被 262144 上限截断(界面要据此禁用"改后重放")。
+	//    返回值第二个布尔 = 是否被 wslogFileMax 上限截断(界面要据此禁用"改后重放")。
 	readFile := func(s *sftp.Client, path string) (string, bool) {
 		if path == "" {
 			return "", false
@@ -354,7 +378,7 @@ from wsfa_t wsfa where rowid='%s';`, sqlWSLogCols(false), rowid)
 		if st, e := f.Stat(); e == nil {
 			size = st.Size()
 		}
-		buf := make([]byte, 262144)
+		buf := make([]byte, wslogFileMax)
 		n, _ := f.Read(buf) // File.Read 内部会循环填满缓冲区(或到 EOF),无需自己重试
 		return string(buf[:n]), size > int64(n)
 	}
@@ -369,67 +393,201 @@ from wsfa_t wsfa where rowid='%s';`, sqlWSLogCols(false), rowid)
 			s.Close()
 		}
 	}
-	_ = rspTrunc
 
-	// 2) 文件已被清理 → 回退 CLOB(Oracle 用 dbms_lob.substr 分段规避 ORA-06502;
-	//    金仓 text 列直接 substr,ksql 原样输出)
+	// 2) 文件已被清理 → 回退 CLOB。整份读,不再只取前 2000 字符:
+	//    wsfa010/011 存的就是报文全文(只有超过入库上限时才不存),此前固定截 2000,
+	//    3~4KB 的正常报文也被判成"不完整",界面因此禁用"改后重放"。
+	//    现在按 wslogClobChunk 分块取(块之间用 @@TTCHUNK:…@@ 行分隔),直到 wslogPayloadMax。
 	if content.Request == "" || content.Response == "" {
-		var clobOut string
-		if dbc.conn.Type == "kingbase" {
-			sql := fmt.Sprintf(`select '<<<REQ>>>' from wsfa_t where ctid='%s' union all select coalesce(substr(wsfa010,1,2000),' ') from wsfa_t where ctid='%s' union all select '<<<RSP>>>' from wsfa_t where ctid='%s' union all select coalesce(substr(wsfa011,1,2000),' ') from wsfa_t where ctid='%s'`, rowid, rowid, rowid, rowid)
-			clobOut, _ = dbc.exec(conn, connStr, "", sql, 60*time.Second)
-		} else {
-			clobSQL := fmt.Sprintf(`set heading off
-set feedback off
-set trimspool on
-set linesize 32767
-set long 30000
-set longchunksize 10000
-select '<<<REQ>>>' from wsfa_t where rowid='%s';
-select dbms_lob.substr(wsfa010,2000,1) from wsfa_t where rowid='%s' and wsfa010 is not null;
-select '<<<RSP>>>' from wsfa_t where rowid='%s';
-select dbms_lob.substr(wsfa011,2000,1) from wsfa_t where rowid='%s' and wsfa011 is not null;`,
-				rowid, rowid, rowid, rowid)
-			clobOut, _ = dbc.exec(conn, connStr, clobSQL, "", 60*time.Second)
-		}
-		sec := ""
-		var reqLines, rspLines []string
-		for _, ln := range strings.Split(clobOut, "\n") {
-			ln = strings.TrimRight(ln, " \r")
-			switch strings.TrimSpace(ln) {
-			case "<<<REQ>>>":
-				sec = "req"
-				continue
-			case "<<<RSP>>>":
-				sec = "rsp"
-				continue
+		reqLen, rspLen := wslogClobLengths(conn, dbc, connStr, item.RowID)
+		if reqLen > 0 || rspLen > 0 {
+			req, rsp, reqCut, rspCut, e := readWSLogClobs(conn, dbc, connStr, item.RowID,
+				content.Request == "", reqLen, content.Response == "", rspLen)
+			if e != nil {
+				// 读失败不等于"没有报文":内容留空、partial 置真,界面会明确标不完整
+				if content.Request == "" {
+					reqTrunc = true
+				}
+				if content.Response == "" {
+					rspTrunc = true
+				}
+			} else {
+				if content.Request == "" && reqLen > 0 {
+					content.Request, reqTrunc = req, reqCut || req == ""
+				}
+				if content.Response == "" && rspLen > 0 {
+					content.Response, rspTrunc = rsp, rspCut || rsp == ""
+				}
 			}
-			if ln == "" || strings.HasPrefix(ln, "GLOBAL_NAME") || strings.Contains(ln, "rows selected") || strings.Contains(ln, "row selected") || strings.Contains(ln, "SQL>") || strings.Contains(ln, "PL/SQL") ||
-				strings.Contains(ln, "dbms_lob") || strings.HasPrefix(ln, "select ") || strings.HasPrefix(ln, "ERROR at line") || strings.Contains(ln, "ORA-") {
-				continue // sqlplus 会把 stdin 的 SQL 回显出来,一并过滤
-			}
-			switch sec {
-			case "req":
-				reqLines = append(reqLines, ln)
-			case "rsp":
-				rspLines = append(rspLines, ln)
-			}
-		}
-		if content.Request == "" && len(reqLines) > 0 {
-			content.Request = strings.Join(reqLines, "\n") + "\n(仅显示前 2000 字符,源文件已被清理)"
-			reqTrunc = true // CLOB 回退只取前 2000 字符:内容本身就是残缺的
-		}
-		if content.Response == "" && len(rspLines) > 0 {
-			content.Response = strings.Join(rspLines, "\n") + "\n(仅显示前 2000 字符,源文件已被清理)"
 		}
 	}
 
-	if content.Request == "" && content.Response == "" {
-		content.Request = "(报文已被清理:超过入库大小上限且源文件已不存在)"
-		reqTrunc = true // 占位文本不是可用入参
+	// 拿不到内容时不再塞占位文案:那段文字会被当成入参写回服务器(见 WriteReplayFiles)。
+	// 界面用空内容 + "不完整"横幅 + 空态提示三件事说清楚。
+	// 请求为空一定要标不完整(它不能被当成入参);响应为空不标 —— 有些调用本来就没有响应体。
+	if content.Request == "" {
+		reqTrunc = true
 	}
 	content.RequestPartial = reqTrunc
+	content.ResponsePartial = rspTrunc
 	return item, content, nil
+}
+
+// wslogClobLengths 取两份报文的入库长度(字符数);没入库的返回 0。
+// 查不到/查询失败一律当 0 —— 调用方会落到"没有报文"的路径,不会凭空造内容。
+func wslogClobLengths(conn *host.SSHConn, dbc *dbRun, connStr, rowid string) (reqLen, rspLen int) {
+	var out string
+	var err error
+	if dbc.conn.Type == "kingbase" {
+		sql := fmt.Sprintf(`select coalesce(length(wsfa010),0)||'|'||coalesce(length(wsfa011),0) from wsfa_t where ctid='%s'`, rowid)
+		out, err = dbc.exec(conn, connStr, "", sql, 30*time.Second)
+	} else {
+		sql := fmt.Sprintf(`set heading off
+set feedback off
+set pagesize 0
+set trimspool on
+select nvl(length(wsfa010),0)||'|'||nvl(length(wsfa011),0) from wsfa_t where rowid='%s';`, rowid)
+		out, err = dbc.exec(conn, connStr, sql, "", 30*time.Second)
+	}
+	if err != nil {
+		return 0, 0
+	}
+	return parseWSLogClobLengths(out)
+}
+
+// parseWSLogClobLengths 解析 "请求长度|响应长度" 那一行(纯函数,便于单测)。
+func parseWSLogClobLengths(out string) (int, int) {
+	for _, ln := range strings.Split(out, "\n") {
+		parts := strings.Split(strings.TrimSpace(ln), "|")
+		if len(parts) != 2 {
+			continue
+		}
+		a, e1 := strconv.Atoi(strings.TrimSpace(parts[0]))
+		b, e2 := strconv.Atoi(strings.TrimSpace(parts[1]))
+		if e1 != nil || e2 != nil {
+			continue
+		}
+		return a, b
+	}
+	return 0, 0
+}
+
+// readWSLogClobs 按块读回入库的请求/响应报文。
+// needReq/needRsp 只有对应文件缺失、需要回退时才为真,避免白读一份。
+// 返回的 *cut 表示"库里还有更多,但已到 wslogPayloadMax 上限"。
+func readWSLogClobs(conn *host.SSHConn, dbc *dbRun, connStr, rowid string, needReq bool, reqLen int, needRsp bool, rspLen int) (req, rsp string, reqCut, rspCut bool, err error) {
+	reqN, rspN := reqLen, rspLen
+	if reqN > wslogPayloadMax {
+		reqN, reqCut = wslogPayloadMax, true
+	}
+	if rspN > wslogPayloadMax {
+		rspN, rspCut = wslogPayloadMax, true
+	}
+	if !needReq {
+		reqN = 0
+	}
+	if !needRsp {
+		rspN = 0
+	}
+	if reqN <= 0 && rspN <= 0 {
+		return "", "", reqCut, rspCut, nil
+	}
+	kingbase := dbc.conn.Type == "kingbase"
+	var b strings.Builder
+	emit := func(kind, col string, n int) {
+		for off := 0; off < n; off += wslogClobChunk {
+			size := wslogClobChunk
+			if off+size > n {
+				size = n - off
+			}
+			if kingbase {
+				fmt.Fprintf(&b, "select '@@TTCHUNK:%s:%d@@';\n", kind, off/wslogClobChunk)
+				fmt.Fprintf(&b, "select substr(%s,%d,%d)||chr(2) from wsfa_t where ctid='%s';\n", col, off+1, size, rowid)
+			} else {
+				fmt.Fprintf(&b, "select '@@TTCHUNK:%s:%d@@' from dual;\n", kind, off/wslogClobChunk)
+				// 末尾拼一个 STX 哨兵:块边界可能正好落在缩进中间,而 sqlplus 会裁掉
+				// 行尾空格(TRIMOUT/TRIMSPOOL),没有哨兵时那几个空格会被静默吃掉。
+				fmt.Fprintf(&b, "select dbms_lob.substr(%s,%d,%d)||chr(2) from wsfa_t where rowid='%s';\n", col, size, off+1, rowid)
+			}
+		}
+	}
+	if reqN > 0 {
+		emit("req", "wsfa010", reqN)
+	}
+	if rspN > 0 {
+		emit("rsp", "wsfa011", rspN)
+	}
+	var out string
+	if kingbase {
+		out, err = dbc.exec(conn, connStr, "", b.String(), 90*time.Second)
+	} else {
+		out, err = dbc.exec(conn, connStr, "set heading off\nset feedback off\nset pagesize 0\nset echo off\nset tab off\nset trimspool on\nset linesize 32767\n"+b.String(), "", 90*time.Second)
+	}
+	if err != nil {
+		return "", "", reqCut, rspCut, err
+	}
+	req, rsp, gotReq, gotRsp := parseWSLogChunks(out)
+	// 少了块 = 某条 select 没出力(报错/被裁),这份报文就是残缺的 —— 宁可标不完整,
+	// 也不能让界面把半份报文当成原文去重放。
+	if reqN > 0 && gotReq != wslogChunkCount(reqN) {
+		reqCut = true
+	}
+	if rspN > 0 && gotRsp != wslogChunkCount(rspN) {
+		rspCut = true
+	}
+	return req, rsp, reqCut, rspCut, nil
+}
+
+// parseWSLogChunks 把 @@TTCHUNK:<kind>:<n>@@ 分隔的输出切回报文(纯函数,便于单测)。
+// 每块的值以 STX(\x02) 结尾(见 readWSLogClobs 的 SQL):sqlplus 会在语句之后多打一个
+// 空行,靠"行尾哨兵"而不是"下一个 marker"来断块,块尾的空格/换行才不会被误删或误加。
+// 返回块数,调用方据此判断是否有块没读到。
+func parseWSLogChunks(out string) (req, rsp string, reqChunks, rspChunks int) {
+	var reqB, rspB strings.Builder
+	kind := ""
+	var lines []string
+	flush := func() {
+		if kind == "" {
+			return
+		}
+		text := strings.Join(lines, "\n")
+		if kind == "req" {
+			reqB.WriteString(text)
+			reqChunks++
+		} else {
+			rspB.WriteString(text)
+			rspChunks++
+		}
+		lines = lines[:0]
+	}
+	for _, ln := range strings.Split(out, "\n") {
+		ln = strings.TrimRight(ln, "\r")
+		if m := reWSLogChunk.FindStringSubmatch(ln); m != nil {
+			flush()
+			kind = m[1]
+			continue
+		}
+		if kind == "" {
+			continue // 第一个块之前 / 块结束之后的 sqlplus 噪声一律不算内容
+		}
+		if strings.HasSuffix(ln, wslogChunkEnd) {
+			lines = append(lines, strings.TrimSuffix(ln, wslogChunkEnd))
+			flush()
+			kind = "" // 本块到此为止;后面的空行是 sqlplus 的语句分隔行
+			continue
+		}
+		lines = append(lines, ln)
+	}
+	flush()
+	return reqB.String(), rspB.String(), reqChunks, rspChunks
+}
+
+// wslogChunkCount 读 n 个字符需要几个块。
+func wslogChunkCount(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	return (n + wslogClobChunk - 1) / wslogClobChunk
 }
 
 // maxReplayPayload 界面回传的入参上限(与接口测试同一量级;防止误把大文件塞进 argv 文件)
