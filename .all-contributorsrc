@@ -16,6 +16,15 @@
         "code",
         "doc"
       ]
+    },
+    {
+      "login": "songyuliang1",
+      "name": "songyuliang1",
+      "avatar_url": "https://avatars.githubusercontent.com/u/111861624?v=4",
+      "profile": "https://github.com/songyuliang1",
+      "contributions": [
+        "bug"
+      ]
     }
   ],
   "contributorsPerLine": 7,
