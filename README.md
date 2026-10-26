@@ -1,6 +1,6 @@
 # TT （T100 开发CLI）
 <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-2-orange.svg?style=flat-square)](#contributors-)
+[![All Contributors](https://img.shields.io/badge/all_contributors-3-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 TT 是用于开发鼎捷数智旗下的大型ERP系统（T100）所构建的CLI工具集
@@ -109,6 +109,7 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
     <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/liuwpa"><img src="https://avatars.githubusercontent.com/u/61258913?v=4?s=100" width="100px;" alt="liuwpa"/><br /><sub><b>liuwpa</b></sub></a><br /><a href="https://github.com/luyaogod/TT/commits?author=liuwpa" title="Code">💻</a> <a href="https://github.com/luyaogod/TT/commits?author=liuwpa" title="Documentation">📖</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/songyuliang1"><img src="https://avatars.githubusercontent.com/u/111861624?v=4?s=100" width="100px;" alt="songyuliang1"/><br /><sub><b>songyuliang1</b></sub></a><br /><a href="https://github.com/luyaogod/TT/issues?q=author%3Asongyuliang1" title="Bug reports">🐛</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Rainco"><img src="https://avatars.githubusercontent.com/u/211707777?v=4?s=100" width="100px;" alt="Rainco"/><br /><sub><b>Rainco</b></sub></a><br /><a href="https://github.com/luyaogod/TT/issues?q=author%3ARainco" title="Bug reports">🐛</a></td>
     </tr>
   </tbody>
 </table>
