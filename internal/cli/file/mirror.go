@@ -1,13 +1,14 @@
 package file
 
-// tt file mirror：离线镜像（source: 4gl/**/*.4gl；interface: 42f/42s）。
+// tt file mirror：离线镜像（source: 4gl/42f/42s/inc；interface: 42f/42s）。
 //
 //   mirror dir [<目录>]              查看/设置镜像根目录（config.json 顶层 mirror.dir）
 //   mirror pull [<环境>] [--full]    下载/更新该环境镜像（默认增量）
 //   mirror path [<环境>]             打印该环境镜像目录的绝对路径（AI 直接前往）
 //
 // 镜像根必须显式设置（不设默认），避免隐式落盘位置。目录结构与服务器同构：
-// <根>/<环境>/erp/... com/...（按 profile 只含 42f/42s，或 source 的 4gl/**/*.4gl）。
+// <根>/<环境>/erp/... com/...（source 含 4gl/**/*.4gl + 42f + 42s/zh_CN + *.inc，
+// interface 只含 42f/42s）。
 //
 // 它是“离线口子”：联网时 AI 用 tt file cat/grep 现读；断网时读这份子集。
 
@@ -31,11 +32,14 @@ func NewMirrorCmd() *cobra.Command {
 	var profile string
 	g := &cobra.Command{
 		Use:   "mirror",
-		Short: "管理 T100 本地镜像（source: 仅 4gl/**/*.4gl；interface: 42f/42s）",
+		Short: "管理 T100 本地镜像（source: 4gl/42f/42s/inc；interface: 只 42f/42s）",
 		Long: `把某环境（T100 服务器）的源码/界面文件镜像到本地目录。
-profile=source（默认）只取 4gl 目录下的 .4gl 文件（严格后缀匹配，不含 .4gl.src）。
-profile=interface 只取 42f/42s，供 tt interface 合成前端画面。
-4fd 不再镜像（设计期 fieldId 不稳定）。per/编译产物/其它语言等不拉；
+profile=source（默认）取四类：4gl 目录下的 .4gl 源码、42f（编译表单）、
+42s/zh_CN（编译字符串）、*.inc（4GL include）。**这四类都是本地命令的饭票**：
+tt outline 只认 4gl，tt interface 只认 42f/42s，而两者读的是同一个镜像目录。
+所以默认 profile 故意收全，不要为了省体积把它改窄（改窄只会让某个命令“找不到文件”）。
+profile=interface 只取 42f/42s，想只要画面时配一个独立目录用。
+4fd 不镜像（设计期 fieldId 不稳定）。per、其它语言目录、.4gl.src 等不拉；
 备份文件（*.bak/*.bck/*~）也排除。目录结构与服务器同构：<镜像目录>/erp/... com/...。
 每个环境可以单独指定镜像目录；未单独指定时回退到全局根目录/<环境名>。
 
@@ -51,8 +55,8 @@ profile=interface 只取 42f/42s，供 tt interface 合成前端画面。
 	dirCmd := newMirrorDirCmd()
 	pullCmd := newMirrorPullCmd(&full, &profile)
 	pathCmd := newMirrorPathCmd()
-	pullCmd.Flags().BoolVar(&full, "full", false, "全量重建（整目录替换，含删除服务器已不存在的文件）")
-	pullCmd.Flags().StringVar(&profile, "profile", "source", "镜像白名单：source(仅 4gl/**/*.4gl) | interface(42f/42s)")
+	pullCmd.Flags().BoolVar(&full, "full", false, "全量重建（本 profile 的白名单内以服务器为准，含删除服务器已不存在的文件）")
+	pullCmd.Flags().StringVar(&profile, "profile", "source", "镜像白名单：source(4gl+42f+42s+inc) | interface(只 42f/42s)")
 	g.AddCommand(dirCmd, pullCmd, pathCmd)
 	return g
 }
@@ -265,9 +269,12 @@ func newMirrorPullCmd(full *bool, profile *string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "pull [<环境>]",
 		Short: "下载/更新该环境镜像（默认增量；--full 全量重建）",
-		Long: `SSH 登录环境，按 profile 的白名单打包：source 只取 4gl 目录下的 .4gl 文件；interface 只取 42f/42s，供 tt interface 合成画面。
+		Long: `SSH 登录环境，按 profile 的白名单打包：source 取 4gl 目录下的 .4gl + 42f + 42s/zh_CN + *.inc；interface 只取 42f/42s，供 tt interface 合成画面。
 下载到该环境的镜像目录（环境单独指定，未指定则用全局根目录/<环境名>）。默认增量：
-服务器 marker 记录上次基线，只拉变更文件；--full 全量重建。切换 profile 时旧类型不会自动删除；要纯净目录就换目录或加 --full。白名单升级后，下次拉取会自动转全量以补齐新增类型。
+服务器标记**按 profile 分别记**，只拉各自自上次以来的变更文件；先拉 source 再拉 interface
+也能真的拉到 42f/42s（不会“无变更”空跑）。--full 全量重建：**只对本 profile 的白名单负责**，
+不属于它的既有文件（如给 interface 做全量时的 4gl/inc）原样保留。
+白名单升级后，下次拉取会自动转全量以补齐新增类型。
 
 打包根（$TOP）按登录区域动态探测；探测失败直接报错。`,
 		Example: `  tt file mirror pull --at 主机109

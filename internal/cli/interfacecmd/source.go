@@ -140,8 +140,16 @@ func resolveSources(opts sourceOpts) (*sourceInputs, error) {
 }
 
 // find42F 在环境镜像中找一个 <form>.42f；同名多模块时要求 --module。
+//
+// 找不到时分两种说：
+//   - 目录里**一个 .42f 也没有** → 不是名字拼错，是这份镜像没拉过画面这一类；
+//   - 目录里有 42f 但没有这个表单 → 名字/模块不对。
+//
+// 两者对应两种完全不同的动作，混成一句“表单不存在”会把人带到错方向（他会去改代码，
+// 而实际只是镜像没拉全）。
 func find42F(root, form, module string) (path, mod string, err error) {
 	var hits []string
+	sawAny42F := false
 	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return nil
@@ -153,6 +161,10 @@ func find42F(root, form, module string) (path, mod string, err error) {
 			}
 			return nil
 		}
+		if !strings.HasSuffix(strings.ToLower(d.Name()), ".42f") {
+			return nil
+		}
+		sawAny42F = true
 		if !strings.EqualFold(d.Name(), form+".42f") {
 			return nil
 		}
@@ -165,8 +177,12 @@ func find42F(root, form, module string) (path, mod string, err error) {
 	})
 	sort.Strings(hits)
 	if len(hits) == 0 {
+		if !sawAny42F {
+			return "", "", notFound("FORM_NOT_FOUND", 4, "镜像里没有任何 .42f（镜像: %s）", root).
+				WithHint("这份镜像没拉画面这一类。拉一次默认镜像即可（source 已含 42f/42s）：tt file mirror pull --at <环境>；或直接给 --42f <文件>")
+		}
 		return "", "", notFound("FORM_NOT_FOUND", 4, "没有找到 %s.42f（镜像: %s）", form, root).
-			WithHint("确认表单名；同名多个模块时加 --module；新镜像先 tt file mirror pull --at <环境> --profile interface")
+			WithHint("镜像里有别的 42f，所以是名字/模块不对：确认表单名；同名多个模块时加 --module（镜像里有 42f 说明 profile 没问题）")
 	}
 	if len(hits) > 1 {
 		return "", "", output.Errorf("FORM_AMBIGUOUS", 2,
