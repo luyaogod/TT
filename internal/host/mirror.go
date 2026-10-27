@@ -2,10 +2,19 @@ package host
 
 // 本地源码镜像引擎:把某环境(T100 服务器)的源码拉到本地镜像目录。
 //
-// 两个 profile 的白名单严格分开：
-//   - source（默认）：只取 4gl 目录下后缀为 .4gl 的文件；
-//     .4gl.src、.4gltest、.str、.42s、脚本、备份和 4gl 里的其它文件都不取；
-//   - interface：只取 42f 与 42s/zh_CN（供 tt interface 合成画面）。
+// 两个 profile 的白名单：
+//   - source（默认）：4gl 目录下后缀为 .4gl 的源码 + 42f（编译表单）+
+//     42s/zh_CN（编译字符串）+ *.inc（4GL include）；
+//     .4gl.src、.4gltest、.str、per、其它语言目录和备份都不取；
+//   - interface：只取 42f 与 42s/zh_CN（供 tt interface 合成画面；只想省体积时
+//     用它配一个独立目录，不要和 source 混在同一个目录里）。
+//
+// **默认 profile 必须是“所有读者的并集”**：一个环境只有一个镜像目录，而
+// tt outline 只认 4gl、tt interface 只认 42f/42s，两者读的都是这个目录。少收一类
+// 就等于让某个命令静默断粮（命令只会报“找不到文件”，看起来像文件不存在）。
+// *.inc 没有命令直接读，它服务的是“人/AI 离线读码”（全局变量、共用参数），
+// 缺了同样不报错 —— 这类静默缺口正是最该避免的。
+//
 // 4fd 是设计期字段描述，fieldId 会随保存重排，两个 profile 都不取。
 // 备份/临时文件(x.4gl.bak、x.bck、x.bck1、*~ 等)不拉,并会清理本地残留。
 //
@@ -55,7 +64,7 @@ func (p MirrorProfile) Label() string {
 	if p == MirrorInterface {
 		return "42f/42s"
 	}
-	return "4gl/*.4gl"
+	return "4gl/42f/42s/inc"
 }
 
 // MirrorStats 一次镜像拉取的统计结果(CLI 打印用)。
@@ -83,6 +92,21 @@ func mirrorTag(name string) string {
 	return fmt.Sprintf("%x", sum)[:10]
 }
 
+// mirrorBase 服务器侧 marker / 归档文件的基础路径(不带 .mark/.tar.gz 后缀)。
+//
+// **带 profile**：服务器上“上次打包到哪个时刻”的记录必须按 profile 分开。否则先用
+// source 拉一次、再按 interface 拉时，`find -newer <marker>` 会把 42f/42s 全当成
+// 老文件排除掉 —— 打包 0 个文件、还报“无变更”，用户在界面上看到的是成功。
+//
+// v4 及更早的版本用的是 `<TOP>/.tdict-mirror-<tag>`。升到带 profile 的命名后，旧
+// marker 文件会留在服务器上不被引用（不自动删：那是别人的文件，且删了也没收益）。
+func mirrorBase(top, envName string, profile MirrorProfile) string {
+	if profile == "" {
+		profile = MirrorSource
+	}
+	return top + "/.tdict-mirror-" + mirrorTag(envName) + "-" + string(profile)
+}
+
 // MirrorProgress 拉取过程的进度(Web 进度条用;CLI 传 nil 回调即无进度)。
 type MirrorProgress struct {
 	Phase   string // connect|probe|pack|download|done
@@ -95,7 +119,7 @@ type MirrorProgress struct {
 // ProgressFunc 进度回调(可能被多次调用,实现需自行加锁)。
 type ProgressFunc func(MirrorProgress)
 
-// MirrorPull 拉取/更新指定环境(NamedSsh)的 source 镜像(4gl/**/*.4gl)到 mirrorDir/<环境名>/。
+// MirrorPull 拉取/更新指定环境(NamedSsh)的 source 镜像(4gl/**/*.4gl + 42f/42s/zh_CN + *.inc)到 mirrorDir/<环境名>/。
 // full=true 全量重建;否则增量(服务器 marker 记录基线)。
 // 增量只在本地已有完整基线(envDir 内存在 .tdict-mirror.ok 标记)时允许;
 // 本地首次/目录被清/旧版无标记 → 自动转全量,防止"服务器 marker 存在而本地
@@ -131,9 +155,14 @@ func MirrorPullToDirProgress(ctx context.Context, e *NamedSsh, envDir string, fu
 
 // MirrorPullToDirProfileProgress 是镜像拉取的实现：envDir 就是本环境的最终目录。
 //
-// profile 只影响服务器侧 find 的白名单：source=4gl/**/*.4gl，interface=42f/42s。
-// 落点、基线、增量、取消语义完全一致 —— 同一目录切 profile 不会自动删除旧类型，
-// 需要干净目录时先 --full 或换目录。
+// profile 只影响服务器侧 find 的白名单：source=4gl/**/*.4gl + 42f + 42s/zh_CN + *.inc，
+// interface=42f/42s。落点、基线、增量、取消语义完全一致 —— 同一目录切 profile 不会
+// 删除另一类的文件（全量解压也会把它们原样搬进新目录，见 extractFull）；想只要一类
+// 的干净目录，给 interface profile 单独配一个目录。
+//
+// 服务器标记与本地基线都是**按 profile 分开记**的（mirrorBase）：否则 source 拉过一次
+// 之后，再按 interface 拉会命中“没有比标记更新的文件”而报“无变更”——0 个文件、退正常，
+// 用户以为拉到了，其实是空跑。
 //
 // ctx 用来**中途取消**:用户误点「全量重建」时界面上的「停止」按钮走的就是它。
 // 取消点选在三处 —— 连接、服务器打包、下载解压循环(见 countingReader / extractTarGz)。
@@ -181,19 +210,25 @@ func MirrorPullToDirProfileProgress(ctx context.Context, e *NamedSsh, envDir str
 	}
 	st.TopDir = top
 
-	tag := mirrorTag(e.Name)
-	base := top + "/.tdict-mirror-" + tag
+	base := mirrorBase(top, e.Name, profile)
 
 	// 本地无完整基线(首次拉取/目录被清/旧版本遗留),或白名单升级过(增量补不齐
 	// 新增类型的历史文件)时,自动按全量拉取,避免镜像残缺
 	needFull := full
 	if !needFull {
-		if lv := localMarkVersion(envDir); !MirrorReadyDir(envDir) {
+		mark := readLocalMark(envDir)
+		switch {
+		case !MirrorReadyDir(envDir):
 			needFull = true
 			logfMirror("本地镜像缺少完整基线标记(%s),本次自动按全量拉取以保证完整", filepath.Join(envDir, localMarkName))
-		} else if lv != mirrorWhitelistVersion {
+		case mark.Version != mirrorWhitelistVersion:
 			needFull = true
-			logfMirror("镜像白名单已升级(v%d -> v%d,新增文件类型),本次自动按全量拉取以补齐", lv, mirrorWhitelistVersion)
+			logfMirror("镜像白名单已升级(v%d -> v%d,文件类型有变),本次自动按全量拉取以补齐", mark.Version, mirrorWhitelistVersion)
+		case !mark.Has(profile):
+			// 这份目录还没拉过该 profile:服务器侧没有它的标记,mirrorPack 会按全量
+			// find 打包,本地只需增量写入 —— 不动已有目录,另一类文件原样保留。
+			logfMirror("该目录还没拉过 %s profile,本次只补这一类文件(已有的 %s 保留)",
+				profile, mark.ProfilesLabel())
 		}
 	}
 	st.Full = needFull
@@ -210,7 +245,7 @@ func MirrorPullToDirProfileProgress(ctx context.Context, e *NamedSsh, envDir str
 		// 服务器无变更但本地基线标记缺失时,依然补一个基线标记,
 		// 否则下次 pull 仍会误判"无基线"而反复尝试全量
 		if !needFull {
-			if err := writeLocalMark(envDir); err != nil {
+			if err := writeLocalMark(envDir, profile); err != nil {
 				logfMirror("写入本地基线标记失败(忽略): %v", err)
 			}
 		}
@@ -243,7 +278,7 @@ func MirrorPullToDirProfileProgress(ctx context.Context, e *NamedSsh, envDir str
 	cr := &countingReader{ctx: ctx, r: rf, total: size, report: report}
 	var files int
 	if needFull {
-		files, err = extractFull(cr, envDir)
+		files, err = extractFull(cr, envDir, profile)
 	} else {
 		files, err = extractIncremental(cr, envDir)
 	}
@@ -262,7 +297,7 @@ func MirrorPullToDirProfileProgress(ctx context.Context, e *NamedSsh, envDir str
 		return nil, err
 	}
 	st.Files = files
-	if err := writeLocalMark(envDir); err != nil {
+	if err := writeLocalMark(envDir, profile); err != nil {
 		return nil, fmt.Errorf("写入本地基线标记失败: %w", err)
 	}
 	// 增量拉取不会删旧文件:清掉历史版本留在本地的备份文件(全量重建时本就没有)
@@ -366,30 +401,87 @@ func mirrorPackProgress(ctx context.Context, conn *SSHConn, base, top string, fu
 	}
 }
 
-// writeLocalMark 在镜像环境目录写入完整基线标记(白名单版本 + 时间)。
-func writeLocalMark(envDir string) error {
+// localMark 是本地基线标记(.tdict-mirror.ok)的内容。
+//
+//	v5 起: "v5 source,interface 2026-10-26T10:00:00Z"
+//	更早:   "v4 2026-10-26T10:00:00Z"(无 profile 列表)或纯时间戳
+//
+// profiles 记的是“这份目录拉过哪些 profile”,它是**并集**:第二次拉另一个 profile
+// 不能把前一个从记录里抹掉,否则日志/判断会把“两类都在”误报成“只有一类”。
+type localMark struct {
+	Version  int
+	Profiles map[MirrorProfile]bool
+}
+
+func (m localMark) Has(p MirrorProfile) bool { return m.Profiles[p] }
+
+// ProfilesLabel 按固定顺序列出已拉过的 profile(日志与测试需要稳定输出)。
+func (m localMark) ProfilesLabel() string {
+	var out []string
+	for _, p := range []MirrorProfile{MirrorSource, MirrorInterface} {
+		if m.Profiles[p] {
+			out = append(out, string(p))
+		}
+	}
+	if len(out) == 0 {
+		return "(无记录)"
+	}
+	return strings.Join(out, ",")
+}
+
+// readLocalMark 读本地基线标记;无标记、旧格式、字段缺失都返回零值(版本 0、空集合),
+// 调用方据此当作“无基线”处理,不会凭空认为镜像完整。
+func readLocalMark(envDir string) localMark {
+	m := localMark{Profiles: map[MirrorProfile]bool{}}
+	b, err := os.ReadFile(filepath.Join(envDir, localMarkName))
+	if err != nil {
+		return m
+	}
+	fields := strings.Fields(strings.TrimSpace(string(b)))
+	if len(fields) == 0 || !strings.HasPrefix(fields[0], "v") {
+		return m
+	}
+	if n, err := strconv.Atoi(strings.TrimPrefix(fields[0], "v")); err == nil {
+		m.Version = n
+	}
+	for _, f := range fields[1:] {
+		// profile 集合写成一个逗号分隔的字段（source,interface）；也容忍空格分隔的旧写法。
+		for _, name := range strings.Split(f, ",") {
+			switch p := MirrorProfile(strings.ToLower(strings.TrimSpace(name))); p {
+			case MirrorSource, MirrorInterface:
+				m.Profiles[p] = true
+			}
+		}
+	}
+	return m
+}
+
+// writeLocalMark 在镜像环境目录写入完整基线标记(白名单版本 + 已拉 profile 集合 + 时间)。
+// profile 取并集:同目录先后拉两种 profile 后,记录里两种都在。
+func writeLocalMark(envDir string, profile MirrorProfile) error {
 	if err := os.MkdirAll(envDir, 0o755); err != nil {
 		return err
 	}
+	mark := readLocalMark(envDir)
+	if mark.Version != mirrorWhitelistVersion {
+		// 版本升级:旧的 profile 记录不再作数(白名单变了,那一类可能得重新拉),
+		// 但保留本次这个 —— 它刚刚被完整解压过。
+		mark.Profiles = map[MirrorProfile]bool{}
+	}
+	if mark.Profiles == nil {
+		mark.Profiles = map[MirrorProfile]bool{}
+	}
+	if profile != "" {
+		mark.Profiles[profile] = true
+	}
 	return os.WriteFile(filepath.Join(envDir, localMarkName),
-		[]byte(fmt.Sprintf("v%d %s\n", mirrorWhitelistVersion, time.Now().UTC().Format(time.RFC3339))), 0o644)
+		[]byte(fmt.Sprintf("v%d %s %s\n", mirrorWhitelistVersion, mark.ProfilesLabel(),
+			time.Now().UTC().Format(time.RFC3339))), 0o644)
 }
 
 // localMarkVersion 读本地基线标记里的白名单版本;无标记或旧格式(纯时间戳)返回 0。
 func localMarkVersion(envDir string) int {
-	b, err := os.ReadFile(filepath.Join(envDir, localMarkName))
-	if err != nil {
-		return 0
-	}
-	fields := strings.Fields(strings.TrimSpace(string(b)))
-	if len(fields) == 0 || !strings.HasPrefix(fields[0], "v") {
-		return 0
-	}
-	n, err := strconv.Atoi(strings.TrimPrefix(fields[0], "v"))
-	if err != nil {
-		return 0
-	}
-	return n
+	return readLocalMark(envDir).Version
 }
 
 // MirrorEnvDir 返回某环境的本地镜像目录(mirrorDir/<环境名>)。
@@ -422,13 +514,42 @@ func logfMirror(format string, args ...any) {
 
 // mirrorWhitelistFindExpr 服务器侧 find 的白名单。
 //
-// source 用后缀级限制 `-path '*/4gl/*' -iname '*.4gl'`：
-// 因此 a.4gl.src、a.4gltest、a.4gl.20201110 都不会进来。
+// source 的四类各自限定：4gl 用后缀级限制 `-path '*/4gl/*' -iname '*.4gl'`（因此
+// a.4gl.src、a.4gltest、a.4gl.20201110 都不会进来）；42f 与 42s 按目录限定（42s 只收
+// zh_CN 语言目录）；*.inc 不限定目录（技能文档里的 inc 就在 4g1/、$ERP/cfg、$COM/cfg 多处）。
+//
+// **source 必须包含 4gl + 42f + 42s + inc 四类**：一个环境只有一个镜像目录，tt outline
+// 只认 4gl、tt interface 只认 42f/42s，两者读同一个目录；少收一类就等于让某个命令
+// 静默断粮（它只会报“找不到文件”，看起来像文件不存在）。
+//
+// 改这里必须同步 mirrorPathInProfile（本地分类器，全量解压时用它决定“哪些文件属于
+// 本 profile、要以服务器为准”），mirror_test.go 里有交叉验证。
 func mirrorWhitelistFindExpr(profile MirrorProfile) string {
 	if profile == MirrorInterface {
 		return `\( -path '*/42f/*' -o -path '*/42s/zh_CN/*' -o -path '*/42s/*/zh_CN/*' \)`
 	}
-	return `\( -path '*/4gl/*' -iname '*.4gl' \)`
+	return `\( -path '*/4gl/*' -iname '*.4gl' ` +
+		`-o -path '*/42f/*' ` +
+		`-o -path '*/42s/zh_CN/*' -o -path '*/42s/*/zh_CN/*' ` +
+		`-o -iname '*.inc' \)`
+}
+
+// mirrorPathInProfile 判断一个**本地**相对路径是否落在该 profile 的白名单内。
+// 只给全量解压用：属于本 profile 的文件以服务器为准（新目录里没有就是服务器删了），
+// 不属于本 profile 的文件原样保留（不因“给 A 做了全量”而删掉 B）。
+//
+// 语义必须与 mirrorWhitelistFindExpr 一致：/"/" 前缀归一化后，路径分段判断。
+func mirrorPathInProfile(profile MirrorProfile, rel string) bool {
+	p := strings.ToLower("/" + strings.TrimPrefix(filepath.ToSlash(rel), "./"))
+	is42f := strings.Contains(p, "/42f/")
+	// 42s 只收 zh_CN：浅层 <模块>/42s/zh_CN/* 与更深层 <模块>/42s/<...>/zh_CN/* 都算。
+	is42s := strings.Contains(p, "/42s/") && strings.Contains(p, "/zh_cn/")
+	if profile == MirrorInterface {
+		return is42f || is42s
+	}
+	is4gl := strings.Contains(p, "/4gl/") && strings.HasSuffix(p, ".4gl")
+	isInc := strings.HasSuffix(p, ".inc")
+	return is4gl || is42f || is42s || isInc
 }
 
 // mirrorWhitelistVersion 白名单版本:新增文件类型时 +1。
@@ -439,7 +560,8 @@ func mirrorWhitelistFindExpr(profile MirrorProfile) string {
 //	v2: +42s/zh_CN、*.inc
 //	v3: 4fd → 42f（前端画面改为 42f+42s；4fd 不再镜像）
 //	v4: source 收紧为 4gl/**/*.4gl；interface 保留 42f/42s
-const mirrorWhitelistVersion = 4
+//	v5: source 恢复为 4gl + 42f + 42s/zh_CN + *.inc（一个镜像目录必须装齐所有读者的并集）
+const mirrorWhitelistVersion = 5
 
 // mirrorBackupSuffixes 备份/临时文件名特征(不含点全名包含即算备份)。
 // 服务器侧打包排除与本地残留清理共用同一份列表,避免两边规则漂移:
@@ -589,8 +711,14 @@ func extractIncremental(r io.Reader, envDir string) (int, error) {
 	return extractTarGz(r, envDir)
 }
 
-// extractFull 全量解压:先写 .staging 临时目录,再整目录替换(旧目录改名 .old 后删除)。
-func extractFull(r io.Reader, envDir string) (int, error) {
+// extractFull 全量解压:先写 .staging 临时目录,再把**本 profile 之外**的旧文件搬进去,
+// 最后整目录替换。
+//
+// 为什么不能“旧目录整个删掉”:一个环境只有一个镜像目录,source(4gl/42f/42s/inc)与
+// interface(42f/42s)可能先后拉进同一个目录。旧实现直接删旧目录,于是“给 profile A
+// 做一次全量”会把 profile B 的文件一起删掉 —— 用户看到的是“我只拉了一类,另一类没了”。
+// 全量的语义应当是“本 profile 的白名单内以服务器为准”,不是“清空别人的东西”。
+func extractFull(r io.Reader, envDir string, profile MirrorProfile) (int, error) {
 	ts := time.Now().Format("20060102-150405.000")
 	staging := filepath.Join(filepath.Dir(envDir), ".staging-"+ts)
 	if err := os.MkdirAll(staging, 0o755); err != nil {
@@ -600,6 +728,13 @@ func extractFull(r io.Reader, envDir string) (int, error) {
 	if err != nil {
 		os.RemoveAll(staging)
 		return 0, err
+	}
+	// 另一类的既有文件先搬进新目录:全量只对本 profile 的白名单负责。
+	if kept, kerr := keepOtherProfileFiles(envDir, staging, profile); kerr != nil {
+		os.RemoveAll(staging)
+		return 0, kerr
+	} else if kept > 0 {
+		logfMirror("全量重建保留另一类文件 %d 个(不属于 %s 的白名单)", kept, profile)
 	}
 	old := envDir + ".old-" + ts
 	if _, err := os.Stat(envDir); err == nil {
@@ -622,6 +757,76 @@ func extractFull(r io.Reader, envDir string) (int, error) {
 		}
 	}
 	return n, nil
+}
+
+// keepOtherProfileFiles 把 oldDir 里**不属于当前 profile** 的普通文件搬进 staging。
+//
+// 几条规矩：
+//   - staging 已有同名文件 = 服务器也给了它 → 以服务器为准，不覆盖；
+//   - 备份/临时文件不搬（它们由 pruneBackupFiles 清理）；
+//   - 基线标记 .tdict-mirror.ok 不搬（新目录会在解压完成后重新写，且要记上本 profile）；
+//   - .staging-* / .old-* 这些临时目录跳过（历史失败留下时不当内容）。
+func keepOtherProfileFiles(oldDir, staging string, profile MirrorProfile) (int, error) {
+	if _, err := os.Stat(oldDir); err != nil {
+		return 0, nil // 首次拉取:没有旧目录
+	}
+	kept := 0
+	err := filepath.WalkDir(oldDir, func(p string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil // 单个文件读不到不该打断整个重建
+		}
+		if d.IsDir() {
+			name := d.Name()
+			if p != oldDir && (strings.HasPrefix(name, ".staging-") || strings.HasPrefix(name, ".old-")) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !d.Type().IsRegular() || isBackupFile(d.Name()) {
+			return nil
+		}
+		rel, rerr := filepath.Rel(oldDir, p)
+		if rerr != nil || rel == localMarkName {
+			return nil
+		}
+		if mirrorPathInProfile(profile, rel) {
+			return nil // 属于本 profile:以服务器为准(新目录里没有就是服务器删了)
+		}
+		dst := filepath.Join(staging, rel)
+		if _, serr := os.Stat(dst); serr == nil {
+			return nil
+		}
+		if err := copyRegularFile(p, dst); err != nil {
+			return err
+		}
+		kept++
+		return nil
+	})
+	return kept, err
+}
+
+// copyRegularFile 复制单个普通文件（保留 mtime，与原解压行为一致）。
+func copyRegularFile(src, dst string) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	if st, err := in.Stat(); err == nil {
+		_ = os.Chtimes(dst, st.ModTime(), st.ModTime())
+	}
+	return nil
 }
 
 // extractTarGz 从 tar.gz 流解压到 dest(标准库;不做任何 shell)。返回文件数。

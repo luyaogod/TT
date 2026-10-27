@@ -1721,7 +1721,7 @@ export function SettingsView() {
               </Card>
 
               <Card id="card-dict-mirror" title="源码镜像"
-                description="把 T100 源码(只收 4gl 目录下的 .4gl；不含 .4gl.src/4fd/42f/42s)拉到本地,供 AI 检索；每个环境可单独指定镜像目录。">
+                description="把 T100 源码与画面文件(4gl/**/*.4gl + 42f + 42s/zh_CN + *.inc)拉到本地,供 AI 检索与 tt outline / tt interface 离线使用；每个环境可单独指定镜像目录。">
                 <SettingRow
                   id="mirror.dir"
                   label="镜像根目录（默认）"

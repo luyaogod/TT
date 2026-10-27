@@ -629,9 +629,9 @@ MAIN
         json: `{"ok":true,"from":"/u1/top/4gl/asf/asfp310.4gl","to":"./asfp310.4gl","bytes":404864}`,
       },
       {
-        cmd: 'tt file mirror pull [<环境>] [--full]', why: '同步本地镜像（默认增量）', mode: S, tip: '镜像只有两族：4gl/**/*.4gl 与 42f/42s；--full 全量重建。',
+        cmd: 'tt file mirror pull [<环境>] [--full]', why: '同步本地镜像（默认增量）', mode: S, tip: 'default(source) 收四类：4gl/**/*.4gl + 42f + 42s/zh_CN + *.inc；interface 只 42f/42s；--full 全量重建（只对本次 profile 的白名单负责）。',
         human: `镜像同步完成：D:\\t100_mirror\\主机109
-  source     新增 12 / 更新 3 / 删除 1（共 4210 个文件）
+  source     新增 12 / 更新 3 / 删除 1（共 4210 个文件：4gl/42f/42s/inc）
   interface  新增 2 / 更新 0`,
         json: `{"ok":true,"dir":"D:\\\\t100_mirror\\\\主机109","source":{"added":12,"updated":3,"deleted":1,"total":4210},"interface":{"added":2}}`,
       },
