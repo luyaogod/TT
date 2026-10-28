@@ -8,7 +8,7 @@ dev/
 │                         + 根开关桥 takeRootFlags + 退出码透传 exitCode
 ├─ common/                两条线共用的脚手架：错误信封 Fail、稳定 JSON、ParseArgs、
 │                         StripIdentitySuffix、config `tdev` 节接缝、总帮助 Usage
-├─ tzc/                   .tzc 代码包线：八个动词核心 + 31 项对抗自检 → 见 tzc/README.md
+├─ tzc/                   .tzc 代码包线：八个动词核心 + uuid 生成 + 31 项对抗自检 → 见 tzc/README.md
 └─ tzs/                   .tzs 表单包线：整线透传给引擎 → 见 tzs/README.md
 ```
 
