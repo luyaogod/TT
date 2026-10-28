@@ -3,7 +3,8 @@ package tzc
 // 本次修改的"唯一标识"门禁。
 //
 // 为什么要有这一层：`tt-dev-tzc` 技能要求开工前向用户索要 `<单号>#<项次>` 与工号
-// （用户拒绝时用 16 位 uuid + agent），并把它们写进 global.memo 的摘要行与修改块。
+// （用户拒绝提供标记时用 16 位 uuid；工号可填实际工号或 agent），并把它们写进
+// global.memo 的摘要行与修改块。
 // 但**只写在技能里是拦不住的** —— agent 可以不读、读了也可以跳过，apply 照样成功。
 // 所以这里把同一规则变成 apply 的前置闸门：没有标记/工号、标记格式不对、或
 // prog.full.4gl 里找不到对应摘要行，一律拒绝（退出码 3，与验证失败同类）。
@@ -19,9 +20,9 @@ import (
 var (
 	// reModTag 单号#项次：两段都允许字母数字与 _-，项次允许点号（如 A12345#01、DOC-7#1.2）。
 	reModTag = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,15}#[A-Za-z0-9][A-Za-z0-9_.-]{0,15}$`)
-	// reModUUID 用户拒绝提供时自动生成的标记：不带分隔符的 16 位十六进制。
+	// reModUUID 用户拒绝提供标记时自动生成的标记：不带分隔符的 16 位十六进制。
 	reModUUID = regexp.MustCompile(`^[0-9a-f]{16}$`)
-	// reModOperator 工号：字母数字与 _-.；用户拒绝时固定写 agent。
+	// reModOperator 工号：字母数字与 _-.；拒绝提供工号时写 agent。与标记类型无关。
 	reModOperator = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$`)
 	// reModBlock 修改块的开/闭行：`#<tag> -s` / `#<tag> -e`（行尾可有空白）。
 	reModBlock = regexp.MustCompile(`^[ \t]*#(\S+)[ \t]+-(s|e)[ \t]*$`)
@@ -48,9 +49,6 @@ func checkModTag(source []byte, tag, operator string) []string {
 	}
 	if len(issues) > 0 {
 		return issues
-	}
-	if reModUUID.MatchString(tag) && operator != "agent" {
-		issues = append(issues, "16 位 uuid 标记只在用户拒绝提供标记时使用，对应 --operator agent")
 	}
 
 	// global.memo 里的摘要行：`#<tag> <作业日> By <工号> <一句说明>`

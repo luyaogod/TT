@@ -67,9 +67,10 @@ const (
 	applyLong = `验证管线全阶段 + 原子写包 + git commit（唯一会改 .tzc 的命令）。
 
 用法：tt dev tzc apply [<dir>] [-o <pkg.tzc>] --tag <单号>#<项次> --operator <工号> [--dry-run] [--yes] [--json]
-  --tag/--operator  本次修改的唯一标识与执行人（开工前先向用户索要；用户拒绝时
-                    用 16 位 uuid + agent）。缺了或 prog.full.4gl 的 global.memo 里
-                    没有对应摘要行，一律拒绝（退出码 3）——见 tag.go
+  --tag/--operator  本次修改的唯一标识与执行人（开工前先向用户索要；标记拒绝时用
+                    16 位 uuid，工号拒绝时写 agent，两者互不影响）。缺了或
+                    prog.full.4gl 的 global.memo 里没有对应摘要行，一律拒绝（退出码 3）
+                    ——见 tag.go
   --no-tag          跳过标记校验：只给合成/测试包用，客户包不要加
   --dry-run 跑完管线并输出逐条目 diff，不落盘、不 commit
   --yes 对「写区段（解开框架）」做二次确认`

@@ -1279,7 +1279,7 @@ func cmdApply(args []string) int {
 				common.Line(w, "")
 				common.Line(w, "先向用户索要标记与工号，然后：")
 				common.Line(w, "  tt dev tzc apply --tag A12345#01 --operator 12345")
-				common.Line(w, "（用户拒绝提供时：--tag <16位uuid> --operator agent）")
+				common.Line(w, "（标记拒绝提供时用 16 位 uuid；工号拒绝提供时写 agent）")
 			}
 			return 3
 		}
