@@ -14,7 +14,7 @@ type Verb struct {
 	Run   func(args []string) int
 }
 
-// Verbs 按帮助顺序列出八个动词。
+// Verbs 按帮助顺序列出八个动词，外加一个生成修改标记的 uuid 小工具。
 func Verbs() []Verb {
 	return []Verb{
 		{"export <pkg.tzc>", "渲染带围栏的 4GL 工作区（只读包）", exportLong, cmdExport},
@@ -24,6 +24,7 @@ func Verbs() []Verb {
 		{"unlock [<dir>]", "框架解锁：单向状态迁移，只改 workspace", unlockLong, cmdUnlock},
 		{"rename [<dir>] <旧函数名> <新函数名>", "结构事务：改自订定义点的函数名（只改 workspace）", renameLong, cmdRename},
 		{"newfn [<dir>]", "新增自订定义点（只改 workspace）", newfnLong, cmdNewfn},
+		{"uuid", "生成 16 位修改标记（用户拒绝提供单号时用）", uuidLong, cmdUUID},
 		{"selftest", "内置 31 项对抗用例（全部合成包）", selftestLong, cmdSelftest},
 	}
 }
@@ -32,7 +33,7 @@ func Verbs() []Verb {
 const TzcLong = `.tzc 代码包管线：Package → Document → Workspace（export，只读包）→ 编辑 prog.full.4gl →
 verify（gate1 + gate2）/ apply（三道闸门 + 原子写包）。
 
-四个生命周期动词 + unlock 状态迁移 + selftest。
+四个生命周期动词 + unlock 状态迁移 + uuid 小工具 + selftest。
 改框架区段必须先 unlock：解锁改变的是门，不是所有房间（锚点区段永远只读）。
 
 报错定位：验证失败会打印「prog.full.4gl:<行号>」+ 该行内容
@@ -88,4 +89,10 @@ const (
 	selftestLong = `内置 31 项对抗用例（全部合成包，不需要真实语料）。
 
 用法：tt dev tzc selftest [--json]`
+
+	uuidLong = `生成一个 16 位十六进制修改标记（8 字节随机数）。
+
+用法：tt dev tzc uuid [--json]
+  用户在开工前拒绝提供 <单号>#<项次> 时，用它生成标记（工号写 agent）。
+  命令行只负责生成 id；摘要行与 -s/-e 块的写法属于项目规范，见 tt-dev-tzc 技能。`
 )

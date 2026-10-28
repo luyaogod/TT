@@ -1,6 +1,6 @@
 # internal/cli/dev/tzc — `.tzc` 代码包线的动词
 
-八个动词的实现体（`cli.go` 的 `cmdXxx`）、31 项对抗自检（`selftest.go`）、
+八个动词的实现体（`cli.go` 的 `cmdXxx`）与 `uuid` 生成（`uuid.go`）、31 项对抗自检（`selftest.go`）、
 动词接线清单（`verbs.go`，父包的 cobra 树从这里取 Use/Short/Long/Run）。
 参数解析权在动词自己的解析器（`common.ParseArgs`，位置无关）——契约见 [../README.md](../README.md)。
 

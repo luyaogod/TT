@@ -84,7 +84,7 @@ go list -f '{{.ImportPath}}|{{join .Imports " "}}' ./internal/... | grep 'tt/int
 |---|---|
 | `cli/at` | `--at` 文法、作用域表、`--at-list` |
 | `debugclient` | 调试面 REST 的**唯一客户端** |
-| `cli/dev/tzc` | `tt dev tzc` 八个动词 + 31 项对抗自检 |
+| `cli/dev/tzc` | `tt dev tzc` 八个动词 + uuid 生成 + 31 项对抗自检 |
 | `cli/dict` | `tt dict` 命令组：表 / 字段 / 校验 / 开窗 / 消息 / 参数 / ACC 查询 + 字典库运维 |
 | `cli/db` | `tt db`：本机 ping / 服务器 probe / 只读 SQL |
 | `cli/dev` | `tt dev` 分发（tzc / tzs 两条线） |

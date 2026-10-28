@@ -28,7 +28,7 @@ TT/
 │  │  ├─ debug/         调试命令组门面（fgldb 那条线）
 │  │  ├─ dev/           tt dev 命令组（tzc/tzs 两条线，目录即分层）
 │  │  │  ├─ common/     两条线共用脚手架：错误信封、稳定紧凑 JSON、参数重排、身份后缀
-│  │  │  ├─ tzc/        .tzc 代码包线：八个动词 + 31 项对抗自检 + Verbs() 接线清单
+│  │  │  ├─ tzc/        .tzc 代码包线：八个动词 + uuid 小工具 + 31 项对抗自检 + Verbs() 接线清单
 │  │  │  └─ tzs/        .tzs 表单包线：cmdTzs 分发、引擎定位、manifest、detail 渲染
 │  │  ├─ dict/          字典命令组：表/字段/校验/开窗/消息/参数/ACC 查询
 │  │  ├─ file/          tt file 命令组：只读 SFTP 与离线镜像
