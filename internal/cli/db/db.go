@@ -32,7 +32,8 @@ func Register(root *cobra.Command) {
 		Short: "数据库：连通性测试与只读 SQL",
 		Long: `数据库：测试连不连得上，以及直接执行一条只读 SQL。
 
-  tt db sql     执行一条只读 SQL（单条 SELECT/WITH，只读事务，最多 200 行）
+  tt db sql     执行一条只读 SQL（单条 SELECT/WITH，只读事务，最多 200 行；
+                默认客户端直连，建连失败回退服务器 sqlplus，--route 可指定）
   tt db ping    从本机连一次库（客户端直连；支持 viaSsh 隧道）
   tt db probe   从服务器连一次库（SSH + sqlplus/ksql；验证该企业的账号）
 
