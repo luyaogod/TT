@@ -89,10 +89,10 @@ func TestResolveWorkspaceDirDefaultsToCwd(t *testing.T) {
 		t.Fatalf("工作区内 newfn（省略 <dir>）退出码 %d", code)
 	}
 	// apply：--dry-run 不落盘，真落盘走一次
-	if code := testkit.Silent(t, func() int { return cmdApply([]string{"--dry-run"}) }); code != 0 {
+	if code := testkit.Silent(t, func() int { return cmdApply([]string{"--no-tag", "--dry-run"}) }); code != 0 {
 		t.Fatalf("工作区内 apply --dry-run（省略 <dir>）退出码 %d", code)
 	}
-	if code := testkit.Silent(t, func() int { return cmdApply([]string{"--yes"}) }); code != 0 {
+	if code := testkit.Silent(t, func() int { return cmdApply([]string{"--no-tag", "--yes"}) }); code != 0 {
 		t.Fatalf("工作区内 apply（省略 <dir>）退出码 %d", code)
 	}
 	// 落盘之后仍然只靠当前目录就能继续工作

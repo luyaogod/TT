@@ -236,7 +236,7 @@ func TestCorpusApplySimulation(t *testing.T) {
 		if err := ws.WriteEdited(newEdited); err != nil {
 			t.Fatal(err)
 		}
-		if code := testkit.Silent(t, func() int { return cmdApply([]string{wsDir}) }); code != 0 {
+		if code := testkit.Silent(t, func() int { return cmdApply([]string{"--no-tag", wsDir}) }); code != 0 {
 			t.Fatalf("%s apply 退出码 %d（目标点 %s，deny=%s）", p, code, target.Name, target.DenyCode)
 		}
 		pkg2, err := pkgfile.Open(mf.Pkg.Path, pkgfile.OpenOptions{})

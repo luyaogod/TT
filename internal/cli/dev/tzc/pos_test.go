@@ -75,7 +75,7 @@ func TestApplyReportsReadonlyLine(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	code, out := testkit.CaptureStdout(t, func() int { return cmdApply([]string{ws}) })
+	code, out := testkit.CaptureStdout(t, func() int { return cmdApply([]string{"--no-tag", ws}) })
 	if code != 4 {
 		t.Fatalf("改动只读区应退出码 4，实际 %d\n输出：\n%s", code, out)
 	}

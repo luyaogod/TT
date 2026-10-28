@@ -214,7 +214,7 @@ func stEditPoint(dir string) error {
 	if err := writeEdited(ws, edited); err != nil {
 		return err
 	}
-	if code := cmdApply([]string{ws.Dir}); code != 0 {
+	if code := cmdApply([]string{"--no-tag", ws.Dir}); code != 0 {
 		return fmt.Errorf("apply 退出码 %d", code)
 	}
 	pkg, err := pkgfile.Open(p, pkgfile.OpenOptions{})
@@ -282,7 +282,7 @@ func stRenameTransaction(dir string) error {
 		return fmt.Errorf("rename 退出码 %d", code)
 	}
 	// 改名后签名行必须已同步（V1 通过），apply 才可能成功
-	if code := cmdApply([]string{ws.Dir}); code != 0 {
+	if code := cmdApply([]string{"--no-tag", ws.Dir}); code != 0 {
 		return fmt.Errorf("改名后 apply 退出码 %d", code)
 	}
 	pkg, err := pkgfile.Open(p, pkgfile.OpenOptions{})
@@ -379,7 +379,7 @@ func stV5Scope(dir string) error {
 		return fmt.Errorf("V5 warn 在 --strict 下应退出码 3，实际 %d", code)
 	}
 	// apply 照旧放行（不阻断既有文本）
-	if code := cmdApply([]string{ws.Dir}); code != 0 {
+	if code := cmdApply([]string{"--no-tag", ws.Dir}); code != 0 {
 		return fmt.Errorf("V5 为 warn 时 apply 应成功，实际 %d", code)
 	}
 	_ = p
@@ -431,7 +431,7 @@ func stNewfn(dir string) error {
 	if !bytes.Contains(edited, []byte("adzi999_added")) {
 		return fmt.Errorf("newfn 后文档里看不到新点")
 	}
-	if code := cmdApply([]string{ws.Dir}); code != 0 {
+	if code := cmdApply([]string{"--no-tag", ws.Dir}); code != 0 {
 		return fmt.Errorf("newfn 后 apply 退出码 %d", code)
 	}
 	pkg, err := pkgfile.Open(p, pkgfile.OpenOptions{})
@@ -477,7 +477,7 @@ func stNewfnTemplate(dir string) error {
 	if !bytes.Contains(edited, []byte("日期 By 作者")) {
 		return fmt.Errorf("日期/作者占位符丢了")
 	}
-	if code := cmdApply([]string{ws.Dir}); code != 0 {
+	if code := cmdApply([]string{"--no-tag", ws.Dir}); code != 0 {
 		return fmt.Errorf("newfn 后 apply 退出码 %d", code)
 	}
 	pkg, err := pkgfile.Open(p, pkgfile.OpenOptions{})
@@ -629,7 +629,7 @@ func stUnlockAlreadyUnlocked(dir string) error {
 // expectApplyCode：apply 必须返回给定退出码，且**原包 sha256 不变**。
 func expectApplyCode(pkgPath, wsDir string, wantCode int, tag string) error {
 	before := mustRead(pkgPath)
-	code := cmdApply([]string{wsDir})
+	code := cmdApply([]string{"--no-tag", wsDir})
 	if code != wantCode {
 		return fmt.Errorf("期待退出码 %d（%s），实际 %d", wantCode, tag, code)
 	}
@@ -667,7 +667,7 @@ func stIterativeApplyLoop(dir string) error {
 		if err := writeEdited(ws, edited); err != nil {
 			return err
 		}
-		if code := cmdApply([]string{ws.Dir}); code != 0 {
+		if code := cmdApply([]string{"--no-tag", ws.Dir}); code != 0 {
 			return fmt.Errorf("第 %d 次 apply 退出码 %d（迭代循环断了）", i+1, code)
 		}
 	}
@@ -744,7 +744,7 @@ func stEOLNormalizedByEditor(dir string) error {
 	beforeSecSha := model.Sha256Bytes(secBefore.Content(tapBefore.Raw))
 
 	// ③ apply 必须成功（行尾归一不算改动），且只动目标点
-	if code := cmdApply([]string{ws.Dir}); code != 0 {
+	if code := cmdApply([]string{"--no-tag", ws.Dir}); code != 0 {
 		return fmt.Errorf("行尾归一后 apply 应成功，实际退出码 %d", code)
 	}
 	pkgAfter, err := pkgfile.Open(p, pkgfile.OpenOptions{})
@@ -784,7 +784,7 @@ func stFenceLineTamper(dir string) error {
 	edited = bytes.Replace(edited, needle, []byte(`order="9"`), 1)
 	writeEdited(ws, edited)
 	before := mustRead(p)
-	code := cmdApply([]string{ws.Dir})
+	code := cmdApply([]string{"--no-tag", ws.Dir})
 	if code != 3 {
 		return fmt.Errorf("期待退出码 3，实际 %d", code)
 	}
@@ -808,7 +808,7 @@ func stReadonlySection(dir string) error {
 	edited = append(edited[:idx], append([]byte("# tdev 偷改区段\n"), edited[idx:]...)...)
 	writeEdited(ws, edited)
 	before := mustRead(p)
-	code := cmdApply([]string{ws.Dir})
+	code := cmdApply([]string{"--no-tag", ws.Dir})
 	if code != 4 {
 		return fmt.Errorf("期待退出码 4（写入被拒），实际 %d", code)
 	}
@@ -828,7 +828,7 @@ func stStructureLine(dir string) error {
 		[]byte("PRIVATE FUNCTION adzi999_calc2(p_a)"), 1)
 	writeEdited(ws, edited)
 	before := mustRead(p)
-	code := cmdApply([]string{ws.Dir})
+	code := cmdApply([]string{"--no-tag", ws.Dir})
 	if code != 3 {
 		return fmt.Errorf("期待退出码 3，实际 %d", code)
 	}
@@ -847,7 +847,7 @@ func stUnpairedFence(dir string) error {
 	edited = bytes.Replace(edited, []byte("{//@tdev:end point}\n"), []byte(""), 1)
 	writeEdited(ws, edited)
 	before := mustRead(p)
-	code := cmdApply([]string{ws.Dir})
+	code := cmdApply([]string{"--no-tag", ws.Dir})
 	if code != 3 {
 		return fmt.Errorf("期待退出码 3，实际 %d", code)
 	}
@@ -867,7 +867,7 @@ func stCDATAClose(dir string) error {
 		[]byte("   RETURN p_a\n   # ]]> 塞 CDATA 结束符\n"), 1)
 	writeEdited(ws, edited)
 	before := mustRead(p)
-	code := cmdApply([]string{ws.Dir})
+	code := cmdApply([]string{"--no-tag", ws.Dir})
 	if code != 3 {
 		return fmt.Errorf("期待退出码 3（I11b），实际 %d", code)
 	}
@@ -886,7 +886,7 @@ func stOutsideFence(dir string) error {
 	edited = append(edited, []byte("\n# 围栏外偷偷塞的内容\n")...)
 	writeEdited(ws, edited)
 	before := mustRead(p)
-	code := cmdApply([]string{ws.Dir})
+	code := cmdApply([]string{"--no-tag", ws.Dir})
 	if code != 3 {
 		return fmt.Errorf("期待退出码 3，实际 %d", code)
 	}
@@ -906,7 +906,7 @@ func stOnlyScope(dir string) error {
 	edited = bytes.Replace(edited, []byte("IMPORT util"), []byte("IMPORT evil"), 1)
 	writeEdited(ws, edited)
 	before := mustRead(p)
-	code := cmdApply([]string{ws.Dir})
+	code := cmdApply([]string{"--no-tag", ws.Dir})
 	if code != 4 {
 		return fmt.Errorf("期待退出码 4（--only 范围外），实际 %d", code)
 	}
@@ -989,7 +989,7 @@ func stDeletePoint(dir string) error {
 	}
 	edited = append(append([]byte(nil), edited[:start]...), edited[end:]...)
 	writeEdited(ws, edited)
-	if code := cmdApply([]string{ws.Dir}); code != 0 {
+	if code := cmdApply([]string{"--no-tag", ws.Dir}); code != 0 {
 		return fmt.Errorf("apply 退出码 %d", code)
 	}
 	pkg, err := pkgfile.Open(p, pkgfile.OpenOptions{})
@@ -1035,7 +1035,7 @@ func stAppendPoint(dir string) error {
 		"{//@tdev:end point}\n"
 	edited = append(append(append([]byte(nil), edited[:at]...), []byte(block)...), edited[at:]...)
 	writeEdited(ws, edited)
-	if code := cmdApply([]string{ws.Dir}); code != 0 {
+	if code := cmdApply([]string{"--no-tag", ws.Dir}); code != 0 {
 		return fmt.Errorf("apply 退出码 %d", code)
 	}
 	pkg, err := pkgfile.Open(p, pkgfile.OpenOptions{})
@@ -1082,7 +1082,7 @@ func stSectionWrite(dir string) error {
 	edited = bytes.Replace(edited, marker, append(append([]byte(nil), marker...), []byte("\n#+ tdev 改过的框架行")...), 1)
 	writeEdited(ws, edited)
 	// Locked 态改区段 → 退出码 4，并且文案要指向 unlock
-	if code := cmdApply([]string{ws.Dir}); code != 4 {
+	if code := cmdApply([]string{"--no-tag", ws.Dir}); code != 4 {
 		return fmt.Errorf("Locked 态改区段应退出码 4，实际 %d", code)
 	}
 	// unlock 未给 --yes → 退出码 4（并打印设计器代价警告原文）
@@ -1098,7 +1098,7 @@ func stSectionWrite(dir string) error {
 	if !bytes.Contains(after, []byte("EDITABLE-SEC")) {
 		return fmt.Errorf("unlock 后应出现 [EDITABLE-SEC] 围栏旗标")
 	}
-	if code := cmdApply([]string{ws.Dir}); code != 0 {
+	if code := cmdApply([]string{"--no-tag", ws.Dir}); code != 0 {
 		return fmt.Errorf("unlock 后 apply 退出码 %d", code)
 	}
 	pkg, err := pkgfile.Open(p, pkgfile.OpenOptions{})
@@ -1168,7 +1168,7 @@ func stUnparsablePoint(dir string) error {
 	edited = bytes.Replace(edited, []byte("#240401-00041#1 只有註解，沒有函式塊"),
 		[]byte("#240401-00041#1 偷改"), 1)
 	writeEdited(ws, edited)
-	code := cmdApply([]string{out})
+	code := cmdApply([]string{"--no-tag", out})
 	if code != 4 {
 		return fmt.Errorf("不可解析的函数块点应被拒（退出码 4），实际 %d", code)
 	}

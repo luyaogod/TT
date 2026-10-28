@@ -1231,12 +1231,16 @@ func cmdApply(args []string) int {
 	dryRun := fs.Bool("dry-run", false, "跑完管线并输出逐条目 diff，不落盘、不 commit")
 	yes := fs.Bool("yes", false, "对「写区段（解开框架）」做二次确认")
 	asJSON := fs.Bool("json", false, "输出 JSON")
-	if err := common.ParseArgs(fs, args, "o", "only", "accept-ver"); err != nil {
+	// 本次修改的唯一标识：缺了就不写包（见 tag.go 的说明）。
+	tag := fs.String("tag", "", "本次修改标记 <单号>#<项次>（用户拒绝提供时用 16 位 uuid）")
+	operator := fs.String("operator", "", "执行人工号（用户拒绝提供时写 agent）")
+	noTag := fs.Bool("no-tag", false, "跳过标记校验（只用于合成/测试包；客户包不要用）")
+	if err := common.ParseArgs(fs, args, "o", "tag", "operator", "only", "accept-ver"); err != nil {
 		return 2
 	}
 	dir, derr := resolveWorkspaceDir(fs.Arg(0)) // 省略 <dir> → 用当前目录
 	if derr != nil {
-		fmt.Fprintln(os.Stderr, "用法：tt dev tzc apply [<dir>] [-o <pkg.tzc>] [--dry-run] [--yes] [--json]   # <dir> 省略时用当前目录")
+		fmt.Fprintln(os.Stderr, "用法：tt dev tzc apply [<dir>] [-o <pkg.tzc>] --tag <单号>#<项次> --operator <工号> [--dry-run] [--yes] [--json]   # <dir> 省略时用当前目录")
 		return common.Fail(derr, *asJSON)
 	}
 	w := os.Stdout
@@ -1259,6 +1263,26 @@ func cmdApply(args []string) int {
 	edited, err := ws.ReadEdited()
 	if err != nil {
 		return common.Fail(err, *asJSON)
+	}
+	// 1b) 标记门禁（见 tag.go）：本次修改必须带 <单号>#<项次>（或拒绝时的 uuid）与工号，
+	//     且已写进 prog.full.4gl 的 memo 摘要行。放在 parse 之前：漏标记时直接给出可执行的
+	//     下一步，而不是让 agent 先去猜 gate1。
+	if !*noTag {
+		if issues := checkModTag(edited, *tag, *operator); len(issues) > 0 {
+			if *asJSON {
+				common.EmitJSON(w, map[string]any{"ok": false, "stage": "tag", "issues": issues})
+			} else {
+				common.Line(w, "apply 被拒绝（本次修改缺少唯一标识）：")
+				for _, s := range issues {
+					common.Line(w, "  - %s", s)
+				}
+				common.Line(w, "")
+				common.Line(w, "先向用户索要标记与工号，然后：")
+				common.Line(w, "  tt dev tzc apply --tag A12345#01 --operator 12345")
+				common.Line(w, "（用户拒绝提供时：--tag <16位uuid> --operator agent）")
+			}
+			return 3
+		}
 	}
 	// 2) parse_fenced：结构性第一道（配对 / 归属 / 嵌套深度）
 	parsed, err := fence.Parse(base, edited)

@@ -14,7 +14,7 @@
 | `export <pkg> [-o <dir>] [--only <点名>…]` | 渲染工作区；`-o` 省略时用默认后缀（见下） | 新建工作区 |
 | `status [<dir>]` | 看改了什么 | 否 |
 | `verify [<dir>] [--strict]` | 解析围栏 + gate1 + gate2 | 否 |
-| `apply [<dir>] [-o <pkg>] [--dry-run] [--yes]` | 完整管线：见下 | **原地覆盖源包**（原子写） |
+| `apply [<dir>] [-o <pkg>] --tag <单号>#<项次> --operator <工号> [--dry-run] [--yes]` | 完整管线：见下 | **原地覆盖源包**（原子写） |
 | `unlock [<dir>] [--yes]` | 框架解锁：单向状态迁移 | 只改工作区 |
 | `rename [<dir>] <旧名> <新名> [--scope …] [--desc …]` | 结构事务：改名 | 只改工作区 |
 | `newfn [<dir>] --type FUNCTION\|DIALOG\|REPORT [--name …]` | 新增自订定义点 | 只改工作区 |
@@ -26,11 +26,14 @@
 ## `apply` 的管线顺序（顺序即契约）
 
 ```
-解析围栏 → gate1 → 源包未变校验 → I15 拒绝 → split → gate2 → 改写字节 → gate3 → 原子写 → git 提交
+标记门禁 → 解析围栏 → gate1 → 源包未变校验 → I15 拒绝 → split → gate2 → 改写字节 → gate3 → 原子写 → git 提交
 ```
 
 逐项说明：
 
+- **标记门禁**：`--tag`/`--operator` 必填（`<单号>#<项次>`，用户拒绝时 16 位 uuid + `agent`），
+  且 `prog.full.4gl` 的 `global.memo` 里必须已有 `#<tag> <作业日> By <工号> <说明>` 摘要行；
+  缺了退 3。`--no-tag` 只给合成/测试包。
 - **解析围栏**：配对、归属、嵌套深度（结构性第一道）。
 - **gate1**：字节恒等 + 写入授权 → 失败退 3，权限类退 4。
 - **源包未变校验**：对照 `manifest` 里记的 sha256，源包在 export 之后被改过就拒绝写回（退 5），
