@@ -51,6 +51,10 @@ type Server struct {
 	// 所以 cfg 的替换也收进这把锁(原来是直接 *s.cfg = nc,没有任何同步)。
 	mu   sync.Mutex
 	stop func()
+
+	// dbPool 常驻直连会话池：/api/dbsql 在同一进程里复用"建连 + 登录"，
+	// 之后的查询只付执行时间（详见 dbpool.go）。nil 表示未初始化（测试里可能直接构造 Server）。
+	dbPool *dbDirectPool
 }
 
 // NewServer 创建服务实例；cfgPath 为 config.json 路径(重读配置用,可为空=只读)。
@@ -66,7 +70,7 @@ func NewServer(cfg *Config, web fs.FS, cfgPath string) *Server {
 	// /api/status 报不出主机,从 /api/sessions 起的会话也会拿空地址去连。
 	// 重复调用无副作用(CLI 的 serve 路径本来就会先调一次)。
 	cfg.ApplyDefaultEnv()
-	s := &Server{cfg: cfg, cfgPath: cfgPath, web: web, mgr: NewManager(cfg), dial: host.Dial}
+	s := &Server{cfg: cfg, cfgPath: cfgPath, web: web, mgr: NewManager(cfg), dial: host.Dial, dbPool: newDBDirectPool()}
 	// 本地字典库优先的作业解析（2026-10-23）：<数据目录>/dict/<环境>.db 里有同一张
 	// gzzz_t/gzza_t，本地命中就省掉每次启动的 SSH+连库（实测约 3s）。CLI 的 serve
 	// 路径（servebg.go）同样走 NewServer，这里装配一次两条路都生效。
@@ -2430,6 +2434,19 @@ func (s *Server) hDBSQL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ent := req.Ent
+
+	// 直连优先：进程内复用一条连接（建连+登录只付一次），拿不到才回退 SSH + sqlplus。
+	// 这一条只在挂了库、且能按 ENT 清单解出账号时才尝试 —— 其余情况行为与从前一字不差。
+	if res, derr, handled := s.directSQL(r.Context(), ent, req.Timeout, req.SQL); handled {
+		if derr != nil {
+			fail(w, 400, derr)
+			return
+		}
+		s.logAISQL(r, res, req.SQL)
+		writeJSON(w, 200, map[string]any{"ok": true, "result": res})
+		return
+	}
+
 	conn, err := s.dialSSH()
 	if err != nil {
 		fail(w, 500, fmt.Errorf("SSH 连接失败: %w", err))
@@ -2441,11 +2458,17 @@ func (s *Server) hDBSQL(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err)
 		return
 	}
-	if actorOf(r) == "ai" {
-		text := "只读 SQL(企业 " + fmt.Sprint(res.Ent) + " → " + res.Account + "): " + firstLine(req.SQL, 120)
-		s.mgr.emit(Event{Type: "log", Actor: "ai", Action: "sql", Text: text})
-	}
+	s.logAISQL(r, res, req.SQL)
 	writeJSON(w, 200, map[string]any{"ok": true, "result": res})
+}
+
+// logAISQL 把 AI 发起的只读 SQL 记进时间线（只留首行线索，不留全文）。
+func (s *Server) logAISQL(r *http.Request, res *DBQueryResult, sqlText string) {
+	if actorOf(r) != "ai" {
+		return
+	}
+	text := "只读 SQL(企业 " + fmt.Sprint(res.Ent) + " → " + res.Account + "): " + firstLine(sqlText, 120)
+	s.mgr.emit(Event{Type: "log", Actor: "ai", Action: "sql", Text: text})
 }
 
 // firstLine 取首行并截断(时间线与日志里只留个线索,不留全文)
@@ -2546,6 +2569,8 @@ func (s *Server) swapConfig(cfg *Config) {
 	s.mu.Lock()
 	*s.cfg = *cfg
 	s.mu.Unlock()
+	// 连接要素可能变了（换了环境/账号/库地址）：整池作废，下一次查询重连。
+	s.dbPool.closeAll()
 }
 
 // ---------- WebSocket ----------

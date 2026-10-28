@@ -43,21 +43,18 @@ func RunDirectQuery(ctx context.Context, conn dbconfig.Connection, sqlText strin
 	if err := safesql.Check(sqlText); err != nil {
 		return nil, err
 	}
-	if !conn.ReadonlySQLEnabled() {
-		return nil, fmt.Errorf("该环境的只读 SQL 已在配置里关闭(debug.sshs[].db.readonlySql=false)")
-	}
 	sec := clampSQLTimeout(timeout)
 	qctx, cancel := context.WithTimeout(ctx, time.Duration(sec)*time.Second)
 	defer cancel()
 
-	start := time.Now()
-	l, err := live.Open(qctx, conn)
+	d, err := OpenDirectQuery(qctx, conn)
 	if err != nil {
-		return nil, &DirectUnreachableError{Err: err}
+		return nil, err
 	}
-	defer l.Close()
+	defer d.Close()
 
-	res, err := directQuery(qctx, l.Connector(), sqlText)
+	start := time.Now()
+	res, err := d.Query(qctx, sqlText)
 	if err != nil {
 		return nil, err
 	}
@@ -65,6 +62,48 @@ func RunDirectQuery(ctx context.Context, conn dbconfig.Connection, sqlText strin
 	// （服务器那边量的也是 sqlplus 启动+登录+执行，不只是库执行时间）。
 	res.Elapsed = time.Since(start).Seconds()
 	return res, nil
+}
+
+// DirectQuery 是**一条进程内可复用**的客户端直连会话。
+//
+// 存在的理由：建连（TCP + Oracle 登录，实测约 55ms）是固定的，一条 SQL 摊一次
+// 完全浪费。批量/常驻场景下先用 OpenDirectQuery 建一次，然后连续 Query —— 这才是
+// "把固定成本摊薄"的正确形态，而不是给每条语句各开一个连接。
+//
+// 只读语义不变：每条语句照样过 safesql.Check，库会话照样是只读事务
+// （Oracle 的 SET TRANSACTION READ ONLY 由 erpdb 在每次查询里发）。
+type DirectQuery struct {
+	l *live.Live
+}
+
+// OpenDirectQuery 建一次直连。账号仍由 conn.Account 决定（调用方已按企业解析好）。
+func OpenDirectQuery(ctx context.Context, conn dbconfig.Connection) (*DirectQuery, error) {
+	if !conn.ReadonlySQLEnabled() {
+		return nil, fmt.Errorf("该环境的只读 SQL 已在配置里关闭(debug.sshs[].db.readonlySql=false)")
+	}
+	l, err := live.Open(ctx, conn)
+	if err != nil {
+		return nil, &DirectUnreachableError{Err: err}
+	}
+	return &DirectQuery{l: l}, nil
+}
+
+// Dialect 返回底层方言（oracle | kingbase）。
+func (d *DirectQuery) Dialect() string { return d.l.Connector().Type() }
+
+// Query 在这条会话上执行一条只读 SQL。
+func (d *DirectQuery) Query(ctx context.Context, sqlText string) (*DBQueryResult, error) {
+	if err := safesql.Check(sqlText); err != nil {
+		return nil, err
+	}
+	return directQuery(ctx, d.l.Connector(), sqlText)
+}
+
+// Close 释放连接（幂等）。
+func (d *DirectQuery) Close() {
+	if d != nil && d.l != nil {
+		d.l.Close()
+	}
 }
 
 // directConnector 是 directQuery 需要的最小能力面。
