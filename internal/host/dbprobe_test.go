@@ -130,13 +130,27 @@ func TestSqlplusCmdHasNoSqlAndQuotesValues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("反解失败: %v", err)
 	}
-	want := "source /u3/pub/bin/chenv 36 >/dev/null 2>&1; exec timeout -s TERM 30 /u2/oracle/bin/sqlplus -S " + shQuote(nasty)
+	want := "source /u3/pub/bin/chenv 36 >/dev/null 2>&1; " +
+		`export NLS_LANG="${NLS_LANG%%.*}.AL32UTF8"; ` +
+		"exec timeout -s TERM 30 /u2/oracle/bin/sqlplus -S " + shQuote(nasty)
 	if string(out) != want {
 		t.Errorf("展开后与期望不符\n 得到 %q\n 期望 %q", out, want)
 	}
 	// 上面那条往返断言就是"注入已根治"的证据:整串展开后**恰好等于**期望脚本,
 	// 说明 payload 里的 `; id; echo` 全部被引用成了数据,没有变成第二条命令。
 	// (不再断言"命令里不含 echo" —— payload 自己就含这个词,那种检查会被数据本身骗到。)
+}
+
+// 服务器 NLS_LANG 为空时，sqlplus 以 US7ASCII 连库，中文会在客户端转换成 `?`。
+// 命令必须把字符集段固定为 AL32UTF8，同时保留「语言_区域」段（日期格式等不变）。
+func TestSqlplusCmdForcesUTF8Charset(t *testing.T) {
+	cmd, err := SqlplusCmd("36", "", "/u2/bin/sqlplus", "ds/x@//h:1521/s", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(cmd, `export NLS_LANG="${NLS_LANG%%.*}.AL32UTF8"`) {
+		t.Errorf("命令里缺少 NLS_LANG 字符集覆盖（中文会被转成 ?）：\n%s", cmd)
+	}
 }
 
 func TestSqlplusCmdRejectsBadInputs(t *testing.T) {
