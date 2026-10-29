@@ -235,6 +235,12 @@ func SqlplusCmd(zone, oracleHome, sqlplusPath, connStr string, killAfterSec int)
 		tool = fmt.Sprintf("timeout -s TERM %d %s", killAfterSec, p)
 	}
 	script := env + "; "
+	// 服务器上的 NLS_LANG 常为空（实测 /u1 站点就是空），sqlplus 会以 US7ASCII 连库：
+	// 库里的中文（AL32UTF8）在**客户端转换**时被静默替换成 `?`，Go 侧拿到的就是
+	// `"MESSAGE":"?????"`。Go 字符串按 UTF-8 解释，所以把字符集段固定为 AL32UTF8；
+	// `${NLS_LANG%%.*}` 保留原来的「语言_区域」段，日期格式等 NLS 行为不变
+	// （为空时退化成 `.AL32UTF8`，实测可用）。
+	script += `export NLS_LANG="${NLS_LANG%%.*}.AL32UTF8"; `
 	if oracleHome != "" {
 		// ${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH} 避免尾随冒号(那等于把当前目录塞进 ld 搜索路径)
 		script += fmt.Sprintf(`export ORACLE_HOME=%s; export PATH="$ORACLE_HOME/bin:$PATH"; export LD_LIBRARY_PATH="$ORACLE_HOME/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; `, oracleHome)
