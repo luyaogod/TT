@@ -15,6 +15,8 @@ export function StatusBar() {
   const state = useStore((s) => s.state)
   const stop = useStore((s) => s.stop)
   const hold = useStore((s) => s.holdingSeconds)
+  const watchdogSeconds = useStore((s) => s.watchdogSeconds)
+  const watchdogDisabled = useStore((s) => s.watchdogDisabled)
   const sessionEnv = useStore((s) => s.sessionEnv)
   const sessionId = useStore((s) => s.sessionId)
   const mode = useStore((s) => s.mode)
@@ -38,9 +40,29 @@ export function StatusBar() {
   if (state === 'stopped') {
     // 入口停站只报文件、没有行号(程序还没 run):别拼出 "x.4gl:undefined"
     const loc = stop?.file ? (stop.line ? `${stop.file}:${stop.line}` : stop.file) : ''
-    bar = 'bg-[#cc6633] text-white'
-    msg = `已停站${loc ? ` ${loc}` : ''} · 停留 ${Math.round(hold)}s`
-    title = '程序已暂停,可查看变量/下断点/继续'
+    const atEntry = stop?.reason === 'entry'
+    // 停站时把“还有多久自动放行”直接摆在状态栏上。
+    //   - 看门狗关闭:红底，说清楚“不会自动放行”（入口停站不持锁，不算危险，照常橙）；
+    //   - 快到了(<60s):红底，避免正看着代码被突然放行；
+    //   - 其它：橙底，带剩余秒数。
+    const secs = watchdogSeconds > 0 ? watchdogSeconds : 0
+    const remain = secs > 0 ? Math.max(0, Math.round(secs - hold)) : 0
+    const off = watchdogDisabled && !atEntry
+    const closing = !off && secs > 0 && remain <= 60
+    bar = off || closing ? 'bg-[#b91c1c] text-white' : 'bg-[#cc6633] text-white'
+    const tail = atEntry
+      ? '入口停站 · 未持锁'
+      : off
+        ? '看门狗已关闭 · 不会自动放行'
+        : secs > 0
+          ? `还有 ${remain}s 自动放行`
+          : ''
+    msg = `已停站${loc ? ` ${loc}` : ''} · 停留 ${Math.round(hold)}s${tail ? ` · ${tail}` : ''}`
+    title = off
+      ? '看门狗已关闭:程序会一直停在这里持锁,直到人工继续/结束。改动 debug.watchdogSeconds 或环境覆盖值后重启会话生效'
+      : atEntry
+        ? '程序已暂停在入口(未 run,不持事务锁),可下断点或启动'
+        : '程序已暂停,可查看变量/下断点/继续;超时会自动放行以防行锁'
   } else if (state === 'running') {
     bar = 'bg-[#0078d4] text-white'
     msg = collab ? 'AI 已放行 · 在界面上观察即可' : '运行中 · 请到 GDC 操作'

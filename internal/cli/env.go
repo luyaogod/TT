@@ -233,8 +233,16 @@ func runEnvShow(cmd *cobra.Command, name string) error {
 	if e.LaunchArgs != "" {
 		cmd.Printf("启动参数  %s\n", e.LaunchArgs)
 	}
-	if e.WatchdogSeconds > 0 {
+	// 看门狗：负数 = 关闭（`config.WatchdogProblems` 会把它当问题报出来）。
+	// 这里**无条件**打印：从前只在 >0 时输出，于是“被关掉”和“没配”在 env show
+	// 里长得一模一样 —— 而这两件事的后果差得很远（一个不自动放行，一个 30 分钟放行）。
+	switch {
+	case config.WatchdogDisabled(e.WatchdogSeconds):
+		cmd.Printf("停站超时  已关闭（停站后不会自动放行，行锁只能靠人工处理）\n")
+	case e.WatchdogSeconds > 0:
 		cmd.Printf("停站超时  %d 秒\n", e.WatchdogSeconds)
+	default:
+		cmd.Printf("停站超时  %d 秒（默认）\n", config.DefaultWatchdogSeconds)
 	}
 	if e.DB == nil {
 		cmd.Printf("数据库    未配置\n")

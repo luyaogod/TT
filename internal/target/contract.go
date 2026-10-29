@@ -66,7 +66,7 @@ var NewSessionKeys = []string{"ref", "display", "kind", "name", "ent", "n", "epo
 // 多一个说明有人往信封里塞了新形状。
 var SessionOptionalKeys = []string{
 	"module", "runProg", "started", "file", "line", "func", "reason",
-	"holdingSeconds", "breakpoints", "watchdogSeconds",
+	"holdingSeconds", "breakpoints", "watchdogSeconds", "watchdogDisabled",
 	"waitingForUser", "waitingKind", "silentSeconds", "mode", "inflight",
 }
 

@@ -285,8 +285,10 @@ func (m *Manager) emit(ev Event) {
 	ev.Seq = m.seq.Add(1) // 第一件事:序号必须先于任何入缓冲/广播动作
 	// 只保留对"发生了什么"有信息量的结构化事件(输出流/自动变量列表不入缓冲,
 	// 会占用大量内存且 AI 用 tail 查询时噪声过大)
+	// watchdog-approaching / watchdog-failed 与 watchdog 同属“防行锁”那条线：
+	// 前者是“快到期了”，后者是“看门狗自己没成功”—— 后者尤其不能静默丢掉。
 	switch ev.Type {
-	case "state", "stopped", "log", "dead", "watchdog", "ai_action":
+	case "state", "stopped", "log", "dead", "watchdog", "watchdog-approaching", "watchdog-failed", "ai_action":
 		m.evMu.Lock()
 		m.evs = append(m.evs, ev)
 		if len(m.evs) > maxBufferedEvents {
@@ -999,6 +1001,10 @@ type SessionBrief struct {
 	Holding  float64 `json:"holdingSeconds"`
 	Breaks   int     `json:"breakpoints"`
 	Watchdog int     `json:"watchdogSeconds"`
+	// WatchdogDisabled 这一轮**真的**不会自动放行（运行时的口径：`<= 0` 即不启定时器）。
+	// 与 `config.WatchdogDisabled`（只把负数当“配错”）故意不同：配置里的 0 会被补成
+	// 默认 1800，而运行时的 0 是“显式关”。给前端的就是“会不会触发”这个事实。
+	WatchdogDisabled bool `json:"watchdogDisabled,omitempty"`
 	// 停站现场就是交互语句(INPUT/MENU/DISPLAY ARRAY…):程序把控制权交给了界面。
 	// 零成本判定(只看停站那一行的源码文本),供 AI 直接分支,不必再读源码做预测。
 	WaitingForUser bool   `json:"waitingForUser,omitempty"`
@@ -1066,14 +1072,15 @@ func (m *Manager) briefOf(s *Session) SessionBrief {
 		Module: s.Module, Prog: s.Prog, RunProg: s.RunProg,
 		State: string(s.State()), Env: s.EnvName(), Started: s.Started(), File: cur.File, Line: cur.Line,
 		Func: cur.Func, Reason: cur.Reason,
-		Holding:        s.HoldingSeconds(),
-		Breaks:         len(s.Breakpoints()),
-		Watchdog:       m.cfg.WatchdogSeconds,
-		WaitingForUser: cur.WaitingForUser,
-		WaitingKind:    cur.WaitingKind,
-		SilentSeconds:  s.SilentSeconds(),
-		Mode:           s.Mode(),
-		Inflight:       s.Inflight(),
+		Holding:          s.HoldingSeconds(),
+		Breaks:           len(s.Breakpoints()),
+		Watchdog:         m.cfg.WatchdogSeconds,
+		WatchdogDisabled: m.cfg.WatchdogSeconds <= 0,
+		WaitingForUser:   cur.WaitingForUser,
+		WaitingKind:      cur.WaitingKind,
+		SilentSeconds:    s.SilentSeconds(),
+		Mode:             s.Mode(),
+		Inflight:         s.Inflight(),
 	}
 }
 

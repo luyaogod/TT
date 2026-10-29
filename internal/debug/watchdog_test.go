@@ -2,6 +2,7 @@ package debug
 
 import (
 	"testing"
+	"time"
 
 	"tt/internal/host"
 )
@@ -24,5 +25,25 @@ func TestWatchdogEnvOverride(t *testing.T) {
 	c.applySsh(&host.NamedSsh{Name: "覆盖过的环境", WatchdogSeconds: 654})
 	if c.WatchdogSeconds != 654 {
 		t.Errorf("环境覆盖应生效:期望 654,得到 %d", c.WatchdogSeconds)
+	}
+}
+
+// 提前提醒的落点：总时长的 80%。固定提前量（比如一律提前 60 秒）在超时被设成
+// 60 秒时会让整段停站都在喊“即将放行”，成了噪音。
+func TestWatchdogApproachDelay(t *testing.T) {
+	cases := []struct{ total, want time.Duration }{
+		{300 * time.Second, 240 * time.Second},
+		{1800 * time.Second, 1440 * time.Second},
+		{60 * time.Second, 48 * time.Second},
+		{0, 0},
+		{-1 * time.Second, 0},
+	}
+	for _, c := range cases {
+		if got := watchdogApproachDelay(c.total); got != c.want {
+			t.Errorf("watchdogApproachDelay(%v) = %v，期望 %v", c.total, got, c.want)
+		}
+	}
+	if watchdogRetryDelay <= 0 {
+		t.Error("重试间隔必须为正：0 会让重试变成忙等")
 	}
 }

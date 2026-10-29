@@ -30,8 +30,11 @@ func TestSessionEnvelopeKeyLiterals(t *testing.T) {
 		}
 	}
 	// 两者合起来必须正好是 SessionBrief 的 JSON 键（C5.2：键名一个都不许改）。
-	if got := len(SessionEnvelopeKeys) + len(SessionOptionalKeys); got != 26 {
-		t.Errorf("恒定键 + omitempty 键 = %d 个，应该是 26 个（C5.1/C5.2）", got)
+	// 27 = 26（原定）+ watchdogDisabled：2026-10-29 真机验证后新增的“这一轮不会
+	// 自动放行”标记。按 C5.2 新增键必须显式登记（不能靠 omitempty 飘进去），
+	// 所以这个数从 26 改成 27 是本契约的一次有记录的变更，不是测试漂移。
+	if got := len(SessionEnvelopeKeys) + len(SessionOptionalKeys); got != 27 {
+		t.Errorf("恒定键 + omitempty 键 = %d 个，应该是 27 个（C5.1/C5.2）", got)
 	}
 	// 顶层恒定键（5.1）：session 与 requested。
 	assertSameSet(t, "5.1 的顶层恒定键", SessionTopKeys, []string{"session", "requested"})

@@ -336,9 +336,11 @@ type Session struct {
 	// 从前清的是全局 `srccache/`,并发启动互删（缺陷 X）。
 	runScope string
 
-	stopTimer *time.Timer
-	kaStop    func() // 停止 SSH 心跳(主动关闭连接前调用,避免误报掉线)
-	restoring bool   // 入口停站后的断点恢复进行中(对外仍报 loading)
+	stopTimer     *time.Timer
+	approachTimer *time.Timer
+	retryTimer    *time.Timer
+	kaStop        func() // 停止 SSH 心跳(主动关闭连接前调用,避免误报掉线)
+	restoring     bool   // 入口停站后的断点恢复进行中(对外仍报 loading)
 
 	custModule string // 转客制作业:实际启动的客制模块名(cpm/apm→cpm),空 = 标准模块
 
@@ -1721,9 +1723,7 @@ func (s *Session) forceExit() {
 	p := s.pending
 	s.pending = nil
 	s.mu.Unlock()
-	if s.stopTimer != nil {
-		s.stopTimer.Stop()
-	}
+	s.stopWatchdog() // 停掉全部看门狗计时（主/预警/重试）
 	if p != nil {
 		p.res <- &execResult{Cmd: p.cmd, SawShell: true}
 	}
@@ -3269,31 +3269,78 @@ func (s *Session) mirrorStopFile(stop *StopInfo) {
 	}()
 }
 
+// watchdogRetryDelay 看门狗自动 continue 失败后，隔多久再试一次。
+//
+// 为什么必须重试：定时器到点那一刻正是“连接可能半死”的时刻（心跳刚好卡住、SSH 通道
+// 正在超时）。从前 `go s.Continue()` 失败就完了：不重试、不告警，timer 也已烧掉，
+// 于是会话继续停在断点上持锁，**从此再没有任何东西会提醒**。
+const watchdogRetryDelay = 60 * time.Second
+
+// watchdogApproachDelay 返回“快要自动放行”的提醒时刻：总时长的 80%。
+//
+// 0.8 而不是固定 60 秒：超时被人设成 60 秒时，固定提前量会把整段停站都变成预警噪音。
+func watchdogApproachDelay(total time.Duration) time.Duration {
+	if total <= 0 {
+		return 0
+	}
+	return total - total/5 // 80% 处
+}
+
 func (s *Session) startWatchdog() {
 	if s.cfg.WatchdogSeconds <= 0 {
 		return
 	}
-	if s.stopTimer != nil {
-		s.stopTimer.Stop()
-	}
+	s.stopWatchdog()
 	cur := s.Cur()
 	if cur.Reason == "entry" {
 		return // 入口停留不持事务锁,不自动 continue
 	}
-	s.stopTimer = time.AfterFunc(time.Duration(s.cfg.WatchdogSeconds)*time.Second, func() {
-		if s.State() != StateStopped {
-			return
-		}
+	total := time.Duration(s.cfg.WatchdogSeconds) * time.Second
+	if lead := total - watchdogApproachDelay(total); lead > 0 {
+		s.approachTimer = time.AfterFunc(watchdogApproachDelay(total), func() {
+			if s.State() != StateStopped {
+				return
+			}
+			// 有人正对着屏幕读这段代码时，忽然被放行很恼火。提前说一声，让他
+			// 决定是继续看（那就手动 continue）还是就这么放着。
+			s.emitEvent(Event{Type: "watchdog-approaching",
+				Text: fmt.Sprintf("停站已接近 %d 秒上限，%d 秒后看门狗会自动继续（要保住现场请手动操作）",
+					s.cfg.WatchdogSeconds, int(lead.Round(time.Second)/time.Second))})
+		})
+	}
+	s.stopTimer = time.AfterFunc(total, func() { s.fireWatchdog(1) })
+}
+
+// fireWatchdog 尝试自动放行一次（attempt=1 首次，2 是重试）。
+func (s *Session) fireWatchdog(attempt int) {
+	if s.State() != StateStopped {
+		return
+	}
+	if attempt == 1 {
 		s.emitEvent(Event{Type: "watchdog",
 			Text: fmt.Sprintf("停站停留超过 %d 秒,看门狗自动继续运行(防生产库行锁)", s.cfg.WatchdogSeconds)})
-		go s.Continue()
-	})
+	}
+	if _, err := s.Continue(); err == nil {
+		return
+	} else if attempt >= 2 {
+		// 两次都不成：把话说到能照着做为止 —— 这时候锁还在，人必须亲自处理。
+		s.emitEvent(Event{Type: "watchdog-failed",
+			Text: fmt.Sprintf("看门狗自动继续连续两次失败(%v)：程序仍停在断点并持锁。"+
+				"请人工处理：tt debug quit（立刻放锁）或 tt session rm（断开连接）", err)})
+		return
+	} else {
+		s.emitEvent(Event{Type: "watchdog-failed",
+			Text: fmt.Sprintf("看门狗自动继续失败(%v)，%d 秒后重试一次", err, int(watchdogRetryDelay.Seconds()))})
+		s.retryTimer = time.AfterFunc(watchdogRetryDelay, func() { s.fireWatchdog(2) })
+	}
 }
 
 // StopTimer 停掉看门狗计时(继续运行时)
 func (s *Session) stopWatchdog() {
-	if s.stopTimer != nil {
-		s.stopTimer.Stop()
+	for _, t := range []*time.Timer{s.stopTimer, s.approachTimer, s.retryTimer} {
+		if t != nil {
+			t.Stop()
+		}
 	}
 }
 
