@@ -60,6 +60,7 @@ TT/
 │  │  └─ testutil/      管线测试夹具
 │  │  └─ shapes/        内置形状库（business/controls/icons/raw）
 │  ├─ entdir/           企业目录（ENT→账号）快照、指纹、新鲜期（debug 与 dict 共用）
+│  ├─ envmove/          环境改名的落点迁移（字典库/快照/镜像）与失败回滚（CLI 与 Web 共用）
 │  ├─ erpdb/            客户端直连库封装（Oracle / 金仓，一个接口两个实现）
 │  ├─ form42f/          .42f 编译表单解析：字段表 + 页面布局（纯函数，零 IO）
 │  ├─ host/             唯一 SSH/远程服务器能力层（连接、登录、服务器侧只读探测）
