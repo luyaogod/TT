@@ -31,7 +31,7 @@ func (s *Server) directSQL(ctx context.Context, ent, timeout int, sqlText string
 		return nil, nil, false
 	}
 	key := s.cfg.EnvName() + "|" + strconv.Itoa(ent) + "|" + cc.Account
-	q, err := s.dbPool.get(key, func() (*DirectQuery, error) {
+	q, release, err := s.dbPool.acquire(key, func() (*DirectQuery, error) {
 		octx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
 		return OpenDirectQuery(octx, *cc)
@@ -40,13 +40,16 @@ func (s *Server) directSQL(ctx context.Context, ent, timeout int, sqlText string
 		// 建不起来（网络 / 隧道 / 登录）：交回老路，不让"本机到不了库"的站点因此查不了数。
 		return nil, nil, false
 	}
+	// release 必须在查询结束后调用：它才是"这条连接现在没人用了"的凭据
+	// （退役/配置热替换要等它才关，见 dbpool.go）。
+	defer release()
 
 	qctx, cancel := context.WithTimeout(ctx, time.Duration(clampSQLTimeout(timeout))*time.Second)
 	defer cancel()
 	res, err := q.Query(qctx, sqlText)
+	// 成败都交给池判断：SQL 写错不该把别人正用的连接抽走，只有像是连接断了才退役。
+	s.dbPool.report(key, q, err)
 	if err != nil {
-		// 连接可能已经死了：摘掉，下一次请求重连。
-		s.dbPool.drop(key, q)
 		return nil, err, true
 	}
 	res.Env = s.cfg.EnvName()

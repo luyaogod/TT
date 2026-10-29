@@ -16,6 +16,7 @@ package debug
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"tt/internal/dbconfig"
@@ -74,6 +75,9 @@ func RunDirectQuery(ctx context.Context, conn dbconfig.Connection, sqlText strin
 // （Oracle 的 SET TRANSACTION READ ONLY 由 erpdb 在每次查询里发）。
 type DirectQuery struct {
 	l *live.Live
+	// closed 保证 Close 真的幂等：池里退出/热替换/上报都可能在同一时刻叫它，
+	// 重复关一条 *sql.DB 不致命，但"关了几次"会让"连接被谁抽走"变得没法追。
+	closed atomic.Bool
 }
 
 // OpenDirectQuery 建一次直连。账号仍由 conn.Account 决定（调用方已按企业解析好）。
@@ -101,7 +105,10 @@ func (d *DirectQuery) Query(ctx context.Context, sqlText string) (*DBQueryResult
 
 // Close 释放连接（幂等）。
 func (d *DirectQuery) Close() {
-	if d != nil && d.l != nil {
+	if d == nil || !d.closed.CompareAndSwap(false, true) {
+		return
+	}
+	if d.l != nil {
 		d.l.Close()
 	}
 }
