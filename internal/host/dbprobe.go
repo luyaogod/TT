@@ -196,7 +196,15 @@ func KbCmd(ksqlPath, host, port, db, connStr string) (string, error) {
 	}
 	// 口令只能作为环境变量前缀传;它仍会出现在远端的 argv 里(ps 可见)——
 	// 这是既有行为,文件头注释以前写成"走 stdin 不进命令行",与实现不符,已改正。
-	return fmt.Sprintf(`KINGBASE_PASSWORD=%s %s -w -h %s -p %s -U %s -d %s -t -A -F '|'`,
+	//
+	// PGCLIENTENCODING=UTF8 与 sqlplus 路线的 `export NLS_LANG=…AL32UTF8` 是同一件事：
+	// 客户端字符集不钉死时，库里的中文会按库字符集原样回字节，Go 侧按 UTF-8 解就成了
+	// 乱码（金仓现场 GBK 编码的库不罕见）。钉成 UTF8 之后服务端负责转码，拿到的就是
+	// 合法 UTF-8。
+	//
+	// 用**命令前缀**而不是 `export`：KbCmd 返回的是一条单命令（不经 bashLC 包成脚本），
+	// 前缀是命令层的形态，不引入引号与再解析面。
+	return fmt.Sprintf(`PGCLIENTENCODING=UTF8 KINGBASE_PASSWORD=%s %s -w -h %s -p %s -U %s -d %s -t -A -F '|'`,
 		shQuote(pass), ksqlPath, shQuote(host), shQuote(port), shQuote(user), shQuote(db)), nil
 }
 

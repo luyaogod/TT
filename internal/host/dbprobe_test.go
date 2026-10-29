@@ -232,3 +232,23 @@ func TestKbCmdRejectsInjection(t *testing.T) {
 		t.Errorf("不该再用 -c 把 SQL 拼进命令行: %s", cmd)
 	}
 }
+
+// 金仓路线也要钉死客户端字符集：库里的中文按库编码回字节，Go 侧一律按 UTF-8 解，
+// 不设 PGCLIENTENCODING 就会乱码（与 sqlplus 的 NLS_LANG 是同一个病）。
+func TestKbCmdForcesUTF8ClientEncoding(t *testing.T) {
+	cmd, err := KbCmd("/u2/bin/ksql", "127.0.0.1", "54321", "t100", "ds/pw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(cmd, "PGCLIENTENCODING=UTF8 ") {
+		t.Errorf("命令应以 PGCLIENTENCODING=UTF8 开头（否则中文乱码）：\n%s", cmd)
+	}
+	// 口令仍必须原样带着 —— 加前缀不能把原来的环境变量挤掉。
+	if !strings.Contains(cmd, "KINGBASE_PASSWORD='pw'") {
+		t.Errorf("口令前缀丢了：\n%s", cmd)
+	}
+	// 命令层形态，不该冒出 export / 分号（那意味着要再过一层 shell）。
+	if strings.Contains(cmd, "export ") || strings.Contains(cmd, ";") {
+		t.Errorf("KbCmd 是单命令，不该含 export 或分号：\n%s", cmd)
+	}
+}
