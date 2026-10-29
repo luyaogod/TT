@@ -29,6 +29,7 @@ import (
 	"tt/internal/config"
 	"tt/internal/dbconfig"
 	"tt/internal/designer"
+	"tt/internal/envmove"
 	"tt/internal/erpdb"
 	"tt/internal/host"
 	"tt/internal/sshtun"
@@ -345,22 +346,104 @@ func (s *Server) hHostsPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 环境改名/删除只影响配置本身。
+	// 环境改名是跨文件迁移：先把要搬的落点规划清楚、并在**写配置之前**搬完。
+	// 反过来（先写配置、后搬文件）一旦搬失败，配置已经是新名、文件还挂在旧名 ——
+	// 那正是本 PR 要消灭的悬空状态，而且用户只会看到"保存成功"。
+	oldRoot, err := config.Open(path)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	var sec map[string]any
 	var renamed []envRename
 	var removedEnvs []string
+	// renamedMeta 记下旧名对应的 host/zone：按旧名算 ents 的目录段。
+	renamedMeta := map[string]struct{ host, zone string }{}
+	if req.Hosts != nil {
+		if err := validateHosts(req.Hosts); err != nil {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
+		sec, err = structToSection(*req.Hosts)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
+		oldNames := map[string]bool{}
+		if oldHosts, ok := oldRoot["hosts"].(map[string]any); ok {
+			oldEntries := envEntries(oldHosts)
+			renamed, removedEnvs = diffEnvs(oldEntries, envEntries(sec))
+			for _, e := range oldEntries {
+				oldNames[e.name] = true
+			}
+			for _, r := range renamed {
+				for _, e := range oldEntries {
+					if e.name != r.From {
+						continue
+					}
+					host, _ := e.raw["host"].(string)
+					zone, _ := e.raw["zone"].(string)
+					renamedMeta[r.From] = struct{ host, zone string }{host: host, zone: zone}
+				}
+			}
+		}
+		// 新增/改名的名字要能安全当路径键与 `local:<名>`。老配置里已有的怪名字
+		// 不在这里拦（否则一次与它无关的保存会被旧数据卡住）。
+		for i := range req.Hosts.SSHs {
+			if name := req.Hosts.SSHs[i].Name; !oldNames[name] {
+				if err := config.ValidateEnvName(name); err != nil {
+					writeErr(w, http.StatusBadRequest, err)
+					return
+				}
+			}
+		}
+	}
+
+	// 1) 规划：任何一个目标落点被占用都整体拒绝，配置文件一个字节都不写。
+	type plannedMove struct {
+		r     envRename
+		moves []envmove.Move
+	}
+	var plans []plannedMove
+	for _, r := range renamed {
+		if err := config.ValidateEnvName(r.To); err != nil {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
+		meta := renamedMeta[r.From]
+		moves, err := envmove.Plan(path, r.From, r.To, meta.host, meta.zone)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
+		plans = append(plans, plannedMove{r: r, moves: moves})
+	}
+	// 2) 搬文件（此时配置仍是旧名）。失败就把已搬的搬回去。
+	var executed []plannedMove
+	for _, p := range plans {
+		if err := envmove.Execute(p.moves, p.r.To, p.r.From); err != nil {
+			for i := len(executed) - 1; i >= 0; i-- {
+				if uerr := envmove.Undo(executed[i].moves, executed[i].r.From); uerr != nil {
+					log.Printf("[tt] 回滚环境 %s 的落点失败: %v", executed[i].r.From, uerr)
+				}
+			}
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		executed = append(executed, p)
+	}
+	rollbackMoves := func() {
+		for i := len(executed) - 1; i >= 0; i-- {
+			if uerr := envmove.Undo(executed[i].moves, executed[i].r.From); uerr != nil {
+				log.Printf("[tt] 回滚环境 %s 的落点失败: %v", executed[i].r.From, uerr)
+			}
+		}
+	}
+
+	// 3) 再写配置：改名 + query.source 改写 + 悬空校验在同一次原子写里完成。
 	err = config.Edit(path, nil, func(root map[string]any) error {
 		if req.Hosts != nil {
-			if err := validateHosts(req.Hosts); err != nil {
-				return err
-			}
-			sec, err := structToSection(*req.Hosts)
-			if err != nil {
-				return err
-			}
-			if oldHosts, ok := root["hosts"].(map[string]any); ok {
-				renamed, removedEnvs = diffEnvs(envEntries(oldHosts), envEntries(sec))
-			}
-			// renamed / removedEnvs 只为"改名不算删"的判断保留；这里不再动任何文件。
+			// renamed / removedEnvs 只为"改名不算删"的判断保留；文件已经在上一步搬完。
 			// 保留前端表单不管理的 db 字段（目前是 viaSsh）。
 			// 配置页只编辑 type/host/port/service/database/readonlySql/accounts，
 			// 整节替换会把手工配的 SSH 隧道悄悄抹掉 —— 那是"保存一次就丢配置"，
@@ -421,16 +504,39 @@ func (s *Server) hHostsPut(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
+		// 改名与数据源在同一次写入里保持一致：source 指向旧名就跟着改。
+		for _, r := range renamed {
+			config.RewriteQuerySource(root, r.From, r.To)
+		}
+		// 保存时就拦住悬空的数据源：用户刚改过数据源时做完整校验。
+		// 悬空引用不会当场报错，只会在下次查询时变成「本地库不存在」——
+		// 那个症状与「数据不存在」长得一模一样，只能靠写入时拦。
+		if req.Query != nil {
+			if err := config.ValidateQuerySource(root); err != nil {
+				return err
+			}
+		}
+		// 改名没被识别出来时（例如同时改了 host，①② 都不成立），旧名字会从配置里
+		// 消失而 query.source 还指着它。不能指望 ValidateQuerySource 全量跑：
+		// 历史配置里的裸 `local` 会被它判成错，那不该阻塞一次与数据源无关的保存。
+		if len(removedEnvs) > 0 {
+			if env := config.QuerySourceEnv(root); env != "" {
+				for _, old := range removedEnvs {
+					if env == old {
+						return fmt.Errorf("query.source 仍指向已删除/改名的环境 %q；若是改名，请先只改名（不改 host 等字段），再改其它内容", env)
+					}
+				}
+			}
+		}
 		root["schemaVersion"] = config.SchemaVersion
 		return nil
 	})
 	if err != nil {
+		// 配置没写成（校验失败/IO）→ 把已经搬走的落点搬回旧名。
+		rollbackMoves()
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	// 这里只剩配置本身的落盘。
-	_ = renamed
-	_ = removedEnvs
 	// 通知持有配置内存态的子系统（如调试服务）重新加载。
 	// 失败只记日志：配置已经落盘成功，重新加载失败不该把一个成功的写报成失败，
 	// 但必须让用户看见 —— 否则就成了"保存成功但没生效"。
@@ -574,28 +680,11 @@ func diffEnvs(oldList, newList []envEntry) (renames []envRename, removed []strin
 			}
 		}
 	}
-	// ③ 数量相等时按下标配对（宁可搬，不要删）
-	var leftOld, leftNew []int
-	for i, o := range oldList {
-		if !usedOld[i] && !newName[o.name] {
-			leftOld = append(leftOld, i)
-		}
-	}
-	for j, n := range newList {
-		if !usedNew[j] && !oldName[n.name] {
-			leftNew = append(leftNew, j)
-		}
-	}
-	if len(leftOld) == len(leftNew) {
-		for k := range leftOld {
-			o, n := oldList[leftOld[k]], newList[leftNew[k]]
-			if o.name == "" || n.name == "" {
-				continue
-			}
-			renames = append(renames, envRename{From: o.name, To: n.name})
-			usedOld[leftOld[k]], usedNew[leftNew[k]] = true, true
-		}
-	}
+	// ③ 曾按“剩余数量相等”兜底配对（宁可搬，不要删）。**去掉**：
+	// 删除环境 A + 新增无关环境 B 在同一次保存里也会满足"数量相等"，而改名现在会
+	// 搬 A 的字典库/企业快照到 B 名下 —— 那是把两个环境的数据串在一起，且没有任何
+	// 报错。改名+改 host 这种组合宁可不识别（由 ValidateQuerySource 当场拒绝，
+	// 提示先只改名），也不能误搬。①（只改名字）与 ②（身份一致）已经覆盖正常改名。
 	// 剩下的才是真的删了
 	for i, o := range oldList {
 		if !usedOld[i] && o.name != "" && !newName[o.name] {
