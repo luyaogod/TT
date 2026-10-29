@@ -235,7 +235,7 @@ func Run(ctx context.Context, conn dbconfig.Connection, target string, tables []
 	// 依据 dzed_t 的 PK 定义 (dzed003='P') 为本次同步的表创建唯一索引
 	synced := make(map[string]bool, len(tables))
 	for _, t := range tables {
-		synced[t] = true
+		synced[strings.ToLower(t)] = true
 	}
 	report(Progress{Phase: "index", TableTotal: total, TotalRows: totalRows, Message: "创建主键索引…"})
 	st.Warnings = createPKIndexes(sq, dzedCols, dzedRows, synced)
@@ -281,7 +281,7 @@ func createPKIndexes(sq *db.DB, dzedCols []string, dzedRows [][]string, synced m
 		if r[ty] != "P" {
 			continue
 		}
-		if !synced[r[ti]] {
+		if !synced[strings.ToLower(r[ti])] {
 			continue // 该表本次未同步
 		}
 		table, key := r[ti], r[ki]
@@ -305,7 +305,9 @@ func createPKIndexes(sq *db.DB, dzedCols []string, dzedRows [][]string, synced m
 
 func indexOf(cols []string, target string) int {
 	for i, c := range cols {
-		if c == target {
+		// 大小写不敏感：Oracle 返回的列名是大写（DZED001），表名/字段名在小字典里是
+		// 小写。按 == 比会一条索引都建不出来，而且返回 nil 警告 —— 看起来"同步成功"。
+		if strings.EqualFold(c, target) {
 			return i
 		}
 	}
