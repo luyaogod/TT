@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -330,6 +331,11 @@ func runEnvRename(cmd *cobra.Command, from, to string) error {
 	}
 	if rewritten {
 		cmd.Printf("query.source 已同步指向新名字。\n")
+	}
+	// 运行中的 tt serve 把配置读进了内存（web 保存路径有 Reloaders，CLI 改名没有）。
+	// 不替用户重启服务，但必须告诉他：否则下一轮查询可能还按旧名寻址。
+	if _, err := os.Stat(config.LocationsAt(path).StateFile()); err == nil {
+		cmd.Printf("\n提示：检测到 tt serve 的状态文件。若服务正在运行，请重启它（tt serve --stop && tt serve）以加载新环境名。\n")
 	}
 	cmd.Printf("\n配置文件：%s\n", path)
 	return nil
