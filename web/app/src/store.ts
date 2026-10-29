@@ -94,7 +94,7 @@ export interface TimelineItem {
   time: string
   origin: 'system' | 'human' | 'ai'
   text: string
-  kind: 'info' | 'stop' | 'command' | 'warn'
+  kind: 'info' | 'stop' | 'command' | 'warn' | 'error'
 }
 
 interface Watch { expr: string; value?: string; error?: string }
@@ -158,6 +158,9 @@ interface Store {
   started: boolean // 程序是否已 run 过(入口停站时步进不可用)
   stop: StopInfo | null
   holdingSeconds: number
+  // 这一轮不会自动放行（运行时口径）。停站时状态栏靠它区分“还有 N 秒”与“永远不会”。
+  watchdogSeconds: number
+  watchdogDisabled: boolean
   launching: boolean
   launchError: string // 启动失败显眼报错(编辑器外红色横幅,空 = 正常)
   // UI 面板显隐
@@ -521,6 +524,7 @@ export function useSessionRuntime(id: string | null | undefined): SessionRuntime
 // 池与路由（sessions/sessionList/view…）不进来 —— 它们是应用级的，切换会话不该变。
 const EDITOR_KEYS = [
   'module', 'prog', 'runProg', 'state', 'sessionEnv', 'started', 'stop', 'holdingSeconds',
+  'watchdogSeconds', 'watchdogDisabled',
   'mode', 'inflight', 'backendDead',
   'breakpoints', 'adjustedBps', 'frames', 'watches', 'autovars', 'selectedFrame',
   'timeline', 'rawLog',
@@ -536,7 +540,7 @@ export type EditorState = Pick<Store, EditorKey>
 function emptyEditor(): EditorState {
   return {
     module: '', prog: '', runProg: '', state: '', sessionEnv: '', started: false, stop: null,
-    holdingSeconds: 0, mode: 'solo', inflight: null, backendDead: '',
+    holdingSeconds: 0, watchdogSeconds: 0, watchdogDisabled: false, mode: 'solo', inflight: null, backendDead: '',
     breakpoints: [], adjustedBps: {}, frames: [], watches: [], autovars: [], selectedFrame: -1,
     timeline: [], rawLog: [],
     sourceContent: '', sourcePath: '', sourceDVM: '', sourceMissing: false, currentLine: 0,
@@ -776,6 +780,7 @@ async function alignSelected(set: (p: Partial<Store>) => void, get: () => Store,
       sessionEnv: snap.env || '',
       stop: snap.stop, breakpoints: snap.breakpoints || [], started: !!snap.started,
       currentLine: snap.stop?.line ?? 0, holdingSeconds: snap.holdingSeconds || 0,
+      watchdogSeconds: snap.watchdogSeconds || 0, watchdogDisabled: !!snap.watchdogDisabled,
       // 快照里的模式比列表更新（选中期间可能刚被切换过）
       mode: modeOf(snap.mode),
     })
@@ -975,7 +980,7 @@ export const useStore = create<Store>((set, get) => ({
   // 刷新后恢复**人上次点的那条**（`tt.sessionId`）。恢复的是"选择"，不是"问服务端要一条"：
   // 这条会话若已经不在服务端了，`checkSelectedStillThere` 会把它清成"未选择"。
   sessionId: readStoredSessionId(), sessionList: [],
-  envs: [], envsLoaded: false, envsErr: '', activeEnv: '', sessions: [], sessionsLoaded: false, editor: {}, runtimes: {}, module: '', prog: '', state: '', sessionEnv: '', started: false, stop: null, holdingSeconds: 0,
+  envs: [], envsLoaded: false, envsErr: '', activeEnv: '', sessions: [], sessionsLoaded: false, editor: {}, runtimes: {}, module: '', prog: '', state: '', sessionEnv: '', started: false, stop: null, holdingSeconds: 0, watchdogSeconds: 0, watchdogDisabled: false,
   launching: false, launchError: '', showBottom: true, bottomMax: false,
   // 面板开关默认关(localStorage tt.stackAuto / tt.autovarsAuto 持久化)
   stackAuto: localStorage.getItem('tt.stackAuto') === '1',
@@ -1235,6 +1240,14 @@ export const useStore = create<Store>((set, get) => ({
         startHoldTimer(set, get)
         return
       }
+      case 'watchdog-approaching':
+        st.pushTimeline({ origin: 'system', kind: 'warn', text: ev.text || '停站接近上限,稍后会自动放行' })
+        return
+      case 'watchdog-failed':
+        // 看门狗自己没成功 = 锁还在、没人管。必须显眼, 不能只是时间线里一行灰字。
+        st.pushTimeline({ origin: 'system', kind: 'error', text: ev.text || '看门狗自动继续失败, 程序可能仍在持锁' })
+        void get().refreshSnapshot()
+        return
       case 'watchdog':
         st.pushTimeline({ origin: 'system', kind: 'warn', text: ev.text || '看门狗触发' })
         return
@@ -1286,6 +1299,14 @@ export const useStore = create<Store>((set, get) => ({
       case 'log':
         st.pushTimeline({ origin: 'system', kind: 'info', text: ev.text || '' })
         break
+      case 'watchdog-approaching':
+        st.pushTimeline({ origin: 'system', kind: 'warn', text: ev.text || '停站接近上限,稍后会自动放行' })
+        return
+      case 'watchdog-failed':
+        // 看门狗自己没成功 = 锁还在、没人管。必须显眼, 不能只是时间线里一行灰字。
+        st.pushTimeline({ origin: 'system', kind: 'error', text: ev.text || '看门狗自动继续失败, 程序可能仍在持锁' })
+        void get().refreshSnapshot()
+        return
       case 'watchdog':
         st.pushTimeline({ origin: 'system', kind: 'warn', text: ev.text || '看门狗触发' })
         break
@@ -1645,6 +1666,7 @@ export const useStore = create<Store>((set, get) => ({
         state: snap.state, stop: snap.stop, breakpoints: snap.breakpoints || [],
         started: !!snap.started,
         holdingSeconds: snap.holdingSeconds || 0,
+        watchdogSeconds: snap.watchdogSeconds || 0, watchdogDisabled: !!snap.watchdogDisabled,
         sessionEnv: snap.env || get().sessionEnv,
         // 谁在驾驶 + 正在执行哪条命令(界面按它收敛写操作、显示 inflight)
         mode: modeOf(snap.mode),
@@ -2286,6 +2308,7 @@ function pollUntilStopped(set: (p: Partial<Store>) => void, get: () => Store) {
         state: snap.state, stop: snap.stop, breakpoints: snap.breakpoints || [],
         started: !!snap.started,
         holdingSeconds: snap.holdingSeconds || 0,
+        watchdogSeconds: snap.watchdogSeconds || 0, watchdogDisabled: !!snap.watchdogDisabled,
         sessionEnv: snap.env || get().sessionEnv,
         module: snap.module || get().module,
         runProg: snap.runProg || get().runProg,

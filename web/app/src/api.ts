@@ -31,6 +31,9 @@ export interface SessionBrief {
   purpose?: string
   file?: string; line?: number; func?: string; reason?: string
   holdingSeconds: number; breakpoints: number; watchdogSeconds: number
+  // 这一轮真的不会自动放行（运行时口径：watchdogSeconds<=0）。停站时若为真，
+  // 状态栏必须把它说出来 —— “看门狗已关闭”与“还有 30 分钟”是两件完全不同的事。
+  watchdogDisabled?: boolean
   // 谁在驾驶:solo(纯人工)| collab(协作,AI 主导)
   mode?: string
   inflight?: InflightInfo

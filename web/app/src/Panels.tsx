@@ -519,7 +519,7 @@ export function TimelinePanel() {
     if (el) el.scrollTop = el.scrollHeight
   }, [tab, timeline.length, rawLog.length])
   const kindTone: Record<string, string> = {
-    stop: 'text-yellow-600 dark:text-yellow-400', warn: 'text-red-600 dark:text-red-400', command: 'text-sky-600 dark:text-sky-400', info: 'text-muted-foreground',
+    stop: 'text-yellow-600 dark:text-yellow-400', warn: 'text-red-600 dark:text-red-400', command: 'text-sky-600 dark:text-sky-400', info: 'text-muted-foreground', error: 'text-red-600 dark:text-red-400 font-semibold',
   }
   // fgldb 命令直通输入(复刻原版 fgldeb Ctrl+D 子画面);仅停站时可发。
   // 协作模式下命令归 AI(服务端会 403)—— 界面不给入口,要看什么请在对话里委托。

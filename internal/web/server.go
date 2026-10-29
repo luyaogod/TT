@@ -1045,6 +1045,12 @@ func validateHosts(h *config.Hosts) error {
 		if e.Host == "" {
 			return fmt.Errorf("环境 %q 缺少服务器地址", e.Name)
 		}
+		// 看门狗负数 = 关掉防行锁保护。设置页能自由写这个字段，所以在这里就拦住：
+		// 一个“看起来还在、实际不生效”的保护开关，比没有这个开关更危险。
+		if config.WatchdogDisabled(e.WatchdogSeconds) {
+			return fmt.Errorf("环境 %q 的停站超时 %d 无效：负数等于关闭看门狗（停站后不会自动放行）；要恢复默认写 0，要缩短超时写正整数",
+				e.Name, e.WatchdogSeconds)
+		}
 		if e.Port < 0 || e.Port > 65535 {
 			return fmt.Errorf("环境 %q 的 SSH 端口 %d 超出范围", e.Name, e.Port)
 		}

@@ -1054,10 +1054,25 @@ var debugStatusCmd = &cobra.Command{
 	},
 }
 
-// debugQuitCmd 结束当前会话
+// debugQuitCmd 结束当前会话的本轮运行。
+//
+// 旧文案写「结束指定调试会话(作业窗口随之关闭)」—— 那是**错的**，实测（2026-10-29）
+// 跑完 quit 之后会话仍在列表里，`state=idle`：作业确实结束了，但 SSH 连接 / PTY /
+// 服务器 shell 全部保留，供下一轮免重登复用。用户以为收干净了，实际占着一套连接，
+// 现场“这台机器挂了十几条 ssh”多半就是这么来的。真正断连是 `tt session rm`。
 var debugQuitCmd = &cobra.Command{
 	Use:   "quit",
-	Short: "结束指定调试会话(作业窗口随之关闭)",
+	Short: "结束本轮运行（作业关闭、会话保留可直接再启动）；要断开连接用 tt session rm",
+	Long: `结束本条会话的本轮运行：给 fgldb 发 quit、作业窗口关闭、事务放开。
+
+**会话本身保留（state=idle）** —— SSH 连接、登录态、服务器 shell 都还在，下一轮
+调试免重新登录。这是有意的（登录一次几秒，复用它）。
+
+要真正断开连接（开会话积累太多 ssh 时）：
+
+  tt session rm --session <ref>
+
+停站持锁时的两条出路：等看门狗自动放行（默认 1800 秒），或直接 quit 立即放行。`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id, err := dbgSessionID()
 		if err != nil {

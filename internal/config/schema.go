@@ -211,6 +211,42 @@ func (d *DebugSettings) FillDefaults() {
 	}
 }
 
+// WatchdogProblems 校验看门狗设置。
+//
+// 为什么值得单独一件事：`watchdogSeconds` 是**唯一**会“静默关掉防行锁保护”的开关。
+// 0 会被 FillDefaults 归一成默认 1800（不会变成“关闭”），但**负数会原样留着**，
+// 而 `Session.startWatchdog` 的门是 `<= 0` —— 于是 -1 = 关掉看门狗，而配置表面上
+// 一直存在这个键。现场一旦写错，症状是“停站了再也没人管”，却没有任何地方提示。
+//
+// 统一在这里出问题列表，`tt config validate` 与设置页保存都调它，不各写一套。
+func WatchdogProblems(r *Root) []string {
+	if r == nil {
+		return nil
+	}
+	var out []string
+	if v := r.Debug.WatchdogSeconds; v < 0 {
+		out = append(out, fmt.Sprintf(
+			"debug.watchdogSeconds = %d：负数等于关闭看门狗，停站将不再自动放行（要恢复默认保护写 0；要缩短超时写正整数）", v))
+	}
+	for i := range r.Hosts.SSHs {
+		e := &r.Hosts.SSHs[i]
+		if e.WatchdogSeconds < 0 {
+			name := e.Name
+			if name == "" {
+				name = fmt.Sprintf("hosts.sshs[%d]", i)
+			}
+			out = append(out, fmt.Sprintf(
+				"环境 %q 的 watchdogSeconds = %d：负数等于关闭该环境的看门狗，停站将不再自动放行", name, e.WatchdogSeconds))
+		}
+	}
+	return out
+}
+
+// WatchdogDisabled 判断一个看门狗秒数是不是“关闭”（负数）。0 不算关闭 —— 它会被
+// FillDefaults 补成默认值，这一点与运行时 `<= 0` 的门故意不同：配置层面的 0 是
+// “没写”，运行时的 0 是“显式关”。区分开才能让“写 0 的人以为关了”变成不可能。
+func WatchdogDisabled(seconds int) bool { return seconds < 0 }
+
 // BPsPersisted 断点持久化是否启用
 func (d *DebugSettings) BPsPersisted(dataDir string) bool {
 	return dataDir != "" && (d.PersistBPs == nil || *d.PersistBPs)

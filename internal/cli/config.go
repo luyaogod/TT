@@ -268,6 +268,8 @@ func validateConfig(path string) []string {
 			}
 		}
 	}
+	// 看门狗：负数 = 静默关掉防行锁保护（见 config.WatchdogProblems 的注释）。
+	problems = append(problems, config.WatchdogProblems(r)...)
 	return problems
 }
 

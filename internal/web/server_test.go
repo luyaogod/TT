@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -741,5 +742,26 @@ func TestHostsPut_UndetectedRenameWithDanglingSourceRejected(t *testing.T) {
 	}
 	if _, err := os.Stat(oldDB); err != nil {
 		t.Errorf("旧库不该被动：%v", err)
+	}
+}
+
+// 设置页能自由写环境的 watchdogSeconds（ungovernedEnvKeys）。负数等于关掉防行锁保护，
+// 必须在保存时拦住 —— 一个"看起来还在、实际不生效"的保护开关比没有更危险。
+func TestHostsPut_RejectsNegativeWatchdog(t *testing.T) {
+	seed := `{"schemaVersion":4,
+	  "hosts":{"sshs":[{"name":"甲","host":"h","port":22,"user":"u","password":"p","zone":"1"}]}}`
+	s, _ := newTestServer(t, seed)
+
+	rec, _ := doJSON(t, s, http.MethodPut, "/api/hosts", map[string]any{
+		"hosts": map[string]any{"sshs": []any{map[string]any{
+			"name": "甲", "host": "h", "port": 22, "user": "u", "password": "p", "zone": "1",
+			"watchdogSeconds": -1,
+		}}},
+	})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("负数应被拒绝，实得 HTTP %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "关闭看门狗") {
+		t.Errorf("错误信息应说清后果：%s", rec.Body.String())
 	}
 }
