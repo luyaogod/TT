@@ -129,7 +129,15 @@ debug / query / mirror / dict / sync / tdev 是各命令组自己的设置。
 			keyPath, raw := args[0], args[1]
 			value := parseValue(raw)
 			err = config.Edit(path, nil, func(root map[string]any) error {
-				return setPath(root, keyPath, value)
+				if err := setPath(root, keyPath, value); err != nil {
+					return err
+				}
+				// 数据源指向不存在的环境 = 留下一枚"下次查询才炸"的悬空引用。
+				// 环境改名之后尤其容易留下它，所以在写入前就拦。
+				if keyPath == "query.source" {
+					return config.ValidateQuerySource(root)
+				}
+				return nil
 			})
 			if err != nil {
 				return err

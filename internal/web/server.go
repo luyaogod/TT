@@ -23,12 +23,14 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"tt/internal/config"
 	"tt/internal/dbconfig"
 	"tt/internal/designer"
+	"tt/internal/envmove"
 	"tt/internal/erpdb"
 	"tt/internal/host"
 	"tt/internal/sshtun"
@@ -348,6 +350,8 @@ func (s *Server) hHostsPut(w http.ResponseWriter, r *http.Request) {
 	// 环境改名/删除只影响配置本身。
 	var renamed []envRename
 	var removedEnvs []string
+	// renamedMeta 记下旧名对应的 host/zone：改名后要按它算 ents/srccache 的目录段。
+	renamedMeta := map[string]struct{ host, zone string }{}
 	err = config.Edit(path, nil, func(root map[string]any) error {
 		if req.Hosts != nil {
 			if err := validateHosts(req.Hosts); err != nil {
@@ -358,7 +362,18 @@ func (s *Server) hHostsPut(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 			if oldHosts, ok := root["hosts"].(map[string]any); ok {
-				renamed, removedEnvs = diffEnvs(envEntries(oldHosts), envEntries(sec))
+				oldEntries := envEntries(oldHosts)
+				renamed, removedEnvs = diffEnvs(oldEntries, envEntries(sec))
+				for _, r := range renamed {
+					for _, e := range oldEntries {
+						if e.name != r.From {
+							continue
+						}
+						host, _ := e.raw["host"].(string)
+						zone, _ := e.raw["zone"].(string)
+						renamedMeta[r.From] = struct{ host, zone string }{host: host, zone: zone}
+					}
+				}
 			}
 			// renamed / removedEnvs 只为"改名不算删"的判断保留；这里不再动任何文件。
 			// 保留前端表单不管理的 db 字段（目前是 viaSsh）。
@@ -421,6 +436,18 @@ func (s *Server) hHostsPut(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
+		// 改名与数据源在同一次写入里保持一致：source 指向旧名就跟着改。
+		for _, r := range renamed {
+			config.RewriteQuerySource(root, r.From, r.To)
+		}
+		// 保存时就拦住悬空的数据源：改名之后、或用户刚改过数据源时校验。
+		// 悬空引用不会当场报错，只会在下次查询时变成「本地库不存在」——
+		// 那个症状与「数据不存在」长得一模一样，只能靠写入时拦。
+		if req.Query != nil || len(renamed) > 0 {
+			if err := config.ValidateQuerySource(root); err != nil {
+				return err
+			}
+		}
 		root["schemaVersion"] = config.SchemaVersion
 		return nil
 	})
@@ -428,8 +455,20 @@ func (s *Server) hHostsPut(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	// 这里只剩配置本身的落盘。
-	_ = renamed
+	// 配置已落盘：把按旧名落盘的字典库/企业快照/源码镜像搬到新名下。
+	// 与命令行 tt env rename 共用同一份迁移逻辑 —— 设置页改名不该是"半个改名"。
+	dataDir := filepath.Dir(path)
+	for _, r := range renamed {
+		meta := renamedMeta[r.From]
+		moves, err := envmove.Plan(dataDir, r.From, r.To, meta.host, meta.zone)
+		if err != nil {
+			log.Printf("[tt] 环境 %s 改名为 %s：迁移落点失败: %v", r.From, r.To, err)
+			continue
+		}
+		if err := envmove.Execute(moves, r.To); err != nil {
+			log.Printf("[tt] 环境 %s 改名为 %s：迁移落点失败: %v", r.From, r.To, err)
+		}
+	}
 	_ = removedEnvs
 	// 通知持有配置内存态的子系统（如调试服务）重新加载。
 	// 失败只记日志：配置已经落盘成功，重新加载失败不该把一个成功的写报成失败，

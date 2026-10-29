@@ -10,6 +10,7 @@ import (
 
 	"tt/internal/cli/common"
 	"tt/internal/config"
+	"tt/internal/envmove"
 )
 
 // newEnvCmd 是统一的环境管理命令组。
@@ -49,6 +50,28 @@ func newEnvCmd() *cobra.Command {
 
 	// 企业清单：--at 的取值来源（环境 × 企业）。用它替代“记住 ENT 号”。
 	cmd.AddCommand(newEnvEntsCmd())
+
+	// env rename：环境名是跨文件的持久引用，改名必须是一次迁移，不是一个字段赋值
+	// （dict/<环境>.db、ents/<环境>.json、srccache/<环境>/ 都拿它当键）。
+	cmd.AddCommand(&cobra.Command{
+		Use:   "rename <旧环境名> <新环境名>",
+		Short: "改环境名，并把按名字落盘的字典库/企业快照/源码镜像一起迁移",
+		Long: `把环境改成一个新名字，**同时**迁移所有按旧名落盘的东西：
+
+  dict/<旧名>.db       本地字典库（改完不用重新同步）
+  ents/<旧名>.json     企业目录快照
+  srccache/<旧名>/     调试源码镜像
+  query.source         配置里指向旧名的数据源（local:<旧名> 或裸名字）
+
+不做迁移的改名会留下悬空引用：查询报「本地库不存在」或「查不到数据」，
+与「数据真的不存在」在输出上分不出来 —— 这类问题只能靠事后排查。
+
+目标名已存在、或目标落点已有文件时整体拒绝，一个都不搬。`,
+		Example: `  tt env rename 正式区 正式
+  tt env rename 测试区 测试`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error { return runEnvRename(cmd, args[0], args[1]) },
+	})
 
 	// env use 是**墓碑**,不是被删掉的命令:它背后的 hosts.activeEnv 已经整个移除
 	// (环境一律点名 —— 见 config.Hosts 的注释)。留一个会解释原因、并给出替代用法的
@@ -249,4 +272,61 @@ func orDash(s string) string {
 		return "-"
 	}
 	return s
+}
+
+// runEnvRename 执行一次带迁移的改名：先搬落点，再改配置；配置写失败就把落点搬回去。
+func runEnvRename(cmd *cobra.Command, from, to string) error {
+	path, err := common.ResolveConfig(false)
+	if err != nil {
+		return err
+	}
+	root, err := config.Load(path)
+	if err != nil {
+		return err
+	}
+	e := root.Hosts.ByName(from)
+	if e == nil {
+		return fmt.Errorf("没有名为 %q 的环境（用 tt env list 看全部）", from)
+	}
+	if root.Hosts.ByName(to) != nil {
+		return fmt.Errorf("环境 %q 已存在，不能改名成它", to)
+	}
+
+	dataDir := config.LocationsAt(path).DataDir()
+	moves, err := envmove.Plan(dataDir, from, to, e.Host, e.Zone)
+	if err != nil {
+		return err
+	}
+	if err := envmove.Execute(moves, to); err != nil {
+		return err
+	}
+	rewritten, err := config.RenameHost(path, from, to)
+	if err != nil {
+		// 配置没改成 → 把落点搬回旧名，别留下"文件在新名、配置在旧名"的半套。
+		envmove.Undo(moves, from)
+		return err
+	}
+
+	if common.IsJSON() {
+		return common.PrintJSON(map[string]any{
+			"ok":                   true,
+			"config":               path,
+			"from":                 from,
+			"to":                   to,
+			"querySourceRewritten": rewritten,
+			"moved":                moves,
+		})
+	}
+	cmd.Printf("已把环境 %q 改名为 %q。\n", from, to)
+	if len(moves) == 0 {
+		cmd.Printf("没有需要迁移的落点（本地字典库/企业快照/源码镜像都不存在）。\n")
+	}
+	for _, m := range moves {
+		cmd.Printf("  迁移 %-8s %s → %s\n", m.Kind, m.From, m.To)
+	}
+	if rewritten {
+		cmd.Printf("query.source 已同步指向新名字。\n")
+	}
+	cmd.Printf("\n配置文件：%s\n", path)
+	return nil
 }
