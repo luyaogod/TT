@@ -307,3 +307,36 @@ func jsonEscape(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b[1 : len(b)-1])
 }
+
+// execlog 与 srccache 同源（<dataDir>/<种类>/<环境段>/runNN/）：调试跑过命令的
+// 大输出副本按环境段落盘，改名不搬就会留下孤儿目录。
+func TestPlanMovesExecLog(t *testing.T) {
+	dir := t.TempDir()
+	seg := entdir.EnvSeg("甲", "10.0.0.1", "1")
+	execlogOld := filepath.Join(dir, "execlog", seg, "run1")
+	touch(t, filepath.Join(execlogOld, "cmd-1.log"), "out")
+
+	moves, err := Plan(filepath.Join(dir, "config.json"), "甲", "乙", "10.0.0.1", "1")
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	var found *Move
+	for i := range moves {
+		if moves[i].Kind == "execlog" {
+			found = &moves[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("execlog 没进计划：%+v", moves)
+	}
+
+	if err := Execute(moves, "乙", "甲"); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "execlog", seg)); !os.IsNotExist(err) {
+		t.Errorf("旧环境段的 execlog 还在：%s", filepath.Join(dir, "execlog", seg))
+	}
+	if _, err := os.Stat(filepath.Join(dir, "execlog", "乙", "run1", "cmd-1.log")); err != nil {
+		t.Errorf("新环境段的 execlog 内容没搬过来：%v", err)
+	}
+}

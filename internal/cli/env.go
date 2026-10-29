@@ -63,6 +63,7 @@ func newEnvCmd() *cobra.Command {
   dict/<旧名>.db.bak   同步留下的上一版备份
   ents/<旧名>.json     企业目录快照
   srccache/<旧名>/     调试源码镜像
+  execlog/<旧名>/      调试跑过命令的大输出副本
   mirror.dir/<旧名>/   tt file mirror 的源码镜像（环境自配 mirrorDir 时不动）
   query.source         配置里指向旧名的数据源（local:<旧名> 或裸名字）
 
