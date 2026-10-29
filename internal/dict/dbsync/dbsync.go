@@ -224,7 +224,7 @@ func Run(ctx context.Context, conn dbconfig.Connection, target string, tables []
 		if err != nil {
 			return fail(fmt.Errorf("写入表 %s 失败: %w", t, err))
 		}
-		if t == "dzed_t" {
+		if isDzedTable(t) {
 			dzedCols, dzedRows = cols, rows
 		}
 		totalRows += n
@@ -270,6 +270,10 @@ func Run(ctx context.Context, conn dbconfig.Connection, target string, tables []
 
 // createPKIndexes builds UNIQUE indexes for each synced table's primary key
 // defined in dzed_t (dzed003 = 'P'). Returns non-fatal warning strings on failure.
+//
+// 除了逐条失败，还必须在"一个都没建成"时开口：dzed_t 缺列、列名大小写对不上、
+// 或者账号没有建索引权限，都会让这里一行索引都建不出来 —— 而同步照样显示成功。
+// 那种状态下查询只能全表扫（实测 291ms 对 75ms），却没有任何地方会抱怨。
 func createPKIndexes(sq *db.DB, dzedCols []string, dzedRows [][]string, synced map[string]bool) []string {
 	ti, ki, ty, fi := indexOf(dzedCols, "dzed001"), indexOf(dzedCols, "dzed002"),
 		indexOf(dzedCols, "dzed003"), indexOf(dzedCols, "dzed004")
@@ -277,6 +281,7 @@ func createPKIndexes(sq *db.DB, dzedCols []string, dzedRows [][]string, synced m
 		return nil
 	}
 	var warnings []string
+	expected, created := 0, 0
 	for _, r := range dzedRows {
 		if r[ty] != "P" {
 			continue
@@ -295,12 +300,29 @@ func createPKIndexes(sq *db.DB, dzedCols []string, dzedRows [][]string, synced m
 		if len(cols) == 0 {
 			continue
 		}
+		expected++
 		idxName := fmt.Sprintf("idx_%s_%s", table, key)
 		if err := sq.CreateUniqueIndex(idxName, table, cols); err != nil {
 			warnings = append(warnings, fmt.Sprintf("  [警告] 索引 %s 创建失败: %v", idxName, err))
+			continue
 		}
+		created++
+	}
+	// 只在"本来要建、却一个都没建成"时开口：只同步无主键表时 expected=0，不该报警。
+	if expected > 0 && created == 0 {
+		warnings = append(warnings, fmt.Sprintf("  [警告] 本次应建 %d 个主键索引，实际建成 0 个：本地库仍会全表扫。"+
+			"先确认本次同步包含 dzed_t（--table 里别漏），再看上面有没有逐条失败原因（建索引权限/列名不匹配）", expected))
 	}
 	return warnings
+}
+
+// isDzedTable 判断本次拉取的是不是 PK 定义表本身。
+//
+// 大小写不敏感的理由与 indexOf 一致：Oracle 侧列名/表名是大写，而 --table 允许
+// 用户手输表名（`--table DZED_T`）。按 == 判会让 dzedCols 整份丢失，随后一条索引
+// 都建不出来 —— 与"列名大小写"是两个独立的洞。
+func isDzedTable(name string) bool {
+	return strings.EqualFold(strings.TrimSpace(name), "dzed_t")
 }
 
 func indexOf(cols []string, target string) int {

@@ -381,12 +381,54 @@ func (d *DB) CreateUniqueIndex(indexName, tableName string, columns []string) er
 		}
 		quoted[i] = quoteIdent(c)
 	}
+	// 先确认列真的在表里。不查的话 SQLite 会走"双引号串"的历史兼容行为：
+	// 解析不到标识符就当成字符串字面量，于是在 (常量) 上建出一个**假索引** ——
+	// 单行表静默成功（不加速，只挡插入），多行表则报 "UNIQUE constraint failed"，
+	// 而那个提示把人引向"数据重复"，根本没指向"列名写错了"。dzed_t 的列名与
+	// 实际表对不上时（大小写/命名差异）正是这么误导人的。
+	have, err := d.tableColumns(tableName)
+	if err != nil {
+		return fmt.Errorf("创建索引 %s: 检查表 %s 的列失败: %w", indexName, tableName, err)
+	}
+	for _, c := range columns {
+		if !have[strings.ToLower(c)] {
+			return fmt.Errorf("创建索引 %s: 表 %s 没有列 %q（索引列名与表结构对不上；"+
+				"SQLite 会把不存在又带引号的列当字符串字面量，建出来的是假索引）", indexName, tableName, c)
+		}
+	}
 	sql := fmt.Sprintf("CREATE UNIQUE INDEX IF NOT EXISTS %s ON %s (%s)",
 		quoteIdent(indexName), quoteIdent(tableName), strings.Join(quoted, ", "))
 	if _, err := d.conn.Exec(sql); err != nil {
 		return fmt.Errorf("创建索引 %s: %w", indexName, err)
 	}
 	return nil
+}
+
+// tableColumns 取一张表的全部列名(小写),供建索引前做列存在性检查。
+// 表名已过 validIdent,拼进 PRAGMA 不会跑出标识符以外的东西。
+func (d *DB) tableColumns(tableName string) (map[string]bool, error) {
+	rows, err := d.conn.Query("PRAGMA table_info(" + quoteIdent(tableName) + ")")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]bool)
+	for rows.Next() {
+		// PRAGMA table_info 的列: cid, name, type, notnull, dflt_value, pk
+		var (
+			cid     int
+			name    string
+			typ     string
+			notnull int
+			dflt    any
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			return nil, err
+		}
+		out[strings.ToLower(name)] = true
+	}
+	return out, rows.Err()
 }
 
 // TableMeta holds the table's basic information.
