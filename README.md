@@ -63,6 +63,7 @@ tt serve
 |name&link|abstract|description|
 |---|---|---|
 |[bdl-tutorial](https://github.com/luyaogod/bdl-tutorial.git)|BDL语法SKILL|当不理解T100项目中的`.4gl`文件里的BDL语法规范时，请激活此技能。|
+|[tt-erp-query](https://github.com/songyuliang1/tt-erp-query.git)|T100通用取数|当需要查 T100 任意表的结构、字段含义，或跑只读 SQL 批量取数时，请激活此技能。|
 
 ---
 
