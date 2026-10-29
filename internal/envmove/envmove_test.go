@@ -10,6 +10,16 @@ import (
 	"tt/internal/entdir"
 )
 
+// writeConfigRaw 写一份最小配置（body 里的 hosts/query 由调用方给）。
+func writeConfigRaw(t *testing.T, dir, body string) string {
+	t.Helper()
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func writeConfig(t *testing.T, dir, source string) string {
 	t.Helper()
 	cfg := map[string]any{
@@ -24,11 +34,7 @@ func writeConfig(t *testing.T, dir, source string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(dir, "config.json")
-	if err := os.WriteFile(path, b, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	return path
+	return writeConfigRaw(t, dir, string(b))
 }
 
 func touch(t *testing.T, path, body string) {
@@ -41,7 +47,7 @@ func touch(t *testing.T, path, body string) {
 	}
 }
 
-// 改名的三份落点都要跟着走，配置里 hosts 与 query.source 同时更新。
+// 改名的落点都要跟着走，配置里 hosts 与 query.source 同时更新。
 func TestRenameMigratesAllPaths(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := writeConfig(t, dir, "local:甲")
@@ -50,17 +56,18 @@ func TestRenameMigratesAllPaths(t *testing.T) {
 	entsOld := entdir.Path(dir, entdir.EnvSeg("甲", "10.0.0.1", "1"))
 	mirrorOld := filepath.Join(dir, "srccache", entdir.EnvSeg("甲", "10.0.0.1", "1"))
 	touch(t, dictOld, "dict")
+	touch(t, dictOld+".bak", "bak")
 	touch(t, entsOld, `{"version":1,"env":"甲","fingerprint":"x","mappings":[{"ent":99,"account":"a","placeholder":false}]}`)
 	touch(t, filepath.Join(mirrorOld, "u1", "com", "a.4gl"), "src")
 
-	moves, err := Plan(dir, "甲", "乙", "10.0.0.1", "1")
+	moves, err := Plan(cfgPath, "甲", "乙", "10.0.0.1", "1")
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
-	if len(moves) != 3 {
-		t.Fatalf("该搬 3 份，实得 %d：%+v", len(moves), moves)
+	if len(moves) != 4 { // dict / dict-bak / ents / srccache
+		t.Fatalf("该搬 4 份，实得 %d：%+v", len(moves), moves)
 	}
-	if err := Execute(moves, "乙"); err != nil {
+	if err := Execute(moves, "乙", "甲"); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	rewritten, err := config.RenameHost(cfgPath, "甲", "乙")
@@ -71,14 +78,14 @@ func TestRenameMigratesAllPaths(t *testing.T) {
 		t.Error("query.source 指向旧名，改名时该一起改写")
 	}
 
-	for _, old := range []string{dictOld, entsOld, mirrorOld} {
+	for _, old := range []string{dictOld, dictOld + ".bak", entsOld, mirrorOld} {
 		if _, err := os.Stat(old); !os.IsNotExist(err) {
 			t.Errorf("旧落点还在：%s", old)
 		}
 	}
 	dictNew := config.DictDBPath(dir, "乙")
 	entsNew := entdir.Path(dir, entdir.EnvSeg("乙", "10.0.0.1", "1"))
-	for _, p := range []string{dictNew, entsNew, filepath.Join(dir, "srccache", "乙")} {
+	for _, p := range []string{dictNew, dictNew + ".bak", entsNew, filepath.Join(dir, "srccache", "乙")} {
 		if _, err := os.Stat(p); err != nil {
 			t.Errorf("新落点不存在：%s（%v）", p, err)
 		}
@@ -108,13 +115,137 @@ func TestRenameMigratesAllPaths(t *testing.T) {
 	}
 }
 
+// dict.dir / 环境 dictDir 指到别处时，也要搬到那个目录（而不是只看 <数据目录>/dict）。
+func TestPlanUsesConfiguredDictDir(t *testing.T) {
+	dir := t.TempDir()
+	custom := filepath.Join(dir, "custom-dict")
+	cfgPath := writeConfigRaw(t, dir, `{"schemaVersion":4,
+	  "dict":{"dir":"`+jsonEscape(custom)+`"},
+	  "hosts":{"sshs":[{"name":"甲","host":"h","port":22,"user":"u","zone":"1"}]},
+	  "query":{"source":"auto"}}`)
+	touch(t, filepath.Join(custom, "甲.db"), "db")
+
+	moves, err := Plan(cfgPath, "甲", "乙", "h", "1")
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	found := false
+	for _, m := range moves {
+		if m.Kind == "dict" {
+			found = true
+			if m.From != filepath.Join(custom, "甲.db") || m.To != filepath.Join(custom, "乙.db") {
+				t.Errorf("dict 落点算错：%+v", m)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("自定义 dict.dir 下的库没有被规划搬迁：%+v", moves)
+	}
+}
+
+// 环境自己的 dictDir 优先于顶层 dict.dir。
+func TestPlanUsesEnvDictDir(t *testing.T) {
+	dir := t.TempDir()
+	envDir := filepath.Join(dir, "env-dict")
+	cfgPath := writeConfigRaw(t, dir, `{"schemaVersion":4,
+	  "dict":{"dir":"`+jsonEscape(filepath.Join(dir, "top-dict"))+`"},
+	  "hosts":{"sshs":[{"name":"甲","dictDir":"`+jsonEscape(envDir)+`","host":"h","port":22,"user":"u","zone":"1"}]},
+	  "query":{"source":"auto"}}`)
+	touch(t, filepath.Join(envDir, "甲.db"), "db")
+
+	moves, err := Plan(cfgPath, "甲", "乙", "h", "1")
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	for _, m := range moves {
+		if m.Kind == "dict" && m.From != filepath.Join(envDir, "甲.db") {
+			t.Errorf("环境 dictDir 没被优先使用：%+v", m)
+		}
+	}
+}
+
+// `tt file mirror` 的镜像根按环境名分目录，改名时要一起搬；环境自己指定 mirrorDir 时跳过。
+func TestPlanMovesMirrorUnderRoot(t *testing.T) {
+	dir := t.TempDir()
+	mirrorRoot := filepath.Join(dir, "mirrors")
+	cfgPath := writeConfigRaw(t, dir, `{"schemaVersion":4,
+	  "mirror":{"dir":"`+jsonEscape(mirrorRoot)+`"},
+	  "hosts":{"sshs":[{"name":"甲","host":"h","port":22,"user":"u","zone":"1"}]},
+	  "query":{"source":"auto"}}`)
+	touch(t, filepath.Join(mirrorRoot, "甲", "erp", "a.4gl"), "src")
+
+	moves, err := Plan(cfgPath, "甲", "乙", "h", "1")
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	found := false
+	for _, m := range moves {
+		if m.Kind == "mirror" {
+			found = true
+			if m.From != filepath.Join(mirrorRoot, "甲") || m.To != filepath.Join(mirrorRoot, "乙") {
+				t.Errorf("mirror 落点算错：%+v", m)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("镜像根下的环境目录没有规划搬迁：%+v", moves)
+	}
+}
+
+// 环境自配 mirrorDir 是绝对路径、与名字无关：不该搬。
+func TestPlanSkipsPerEnvMirrorDir(t *testing.T) {
+	dir := t.TempDir()
+	own := filepath.Join(dir, "my-mirror")
+	cfgPath := writeConfigRaw(t, dir, `{"schemaVersion":4,
+	  "mirror":{"dir":"`+jsonEscape(filepath.Join(dir, "root"))+`"},
+	  "hosts":{"sshs":[{"name":"甲","mirrorDir":"`+jsonEscape(own)+`","host":"h","port":22,"user":"u","zone":"1"}]},
+	  "query":{"source":"auto"}}`)
+	touch(t, filepath.Join(own, "x.4gl"), "src")
+
+	moves, err := Plan(cfgPath, "甲", "乙", "h", "1")
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	for _, m := range moves {
+		if m.Kind == "mirror" {
+			t.Errorf("环境自配 mirrorDir 不该搬：%+v", m)
+		}
+	}
+}
+
+// Execute 中途失败时回滚已搬的落点，并把企业快照的 env 改回旧名。
+func TestExecuteRollbackRestoresSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	entsFrom := filepath.Join(dir, "ents", "甲.json")
+	touch(t, entsFrom, `{"version":1,"env":"甲"}`)
+
+	moves := []Move{
+		{Kind: "ents", From: entsFrom, To: filepath.Join(dir, "ents", "乙.json")},
+		{Kind: "dict", From: filepath.Join(dir, "nope.db"), To: filepath.Join(dir, "nope2.db")},
+	}
+	err := Execute(moves, "乙", "甲")
+	if err == nil {
+		t.Fatal("第二个落点不存在，Execute 应该失败")
+	}
+	if _, err := os.Stat(entsFrom); err != nil {
+		t.Errorf("回滚后旧快照不在：%v", err)
+	}
+	b, _ := os.ReadFile(entsFrom)
+	var snap map[string]any
+	_ = json.Unmarshal(b, &snap)
+	if snap["env"] != "甲" {
+		t.Errorf("回滚后快照 env = %v，期望 甲", snap["env"])
+	}
+}
+
 // 目标名已被占：整次拒绝，一个都不搬。
 func TestPlanRefusesExistingTarget(t *testing.T) {
 	dir := t.TempDir()
+	cfgPath := writeConfig(t, dir, "auto")
 	touch(t, filepath.Join(dir, "dict", "甲.db"), "a")
 	touch(t, filepath.Join(dir, "dict", "乙.db"), "b")
 
-	if _, err := Plan(dir, "甲", "乙", "h", "1"); err == nil {
+	if _, err := Plan(cfgPath, "甲", "乙", "h", "1"); err == nil {
 		t.Fatal("目标已存在时必须报错，不能覆盖")
 	}
 	if _, err := os.Stat(filepath.Join(dir, "dict", "甲.db")); err != nil {
@@ -126,7 +257,7 @@ func TestPlanRefusesExistingTarget(t *testing.T) {
 func TestPlanWithoutPaths(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := writeConfig(t, dir, "auto")
-	moves, err := Plan(dir, "甲", "乙", "h", "1")
+	moves, err := Plan(cfgPath, "甲", "乙", "h", "1")
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
@@ -138,7 +269,7 @@ func TestPlanWithoutPaths(t *testing.T) {
 	}
 }
 
-// 保存时校验：指向不存在的环境必须报错，指向存在的放行。
+// 保存时校验：指向不存在的环境必须报错，指向存在的放行；裸 local 也不放行。
 func TestValidateQuerySource(t *testing.T) {
 	root := func(src string) map[string]any {
 		return map[string]any{
@@ -146,14 +277,33 @@ func TestValidateQuerySource(t *testing.T) {
 			"query": map[string]any{"source": src},
 		}
 	}
-	for _, bad := range []string{"local:乙", "乙", "local:"} {
+	for _, bad := range []string{"local:乙", "乙", "local:", "local"} {
 		if err := config.ValidateQuerySource(root(bad)); err == nil {
 			t.Errorf("query.source = %q 该报错", bad)
 		}
 	}
-	for _, ok := range []string{"", "auto", "local", "local:甲", "甲"} {
+	for _, ok := range []string{"", "auto", "local:甲", "甲"} {
 		if err := config.ValidateQuerySource(root(ok)); err != nil {
 			t.Errorf("query.source = %q 不该报错：%v", ok, err)
 		}
 	}
+}
+
+// 新环境名不允许路径分隔符/冒号（会破坏落点与 local: 前缀）。
+func TestValidateEnvName(t *testing.T) {
+	for _, bad := range []string{"", " 甲", "甲 ", "a/b", `a\b`, "a:b", ".", ".."} {
+		if err := config.ValidateEnvName(bad); err == nil {
+			t.Errorf("环境名 %q 该被拒绝", bad)
+		}
+	}
+	for _, ok := range []string{"甲", "测试 区", "prod-2"} {
+		if err := config.ValidateEnvName(ok); err != nil {
+			t.Errorf("环境名 %q 不该被拒绝：%v", ok, err)
+		}
+	}
+}
+
+func jsonEscape(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b[1 : len(b)-1])
 }

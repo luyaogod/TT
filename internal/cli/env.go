@@ -58,9 +58,11 @@ func newEnvCmd() *cobra.Command {
 		Short: "改环境名，并把按名字落盘的字典库/企业快照/源码镜像一起迁移",
 		Long: `把环境改成一个新名字，**同时**迁移所有按旧名落盘的东西：
 
-  dict/<旧名>.db       本地字典库（改完不用重新同步）
+  dict/<旧名>.db       本地字典库（改完不用重新同步；尊重 dict.dir / 环境 dictDir）
+  dict/<旧名>.db.bak   同步留下的上一版备份
   ents/<旧名>.json     企业目录快照
   srccache/<旧名>/     调试源码镜像
+  mirror.dir/<旧名>/   tt file mirror 的源码镜像（环境自配 mirrorDir 时不动）
   query.source         配置里指向旧名的数据源（local:<旧名> 或裸名字）
 
 不做迁移的改名会留下悬空引用：查询报「本地库不存在」或「查不到数据」，
@@ -292,18 +294,20 @@ func runEnvRename(cmd *cobra.Command, from, to string) error {
 		return fmt.Errorf("环境 %q 已存在，不能改名成它", to)
 	}
 
-	dataDir := config.LocationsAt(path).DataDir()
-	moves, err := envmove.Plan(dataDir, from, to, e.Host, e.Zone)
+	moves, err := envmove.Plan(path, from, to, e.Host, e.Zone)
 	if err != nil {
 		return err
 	}
-	if err := envmove.Execute(moves, to); err != nil {
+	if err := envmove.Execute(moves, to, from); err != nil {
 		return err
 	}
 	rewritten, err := config.RenameHost(path, from, to)
 	if err != nil {
 		// 配置没改成 → 把落点搬回旧名，别留下"文件在新名、配置在旧名"的半套。
-		envmove.Undo(moves, from)
+		// 回滚失败必须报出来：只报配置错误会让用户以为文件还是旧的。
+		if uerr := envmove.Undo(moves, from); uerr != nil {
+			return fmt.Errorf("%w；同时回滚落点失败：%v", err, uerr)
+		}
 		return err
 	}
 

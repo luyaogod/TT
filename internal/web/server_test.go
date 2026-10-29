@@ -619,3 +619,127 @@ func TestHostsPut_EmptyListAllowed(t *testing.T) {
 		t.Fatalf("sshs 应为空，实得 %v", sshs)
 	}
 }
+
+// 目标落点已被占用：整次拒绝（配置一个字节都不写），不能出现“配置改了、文件没搬”的半套。
+func TestHostsPut_RenameConflictLeavesConfigUntouched(t *testing.T) {
+	seed := `{"schemaVersion":4,
+	  "hosts":{"sshs":[{"name":"甲","host":"h","port":22,"user":"u","password":"p","zone":"1"}]},
+	  "query":{"source":"auto"}}`
+	s, path := newTestServer(t, seed)
+	dir := filepath.Dir(path)
+	for _, n := range []string{"甲", "乙"} {
+		p := config.DictDBPath(dir, n)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(n), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rec, _ := doJSON(t, s, http.MethodPut, "/api/hosts", map[string]any{
+		"hosts": map[string]any{"sshs": []any{map[string]any{
+			"name": "乙", "host": "h", "port": 22, "user": "u", "password": "p", "zone": "1",
+		}}},
+	})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("目标被占用应 400，实际 HTTP %d：%s", rec.Code, rec.Body.String())
+	}
+	root, _ := config.Load(path)
+	if len(root.Hosts.SSHs) != 1 || root.Hosts.SSHs[0].Name != "甲" {
+		t.Fatalf("配置不该被改：%+v", root.Hosts.SSHs)
+	}
+	if _, err := os.Stat(config.DictDBPath(dir, "甲")); err != nil {
+		t.Errorf("旧库不该被动：%v", err)
+	}
+}
+
+// 新增/改名的环境名会进 dict/<名>.db、ents/<名>.json 与 local:<名>：
+// 路径分隔符/冒号必须当场拒绝，老配置里已有的名字则不追溯。
+func TestHostsPut_RejectsUnsafeNewName(t *testing.T) {
+	seed := `{"schemaVersion":4,
+	  "hosts":{"sshs":[{"name":"甲","host":"h","port":22,"user":"u","password":"p","zone":"1"}]},
+	  "query":{"source":"auto"}}`
+	s, path := newTestServer(t, seed)
+
+	rec, _ := doJSON(t, s, http.MethodPut, "/api/hosts", map[string]any{
+		"hosts": map[string]any{"sshs": []any{
+			map[string]any{"name": "甲", "host": "h", "port": 22, "user": "u", "password": "p", "zone": "1"},
+			map[string]any{"name": "a/b", "host": "h2", "port": 22, "user": "u", "password": "p", "zone": "1"},
+		}},
+	})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("非法环境名应 400，实际 HTTP %d：%s", rec.Code, rec.Body.String())
+	}
+	root, _ := config.Load(path)
+	if len(root.Hosts.SSHs) != 1 || root.Hosts.SSHs[0].Name != "甲" {
+		t.Fatalf("配置不该被改：%+v", root.Hosts.SSHs)
+	}
+}
+
+// 删一个环境 + 加一个无关环境（同一次保存）：不能被当成改名而搬走旧数据。
+func TestHostsPut_DeletePlusAddDoesNotMoveData(t *testing.T) {
+	seed := `{"schemaVersion":4,
+	  "hosts":{"sshs":[{"name":"甲","host":"old-host","port":22,"user":"u","password":"p","zone":"1"}]},
+	  "query":{"source":"auto"}}`
+	s, path := newTestServer(t, seed)
+	dir := filepath.Dir(path)
+	oldDB := config.DictDBPath(dir, "甲")
+	if err := os.MkdirAll(filepath.Dir(oldDB), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(oldDB, []byte("甲的数据"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rec, _ := doJSON(t, s, http.MethodPut, "/api/hosts", map[string]any{
+		"hosts": map[string]any{"sshs": []any{map[string]any{
+			"name": "丙", "host": "new-host", "port": 22, "user": "u", "password": "p", "zone": "9",
+		}}},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("删一个加一个应允许保存，实际 HTTP %d：%s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(oldDB); err != nil {
+		t.Errorf("被删环境的库不该搬走：%v", err)
+	}
+	if _, err := os.Stat(config.DictDBPath(dir, "丙")); !os.IsNotExist(err) {
+		t.Errorf("新环境名下不该出现旧数据：%v", err)
+	}
+}
+
+// 改名同时改了 host：改名识别不出来，旧名从配置里消失而 query.source 还指着它 ——
+// 必须当场拒绝，而不是留下悬空引用。
+func TestHostsPut_UndetectedRenameWithDanglingSourceRejected(t *testing.T) {
+	seed := `{"schemaVersion":4,
+	  "hosts":{"sshs":[{"name":"甲","host":"h1","port":22,"user":"u","password":"p","zone":"1"}]},
+	  "query":{"source":"local:甲"}}`
+	s, path := newTestServer(t, seed)
+	dir := filepath.Dir(path)
+	oldDB := config.DictDBPath(dir, "甲")
+	if err := os.MkdirAll(filepath.Dir(oldDB), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(oldDB, []byte("db"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rec, _ := doJSON(t, s, http.MethodPut, "/api/hosts", map[string]any{
+		"hosts": map[string]any{"sshs": []any{map[string]any{
+			"name": "乙", "host": "h2", "port": 22, "user": "u", "password": "p", "zone": "1",
+		}}},
+	})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("悬空的 query.source 应拒绝保存，实际 HTTP %d：%s", rec.Code, rec.Body.String())
+	}
+	root, _ := config.Load(path)
+	if len(root.Hosts.SSHs) != 1 || root.Hosts.SSHs[0].Name != "甲" {
+		t.Fatalf("配置不该被改：%+v", root.Hosts.SSHs)
+	}
+	if root.Query.Source != "local:甲" {
+		t.Errorf("query.source 不该被改：%q", root.Query.Source)
+	}
+	if _, err := os.Stat(oldDB); err != nil {
+		t.Errorf("旧库不该被动：%v", err)
+	}
+}

@@ -5,6 +5,28 @@ import (
 	"strings"
 )
 
+// ValidateEnvName 校验一个**新**环境名能不能安全地当作路径键与 query.source 的一部分。
+//
+// 环境名会直接进 dict/<环境>.db、ents/<环境>.json、mirror.dir/<环境>/ 与
+// `local:<环境>`：路径分隔符会改变落点，冒号会和 query.source 的 `local:` 前缀
+// 打架。名字里允许中文与空格，但不允许首尾空白。
+func ValidateEnvName(name string) error {
+	n := strings.TrimSpace(name)
+	if n == "" {
+		return fmt.Errorf("环境名不能为空")
+	}
+	if n != name {
+		return fmt.Errorf("环境名首尾不能有空白：%q", name)
+	}
+	if strings.ContainsAny(n, `/\:`) {
+		return fmt.Errorf("环境名不能包含路径分隔符或冒号（会破坏落点与 query.source 的写法）：%q", name)
+	}
+	if n == "." || n == ".." {
+		return fmt.Errorf("环境名不能是 %q", n)
+	}
+	return nil
+}
+
 // RenameHost 把 hosts.sshs 里的环境名 from 改成 to，并在**同一次原子写**里把
 // query.source 中指向 from 的引用（`from` 或 `local:from`）一并改成 to。
 // 返回 query.source 是否被改写。
@@ -20,6 +42,9 @@ func RenameHost(path, from, to string) (bool, error) {
 	}
 	if from == to {
 		return false, fmt.Errorf("新旧环境名相同：%q", from)
+	}
+	if err := ValidateEnvName(to); err != nil {
+		return false, err
 	}
 
 	rewritten := false
@@ -112,6 +137,25 @@ func containsName(names []string, want string) bool {
 	return false
 }
 
+// QuerySourceEnv 返回 query.source 实际指向的环境名：
+// 裸环境名返回原名，`local:<环境>` 返回环境名；空 / auto / 裸 local 返回空串
+// （它们不指向具体环境，由命令行或其它规则决定）。
+func QuerySourceEnv(root map[string]any) string {
+	q, _ := root["query"].(map[string]any)
+	if q == nil {
+		return ""
+	}
+	src, _ := q["source"].(string)
+	src = strings.TrimSpace(src)
+	if src == "" || strings.EqualFold(src, "auto") || strings.EqualFold(src, "local") {
+		return ""
+	}
+	if strings.HasPrefix(strings.ToLower(src), "local:") {
+		return strings.TrimSpace(src[len("local:"):])
+	}
+	return src
+}
+
 // ValidateQuerySource 校验 root 里的 query.source 只引用**存在的**环境。
 //
 // 这是"保存时就拦住"的那道闸：悬空引用不会当场报错，只会在下次查询时表现为
@@ -123,8 +167,11 @@ func ValidateQuerySource(root map[string]any) error {
 	}
 	src, _ := q["source"].(string)
 	src = strings.TrimSpace(src)
-	if src == "" || strings.EqualFold(src, "auto") || strings.EqualFold(src, "local") {
-		return nil // 未固定 / 旧值：由命令行点名环境
+	if src == "" || strings.EqualFold(src, "auto") {
+		return nil // 未固定：由命令行点名环境
+	}
+	if strings.EqualFold(src, "local") {
+		return fmt.Errorf("query.source = local 缺少环境名（本地库按环境分开，应写 local:<环境>）")
 	}
 	env := src
 	if strings.HasPrefix(strings.ToLower(src), "local:") {
