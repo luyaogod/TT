@@ -12,6 +12,7 @@ package debug
 
 import (
 	"fmt"
+	"strings"
 
 	"tt/internal/config"
 	"tt/internal/dbconfig"
@@ -167,6 +168,54 @@ func (c *Config) CloneEnv(name string) *Config {
 func (c *Config) TopentInt() int {
 	n, _ := c.Topent.Int()
 	return n
+}
+
+// EntAccount 按企业编号取该环境 ENT 清单里的账号（纯配置，不联网）。
+//
+// 这是"企业→账号"在**配置层**的唯一实现：CLI 的 tt db sql 与 Web 的 /api/dbsql
+// 都从这里取，两条路落到同一个 schema。清单没同步就报“没同步”，绝不猜一个账号
+// —— 猜错的账号查出来是 0 行，而那看起来和“数据不存在”一模一样。
+func (c *Config) EntAccount(ent int) (string, error) {
+	name := c.EnvName()
+	for i := range c.SSHs {
+		if c.SSHs[i].Name != name {
+			continue
+		}
+		e := &c.SSHs[i]
+		for _, x := range e.Ents {
+			if x.Ent != ent {
+				continue
+			}
+			if a := strings.TrimSpace(x.Account); a != "" && a != "-" {
+				return a, nil
+			}
+			return "", fmt.Errorf("企业 %d 在配置的 ENT 清单里没有可用账号（tt env ents %s 可看，或到设置页「ENT」页签刷新）", ent, name)
+		}
+		if len(e.Ents) == 0 {
+			return "", fmt.Errorf("环境 %q 还没同步过 ENT 清单：跑 tt env ents %s --refresh（或设置页「ENT」页签）", name, name)
+		}
+		return "", fmt.Errorf("企业 %d 不在 %s 的 ENT 清单里（tt env ents %s 看全部）", ent, name, name)
+	}
+	return "", fmt.Errorf("环境 %q 不在配置里", name)
+}
+
+// DBConnForEnt 取该环境的库连接副本，并把 Account 槽位换成本次企业的账号。
+//
+// 返回的是**副本**：Accounts 切片只读共享，Account 是"这次用哪个账号"的一次性槽位，
+// 改它不能影响配置本体（否则下一次查询会沿用上一次的企业）。
+func (c *Config) DBConnForEnt(ent int) (*dbconfig.Connection, error) {
+	if c.DB == nil {
+		return nil, fmt.Errorf("环境 %q 未挂数据库连接（设置 → 站点管理 → 数据库）", c.EnvName())
+	}
+	cc := *c.DB
+	if ent > 0 {
+		acct, err := c.EntAccount(ent)
+		if err != nil {
+			return nil, err
+		}
+		cc.Account = acct
+	}
+	return &cc, nil
 }
 
 // BPsPersisted 断点持久化是否启用

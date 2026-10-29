@@ -219,3 +219,19 @@ tt db sql --at <环境>@<企业> "select count(*) from capp115_tmp"
 tt db sql --at <环境>@<企业> "select bmaa001,bmaastus from bmaa_t where bmaa001='FCPU010100003'"
 ```
 
+默认从本机直连该企业的库；直连建不起来会自动回退服务器 sqlplus（不静默：信封里
+`route` 写明这次实际走的哪条，`notes` 写明回退原因）。要钉死某条路用
+`--route direct`（只直连）或 `--route server`（只走服务器）。
+
+**两条路的日期渲染不一样**：直连是 `2026-10-28 00:00:00`，服务器 sqlplus 是
+`28-OCT-26`。要和既有报表逐字对齐时加 `--route server`；只是自己读一眼逻辑，默认值就行。
+
+一次要查好几条时用批次，别在 shell 里循环（每条都要重新建连）：
+```
+echo '[{"id":"cnt","sql":"select count(*) c from inaj_t"},
+       {"id":"one","sql":"select 1 x from dual"}]' > q.json
+tt db sql --at <环境>@<企业> --batch q.json
+```
+批次只输出 JSON：成败看逐条 `items[].ok`，行数看 `items[].rows`（顶层
+`totalRows/returned` 是语句条数）；单条失败不影响其余。
+

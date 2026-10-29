@@ -1438,7 +1438,7 @@ var debugSQLCmd = &cobra.Command{
 		if ent <= 0 {
 			return fmt.Errorf("需要 --at <环境>@<企业>（或 --env + --ent）：企业编号决定用哪个账号")
 		}
-		return cdb.QueryOnce(sqlText, ent, dbgTimeout)
+		return cdb.QueryOnce(sqlText, ent, dbgTimeout, cdb.SQLRouteServer)
 	},
 }
 

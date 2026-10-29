@@ -50,6 +50,10 @@ type DBQueryResult struct {
 	SSHHost       string     `json:"sshHost,omitempty"`  // 该环境的 SSH 主机
 	Zone          string     `json:"zone,omitempty"`     // 登录区域代码
 	DBTarget      string     `json:"dbTarget,omitempty"` // 库地址 host:port/服务名
+	// Route 这次实际走的执行路线（dbconfig.Route*）。空 = 沿用老行为由方言推
+	// （服务器 sqlplus/ksql），所以旧调用方与旧测试的输出一个字节不变。
+	Route         string     `json:"route,omitempty"`
+	ViaTunnel     bool       `json:"viaTunnel,omitempty"` // 客户端直连是否经 SSH 端口转发
 	Dialect       string     `json:"dialect"`
 	Columns       []string   `json:"columns"`
 	Rows          [][]string `json:"rows"`

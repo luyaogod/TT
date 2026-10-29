@@ -32,7 +32,9 @@ func Register(root *cobra.Command) {
 		Short: "数据库：连通性测试与只读 SQL",
 		Long: `数据库：测试连不连得上，以及直接执行一条只读 SQL。
 
-  tt db sql     执行一条只读 SQL（单条 SELECT/WITH，只读事务，最多 200 行）
+  tt db sql     执行一条只读 SQL（单条 SELECT/WITH，只读事务，最多 200 行；
+                默认客户端直连，建连失败回退服务器 sqlplus，--route 可指定）
+  tt db sql --batch <json>  一次建连跑 N 条（JSON 数组 [{id?,sql}]，只输出 JSON）
   tt db ping    从本机连一次库（客户端直连；支持 viaSsh 隧道）
   tt db probe   从服务器连一次库（SSH + sqlplus/ksql；验证该企业的账号）
 
@@ -87,44 +89,13 @@ func entOf(flag int) int {
 
 // entAccount 从配置的 ENT 清单取该企业的账号。
 //
-// 只读配置：这里不做“没有就现查 gzou_t”的回落 —— 那是同步（tt env ents --refresh /
-// ENT 页签）的活。清单里没有这个企业就报错并列出可用的，绝不猜一个账号。
+// 实现只有一处（debug.Config.EntAccount）：Web 的 /api/dbsql 与 CLI 必须按同一份
+// 清单落到同一个 schema —— 两处各写一遍，"同名不同号"迟早会漂移。
 func entAccount(cfg *debug.Config, ent int) (string, error) {
-	name := cfg.EnvName()
-	for i := range cfg.SSHs {
-		if cfg.SSHs[i].Name != name {
-			continue
-		}
-		e := &cfg.SSHs[i]
-		for _, x := range e.Ents {
-			if x.Ent != ent {
-				continue
-			}
-			if a := strings.TrimSpace(x.Account); a != "" && a != "-" {
-				return a, nil
-			}
-			return "", fmt.Errorf("企业 %d 在配置的 ENT 清单里没有可用账号（tt env ents %s 可看，或到设置页「ENT」页签刷新）", ent, name)
-		}
-		if len(e.Ents) == 0 {
-			return "", fmt.Errorf("环境 %q 还没同步过 ENT 清单：跑 tt env ents %s --refresh（或设置页「ENT」页签）", name, name)
-		}
-		return "", fmt.Errorf("企业 %d 不在 %s 的 ENT 清单里（tt env ents %s 看全部）", ent, name, name)
-	}
-	return "", fmt.Errorf("环境 %q 不在配置里", name)
+	return cfg.EntAccount(ent)
 }
 
-// dbConnFor 把该环境的库连接取出来（可选覆盖成某个企业的账号）。
+// dbConnFor 把该环境的库连接取出来（换成某个企业的账号）。
 func dbConnFor(cfg *debug.Config, ent int) (*dbconfig.Connection, error) {
-	if cfg.DB == nil {
-		return nil, fmt.Errorf("环境 %q 未挂数据库连接（设置 → 站点管理 → 数据库）", cfg.EnvName())
-	}
-	cc := *cfg.DB // 浅拷贝：只改 Account 槽位，Accounts 切片只读
-	if ent > 0 {
-		acct, err := entAccount(cfg, ent)
-		if err != nil {
-			return nil, err
-		}
-		cc.Account = acct
-	}
-	return &cc, nil
+	return cfg.DBConnForEnt(ent)
 }
