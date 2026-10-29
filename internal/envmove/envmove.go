@@ -1,7 +1,7 @@
 // Package envmove 把「环境改名」里按名字落盘的东西一起搬走。
 //
 // 环境名是跨文件的持久键：dict/<环境>.db、ents/<环境>.json、srccache/<环境>/、
-// mirror.dir/<环境>/（tt file mirror 的源码镜像）。只改 config.json 里的 name，
+// execlog/<环境>/、mirror.dir/<环境>/（tt file mirror 的源码镜像）。只改 config.json 里的 name，
 // 这些目录就变成孤儿；查询随后报「本地库不存在」，而它与「数据不存在」在输出上
 // 无法区分。所以改名必须是一次迁移：
 //
@@ -24,7 +24,7 @@ import (
 
 // Move 一份要搬的落点（文件或整个目录）。
 type Move struct {
-	Kind string `json:"kind"` // dict / dict-bak / ents / srccache / mirror
+	Kind string `json:"kind"` // dict / dict-bak / ents / srccache / execlog / mirror
 	From string `json:"from"`
 	To   string `json:"to"`
 }
@@ -74,6 +74,10 @@ func Plan(cfgPath, from, to, host, zone string) ([]Move, error) {
 		pair{"dict-bak", config.DictDBPathIn(dictDir, from) + ".bak", config.DictDBPathIn(dictDir, to) + ".bak"},
 		pair{"ents", entdir.Path(dataDir, segFrom), entdir.Path(dataDir, segTo)},
 		pair{"srccache", filepath.Join(dataDir, "srccache", segFrom), filepath.Join(dataDir, "srccache", segTo)},
+		// execlog 与 srccache 同源（都是 <dataDir>/<种类>/<环境段>/[runNN/]）：
+		// 调试跑过命令的大输出副本按环境段落盘，不搬就走成孤儿目录。它只堆磁盘、
+		// 不影响查询正确性，但既然目标是"按名字落盘的东西都跟着走"，就不该落下它。
+		pair{"execlog", filepath.Join(dataDir, "execlog", segFrom), filepath.Join(dataDir, "execlog", segTo)},
 	)
 
 	// mirror：环境自配 mirrorDir 时是绝对路径、与名字无关，不搬；否则
