@@ -55,7 +55,7 @@ func DetectStructural(base *model.Document, parsed *fence.ParseResult) []StructE
 		if from, to, ch := pr.StructFieldChanged("desc"); ch {
 			out = append(out, StructEdit{Region: b.Name, Kind: StructDescChange, From: from, To: to})
 		}
-		bs := spanText(base, b.SignatureSpan)
+		bs := signatureTextOf(base, b)
 		es := spanText(parsed.Doc, e.SignatureSpan)
 		if bs != es {
 			out = append(out, StructEdit{
@@ -72,6 +72,32 @@ func spanText(d *model.Document, r *model.ByteRange) string {
 		return ""
 	}
 	return string(d.Text[r.Start:r.End])
+}
+
+// reSigLine 判断一行是不是函数/对话/报表的签名行。
+var reSigLine = regexp.MustCompile(`(?i)^[ \t]*(PUBLIC|PRIVATE)[ \t]+(FUNCTION|DIALOG|REPORT)[ \t]*`)
+
+// signatureTextOf 取基线区段的签名行原文。
+//
+// 不能无条件相信 Region.SignatureSpan：部分设计器包（行业版 _wf 尤其常见）导出的
+// regions.json 里 SignatureSpan 是「不含围栏行」的坐标系，偏移会随围栏行累积漂移，
+// 于是这里读到的根本不是签名行，V7 会把每个 cite_std=Y 的点都误判成「签名被改」。
+// 先验证该区间确实落在签名行上；若不是，就退回该区段正文里按函数信封找签名行。
+func signatureTextOf(d *model.Document, r *model.Region) string {
+	if r.SignatureSpan != nil {
+		if s := spanText(d, r.SignatureSpan); reSigLine.MatchString(s) {
+			return s
+		}
+	}
+	if c := d.OwnBytes(r); len(c) > 0 {
+		kind, _ := fgl.EnvelopeKindFor(r.Name)
+		if blk, err := fgl.ParseBlock(string(c), kind); err == nil && blk != nil {
+			if blk.Header.StartByte >= 0 && blk.Header.EndByte <= len(c) && blk.Header.EndByte > blk.Header.StartByte {
+				return string(c[blk.Header.StartByte:blk.Header.EndByte])
+			}
+		}
+	}
+	return spanText(d, r.SignatureSpan)
 }
 
 // 程序类型 → 允许的 scope（FunctionInfoWindow.xaml.cs:143-192）。
