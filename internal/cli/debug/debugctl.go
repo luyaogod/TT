@@ -7,6 +7,7 @@ package debug
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -19,6 +20,7 @@ import (
 	cdb "tt/internal/cli/db"
 	"tt/internal/debug"
 	"tt/internal/debugclient"
+	"tt/internal/output"
 	"tt/internal/target"
 
 	"github.com/spf13/cobra"
@@ -106,7 +108,44 @@ func actorSelf() string {
 // 这里**不再自己实现一遍 HTTP**：其他命令也走同一个客户端，一套规矩。
 // 从前各写一份的后果是"同一个失败在两条线上有不同的码与提示"。
 func dbgAPI(method, path string, body any) ([]byte, error) {
-	return dbgClient().Do(method, path, body)
+	data, err := dbgClient().Do(method, path, body)
+	if err != nil {
+		return nil, annotateEnvFailure(err)
+	}
+	return data, nil
+}
+
+// annotateEnvFailure 给"查询失败"补一句**能自己走下去的**下一步（2026-11-05 实测）。
+//
+// 现场：`tt debug wslogs --show <rowid>` 没带 --at，落到了一个没同步 wsfa_t 的环境上，
+// 回包只有 `{"ok":false,"code":"QUERY_FAILED","error":"wsfa_t 查询出错: ERROR at line 1:"}`
+// —— 既没有 ORA 原文（服务端那一侧现在补了），也没有"这次到底连的是哪个环境"。
+// 调用方唯一的动作就成了"换个 --at 再试"，白跑一整个回合。
+//
+// 所以这一层只做两件事，**不改任何码**（code / exit 原样透传）：
+//   - 把"这次落到的环境"写进提示（--at 给的就是它；没给就说明没给）；
+//   - 给一条可复制的核对命令：`tt debug wslogs --at-list`。
+func annotateEnvFailure(err error) error {
+	var f *debugclient.Failure
+	if !errors.As(err, &f) {
+		return err
+	}
+	if f.Code != output.CodeQueryFailed {
+		return err
+	}
+	env := strings.TrimSpace(dbgTargetEnv())
+	tip := "核对目标环境：tt debug wslogs --at-list"
+	if env == "" {
+		tip = "这次没有点名环境（--at 缺省）；" + tip
+	} else {
+		tip = "这次落在环境 " + env + "；" + tip
+	}
+	if f.Hint == "" {
+		f.Hint = tip
+	} else if !strings.Contains(f.Hint, "at-list") {
+		f.Hint += "；" + tip
+	}
+	return f
 }
 
 // dbgClient 按当前配置目录算出调试面客户端（地址与前缀来自服务状态文件）。
