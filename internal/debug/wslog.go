@@ -258,7 +258,21 @@ func isDBErrorLine(ln string) bool {
 // 在测试里被替换、在代码里只有一处名字。
 const wsfaTable = "wsfa_t"
 
-// dbQueryError 把一行数据库报错变成**能自己走下去**的错误（2026-11-05 实测的问题）。
+// extractDBError 从**整段**数据库输出里识别报错并转成错误；没报错返回 nil。
+//
+// 抽这一个入口，是为了让"报错识别 + 原因行保留"这条逻辑只有一个出口、
+// 且能被测试直接走一遍（见 wslog_dberr_path_test.go）。
+// 参数永远是整段 out：原因行在报错行的**下一行**，传单行就必然丢掉它。
+func extractDBError(acct, out string) error {
+	for _, ln := range strings.Split(out, "\n") {
+		if isDBErrorLine(ln) {
+			return dbQueryError(acct, out)
+		}
+	}
+	return nil
+}
+
+// dbQueryError 把**整段数据库输出**里的报错变成"能自己走下去"的错误（2026-11-05 实测的问题）。
 //
 // 从前这里只回 `wsfa_t 查询出错: ERROR at line 1:` —— 括号里那句是 sqlplus 的
 // "行号行"，**真正的原因（ORA-00942 表或视图不存在 / ORA-00904 标识符无效 /
@@ -274,7 +288,7 @@ const wsfaTable = "wsfa_t"
 // 不做"自动改 environment 重试"：静默换数据源是这套 CLI 明确禁止的动作。
 func dbQueryError(acct, raw string) error {
 	reason := collectDBErrorLines(raw, 6)
-	msg := "wsfa_t(" + wsfaTable + ") 查询出错"
+	msg := wsfaTable + " 查询出错"
 	if reason == "" {
 		reason = strings.TrimSpace(raw)
 	}
@@ -294,6 +308,9 @@ func dbQueryError(acct, raw string) error {
 // collectDBErrorLines 取输出里"像报错"的头部（按原顺序、去空行）。
 //
 // 报错后的上下文行（`ERROR at line 1:` 之后那行 `ORA-00942: …`）也要留 —— 那行才是原因。
+//
+// **传进来的必须是整段输出**，不是单行：这个函数靠"进入报错区之后再看下一行"来找原因。
+// 调用点见 extractDBError。之前 listWSLogs 传了单行 ln，原因行因此永远拿不到。
 // 规则：**只收报错信息本身**；一旦等到原因（含 `:` 的那一行，或 `ORA-`/`SP2-` 行），
 // 立刻停 —— Oracle 之后可能还跟着一堆会话/日志噪声，收进来只会把原因埋掉。
 func collectDBErrorLines(raw string, max int) string {
@@ -362,11 +379,13 @@ from wsfa_t wsfa where %s order by wsfa003 desc, wsfa004 desc offset %d rows fet
 	if err != nil {
 		return nil, false, fmt.Errorf("查询 wsfa_t 失败: %w (%s)", err, host.FirstLines(out, 3))
 	}
+	// 报错识别走统一入口，且**必须传整段 out**：原因行在报错行的下一行，
+	// 传单行就会把它丢掉（P1 曾经就是这样，中心目标在真实路径上失效）。
+	if e := extractDBError(wsSysAccount, out); e != nil {
+		return nil, false, e
+	}
 	var all []WSLogItem
 	for _, ln := range strings.Split(out, "\n") {
-		if isDBErrorLine(ln) {
-			return nil, false, dbQueryError(wsSysAccount, ln)
-		}
 		m := reWSLogRow.FindStringSubmatch(strings.TrimRight(ln, " \r"))
 		if m == nil {
 			continue
@@ -413,11 +432,11 @@ from wsfa_t wsfa where rowid='%s';`, sqlWSLogCols(false), rowid)
 	if err != nil {
 		return nil, nil, fmt.Errorf("查询 wsfa_t 失败: %w (%s)", err, host.FirstLines(out, 3))
 	}
+	if e := extractDBError(wsSysAccount, out); e != nil {
+		return nil, nil, e
+	}
 	var item *WSLogItem
 	for _, ln := range strings.Split(out, "\n") {
-		if isDBErrorLine(ln) {
-			return nil, nil, dbQueryError(wsSysAccount, ln)
-		}
 		if m := reWSLogRow.FindStringSubmatch(strings.TrimRight(ln, " \r")); m != nil {
 			item = &WSLogItem{
 				RowID: m[1], Service: m[2], PID: m[3], Start: m[4], Duration: m[5],

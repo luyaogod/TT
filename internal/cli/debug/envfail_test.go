@@ -86,7 +86,7 @@ func TestQueryFailureTipOldServeStatesMissingCause(t *testing.T) {
 
 func TestAnnotateEnvFailureKeepsCodeAndExit(t *testing.T) {
 	f := &debugclient.Failure{Code: output.CodeQueryFailed, Message: "ORA-01410: invalid ROWID"}
-	got := annotateEnvFailure(f)
+	got := annotateEnvFailure(f, "/api/wslogs/content?rowid=x")
 	if got != f {
 		t.Fatal("应原地补 hint 并返回同一个 Failure")
 	}
@@ -100,9 +100,36 @@ func TestAnnotateEnvFailureKeepsCodeAndExit(t *testing.T) {
 
 func TestAnnotateEnvFailureIgnoresOtherCodes(t *testing.T) {
 	f := &debugclient.Failure{Code: output.CodeNotFound, Message: "ORA-01410: invalid ROWID"}
-	annotateEnvFailure(f)
+	annotateEnvFailure(f, "/api/wslogs/content?rowid=x")
 	if f.Hint != "" {
 		t.Fatalf("只认 QUERY_FAILED，其他码不该被加提示，得到: %s", f.Hint)
+	}
+}
+
+// P2（作用域过宽）：dbgAPI 是所有 debug REST 命令的共用入口，
+// 而 QUERY_FAILED 是服务端 500 的默认码。若对所有命令都贴 wsfa_t/rowid 提示，
+// `tt debug sql` 之类查业务表报 500 时会被贴一句关于 wslogs 的误导性 hint。
+// 所以注解只允许挂在 /api/wslogs* 上，别的端点一律原样返回。
+func TestAnnotateEnvFailureOnlyForWslogs(t *testing.T) {
+	msg := "ORA-00942: table or view does not exist"
+	for _, path := range []string{
+		"/api/sessions",
+		"/api/status",
+		"/api/hosts",
+		"/api/sql",
+		"/api/jobinfo",
+	} {
+		f := &debugclient.Failure{Code: output.CodeQueryFailed, Message: msg}
+		annotateEnvFailure(f, path)
+		if f.Hint != "" {
+			t.Fatalf("非 wslogs 端点 %q 不该被贴 wslogs 提示，得到: %s", path, f.Hint)
+		}
+	}
+	// wslogs 端点则正常补。
+	f := &debugclient.Failure{Code: output.CodeQueryFailed, Message: msg}
+	annotateEnvFailure(f, "/api/wslogs?limit=10")
+	if f.Hint == "" {
+		t.Fatal("wslogs 端点应补提示")
 	}
 }
 

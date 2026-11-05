@@ -110,37 +110,31 @@ func actorSelf() string {
 func dbgAPI(method, path string, body any) ([]byte, error) {
 	data, err := dbgClient().Do(method, path, body)
 	if err != nil {
-		return nil, annotateEnvFailure(err)
+		return nil, annotateEnvFailure(err, path)
 	}
 	return data, nil
 }
 
 // annotateEnvFailure 给"查询失败"补一句**能自己走下去的**下一步。
 //
+// 作用域：**只对接口日志（/api/wslogs*）那条线生效**。dbgAPI 是所有 debug REST
+// 命令的共用入口，而 QUERY_FAILED 是服务端 500 的默认码 —— 任何 debug 端点 500
+// 都会走到这里；若对所有命令都贴 wsfa_t/rowid 的提示，`tt debug sql` 查业务表报
+// ORA-00942 时就会被贴一句关于 wslogs 的误导性 hint（P2，评审指出）。
+//
 // 环境名一律来自**用户自己的配置**（--at / --env 的原值，经 dbgTargetEnv 取），
 // 这里不出现任何具体环境名 —— 环境是用户定义的、非固定的，写死在工具里没有意义。
 //
-// **本函数第一版写错了方向，这里整段重写**（2026-11-05，实测推翻前一次判断）：
-//
-//	当时的现场：`tt debug wslogs --show <rowid> --at <环境>` 失败，
-//	回包只有 `wsfa_t 查询出错: ERROR at line 1:`。第一版据此推断"环境没同步 wsfa_t"，
-//	于是无条件补了一句"核对目标环境：tt debug wslogs --at-list"。
-//
-//	复查结果：**环境一点问题都没有**。目标库的 wsfa_t 在、SSH 通、
-//	列表查询（不带 --show）也成功。真正的原因是 **rowid 跨库**：
-//	这个 rowid 是另一个库的物理 ROWID，拿到别的库去查就是 ORA-01410 invalid ROWID。
-//	Oracle 的 ROWID 是物理地址，不可能跨库有效。
-//
-// 所以这里的前提是：**先读错误在说什么，再决定提什么**。无条件加一句"核对环境"
-// 会把调用方引向错误方向，比不加更差 —— 那正是这次走过的弯路。
-//
 // 仍然**不改任何码**（code / exit 原样透传），只补 hint。
-func annotateEnvFailure(err error) error {
+func annotateEnvFailure(err error, path string) error {
 	var f *debugclient.Failure
 	if !errors.As(err, &f) {
 		return err
 	}
 	if f.Code != output.CodeQueryFailed {
+		return err
+	}
+	if !strings.Contains(path, "wslogs") {
 		return err
 	}
 	tip := queryFailureTip(strings.TrimSpace(dbgTargetEnv()), f.Message)
