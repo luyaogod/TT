@@ -74,30 +74,43 @@ func spanText(d *model.Document, r *model.ByteRange) string {
 	return string(d.Text[r.Start:r.End])
 }
 
-// reSigLine 判断一行是不是函数/对话/报表的签名行。
-var reSigLine = regexp.MustCompile(`(?i)^[ \t]*(PUBLIC|PRIVATE)[ \t]+(FUNCTION|DIALOG|REPORT)[ \t]*`)
-
-// signatureTextOf 取基线区段的签名行原文。
+// signatureTextOf 取**基线**点的签名行原文（结构事务比较的左值）。
 //
 // 不能无条件相信 Region.SignatureSpan：部分设计器包（行业版 _wf 尤其常见）导出的
-// regions.json 里 SignatureSpan 是「不含围栏行」的坐标系，偏移会随围栏行累积漂移，
-// 于是这里读到的根本不是签名行，V7 会把每个 cite_std=Y 的点都误判成「签名被改」。
-// 先验证该区间确实落在签名行上；若不是，就退回该区段正文里按函数信封找签名行。
+// regions.json 里 SignatureSpan 是按「不含围栏行」的坐标系算的，偏移会随该点之前
+// 所有围栏行累积漂移（实测 2.5MB 处差 316KB），读到的根本不是签名行，于是每个
+// cite_std=Y 的点都被 V7 判成「签名被改」。按修好之后的口径重新 export 就不会再
+// 写出这种坐标，但**老工作区**里的 regions.json 仍然是坏的，所以读的时候必须自愈。
+//
+// 判据：span 必须完整落在本点正文内，且签名里的函数名与本点名一致；否则按正文
+// 信封重取。重取口径与 fence.recomputeBody 逐字一致（Header.StartByte..EndByte，
+// EndByte 不含行尾 EOL），两边必须保持一致，否则结构行比对会错位。
 func signatureTextOf(d *model.Document, r *model.Region) string {
-	if r.SignatureSpan != nil {
-		if s := spanText(d, r.SignatureSpan); reSigLine.MatchString(s) {
+	if r == nil {
+		return ""
+	}
+	if inRegionSpan(r, r.SignatureSpan) {
+		if s := spanText(d, r.SignatureSpan); bareName(signatureName(s)) == bareName(r.Name) {
 			return s
 		}
 	}
 	if c := d.OwnBytes(r); len(c) > 0 {
-		kind, _ := fgl.EnvelopeKindFor(r.Name)
-		if blk, err := fgl.ParseBlock(string(c), kind); err == nil && blk != nil {
-			if blk.Header.StartByte >= 0 && blk.Header.EndByte <= len(c) && blk.Header.EndByte > blk.Header.StartByte {
+		if kind, ok := fgl.EnvelopeKindFor(r.Name); ok {
+			blk, err := fgl.ParseBlock(string(c), kind)
+			if err == nil && blk != nil &&
+				blk.Header.EndByte > blk.Header.StartByte && blk.Header.EndByte <= len(c) {
 				return string(c[blk.Header.StartByte:blk.Header.EndByte])
 			}
 		}
 	}
 	return spanText(d, r.SignatureSpan)
+}
+
+// inRegionSpan 判断区间是否完整落在该点的正文内。
+// 漂移后的 SignatureSpan 通常已经越出本点，用它把「坏坐标」挡在采信之前。
+func inRegionSpan(r *model.Region, sp *model.ByteRange) bool {
+	return sp != nil && sp.End > sp.Start &&
+		sp.Start >= r.ContentSpan.Start && sp.End <= r.ContentSpan.End
 }
 
 // 程序类型 → 允许的 scope（FunctionInfoWindow.xaml.cs:143-192）。
@@ -145,7 +158,8 @@ func validateStructural(edits []StructEdit, base *model.Document, parsed *fence.
 		declared := pr.EditedMeta.KV["fn"]
 		if declared == "" {
 			// 旧工作区（围栏无 fn 字段）：只要求签名行没被改，否则无法做事务校验。
-			if bs := spanText(base, pr.Base.SignatureSpan); bs != sig {
+			// 基线侧不能直接读 SignatureSpan —— 老工作区里它可能是漂移的坐标。
+			if bs := signatureTextOf(base, pr.Base); bs != sig {
 				rep.Add(Finding{Code: "V1", Severity: SevError, Region: e.Name,
 					Message: "签名行被改动，但围栏没有 fn 字段（工作区由旧版本创建）",
 					Detail: []string{"请重新 export 后再做结构事务（改名/改签名）",
