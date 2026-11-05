@@ -274,6 +274,12 @@ func Render(doc *model.Document) ([]byte, []*model.Region, []model.Span, error) 
 		c.ContentSpan.End = out.Len()
 		c.Sha256 = model.Sha256Bytes(out.Bytes()[c.ContentSpan.Start:c.ContentSpan.End])
 		c.BodySpan = shift(r.BodySpan, delta)
+		// 签名行、描述块与正文同属 ContentSpan，插完 begin 围栏行后必须一起平移。
+		// 漏掉这两个会让 regions.json 里留下**未围栏坐标系**的偏移：偏移量随该点之前
+		// 所有围栏行的字节和累积（实测 2.5MB 处差 316KB），读基线签名行时读到的
+		// 是无关代码，gate2 于是把每个点都判成「签名被改」。
+		c.SignatureSpan = shift(r.SignatureSpan, delta)
+		c.DescSpan = shift(r.DescSpan, delta)
 		c.StructureSpans = nil
 		for _, s := range r.StructureSpans {
 			c.StructureSpans = append(c.StructureSpans, model.ByteRange{Start: s.Start + delta, End: s.End + delta})
