@@ -117,16 +117,19 @@ func dbgAPI(method, path string, body any) ([]byte, error) {
 
 // annotateEnvFailure 给"查询失败"补一句**能自己走下去的**下一步。
 //
-// **本函数第一版写错了方向，这里整段重写**（2026-11-05 晚，实测推翻前一次判断）：
+// 环境名一律来自**用户自己的配置**（--at / --env 的原值，经 dbgTargetEnv 取），
+// 这里不出现任何具体环境名 —— 环境是用户定义的、非固定的，写死在工具里没有意义。
 //
-//	当时的现场：`tt debug wslogs --show AAATu4AAFAAN74lAAB --at 测试` 失败，
+// **本函数第一版写错了方向，这里整段重写**（2026-11-05，实测推翻前一次判断）：
+//
+//	当时的现场：`tt debug wslogs --show <rowid> --at <环境>` 失败，
 //	回包只有 `wsfa_t 查询出错: ERROR at line 1:`。第一版据此推断"环境没同步 wsfa_t"，
 //	于是无条件补了一句"核对目标环境：tt debug wslogs --at-list"。
 //
-//	复查结果：**环境一点问题都没有**。测试库的 wsfa_t 在（OWNER=DS，15037 行）、
-//	SSH 通、列表查询（不带 --show）也成功。真正的原因是 **rowid 跨库**：
-//	`AAATu4AAFAAN74lAAB` 是正式库的物理 ROWID，拿到测试库去查就是 ORA-01410 invalid ROWID。
-//	Oracle 的 ROWID 是物理地址，**永远不可能跨库有效**。
+//	复查结果：**环境一点问题都没有**。目标库的 wsfa_t 在、SSH 通、
+//	列表查询（不带 --show）也成功。真正的原因是 **rowid 跨库**：
+//	这个 rowid 是另一个库的物理 ROWID，拿到别的库去查就是 ORA-01410 invalid ROWID。
+//	Oracle 的 ROWID 是物理地址，不可能跨库有效。
 //
 // 所以这里的前提是：**先读错误在说什么，再决定提什么**。无条件加一句"核对环境"
 // 会把调用方引向错误方向，比不加更差 —— 那正是这次走过的弯路。
@@ -159,9 +162,9 @@ func queryFailureTip(env, msg string) string {
 	switch {
 	// rowid 跨库：ORA-01410 invalid ROWID。
 	//
-	// 实测（2026-11-05，双向验证）：正式库的 rowid 在测试库查不到、测试库的 rowid
-	// 在正式库也查不到 —— 两个环境的落点是分开的；rowid 是**物理地址**，
-	// 跨库查不到是它的性质，不是"环境配错了"。
+	// 实测（2026-11-05，双向验证）：一个库的 rowid 在另一个库查不到，反过来也一样 ——
+	// 不同环境的落点是分开的；rowid 是**物理地址**，跨库查不到是它的性质，
+	// 不是"环境配错了"。
 	case strings.Contains(msg, "ORA-01410"), strings.Contains(msg, "不在当前环境"),
 		strings.Contains(msg, "不在当前的 wsfa_t"):
 		head := "rowid 是物理地址，只在产生它的库里有效。"
@@ -250,9 +253,10 @@ func dbgWaitStopped(id string, timeout time.Duration) (map[string]any, error) {
 
 // dbgTargetEnv 这次启动要连哪个环境。
 //
+// 环境名是**用户自己配置的、非固定**：这里只做取值，不认任何具体名字。
 // 两条来源,命令自己的 --env 优先:
-//   - `tt debug start x --env 恒烁正式区`(写在子命令上,语义最明确);
-//   - `tt --env 恒烁正式区 debug start x`(根命令的持久开关,别处能用,这里也认)。
+//   - `tt debug start x --env <你的环境名>`(写在子命令上,语义最明确);
+//   - `tt --env <你的环境名> debug start x`(根命令的持久开关,别处能用,这里也认)。
 //
 // 从前这里**只看 --ssh**,而 --env 是根命令的开关、debug 组里没人读 —— 于是
 // `tt debug start … --env X` 既不报错也不生效,方向永远取服务端当前环境。同机多环境
@@ -1723,7 +1727,7 @@ func init() {
 	// 于是报出 `asf_axmt500_wf.4gl`，而真名是 `axm_axmt500_wf.4gl`，`break asf_…:行`
 	// 必然 `No source file named`。留空 = 让会话自己解析（唯一权威来源）。
 	debugStartCmd.Flags().StringVarP(&dbgModule, "module", "m", "", debug.ModuleFlagHelp())
-	debugStartCmd.Flags().StringVar(&dbgZone, "zone", "", "区域代码覆盖(31开发/35测试/36正式;默认取配置)")
+	debugStartCmd.Flags().StringVar(&dbgZone, "zone", "", "区域代码覆盖(默认取用户配置)")
 	debugStartCmd.Flags().StringVar(&dbgSSHName, "ssh", "", "SSH 配置名(设置页配置的多 SSH;默认取配置)")
 	// --env 与全局 --env 同名同义:子命令上显式给的优先级更高(根命令那个是持久开关,
 	// 别处能用这里也必须能用;写在子命令上语义最明确)。--ssh 是环境名的历史叫法,两者并存。

@@ -105,3 +105,35 @@ func TestAnnotateEnvFailureIgnoresOtherCodes(t *testing.T) {
 		t.Fatalf("只认 QUERY_FAILED，其他码不该被加提示，得到: %s", f.Hint)
 	}
 }
+
+// 环境名是**用户定义的、非固定的**：提示里出现的必须是用户传进来的那一个字符串，
+// 且不许出现任何内置的具体环境名。用户取什么名字，就得原样显示什么名字。
+func TestQueryFailureTipUsesExactlyUserEnvName(t *testing.T) {
+	for _, env := range []string{"测试", "正式", "恒烁正式区", "prod-eu-1", "客户A_生产"} {
+		tip := queryFailureTip(env, "wsfa_t 查询出错: ERROR at line 1:")
+		if !strings.Contains(tip, env) {
+			t.Fatalf("环境 %q 应原样出现在提示里，得到: %s", env, tip)
+		}
+	}
+}
+
+// 反向约束：源码里不许把某个具体环境名写进提示逻辑。
+// 这里在所有失败形态上跑一遍，确保输出里除了"用户传进来的名字"之外没有别的环境名。
+func TestQueryFailureTipHasNoBuiltinEnvNames(t *testing.T) {
+	builtin := []string{"恒烁", "测试库", "正式库"}
+	msgs := []string{
+		"wsfa_t 查询出错: ERROR at line 1:",
+		"ORA-01410: invalid ROWID",
+		"ORA-00942: table or view does not exist",
+	}
+	for _, msg := range msgs {
+		for _, env := range []string{"", "我的环境"} {
+			tip := queryFailureTip(env, msg)
+			for _, b := range builtin {
+				if strings.Contains(tip, b) {
+					t.Fatalf("提示里出现了内置环境名 %q（环境名应只来自用户配置）: %s", b, tip)
+				}
+			}
+		}
+	}
+}
