@@ -115,16 +115,23 @@ func dbgAPI(method, path string, body any) ([]byte, error) {
 	return data, nil
 }
 
-// annotateEnvFailure 给"查询失败"补一句**能自己走下去的**下一步（2026-11-05 实测）。
+// annotateEnvFailure 给"查询失败"补一句**能自己走下去的**下一步。
 //
-// 现场：`tt debug wslogs --show <rowid>` 没带 --at，落到了一个没同步 wsfa_t 的环境上，
-// 回包只有 `{"ok":false,"code":"QUERY_FAILED","error":"wsfa_t 查询出错: ERROR at line 1:"}`
-// —— 既没有 ORA 原文（服务端那一侧现在补了），也没有"这次到底连的是哪个环境"。
-// 调用方唯一的动作就成了"换个 --at 再试"，白跑一整个回合。
+// **本函数第一版写错了方向，这里整段重写**（2026-11-05 晚，实测推翻前一次判断）：
 //
-// 所以这一层只做两件事，**不改任何码**（code / exit 原样透传）：
-//   - 把"这次落到的环境"写进提示（--at 给的就是它；没给就说明没给）；
-//   - 给一条可复制的核对命令：`tt debug wslogs --at-list`。
+//	当时的现场：`tt debug wslogs --show AAATu4AAFAAN74lAAB --at 测试` 失败，
+//	回包只有 `wsfa_t 查询出错: ERROR at line 1:`。第一版据此推断"环境没同步 wsfa_t"，
+//	于是无条件补了一句"核对目标环境：tt debug wslogs --at-list"。
+//
+//	复查结果：**环境一点问题都没有**。测试库的 wsfa_t 在（OWNER=DS，15037 行）、
+//	SSH 通、列表查询（不带 --show）也成功。真正的原因是 **rowid 跨库**：
+//	`AAATu4AAFAAN74lAAB` 是正式库的物理 ROWID，拿到测试库去查就是 ORA-01410 invalid ROWID。
+//	Oracle 的 ROWID 是物理地址，**永远不可能跨库有效**。
+//
+// 所以这里的前提是：**先读错误在说什么，再决定提什么**。无条件加一句"核对环境"
+// 会把调用方引向错误方向，比不加更差 —— 那正是这次走过的弯路。
+//
+// 仍然**不改任何码**（code / exit 原样透传），只补 hint。
 func annotateEnvFailure(err error) error {
 	var f *debugclient.Failure
 	if !errors.As(err, &f) {
@@ -133,19 +140,52 @@ func annotateEnvFailure(err error) error {
 	if f.Code != output.CodeQueryFailed {
 		return err
 	}
-	env := strings.TrimSpace(dbgTargetEnv())
-	tip := "核对目标环境：tt debug wslogs --at-list"
-	if env == "" {
-		tip = "这次没有点名环境（--at 缺省）；" + tip
-	} else {
-		tip = "这次落在环境 " + env + "；" + tip
+	tip := queryFailureTip(strings.TrimSpace(dbgTargetEnv()), f.Message)
+	if tip == "" {
+		return f
 	}
 	if f.Hint == "" {
 		f.Hint = tip
-	} else if !strings.Contains(f.Hint, "at-list") {
+	} else if !strings.Contains(f.Hint, tip) {
 		f.Hint += "；" + tip
 	}
 	return f
+}
+
+// queryFailureTip 按**错误内容**决定提示；认不出的失败一律不给建议（宁缺毋滥）。
+//
+// 用 ORA 号分支而不是中文文案：文案会翻译、会改，ORA 号是稳定的。
+func queryFailureTip(env, msg string) string {
+	switch {
+	// rowid 跨库：ORA-01410 invalid ROWID，或服务端已经把话说明白的"不在当前环境"。
+	case strings.Contains(msg, "ORA-01410"), strings.Contains(msg, "不在当前环境"),
+		strings.Contains(msg, "不在当前的 wsfa_t"):
+		hint := "接口日志的 rowid 只在**产生它的环境**有效，换个库查必然失败"
+		if env != "" {
+			hint = "这次落在环境 " + env + " —— " + hint + "；确认这条日志是不是这个环境产生的"
+		}
+		return hint + "：先 `tt debug wslogs --at <该环境>` 列表找到 rowid 再 --show"
+
+	// 表不在 / 视图不存在 / 权限不足：这才是"环境本身有问题"，指 --at-list。
+	case strings.Contains(msg, "ORA-00942"), strings.Contains(msg, "ORA-01031"):
+		if env != "" {
+			return "环境 " + env + " 上读不到 wsfa_t；核对目标环境：tt debug wslogs --at-list"
+		}
+		return "读不到 wsfa_t；核对目标环境：tt debug wslogs --at-list"
+
+	// 服务端是**旧版**时只回得出 `ERROR at line 1:` —— 原因被吞掉了（新版会带 ORA 原文）。
+	// 这种时候**不能装作认出来了，也不能什么都不说**：给一条把两种可能都覆盖掉的判据。
+	// 顺序刻意这样：先验 rowid 的环境归属（更常见、更便宜），再怀疑环境本身。
+	case strings.Contains(msg, "ERROR at line"), strings.HasSuffix(strings.TrimSpace(msg), ":"):
+		where := "当前环境"
+		if env != "" {
+			where = "环境 " + env
+		}
+		return where + " 上查不到这条 rowid。两种可能，按此顺序排：" +
+			"① rowid 属于别的环境（接口日志 rowid 只在产生它的环境有效）——用 tt debug wslogs --at 该环境 列表确认；" +
+			"② 真的读不到 wsfa_t——tt debug wslogs --at-list 核对环境。新版服务会直接给出 ORA 原文"
+	}
+	return ""
 }
 
 // dbgClient 按当前配置目录算出调试面客户端（地址与前缀来自服务状态文件）。
