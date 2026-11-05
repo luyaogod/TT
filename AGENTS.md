@@ -112,3 +112,13 @@ TT/
 ## 开发命令
 
 所有开发过程中用到的命令由[Makefile](Makefile)统一管理
+
+## Agent 协作约定
+
+> 环境选择、只读、交付位置等通用规则见用户级 `~/.dsh/AGENTS.md`；本节只放本仓库的硬约定。
+
+- 任何代码或文档修改都走分支 + PR（见 `.agents/skills/tt-pj-git`），commit 用 `feat|fix|chore|refactor(scope): title`。
+- 改 T100 行业版程序：只改 `<标准>_wf_*` 行业函式本体，**不要改 `#---> industry (xx) S/E` 之间的跳板区块**（重产会被覆盖）。
+- 改动处打 `#deepseek-YYYYMMDD` 标记；卡控写在对应 `END FUNCTION` 之前。
+- 提交前跑 `make test`（全量 `go test ./...`）；动了前端再跑 `make check-web`。
+- 生成物与评估文档放 `E:\主机`，不要落进仓库工作目录。
