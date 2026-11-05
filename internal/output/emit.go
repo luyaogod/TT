@@ -29,6 +29,13 @@ type Options struct {
 	Rows    [][]string
 }
 
+// RowSet 是 JSON 的列式载荷：data 直接给 columns/rows，省掉每个字段重复的键名。
+// 只在"整份载荷就是一张二维表"时使用；有嵌套结构的载荷仍用原对象。
+type RowSet struct {
+	Columns []string   `json:"columns"`
+	Rows    [][]string `json:"rows"`
+}
+
 // Emit 唯一的输出出口。w 注入,所以能像 tt debug sql 的 writeSQLResult 那样直接单测 ——
 // 这是本仓库唯一可行的输出测试手法(见 emit_test.go)。
 func Emit(w io.Writer, opt Options) error {

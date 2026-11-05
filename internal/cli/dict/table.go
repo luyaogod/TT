@@ -181,7 +181,7 @@ JSON 形状（单表响应会在 notes 里提示批量写法）：
 			if len(tables) == 1 {
 				notes = append(notes, "批量查多张表：tt dict r.t \"a,b,c\" --brief（多表只看表级信息）")
 			}
-			return emitDetailNotes(dicts, tableDetailColumns, tableDetailRows(dicts), notes...)
+			return emitDetailNotes(output.RowSet{Columns: tableDetailColumns, Rows: tableDetailRows(dicts)}, tableDetailColumns, tableDetailRows(dicts), notes...)
 		}
 
 		for _, d := range dicts {
