@@ -157,33 +157,48 @@ func annotateEnvFailure(err error) error {
 // 用 ORA 号分支而不是中文文案：文案会翻译、会改，ORA 号是稳定的。
 func queryFailureTip(env, msg string) string {
 	switch {
-	// rowid 跨库：ORA-01410 invalid ROWID，或服务端已经把话说明白的"不在当前环境"。
+	// rowid 跨库：ORA-01410 invalid ROWID。
+	//
+	// 实测（2026-11-05，双向验证）：正式库的 rowid 在测试库查不到、测试库的 rowid
+	// 在正式库也查不到 —— 两个环境的落点是分开的；rowid 是**物理地址**，
+	// 跨库查不到是它的性质，不是"环境配错了"。
 	case strings.Contains(msg, "ORA-01410"), strings.Contains(msg, "不在当前环境"),
 		strings.Contains(msg, "不在当前的 wsfa_t"):
-		hint := "接口日志的 rowid 只在**产生它的环境**有效，换个库查必然失败"
+		head := "rowid 是物理地址，只在产生它的库里有效。"
 		if env != "" {
-			hint = "这次落在环境 " + env + " —— " + hint + "；确认这条日志是不是这个环境产生的"
+			head = "本次落在环境 " + env + "。" + head
 		}
-		return hint + "：先 `tt debug wslogs --at <该环境>` 列表找到 rowid 再 --show"
+		return head + "若这条 rowid 来自其它环境，请在原环境查：tt debug wslogs --at <你的环境名> 列表确认"
 
-	// 表不在 / 视图不存在 / 权限不足：这才是"环境本身有问题"，指 --at-list。
+	// 表不在 / 视图不存在 / 权限不足：这类才涉及"这个环境读不到"。
 	case strings.Contains(msg, "ORA-00942"), strings.Contains(msg, "ORA-01031"):
 		if env != "" {
-			return "环境 " + env + " 上读不到 wsfa_t；核对目标环境：tt debug wslogs --at-list"
+			return "本次落在环境 " + env + "，这轮读 wsfa_t 被拒（表不存在或权限不足）；可用：tt debug wslogs --at-list"
 		}
-		return "读不到 wsfa_t；核对目标环境：tt debug wslogs --at-list"
+		return "这轮读 wsfa_t 被拒（表不存在或权限不足）；可用：tt debug wslogs --at-list"
 
 	// 服务端是**旧版**时只回得出 `ERROR at line 1:` —— 原因被吞掉了（新版会带 ORA 原文）。
-	// 这种时候**不能装作认出来了，也不能什么都不说**：给一条把两种可能都覆盖掉的判据。
-	// 顺序刻意这样：先验 rowid 的环境归属（更常见、更便宜），再怀疑环境本身。
+	//
+	// 这一支的措辞有一条硬约束（2026-11-05 用户反馈"报错提示不应该那么绝对"）：
+	// **只陈述事实与可选方向，不替调用方判定原因、不给可能性排序**。
+	// 上一版写的是"上查不到这条 rowid。两种可能，按此顺序排：① … ② …"，
+	// 那等于替调用方宣布了结论，而事实上连 ORA 原文都没拿到。
 	case strings.Contains(msg, "ERROR at line"), strings.HasSuffix(strings.TrimSpace(msg), ":"):
-		where := "当前环境"
+		// 环境名一律取**用户自己配置/传入的**那个（--at / --env 的原值），
+		// 不在这里编造"当前环境"这种没信息量的说法：
+		// 没传 --at 时落点由**服务端**的当前配置决定（见 debug.api 的 wslogCfg：
+		// 空 env → s.cfg），CLI 本地算不出来，就如实说"未指定"。
+		var b strings.Builder
 		if env != "" {
-			where = "环境 " + env
+			b.WriteString("本次落在环境 " + env + "。")
+		} else {
+			b.WriteString("本次未指定环境（--at 缺省，落点由服务端当前配置决定）。")
 		}
-		return where + " 上查不到这条 rowid。两种可能，按此顺序排：" +
-			"① rowid 属于别的环境（接口日志 rowid 只在产生它的环境有效）——用 tt debug wslogs --at 该环境 列表确认；" +
-			"② 真的读不到 wsfa_t——tt debug wslogs --at-list 核对环境。新版服务会直接给出 ORA 原文"
+		b.WriteString("失败原因本轮没拿到（旧服务只回了行号，未带 ORA 原文）。")
+		b.WriteString("可自行区分：① 若这条 rowid 来自其它环境，rowid 是物理地址，跨库查不到 —— ")
+		b.WriteString("用 tt debug wslogs --at <你的环境名> 列表确认；")
+		b.WriteString("② 若本环境就该有 wsfa_t —— tt debug wslogs --at-list 核对环境。")
+		return b.String()
 	}
 	return ""
 }

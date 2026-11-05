@@ -1,9 +1,12 @@
 package debug
 
-// annotateEnvFailure 第一版踩过的坑（2026-11-05）：把"rowid 跨库"误判成"环境没同步表"，
-// 于是对**所有** QUERY_FAILED 无条件补一句"核对目标环境"。
+// annotateEnvFailure 的措辞约束（2026-11-05 用户反馈「报错提示不应该那么绝对」）：
 //
-// 这些用例锁住新口径：**先读错误在说什么，再决定提什么**；认不出来就不给建议。
+//  1. **只陈述事实与可选方向，不替调用方判定原因**，也不给可能性排序；
+//  2. 环境名一律用**用户自己配置/传入的**那个（--at / --env 原值），
+//     没传就如实说"未指定"，不许编造"当前环境"这种没信息量的说法
+//     （没传时落点由服务端当前配置决定，CLI 本地算不出来）；
+//  3. 认不出来的失败不给建议（宁缺毋滥）。
 
 import (
 	"strings"
@@ -14,51 +17,70 @@ import (
 )
 
 func TestQueryFailureTipRowidCrossEnv(t *testing.T) {
-	msg := "wsfa_t(wsfa_t) 查询出错: ORA-01410: invalid ROWID"
-	tip := queryFailureTip("测试", msg)
+	tip := queryFailureTip("测试", "wsfa_t(wsfa_t) 查询出错: ORA-01410: invalid ROWID")
 
-	if !strings.Contains(tip, "只在") || !strings.Contains(tip, "产生它的环境") {
-		t.Fatalf("rowid 跨库应提示 rowid 的环境归属，得到: %s", tip)
+	if !strings.Contains(tip, "物理地址") {
+		t.Fatalf("应说明 rowid 是物理地址，得到: %s", tip)
 	}
 	if !strings.Contains(tip, "测试") {
-		t.Fatalf("应带上这次落到的环境，得到: %s", tip)
+		t.Fatalf("环境名应取用户传入的那个，得到: %s", tip)
 	}
-	// 关键：这句话会把人引向"换环境再试"，而环境本来就是对的。
-	if strings.Contains(tip, "核对目标环境") {
-		t.Fatalf("rowid 跨库时不该说'核对目标环境'（这次环境是对的）: %s", tip)
+	// 不许出现绝对化措辞：这些说法等于替用户宣布了结论。
+	for _, abs := range []string{"必然失败", "按此顺序排", "核对目标环境"} {
+		if strings.Contains(tip, abs) {
+			t.Fatalf("措辞过于绝对（%q），得到: %s", abs, tip)
+		}
 	}
 }
 
 func TestQueryFailureTipTableMissing(t *testing.T) {
 	tip := queryFailureTip("测试", "wsfa_t 查询出错: ORA-00942: table or view does not exist")
 	if !strings.Contains(tip, "at-list") {
-		t.Fatalf("表不在才是环境问题，应指 --at-list，得到: %s", tip)
+		t.Fatalf("应给可复制的下一步，得到: %s", tip)
+	}
+	if !strings.Contains(tip, "测试") {
+		t.Fatalf("应带上用户传入的环境名，得到: %s", tip)
 	}
 }
 
 func TestQueryFailureTipUnknownGivesNothing(t *testing.T) {
-	// 认不出来的失败不许乱给建议：宁缺毋滥。
 	if tip := queryFailureTip("测试", "some unrelated network error"); tip != "" {
 		t.Fatalf("未知失败不该编提示，得到: %s", tip)
 	}
 }
 
-// 旧版服务只回 `ERROR at line 1:`（原因被吞）。这时不能装作认出来了，也不能什么都不说：
-// 要给一条把两种可能都覆盖、且**顺序正确**的判据（rowid 跨界更常见也更便宜）。
-func TestQueryFailureTipOldServeStillGuides(t *testing.T) {
-	tip := queryFailureTip("测试", "wsfa_t 查询出错: ERROR at line 1:")
+// 没传 --at 时：不编造"当前环境"，而是如实说"未指定、落点由服务端决定"。
+func TestQueryFailureTipNoEnvSaysUnspecified(t *testing.T) {
+	tip := queryFailureTip("", "wsfa_t 查询出错: ERROR at line 1:")
+
 	if tip == "" {
 		t.Fatal("旧服务下什么都不提示 = 又回到白跑一回合")
 	}
-	if !strings.Contains(tip, "只在产生它的环境有效") {
-		t.Fatalf("应把 rowid 跨界列为第一嫌疑，得到: %s", tip)
+	if strings.Contains(tip, "当前环境") {
+		t.Fatalf("不许编造“当前环境”（CLI 算不出服务端落点），得到: %s", tip)
 	}
-	// 不能一上来就"核对环境"——这次的环境是对的。
-	if strings.Index(tip, "at-list") < strings.Index(tip, "产生它的环境") {
-		t.Fatalf("应先把 rowid 归属排在环境之前，得到: %s", tip)
+	if !strings.Contains(tip, "未指定环境") {
+		t.Fatalf("应如实说明未指定环境，得到: %s", tip)
 	}
-	if !strings.Contains(tip, "测试") {
-		t.Fatalf("应带上这次落到的环境，得到: %s", tip)
+	if !strings.Contains(tip, "服务端") {
+		t.Fatalf("应说明落点由服务端决定，得到: %s", tip)
+	}
+}
+
+// 旧服务场景：信息不完整时要说"原因没拿到"，不许下结论。
+func TestQueryFailureTipOldServeStatesMissingCause(t *testing.T) {
+	tip := queryFailureTip("正式", "wsfa_t 查询出错: ERROR at line 1:")
+
+	if !strings.Contains(tip, "原因本轮没拿到") {
+		t.Fatalf("应坦白原因未知，得到: %s", tip)
+	}
+	if !strings.Contains(tip, "ORA 原文") {
+		t.Fatalf("应说明缺的是 ORA 原文，得到: %s", tip)
+	}
+	for _, abs := range []string{"按此顺序排", "上查不到这条 rowid", "核对目标环境"} {
+		if strings.Contains(tip, abs) {
+			t.Fatalf("不许下绝对结论（%q），得到: %s", abs, tip)
+		}
 	}
 }
 
