@@ -545,6 +545,10 @@ func (f *Failure) WriteEnvelope(w io.Writer) error {
 		payload["candidates"] = f.Candidates
 	}
 	enc := json.NewEncoder(w)
+	// 关掉 HTML 转义，与 `internal/output` 的信封同一条规矩（那里也是
+	// `SetEscapeHTML(false)`）。不开的话提示里的 `<你的环境名>` 会变成
+	// `\u003c你的环境名\u003e`，人读与机器读都被这串码干扰。
+	enc.SetEscapeHTML(false)
 	return enc.Encode(payload)
 }
 

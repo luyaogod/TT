@@ -254,6 +254,96 @@ func isDBErrorLine(ln string) bool {
 	return false
 }
 
+// wsfaTable 是接口日志表。独立成常量，好让"表在不在这个库/账号里"的探针
+// 在测试里被替换、在代码里只有一处名字。
+const wsfaTable = "wsfa_t"
+
+// extractDBError 从**整段**数据库输出里识别报错并转成错误；没报错返回 nil。
+//
+// 抽这一个入口，是为了让"报错识别 + 原因行保留"这条逻辑只有一个出口、
+// 且能被测试直接走一遍（见 wslog_dberr_path_test.go）。
+// 参数永远是整段 out：原因行在报错行的**下一行**，传单行就必然丢掉它。
+func extractDBError(acct, out string) error {
+	for _, ln := range strings.Split(out, "\n") {
+		if isDBErrorLine(ln) {
+			return dbQueryError(acct, out)
+		}
+	}
+	return nil
+}
+
+// dbQueryError 把**整段数据库输出**里的报错变成"能自己走下去"的错误（2026-11-05 实测的问题）。
+//
+// 从前这里只回 `wsfa_t 查询出错: ERROR at line 1:` —— 括号里那句是 sqlplus 的
+// "行号行"，**真正的原因（ORA-00942 表或视图不存在 / ORA-00904 标识符无效 /
+// 权限不足）在下一行，被整行丢掉了**。调用方拿到这种失败，唯一的动作是"换一个环境再试"
+// —— 那正是实测里打在测试库上盲目重试的那两轮，白跑一整个回合。
+//
+// 现在的口径：
+//   - 先把**整段输出**里像报错的行按原顺序拼回去（最多 6 行），ORA 原文一个字不改；
+//   - 报错行本身不带 ORA 号（正是 `ERROR at line N:` 这种）时，补一句"原因这行没给"，
+//     别让调用方以为这句话就是全部；
+//   - 补一句账号说明：wsfa_t 是系统账号的共享表，**查不到不一定是你上错环境**。
+//
+// 不做"自动改 environment 重试"：静默换数据源是这套 CLI 明确禁止的动作。
+func dbQueryError(acct, raw string) error {
+	reason := collectDBErrorLines(raw, 6)
+	msg := wsfaTable + " 查询出错"
+	if reason == "" {
+		reason = strings.TrimSpace(raw)
+	}
+	if reason != "" {
+		msg += ": " + reason
+	}
+	if !strings.Contains(reason, "ORA-") {
+		msg += "（报错行没带 ORA 编号：真正的原因通常是紧随其后的一行，见 "
+		msg += "'tt db probe' 对该环境的连通性检查）"
+	}
+	if a := strings.TrimSpace(acct); a != "" {
+		msg += "；接口日志查的是系统账号 " + a + " 下的共享表，与 --at 是否上错环境无必然关系"
+	}
+	return fmt.Errorf("%s", msg)
+}
+
+// collectDBErrorLines 取输出里"像报错"的头部（按原顺序、去空行）。
+//
+// 报错后的上下文行（`ERROR at line 1:` 之后那行 `ORA-00942: …`）也要留 —— 那行才是原因。
+//
+// **传进来的必须是整段输出**，不是单行：这个函数靠"进入报错区之后再看下一行"来找原因。
+// 调用点见 extractDBError。之前 listWSLogs 传了单行 ln，原因行因此永远拿不到。
+// 规则：**只收报错信息本身**；一旦等到原因（含 `:` 的那一行，或 `ORA-`/`SP2-` 行），
+// 立刻停 —— Oracle 之后可能还跟着一堆会话/日志噪声，收进来只会把原因埋掉。
+func collectDBErrorLines(raw string, max int) string {
+	var kept []string
+	for _, ln := range strings.Split(raw, "\n") {
+		t := strings.TrimSpace(ln)
+		if t == "" {
+			continue
+		}
+		isErr := isDBErrorLine(t)
+		if !isErr && len(kept) == 0 {
+			continue // 还没进入报错区
+		}
+		// 已经在报错区了：**只收像原因/像报错的行**。
+		// `ERROR at line 1:` 那种只有行号没原因，所以要再看下一行；
+		// 而紧随其后的日志噪声（既不带冒号也不像报错）一律不收。
+		if !isErr && len(kept) > 0 {
+			looksCause := strings.Contains(t, ":") || strings.HasPrefix(t, "ORA-") || strings.HasPrefix(t, "SP2-")
+			if !looksCause {
+				break
+			}
+		}
+		kept = append(kept, t)
+		if !isErr { // 收到原因行即止：原因之后的内容对判读没有价值
+			break
+		}
+		if len(kept) >= max {
+			break
+		}
+	}
+	return strings.Join(kept, " | ")
+}
+
 // listWSLogs 查询接口日志列表(Oracle: rowid + OFFSET/FETCH;金仓: ctid + OFFSET/LIMIT)
 func listWSLogs(conn *host.SSHConn, dbc *dbRun, f WSLogFilter) (items []WSLogItem, hasMore bool, err error) {
 	size := f.PageSize
@@ -289,11 +379,13 @@ from wsfa_t wsfa where %s order by wsfa003 desc, wsfa004 desc offset %d rows fet
 	if err != nil {
 		return nil, false, fmt.Errorf("查询 wsfa_t 失败: %w (%s)", err, host.FirstLines(out, 3))
 	}
+	// 报错识别走统一入口，且**必须传整段 out**：原因行在报错行的下一行，
+	// 传单行就会把它丢掉（P1 曾经就是这样，中心目标在真实路径上失效）。
+	if e := extractDBError(wsSysAccount, out); e != nil {
+		return nil, false, e
+	}
 	var all []WSLogItem
 	for _, ln := range strings.Split(out, "\n") {
-		if isDBErrorLine(ln) {
-			return nil, false, fmt.Errorf("wsfa_t 查询出错: %s", strings.TrimSpace(ln))
-		}
 		m := reWSLogRow.FindStringSubmatch(strings.TrimRight(ln, " \r"))
 		if m == nil {
 			continue
@@ -340,11 +432,11 @@ from wsfa_t wsfa where rowid='%s';`, sqlWSLogCols(false), rowid)
 	if err != nil {
 		return nil, nil, fmt.Errorf("查询 wsfa_t 失败: %w (%s)", err, host.FirstLines(out, 3))
 	}
+	if e := extractDBError(wsSysAccount, out); e != nil {
+		return nil, nil, e
+	}
 	var item *WSLogItem
 	for _, ln := range strings.Split(out, "\n") {
-		if isDBErrorLine(ln) {
-			return nil, nil, fmt.Errorf("wsfa_t 查询出错: %s", strings.TrimSpace(ln))
-		}
 		if m := reWSLogRow.FindStringSubmatch(strings.TrimRight(ln, " \r")); m != nil {
 			item = &WSLogItem{
 				RowID: m[1], Service: m[2], PID: m[3], Start: m[4], Duration: m[5],

@@ -7,6 +7,7 @@ package debug
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -19,6 +20,7 @@ import (
 	cdb "tt/internal/cli/db"
 	"tt/internal/debug"
 	"tt/internal/debugclient"
+	"tt/internal/output"
 	"tt/internal/target"
 
 	"github.com/spf13/cobra"
@@ -106,7 +108,96 @@ func actorSelf() string {
 // 这里**不再自己实现一遍 HTTP**：其他命令也走同一个客户端，一套规矩。
 // 从前各写一份的后果是"同一个失败在两条线上有不同的码与提示"。
 func dbgAPI(method, path string, body any) ([]byte, error) {
-	return dbgClient().Do(method, path, body)
+	data, err := dbgClient().Do(method, path, body)
+	if err != nil {
+		return nil, annotateEnvFailure(err, path)
+	}
+	return data, nil
+}
+
+// annotateEnvFailure 给"查询失败"补一句**能自己走下去的**下一步。
+//
+// 作用域：**只对接口日志（/api/wslogs*）那条线生效**。dbgAPI 是所有 debug REST
+// 命令的共用入口，而 QUERY_FAILED 是服务端 500 的默认码 —— 任何 debug 端点 500
+// 都会走到这里；若对所有命令都贴 wsfa_t/rowid 的提示，`tt debug sql` 查业务表报
+// ORA-00942 时就会被贴一句关于 wslogs 的误导性 hint（P2，评审指出）。
+//
+// 环境名一律来自**用户自己的配置**（--at / --env 的原值，经 dbgTargetEnv 取），
+// 这里不出现任何具体环境名 —— 环境是用户定义的、非固定的，写死在工具里没有意义。
+//
+// 仍然**不改任何码**（code / exit 原样透传），只补 hint。
+func annotateEnvFailure(err error, path string) error {
+	var f *debugclient.Failure
+	if !errors.As(err, &f) {
+		return err
+	}
+	if f.Code != output.CodeQueryFailed {
+		return err
+	}
+	if !strings.Contains(path, "wslogs") {
+		return err
+	}
+	tip := queryFailureTip(strings.TrimSpace(dbgTargetEnv()), f.Message)
+	if tip == "" {
+		return f
+	}
+	if f.Hint == "" {
+		f.Hint = tip
+	} else if !strings.Contains(f.Hint, tip) {
+		f.Hint += "；" + tip
+	}
+	return f
+}
+
+// queryFailureTip 按**错误内容**决定提示；认不出的失败一律不给建议（宁缺毋滥）。
+//
+// 用 ORA 号分支而不是中文文案：文案会翻译、会改，ORA 号是稳定的。
+func queryFailureTip(env, msg string) string {
+	switch {
+	// rowid 跨库：ORA-01410 invalid ROWID。
+	//
+	// 实测（2026-11-05，双向验证）：一个库的 rowid 在另一个库查不到，反过来也一样 ——
+	// 不同环境的落点是分开的；rowid 是**物理地址**，跨库查不到是它的性质，
+	// 不是"环境配错了"。
+	case strings.Contains(msg, "ORA-01410"), strings.Contains(msg, "不在当前环境"),
+		strings.Contains(msg, "不在当前的 wsfa_t"):
+		head := "rowid 是物理地址，只在产生它的库里有效。"
+		if env != "" {
+			head = "本次落在环境 " + env + "。" + head
+		}
+		return head + "若这条 rowid 来自其它环境，请在原环境查：tt debug wslogs --at <你的环境名> 列表确认"
+
+	// 表不在 / 视图不存在 / 权限不足：这类才涉及"这个环境读不到"。
+	case strings.Contains(msg, "ORA-00942"), strings.Contains(msg, "ORA-01031"):
+		if env != "" {
+			return "本次落在环境 " + env + "，这轮读 wsfa_t 被拒（表不存在或权限不足）；可用：tt debug wslogs --at-list"
+		}
+		return "这轮读 wsfa_t 被拒（表不存在或权限不足）；可用：tt debug wslogs --at-list"
+
+	// 服务端是**旧版**时只回得出 `ERROR at line 1:` —— 原因被吞掉了（新版会带 ORA 原文）。
+	//
+	// 这一支的措辞有一条硬约束（2026-11-05 用户反馈"报错提示不应该那么绝对"）：
+	// **只陈述事实与可选方向，不替调用方判定原因、不给可能性排序**。
+	// 上一版写的是"上查不到这条 rowid。两种可能，按此顺序排：① … ② …"，
+	// 那等于替调用方宣布了结论，而事实上连 ORA 原文都没拿到。
+	case strings.Contains(msg, "ERROR at line"), strings.HasSuffix(strings.TrimSpace(msg), ":"):
+		// 环境名一律取**用户自己配置/传入的**那个（--at / --env 的原值），
+		// 不在这里编造"当前环境"这种没信息量的说法：
+		// 没传 --at 时落点由**服务端**的当前配置决定（见 debug.api 的 wslogCfg：
+		// 空 env → s.cfg），CLI 本地算不出来，就如实说"未指定"。
+		var b strings.Builder
+		if env != "" {
+			b.WriteString("本次落在环境 " + env + "。")
+		} else {
+			b.WriteString("本次未指定环境（--at 缺省，落点由服务端当前配置决定）。")
+		}
+		b.WriteString("失败原因本轮没拿到（旧服务只回了行号，未带 ORA 原文）。")
+		b.WriteString("可自行区分：① 若这条 rowid 来自其它环境，rowid 是物理地址，跨库查不到 —— ")
+		b.WriteString("用 tt debug wslogs --at <你的环境名> 列表确认；")
+		b.WriteString("② 若本环境就该有 wsfa_t —— tt debug wslogs --at-list 核对环境。")
+		return b.String()
+	}
+	return ""
 }
 
 // dbgClient 按当前配置目录算出调试面客户端（地址与前缀来自服务状态文件）。
@@ -156,9 +247,10 @@ func dbgWaitStopped(id string, timeout time.Duration) (map[string]any, error) {
 
 // dbgTargetEnv 这次启动要连哪个环境。
 //
+// 环境名是**用户自己配置的、非固定**：这里只做取值，不认任何具体名字。
 // 两条来源,命令自己的 --env 优先:
-//   - `tt debug start x --env 恒烁正式区`(写在子命令上,语义最明确);
-//   - `tt --env 恒烁正式区 debug start x`(根命令的持久开关,别处能用,这里也认)。
+//   - `tt debug start x --env <你的环境名>`(写在子命令上,语义最明确);
+//   - `tt --env <你的环境名> debug start x`(根命令的持久开关,别处能用,这里也认)。
 //
 // 从前这里**只看 --ssh**,而 --env 是根命令的开关、debug 组里没人读 —— 于是
 // `tt debug start … --env X` 既不报错也不生效,方向永远取服务端当前环境。同机多环境
@@ -1629,7 +1721,7 @@ func init() {
 	// 于是报出 `asf_axmt500_wf.4gl`，而真名是 `axm_axmt500_wf.4gl`，`break asf_…:行`
 	// 必然 `No source file named`。留空 = 让会话自己解析（唯一权威来源）。
 	debugStartCmd.Flags().StringVarP(&dbgModule, "module", "m", "", debug.ModuleFlagHelp())
-	debugStartCmd.Flags().StringVar(&dbgZone, "zone", "", "区域代码覆盖(31开发/35测试/36正式;默认取配置)")
+	debugStartCmd.Flags().StringVar(&dbgZone, "zone", "", "区域代码覆盖(默认取用户配置)")
 	debugStartCmd.Flags().StringVar(&dbgSSHName, "ssh", "", "SSH 配置名(设置页配置的多 SSH;默认取配置)")
 	// --env 与全局 --env 同名同义:子命令上显式给的优先级更高(根命令那个是持久开关,
 	// 别处能用这里也必须能用;写在子命令上语义最明确)。--ssh 是环境名的历史叫法,两者并存。

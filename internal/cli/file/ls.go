@@ -3,6 +3,7 @@ package file
 import (
 	"fmt"
 	"os"
+	"path"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -13,10 +14,65 @@ import (
 )
 
 // ls 一条记录（--json 用）。
+//
+// 元数据语义（保证信封自洽）：
+//   - dirEntries  目录里可见条目总数（筛之前，含隐藏与否已定）
+//   - total       筛选后的匹配数（= returned + truncated，恒成立）
+//   - returned    实际返回条数（截断后）
+//   - truncated   total - returned（没返回的条数，截断不静默）
+//
+// 从前 `tt file ls com/lib/42m` 一次回 200 来条、30KB JSON，调用方要的往往只是
+// "这个目录里有没有 wssp00120_wf 的编译产物" —— 筛选必须能在命令内部做完，
+// 并且**截断不许静默**。
+// 旧键（ok/path/entries）一个没改名，既有脚本行为不变。
 type lsJSON struct {
-	OK      bool      `json:"ok"`
-	Path    string    `json:"path"`
-	Entries []lsEntry `json:"entries"`
+	OK         bool      `json:"ok"`
+	Path       string    `json:"path"`
+	DirEntries int       `json:"dirEntries,omitempty"`
+	Total      int       `json:"total"`
+	Returned   int       `json:"returned"`
+	Truncated  int       `json:"truncated,omitempty"`
+	Filter     string    `json:"filter,omitempty"`
+	Entries    []lsEntry `json:"entries"`
+	Hint       string    `json:"hint,omitempty"`
+}
+
+// filterEntries 按 glob 筛选；pat 为空 = 不筛。
+//
+// 取 glob（* / ?）与 `tt debug wslogs --job wssp*` 同一口径；**不区分大小写**，
+// 因为服务器上真实存在 `WSSP00120_WF.42M` 这类混排名字，而调用方通常只想
+// "有没有这个名字"。
+//
+// 畸形 pattern（如 `[`）会返回 path.ErrBadPattern，调用方要转成 USAGE 报错，
+// 不许吞掉 —— 吞掉的后果是"全部被滤掉 + 误导性的没有匹配"提示（P2，评审指出）。
+//
+// 注：pattern 与名字都做 ToLower 后匹配，意味着字符类 `[A-Z]` 会退化成 `[a-z]`，
+// 即字符类也随之不区分大小写。这是有意为之（名字侧本来就不分大小写），可接受。
+func filterEntries(entries []lsEntry, pat string) ([]lsEntry, error) {
+	pat = strings.TrimSpace(pat)
+	if pat == "" {
+		return entries, nil
+	}
+	lower := strings.ToLower(pat)
+	// 预检 pattern 合法性：坏 glob 现在要显式报出来，而不是静默滤空。
+	if _, err := path.Match(lower, "probe"); err != nil {
+		return nil, err
+	}
+	out := make([]lsEntry, 0, len(entries))
+	for _, e := range entries {
+		if ok, _ := path.Match(lower, strings.ToLower(e.Name)); ok {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
+// limitEntries 截断到 limit 条；limit <= 0 = 不限。返回被截掉的条数（不许静默）。
+func limitEntries(entries []lsEntry, limit int) ([]lsEntry, int) {
+	if limit <= 0 || len(entries) <= limit {
+		return entries, 0
+	}
+	return entries[:limit], len(entries) - limit
 }
 
 type lsEntry struct {
@@ -43,16 +99,32 @@ func entryType(e host.Entry) string {
 
 func newLsCmd() *cobra.Command {
 	var long, all bool
+	var filter string
+	var limit int
 	c := &cobra.Command{
-		Use:   "ls [-la] [--human] [<路径>]",
-		Short: "列出目录（默认 $TOP）",
+		Use:   "ls [-la] [--filter <glob>] [--limit n] [<路径>]",
+		Short: "列出目录（默认 $TOP；支持按名字筛选与限制条数）",
 		Long: `列出 $TOP 内的一个目录；不给路径就是 $TOP。
 
   -l  长格式（权限/大小/时间/名字）
   -a  含隐藏文件（名字以 . 开头）
-  --human  大小人性化（配合 -l；-h 被 help 占用）`,
+  --human  大小人性化（配合 -l；-h 被 help 占用）
+
+  --filter <glob>  只留名字匹配的条目（* 与 ? 通配，不区分大小写）。
+  --limit <n>      最多返回 n 条（默认 0 = 不限）；截断时 truncated > 0 并给 hint。
+
+JSON 形状（默认）：
+  {"ok":true,"path":"com/cwss/42m","dirEntries":98,"total":3,"returned":3,
+   "filter":"*wssp00120*","entries":[{"name":"cwss_wssp00120_wf.42m","type":"file",
+   "size":129169,"mode":"-rw-rw-r--","modTime":"2026-07-02 17:35:41"}]}
+
+  说明：dirEntries=目录可见条目总数；total=筛选后匹配数（=returned+truncated）。
+
+退出码：0 成功（筛不到 = 空 entries）；1 路径不存在（NOT_FOUND）；4 读取失败。`,
 		Example: `  tt file ls --at 主机109
-  tt file ls -la --at 主机109 erp/apm/4gl`,
+  tt file ls -la --at 主机109 erp/apm/4gl
+  tt file ls --at 主机109 com/cwss/42m --filter '*wssp00120*'
+  tt file ls --at 主机109 com/lib/42m --filter '*.42m' --limit 20`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			arg := ""
@@ -88,18 +160,35 @@ func newLsCmd() *cobra.Command {
 				}
 				shown = append(shown, e)
 			}
+			// 先转成对外形状，再在它上面筛选/截断：筛选口径与 JSON 里的名字永远是同一个。
+			rows := make([]lsEntry, 0, len(shown))
+			for _, e := range shown {
+				rows = append(rows, lsEntry{
+					Name: e.Name, Type: entryType(e), Size: e.Size,
+					Mode: e.ModeText(), ModTime: e.ModTime.Format("2006-01-02 15:04:05"),
+					Link: e.Link,
+				})
+			}
+			dirEntries := len(rows)
+			rows, err = filterEntries(rows, filter)
+			if err != nil {
+				return usageErr("--filter 语法错误: %v", err)
+			}
+			total := len(rows) // 筛选后匹配数；returned + truncated == total 恒成立
+			rows, truncated := limitEntries(rows, limit)
+
 			if wantJSON(cmd) {
-				out := lsJSON{OK: true, Path: display(cur.top, p), Entries: make([]lsEntry, 0, len(shown))}
-				for _, e := range shown {
-					out.Entries = append(out.Entries, lsEntry{
-						Name: e.Name, Type: entryType(e), Size: e.Size,
-						Mode: e.ModeText(), ModTime: e.ModTime.Format("2006-01-02 15:04:05"),
-						Link: e.Link,
-					})
+				out := lsJSON{OK: true, Path: display(cur.top, p), DirEntries: dirEntries,
+					Total: total, Returned: len(rows), Truncated: truncated, Filter: filter, Entries: rows}
+				if truncated > 0 {
+					out.Hint = truncHint(display(cur.top, p), filter, total, truncated)
+				}
+				if dirEntries > 0 && total == 0 {
+					out.Hint = fmt.Sprintf("目录里有 %d 条，但没有名字匹配 %q 的；去掉 --filter 看全量", dirEntries, filter)
 				}
 				return commonPrintJSON(out)
 			}
-			for _, e := range shown {
+			for _, e := range rows {
 				name := e.Name
 				if e.Link != "" {
 					name += " -> " + e.Link
@@ -113,14 +202,36 @@ func newLsCmd() *cobra.Command {
 					size = humanBytes(e.Size)
 				}
 				fmt.Fprintf(os.Stdout, "%s %8s %s  %s\n",
-					e.ModeText(), size, e.ModTime.Format("2006-01-02 15:04"), name)
+					e.Mode, size, e.ModTime[:16], name)
+			}
+			if truncated > 0 {
+				fmt.Fprintf(os.Stderr, "（还有 %d 条没返回；%s）\n", truncated, truncHint(display(cur.top, p), filter, total, truncated))
+			}
+			if dirEntries > 0 && total == 0 {
+				fmt.Fprintf(os.Stderr, "（目录里有 %d 条，但没有名字匹配 %q 的）\n", dirEntries, filter)
 			}
 			return nil
 		},
 	}
 	c.Flags().BoolVarP(&long, "long", "l", false, "长格式（权限/大小/时间/名字）")
 	c.Flags().BoolVarP(&all, "all", "a", false, "含隐藏文件")
+	c.Flags().StringVar(&filter, "filter", "", "只留名字匹配该 glob 的条目（* 与 ? 通配，不区分大小写）")
+	c.Flags().IntVar(&limit, "limit", 0, "最多返回多少条（0 = 不限；截断时给 truncated 与提示）")
 	return c
+}
+
+// truncHint 截断时的下一步提示；措辞按"是否设了 --filter"分情况（P3，评审指出）：
+//
+//   - 设了 filter：给"看更多"的可复制命令（调大 --limit 看全部匹配），
+//     同时提一句"或收窄 --filter"作为并列选项 —— 不再把"看更多"说成"缩小"；
+//   - 没设 filter：--filter 是空操作，正解是 --limit 0 看全量。
+func truncHint(p, filter string, total, truncated int) string {
+	if strings.TrimSpace(filter) != "" {
+		return fmt.Sprintf("还有 %d 条没返回；看全部 %d 条匹配：tt file ls %s --filter '%s' --limit 0（或收窄 --filter）",
+			truncated, total, p, filter)
+	}
+	return fmt.Sprintf("还有 %d 条没返回；看全量：tt file ls %s --limit 0（或调大 --limit）",
+		truncated, p)
 }
 
 // commonPrintJSON 包一层，避免每个命令都 import output。
