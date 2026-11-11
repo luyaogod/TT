@@ -21,3 +21,7 @@ refactor(scope): title
 ```
 
 > Body、Footer内容格式不设要求
+
+## Tag
+
+禁止在没有经过允许的情况下对Tag进行升级
