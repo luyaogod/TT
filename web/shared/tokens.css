@@ -11,11 +11,13 @@
    否则同一个值会有两套机制,改的时候必漏一处。
    工作站外壳(`.dsh-shell`)在 app/src/index.css 里把这一档放宽到 8px —— 仍是同一个档位,
    只是取值跟着外壳走。
-   两处**刻意不圆**的,别顺手"统一"掉:
-     · 表格与零散小件(下拉弹层、弹窗、表格网格、Calendar、Checkbox)保持直角;
-     · 没有边框、底色透明的输入框也保持直角 —— 可编辑表格的 .cell-input 要融进网格线,
-       调试台 `>` 命令行是 VS Code 式的裸文本行;它们没有边框可循,
-       圆角只会露出圆底或看不出形状的弧度。
+    两处口径不同,别顺手"统一"掉:
+      · 表格:**外框**吃 --radius-ui(四个外角是圆的),**内部网格一律直角** ——
+        圆角只属于"这张表"这个盒子,不属于任何一条网格线,见文件末尾的 .tt-table-frame;
+        零散小件(下拉弹层、Calendar、Checkbox)仍保持直角;
+      · 没有边框、底色透明的输入框也保持直角 —— 可编辑表格的 .cell-input 要融进网格线,
+        调试台 `>` 命令行是 VS Code 式的裸文本行;它们没有边框可循,
+        圆角只会露出圆底或看不出形状的弧度。
 
    合并前这份在 web/app/src/index.css 里,只服务调试工作台 —— 字典页因此完全没有主题机制
    (它的 dark: 类走 Tailwind v4 默认的 prefers-color-scheme,跟随系统且不可切换)。
@@ -142,9 +144,52 @@ body { margin: 0; background: var(--background); }
   background: transparent;
 }
 
+/* ── 网格表格的圆角外框 ──
+   border-collapse 的表格不吃自身的 border-radius(边框塌陷在表格边界上,圆角会被切掉),
+   所以**外框与圆角归容器**,表格只画内部网格线 —— 圆角只出现在四个外角,内部仍是直角,
+   与卡片/输入框同一档半径(--radius-ui),不再让表格在满屏圆角里单独一个方角。
+   做法:单元格只留 右+下 两条线,最右一列去右线、最后一行去下线,外框由容器那道 1px 边框给出;
+   四个角的格子各自切圆(表头有底色、行有 hover 底色,不切就会顶穿外框的圆角)。
+   容器**不写 overflow**:调用方可能还要横向/纵向滚动,overflow 交给它的工具类决定。 */
+.tt-table-frame {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-ui);
+}
+.tt-table-frame > table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+.tt-table-frame th,
+.tt-table-frame td {
+  border: 0;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.tt-table-frame tr > :last-child {
+  border-right: 0;
+}
+.tt-table-frame tbody > tr:last-child > * {
+  border-bottom: 0;
+}
+.tt-table-frame thead > tr:first-child > th:first-child {
+  border-top-left-radius: calc(var(--radius-ui) - 1px);
+}
+.tt-table-frame thead > tr:first-child > th:last-child {
+  border-top-right-radius: calc(var(--radius-ui) - 1px);
+}
+.tt-table-frame tbody > tr:last-child > :first-child {
+  border-bottom-left-radius: calc(var(--radius-ui) - 1px);
+}
+.tt-table-frame tbody > tr:last-child > :last-child {
+  border-bottom-right-radius: calc(var(--radius-ui) - 1px);
+}
+
 /* ── 可编辑表格单元格控件(对齐 TbmLite 的 Excel 风格) ──
    控件完全嵌入单元格:透明背景、无边框、无阴影、填满格宽;网格线由 TableCell 的 border 承担。
-   单元格加 p-0 focus-within:ring-1 给出"正在编辑这一格"的提示。 */
+   这就是"格子里的字"的唯一一份样式:JS 侧只经 shared/ui.tsx 的 CellInput 使用,
+   别在表格里手搓带边框的 <Input>(那会让格子看着像嵌了个输入框)。
+   "正在编辑这一格"的提示画在**整格**上(TableCell 挂 CELL_EDITING 的 1px 内嵌环),
+   编辑器自己一律不画,提示才不会缩成"输入框的边框"。 */
 .cell-input {
   display: block;
   width: 100%;

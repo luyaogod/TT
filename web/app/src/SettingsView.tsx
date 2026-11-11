@@ -22,6 +22,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   AlertCircle, CheckCircle2, Copy, Download, Eye, EyeOff,
   FolderOpen, Monitor, Plus, RefreshCw, Search, Sun, Moon,
+  SquareArrowOutUpRight, SquareArrowRightEnter,
   Terminal, Trash2, Zap,
 } from 'lucide-react'
 import {
@@ -31,9 +32,10 @@ import {
   type UpdateState,
 } from './api'
 import {
-  Button, Input, Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Button, CellInput, CELL_EDITING, Input, Table, TableBody, TableCell, TABLE_FRAME, TableHead, TableHeader, TableRow,
 } from '../../shared/ui'
 import {
+  Accordion, AccordionChevron, AccordionContent, AccordionItem, AccordionTrigger,
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
   Checkbox,
@@ -284,8 +286,6 @@ function fmtBytes(n: number): string {
 // Input 却只有 hidden 的块级宽度 —— 两种来源不一样,换一次外层布局就会一部分宽一部分窄。
 // 显式写死 w-full,控件宽度就只由那一列决定。
 const input = 'h-7 w-full min-w-0 text-xs'
-// 单元格「正在编辑」提示环:用 ring 语义 token,不写死颜色(共享层里也只有这一份)
-const CELL_EDITING = 'focus-within:ring-1 focus-within:ring-inset focus-within:ring-ring/60'
 
 const blankDb = (): SshDb => ({ type: 'oracle', host: '', port: 1521, service: 'topprd', database: '', accounts: [] })
 // 新增环境默认带三个常用账号(账号=密码),省去手工录入
@@ -374,30 +374,36 @@ function debugPatchOf(d: DebugForm): NonNullable<HostsPatch['debug']> {
  * 按钮一起消失"都能发生（实测，2026-10-15）。
  */
 function sshsFormOf(c: HostsView): SshItem[] {
-  return (c.sshs || []).map((e) => {
-    const d = e.db
-    return {
-      name: e.name || '', host: e.host || '', port: e.port || 22, user: e.user || '', password: e.password || '',
-      zone: e.zone || '',
-      workspace: e.workspace || '',
-      mirrorDir: e.mirrorDir || '',
-      dictDir: e.dictDir || '',
-      // ENT 清单必须跟着表单走：hosts 是整节提交的，表单里没有它 = 保存一次就抹掉。
-      ents: (e.ents || []).map((x) => ({ ent: x.ent, account: x.account, password: x.password })),
-      entsSyncedAt: e.entsSyncedAt || '',
-      db: d ? {
-        type: d.type || 'oracle', host: d.host || '', port: d.port || 0,
-        service: d.service || '', database: d.database || '',
-        accounts: (d.accounts || []).map((a) => ({ account: a.account || '', password: a.password || '' })),
-        readonlySql: d.readonlySql === false ? false : undefined,
-        // 隧道配置必须跟着表单走:表单不编辑它,但「测试连接」要用它。
-        // 漏了这一行,状态里就没有 viaSsh,测试照旧打本机直连(超时),
-        // 而保存时后端 preserveUngovernedFields 又把文件里的那份留着 ——
-        // 于是"文件里明明有隧道、界面上就是测不通",极难自查。
-        viaSsh: d.viaSsh,
-      } : null,
-    }
-  })
+  return (c.sshs || []).map(sshItemOf)
+}
+
+// sshItemOf 把配置里的一个站点转成表单形状。
+//
+// 单独抽出来是因为「从 JSON 导入」也要走它:导入进来的必须和手填/设计器导入的
+// 变成**同一种** SshItem,后面才共用同一条保存路径(hostsPatchOf)。
+function sshItemOf(e: HostsSsh): SshItem {
+  const d = e.db
+  return {
+    name: e.name || '', host: e.host || '', port: e.port || 22, user: e.user || '', password: e.password || '',
+    zone: e.zone || '',
+    workspace: e.workspace || '',
+    mirrorDir: e.mirrorDir || '',
+    dictDir: e.dictDir || '',
+    // ENT 清单必须跟着表单走：hosts 是整节提交的，表单里没有它 = 保存一次就抹掉。
+    ents: (e.ents || []).map((x) => ({ ent: x.ent, account: x.account, password: x.password })),
+    entsSyncedAt: e.entsSyncedAt || '',
+    db: d ? {
+      type: d.type || 'oracle', host: d.host || '', port: d.port || 0,
+      service: d.service || '', database: d.database || '',
+      accounts: (d.accounts || []).map((a) => ({ account: a.account || '', password: a.password || '' })),
+      readonlySql: d.readonlySql === false ? false : undefined,
+      // 隧道配置必须跟着表单走:表单不编辑它,但「测试连接」要用它。
+      // 漏了这一行,状态里就没有 viaSsh,测试照旧打本机直连(超时),
+      // 而保存时后端 preserveUngovernedFields 又把文件里的那份留着 ——
+      // 于是"文件里明明有隧道、界面上就是测不通",极难自查。
+      viaSsh: d.viaSsh,
+    } : null,
+  }
 }
 
 // 没有 `onBack` / `backLabel` 了（用户 2026-10-16 要求去掉那个「返回「返回」按钮）：
@@ -772,23 +778,72 @@ export function SettingsView() {
   // 候选行的稳定键:uid 优先(设计器保证唯一),没有就退回名字+下标 —— 同名站点也可能存在。
   const discKey = (e: DiscoveredEnv, i: number) => e.uid || `${e.name}#${i}`
 
-  const openDiscover = () => {
-    setDisc({ open: true, loading: true, reason: '', sitesFile: '', envs: [], picked: {} })
+  // 「从 JSON 导入」的候选:一个目录里可能有多份站点文件,读成一张可勾选的清单。
+  // dir 记着上一次选的目录 —— 再打开弹窗时直接重读,不用重新点路径。
+  const [imp, setImp] = useState<{
+    dir: string
+    loading: boolean
+    error: string
+    sites: { file: string; site?: HostsSsh; error?: string }[]
+    picked: Record<string, boolean>
+    truncated: boolean
+  }>({ dir: '', loading: false, error: '', sites: [], picked: {}, truncated: false })
+  // 导出落点:记住上一次选的目录,同一个目录反复导出多份站点时省一步。
+  const [exportDir, setExportDir] = useState('')
+
+  // 读设计器清单(弹窗里那个「重新扫描」也走它)。
+  const loadDiscover = () => {
+    setDisc((d) => ({ ...d, loading: true, reason: '' }))
     api.discoverEnvs().then((r) => {
-      // 默认勾选规则:**已存在的名字不勾**,其余可用的一条都勾上。
-      // 同名仍然列出来并可手动勾(用户要的可能是"导入一份副本"),只是不替用户决定覆盖。
-      const existing = new Set(sshs.map((x) => sshName(x)))
+      // 默认**一条都不勾**:导入哪几条是用户的决定,替人预勾等于替人做主 ——
+      // 已存在的名字只在行上标「已存在」,勾不勾由用户点。
       const picked: Record<string, boolean> = {}
       ;(r.envs || []).forEach((e, i) => {
-        picked[discKey(e, i)] = !e.skipped && !existing.has(e.name)
+        picked[discKey(e, i)] = false
       })
-      setDisc({ open: true, loading: false, reason: r.reason || '', sitesFile: r.sitesFile || '', envs: r.envs || [], picked })
+      setDisc((d) => ({ ...d, loading: false, reason: r.reason || '', sitesFile: r.sitesFile || '', envs: r.envs || [], picked }))
     }).catch((e: any) => {
       setDisc((d) => ({ ...d, loading: false, reason: e?.message || String(e) }))
     })
   }
 
-  const confirmDiscover = () => {
+  // 读目录里的站点 JSON(导入弹窗的第二个分区)。
+  const loadSites = async (dir: string) => {
+    setImp((s) => ({ ...s, dir, loading: true, error: '', sites: [], picked: {}, truncated: false }))
+    try {
+      const r = await api.importSites({ dir })
+      // 与设计器那一段同一口径:默认一条都不勾,重名的只在行上标「已存在」。
+      const picked: Record<string, boolean> = {}
+      ;(r.sites || []).forEach((it) => {
+        if (it.site) picked[it.file] = false
+      })
+      setImp((s) => ({
+        ...s, dir: r.dir || dir, loading: false, sites: r.sites || [], picked, truncated: !!r.truncated,
+      }))
+    } catch (ex: any) {
+      setImp((s) => ({ ...s, loading: false, error: ex?.message || String(ex) }))
+    }
+  }
+
+  // 打开导入弹窗:设计器清单每次现扫(它读的是本机文件,很便宜),
+  // JSON 那一段只在已经选过目录时重读 —— 没选过就等用户点「选择目录」。
+  const openImport = () => {
+    setDisc({ open: true, loading: true, reason: '', sitesFile: '', envs: [], picked: {} })
+    loadDiscover()
+    if (imp.dir) void loadSites(imp.dir)
+  }
+
+  const pickImportDir = () => {
+    setDirPick({
+      open: true,
+      initial: imp.dir,
+      title: '选择站点 JSON 所在的目录',
+      onPick: (dir) => { void loadSites(dir) },
+    })
+  }
+
+  // 两个分区勾中的一起导入。设计器那份没有数据库配置(见下),JSON 那份有就带上。
+  const confirmImport = () => {
     const add: SshItem[] = []
     disc.envs.forEach((e, i) => {
       if (e.skipped || !disc.picked[discKey(e, i)]) return
@@ -807,11 +862,53 @@ export function SettingsView() {
         // 用户导入后要在「数据库」页签自己补 —— 弹窗里也写明了这一点。
       })
     })
+    imp.sites.forEach((it) => {
+      if (!it.site || !imp.picked[it.file]) return
+      add.push(sshItemOf(it.site))
+    })
+
     setDisc((d) => ({ ...d, open: false }))
     if (add.length === 0) return
+
+    // 重名:配置层不允许同名环境(validateHosts 直接拒),所以在这里给后来者加序号 ——
+    // 否则用户导入完、等自动保存时才看到一句"环境名重复",还得回头自己找是谁撞了。
+    const used = new Set(sshs.map((x) => sshName(x)))
+    for (const it of add) {
+      const base = (it.name || sshName(it)).trim()
+      let name = base
+      for (let n = 2; used.has(name); n++) name = `${base}-${n}`
+      it.name = name
+      used.add(name)
+    }
     setSelSsh(sshs.length) // 选中第一条新导入的,让用户直接接着填数据库
     setSshs([...sshs, ...add])
     markDirty('hosts')
+  }
+
+  // 「导入选中」按钮上的数字:两个分区勾中的合计。
+  const importPickedCount = () =>
+    disc.envs.filter((e, i) => !e.skipped && disc.picked[discKey(e, i)]).length +
+    imp.sites.filter((s) => s.site && imp.picked[s.file]).length
+
+  // 导出当前站点:选目录 → 服务端按**磁盘上的配置**写 <站点名>.json。
+  // 还在自动保存窗口里就置灰(按钮 side),否则导出的会是上一版配置。
+  const exportSite = () => {
+    const s = sshs[selSsh]
+    const name = s ? sshName(s) : ''
+    if (!name) { toast.error('先在左边的「环境清单」里选一个环境'); return }
+    setDirPick({
+      open: true,
+      initial: exportDir,
+      title: `选择「${name}」导出到哪个目录`,
+      onPick: (dir) => {
+        setExportDir(dir)
+        setBusy('export')
+        api.exportSite({ name, dir })
+          .then((r) => toast.success(`已导出环境「${name}」`, { description: r.path }))
+          .catch((ex: any) => toast.error('导出失败', { description: ex?.message || String(ex) }))
+          .finally(() => setBusy(''))
+      },
+    })
   }
 
   /**
@@ -945,6 +1042,22 @@ export function SettingsView() {
       else toast.error(r.stage === 'version' ? '取版本失败' : '连接失败', { description: r.error })
     } catch (ex: any) {
       toast.error('连接失败', { description: ex?.message || String(ex) })
+    } finally { setBusy('') }
+  }
+
+  // SSH 链路自检:用**表单里的当前值**真登一次(可以不先保存)。
+  // 与「从服务器获取」分工:那一步登进去探库要素并回填;这里只回答"能不能登进去",
+  // 用主机名回话 —— 跳板/端口转发环境下,只说 ok 看不出连到的到底是哪台。
+  const testSSH = async () => {
+    const s = sshs[selSsh]
+    if (!s?.host.trim() || !s?.user.trim()) { toast.error('请先填写 IP 主机与账号'); return }
+    setBusy('ssh')
+    try {
+      const r = await api.sshTest({ host: s.host.trim(), port: s.port || 22, user: s.user.trim(), password: s.password })
+      const detail = [r.hostname, r.note].filter(Boolean).join(';')
+      toast.success(`SSH 连接正常:${r.address}`, { description: detail || undefined })
+    } catch (ex: any) {
+      toast.error('SSH 连接失败', { description: ex?.message || String(ex) })
     } finally { setBusy('') }
   }
 
@@ -1246,11 +1359,12 @@ export function SettingsView() {
                 </div>
                 <div className="flex items-center gap-2">
                   <Button variant="outline" size="sm" onClick={addSsh}><Plus className="h-3.5 w-3.5" />新增环境</Button>
-                  {/* 从本机的 T100 设计器站点清单里导入 —— TT 的环境字段就是照设计器做的,
-                      初次装 TT 的机器上大概率已经有那份清单,省掉逐字段手抄。 */}
-                  <Button variant="ghost" size="sm" onClick={openDiscover}
-                    title="扫描本机 T100 设计器的站点清单,勾选导入(主机/端口/账号/口令/登录区域/工作区;数据库要自己补)">
-                    <Search className="h-3.5 w-3.5" />发现环境
+                  {/* 导入 = 两个来源(本机设计器的站点清单 / TT 导出的 JSON),都在一个弹窗里,
+                      用 Accordion 分两区。设计器那条的由来:TT 的环境字段就是照设计器做的,
+                      初次装 TT 的机器上大概率已经存过站点,省掉逐字段手抄。 */}
+                  <Button variant="ghost" size="sm" onClick={openImport}
+                    title="导入环境:从本机 T100 设计器的站点清单,或从 TT 导出的站点 JSON(数据库配置 JSON 里有就一起带进来)">
+                    <SquareArrowRightEnter className="h-3.5 w-3.5" />导入环境
                   </Button>
                 </div>
               </Card>
@@ -1270,6 +1384,14 @@ export function SettingsView() {
                           <TabsTrigger value="ents">ENT</TabsTrigger>
                         </TabsList>
                         <span className="ml-auto flex items-center gap-2">
+                          <Button variant="ghost" size="sm"
+                            disabled={busy !== '' || isDirty('hosts')}
+                            title={isDirty('hosts')
+                              ? '改动正在自动保存，稍等再导出'
+                              : '把当前环境导出成 JSON 文件（含 SSH/数据库口令，注意存放位置）'}
+                            onClick={exportSite}>
+                            <SquareArrowOutUpRight className={cn('h-3.5 w-3.5', busy === 'export' && 'animate-pulse')} />导出
+                          </Button>
                           <Button variant="ghost" size="sm" title="复制该环境(SSH 与数据库连接整份抄一份,名称自动加 -copy)"
                             onClick={() => dupSsh(selSsh)}>
                             <Copy className="h-3.5 w-3.5" />复制
@@ -1320,6 +1442,19 @@ export function SettingsView() {
                             <Input className={input} value={cur.workspace} placeholder="D:\\t100_wrok_dir\\客户\\prd"
                               onChange={(e) => patchSsh(selSsh, { workspace: e.target.value })} />
                           </Field>
+                        </div>
+                        {/* SSH 链路自检:留在表单流里、不塞进上面那行页签操作 ——
+                            「复制/删除」是环境的动作,这里是"这一组连接参数现在通不通"。
+                            与数据库页签的「测试连接」同一手法:结果只走 toast,不顶动布局。 */}
+                        <div className="flex items-center gap-2">
+                          <Button variant="outline" size="sm"
+                            disabled={busy !== '' || !cur.host.trim() || !cur.user.trim()}
+                            title={!cur.host.trim() || !cur.user.trim()
+                              ? '先填 IP 主机与账号'
+                              : '用当前主机/端口/账号/口令登录一次,验证 SSH 链路(不必先保存)'}
+                            onClick={() => void testSSH()}>
+                            <Zap className={cn('h-3.5 w-3.5', busy === 'ssh' && 'animate-spin')} />测试连接
+                          </Button>
                         </div>
                       </TabsContent>
 
@@ -1391,7 +1526,7 @@ export function SettingsView() {
                                 滚动容器由我们自己提供(container={false}) —— 用 Table 自带的
                                 那个 overflow-x-auto 包一层的话,它就成了滚动祖先,th 的 sticky 会失效。
                                 表头底色必须不透明(默认 bg-muted/50 是半透明的),否则行会从表头透出来。 */}
-                            <div className="max-h-64 overflow-auto">
+                            <div className={cn(TABLE_FRAME, 'max-h-64 overflow-auto')}>
                               <Table container={false}>
                                 <TableHeader>
                                   <TableRow className="hover:bg-transparent">
@@ -1403,12 +1538,12 @@ export function SettingsView() {
                                 <TableBody>
                                   <TableRow>
                                     <TableCell className={CELL_EDITING}>
-                                      <input className={cn('cell-input font-mono')} placeholder="新增账号…" value={addAcct.account}
+                                      <CellInput className="font-mono" placeholder="新增账号…" value={addAcct.account}
                                         onChange={(e) => setAddAcct((s) => ({ ...s, account: e.target.value }))}
                                         onKeyDown={(e) => { if (e.key === 'Enter') pushAcct() }} />
                                     </TableCell>
                                     <TableCell className={CELL_EDITING}>
-                                      <input className="cell-input font-mono" placeholder="新增密码…" value={addAcct.password}
+                                      <CellInput className="font-mono" placeholder="新增密码…" value={addAcct.password}
                                         onChange={(e) => setAddAcct((s) => ({ ...s, password: e.target.value }))}
                                         onKeyDown={(e) => { if (e.key === 'Enter') pushAcct() }} />
                                     </TableCell>
@@ -1426,13 +1561,13 @@ export function SettingsView() {
                                   {curDb.accounts.map((a, j) => (
                                     <TableRow key={j}>
                                       <TableCell className={CELL_EDITING}>
-                                        <input className="cell-input font-mono" value={a.account}
+                                        <CellInput className="font-mono" value={a.account}
                                           onChange={(e) => patchAcct(selSsh, j, { account: e.target.value })} />
                                       </TableCell>
                                       <TableCell className={cn(CELL_EDITING, 'relative')}>
                                         {/* type=password:数据库账号口令不该常显在屏幕上（也不该以明文躺在 DOM 里）。
                                             与上面 SSH 口令那一栏同一口径；要看内容时用浏览器/系统的密码提示，而不是把它摊开。 */}
-                                        <input className="cell-input font-mono" type="password" autoComplete="off" value={a.password}
+                                        <CellInput className="font-mono" type="password" autoComplete="off" value={a.password}
                                           onChange={(e) => patchAcct(selSsh, j, { password: e.target.value })} />
                                       </TableCell>
                                       <TableCell className="text-center whitespace-nowrap">
@@ -1480,7 +1615,7 @@ export function SettingsView() {
                             之后 <span className="font-mono">tt env ents</span> / <span className="font-mono">--at-list</span> 都只读配置、不再连网。
                           </div>
                         ) : (
-                          <div className="min-h-0 flex-1 overflow-auto rounded-ui border border-border">
+                          <div className={cn(TABLE_FRAME, 'min-h-0 flex-1 overflow-auto')}>
                             <Table container={false}>
                               <TableHeader>
                                 <TableRow className="hover:bg-transparent">
@@ -1773,12 +1908,13 @@ export function SettingsView() {
                                 idle={e.ready ? '已有镜像' : '未拉取'}
                                 error={failed ? (mirror.job.error || mirror.job.message || '失败') : undefined} />
                             </TableCell>
-                            <TableCell className="px-1 py-1">
-                              {/* 输入框不画自己的边框，整个单元格就是输入区；hover/focus 时才浮出边界。
-                                  右侧文件夹按钮是原生选择器的入口 —— 浏览器拿不到绝对路径，只能让本机服务弹框。 */}
-                              <div className="group flex h-8 min-w-0 items-center rounded-ui border border-transparent transition-colors hover:border-border/70 focus-within:border-border focus-within:bg-background/30">
-                                <input
-                                  className="min-w-0 flex-1 bg-transparent px-2 font-mono text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70"
+                            <TableCell className={CELL_EDITING}>
+                              {/* 这一格与「账号/密码」那两列同一口径:编辑器不画边框、不铺底色,
+                                  「正在编辑」由整格那一条 ring 提示 —— 格子里不再套一个输入框。
+                                  右侧文件夹按钮是原生选择器的入口 —— 浏览器拿不到绝对路径,只能让本机服务弹框。 */}
+                              <div className="flex h-8 min-w-0 items-center">
+                                <CellInput
+                                  className="min-w-0 flex-1 font-mono text-[11px]"
                                   value={ssh?.mirrorDir || ''}
                                   placeholder={e.path || '留空 = 用全局根目录/<环境名>'}
                                   title={e.path || '未设置镜像目录'}
@@ -2042,75 +2178,157 @@ export function SettingsView() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* 发现环境:扫描本机 T100 设计器的站点清单,勾选导入。
+      {/* 导入环境:两个来源各占一个 Accordion 分区(默认都展开)。
           用 Dialog 而不是 AlertDialog —— 这里装的是可交互内容(勾选列表),
           点遮罩/按 Esc 就该关掉,那是 Dialog 的语义(AlertDialog 会强制用户先做选择)。 */}
       <Dialog open={disc.open} onOpenChange={(o) => setDisc((d) => ({ ...d, open: o }))}>
-        <DialogContent>
+        {/* 没有说明段:两个分区的标题自己就说清了来源,再叠一段解释只是噪音。
+            去掉 description 后必须显式 aria-describedby={undefined},否则 Radix 会警告缺描述。 */}
+        <DialogContent aria-describedby={undefined} className="flex max-h-[min(760px,86vh)] flex-col">
           <DialogHeader>
-            <DialogTitle>发现环境 — 从 T100 设计器导入</DialogTitle>
-            <DialogDescription>
-              读取本机设计器的站点清单(只读,不会改动设计器的配置),勾选后加入环境清单。
-              {"\n"}设计器里没有数据库配置,导入完成后请在「数据库」页签补上。
-            </DialogDescription>
+            <DialogTitle>导入环境</DialogTitle>
           </DialogHeader>
 
-          {disc.loading ? (
-            <div className="flex items-center gap-2 py-6 text-muted-foreground">
-              <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-              正在扫描设计器的站点清单…
-            </div>
-          ) : disc.envs.length === 0 ? (
-            // 没扫到不是错误:把原因原样说给用户,并把查过的路径也列出来(便于自查)
-            <div className="space-y-1.5 py-3">
-              <p className="text-muted-foreground">{disc.reason || '没有发现可导入的环境。'}</p>
-              {disc.sitesFile && (
-                <p className="font-mono text-[11px] break-all text-muted-foreground">查找位置:{disc.sitesFile}</p>
-              )}
-            </div>
-          ) : (
-            <div className="min-h-0 flex-1 space-y-0.5 overflow-auto">
-              {disc.envs.map((e, i) => {
-                const key = discKey(e, i)
-                const dup = existingNames.has(e.name)
-                const disabled = !!e.skipped
-                return (
-                  <label key={key}
-                    className={cn('flex items-start gap-2 rounded-ui px-1.5 py-1.5',
-                      disabled ? 'opacity-50' : 'cursor-pointer hover:bg-accent/50')}>
-                    <Checkbox className="mt-0.5" disabled={disabled}
-                      checked={!!disc.picked[key] && !disabled}
-                      onCheckedChange={(v) => setDisc((d) => ({ ...d, picked: { ...d.picked, [key]: v === true } }))} />
-                    <span className="min-w-0 flex-1">
-                      <span className="flex flex-wrap items-center gap-1.5">
-                        <span className="font-medium">{e.name}</span>
-                        {dup && <span className="rounded-ui bg-muted px-1 text-[11px] text-muted-foreground">已存在</span>}
-                        {e.folder && <span className="text-[11px] text-muted-foreground">来自文件夹「{e.folder}」</span>}
-                      </span>
-                      {e.skipped ? (
-                        <span className="block text-[11px] text-red-600 dark:text-red-400">{e.skipped}</span>
-                      ) : (
-                        <span className="block font-mono text-[11px] text-muted-foreground">
-                          {e.user}@{e.host}:{e.port}
-                          {e.zone ? ` · 区域 ${e.zone}` : ''}
-                          {e.workspace ? ` · ${e.workspace}` : ''}
-                        </span>
-                      )}
-                    </span>
-                  </label>
-                )
-              })}
-            </div>
-          )}
+          <Accordion type="multiple" defaultValue={['designer', 'json']} className="min-h-0 flex-1 overflow-auto">
+            <AccordionItem value="designer" className="border-b border-border">
+              {/* 刷新按钮与触发行**平级**:塞进 trigger 里会让"刷新"顺带折叠一次分区,
+                  而 trigger 是 <button>,里面再套 button 也不是合法结构。 */}
+              <div className="flex items-center gap-1">
+                <AccordionTrigger
+                  className="flex min-w-0 flex-1 items-center gap-1.5 py-2 text-xs font-medium hover:text-foreground/80 [&[data-state=open]>svg]:rotate-180">
+                  <AccordionChevron />从 T100 设计器导入
+                </AccordionTrigger>
+                <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0"
+                  title="重新扫描设计器" aria-label="重新扫描设计器"
+                  disabled={disc.loading} onClick={loadDiscover}>
+                  <RefreshCw className={cn('h-3.5 w-3.5', disc.loading && 'animate-spin')} />
+                </Button>
+              </div>
+              <AccordionContent className="pb-2">
+                {disc.loading ? (
+                  <div className="flex items-center gap-2 py-4 text-xs text-muted-foreground">
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    正在扫描设计器的站点清单…
+                  </div>
+                ) : disc.envs.length === 0 ? (
+                  // 没扫到不是错误:把原因原样说给用户,并把查过的路径也列出来(便于自查)
+                  <div className="space-y-1.5 py-2">
+                    <p className="text-xs text-muted-foreground">{disc.reason || '没有发现可导入的环境。'}</p>
+                    {disc.sitesFile && (
+                      <p className="font-mono text-[11px] break-all text-muted-foreground">查找位置:{disc.sitesFile}</p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-0.5">
+                    {disc.envs.map((e, i) => {
+                      const key = discKey(e, i)
+                      const dup = existingNames.has(e.name)
+                      const disabled = !!e.skipped
+                      return (
+                        <label key={key}
+                          className={cn('flex items-start gap-2 rounded-ui px-1.5 py-1.5',
+                            disabled ? 'opacity-50' : 'cursor-pointer hover:bg-accent/50')}>
+                          <Checkbox className="mt-0.5" disabled={disabled}
+                            checked={!!disc.picked[key] && !disabled}
+                            onCheckedChange={(v) => setDisc((d) => ({ ...d, picked: { ...d.picked, [key]: v === true } }))} />
+                          <span className="min-w-0 flex-1">
+                            <span className="flex flex-wrap items-center gap-1.5">
+                              <span className="font-medium">{e.name}</span>
+                              {dup && <span className="rounded-ui bg-muted px-1 text-[11px] text-muted-foreground">已存在</span>}
+                              {e.folder && <span className="text-[11px] text-muted-foreground">来自文件夹「{e.folder}」</span>}
+                            </span>
+                            {e.skipped ? (
+                              <span className="block text-[11px] text-red-600 dark:text-red-400">{e.skipped}</span>
+                            ) : (
+                              <span className="block font-mono text-[11px] text-muted-foreground">
+                                {e.user}@{e.host}:{e.port}
+                                {e.zone ? ` · 区域 ${e.zone}` : ''}
+                                {e.workspace ? ` · ${e.workspace}` : ''}
+                              </span>
+                            )}
+                          </span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                )}
+              </AccordionContent>
+            </AccordionItem>
+
+            <AccordionItem value="json">
+              <AccordionTrigger
+                className="flex w-full items-center gap-1.5 py-2 text-xs font-medium hover:text-foreground/80 [&[data-state=open]>svg]:rotate-180">
+                <AccordionChevron />从 JSON 导入
+              </AccordionTrigger>
+              <AccordionContent className="pb-2">
+                <div className="mb-2 flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={pickImportDir}>
+                    <FolderOpen className="h-3.5 w-3.5" />选择目录
+                  </Button>
+                  {imp.dir && (
+                    <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground" title={imp.dir}>{imp.dir}</span>
+                  )}
+                </div>
+                {imp.error ? (
+                  <p className="px-1.5 text-[11px] text-red-600 dark:text-red-400">{imp.error}</p>
+                ) : imp.loading ? (
+                  <div className="flex items-center gap-2 py-3 text-xs text-muted-foreground">
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />正在读取目录…
+                  </div>
+                ) : !imp.dir ? null : imp.sites.length === 0 ? (
+                  <p className="px-1.5 text-[11px] text-muted-foreground">这个目录里没有 .json 文件。</p>
+                ) : (
+                  <div className="space-y-0.5">
+                    {imp.sites.map((it) => {
+                      const dup = !!it.site && existingNames.has(it.site.name)
+                      const disabled = !it.site
+                      return (
+                        <label key={it.file}
+                          className={cn('flex items-start gap-2 rounded-ui px-1.5 py-1.5',
+                            disabled ? 'opacity-60' : 'cursor-pointer hover:bg-accent/50')}>
+                          <Checkbox className="mt-0.5" disabled={disabled}
+                            checked={!!imp.picked[it.file] && !disabled}
+                            onCheckedChange={(v) => setImp((s) => ({ ...s, picked: { ...s.picked, [it.file]: v === true } }))} />
+                          <span className="min-w-0 flex-1">
+                            {it.site ? (
+                              <>
+                                <span className="flex flex-wrap items-center gap-1.5">
+                                  <span className="font-medium">{it.site.name}</span>
+                                  {dup && <span className="rounded-ui bg-muted px-1 text-[11px] text-muted-foreground">已存在</span>}
+                                  {it.site.db && (
+                                    <span className="text-[11px] text-muted-foreground">
+                                      含数据库({it.site.db.type === 'kingbase' ? '金仓' : 'Oracle'})
+                                    </span>
+                                  )}
+                                </span>
+                                <span className="block font-mono text-[11px] text-muted-foreground">
+                                  {it.site.user}@{it.site.host}:{it.site.port}
+                                  {it.site.zone ? ` · 区域 ${it.site.zone}` : ''}
+                                </span>
+                              </>
+                            ) : (
+                              <span className="block text-[11px] text-red-600 dark:text-red-400">{it.error}</span>
+                            )}
+                            <span className="block truncate text-[10px] text-muted-foreground/70" title={it.file}>{it.file}</span>
+                          </span>
+                        </label>
+                      )
+                    })}
+                    {imp.truncated && (
+                      <p className="px-1.5 py-1 text-[11px] text-muted-foreground">
+                        文件太多,只读了前 {imp.sites.length} 个;建议把要导入的放进单独一个目录。
+                      </p>
+                    )}
+                  </div>
+                )}
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
 
           <DialogFooter>
             <Button variant="ghost" size="sm" onClick={() => setDisc((d) => ({ ...d, open: false }))}>取消</Button>
-            <Button variant="outline" size="sm" onClick={openDiscover} disabled={disc.loading}>
-              <RefreshCw className="h-3.5 w-3.5" />重新扫描
-            </Button>
-            <Button size="sm" onClick={confirmDiscover}
-              disabled={disc.loading || disc.envs.length === 0}>
-              导入选中
+            <Button size="sm" onClick={confirmImport} disabled={disc.loading || importPickedCount() === 0}>
+              导入选中{importPickedCount() > 0 ? `(${importPickedCount()})` : ''}
             </Button>
           </DialogFooter>
         </DialogContent>

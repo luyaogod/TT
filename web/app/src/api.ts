@@ -469,9 +469,19 @@ export const api = {
   // 共享端点要求 {connection: …} 包一层(沿用字典侧的请求形状),不再是平铺连接字段。
   connTest: (connection: HostsDb) =>
     req<{ ok: boolean; type?: string; serverVersion?: string; address?: string; stage?: string; error?: string; via?: string }>('/api/conntest', { method: 'POST', body: JSON.stringify({ connection }) }),
+  // SSH 链路自检(设置页「SSH 服务器」页签):只登录一次并取主机名,不碰库。
+  // 参数是**表单当前值**,不必先保存 —— 所以这里平铺字段,不引用 hosts 配置。
+  sshTest: (body: { host: string; port: number; user: string; password: string }) =>
+    req<{ ok: boolean; address: string; hostname?: string; elapsedMs?: number; note?: string }>('/api/sshtest', { method: 'POST', body: JSON.stringify(body) }),
   // 账号清单「验证」:SSH 上服务器以该账号+密码连显式目标库 select 1(只读)
   dbAccVerify: (body: { host: string; port: number; user: string; password: string; zone: string; type: string; account: string; acctPassword: string; dbHost?: string; dbPort?: number; dbSvc?: string; dbDatabase?: string }) =>
     req<{ ok: boolean; error?: string }>('/api/dbaccverify', { method: 'POST', body: JSON.stringify(body) }),
+  // 站点导出/导入(设置页「站点管理」):导出写一个 JSON 文件到用户选的目录;
+  // 导入读一个目录里的这类文件,**只回候选、不写配置**(落盘仍走 saveSettings)。
+  exportSite: (body: { name: string; dir: string }) =>
+    req<{ ok: boolean; path: string; bytes: number }>('/api/hosts/export', { method: 'POST', body: JSON.stringify(body) }),
+  importSites: (body: { dir: string }) =>
+    req<{ ok: boolean; dir: string; sites: { file: string; site?: HostsSsh; error?: string }[]; truncated?: boolean }>('/api/hosts/import', { method: 'POST', body: JSON.stringify(body) }),
   // 配置派生状态:路径型取值的"在本机是否真的存在"只有服务端算得出来(要 os.Stat)。
   // 单独一个端点而不并进 /api/hosts —— 后者是每次进设置都读的热路径。
   configStatus: () => req<ConfigStatus>('/api/config/status'),

@@ -75,12 +75,15 @@ export function Panel({ title, right, children, className }: {
   )
 }
 
+// 表单控件聚焦时的唯一口径:只把**那 1px 边框**染成 --ring,不画环、不加阴影。
+// 早先用的是 `ring-[3px] ring-inset`(内嵌环是为了躲开祖先 overflow 的裁角,理由见
+// tokens.css 的圆角口径),但 3px 半透明底色铺在输入框里读起来就是"向内的一大块蓝色
+// 阴影",太重(用户实测反馈)。纯边框变色同样不越出盒子 —— 既没有被裁角的风险,也没有
+// 那层厚阴影。Input 与 Select 的触发钮都从这里取,两者才不会跑偏。
+export const FIELD_FOCUS = 'focus-visible:border-ring'
+
 // 有边框的输入框:圆角走全站唯一那一档(--radius-ui),见 tokens.css 的圆角口径。
-// 聚焦高亮用 `ring-inset`(**画在边框内侧**),不用默认的外扩环:外扩环会溢出到
-// 控件盒子之外,任何一层带 overflow 的祖先(设置页的内容列、可滚表格、未来的新容器)
-// 都可能把它裁掉一条边或一个角 —— 表现是"聚焦了但高亮缺一角"。内嵌环画在盒内,
-// 与祖先的 overflow 无关,是根治;它也正好与可编辑表格单元格的 CELL_EDITING 同一手法。
-// 刻意不加 focus 时的圆角变化 —— 聚焦只改边框色与 ring,形状不跳。
+// 焦点态见 FIELD_FOCUS;刻意不加 focus 时的圆角变化 —— 聚焦只改边框色,形状不跳。
 export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
   function Input({ className, type, ...props }, ref) {
     return (
@@ -88,7 +91,8 @@ export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttribute
         ref={ref}
         type={type}
         className={cn(
-          'flex h-8 w-full min-w-0 rounded-ui border border-input bg-transparent px-2 py-1 text-sm transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30',
+          'flex h-8 w-full min-w-0 rounded-ui border border-input bg-transparent px-2 py-1 text-sm transition-colors outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30',
+          FIELD_FOCUS,
           className,
         )}
         {...props}
@@ -113,15 +117,20 @@ export function Separator({ className, orientation = 'horizontal' }: {
 }
 
 // ---- Table(shadcn 规范,对齐 TbmLite 的可编辑表格):单元格自带网格线,控件嵌在格内 ----
-// 表格容器横向可滚;TableHead/TableCell 带 border 形成 Excel 式网格(零圆角由 tokens.css 统一)。
+// 表格容器横向可滚;TableHead/TableCell 带 border 形成 Excel 式网格。
+// 圆角在**容器**上:外框走 .tt-table-frame(tokens.css)= 1px 边框 + --radius-ui,
+// 表格内部网格仍是直角 —— border-collapse 的表格自己不吃 border-radius,圆角只能由外框给。
 // container=false 供「需要表头 sticky」的列表使用:外层 overflow-x-auto 的 div 按 CSS 规则
 // 会让 overflow-y 也算成非 visible,于是它成了新的滚动祖先,里层 th 的 sticky 就失效了
-// (滚动容器改由调用方提供)。默认仍套容器,不影响既有网格表格。
+// (滚动容器改由调用方提供)。这情形请把 TABLE_FRAME 加到调用方那个滚动容器上,
+// 否则表格会是方角、且外框线仍由单元格自己画(相邻边会叠成 2px)。
+export const TABLE_FRAME = 'tt-table-frame'
+
 export function Table({ className, container = true, ...props }:
   React.ComponentProps<'table'> & { container?: boolean }) {
   const table = <table className={cn('w-full caption-bottom border-collapse text-sm', className)} {...props} />
   if (!container) return table
-  return <div className="relative w-full overflow-x-auto">{table}</div>
+  return <div className={cn(TABLE_FRAME, 'relative w-full overflow-x-auto')}>{table}</div>
 }
 
 export function TableHeader({ className, ...props }: React.ComponentProps<'thead'>) {
@@ -154,7 +163,19 @@ export function TableCell({ className, ...props }: React.ComponentProps<'td'>) {
   )
 }
 
-// 可编辑表格里「正在编辑这一格」的提示环。挂在做 p-0 的 TableCell 上,
-// 用 ring 语义 token 而不是写死的颜色 —— 合并前两套 SPA 各写了一份 sky 色,
+// 表格单元格里的可编辑文本:观感上就是"格子里的字",不是"格里又嵌了一个输入框" ——
+// 无边框、无底色、无环,填满整格(.cell-input 的样式见 tokens.css)。
+// 可编辑表格里的文本输入一律用它,别再手搓 className:"正在编辑这一格"的唯一提示是
+// 所在 TableCell 的 CELL_EDITING,边框/底色只在那一处出现,口径才不会一表一样。
+export const CellInput = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
+  function CellInput({ className, ...props }, ref) {
+    return <input ref={ref} className={cn('cell-input', className)} {...props} />
+  },
+)
+
+// 可编辑单元格「正在编辑」的唯一提示:整格一条 1px 内嵌环,与 Input 的聚焦口径同一档
+// (只留一条线,不发光、不铺底色)。挂在 TableCell 上(该单元格必须 p-0,格子即输入区),
+// 这样高亮贴的是**格子边界**,不是编辑器边界 —— 格子看上去才不会像嵌了个 input。
+// 用 ring 语义 token 而不是写死的颜色:合并前两套 SPA 各写了一份 sky 色,
 // 其中一份在暗色下对比度不够。
-export const CELL_EDITING = 'focus-within:ring-1 focus-within:ring-inset focus-within:ring-ring/60'
+export const CELL_EDITING = 'focus-within:ring-1 focus-within:ring-inset focus-within:ring-ring'

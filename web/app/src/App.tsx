@@ -401,9 +401,6 @@ export function App() {
         >
           <div className="flex h-12 shrink-0 items-center gap-3 border-b border-border px-4">
             <DialogTitle className="text-[15px] font-semibold tracking-tight">设置</DialogTitle>
-            <span className="min-w-0 truncate text-[11px] text-muted-foreground">
-              环境 / 数据字典 / 调试参数 / 应用
-            </span>
             <button
               onClick={closeSettings}
               aria-label="关闭设置"
