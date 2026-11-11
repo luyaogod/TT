@@ -11,7 +11,7 @@ import * as SelectPrimitive from '@radix-ui/react-select'
 import * as TabsPrimitive from '@radix-ui/react-tabs'
 import { DayPicker } from 'react-day-picker'
 import { CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react'
-import { Button } from './ui'
+import { Button, FIELD_FOCUS } from './ui'
 import { cn } from './utils'
 
 // ---- Select(shadcn 规范,Radix 实现):全站下拉统一用这套,不再用原生 <select> ----
@@ -26,9 +26,10 @@ export function SelectTrigger({ className, children, ...props }:
     <SelectPrimitive.Trigger
       className={cn(
         // rounded-ui:与 Input 同值 —— 上面那句"外观对齐 Input"要真的同值才算数
-        // ring-inset:聚焦环画在内侧,理由与 Input 相同(tokens.css 的圆角口径那节有说明)
-        'flex h-8 w-fit min-w-0 items-center justify-between gap-1.5 rounded-ui border border-input bg-transparent px-2 py-1 text-sm whitespace-nowrap transition-[color,box-shadow] outline-none',
-        'data-[placeholder]:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50',
+        // 聚焦口径同源于 FIELD_FOCUS(只染 1px 边框,不画环),别在这里另起一套
+        'flex h-8 w-fit min-w-0 items-center justify-between gap-1.5 rounded-ui border border-input bg-transparent px-2 py-1 text-sm whitespace-nowrap transition-colors outline-none',
+        'data-[placeholder]:text-muted-foreground',
+        FIELD_FOCUS,
         'disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30 [&>span]:truncate',
         className,
       )}
@@ -140,11 +141,21 @@ export function TabsTrigger({ className, ...props }: React.ComponentProps<typeof
   return (
     <TabsPrimitive.Trigger
       className={cn(
-        'inline-flex items-center justify-center gap-1.5 rounded-ui px-2.5 py-1 text-xs whitespace-nowrap transition-colors outline-none',
+        // border + border-transparent 是**常驻**的:活动态才补边框的话,那 1px 会在
+        // 切页签的一瞬间从"无边框元素"的 currentColor(浅灰,就是文字色)过渡到
+        // --border(深灰),而过场由 transition-colors 负责 —— 表现就是刚点中的那颗
+        // 外面亮了一下再暗下去,看着像 outline 闪了一下(实测抓帧确认)。
+        // 常驻透明边框之后,过渡的起点是 transparent,只会"淡入",不会先亮一截;
+        // 顺带消掉活动态多出 1px 边框造成的尺寸跳动。
+        'inline-flex items-center justify-center gap-1.5 rounded-ui border border-transparent px-2.5 py-1 text-xs whitespace-nowrap transition-colors outline-none',
         'text-muted-foreground hover:text-foreground',
-        'focus-visible:ring-ring/50 focus-visible:ring-[3px]',
-        // 活动态:卡片底 + 边框盖住 muted 底,视觉上"浮起一格"
-        'data-[state=active]:border data-[state=active]:border-border data-[state=active]:bg-card data-[state=active]:font-medium data-[state=active]:text-foreground',
+        // 这里**不画聚焦环**:Radix 的页签在点击后会把焦点移到触发钮上,Chrome 因此判定
+        // :focus-visible 成立(实测 matches(':focus-visible') === true),于是每切一次页签,
+        // 刚点中的那颗外面就多一圈 3px 的环 —— 看着就是"切换时冒出个 outline"。
+        // 页签的"当前在哪"由活动态自己表达(卡片底 + 边框 + 字重),键盘用户同样看得出
+        // (焦点一走,浮起的那一格就跟着走),所以不需要再叠一圈环。
+        // 活动态:卡片底 + 边框盖住 muted 底,视觉上"浮起一格"(边框宽度已由上面的常驻类给出)
+        'data-[state=active]:border-border data-[state=active]:bg-card data-[state=active]:font-medium data-[state=active]:text-foreground',
         'disabled:pointer-events-none disabled:opacity-50',
         className,
       )}

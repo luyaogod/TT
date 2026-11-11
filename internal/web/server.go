@@ -90,7 +90,7 @@ type Options struct {
 
 	// ---- 三个"动作"端点的外部依赖 ----
 	//
-	// 它们三个都要连服务器/连库，所以默认档的测试进不去 —— 而这三条路径上的
+	// 它们都要连服务器/连库，所以默认档的测试进不去 —— 而这几条路径上的
 	// **错误分支**（信封形状、HTTP 码、stage 取值）恰恰是对外契约，改了没人会响。
 	// 抽成函数字段就能只测那一半，不必造一个假的 *host.SSHConn
 	// （那个结构体的 cli 是私有字段，伪造要付 8 个方法，见 internal/debug 的 dial 字段）。
@@ -106,6 +106,11 @@ type Options struct {
 	// 与前两个不同：它的返回值 `erpdb.Connector` 是**接口**，所以注入一个假 Connector
 	// 能测到 hConnTest 的**快乐路径** —— 那是这三个端点里唯一一条能测全的。
 	OpenDB func(context.Context, dbconfig.Connection) (erpdb.Connector, error)
+	// SSHTest POST /api/sshtest。nil = host.TestSSH。
+	//
+	// 真实现要真的登一台 SSH,默认档测试进不去;注入假实现就能把
+	// 「端口缺省补 22 / 主机名回填 / 失败信封」这几条对外契约钉住。
+	SSHTest func(host.SSHConfig) (*host.SSHTestOut, error)
 }
 
 // ConfigReloader 由持有配置内存态的子系统实现；本服务在配置写入成功后调用它。
@@ -145,11 +150,17 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/health", s.hHealth)
 	m.HandleFunc("GET /api/hosts", s.hHostsGet)
 	m.HandleFunc("PUT /api/hosts", s.hHostsPut)
+	// 站点的导出/导入:把单个环境搬成 JSON 文件,或从目录里读回来。
+	// 两个端点都不写配置 —— 导入只回候选,落盘仍走上面那条 PUT。
+	m.HandleFunc("POST /api/hosts/export", s.hHostsExport)
+	m.HandleFunc("POST /api/hosts/import", s.hHostsImport)
 	// 从 T100 设计器的站点清单里发现环境(只读那份加密文件,让用户勾选导入)。
 	m.HandleFunc("GET /api/discover/envs", s.hDiscoverEnvs)
 	m.HandleFunc("POST /api/dbprobe", s.hDBProbe)
 	m.HandleFunc("POST /api/dbaccverify", s.hDBAccVerify)
 	m.HandleFunc("POST /api/conntest", s.hConnTest)
+	// SSH 链路自检(设置页「SSH 服务器」页签):只登录一次,不碰库、不落盘。
+	m.HandleFunc("POST /api/sshtest", s.hSSHTest)
 
 	m.HandleFunc("GET /api/config/meta", s.hConfigMeta)
 	m.HandleFunc("GET /api/config/status", s.hConfigStatus)
