@@ -745,7 +745,7 @@ export function SettingsView() {
       const r = await api.entsSync(name)
       await new Promise<void>((resolve) => { loadSettings(); setTimeout(resolve, 300) })
       const extra = r.addedAccounts?.length
-        ? `；新增账号 ${r.addedAccounts.join('、')}（密码按惯例=账号名，请到「数据库」页签改成真实口令）`
+        ? `；新增账号 ${r.addedAccounts.join('、')}（口令请到「数据库」页签核对）`
         : ''
       toast.success(`已同步 ${r.count} 个企业${extra}`)
     } catch (e: any) {
@@ -1223,7 +1223,7 @@ export function SettingsView() {
     if (!env) return
     setAsk({
       title: `同步环境「${env}」的字典数据?`,
-      desc: `目标:${(sync?.envs.find((e) => e.name === env)?.dbPath || '')}\n将覆盖本地 SQLite(原库自动备份为 .bak),约 85 万行,需数分钟。`,
+      desc: `目标:${(sync?.envs.find((e) => e.name === env)?.dbPath || '')}\n将覆盖本机的字典库（旧库自动备份），需要几分钟。`,
       confirmText: '开始同步',
       run: () => void doSync(env),
     })
@@ -1365,7 +1365,7 @@ export function SettingsView() {
                       用 Accordion 分两区。设计器那条的由来:TT 的环境字段就是照设计器做的,
                       初次装 TT 的机器上大概率已经存过站点,省掉逐字段手抄。 */}
                   <Button variant="ghost" size="sm" onClick={openImport}
-                    title="导入环境:从本机 T100 设计器的站点清单,或从 TT 导出的站点 JSON(数据库配置 JSON 里有就一起带进来)">
+                    title="从本机设计器的站点清单，或 TT 导出的 JSON 导入环境">
                     <SquareArrowRightEnter className="h-3.5 w-3.5" />导入环境
                   </Button>
                 </div>
@@ -1390,7 +1390,7 @@ export function SettingsView() {
                             disabled={busy !== '' || isDirty('hosts')}
                             title={isDirty('hosts')
                               ? '改动正在自动保存，稍等再导出'
-                              : '把当前环境导出成 JSON 文件（含 SSH/数据库口令，注意存放位置）'}
+                              : '导出当前环境为 JSON（含口令，注意存放）'}
                             onClick={exportSite}>
                             <SquareArrowOutUpRight className={cn('h-3.5 w-3.5', busy === 'export' && 'animate-pulse')} />导出
                           </Button>
@@ -1453,7 +1453,7 @@ export function SettingsView() {
                             disabled={busy !== '' || !cur.host.trim() || !cur.user.trim()}
                             title={!cur.host.trim() || !cur.user.trim()
                               ? '先填 IP 主机与账号'
-                              : '用当前主机/端口/账号/口令登录一次,验证 SSH 链路(不必先保存)'}
+                              : '用当前填写的信息登录一次，看看能不能连通（不必先保存）'}
                             onClick={() => void testSSH()}>
                             <Zap className={cn('h-3.5 w-3.5', busy === 'ssh' && 'animate-spin')} />测试连接
                           </Button>
@@ -1502,11 +1502,11 @@ export function SettingsView() {
                           <label className="mt-3 flex items-center gap-2 text-[11px] text-muted-foreground">
                             <input type="checkbox" checked={curDb.readonlySql !== false}
                               onChange={(e) => patchDb(selSsh, { readonlySql: e.target.checked ? undefined : false })} />
-                            允许 AI 执行只读 SQL(默认开启;关掉后调试端点的 SQL 查询直接 403)
+                            允许 AI 执行只读 SQL（默认开启；关掉后 AI 查不了库）
                           </label>
                           <div className="mt-3 flex items-center gap-2">
                             <Button variant="outline" size="sm" disabled={busy !== '' || !cur.host || !cur.user}
-                              title={!cur.host || !cur.user ? '先填 SSH 主机与账号' : '按区域登录服务器,解析库地址/service 并回填'}
+                              title={!cur.host || !cur.user ? '先填 SSH 主机与账号' : '登录服务器，读出库地址等信息并回填'}
                               onClick={() => void fetchFromServer()}>
                               <RefreshCw className={cn('h-3.5 w-3.5', busy === 'fetch' && 'animate-spin')} />从服务器获取
                             </Button>
@@ -1522,7 +1522,7 @@ export function SettingsView() {
 
                           <div className="mt-4">
                             <div className="mb-1 text-[11px] text-muted-foreground">
-                              账号列表(账号即 schema 名;客户端直连取首项,服务器侧调试按 ENT 解析出账号后在此查密码)
+                              账号列表
                             </div>
                             {/* 账号可能很多:表格封顶 16rem 后就地滚,表头 sticky 常驻。
                                 滚动容器由我们自己提供(container={false}) —— 用 Table 自带的
@@ -1606,15 +1606,14 @@ export function SettingsView() {
                           <Button size="sm" variant="outline" className="ml-auto h-7"
                             disabled={entsBusy || !cur.host}
                             onClick={() => void syncEnts()}
-                            title="连库读 gzou_t（系统账号 ds），成功后写回 config.json">
+                            title="从该环境重新读取 ENT 清单">
                             <RefreshCw className={cn('h-3.5 w-3.5', entsBusy && 'animate-spin')} />
                             {entsBusy ? '同步中…' : '从服务器刷新'}
                           </Button>
                         </div>
                         {!cur.ents || cur.ents.length === 0 ? (
                           <div className="py-3 text-xs text-muted-foreground">
-                            还没有同步过 ENT 清单。点上面的「从服务器刷新」读一次库（需要能连上该环境）；
-                            之后 <span className="font-mono">tt env ents</span> / <span className="font-mono">--at-list</span> 都只读配置、不再连网。
+                            还没有同步过 ENT 清单。点上面的「从服务器刷新」读一次（需要能连上该环境）。
                           </div>
                         ) : (
                           <div className={cn(TABLE_FRAME, 'min-h-0 flex-1 overflow-auto')}>
@@ -1639,9 +1638,7 @@ export function SettingsView() {
                           </div>
                         )}
                         <p className="text-[11px] leading-relaxed text-muted-foreground">
-                          清单一律由「从服务器刷新」写入（读 gzou_t 的启用企业 gzou001，账号取 gzou003），
-                          不提供手工编辑。同步会把清单里的账号补进「数据库」页签的账号清单；缺的口令按
-                          T100 惯例（账号=密码）填写，请在那边核对。
+                          ENT 清单只能从服务器同步，不能手工编辑。同步后请到「数据库」页签核对各账号的口令。
                         </p>
                       </TabsContent>
                     </Tabs>
@@ -1658,11 +1655,11 @@ export function SettingsView() {
                   本地那份 SQLite 从哪来、查的时候走哪条路。原先分成两张卡,第一张只放一个下拉,
                   第二张才是"这份数据怎么来的",读的人得自己把两处接起来。 */}
               <Card id="card-dict-query" title="查询数据源"
-                description="r.t / r.v / desc / scc / r.q 等查询命令走哪条路取数。">
+                description="查询数据时走哪里取数。">
                 <SettingRow
                   id="query.source"
                   label="数据源"
-                  description="在线走该环境直查；本地只读该环境自己的 SQLite，各环境互不干扰。本地要先同步下面那一行。"
+                  description="在线：直接查环境库。本地：查已同步到本机的副本（需先同步）。"
                   control={
                     <Select
                       value={dict.querySource === '' ? 'online' : dict.querySource}
@@ -1698,9 +1695,9 @@ export function SettingsView() {
                   label="库根目录（默认）"
                   description={
                     !dict.dictDir.trim()
-                      ? `留空 = 缺省目录${sync?.dir ? `：${sync.dir}` : ''}；各环境的库仍是 <根目录>/<环境>.db。`
+                      ? `留空 = 缺省目录${sync?.dir ? `：${sync.dir}` : ''}。`
                       : status?.dict.exists
-                        ? '目录已存在；各环境的库仍是 <根目录>/<环境>.db。'
+                        ? '目录已存在。'
                         : '目录不存在，同步时会自动创建。'
                   }
                   control={
@@ -1721,7 +1718,7 @@ export function SettingsView() {
                 />
                 {dict.querySource === 'local' && (
                   <p className="text-[11px] leading-relaxed text-amber-600 dark:text-amber-400">
-                    旧配置 query.source = local 没有指定环境；请选「本地（某环境）」或「在线」，选完自动保存。
+                    当前是旧版的「本地」设置，没指定环境；请重新选一个数据源，选完自动保存。
                   </p>
                 )}
                 {(() => {
@@ -1737,7 +1734,7 @@ export function SettingsView() {
                 {/* 数据同步(原「数据同步」卡片):一个环境一行,每行一个「开始同步」。
                     它必须留在这张卡里 —— 上面选了「本地」就等于声明"我读本地那份",
                     而本地那份正是这张表同步出来的。 */}
-                <SectionTitle>数据同步(写入本地 SQLite)</SectionTitle>
+                <SectionTitle>数据同步（同步到本机）</SectionTitle>
                 {/* 这里原先内联一段失败红字(拉取/同步/停止失败),已改走统一 toast:
                     它出现与消失都会顶动这张卡的高度,而错误详情往往好几行。
                     保留在卡片里的只有**说明性**的一行(下面那条"没有可同步的环境"),
@@ -1783,7 +1780,7 @@ export function SettingsView() {
                                 <button
                                   type="button"
                                   className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
-                                  title={`选择「${e.name}」的库目录；现在：${e.dbPath}`}
+                                  title={`选择「${e.name}」的库目录`}
                                   onClick={() => {
                                     const idx = sshs.findIndex((x) => sshName(x) === e.name)
                                     if (idx < 0) return
@@ -1812,7 +1809,7 @@ export function SettingsView() {
                                   一整列实心主色块会把"表格"读成"一堆按钮",行与行的主次也没了。
                                   ghost 只是没有底色,仍是完整按钮 —— 点击区、禁用态、悬停反馈都在。 */}
                               <Button variant="ghost" size="sm" disabled={syncBusy}
-                                title={`从「${e.name}」拉取字典数据到本地 SQLite`}
+                                title={`从「${e.name}」同步字典数据到本机`}
                                 onClick={() => void runSync(e.name)}>
                                 开始同步
                               </Button>
@@ -1858,16 +1855,16 @@ export function SettingsView() {
               </Card>
 
               <Card id="card-dict-mirror" title="源码镜像"
-                description="把 T100 源码与画面文件(4gl/**/*.4gl + 42f + 42s/zh_CN + *.inc)拉到本地,供 AI 检索与 tt outline / tt interface 离线使用；每个环境可单独指定镜像目录。">
+                description="把该环境的 T100 源码与画面文件拉到本机，供 AI 检索和离线查看。每个环境可单独指定目录。">
                 <SettingRow
                   id="mirror.dir"
                   label="镜像根目录（默认）"
                   description={
                     !dict.mirrorDir.trim()
-                      ? '留空 = 不设默认根目录；下方每个环境仍可单独指定。两者都没有的环境不能拉取。'
+                      ? '留空 = 不设默认根目录；下面每个环境仍可单独指定。都没有的环境不能拉取。'
                       : status?.mirror.exists
-                        ? '目录已存在；下方每个环境可单独覆盖，留空则用根目录/<环境名>。'
-                        : '目录不存在，拉取时自动创建；下方每个环境可单独覆盖。'
+                        ? '目录已存在；下面每个环境可单独覆盖。'
+                        : '目录不存在，拉取时自动创建；下面每个环境可单独覆盖。'
                   }
                   control={<Input className={input} value={dict.mirrorDir} placeholder="如 D:\t100\mirror"
                     onChange={(e) => { setDict((s) => ({ ...s, mirrorDir: e.target.value })); markDirty('mirror') }} />}
@@ -1918,7 +1915,7 @@ export function SettingsView() {
                                 <CellInput
                                   className="min-w-0 flex-1 font-mono text-[11px]"
                                   value={ssh?.mirrorDir || ''}
-                                  placeholder={e.path || '留空 = 用全局根目录/<环境名>'}
+                                  placeholder={e.path || '留空 = 用上面的根目录'}
                                   title={e.path || '未设置镜像目录'}
                                   onChange={(ev) => {
                                     if (sshIndex < 0) return
@@ -1997,10 +1994,9 @@ export function SettingsView() {
                   整节替换 + 字段 omitempty,不回传等于把这些键从 config.json 里删掉。
                   「默认环境」那张卡整张去掉 —— 调试会话不指定环境时继承站点默认
                   (站点管理里那个绿点),这一层覆盖没必要暴露。 */}
-              <Card id="card-debug-params" title="调试参数"
-                description="本机调试会话的默认参数。">
+              <Card id="card-debug-params" title="调试参数">
                 <SettingRow id="debug.watchdogSeconds" label="停站看门狗(秒)"
-                  description="停站后超过该时长无响应即判定失联。"
+                  description="停站后超过这么久没响应就断开"
                   control={<Input className={input} type="number" value={dbg.watchdogSeconds || ''} placeholder="1800"
                     onChange={(e) => { setDbg((s) => ({ ...s, watchdogSeconds: Number(e.target.value) || 0 })); markDirty('debug') }} />} />
               </Card>
@@ -2014,14 +2010,14 @@ export function SettingsView() {
           {section === 'app' && (
             <>
               <Card id="card-app-theme" title="外观"
-                description="全站共用一份;切换后各视图都跟着变。">
+                description="切换后立即生效。">
                 <ThemeCards value={theme} onChange={setTheme} />
               </Card>
 
               <Card id="card-app-service" title="服务"
                 description="统一 Web 服务的监听地址。">
                 <SettingRow id="listen" label="监听地址"
-                  description="改完需重启 tt serve;端口占用时自动向后顺延。"
+                  description="改完要重启服务才生效。"
                   control={<Input className={input} value={listen} placeholder="127.0.0.1:28670"
                     onChange={(e) => { setListen(e.target.value); markDirty('listen') }} />} />
               </Card>
@@ -2073,7 +2069,7 @@ export function SettingsView() {
               </Card>
 
               <Card id="card-app-update" title="更新"
-                description="检查/升级 tt 自身。查由你手动触发;升级会校验 sha256 后交由独立更新器完成。">
+                description="检查并安装 tt 的新版本。">
                 <InfoRow label="当前版本" value={upd?.version || cfg.version || '(未知)'} />
                 <InfoRow label="安装形态" value={upd ? `${upd.kind}${upd.canInstall ? '' : '（不让自装）'}` : '—'} />
                 <InfoRow label="更新源" value={upd?.source || '—'} />
@@ -2109,8 +2105,7 @@ export function SettingsView() {
 
               <Card id="card-app-cache" title="缓存">
                 <p className="text-[11px] text-muted-foreground">
-                  跑出来的可再生数据(企业快照、源码镜像、查询落盘、断点存档)。它们与 config.json
-                  同目录,但性质相反 —— 清除只动这些,配置文件一律不碰。
+                  可随时清理的缓存：企业快照、源码镜像、查询结果、断点存档。清缓存不会动配置文件。
                 </p>
                 <InfoRow label="缓存目录" value={status?.cache?.dir || '—'} />
                 {(status?.cache?.dirs ?? []).map((d) => (
@@ -2133,10 +2128,8 @@ export function SettingsView() {
                   </Button>
                 </div>
                 <p className="text-[11px] text-muted-foreground">
-                  tt serve 启动时会自动清理超过{' '}
-                  {Math.max(1, Math.round((status?.cache?.maxAgeHours ?? 168) / 24))} 天的缓存
-                  —— 刻意不"启动即全清":查询落盘的那些文件正是"刚才那条查询的完整结果",
-                  启动就删会把上一条命令刚告诉你的东西删掉。
+                  超过{' '}
+                  {Math.max(1, Math.round((status?.cache?.maxAgeHours ?? 168) / 24))} 天的缓存会在启动时自动清理。
                 </p>
               </Card>
             </>
@@ -2167,10 +2160,9 @@ export function SettingsView() {
           <AlertDialogHeader>
             <AlertDialogTitle>删除环境「{delTarget !== null ? sshName(sshs[delTarget]) : ''}」?</AlertDialogTitle>
             <AlertDialogDescription>
-              该环境的 SSH 连接、登录区域、工作区与数据库账号配置将一并移除。
-              它名下**长期库里的录像也会一起删掉**（不可再生，删了就再也造不出来）。
-              点击「删除」后立即写入 config.json,不可撤销。
-              {'\n'}只是改了名字的话不会删录像：改名会把它们搬到新名字下。
+              该环境的 SSH 连接、登录区域、工作区与数据库账号会一并移除。{'\n'}
+              <b>该环境名下的调试录像也会一起删掉，删了无法恢复。</b>{'\n'}
+              只是改名不会删录像，录像会跟着搬到新名字下。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

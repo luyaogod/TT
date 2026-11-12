@@ -41,7 +41,7 @@ function NodeRow({ node, depth, toggle }: { node: TNode; depth: number; toggle: 
           className="block text-muted-foreground hover:text-foreground"
           style={{ paddingLeft: (depth + 1) * 14 + 4 }}
           onClick={(e) => { e.stopPropagation(); setShown((n) => n + PAGE) }}
-          title={`这一层共 ${total} 项，已铺 ${shown} 项 —— 一次全铺出来会让 DOM 卡住`}
+          title={`这一层共 ${total} 项，已显示 ${shown} 项`}
         >
           再显示 {Math.min(PAGE, total - shown)} 项（共 {total} 项）
         </button>

@@ -223,13 +223,13 @@ export function SessionPanel() {
           <div className="py-1">
             <div className="flex items-center gap-1.5 px-2 py-0.5">
               <span className="w-[52px] shrink-0 text-xs text-muted-foreground"
-                title="TOPENT(企业编号):T100 运行时的企业环境,作业运行与数据库连接以此为准">TOPENT</span>
+                title="企业编号（ENT）">TOPENT</span>
               <Input value={ent} disabled={entLocked}
                 onChange={(e) => setEnt(e.target.value)}
                 placeholder="必填,如 99"
                 title={entLocked
                   ? '协作模式下企业编号归 AI(它会直接改会话的企业编号);要自己填请先切回纯人工模式'
-                  : '企业编号(ENT):决定这次连哪个企业/账号。它随「切换/重启会话」带给后端,在登录后 export 到宿主 shell;留空不放行 —— 空着连会沿用机器登录默认,容易连错企业'}
+                  : '企业编号（ENT）：决定这次连哪个企业，必填'}
                 className="h-6 min-w-0 flex-1 px-1.5 font-mono text-xs" />
             </div>
           </div>
@@ -286,7 +286,7 @@ export function SessionPanel() {
                     // busy 时两个按钮都置灰（`disabled:pointer-events-none` → 灰按钮自己弹不出 tooltip），
                     // 所以**把原因写在包着它的这一层**上：否则"点了没反应"连句解释都没有。
                     <span className={`flex shrink-0 items-center gap-0.5 ${needEnt ? 'opacity-60' : 'opacity-70 group-hover:opacity-100'}`}
-                      title={busy ? `上一个会话操作还没回来（${busy}）—— 两个按钮先置灰，等它落定；若一直不动，看服务端日志` : undefined}>
+                      title={busy ? `上一个操作还没回来（${busy}），请稍候` : undefined}>
                       <button
                         title={needEnt ? '请先填 TOPENT(企业编号)才能重启会话' : '重启会话(断开重连同环境)'}
                         disabled={!!busy || needEnt}
