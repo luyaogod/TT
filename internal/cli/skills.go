@@ -24,13 +24,16 @@ import (
 )
 
 func newSkillsCmd() *cobra.Command {
-	var project string
+	var (
+		project string
+		global  bool
+	)
 	cmd := &cobra.Command{
 		Use:   "skills",
-		Short: "把技能分发到项目里的 AI 工具目录（.agents / DSH / WorkBuddy / Claude / Codex）",
-		Long: `把 TT 的技能分发到项目里的五个 AI 工具目录。
+		Short: "把技能分发到 AI 工具目录（项目级或全局）",
+		Long: `把 TT 的技能分发到五个 AI 工具目录：默认落在当前项目，加 --global 落在用户目录。
 
-平台（目录相对项目根）：
+平台（目录相对项目根 / 用户目录）：
 
   agents      .agents/skills           跨客户端公约数
   dsh         .dsh/skills              DeepSeek Harness
@@ -41,13 +44,15 @@ func newSkillsCmd() *cobra.Command {
 同步是**覆盖更新**：勾选的技能直接覆盖同名目录；取消勾选的（清单里记过的）删除。
 不做版本检测，不比较内容，也不需要 --force。
 
-清单在 <项目>/.agents/.tt-manifest.json，只记“哪个平台装了哪些技能”。
+清单只记“哪个平台装了哪些技能”，落在对应范围的 .agents/.tt-manifest.json：
+项目级在 <项目>/.agents/.tt-manifest.json，全局在 <用户目录>/.agents/.tt-manifest.json。
 `,
 		Example: `  tt skills list
   tt skills deploy --all
   tt skills deploy --agent claude --agent codex
+  tt skills deploy --global --agent claude
   tt skills deploy --agent dsh --skill tt-erp-read --dry-run
-  tt skills remove --agent claude --yes`,
+  tt skills remove --global --agent claude --yes`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
@@ -57,7 +62,8 @@ func newSkillsCmd() *cobra.Command {
 		},
 	}
 	cmd.PersistentFlags().StringVar(&project, "project", "", "项目目录（默认当前目录）")
-	cmd.AddCommand(newSkillsListCmd(&project), newSkillsDeployCmd(&project), newSkillsRemoveCmd(&project))
+	cmd.PersistentFlags().BoolVar(&global, "global", false, "操作用户目录（全局），而不是当前项目")
+	cmd.AddCommand(newSkillsListCmd(&project, &global), newSkillsDeployCmd(&project, &global), newSkillsRemoveCmd(&project, &global))
 	return cmd
 }
 
@@ -65,14 +71,14 @@ func newSkillsCmd() *cobra.Command {
 // list
 //---------------------------------------------------------------------------
 
-func newSkillsListCmd(project *string) *cobra.Command {
+func newSkillsListCmd(project *string, global *bool) *cobra.Command {
 	var brief bool
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "看技能源、五个平台的检测与已分发情况",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			proj, err := resolveProjectDir(*project)
+			base, scope, err := resolveSkillsBase(*project, *global)
 			if err != nil {
 				return err
 			}
@@ -80,7 +86,7 @@ func newSkillsListCmd(project *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			m, _, err := skill.LoadManifest(proj)
+			m, _, err := skill.LoadManifest(base)
 			if err != nil {
 				return err
 			}
@@ -89,14 +95,14 @@ func newSkillsListCmd(project *string) *cobra.Command {
 			for _, t := range skill.Targets {
 				targets = append(targets, skillListTarget{
 					ID: t.ID, Name: t.Name, Dir: t.Dir,
-					Detected: t.Detected(proj), Skills: m.Skills(t.ID),
+					Detected: t.Detected(base), Skills: m.Skills(t.ID),
 				})
 			}
 
 			if common.IsJSON() {
 				if brief {
 					return common.PrintJSON(map[string]any{
-						"ok": true, "project": proj,
+						"ok": true, "scope": scope, "project": base,
 						"skills":  skillNames(plan.Skills),
 						"targets": targets,
 					})
@@ -114,11 +120,11 @@ func newSkillsListCmd(project *string) *cobra.Command {
 					})
 				}
 				return common.PrintJSON(map[string]any{
-					"ok": true, "project": proj, "skills": rows, "targets": targets, "warnings": plan.Warnings,
+					"ok": true, "scope": scope, "project": base, "skills": rows, "targets": targets, "warnings": plan.Warnings,
 				})
 			}
 
-			fmt.Printf("项目 %s\n", proj)
+			fmt.Printf("%s %s\n", scopeLabel(scope), base)
 			if brief {
 				fmt.Printf("技能 %d 个：%s\n", len(plan.Skills), strings.Join(skillNames(plan.Skills), "、"))
 			} else {
@@ -149,7 +155,7 @@ func newSkillsListCmd(project *string) *cobra.Command {
 // deploy
 //---------------------------------------------------------------------------
 
-func newSkillsDeployCmd(project *string) *cobra.Command {
+func newSkillsDeployCmd(project *string, global *bool) *cobra.Command {
 	var (
 		all    bool
 		agents []string
@@ -173,7 +179,7 @@ func newSkillsDeployCmd(project *string) *cobra.Command {
 			if all && len(agents) > 0 {
 				return output.Errorf("USAGE", 2, "--all 与 --agent 只能给一个")
 			}
-			proj, err := resolveProjectDir(*project)
+			base, scope, err := resolveSkillsBase(*project, *global)
 			if err != nil {
 				return err
 			}
@@ -188,11 +194,11 @@ func newSkillsDeployCmd(project *string) *cobra.Command {
 			if len(names) == 0 {
 				return output.Errorf("USAGE", 2, "没有可用技能")
 			}
-			targets, err := pickTargets(proj, all, agents)
+			targets, err := pickTargets(base, all, agents)
 			if err != nil {
 				return err
 			}
-			req := skill.DeployRequest{Project: proj, DryRun: dryRun}
+			req := skill.DeployRequest{Project: base, DryRun: dryRun}
 			for _, t := range targets {
 				req.Targets = append(req.Targets, skill.DeployTarget{ID: t.ID, Skills: names})
 			}
@@ -200,7 +206,7 @@ func newSkillsDeployCmd(project *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return printDeployReport(rep)
+			return printDeployReport(rep, scope)
 		},
 	}
 	cmd.Flags().BoolVar(&all, "all", false, "五个平台全部写入（含未检测，会建目录）")
@@ -214,7 +220,7 @@ func newSkillsDeployCmd(project *string) *cobra.Command {
 // remove
 //---------------------------------------------------------------------------
 
-func newSkillsRemoveCmd(project *string) *cobra.Command {
+func newSkillsRemoveCmd(project *string, global *bool) *cobra.Command {
 	var (
 		agents []string
 		yes    bool
@@ -225,7 +231,7 @@ func newSkillsRemoveCmd(project *string) *cobra.Command {
 		Short: "删除清单里记录的技能目录（只删 TT 装的）",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			proj, err := resolveProjectDir(*project)
+			base, scope, err := resolveSkillsBase(*project, *global)
 			if err != nil {
 				return err
 			}
@@ -233,14 +239,14 @@ func newSkillsRemoveCmd(project *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			targets, err := pickTargetsForRemove(proj, agents)
+			targets, err := pickTargetsForRemove(agents)
 			if err != nil {
 				return err
 			}
 			if !dryRun && !yes {
 				return output.Errorf("USAGE", 2, "删除要加 --yes（先加 --dry-run 看一眼会删什么）")
 			}
-			req := skill.DeployRequest{Project: proj, DryRun: dryRun}
+			req := skill.DeployRequest{Project: base, DryRun: dryRun}
 			for _, t := range targets {
 				req.Targets = append(req.Targets, skill.DeployTarget{ID: t.ID, Skills: nil})
 			}
@@ -248,7 +254,7 @@ func newSkillsRemoveCmd(project *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return printDeployReport(rep)
+			return printDeployReport(rep, scope)
 		},
 	}
 	cmd.Flags().StringArrayVar(&agents, "agent", nil, "只清这些平台（默认全部）")
@@ -320,6 +326,42 @@ func resolveProjectDir(raw string) (string, error) {
 	return abs, nil
 }
 
+// homeDir 可替换（测试用）：否则 --global 的用例会写到开发者真实的用户目录。
+var homeDir = os.UserHomeDir
+
+// resolveSkillsBase 把 --project / --global 解析成一个分发根目录与范围名。
+//
+// 全局就是“根目录换成用户目录”，平台相对目录不变 —— 例如 Claude 的全局落点是
+// <用户目录>/.claude/skills。清单也跟着根目录走：<用户目录>/.agents/.tt-manifest.json。
+func resolveSkillsBase(project string, global bool) (base, scope string, err error) {
+	if global {
+		if strings.TrimSpace(project) != "" {
+			return "", "", output.Errorf("USAGE", 2, "--global 与 --project 只能给一个")
+		}
+		home, herr := homeDir()
+		if herr != nil {
+			return "", "", fmt.Errorf("取不到用户目录: %w", herr)
+		}
+		st, serr := os.Stat(home)
+		if serr != nil || !st.IsDir() {
+			return "", "", output.Errorf("NOT_FOUND", 4, "用户目录不存在: %s", home)
+		}
+		return home, "global", nil
+	}
+	base, err = resolveProjectDir(project)
+	if err != nil {
+		return "", "", err
+	}
+	return base, "project", nil
+}
+
+func scopeLabel(scope string) string {
+	if scope == "global" {
+		return "全局"
+	}
+	return "项目"
+}
+
 func pickSkillNames(plan skill.Plan, want []string) ([]string, error) {
 	if len(want) == 0 {
 		out := make([]string, 0, len(plan.Skills))
@@ -376,7 +418,7 @@ func pickTargets(proj string, all bool, agents []string) ([]skill.Target, error)
 	return out, nil
 }
 
-func pickTargetsForRemove(_ string, agents []string) ([]skill.Target, error) {
+func pickTargetsForRemove(agents []string) ([]skill.Target, error) {
 	if len(agents) == 0 {
 		return append([]skill.Target(nil), skill.Targets...), nil
 	}
@@ -417,14 +459,15 @@ func originLabel(o skill.Origin) string {
 	return "第三方"
 }
 
-func printDeployReport(rep skill.DeployReport) error {
+func printDeployReport(rep skill.DeployReport, scope string) error {
 	if common.IsJSON() {
 		return common.PrintJSON(map[string]any{
-			"ok": true, "project": rep.Project, "dryRun": rep.DryRun,
+			"ok": true, "scope": scope, "project": rep.Project, "dryRun": rep.DryRun,
 			"written": rep.Written, "removed": rep.Removed,
 			"skipped": rep.Skipped, "warnings": rep.Warnings,
 		})
 	}
+	fmt.Printf("%s %s\n", scopeLabel(scope), rep.Project)
 	if rep.DryRun {
 		fmt.Println("（试算，未写入任何文件）")
 	}

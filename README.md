@@ -60,14 +60,17 @@ tt serve
 
 ```bash
 tt skills list                  # 看技能源、五个平台的检测与已分发情况
-tt skills deploy --all          # 覆盖写入全部五个平台
+tt skills deploy --all          # 覆盖写入全部五个平台（当前项目）
+tt skills deploy --global --agent claude   # 装到用户目录，所有项目共用
 tt skills deploy --agent claude --agent codex
 tt skills remove --agent claude --yes
 ```
 
-平台目录（相对项目根）：`.agents/skills`、`.dsh/skills`、`.codebuddy/skills`、
-`.claude/skills`、`.codex/skills`。同步是**覆盖更新**，不做版本检测；清单在
-`<项目>/.agents/.tt-manifest.json`。设置页「技能 → 分发」是同一份实现的图形面。
+平台目录（相对根目录）：`.agents/skills`、`.dsh/skills`、`.codebuddy/skills`、
+`.claude/skills`、`.codex/skills`。默认根是当前项目；`--global` 或设置页「全局」把根换成
+用户目录（`~/.agents/skills` 等）。同步是**覆盖更新**，不做版本检测；清单在
+`<根>/.agents/.tt-manifest.json`（项目级或用户目录各一份）。设置页「技能 → 分发」是同一份
+实现的图形面。
 
 ## TT SKILL HUB
 

@@ -474,6 +474,7 @@ export interface SkillTargetState {
 
 export interface SkillsOverview {
   ok: boolean
+  scope: 'project' | 'global'
   project: string
   officialDir?: string
   officialError?: string
@@ -491,6 +492,7 @@ export interface SkillDeployAction {
 
 export interface SkillDeployResult {
   ok: boolean
+  scope: 'project' | 'global'
   project: string
   dryRun: boolean
   written: SkillDeployAction[]
@@ -701,14 +703,20 @@ export const api = {
   // 只从登记表里去掉,不碰磁盘。removed=false 表示本来就没这条(幂等)。
   skillsRemove: (path: string) =>
     req<{ ok: boolean; removed: boolean }>('/api/skills/remove', { method: 'POST', body: JSON.stringify({ path }) }),
-  // 分发页：项目 + 五平台矩阵 + 清单。
-  skillsOverview: (project?: string) =>
-    req<SkillsOverview>('/api/skills/overview' + (project ? `?project=${encodeURIComponent(project)}` : '')),
+  // 分发页：范围（项目 / 全局）+ 平台矩阵 + 清单。
+  skillsOverview: (project?: string, scope?: 'project' | 'global') => {
+    const q = new URLSearchParams()
+    if (scope && scope !== 'project') q.set('scope', scope)
+    if (project) q.set('project', project)
+    const tail = q.toString()
+    return req<SkillsOverview>('/api/skills/overview' + (tail ? '?' + tail : ''))
+  },
   // 期望态同步：targets 是完整的（页面一次发五个），没出现的平台不动。
-  skillsDeploy: (project: string, targets: { id: string; skills: string[] }[], dryRun = false) =>
+  skillsDeploy: (project: string, targets: { id: string; skills: string[] }[],
+    scope: 'project' | 'global' = 'project', dryRun = false) =>
     req<SkillDeployResult>('/api/skills/deploy', {
       method: 'POST',
-      body: JSON.stringify({ project, targets, dryRun }),
+      body: JSON.stringify({ project, targets, scope, dryRun }),
     }),
 
 }

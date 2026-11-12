@@ -6,10 +6,10 @@ import (
 	"strings"
 )
 
-// Target 是一个 agent 工具的**项目级**技能落点。
+// Target 是一个 agent 工具的技能落点（项目级与全局共用这张表）。
 //
-// 表驱动：加一个平台只加一行，前端、CLI、同步逻辑共用这张表。目录一律相对项目根，
-// 不写用户目录 —— 本功能只做项目级分发（全局范围见计划里的非目标）。
+// 表驱动：加一个平台只加一行，前端、CLI、同步逻辑共用这张表。目录一律相对**根目录**：
+// 项目级时根是项目目录，--global / 设置页「全局」时根是用户目录（如 ~/.claude/skills）。
 type Target struct {
 	ID      string   `json:"id"`
 	Name    string   `json:"name"`

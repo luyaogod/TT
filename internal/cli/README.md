@@ -90,7 +90,7 @@ tt outline    0 成功 / 2 用法或文件名歧义 / 4 文件不存在
 | `tt config` | 位置 / 查看 / 读写 / 迁移 / 校验；`--raw` 不过滤口令 |
 | `tt cache` | 配置目录下**可再生**中间数据的查看与清理；"哪些算缓存"由配置层定义一次 |
 | `tt install` | 官方技能 + 登记的第三方技能装到**一个**目录（底层；`tt update` 刷新用它），或把 tt 加进用户 PATH |
-| `tt skills` | 分发管理面：五个平台（`.agents` / DSH / WorkBuddy / Claude / Codex）、清单、覆盖与删除（实现见 [../skill](../skill/README.md)） |
+| `tt skills` | 分发管理面：五个平台（`.agents` / DSH / WorkBuddy / Claude / Codex）、项目级或 `--global`、清单、覆盖与删除（实现见 [../skill](../skill/README.md)） |
 | `tt version` | 版本；本地构建时回落到构建信息里的修订号（回答"这份二进制对应哪次提交"） |
 
 ## 判据

@@ -42,11 +42,11 @@ type matrixTarget struct {
 	Skills   []string `json:"skills"`
 }
 
-// hSkillsOverview 返回某个项目的技能源、平台检测与清单。
+// hSkillsOverview 返回某个范围（项目 / 用户目录）的技能源、平台检测与清单。
 //
-// 不写盘、不联网。项目默认取服务进程的 cwd（设置页会把它显示出来，允许更换）。
+// 不写盘、不联网。项目默认取服务进程的 cwd；scope=global 时根目录换成用户目录。
 func (s *Server) hSkillsOverview(w http.ResponseWriter, r *http.Request) {
-	project, err := resolveProject(r.URL.Query().Get("project"))
+	base, scope, err := resolveSkillsBase(r.URL.Query().Get("project"), r.URL.Query().Get("scope"))
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
@@ -64,7 +64,7 @@ func (s *Server) hSkillsOverview(w http.ResponseWriter, r *http.Request) {
 
 	rows, officialDir, officialErr := skillMatrix(root)
 
-	m, exists, err := skill.LoadManifest(project)
+	m, exists, err := skill.LoadManifest(base)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -75,14 +75,15 @@ func (s *Server) hSkillsOverview(w http.ResponseWriter, r *http.Request) {
 			ID:       t.ID,
 			Name:     t.Name,
 			Dir:      t.Dir,
-			Detected: t.Detected(project),
+			Detected: t.Detected(base),
 			Skills:   m.Skills(t.ID),
 		})
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":            true,
-		"project":       project,
+		"scope":         scope,
+		"project":       base,
 		"officialDir":   officialDir,
 		"officialError": officialErr,
 		"manifest":      exists,
@@ -94,8 +95,10 @@ func (s *Server) hSkillsOverview(w http.ResponseWriter, r *http.Request) {
 // hSkillsDeploy 按页面提交的期望态同步多个平台。
 //
 // 请求里的 targets 是完整的期望态；没出现的平台不动。dryRun 只计算不写盘。
+// scope=global 时根目录是用户目录，清单在 <用户目录>/.agents/.tt-manifest.json。
 func (s *Server) hSkillsDeploy(w http.ResponseWriter, r *http.Request) {
 	var req struct {
+		Scope   string               `json:"scope"`
 		Project string               `json:"project"`
 		Targets []skill.DeployTarget `json:"targets"`
 		DryRun  bool                 `json:"dryRun,omitempty"`
@@ -104,7 +107,7 @@ func (s *Server) hSkillsDeploy(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	project, err := resolveProject(req.Project)
+	base, scope, err := resolveSkillsBase(req.Project, req.Scope)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
@@ -130,7 +133,7 @@ func (s *Server) hSkillsDeploy(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	rep, err := skill.Deploy(plan, skill.DeployRequest{Project: project, Targets: req.Targets, DryRun: req.DryRun})
+	rep, err := skill.Deploy(plan, skill.DeployRequest{Project: base, Targets: req.Targets, DryRun: req.DryRun})
 	if err != nil {
 		// 走到这里的错误基本是请求本身（未知平台/技能、项目不存在、清单坏了）。
 		writeErr(w, http.StatusBadRequest, err)
@@ -138,6 +141,7 @@ func (s *Server) hSkillsDeploy(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":       true,
+		"scope":    scope,
 		"project":  rep.Project,
 		"dryRun":   rep.DryRun,
 		"written":  rep.Written,
@@ -232,4 +236,34 @@ func resolveProject(raw string) (string, error) {
 		return "", fmt.Errorf("项目路径不是目录: %s", abs)
 	}
 	return abs, nil
+}
+
+// userHomeDir 可替换（测试用）：--scope=global 的用例不该写开发者真实的用户目录。
+var userHomeDir = os.UserHomeDir
+
+// resolveSkillsBase 把 project / scope 解析成“分发根目录 + 范围名”。
+//
+// 全局就是根目录换成用户目录，平台相对目录不变：Claude 的全局落点是
+// <用户目录>/.claude/skills，清单在 <用户目录>/.agents/.tt-manifest.json。
+func resolveSkillsBase(project, scope string) (base, kind string, err error) {
+	switch strings.ToLower(strings.TrimSpace(scope)) {
+	case "", "project":
+		base, err = resolveProject(project)
+		return base, "project", err
+	case "global":
+		if strings.TrimSpace(project) != "" {
+			return "", "", fmt.Errorf("scope=global 时不能再给 project")
+		}
+		home, herr := userHomeDir()
+		if herr != nil {
+			return "", "", fmt.Errorf("取不到用户目录: %w", herr)
+		}
+		st, serr := os.Stat(home)
+		if serr != nil || !st.IsDir() {
+			return "", "", fmt.Errorf("用户目录不存在: %s", home)
+		}
+		return home, "global", nil
+	default:
+		return "", "", fmt.Errorf("不认识的 scope: %s（project / global）", scope)
+	}
 }

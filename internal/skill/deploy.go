@@ -8,7 +8,10 @@ import (
 	"strings"
 )
 
-// DeployRequest 是一次分发请求：项目 + 期望态（每个平台要哪些技能）。
+// DeployRequest 是一次分发请求：根目录 + 期望态（每个平台要哪些技能）。
+//
+// Project 是**分发根目录**：项目级时是项目路径，全局时是用户目录（见调用方）。
+// 字段名沿用 Project 是为了不改已有调用方；语义是“根”，不是“必须是项目”。
 //
 // `Targets` 是**完整的期望态**：出现的平台按这里同步，没出现的平台一概不碰。
 // 设置页一次发五个平台；CLI 只发它点名的那些。
@@ -62,17 +65,17 @@ func Deploy(plan Plan, req DeployRequest) (DeployReport, error) {
 	}
 	project, err := filepath.Abs(req.Project)
 	if err != nil {
-		return rep, fmt.Errorf("解析项目目录失败 %s: %w", req.Project, err)
+		return rep, fmt.Errorf("解析根目录失败 %s: %w", req.Project, err)
 	}
 	st, err := os.Stat(project)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return rep, fmt.Errorf("项目目录不存在: %s", project)
+			return rep, fmt.Errorf("根目录不存在: %s", project)
 		}
-		return rep, fmt.Errorf("读项目目录失败 %s: %w", project, err)
+		return rep, fmt.Errorf("读根目录失败 %s: %w", project, err)
 	}
 	if !st.IsDir() {
-		return rep, fmt.Errorf("项目路径不是目录: %s", project)
+		return rep, fmt.Errorf("根目录不是目录: %s", project)
 	}
 	rep.Project = project
 	rep.DryRun = req.DryRun

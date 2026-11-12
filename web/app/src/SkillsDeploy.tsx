@@ -19,6 +19,9 @@ import { useToast } from './toast'
 import { cn } from '../../shared/utils'
 
 const PROJECT_KEY = 'tt.skills.project'
+const SCOPE_KEY = 'tt.skills.scope'
+
+type Scope = 'project' | 'global'
 
 const key = (target: string, skill: string) => target + '::' + skill
 
@@ -28,6 +31,14 @@ function savedProject(): string {
 
 function rememberProject(project: string) {
   try { localStorage.setItem(PROJECT_KEY, project) } catch { /* 隐私模式/禁用存储：不影响本次 */ }
+}
+
+function savedScope(): Scope {
+  try { return localStorage.getItem(SCOPE_KEY) === 'global' ? 'global' : 'project' } catch { return 'project' }
+}
+
+function rememberScope(scope: Scope) {
+  try { localStorage.setItem(SCOPE_KEY, scope) } catch { /* 忽略 */ }
 }
 
 /** 首次进入的勾选：有清单按清单；没有清单就替用户把 `.agents` + 已检测平台全勾上。 */
@@ -58,15 +69,19 @@ export function SkillsDeploy() {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [picking, setPicking] = useState(false)
+  const [scope, setScope] = useState<Scope>(savedScope)
   const [confirm, setConfirm] = useState<{ removals: { target: string; skill: string }[]; targets: { id: string; skills: string[] }[] } | null>(null)
 
-  const load = useCallback(async (project?: string) => {
+  const load = useCallback(async (project?: string, wantScope?: Scope) => {
+    const nextScope = wantScope ?? savedScope()
     setLoading(true)
     setErr('')
     try {
-      const r = await api.skillsOverview(project)
+      const r = await api.skillsOverview(project, nextScope)
       setData(r)
-      rememberProject(r.project)
+      setScope(r.scope)
+      rememberScope(r.scope)
+      if (r.scope === 'project') rememberProject(r.project)
       setPicked(initialPicked(r))
     } catch (e: any) {
       setErr(e?.message || String(e))
@@ -75,7 +90,7 @@ export function SkillsDeploy() {
     }
   }, [])
 
-  useEffect(() => { void load(savedProject() || undefined) }, [load])
+  useEffect(() => { void load(savedProject() || undefined, savedScope()) }, [load])
 
   const avail = useMemo(() => (data?.skills ?? []).filter((s) => s.available), [data])
 
@@ -89,13 +104,19 @@ export function SkillsDeploy() {
           <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span className="break-all">{err}</span>
         </div>
-        <Button size="sm" variant="outline" onClick={() => void load(savedProject() || undefined)}>
+        <Button size="sm" variant="outline" onClick={() => void load(savedProject() || undefined, scope)}>
           <RefreshCw className="h-3.5 w-3.5" />重试
         </Button>
         <Button size="sm" variant="ghost" onClick={() => {
+          if (scope === 'global') {
+            rememberScope('project')
+            setScope('project')
+            void load(savedProject() || undefined, 'project')
+            return
+          }
           try { localStorage.removeItem(PROJECT_KEY) } catch { /* 忽略 */ }
-          void load()
-        }}>用当前目录</Button>
+          void load(undefined, 'project')
+        }}>{scope === 'global' ? '切回本项目' : '用当前目录'}</Button>
       </div>
     )
   }
@@ -142,11 +163,11 @@ export function SkillsDeploy() {
     if (busy) return
     setBusy(true)
     try {
-      const r: SkillDeployResult = await api.skillsDeploy(data.project, targets)
+      const r: SkillDeployResult = await api.skillsDeploy(data.project, targets, data.scope)
       const files = r.written.reduce((n, w) => n + (w.files?.length || 0), 0)
       const removed = r.removed.length
       toast.success(`已同步：写入 ${files} 个文件` + (removed ? `，删除 ${removed} 个` : ''))
-      await load(data.project)
+      await load(data.project, data.scope)
     } catch (e: any) {
       toast.error(e?.message || String(e))
     } finally {
@@ -174,10 +195,30 @@ export function SkillsDeploy() {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[11px] text-muted-foreground">项目</span>
+        <div className="inline-flex items-center gap-0.5 rounded-ui border border-border p-0.5">
+          {(['project', 'global'] as const).map((s) => (
+            <button key={s} type="button" disabled={busy || loading}
+              title={s === 'global' ? '用户目录：所有项目共用' : '当前项目'}
+              onClick={() => {
+                if (busy || s === scope) return
+                setScope(s)
+                rememberScope(s)
+                setConfirm(null)
+                void load(s === 'global' ? undefined : (savedProject() || undefined), s)
+              }}
+              className={cn(
+                'rounded-[4px] px-2.5 py-0.5 text-[11px] transition-colors disabled:opacity-50',
+                scope === s ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground',
+              )}>
+              {s === 'project' ? '本项目' : '全局'}
+            </button>
+          ))}
+        </div>
         <code className="max-w-[560px] truncate rounded-ui border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px]"
           title={data.project}>{data.project}</code>
-        <Button size="sm" variant="outline" disabled={busy} onClick={() => setPicking(true)}>更换</Button>
+        {scope === 'project' && (
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => setPicking(true)}>更换</Button>
+        )}
       </div>
 
       {data.officialError && (
@@ -251,7 +292,7 @@ export function SkillsDeploy() {
           已选 {selTargets} 个平台 · {selSkills} 个技能
           {removals.length > 0 && <span className="ml-2 text-red-600 dark:text-red-400">将删除 {removals.length} 个</span>}
         </span>
-        <Button size="sm" onClick={sync} disabled={busy || !!data.officialError || (selTargets === 0 && removals.length === 0)}>
+        <Button size="sm" onClick={sync} disabled={busy || loading || !!data.officialError || (selTargets === 0 && removals.length === 0)}>
           {busy ? '同步中…' : '同步'}
         </Button>
       </div>

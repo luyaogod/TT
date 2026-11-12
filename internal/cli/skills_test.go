@@ -178,6 +178,50 @@ func TestSkillsListBriefJSON(t *testing.T) {
 	}
 }
 
+func TestSkillsGlobal(t *testing.T) {
+	withSkillSource(t, "alpha")
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := homeDir
+	homeDir = func() (string, error) { return home, nil }
+	t.Cleanup(func() { homeDir = old })
+	writeConfig(t, `{"schemaVersion":4}`)
+
+	code, out := runSkills(t, "deploy", "--global", "--agent", "claude")
+	if code != 0 {
+		t.Fatalf("全局 deploy 退出码 = %d: %s", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude", "skills", "alpha", "SKILL.md")); err != nil {
+		t.Error("全局落点该是 <home>/.claude/skills")
+	}
+	if _, err := os.Stat(filepath.Join(home, ".agents", ".tt-manifest.json")); err != nil {
+		t.Error("全局清单该在 <home>/.agents/.tt-manifest.json")
+	}
+
+	code, out = runSkills(t, "list", "--global")
+	if code != 0 {
+		t.Fatalf("全局 list 退出码 = %d: %s", code, out)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("list 该是 JSON: %v", err)
+	}
+	if got["scope"] != "global" || got["project"] != home {
+		t.Errorf("全局 list = scope %v project %v", got["scope"], got["project"])
+	}
+}
+
+func TestSkillsGlobalConflictsWithProject(t *testing.T) {
+	withSkillSource(t, "alpha")
+	proj := t.TempDir()
+	writeConfig(t, `{"schemaVersion":4}`)
+	if code, out := runSkills(t, "list", "--global", "--project", proj); code == 0 {
+		t.Errorf("--global 与 --project 同给该失败: %s", out)
+	}
+}
+
 func TestSkillsBadInput(t *testing.T) {
 	withSkillSource(t, "alpha")
 	proj := t.TempDir()

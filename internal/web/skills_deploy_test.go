@@ -130,6 +130,52 @@ func TestSkillsDeployBadRequest(t *testing.T) {
 	}
 }
 
+func TestSkillsGlobalScope(t *testing.T) {
+	withOfficialSkills(t, "tt-erp-read")
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := userHomeDir
+	userHomeDir = func() (string, error) { return home, nil }
+	t.Cleanup(func() { userHomeDir = old })
+	s, _ := newTestServer(t, `{"schemaVersion":4}`)
+
+	rec, out := doJSON(t, s, "GET", "/api/skills/overview?scope=global", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("全局 overview = %d: %s", rec.Code, rec.Body.String())
+	}
+	if out["scope"] != "global" || out["project"] != home {
+		t.Errorf("全局 overview = scope %v project %v", out["scope"], out["project"])
+	}
+
+	rec, out = doJSON(t, s, "POST", "/api/skills/deploy", map[string]any{
+		"scope":   "global",
+		"targets": []map[string]any{{"id": "claude", "skills": []string{"tt-erp-read"}}},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("全局 deploy = %d: %s", rec.Code, rec.Body.String())
+	}
+	if out["scope"] != "global" {
+		t.Errorf("deploy 响应 scope = %v", out["scope"])
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude", "skills", "tt-erp-read", "SKILL.md")); err != nil {
+		t.Error("全局该写到 <home>/.claude/skills")
+	}
+	if _, err := os.Stat(filepath.Join(home, ".agents", ".tt-manifest.json")); err != nil {
+		t.Error("全局清单该在 <home>/.agents")
+	}
+
+	// 同时给 project 与 scope=global 是用法错。
+	rec, _ = doJSON(t, s, "POST", "/api/skills/deploy", map[string]any{
+		"scope": "global", "project": home,
+		"targets": []map[string]any{{"id": "claude"}},
+	})
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("scope=global + project 该 400，得到 %d", rec.Code)
+	}
+}
+
 func TestSkillsOverviewBadProject(t *testing.T) {
 	s, _ := newTestServer(t, `{"schemaVersion":4}`)
 	rec, _ := doJSON(t, s, "GET", "/api/skills/overview?project="+url.QueryEscape(filepath.Join(t.TempDir(), "gone")), nil)

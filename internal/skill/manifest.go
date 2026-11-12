@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-// ManifestRel 是项目内清单的落点。
+// ManifestRel 是清单的落点（相对分发根目录：项目目录或用户目录）。
 //
 // 放在 `.agents/` 而不是项目根：它描述的就是这棵树的部署事实，跟 README/AGENTS.md
 // 混在根目录只会更难找。文件名刻意不叫 `.tt-skills.json` —— 配置目录里已经有一个同名
