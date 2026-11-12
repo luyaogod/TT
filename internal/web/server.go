@@ -178,11 +178,14 @@ func (s *Server) routes() {
 	m.HandleFunc("DELETE /api/install", s.hInstallRemove)
 
 	// 技能：官方那一棵随包走，第三方靠设置页登记（config.json 的 skills.externals）。
-	// 这里只有**登记**（查/增/删）；**装到哪**是命令行的事（`tt install skills`）——
-	// 前端不再提供第二条安装入口，也就没有“按请求里的路径往磁盘写”这个面。
+	// 「技能库」只登记（查/增/删）；「分发」按 internal/skill 的五个平台表把技能覆盖到
+	// 项目目录。目标由平台表推导，前端不能传任意路径 —— 分发是同一个入口的第二个视图，
+	// 不是第二条安装路径。
 	m.HandleFunc("GET /api/skills", s.hSkillsGet)
 	m.HandleFunc("POST /api/skills/add", s.hSkillsAdd)
 	m.HandleFunc("POST /api/skills/remove", s.hSkillsRemove)
+	m.HandleFunc("GET /api/skills/overview", s.hSkillsOverview)
+	m.HandleFunc("POST /api/skills/deploy", s.hSkillsDeploy)
 
 	// tt 自身的更新（查/装）。与 install 同一层：应用级动作，不属于任何子系统。
 	m.HandleFunc("GET /api/update", s.hUpdateGet)

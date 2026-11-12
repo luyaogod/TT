@@ -56,7 +56,7 @@ func TestResolveAutoTarget(t *testing.T) {
 	}{
 		{"都没有 → 跨客户端公约数", nil, filepath.Join(".agents", "skills")},
 		{"只有 .claude → 用它", []string{".claude"}, filepath.Join(".claude", "skills")},
-		{"只有 .cursor → 用它", []string{".cursor"}, filepath.Join(".cursor", "skills")},
+		{"只有 .codex → 用它", []string{".codex"}, filepath.Join(".codex", "skills")},
 		{"两个都有 → .agents 优先（读它的 agent 最多）", []string{".claude", ".agents"}, filepath.Join(".agents", "skills")},
 	}
 	for _, c := range cases {
@@ -84,7 +84,7 @@ func TestResolveAutoTarget(t *testing.T) {
 // --agent 的名字表与 --to/--agent 的互斥。
 func TestResolveSkillsTargetByAgent(t *testing.T) {
 	t.Chdir(t.TempDir())
-	for _, name := range []string{"agents", "universal", "claude-code", "claude", "copilot", "vscode", "cursor"} {
+	for _, name := range []string{"agents", "universal", "dsh", "deepseek", "workbuddy", "wb", "claude-code", "claude", "codex"} {
 		dst, why, err := resolveSkillsTarget("", name)
 		if err != nil {
 			t.Fatalf("--agent %s: %v", name, err)
@@ -99,7 +99,7 @@ func TestResolveSkillsTargetByAgent(t *testing.T) {
 	if _, _, err := resolveSkillsTarget("", "nope"); err == nil {
 		t.Error("不认识的 agent 名应报错（而不是静默装到某个默认位置）")
 	}
-	if _, _, err := resolveSkillsTarget(".x", "cursor"); err == nil {
+	if _, _, err := resolveSkillsTarget(".x", "codex"); err == nil {
 		t.Error("--to 与 --agent 同时给应报错")
 	}
 	// 不给就是默认：<当前目录>/.agents/skills

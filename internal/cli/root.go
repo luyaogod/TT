@@ -57,6 +57,7 @@ config.json、同一个本地 Web 服务（tt serve）。
                  （tt dev tzs <动词> --args '<JSON 对象>'），不是拼 XML
   tt interface … 前端画面：合成 .42f + .42s（页面 / 字段 / 中文标签）
   tt outline …   4GL 源码大纲：函数 / UI 块与行范围
+  tt skills …    技能分发：项目内五个 AI 工具目录（覆盖更新，不做版本检测）
   tt env / config / serve / install / update   环境、配置、本地服务、安装、自更新
 
 远程操作默认只读：服务器上的写只有 tzc 的三道闸门与 tzs 引擎动词；
@@ -122,6 +123,7 @@ func init() {
 	rootCmd.AddCommand(newCacheCmd())
 	rootCmd.AddCommand(newServeCmd())
 	rootCmd.AddCommand(newInstallCmd())
+	rootCmd.AddCommand(newSkillsCmd())
 	rootCmd.AddCommand(newVersionCmd())
 	rootCmd.AddCommand(newUpdateCmd())
 	// --at 的校验/落位：先于任何 RunE，且子命令自己的 --ent 还没被读。

@@ -41,6 +41,7 @@ var scopes = map[string]Scope{
 	"file mirror dir": Env, // 不带 --at=全局根；带 --at=该环境单独目录
 	// 本地目录/本地文件类：连环境都不需要
 	"dict spill": None,
+	"skills":     None, // 只操作项目目录与 <exe>/skills，不碰环境
 
 	// ---- 只连环境（<环境>）----
 	"debug wslogs": Env,

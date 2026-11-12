@@ -103,12 +103,14 @@ clone 下来的工作副本，要装的是它的内容，不是它的历史。�
 
   tt install skills --to auto             # 已有 agent 目录就用它，否则建 .agents/skills
   tt install skills --agent claude-code   # 装到 Claude Code 读的位置
-  tt install skills --agent agents        # 跨客户端公约数 .agents/skills
+  tt install skills --agent dsh           # 装到 DeepSeek Harness 的项目目录
 
 --agent 接受的名字：` + agentSkillNames() + `
 
---to auto 的探测顺序：.agents/skills 优先（读它的 agent 最多），其次 .claude/skills、
-.github/skills、.cursor/skills；当前目录一个都没有就新建 .agents/skills。
+--to auto 的探测顺序：.agents/skills 优先（读它的 agent 最多），其次 .dsh/skills、
+.codebuddy/skills、.claude/skills、.codex/skills；当前目录一个都没有就新建 .agents/skills。
+
+**要一次装到多个平台，用 tt skills deploy**（本次新增的管理面：平台表、清单、覆盖）。
 
 目标目录不存在就新建；已经存在就**追加**：同名的条目默认跳过（不覆盖目标里已有的技能，
 方便多个来源共用 .agents/skills），不冲突的技能照常加进去。要刷新同名条目（例如升级后
@@ -274,18 +276,18 @@ func (a agentSkillsTarget) Dir() string { return filepath.Join(a.Root, skillsDir
 //
 // **表里的顺序就是 --to auto 的探测顺序**：.agents/skills 排第一，因为它是跨客户端
 // 公约数（Agent Skills 规范点名的互操作路径，pi、Codex、Cursor、Gemini CLI、OpenCode、
-// Copilot 都扫它），装一次伺候的人最多。
-//
-// 只收路径真的不同的那几个 —— 路径相同的（Codex、Cline、Zed…）没有单列的必要。
+// Copilot 都扫它），装一次伺候的人最多。其余四个与 `tt skills` 的平台表一致。
 var agentSkillsDirs = []agentSkillsTarget{
 	{Name: "agents", Root: ".agents", Aliases: []string{"universal"},
 		Who: "跨客户端公约数：pi、Codex、Cursor、Gemini CLI、OpenCode、Copilot 都读它"},
+	{Name: "dsh", Root: ".dsh", Aliases: []string{"deepseek", "deepseek-harness"},
+		Who: "DeepSeek Harness"},
+	{Name: "workbuddy", Root: ".codebuddy", Aliases: []string{"wb", "work-buddy"},
+		Who: "WorkBuddy"},
 	{Name: "claude-code", Root: ".claude", Aliases: []string{"claude"},
 		Who: "Claude Code"},
-	{Name: "copilot", Root: ".github", Aliases: []string{"github-copilot", "vscode"},
-		Who: "GitHub Copilot / VS Code 的工作区技能"},
-	{Name: "cursor", Root: ".cursor",
-		Who: "Cursor 的专属目录（它也读 .agents/skills）"},
+	{Name: "codex", Root: ".codex", Aliases: []string{"codex-cli"},
+		Who: "Codex"},
 }
 
 // agentSkillNames 是 --agent 的全部合法名字（含别名），用于帮助与报错。
