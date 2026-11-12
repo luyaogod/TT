@@ -203,7 +203,7 @@ export function SkillsDeploy() {
                   </div>
                   <div className="mt-0.5 truncate font-mono text-[10px] font-normal text-muted-foreground" title={t.dir}>{t.dir}</div>
                   <button type="button" onClick={() => toggleColumn(t)} title="全选 / 清空"
-                    className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground">
+                    className="mt-1 flex w-full flex-col items-center gap-0.5 text-[10px] text-muted-foreground hover:text-foreground">
                     <CheckBox checked={tri(t)} />
                     <span>全选</span>
                   </button>
@@ -219,7 +219,6 @@ export function SkillsDeploy() {
                 <div className="px-2 py-1.5">
                   <div className="flex items-center gap-1.5">
                     <code className="truncate font-mono text-[11px] text-foreground" title={s.name}>{s.name}</code>
-                    <Badge tone={s.origin === 'official' ? 'blue' : 'gray'}>{s.origin === 'official' ? '官方' : '第三方'}</Badge>
                     {!s.available && <Badge tone="red">不可用</Badge>}
                   </div>
                   {!s.available && s.why && (
