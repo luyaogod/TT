@@ -203,9 +203,8 @@ export function SkillsDeploy() {
                   </div>
                   <div className="mt-0.5 truncate font-mono text-[10px] font-normal text-muted-foreground" title={t.dir}>{t.dir}</div>
                   <button type="button" onClick={() => toggleColumn(t)} title="全选 / 清空"
-                    className="mt-1 flex w-full flex-col items-center gap-0.5 text-[10px] text-muted-foreground hover:text-foreground">
+                    className="mt-1 flex w-full items-center justify-center text-muted-foreground hover:text-foreground">
                     <CheckBox checked={tri(t)} />
-                    <span>全选</span>
                   </button>
                 </div>
               </TableHead>
