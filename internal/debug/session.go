@@ -2833,10 +2833,20 @@ func (s *Session) onLine(ln string) {
 				// 两个限定条件都必要:只认**带箭头**的行(list 之类输出没有箭头),
 				// 且只认**放行类命令在飞**时(排除别的命令恰好带回一行源码)。
 				collect = &stopCollect{reason: "step"}
-			} else if reSource.MatchString(ln) {
+			} else if m := reSource.FindStringSubmatch(ln); m != nil {
 				// 其余源码块行(如 `-> 1532 DEFER INTERRUPT`):行内容可能含 INTERRUPT
 				// 这类关键字,必须在这里吃掉 —— 否则会落到下面被误判成人工中断标记。
 				// 这是原有行为,别删。
+				//
+				// 例外：放行类命令在飞时,不带箭头的源码行同样是**停站行**。
+				// 部分 Genero/T100 的 fgldb 发行版在 step/next 停下时只打源码窗、
+				// 不打 `->` 箭头。以前这里一律当噪音,于是 stopCollect 从不创建、
+				// onStop 不被调用 —— 会话永久停在 running(之后 exec 全被 400 拒绝,
+				// interrupt 也救不回来)。见 runstate_test.go:TestStopOnArrowlessSourceLine。
+				if pending != nil && IsResumeCmd(pending.cmd) {
+					line, _ := strconv.Atoi(m[2])
+					collect = &stopCollect{reason: "step", line: line}
+				}
 			} else if reInterrupt.MatchString(ln) {
 				collect = &stopCollect{reason: "interrupt"}
 			} else if state == StateRunning && !reFrame.MatchString(ln) {
@@ -2974,6 +2984,23 @@ func (s *Session) onLine(ln string) {
 			return
 		}
 		if host.IsBarePrompt(ln) && pending.mode == waitPrompt {
+			// 兜底：放行类命令在飞、收口时却没有任何停站块（连源码行都没解析到）。
+			// 提示符本身就是"程序停在调试器上"的铁证 —— 必须回写 stopped，否则会话
+			// 永久停在 running：之后每条 exec 都被 400「程序运行中」拒绝，interrupt
+			// 又因为进程其实没在跑而毫无效果，只能 quit 重开。
+			// 见 runstate_test.go:TestPromptFallbackStopsRunningSession。
+			if IsResumeCmd(pending.cmd) && s.State() == StateRunning {
+				stop := s.stopFallback()
+				s.setState(StateStopped)
+				s.emitEvent(Event{Type: "stopped", Stop: &stop})
+				s.startWatchdog()
+				s.completePending(&execResult{
+					Cmd: pending.cmd, Lines: pending.lines, Stop: &stop,
+					Frames: pending.frames, Value: pending.value.String(), BPs: pending.settleBPs(),
+					Err: pending.errText,
+				})
+				return
+			}
 			s.completePending(&execResult{
 				Cmd: pending.cmd, Lines: pending.lines,
 				Frames: pending.frames, Value: pending.value.String(), BPs: pending.settleBPs(),
@@ -3115,6 +3142,18 @@ func (s *Session) setStop(stop *StopInfo) {
 	s.curFrame = 0 // 新停站回到栈顶帧
 	s.mu.Unlock()
 	s.mirrorStopFile(stop)
+}
+
+// stopFallback 在"已经确定程序停在调试器上、但没解析出停站块"时构造一个停站信息。
+// 位置沿用上一次停站（与 onLine 里"同文件步进沿用旧文件"的兜底一致），reason 记为 step，
+// 让前端与调用方都能把这一轮当成一次正常停站处理。
+func (s *Session) stopFallback() StopInfo {
+	cur := s.Cur()
+	stop := StopInfo{Reason: "step", File: cur.File, Line: cur.Line, Func: cur.Func}
+	s.mu.Lock()
+	s.cur = stop
+	s.mu.Unlock()
+	return stop
 }
 
 // resetMirrored 清掉"已镜像"记录,必须与 clearMirrorForSession 成对调用。
