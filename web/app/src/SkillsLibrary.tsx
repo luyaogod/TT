@@ -1,8 +1,7 @@
-// 设置页「技能」分区：卡片墙，只管「登记了哪些技能」。
+// 设置页「技能 → 技能库」：卡片墙，只管「登记了哪些技能」。
 //
-// 这里**不提供安装**：装到哪个目录、要不要覆盖、要不要试算，是 `tt install skills`
-// 的事（一条命令，带 --to/--force/--dry-run）。前端再摆一份目标路径的输入框，就成了
-// 第二条安装入口 —— 两条路各有各的默认值，出了问题还要先问"你从哪儿点的"。
+// 这里**不提供安装**：装到哪个平台、覆盖还是删除，是「分发」子标签的事
+// （tt skills deploy / POST /api/skills/deploy）。两页共用同一份技能源与校验。
 //
 // 所以这一页只有：有哪些技能（卡片）、加（选目录）、删（卡片右上角）。
 // 一次增删的结果走 toast；来源路径、assets 指针规则、撞名优先级这些说明性内容
@@ -26,7 +25,7 @@ const BADGE: Record<string, { text: string; tone: 'yellow' | 'red' }> = {
   conflict: { text: '撞名', tone: 'red' },
 }
 
-export function SkillsPanel() {
+export function SkillsLibrary() {
   const toast = useToast()
   const [data, setData] = useState<SkillsResp | null>(null)
   const [loadErr, setLoadErr] = useState('')

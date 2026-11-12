@@ -54,7 +54,20 @@ tt serve
 
 ## 技能（skills）
 
-执行`tt install skills`可以将`tt`官方技能和配置在`tt`中的第三方技能安装到指定的目录下，命令执行完毕将在目标目录下创建`.agents/`目录，并将技能添加到其中。
+`tt install skills` 把官方技能与登记的第三方技能装到**一个**目录（`tt update` 刷新时用它）。
+
+要一次分发到多个 AI 工具，用 `tt skills deploy`：
+
+```bash
+tt skills list                  # 看技能源、五个平台的检测与已分发情况
+tt skills deploy --all          # 覆盖写入全部五个平台
+tt skills deploy --agent claude --agent codex
+tt skills remove --agent claude --yes
+```
+
+平台目录（相对项目根）：`.agents/skills`、`.dsh/skills`、`.codebuddy/skills`、
+`.claude/skills`、`.codex/skills`。同步是**覆盖更新**，不做版本检测；清单在
+`<项目>/.agents/.tt-manifest.json`。设置页「技能 → 分发」是同一份实现的图形面。
 
 ## TT SKILL HUB
 

@@ -46,7 +46,7 @@ import {
 } from '../../shared/ui-radix'
 import { Card, Field, InfoRow, SectionTitle, SettingRow } from '../../shared/settings'
 import { DirPicker } from './DirPicker'
-import { SkillsPanel } from './SkillsPanel'
+import { SkillsView } from './SkillsView'
 import { useToast } from './toast'
 import { useStore, type ThemeMode } from './store'
 import { cn } from '../../shared/utils'
@@ -2006,7 +2006,7 @@ export function SettingsView() {
           )}
 
           {/* ============ 技能 ============ */}
-          {section === 'skills' && <SkillsPanel />}
+          {section === 'skills' && <SkillsView />}
 
           {/* ============ 应用设置 ============ */}
           {section === 'app' && (

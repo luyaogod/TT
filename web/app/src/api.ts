@@ -451,6 +451,54 @@ export interface SkillsResp {
   externals: SkillRow[]
 }
 
+/** GET /api/skills/overview：分发页的矩阵行。 */
+export interface SkillMatrixRow {
+  id: string
+  name: string
+  description?: string
+  origin: 'official' | 'external'
+  dir?: string
+  available: boolean
+  /** 不可用的原因（第三方失联/不合规/撞名） */
+  why?: string
+}
+
+/** 矩阵的一列：一个平台，skills 是清单里已分发的技能名。 */
+export interface SkillTargetState {
+  id: string
+  name: string
+  dir: string
+  detected: boolean
+  skills: string[]
+}
+
+export interface SkillsOverview {
+  ok: boolean
+  project: string
+  officialDir?: string
+  officialError?: string
+  /** 清单文件是否存在；不存在时页面按“首次使用”默认勾选 */
+  manifest: boolean
+  skills: SkillMatrixRow[]
+  targets: SkillTargetState[]
+}
+
+export interface SkillDeployAction {
+  target: string
+  skill: string
+  files?: string[]
+}
+
+export interface SkillDeployResult {
+  ok: boolean
+  project: string
+  dryRun: boolean
+  written: SkillDeployAction[]
+  removed: SkillDeployAction[]
+  skipped?: { target: string; skill: string; why: string }[]
+  warnings?: { kind: string; index?: number; path?: string; name?: string; why: string }[]
+}
+
 export const api = {
   status: () => req<any>(`${API_BASE}/status`),
   // 环境清单:读共享端点。合并前这里调 /api/settings(旧 debug 节的 sshs),
@@ -643,9 +691,8 @@ export const api = {
   sourcePreview: (module: string, prog: string) =>
     req<{ source: { path: string; content: string; dvmFile?: string } }>(`${API_BASE}/source-preview?module=${encodeURIComponent(module)}&prog=${encodeURIComponent(prog)}`),
 
-  // ---- 技能(官方随包 + 第三方登记) ----
-  // 只管「登记了哪些」:**能装到哪、要不要覆盖是命令行的事**(tt install skills),
-  // 前端不再提供第二条安装入口。
+  // ---- 技能：库（登记）与分发（五个平台） ----
+  // 库只管「登记了哪些」；分发页负责“装到哪儿”，目标由后端平台表推导，前端不能传任意路径。
   skills: () => req<SkillsResp>('/api/skills'),
   // 添加时**当场校验**:不合规/撞名会被后端直接拒(400),失联允许存下来(ok + warning)。
   skillsAdd: (path: string, label?: string) =>
@@ -654,5 +701,14 @@ export const api = {
   // 只从登记表里去掉,不碰磁盘。removed=false 表示本来就没这条(幂等)。
   skillsRemove: (path: string) =>
     req<{ ok: boolean; removed: boolean }>('/api/skills/remove', { method: 'POST', body: JSON.stringify({ path }) }),
+  // 分发页：项目 + 五平台矩阵 + 清单。
+  skillsOverview: (project?: string) =>
+    req<SkillsOverview>('/api/skills/overview' + (project ? `?project=${encodeURIComponent(project)}` : '')),
+  // 期望态同步：targets 是完整的（页面一次发五个），没出现的平台不动。
+  skillsDeploy: (project: string, targets: { id: string; skills: string[] }[], dryRun = false) =>
+    req<SkillDeployResult>('/api/skills/deploy', {
+      method: 'POST',
+      body: JSON.stringify({ project, targets, dryRun }),
+    }),
 
 }
