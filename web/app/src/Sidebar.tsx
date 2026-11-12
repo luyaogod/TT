@@ -64,8 +64,10 @@ export function Sidebar({
   envs, envsLoaded, envsErr, sessions, states, route,
   onSelectEnv, onSelectSession, onCloseSession, onNewSession, onSettings, onRefreshEnvs, onAddEnv, onCollapse,
 }: SidebarProps) {
-  // 展开状态:没记过就是展开(新环境默认把会话露出来),用户收起后按环境名记住。
-  const [closed, setClosed] = useState<Record<string, boolean>>({})
+  // 展开状态:按环境名记住**用户显式开/关过**的选择。
+  // 没选过时:有会话才默认展开 —— 一个会话都没有的环境展开着只剩一行「还没有会话」,
+  // 三五个环境就把一屏占满(2026-11-12 用户反馈:没有会话默认折叠)。
+  const [toggled, setToggled] = useState<Record<string, boolean>>({})
   const [filterOpen, setFilterOpen] = useState(false)
   const [q, setQ] = useState('')
 
@@ -73,7 +75,7 @@ export function Sidebar({
   const routeSessionEnv = route.kind === 'session' ? sessions.find((s) => s.id === route.id)?.env : undefined
   useEffect(() => {
     if (!routeSessionEnv) return
-    setClosed((c) => (c[routeSessionEnv] ? { ...c, [routeSessionEnv]: false } : c))
+    setToggled((c) => (c[routeSessionEnv] === true ? c : { ...c, [routeSessionEnv]: true }))
   }, [routeSessionEnv])
 
   const query = q.trim().toLowerCase()
@@ -182,14 +184,15 @@ export function Sidebar({
           <div className="p-2 text-xs text-muted-foreground">没有匹配的环境或会话。</div>
         ) : (
           shown.map(({ env, hits }) => {
-            const open = !closed[env.name] || !!query
             const list = query ? hits : (byEnv.get(env.name) || [])
+            // 搜索时一律展开(否则搜到了却看不见);平时按用户的选择,没选过则有会话才展开。
+            const open = query ? true : (toggled[env.name] ?? list.length > 0)
             return (
               <div key={env.name} className="mb-0.5">
                 <div className={cn(rowBase, 'pl-1', isEnvOn(env.name) && routeSessionEnv !== env.name ? rowOn : rowIdle)}>
                   <button
                     title={open ? '收起该环境的会话' : '展开该环境的会话'}
-                    onClick={() => setClosed((c) => ({ ...c, [env.name]: !c[env.name] }))}
+                    onClick={() => setToggled((c) => ({ ...c, [env.name]: !open }))}
                     className="flex h-6 w-5 shrink-0 items-center justify-center rounded-[5px] text-muted-foreground hover:text-foreground">
                     <ChevronRight className={cn('h-3.5 w-3.5 transition-transform', open && 'rotate-90')} />
                   </button>
