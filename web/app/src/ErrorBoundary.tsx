@@ -51,7 +51,7 @@ export class ErrorBoundary extends Component<Props, State> {
         </pre>
         <button
           onClick={() => this.setState({ err: null })}
-          title="清掉错误状态并重新挂载这块界面（必崩的输入会再崩一次，报错原文就是拿去修的证据）"
+          title="重新加载这块界面（同样的输入可能再次出错）"
           className="rounded-ui border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           重试

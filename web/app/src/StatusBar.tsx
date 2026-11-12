@@ -59,9 +59,9 @@ export function StatusBar() {
           : ''
     msg = `已停站${loc ? ` ${loc}` : ''} · 停留 ${Math.round(hold)}s${tail ? ` · ${tail}` : ''}`
     title = off
-      ? '看门狗已关闭:程序会一直停在这里持锁,直到人工继续/结束。改动 debug.watchdogSeconds 或环境覆盖值后重启会话生效'
+      ? '看门狗已关闭：程序会一直停在这里，直到你继续或结束。'
       : atEntry
-        ? '程序已暂停在入口(未 run,不持事务锁),可下断点或启动'
+        ? '已停在入口，可下断点或启动。'
         : '程序已暂停,可查看变量/下断点/继续;超时会自动放行以防行锁'
   } else if (state === 'running') {
     bar = 'bg-[#0078d4] text-white'

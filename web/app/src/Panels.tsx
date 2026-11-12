@@ -76,7 +76,7 @@ function LaunchSection() {
             {prog || (state === 'loading' ? '连接中…' : sessionEnv || '会话')}
           </span>
           <button
-            title={collab ? '协作模式:行号校准由 AI 负责' : (state === 'stopped' ? '行号校准:协议行号与源码错位时点击对齐' : '行号校准(需停站后点击)')}
+            title={collab ? '协作模式:行号校准由 AI 负责' : (state === 'stopped' ? '行号错位时点击对齐' : '行号校准(需停站后点击)')}
             disabled={collab || state !== 'stopped'}
             onClick={() => void calibrate()}
             className="p-1 transition-colors hover:bg-accent/60 disabled:pointer-events-none disabled:opacity-30"
@@ -473,7 +473,7 @@ function BpsBody() {
               disabled={!sessionId}
               className="cursor-pointer disabled:pointer-events-none disabled:opacity-30"
               title={!sessionId
-                ? '还没有调试会话：断点是会话上的东西，先起一个会话再改'
+                ? '先建一个调试会话，再改断点'
                 : (b.enabled ? '取消勾选禁用断点' : '勾选启用断点')}
             />
             <span
@@ -490,7 +490,7 @@ function BpsBody() {
             <button
               className="text-muted-foreground hover:text-red-600 dark:hover:text-red-400 disabled:pointer-events-none disabled:opacity-30"
               disabled={!sessionId}
-              title={sessionId ? '删掉这条断点' : '还没有调试会话：断点是会话上的东西，先起一个会话再改'}
+              title={sessionId ? '删掉这条断点' : '先建一个调试会话，再改断点'}
               onClick={() => void removeBreakpoint(b.num)}>×</button>
           </div>
         )
@@ -567,7 +567,7 @@ export function TimelinePanel() {
             「还原」(Minimize2),不做成两个并排的按钮(那样总有一个是空点)。 */}
         <button
           onClick={() => void toggleBottomMax()}
-          title={bottomMax ? '还原下方面板(编辑器回到常规分栏)' : '最大化下方面板(占满代码区那一列,编辑器让位)'}
+          title={bottomMax ? '还原下方面板(编辑器回到常规分栏)' : '最大化下方面板'}
           className={`${bottomMax ? '' : 'ml-auto '}mr-0.5 shrink-0 p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground`}
         >
           {bottomMax ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize className="h-3.5 w-3.5" />}

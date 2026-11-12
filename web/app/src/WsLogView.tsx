@@ -497,7 +497,7 @@ export function WsLogView() {
           {/* 企业编号:清单来自 gzou_t(固定用系统账号 ds 查),下拉里带上 gzou003 的账号。
               选完点「查询」才发请求 —— 不依赖会话,也不在开页时自己拂一次 SSH。 */}
           <div className="flex items-center gap-1.5"
-            title="企业编号来自 gzou_t(gzoustus='Y' 的 gzou001),用系统账号 ds 查;后面是该企业在 gzou003 里的账号/schema">
+            title="要查哪个企业的日志">
             <span className="shrink-0 text-xs text-muted-foreground">企业编号</span>
             <Select value={ent ? String(ent) : undefined} onValueChange={(v) => setEnt(Number(v) || 0)}>
               <SelectTrigger className="h-7 w-40 text-xs" aria-label="企业编号">
@@ -512,7 +512,7 @@ export function WsLogView() {
               </SelectContent>
             </Select>
             <button onClick={() => void loadEnts(activeEnv, true)} disabled={!activeEnv || entsView?.loading}
-              title="重新读 gzou_t(固定用系统账号 ds)"
+              title="重新读取企业清单"
               className="p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40">
               <RefreshCw className={`h-3.5 w-3.5 ${entsView?.loading ? 'animate-spin' : ''}`} />
             </button>
@@ -526,7 +526,7 @@ export function WsLogView() {
             onChange={(v) => setDraft((d) => ({ ...d, service: v }))}
             onKeyDown={onEnter}
             placeholder="支持 * ? 通配"
-            title="服务名称 wsfa001:支持 * ? 通配,如 icd.erp.wo*;回车生效"
+            title="服务名称：支持 * ? 通配，如 icd.erp.wo*；回车查询"
           />
           <QueryField
             label="作业编号"
@@ -534,7 +534,7 @@ export function WsLogView() {
             onChange={(v) => setDraft((d) => ({ ...d, job: v }))}
             onKeyDown={onEnter}
             placeholder="如 wssp01131"
-            title="作业编号 wsfa012:支持 * ? 通配,如 wssp01131 / wssp*。服务名是 oa.schema.data.get 这类反域名,认不出是哪个作业,按作业找要用这个;回车生效"
+            title="作业编号：支持 * ? 通配，如 wssp01131 / wssp*；回车查询"
           />
           <QueryField
             label="服务端"
@@ -542,7 +542,7 @@ export function WsLogView() {
             onChange={(v) => setDraft((d) => ({ ...d, server: v }))}
             onKeyDown={onEnter}
             placeholder="如 T100"
-            title="服务端 wsfa018:等值匹配,如 T100;回车生效"
+            title="服务端：如 T100；回车查询"
           />
           <QueryField
             label="发起端"
@@ -550,7 +550,7 @@ export function WsLogView() {
             onChange={(v) => setDraft((d) => ({ ...d, origin: v }))}
             onKeyDown={onEnter}
             placeholder="如 OA"
-            title="发起端 wsfa013:等值匹配,如 OA / Athena;回车生效"
+            title="发起端：如 OA / Athena；回车查询"
           />
           <QueryField
             label="处理结果"
@@ -558,7 +558,7 @@ export function WsLogView() {
             onChange={(v) => setDraft((d) => ({ ...d, result: v }))}
             onKeyDown={onEnter}
             placeholder="如 000"
-            title="处理结果 wsfa006:等值匹配,如 000 成功 / 100 失败;回车生效"
+            title="处理结果：如 000 成功 / 100 失败；回车查询"
           />
           {/* 这里原先有一个单独的「刷新」图标（= 按当前条件重查）。
               现在左边已经有一个写明的「查询」按钮，同一动作留两个入口只会让人猜
@@ -567,10 +567,10 @@ export function WsLogView() {
         <div className="flex flex-wrap items-center gap-2 px-2 pt-1.5 pb-2">
           <div className="flex items-center gap-1 text-xs text-muted-foreground">
             起始时间
-            <DatePicker value={from} onChange={setFrom} title="起始时间 wsfa003 的下界(含当天)" />
+            <DatePicker value={from} onChange={setFrom} title="起始日期" />
             ~
             结束时间
-            <DatePicker value={to} onChange={setTo} title="结束时间 wsfa004 的上界(含当天,补到 23:59:59.99999)" />
+            <DatePicker value={to} onChange={setTo} title="结束日期" />
           </div>
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Checkbox id="wslog-onlyfail" checked={onlyFail}
@@ -680,10 +680,10 @@ export function WsLogView() {
               !queried ? (
                 <div className="flex flex-col items-center gap-1.5 p-6 text-center text-xs text-muted-foreground">
                   <span className="text-sm text-foreground">选企业编号，点「查询」</span>
-                  <span>接口日志查的是环境库里的 wsfa_t（系统账号 ds），不需要先建会话。</span>
+                  <span>不需要先建会话，选企业编号就能查。</span>
                   {entsView?.err && (
                     <span className="max-w-2xl whitespace-pre-wrap text-red-600 dark:text-red-400">
-                      企业清单读取失败（gzou_t）：{entsView.err}
+                      企业清单读取失败：{entsView.err}
                     </span>
                   )}
                 </div>
@@ -747,10 +747,10 @@ export function WsLogView() {
                   onClick={() => void replayDebug(sel, reqDirty ? reqDraft : undefined, entRef.current || undefined)}
                   disabled={reqDirty && !!content?.requestPartial}
                   title={reqDirty && content?.requestPartial
-                    ? '入参内容不完整(超过读取上限被截断,或未完整入库),不能基于它重放'
+                    ? '入参不完整，不能基于它重放'
                     : reqDirty
                       ? '用上面编辑器里改过的入参重放此接口调用'
-                      : '用该日志的原始报文重放此接口调用(T100 r.dg 同款;现有会话会自动收口)'}
+                      : '用原始报文重放这次调用（会先结束当前调试）'}
                   className="ml-auto inline-flex items-center gap-1 border border-emerald-500/20 px-2 py-0.5 text-xs text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 disabled:pointer-events-none disabled:opacity-40"
                 >
                   <Bug className="h-3.5 w-3.5" />
@@ -759,7 +759,7 @@ export function WsLogView() {
                 {/* 把这行日志的唯一标识交给 AI:AI 用 tdebug wsdebug <标识> 直接重放这一行 */}
                 <button
                   onClick={() => void copyRowID()}
-                  title="复制这行日志的唯一标识(rowid / ctid)。把它发给 AI,AI 就能用 tdebug wsdebug <标识> 直接重放这一行"
+                  title="复制这行日志的标识，交给 AI 就能重放这一行"
                   className={`inline-flex shrink-0 items-center gap-1 border px-2 py-0.5 text-xs transition-colors ${
                     idState === 'fail'
                       ? 'border-red-500/20 text-red-600 dark:text-red-400'
@@ -789,12 +789,12 @@ export function WsLogView() {
               {/* 内容不完整时点明:按原报文重放没问题,但不能在编辑器里改完再重放 */}
               {tab === 'request' && content?.requestPartial && (
                 <div className="shrink-0 border-b border-border bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-600 dark:text-amber-400">
-                  入参内容不完整(超过读取上限被截断,或源文件已清理且未完整入库):可以按原报文重放,但不能用修改后的入参重放。
+                  入参不完整：可以原样重放，不能改写后再重放。
                 </div>
               )}
               {tab === 'response' && content?.responsePartial && (
                 <div className="shrink-0 border-b border-border bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-600 dark:text-amber-400">
-                  响应报文不完整(超过读取上限被截断,或未完整入库),仅供查看。
+                  响应报文不完整，仅供查看。
                 </div>
               )}
               {/* 基本信息是普通内容流,需要外层滚动;报文页交给 Monaco 自己滚(嵌套滚动容器会出多余滚动条) */}
@@ -868,7 +868,7 @@ function PayloadBody({ text, loading, path, editable, onChange }: {
       path={path}
       editable={editable}
       onChange={onChange}
-      emptyHint="无报文(超过入库大小上限且源文件已清理)"
+      emptyHint="无报文（原始报文已不可取）"
     />
   )
 }

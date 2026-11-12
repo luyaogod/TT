@@ -89,7 +89,7 @@ function CreateSessionPane({ env, count, onCreate }: {
     if (busy) return
     // 一道硬前置先在界面拦一下:后端也会拒,但不必为一句"没填"白花一次 SSH 握手。
     // 作业编号**不是必填**:填了就建完直接起作业,留空就只建空闲会话(见 store.createSession)。
-    if (!ent.trim()) { setErr('企业编号（ENT）必填：它决定用哪个账号连库，环境配置里已经没有它了'); return }
+    if (!ent.trim()) { setErr('企业编号（ENT）必填：决定这次连哪个企业的库'); return }
     setErr('')
     setBusy(true)
     setStep('')
@@ -113,7 +113,7 @@ function CreateSessionPane({ env, count, onCreate }: {
       <div className="mx-auto w-full max-w-[580px]">
         <h2 className="text-[17px] font-semibold tracking-tight text-foreground">在「{env.name}」下创建会话</h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          会话会挂在左侧这棵树的「{env.name}」下面。建完自动跳到它的 Debug 页。
+          建完自动跳到它的 Debug 页。
         </p>
 
         <div className="mt-5 space-y-4 rounded-[12px] border border-border bg-card p-4">
@@ -124,7 +124,7 @@ function CreateSessionPane({ env, count, onCreate }: {
               onKeyDown={(e) => { if (e.key === 'Enter') void submit() }}
               className="h-8 text-[13px]" />
             <span className="mt-1 block text-[11px] text-muted-foreground/80">
-              留空就用「{placeholder}」。每条会话都会有个名字，便于在树里认。
+              留空就用「{placeholder}」。
             </span>
           </label>
 
@@ -135,7 +135,7 @@ function CreateSessionPane({ env, count, onCreate }: {
                 {entsView?.loading && <RefreshCw className="h-3 w-3 animate-spin" />}
                 <button type="button" onClick={() => void loadEnts(env.name, true)}
                   disabled={busy || entsView?.loading}
-                  title="重新从 gzou_t 读企业清单（固定用系统账号 ds 查）"
+                  title="重新读取企业清单"
                   className="ml-auto rounded-ui p-1 text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground disabled:opacity-40">
                   <RefreshCw className="h-3 w-3" />
                 </button>
@@ -163,7 +163,7 @@ function CreateSessionPane({ env, count, onCreate }: {
                   className="h-8 text-[13px]" />
               )}
               {entsView?.err && (
-                <span className="mt-1 block text-[11px] text-red-600 dark:text-red-400">企业清单读取失败（gzou_t）：{entsView.err}</span>
+                <span className="mt-1 block text-[11px] text-red-600 dark:text-red-400">企业清单读取失败：{entsView.err}</span>
               )}
             </label>
             <label className="block">
@@ -177,8 +177,7 @@ function CreateSessionPane({ env, count, onCreate }: {
             </label>
           </div>
           <p className="-mt-2 text-[11px] text-muted-foreground/80">
-            ENT 决定用哪个账号连库（不再沿用登录 shell 的 $TOPENT）；作业编号填了就在建好的会话里直接起作业，
-            留空只建空闲会话（之后在右侧「运行」里再起）。
+            ENT 决定这次连哪个企业；作业编号填了，建完就直接起作业，留空只建空闲会话。
           </p>
 
           <div className="flex items-start gap-2 rounded-[8px] border border-border bg-muted/30 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
