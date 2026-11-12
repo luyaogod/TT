@@ -196,7 +196,7 @@ export function SkillsDeploy() {
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <div className="inline-flex items-center gap-0.5 rounded-ui border border-border p-0.5">
-          {(['project', 'global'] as const).map((s) => (
+          {(['global', 'project'] as const).map((s) => (
             <button key={s} type="button" disabled={busy || loading}
               title={s === 'global' ? '用户目录：所有项目共用' : '当前项目'}
               onClick={() => {
@@ -210,14 +210,16 @@ export function SkillsDeploy() {
                 'rounded-[4px] px-2.5 py-0.5 text-[11px] transition-colors disabled:opacity-50',
                 scope === s ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground',
               )}>
-              {s === 'project' ? '本项目' : '全局'}
+              {s === 'project' ? '项目' : '全局'}
             </button>
           ))}
         </div>
-        <code className="max-w-[560px] truncate rounded-ui border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px]"
-          title={data.project}>{data.project}</code>
         {scope === 'project' && (
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => setPicking(true)}>更换</Button>
+          <>
+            <code className="max-w-[560px] truncate rounded-ui border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px]"
+              title={data.project}>{data.project}</code>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => setPicking(true)}>更换</Button>
+          </>
         )}
       </div>
 
