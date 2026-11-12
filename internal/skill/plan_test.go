@@ -387,3 +387,67 @@ func TestApplyOnlySkipsTopLevelAssets(t *testing.T) {
 		t.Errorf("嵌套的 references/assets 该照装: %v", err)
 	}
 }
+
+// 第三方技能常常是 git clone 下来的工作副本：版本库元数据不该跟着装出去，也不该在
+// files 清单里按对象文件逐个列出来（那正是 tt install skills 输出爆炸的来源）。
+//
+// 规则对**任意层级**生效，且 .git 是文件（worktree / submodule）时也照样跳过；
+// dry-run 与真正安装必须是同一套清单。
+func TestApplySkipsVCSMetadata(t *testing.T) {
+	official := t.TempDir()
+	mkSkill(t, official, "alpha", goodBody("alpha"))
+	kb := mkSkill(t, t.TempDir(), "kb", goodBody("kb"))
+	for p, body := range map[string]string{
+		filepath.Join(kb, ".git", "HEAD"):                "ref: refs/heads/main\n",
+		filepath.Join(kb, ".git", "objects", "aa", "bb"): "object",
+		filepath.Join(kb, ".hg", "store", "journal"):     "hg",
+		filepath.Join(kb, "docs", ".git"):                "gitdir: ../../.git/modules/docs\n",
+		filepath.Join(kb, "notes.md"):                    "笔记\n",
+	} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	plan, err := BuildPlan(official, []string{kb})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dstDry := filepath.Join(t.TempDir(), "skills")
+	repDry, err := Apply(plan, dstDry, Options{DryRun: true})
+	if err != nil {
+		t.Fatalf("dry-run: %v", err)
+	}
+	dst := filepath.Join(t.TempDir(), "skills")
+	rep, err := Apply(plan, dst, Options{})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	for _, rel := range []string{".git", ".hg", filepath.Join("docs", ".git")} {
+		if _, err := os.Stat(filepath.Join(dst, "kb", rel)); !os.IsNotExist(err) {
+			t.Errorf("目标里出现了版本库元数据 %s（err=%v）", rel, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dst, "kb", "notes.md")); err != nil {
+		t.Errorf("普通文件该照装: %v", err)
+	}
+
+	wantIgnored := []string{"kb/.git", "kb/.hg", "kb/docs/.git"}
+	for _, c := range []struct {
+		label string
+		r     Report
+	}{{"dry-run", repDry}, {"apply", rep}} {
+		if got := strings.Join(c.r.Ignored, ","); got != strings.Join(wantIgnored, ",") {
+			t.Errorf("%s 的 Ignored = %q, want %q", c.label, got, strings.Join(wantIgnored, ","))
+		}
+		for _, f := range c.r.Copied {
+			if strings.Contains(f, ".git") || strings.Contains(f, ".hg") {
+				t.Errorf("%s 的文件清单里混进了版本库元数据: %s", c.label, f)
+			}
+		}
+	}
+}

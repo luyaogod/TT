@@ -95,6 +95,10 @@ func newInstallSkillsCmd() *cobra.Command {
 第三方技能根级的 assets/ **不复制**：目标里的 SKILL.md 正文首行会被写一行指针，指回
 源目录的 assets（重复安装会替换那一行，不会堆）。这样知识库型技能不会把目标目录撑大。
 
+技能里的版本库元数据（.git / .hg / .svn，任何层级）**不复制**：登记的目录常常是一份
+clone 下来的工作副本，要装的是它的内容，不是它的历史。报告里只记被跳过的那个条目
+（如 kb/.git），不会逐个列它底下的对象文件。
+
 要装到 agent 会去读的位置，用 --to auto 或点名一个 agent：
 
   tt install skills --to auto             # 已有 agent 目录就用它，否则建 .agents/skills
@@ -207,8 +211,8 @@ func printInstallReport(rep skill.Report, src, why string) {
 		}
 		_ = common.PrintJSON(map[string]any{
 			"ok": true, "source": src, "target": rep.Target, "why": why,
-			"dryRun": rep.DryRun, "files": rep.Copied, "skipped": rep.Skipped,
-			"rewritten": rep.Rewritten, "warnings": warns,
+			"dryRun": rep.DryRun, "files": rep.Copied, "ignored": rep.Ignored,
+			"skipped": rep.Skipped, "rewritten": rep.Rewritten, "warnings": warns,
 		})
 		return
 	}
@@ -227,6 +231,10 @@ func printInstallReport(rep skill.Report, src, why string) {
 	}
 	for _, f := range rep.Copied {
 		fmt.Printf("    %s\n", f)
+	}
+	if len(rep.Ignored) > 0 {
+		fmt.Printf("  已忽略 %d 处版本库元数据（.git/.hg/.svn 不复制）: %s\n",
+			len(rep.Ignored), strings.Join(rep.Ignored, ", "))
 	}
 	if len(rep.Rewritten) > 0 {
 		fmt.Printf("  已改写 %d 份 SKILL.md 的静态文件指针（assets/ 没复制）: %s\n",

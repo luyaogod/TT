@@ -21,10 +21,13 @@ type Options struct {
 //
 // Copied 里是相对目标目录的文件路径（/ 分隔），Rewritten 是「被写入了静态文件指针」
 // 的技能名 —— 那几个 SKILL.md 与源文件**故意不一致**，说出来比让人自己发现好。
+// Ignored 是被刻意跳过的版本库元数据（同样相对目标目录、/ 分隔）：只记 `.git` 这个
+// 条目本身，不逐个列它下面的对象文件 —— 那正是它要被跳过的原因。
 type Report struct {
 	Target    string    `json:"target"`
 	DryRun    bool      `json:"dryRun,omitempty"`
 	Copied    []string  `json:"files"`
+	Ignored   []string  `json:"ignored,omitempty"`
 	Skipped   []string  `json:"skipped,omitempty"`
 	Rewritten []string  `json:"rewritten,omitempty"`
 	Warnings  []Warning `json:"warnings,omitempty"`
@@ -76,19 +79,24 @@ func Apply(p Plan, dst string, opt Options) (Report, error) {
 		hasAssets := HasAssets(s.Dir)
 
 		if opt.DryRun {
-			files, perr := plannedFiles(s.Dir, s.Name)
+			files, ignored, perr := plannedFiles(s.Dir, s.Name)
 			if perr != nil {
 				return rep, perr
 			}
 			rep.Copied = append(rep.Copied, files...)
+			rep.Ignored = append(rep.Ignored, ignored...)
 			if hasAssets {
 				rep.Rewritten = append(rep.Rewritten, s.Name)
 			}
 			continue
 		}
 
-		if err := copyTree(s.Dir, dstEntry); err != nil {
-			return rep, err
+		ignored, cerr := copyTree(s.Dir, dstEntry)
+		if cerr != nil {
+			return rep, cerr
+		}
+		for _, p := range ignored {
+			rep.Ignored = append(rep.Ignored, s.Name+"/"+p)
 		}
 		if hasAssets {
 			changed, ierr := rewriteAssetsPointer(dstEntry, AssetsDir(s.Dir))
@@ -134,6 +142,7 @@ func Apply(p Plan, dst string, opt Options) (Report, error) {
 	}
 
 	sort.Strings(rep.Copied)
+	sort.Strings(rep.Ignored)
 	sort.Strings(rep.Skipped)
 	sort.Strings(rep.Rewritten)
 	return rep, nil
@@ -161,9 +170,11 @@ func rewriteAssetsPointer(skillDstDir, assetsDir string) (bool, error) {
 	return true, nil
 }
 
-// copyTree 复制技能目录，**只跳过根级 assets/**（嵌套的同名目录照装）。
-func copyTree(src, dst string) error {
-	return filepath.WalkDir(src, func(p string, d fs.DirEntry, werr error) error {
+// copyTree 复制技能目录，**只跳过两件事**：根级 assets/（改为写指针，见 assets.go）
+// 与**任意层级**的版本库元数据（见 isVCSMeta）。返回被跳过的版本库元数据相对路径。
+func copyTree(src, dst string) ([]string, error) {
+	var ignored []string
+	err := filepath.WalkDir(src, func(p string, d fs.DirEntry, werr error) error {
 		if werr != nil {
 			return werr
 		}
@@ -177,18 +188,42 @@ func copyTree(src, dst string) error {
 		if d.IsDir() && rel == assetsDirName {
 			return fs.SkipDir
 		}
+		if isVCSMeta(d.Name()) {
+			ignored = append(ignored, filepath.ToSlash(rel))
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil // worktree / submodule 的 .git 是文件，跳过即可
+		}
 		target := filepath.Join(dst, rel)
 		if d.IsDir() {
 			return os.MkdirAll(target, 0o755)
 		}
 		return copyFile(p, target)
 	})
+	return ignored, err
+}
+
+// isVCSMeta 判断一个条目是不是版本库元数据 —— 复制技能树时**任何层级**都不带它。
+//
+// 第三方技能常常就是一份 git clone 下来的工作副本。把 .git 一起装进 agent 目录有三个
+// 坏处：目标凭空多出几百 MB 对象库；`tt install skills` 的 files 清单会按对象文件逐个
+// 列出（一次几千行）；agent 扫技能树时还会撞见别人的仓库历史。技能要的是它的内容，
+// 不是它的版本控制历史。
+//
+// 按**名字**判断，不看类型：worktree / submodule 里的 .git 是文件而不是目录。
+func isVCSMeta(name string) bool {
+	switch name {
+	case ".git", ".hg", ".svn":
+		return true
+	}
+	return false
 }
 
 // plannedFiles 是 dry-run 用的：算出会复制哪些文件（相对目标目录，/ 分隔），不写盘。
-func plannedFiles(src, name string) ([]string, error) {
-	var out []string
-	err := filepath.WalkDir(src, func(p string, d fs.DirEntry, werr error) error {
+// ignored 与 copyTree 的规则必须一致，否则 --dry-run 与实际安装会给出两份不同的清单。
+func plannedFiles(src, name string) (files, ignored []string, err error) {
+	err = filepath.WalkDir(src, func(p string, d fs.DirEntry, werr error) error {
 		if werr != nil {
 			return werr
 		}
@@ -204,15 +239,23 @@ func plannedFiles(src, name string) ([]string, error) {
 			if rel == assetsDirName {
 				return fs.SkipDir
 			}
+			if isVCSMeta(d.Name()) {
+				ignored = append(ignored, name+"/"+rel)
+				return fs.SkipDir
+			}
 			return nil
 		}
-		out = append(out, name+"/"+rel)
+		if isVCSMeta(d.Name()) {
+			ignored = append(ignored, name+"/"+rel)
+			return nil
+		}
+		files = append(files, name+"/"+rel)
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("列计划文件失败 %s: %w", src, err)
+		return nil, nil, fmt.Errorf("列计划文件失败 %s: %w", src, err)
 	}
-	return out, nil
+	return files, ignored, nil
 }
 
 func copyFile(src, dst string) error {
