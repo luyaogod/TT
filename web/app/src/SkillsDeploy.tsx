@@ -187,14 +187,14 @@ export function SkillsDeploy() {
         </div>
       )}
 
-      <Table className="min-w-[880px] text-[11px]">
+      <Table className="min-w-[800px] text-[11px]">
         <TableHeader>
           <TableRow>
-            <TableHead className="w-[240px] align-top">
+            <TableHead className="w-[220px] align-top">
               <div className="px-2 py-1.5 text-muted-foreground">技能</div>
             </TableHead>
             {data.targets.map((t) => (
-              <TableHead key={t.id} className="min-w-[128px] align-top"
+              <TableHead key={t.id} className="min-w-[116px] align-top"
                 title={t.detected ? '已存在' : '未检测到；勾选后同步会创建目录'}>
                 <div className="px-2 py-1.5">
                   <div className="flex items-center gap-1.5">
@@ -215,7 +215,7 @@ export function SkillsDeploy() {
         <TableBody>
           {data.skills.map((s) => (
             <TableRow key={s.id}>
-              <TableCell className="w-[240px] whitespace-normal">
+              <TableCell className="w-[220px] whitespace-normal">
                 <div className="px-2 py-1.5">
                   <div className="flex items-center gap-1.5">
                     <code className="truncate font-mono text-[11px] text-foreground" title={s.name}>{s.name}</code>
@@ -308,3 +308,4 @@ function CheckBox({ checked, disabled }: { checked: 'on' | 'off' | 'ind'; disabl
     </span>
   )
 }
+

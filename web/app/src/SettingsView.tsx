@@ -1314,12 +1314,14 @@ export function SettingsView() {
 
       {/* 右侧内容区:当前分区的全部卡片,整体滚动。
           站点管理是左右两栏(左边环境清单、右边连接表单),列宽放宽一档给表单留出原来的舒适宽度;
-          其余分区都是单列设置列表,仍然收在 max-w-3xl。
+          技能的分发是五列矩阵,同样放宽一档;其余分区都是单列设置列表,仍然收在 max-w-3xl。
           px-1 不是给排版留白,是给**输入框的聚焦环**留位置:内层 mx-auto 的宽度就等于卡片宽度,
           卡片里贴边的输入框 focus 时 ring 要往外扩约 2px,没有这点余量就会被本层的
           overflow-auto 裁掉 —— 表现是"选中时高亮缺一条边/一角"。 */}
       <div className={cn('min-h-0 flex-1 px-1', section === 'sites' ? 'overflow-hidden' : 'overflow-auto')}>
-        <div className={cn('mx-auto p-4', section === 'sites' ? 'flex h-full min-h-0 max-w-5xl flex-col gap-3' : 'max-w-3xl space-y-3')}>
+        <div className={cn('mx-auto p-4', section === 'sites'
+          ? 'flex h-full min-h-0 max-w-5xl flex-col gap-3'
+          : section === 'skills' ? 'max-w-5xl space-y-3' : 'max-w-3xl space-y-3')}>
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-sm font-medium text-foreground">
               {SETTINGS_SECTIONS.find((s) => s.key === section)?.label}
