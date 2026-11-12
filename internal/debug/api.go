@@ -611,6 +611,11 @@ func (s *Server) hLaunch(w http.ResponseWriter, r *http.Request) {
 		// 与"点错了"表现完全一样(作业照跑,只是跑在另一家企业上)。现在它是必填:
 		// 空且目标会话也没有显式 override 时,`prepareSession` 会拒掉(见 requireExplicitEnt)。
 		Ent string `json:"ent"`
+		// NoRestoreBP 本轮**不恢复**上次的断点（`debug start --no-restore-bp`）。
+		// 存在理由：断点存档按 module+prog 复用，而"同一作业换了模块/客制副本"时上一轮的
+		// 位置可能已经不被加载了（P1：下断前核 info sources，不加载的直接拒）。想从干净
+		// 状态开始又不想逐条删，就用它。
+		NoRestoreBP bool `json:"noRestoreBP"`
 	}
 	if !readBody(w, r, &req) {
 		return
@@ -653,11 +658,16 @@ func (s *Server) hLaunch(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, err)
 		return
 	}
-	// `--ent`：只改**本轮**配置（launchCfg 在没有任何覆盖时会直接返回 s.cfg，
-	// 就地写它会把这个企业留给后面每一轮）。浅拷贝与 CloneWithZone 同一套做法。
-	if e := strings.TrimSpace(req.Ent); e != "" {
+	// `--ent` / `--no-restore-bp`：只改**本轮**配置（launchCfg 在没有任何覆盖时会直接返回
+	// s.cfg，就地写它会把这两项留给后面每一轮 —— `--no-restore-bp` 尤其不能泄漏，
+	// 那会让"这一轮不恢复"变成"以后都不恢复"，而且毫无痕迹）。
+	// 浅拷贝与 CloneWithZone 同一套做法。
+	if e := strings.TrimSpace(req.Ent); e != "" || req.NoRestoreBP {
 		c2 := *cfg
-		c2.Topent = host.EntValue(e)
+		if e != "" {
+			c2.Topent = host.EntValue(e)
+		}
+		c2.NoRestoreBPs = req.NoRestoreBP
 		cfg = &c2
 	}
 	// `--name` 的判定都在**建立会话之前**（C2.8 的同一条纪律：一个字节都不该白花）。

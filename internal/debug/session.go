@@ -323,6 +323,10 @@ type Session struct {
 
 	sftpClientCache *sftp.Client
 	srcCache        map[string]srcCacheEntry
+	// sourcesCache 是 `info sources` 的短缓存（下断前核"文件加载了没有"用）。
+	// 恢复断点会连着发十几条 break，每条都读一次 info sources 就白多十几趟往返。
+	// nil = 还没读过或读失败过（读不到 ≠ 没有文件，见 loadedSources）。
+	sourcesCache *sourcesCacheEntry
 	// mirrored 已经发起过镜像落盘的 DVM 源名(见 mirrorStopFile):
 	// 同一个文件反复停站不重复拉取。尽力而为的标记 —— 失败的不会重试。
 	//
@@ -1071,6 +1075,9 @@ func (s *Session) SetRun(cfg *Config, module, prog, runProg, launchRef, extra st
 	s.ExtraArgs = extra
 	s.ArgsOverride = ""
 	s.custModule = ""
+	// 换作业 = 换一份加载清单：旧缓存（上一个作业的 info sources）必须作废，
+	// 否则头 10 秒内新作业的下断会被旧清单误拒。
+	s.sourcesCache = nil
 	// 复用宿主跑新一轮 = **换代**（契约 C5.3 / F15）：宿主没有重登，但"这一轮运行"是新的，
 	// 调用方手上那个旧句柄指的是上一轮 —— 换了代，它当场失效（SESSION_STALE）。
 	// 序号 `n` 与别名 `name` 不动：它们标识的是"这条会话"，跨轮不变（C2.0 / C2.5b）。
@@ -2054,6 +2061,11 @@ func (s *Session) Break(loc string) (*Breakpoint, error) {
 // 事实不足就不改，而是把"怎么给"写进 Notes 里（A15 不猜）。
 func (s *Session) BreakWith(o BreakpointOpts) (*Breakpoint, error) {
 	o, locNote := s.resolveBPLocation(o)
+	// P1：位置里的文件没被这次运行加载 ⇒ 直接拒（fgldb 会照单全收，然后 0 命中）。
+	// 排在前缀修正之后：修正只是把 asf_ 换成 asm_ 这种明显笔误，核加载与否才是事实判定。
+	if err := s.VerifyBPLoaded(o); err != nil {
+		return nil, err
+	}
 	first, err := o.BreakCmd()
 	if err != nil {
 		return nil, err
@@ -2441,6 +2453,57 @@ func (s *Session) Sources() ([]string, error) {
 		}
 	}
 	return out, nil
+}
+
+// loadedSources 取"这次运行加载了哪些源文件"（info sources），带 10 秒短缓存。
+//
+// 返回 nil 表示**不知道**（还没停站、PTY 忙、fgldb 读不回来）—— 调用方必须把 nil 当成
+// "无从判断"，绝不能当成"一个文件都没加载"：后者会把每条下断都拒掉。
+func (s *Session) loadedSources() []string {
+	s.mu.Lock()
+	if c := s.sourcesCache; c != nil && time.Since(c.at) < 10*time.Second {
+		out := c.files
+		s.mu.Unlock()
+		return out
+	}
+	s.mu.Unlock()
+	files, err := s.Sources()
+	if err != nil || len(files) == 0 {
+		return nil
+	}
+	s.mu.Lock()
+	s.sourcesCache = &sourcesCacheEntry{files: files, at: time.Now()}
+	s.mu.Unlock()
+	return files
+}
+
+// VerifyBPLoaded 在下断之前核一次"位置里的文件到底被这次运行加载了没有"（P1）。
+//
+// 只核**带 .4gl 文件名的位置**：裸行号/函数名由 fgldb 自己解析，没有文件可核；
+// 监视点的"位置"是被监视的表达式。读不到 info sources 时**放行**（不知道 ≠ 没加载，
+// 见 loadedSources）—— 宁可漏判一次，也不能在 PTY 抖动时把正常的下断全拒掉。
+func (s *Session) VerifyBPLoaded(o BreakpointOpts) error {
+	if s == nil || o.kind() == BPKindWatch {
+		return nil
+	}
+	file, line := bplocFileLine(o.Location)
+	if file == "" {
+		return nil
+	}
+	loaded := s.loadedSources()
+	if len(loaded) == 0 {
+		return nil
+	}
+	for _, l := range loaded {
+		if strings.EqualFold(bpBase(l), bpBase(file)) {
+			return nil
+		}
+	}
+	return &BPLocNotLoadedError{
+		File: file, Line: line,
+		Loaded: bplocSuggest(file, loaded),
+		Total:  len(loaded),
+	}
 }
 
 // Functions 全部函数名(info functions,每行 `name ()`;T100 大作业可达上万行)。
@@ -2833,10 +2896,20 @@ func (s *Session) onLine(ln string) {
 				// 两个限定条件都必要:只认**带箭头**的行(list 之类输出没有箭头),
 				// 且只认**放行类命令在飞**时(排除别的命令恰好带回一行源码)。
 				collect = &stopCollect{reason: "step"}
-			} else if reSource.MatchString(ln) {
+			} else if m := reSource.FindStringSubmatch(ln); m != nil {
 				// 其余源码块行(如 `-> 1532 DEFER INTERRUPT`):行内容可能含 INTERRUPT
 				// 这类关键字,必须在这里吃掉 —— 否则会落到下面被误判成人工中断标记。
 				// 这是原有行为,别删。
+				//
+				// 例外：放行类命令在飞时,不带箭头的源码行同样是**停站行**。
+				// 部分 Genero/T100 的 fgldb 发行版在 step/next 停下时只打源码窗、
+				// 不打 `->` 箭头。以前这里一律当噪音,于是 stopCollect 从不创建、
+				// onStop 不被调用 —— 会话永久停在 running(之后 exec 全被 400 拒绝,
+				// interrupt 也救不回来)。见 runstate_test.go:TestStopOnArrowlessSourceLine。
+				if pending != nil && IsResumeCmd(pending.cmd) {
+					line, _ := strconv.Atoi(m[2])
+					collect = &stopCollect{reason: "step", line: line}
+				}
 			} else if reInterrupt.MatchString(ln) {
 				collect = &stopCollect{reason: "interrupt"}
 			} else if state == StateRunning && !reFrame.MatchString(ln) {
@@ -2974,6 +3047,23 @@ func (s *Session) onLine(ln string) {
 			return
 		}
 		if host.IsBarePrompt(ln) && pending.mode == waitPrompt {
+			// 兜底：放行类命令在飞、收口时却没有任何停站块（连源码行都没解析到）。
+			// 提示符本身就是"程序停在调试器上"的铁证 —— 必须回写 stopped，否则会话
+			// 永久停在 running：之后每条 exec 都被 400「程序运行中」拒绝，interrupt
+			// 又因为进程其实没在跑而毫无效果，只能 quit 重开。
+			// 见 runstate_test.go:TestPromptFallbackStopsRunningSession。
+			if IsResumeCmd(pending.cmd) && s.State() == StateRunning {
+				stop := s.stopFallback()
+				s.setState(StateStopped)
+				s.emitEvent(Event{Type: "stopped", Stop: &stop})
+				s.startWatchdog()
+				s.completePending(&execResult{
+					Cmd: pending.cmd, Lines: pending.lines, Stop: &stop,
+					Frames: pending.frames, Value: pending.value.String(), BPs: pending.settleBPs(),
+					Err: pending.errText,
+				})
+				return
+			}
 			s.completePending(&execResult{
 				Cmd: pending.cmd, Lines: pending.lines,
 				Frames: pending.frames, Value: pending.value.String(), BPs: pending.settleBPs(),
@@ -3115,6 +3205,18 @@ func (s *Session) setStop(stop *StopInfo) {
 	s.curFrame = 0 // 新停站回到栈顶帧
 	s.mu.Unlock()
 	s.mirrorStopFile(stop)
+}
+
+// stopFallback 在"已经确定程序停在调试器上、但没解析出停站块"时构造一个停站信息。
+// 位置沿用上一次停站（与 onLine 里"同文件步进沿用旧文件"的兜底一致），reason 记为 step，
+// 让前端与调用方都能把这一轮当成一次正常停站处理。
+func (s *Session) stopFallback() StopInfo {
+	cur := s.Cur()
+	stop := StopInfo{Reason: "step", File: cur.File, Line: cur.Line, Func: cur.Func}
+	s.mu.Lock()
+	s.cur = stop
+	s.mu.Unlock()
+	return stop
 }
 
 // resetMirrored 清掉"已镜像"记录,必须与 clearMirrorForSession 成对调用。
@@ -3383,6 +3485,11 @@ func (s *Session) sftpClient() (*sftp.Client, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.sftpClientCache == nil {
+		// 会话断开后 conn 是 nil：这里必须自己拦，不能把 nil 交给 SFTP()（那个会直接
+		// 解引用底层 ssh.Client 段错误）。停站后立刻断线、又赶上落盘/拉源码时真会走到。
+		if s.conn == nil {
+			return nil, fmt.Errorf("会话没有 SSH 连接（已断开？）")
+		}
 		c, err := s.conn.SFTP()
 		if err != nil {
 			return nil, fmt.Errorf("打开 SFTP 失败: %w", err)
@@ -3437,6 +3544,15 @@ func (s *Session) mirrorWrite(serverPath string, data []byte) string {
 type srcCacheEntry struct {
 	modTime time.Time
 	file    SourceFile
+}
+
+// sourcesCacheEntry 是 `info sources` 的短缓存（下断/恢复断点核"文件加载了没有"用）。
+//
+// 只缓存**读成功且非空**的结果：空结果不缓存，因为"这个作业一个符号都没加载"在真机上
+// 基本只出现在"还没到停站态/读到一半失败"，把它当事实会让下断全被误拒。
+type sourcesCacheEntry struct {
+	files []string
+	at    time.Time
 }
 
 // sourceCandidatePaths 生成源码查找候选路径(自由函数,会话与预取共用)
@@ -3841,6 +3957,10 @@ func (s *Session) restoreBreakpoints() {
 	if !s.cfg.BPsPersisted() {
 		return
 	}
+	if s.cfg.NoRestoreBPs {
+		s.emitEvent(Event{Type: "log", Text: "本轮不恢复断点（--no-restore-bp）"})
+		return
+	}
 	st, err := loadBPs(s.cfg.DataDir, s.Module, s.Prog)
 	if err != nil || len(st.Breakpoints) == 0 {
 		return
@@ -3891,6 +4011,13 @@ func (s *Session) restoreBreakpoints() {
 		bp, err := s.BreakWith(opts)
 		if err != nil {
 			skipped++
+			// "文件这次没加载"是**跳过**，不是故障：存档按 module+prog 复用，换过客制副本/
+			// 模块前缀时上一轮的位置本来就不该再挂（P1 的下断前校验会把它拦在这里）。
+			var notLoaded *BPLocNotLoadedError
+			if errors.As(err, &notLoaded) {
+				s.emitEvent(Event{Type: "log", Text: fmt.Sprintf("断点恢复跳过:%s（本次运行未加载该文件）", opts.Location)})
+				continue
+			}
 			s.emitEvent(Event{Type: "log", Text: fmt.Sprintf("断点恢复失败:%s: %v", opts.Location, err)})
 			continue
 		}

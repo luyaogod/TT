@@ -1,0 +1,2 @@
+1031        CALL s_bsft001_wf_gen_apmt500(l_sfaadocno)
+(fgldb)

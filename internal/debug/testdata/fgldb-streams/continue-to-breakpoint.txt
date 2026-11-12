@@ -1,0 +1,5 @@
+Continuing.
+
+Breakpoint 3, s_bsft001_wf_process() at csub_s_bsft001_wf.4gl:1023
+1023        SELECT sfakwf011,sfakwf012 INTO g_sfakwf011
+(fgldb)

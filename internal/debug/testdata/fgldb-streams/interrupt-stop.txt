@@ -1,0 +1,4 @@
+^C
+  812      DEFER INTERRUPT
+-> 813         LET g_x = 1
+(fgldb)

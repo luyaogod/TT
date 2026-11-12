@@ -35,6 +35,11 @@ type Config struct {
 	TermHeight      int             `json:"termHeight"`
 	PrintElements   int             `json:"printElements"`      // fgldb 单次 print 的数组元素上限;0=默认 1000
 	PersistBPs      *bool           `json:"persistBreakpoints"` // 断点持久化开关(nil 视为 true)
+	// NoRestoreBPs 是**这一轮**的开关（`debug start --no-restore-bp`）：启动后不把上次的
+	// 断点重新挂上。它是 `config.json` 里不存在的运行时值（json:"-"），只在本次 launch 的
+	// 配置副本上为 true —— 断点恢复出过"上一轮的 stale 位置把新作业的下断全占住"这种事，
+	// 那时最省事的做法就是从干净状态开始。
+	NoRestoreBPs bool `json:"-"`
 	// AITakeover 是**默认起步模式**：打开后，新建的调试会话直接以「协作模式」启动
 	// （AI 可写：能启动作业、下断点、步进、求值）。
 	//

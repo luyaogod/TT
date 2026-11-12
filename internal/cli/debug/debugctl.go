@@ -59,6 +59,9 @@ var (
 	// 空串有语义("本轮交回 T100 自动设置"),所以判定一律用 cmd.Flags().Changed,
 	// 绝不能写成 `if dbgFGLServer != ""`。
 	dbgFGLServer string
+	// dbgNoRestoreBP 是 start --no-restore-bp：本轮不把上次的断点重新挂上。
+	// 与 --fglserver 同一类"只影响这一轮"的开关，所以只在本轮请求体里出现。
+	dbgNoRestoreBP bool
 
 	wsShow         string   // wslogs --show <rowid>:只看这一条的报文
 	wsSaveReq      string   // wslogs --show --save-request:把请求原文另存一份(改完再 --request-file)
@@ -389,6 +392,10 @@ var debugStartCmd = &cobra.Command{
 		// 不是"给已有会话改名"。
 		if n := strings.TrimSpace(dbgNameFlag); n != "" {
 			body["name"] = n
+		}
+		// 本轮不恢复断点。只送 true（H2：false 与"没给"逐字相同，服务端默认恢复）。
+		if dbgNoRestoreBP {
+			body["noRestoreBP"] = true
 		}
 		targetEnv := dbgWireOverrides(cmd, body)
 		// 只点名了会话、没点名环境：**环境由那一条会话决定**（它是那条会话自己的目标）。
@@ -803,7 +810,12 @@ var debugExecCmd = &cobra.Command{
 
 continue/next 这类会让程序跑起来的命令,建议加 --wait N:到点若程序仍在跑就直接返回
 (不再等,也**不发 SIGINT**)。不加 --wait 时,超过 --timeout 会发 SIGINT 探测 ——
-那会打断正停在 GDC 界面上等用户输入的程序,所以别再用"短 --timeout"当软等待。`,
+那会打断正停在 GDC 界面上等用户输入的程序,所以别再用"短 --timeout"当软等待。
+
+步进（next/step）**不是**"一定会跑很久"：只要它停在下一行，就会立刻返回并打印停站行
+（「— 已停站 <文件>:<行> reason=step」），批量里后面的 print 可以照常接上。--wait/--timeout
+只在**步进跨过了交互语句**（程序停在 GDC 对话框上等用户输入）时才是退路 —— 那一刀下去
+程序确实在等用户，不是 tt 卡住了。`,
 	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var fileData []byte
@@ -1629,6 +1641,8 @@ func init() {
 	// 于是报出 `asf_axmt500_wf.4gl`，而真名是 `axm_axmt500_wf.4gl`，`break asf_…:行`
 	// 必然 `No source file named`。留空 = 让会话自己解析（唯一权威来源）。
 	debugStartCmd.Flags().StringVarP(&dbgModule, "module", "m", "", debug.ModuleFlagHelp())
+	debugStartCmd.Flags().BoolVar(&dbgNoRestoreBP, "no-restore-bp", false,
+		"本轮不恢复上次的断点（默认会按行文本把它们重新挂上；断点存档按 module+prog 复用，换过模块/客制副本时旧位置可能已不加载）")
 	debugStartCmd.Flags().StringVar(&dbgZone, "zone", "", "区域代码覆盖(31开发/35测试/36正式;默认取配置)")
 	debugStartCmd.Flags().StringVar(&dbgSSHName, "ssh", "", "SSH 配置名(设置页配置的多 SSH;默认取配置)")
 	// --env 与全局 --env 同名同义:子命令上显式给的优先级更高(根命令那个是持久开关,
