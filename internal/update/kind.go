@@ -25,6 +25,13 @@ const (
 	// KindMSI 安装器装的：exe 在 %LOCALAPPDATA%\Programs\TT（见 installer/tt.wxs
 	// 的 INSTALLFOLDER），升级交给 msiexec（per-user，不需要管理员）。
 	KindMSI
+	// KindDesktop 随 TT Desktop（Electron 桌面版）安装的：exe 在
+	// <安装目录>\resources\tt\，同目录有 config.DesktopMark。
+	//
+	// 它**不允许**命令行自装（也不让 `tt update` 就地替换）：那份 tt.exe 是桌面版
+	// 载荷的一部分，要跟着桌面版整体升级。允许替换的后果是桌面版下次启动时加载到
+	// 一个它没发布过的二进制 —— 版本对不上，而且没有任何人看得见。
+	KindDesktop
 )
 
 // 计划文件与日志用的稳定记号。**故意与 String() 分开**：String() 是给人读的中文，
@@ -32,6 +39,7 @@ const (
 const (
 	TokenPortable = "portable"
 	TokenMSI      = "msi"
+	TokenDesktop  = "desktop"
 )
 
 func (k Kind) String() string {
@@ -40,6 +48,8 @@ func (k Kind) String() string {
 		return "便携包"
 	case KindMSI:
 		return "MSI 安装"
+	case KindDesktop:
+		return "桌面版"
 	default:
 		return "未知布局"
 	}
@@ -52,16 +62,22 @@ func (k Kind) Token() string {
 		return TokenPortable
 	case KindMSI:
 		return TokenMSI
+	case KindDesktop:
+		return TokenDesktop
 	default:
 		return "other"
 	}
 }
 
-// DetectKind 判形态。判定顺序：便携标记优先于目录 —— 便携标记是包自己带的事实。
+// DetectKind 判形态。判定顺序：**包自己带的标记优先于目录** —— 标记是这份载荷
+// 自己带的事实，而"exe 落在哪个目录"只是对安装器的假设。
 func DetectKind(exePath string) Kind {
 	dir := filepath.Dir(exePath)
 	if _, err := os.Stat(filepath.Join(dir, config.PortableMark)); err == nil {
 		return KindPortable
+	}
+	if _, err := os.Stat(filepath.Join(dir, config.DesktopMark)); err == nil {
+		return KindDesktop
 	}
 	if installDir := msiInstallDir(); installDir != "" && samePath(dir, installDir) {
 		return KindMSI
@@ -73,6 +89,15 @@ func DetectKind(exePath string) Kind {
 //
 // 这段文字是给使用者看的判据，所以每种情形都指名"下一步该敲什么"，而不是笼统地拒绝。
 func InstallRefusal(k Kind, exePath, version string) string {
+	// 形态优先于版本号。桌面版的判断与"这份二进制有没有版本号"无关：它无论怎么
+	// 构建都不该被命令行替换。反过来（先判版本）会让一份没注入版本号的桌面载荷
+	// 报成"源码态，用 make build 更新" —— 指错了地方，也漏掉了真正的约束。
+	if k == KindDesktop {
+		// 措辞要给"下一步该做什么"，不只是"不许"：桌面版用户多半不敲命令，
+		// 所以先指到桌面版的更新入口，再说为什么不要让命令行替换它。
+		return "这份 tt 随 TT Desktop 一起安装：请在桌面版里「检查更新」，或重新下载桌面版安装包。" +
+			"命令行的 tt update 不会替换它（替换后桌面版加载的就不是它自己发布的那一份了）"
+	}
 	if version == "" {
 		return "这份 tt 没有版本号（本地 go build 的产物）：源码态由 `make build` 更新，" +
 			"要装发行版请从 " + RepoPage + "/releases 取 MSI 或便携包"

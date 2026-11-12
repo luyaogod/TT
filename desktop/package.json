@@ -1,0 +1,21 @@
+{
+  "name": "tt-desktop",
+  "productName": "TT Desktop",
+  "version": "0.5.3",
+  "private": true,
+  "type": "module",
+  "description": "TT Desktop — T100 人机协同调试的桌面版（双击即用的 tt 外壳）",
+  "author": "luyao",
+  "license": "UNLICENSED",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "node scripts/dev.mjs",
+    "test": "node scripts/check-syntax.mjs && node --test \"test/*.test.mjs\"",
+    "dist": "electron-builder --win --x64"
+  },
+  "devDependencies": {
+    "electron": "45.3.1",
+    "electron-builder": "26.18.0"
+  }
+}

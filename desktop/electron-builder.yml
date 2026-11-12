@@ -1,0 +1,42 @@
+appId: com.luyao.tt.desktop
+productName: TT Desktop
+copyright: Copyright © luyao
+
+directories:
+  output: release
+  buildResources: build
+
+# 壳自己（asar 里只有这四样）：主进程、启动页/欢迎页、preload、package.json。
+# 载荷（tt.exe / tzs / designer / skills）在 extraResources 里，**不进 asar** ——
+# spawn 需要真实路径。
+files:
+  - src/**/*
+  - package.json
+
+extraResources:
+  - from: payload/tt
+    to: tt
+
+asar: true
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: zip
+      arch: [x64]
+  icon: build/icon.ico
+  artifactName: TT-Desktop-${version}-x64.${ext}
+
+nsis:
+  # 用户级安装（perMachine=false）：与 MSI 的策略一致 —— 不碰 Program Files，
+  # 全程不需要管理员。安装目录默认 %LOCALAPPDATA%\Programs\TT Desktop，
+  # 与 MSI 的 ...\Programs\TT 分开，两个产品不会互相覆盖。
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: TT Desktop
+  uninstallDisplayName: TT Desktop
+  artifactName: TT-Desktop-${version}-x64-Setup.${ext}

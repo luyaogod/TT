@@ -7,7 +7,7 @@ SHELL := sh
 .SHELLFLAGS := -c
 
 .DEFAULT_GOAL := all
-.PHONY: all help build test check-web web-build engine selftest doctor deep-tzc deep-tzs fns e2e skips version-check update-live-check package msi
+.PHONY: all help build test check-web web-build engine selftest doctor deep-tzc deep-tzs fns e2e skips version-check update-live-check package msi desktop-check desktop-dist
 
 all: build test
 
@@ -65,11 +65,17 @@ update-live-check: ## tt update 的真联网自检（要能访问 GitHub；代�
 #      立刻退出 0 —— 目标报成功，产物一个没动。这比报错坏得多。
 #   2) 换成 `cmd /c X` 也不行：从 Git Bash 直接敲时 MSYS 会把 `/c` 当路径转成 `C:\`。
 #   `MSYS2_ARG_CONV_EXCL="*"` + 显式 `cmd.exe /c` 在两种走法下都对（已实测）。
-version-check: ## 版本号只有 VERSION 一个出处：对照 web 的两份 package.json 与 package-lock.json
-	@node -e 'const fs=require("fs");const want=fs.readFileSync("VERSION","utf8").trim();if(!/^[0-9]+\.[0-9]+\.[0-9]+$$/.test(want)){console.error("VERSION is not MAJOR.MINOR.PATCH: "+want);process.exit(1)}const lock=JSON.parse(fs.readFileSync("web/package-lock.json","utf8"));const rows=[["web/package.json",JSON.parse(fs.readFileSync("web/package.json","utf8")).version],["web/app/package.json",JSON.parse(fs.readFileSync("web/app/package.json","utf8")).version],["web/package-lock.json",lock.version],["web/package-lock.json packages[\"\"]",lock.packages[""].version]];const bad=rows.filter(r=>r[1]!==want);if(bad.length){console.error("version mismatch, VERSION = "+want+"\n  "+bad.map(r=>r[0]+" = "+r[1]).join("\n  "));process.exit(1)}console.log("version-check OK: "+want+" (VERSION is the single source)")'
+version-check: ## 版本号只有 VERSION 一个出处：对照 web 的两份 package.json、lock 与 desktop/package.json
+	@node -e 'const fs=require("fs");const want=fs.readFileSync("VERSION","utf8").trim();if(!/^[0-9]+\.[0-9]+\.[0-9]+$$/.test(want)){console.error("VERSION is not MAJOR.MINOR.PATCH: "+want);process.exit(1)}const lock=JSON.parse(fs.readFileSync("web/package-lock.json","utf8"));const rows=[["web/package.json",JSON.parse(fs.readFileSync("web/package.json","utf8")).version],["web/app/package.json",JSON.parse(fs.readFileSync("web/app/package.json","utf8")).version],["web/package-lock.json",lock.version],["web/package-lock.json packages[\"\"]",lock.packages[""].version],["desktop/package.json",JSON.parse(fs.readFileSync("desktop/package.json","utf8")).version]];const bad=rows.filter(r=>r[1]!==want);if(bad.length){console.error("version mismatch, VERSION = "+want+"\n  "+bad.map(r=>r[0]+" = "+r[1]).join("\n  "));process.exit(1)}console.log("version-check OK: "+want+" (VERSION is the single source)")'
 
 package: version-check ## 便携包 → dist/tt-portable/ 与 dist/tt-portable.zip
 	MSYS2_ARG_CONV_EXCL="*" cmd.exe /c "build_portable.bat"
 
 msi: version-check ## MSI 安装包（需 WiX v3；复用便携包载荷）
 	MSYS2_ARG_CONV_EXCL="*" cmd.exe /c "build_msi.bat"
+
+desktop-check: ## 桌面壳的语法闸门 + 单元测试（纯 Node，不启 Electron、不需要载荷）
+	cd desktop && npm test
+
+desktop-dist: version-check ## 桌面版产物（Electron；复用便携包载荷，需能下 electron 运行时）
+	MSYS2_ARG_CONV_EXCL="*" cmd.exe /c "build_desktop.bat"

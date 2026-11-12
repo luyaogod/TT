@@ -159,6 +159,11 @@ func Apply(ctx context.Context, p *Plan, log func(string, ...any)) error {
 		applyErr = applyPortable(p, log)
 	case TokenMSI:
 		applyErr = applyMSI(ctx, p, log)
+	case TokenDesktop:
+		// 正常情况下走不到：InstallRefusal 在"查"那一步就把桌面版挡掉了。
+		// 留这个分支是因为升级计划是**跨进程落盘**的（update.Plan），
+		// 一份手改过的计划不该被就地执行成"替换桌面版载荷"。
+		applyErr = fmt.Errorf("桌面版的 tt 随 TT Desktop 升级，不能用 tt update 就地替换")
 	default:
 		applyErr = fmt.Errorf("升级计划里的安装形态 %q 认不出", p.Kind)
 	}

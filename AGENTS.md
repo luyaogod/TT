@@ -9,9 +9,10 @@ TT/
 ├─ AGENTS.md            仓库说明（AI/协作者必读）
 ├─ Makefile             必跑命令的快捷方式（make = build + test；深档目标自带副本闸门）
 ├─ config.example.json  配置文件样例（字段说明入口之一）
-├─ VERSION              版本号唯一出处（两个打包脚本读它，make version-check 对照 web）
+├─ VERSION              版本号唯一出处（三个打包脚本读它，make version-check 对照 web/desktop）
 ├─ build_portable.bat   便携包构建：前端 + Go 二进制 + skills/ + 引擎 + 设计器
 ├─ build_msi.bat        MSI 构建：复用便携载荷，生成 perUser 安装包
+├─ build_desktop.bat    桌面版构建：复用便携载荷 → Electron 壳 → 安装包 + 免安装 zip
 │
 ├─ .agents/             项目 Agent 技能与说明（不随发行包装到用户目录）
 │  ├─ docs/             协作者共享文档与项目架构图
@@ -85,6 +86,12 @@ TT/
 │  │  └─ scripts/       前端语料/校验脚本（含 fgl-fixtures）
 │  ├─ shared/           共享主题与设计系统（被 @source 扫描，改动要谨慎）
 │  └─ dist/             构建产物，被 Go 嵌入（.gitkeep 是承重墙）
+│
+├─ desktop/             TT Desktop（Electron 壳）：只做窗口/单实例/收尾，业务全在 Go
+│  ├─ src/              main 进程、serve 契约（等就绪/判所有权/收尾）、启动页/欢迎页、preload
+│  ├─ scripts/          dev 启动器 + 语法闸门
+│  ├─ test/             node --test（纯 Node，不启 Electron）
+│  └─ payload/          打包时从 dist\tt-portable 拷入（不入库）
 │
 ├─ engine/              .tzs 表单引擎（C#，csc.exe 单独构建，只在改 engine/ 时重编）
 │  ├─ src/              引擎 C# 源码（tzs-server）

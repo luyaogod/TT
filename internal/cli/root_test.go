@@ -34,7 +34,7 @@ import (
 //
 // 所以这里不强求统一成 CRLF（那是一次有意的规范化提交，不归这条测试管），只禁止混行。
 func TestBuildScriptsAreASCIIAndNotMixed(t *testing.T) {
-	for _, name := range []string{"build_portable.bat", "build_msi.bat"} {
+	for _, name := range []string{"build_portable.bat", "build_msi.bat", "build_desktop.bat"} {
 		p := filepath.Join("..", "..", name)
 		b, err := os.ReadFile(p)
 		if err != nil {
@@ -82,7 +82,7 @@ func TestVersionHasOneHome(t *testing.T) {
 		t.Errorf("VERSION 内容 %q 不是 MAJOR.MINOR.PATCH", v)
 	}
 	hardcoded := regexp.MustCompile(`(?m)^\s*set VERSION=[0-9]`)
-	for _, name := range []string{"build_portable.bat", "build_msi.bat"} {
+	for _, name := range []string{"build_portable.bat", "build_msi.bat", "build_desktop.bat"} {
 		src, err := os.ReadFile(filepath.Join("..", "..", name))
 		if err != nil {
 			t.Fatalf("读不到 %s：%v", name, err)
