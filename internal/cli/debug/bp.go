@@ -23,6 +23,7 @@ package debug
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -159,7 +160,7 @@ func bpAdd(id string, o debug.BreakpointOpts) error {
 	return nil
 }
 
-// bpDel 删一条断点。
+// bpDel 删一条断点（**不打印**：批删时由调用方决定怎么汇总）。
 func bpDel(id string, num int) error {
 	path := dbgSessionURL(id, "/breakpoints/"+strconv.Itoa(num))
 	if path == "" {
@@ -168,7 +169,177 @@ func bpDel(id string, num int) error {
 	if _, err := dbgAPI("DELETE", path, nil); err != nil {
 		return withRunningHint(err)
 	}
+	return nil
+}
+
+// bpBaseName 取裸文件名（位置里偶尔带目录，账本与 info sources 都只回裸名）。
+func bpBaseName(name string) string {
+	if i := strings.LastIndexAny(name, `/\`); i >= 0 {
+		return name[i+1:]
+	}
+	return name
+}
+
+// bpDeleteByNum 删一条：先核编号在不在账本里，再删，最后重列。
+//
+// 为什么要核：fgldb 对不存在的编号只回一句 "No breakpoint number N."，而 DeleteBreakpoint
+// 把它当成功（exec 不报错）—— 于是「断点 #9 已删除」这种假成功会把"其实删错了编号"
+// 盖过去。账本是停站时从内核读回来的，编号以它为准。
+func bpDeleteByNum(id string, num int) error {
+	bps, err := bpList(id)
+	if err != nil {
+		return err
+	}
+	if !bpHasNum(bps, num) {
+		return fmt.Errorf("没有断点 #%d（当前：%s）。编号见 tt debug bp list —— 注意 fgldb 删完会重排序号，删之前先看一眼",
+			num, bpNumsText(bps))
+	}
+	if err := bpDel(id, num); err != nil {
+		return err
+	}
 	fmt.Printf("断点 #%d 已删除\n", num)
+	return bpPrintRemaining(id)
+}
+
+// bpDeleteByLocation 按 `file:line` / `file` 删（P1：编号会重排，位置不会）。
+func bpDeleteByLocation(id, loc string) error {
+	file, line, ok := debug.ParseBPLocation(loc)
+	if !ok {
+		return fmt.Errorf("这不是文件位置：%q。要按位置删就给 <文件>.4gl[:行号]（如 axm_axmt500_wf.4gl:4130），"+
+			"要按编号删就给正整数；编号见 tt debug bp list", loc)
+	}
+	bps, err := bpList(id)
+	if err != nil {
+		return err
+	}
+	var hit []bpView
+	for _, b := range bps {
+		if b.Kind == debug.BPKindWatch || !strings.EqualFold(bpBaseName(b.File), bpBaseName(file)) {
+			continue
+		}
+		if line > 0 && b.Line != line {
+			continue
+		}
+		hit = append(hit, b)
+	}
+	switch {
+	case len(hit) == 0:
+		return fmt.Errorf("没有落在 %s 上的断点（当前：%s）", loc, bpNumsText(bps))
+	case len(hit) > 1:
+		// 同一文件多行都下了断：不替人挑一条（挑错了看起来还像成功）。
+		var lines []string
+		for _, b := range hit {
+			lines = append(lines, "#"+strconv.Itoa(b.Num)+" @"+bpLocationText(b))
+		}
+		return fmt.Errorf("%s 匹配到 %d 条断点：%s。请给到行号（<文件>.4gl:行号）或按编号删",
+			loc, len(hit), strings.Join(lines, "、"))
+	}
+	num := hit[0].Num
+	if err := bpDel(id, num); err != nil {
+		return err
+	}
+	fmt.Printf("断点 #%d 已删除（%s）\n", num, bpLocationText(hit[0]))
+	return bpPrintRemaining(id)
+}
+
+// bpDeleteAll 清空断点。
+//
+// **倒序删**：实测 fgldb 在 delete 之后会重排剩余断点的编号，正序删会跳过一半、
+// 甚至删到别人身上（现场：`bp del 4` / `bp del 5` 各删错一条）。
+func bpDeleteAll(id string) error {
+	bps, err := bpList(id)
+	if err != nil {
+		return err
+	}
+	if len(bps) == 0 {
+		fmt.Println("断点 0 个，没有可删的")
+		return nil
+	}
+	nums := make([]int, 0, len(bps))
+	for _, b := range bps {
+		nums = append(nums, b.Num)
+	}
+	sort.Sort(sort.Reverse(sort.IntSlice(nums)))
+	deleted := 0
+	for _, n := range nums {
+		if err := bpDel(id, n); err != nil {
+			fmt.Printf("已删除 %d 条，断点 #%d 删除失败\n", deleted, n)
+			return err
+		}
+		deleted++
+	}
+	fmt.Printf("断点 %d 个已全部删除\n", deleted)
+	return bpPrintRemaining(id)
+}
+
+// bpHasNum 编号在不在账本里。
+func bpHasNum(bps []bpView, num int) bool {
+	for _, b := range bps {
+		if b.Num == num {
+			return true
+		}
+	}
+	return false
+}
+
+// bpNumsText 把账本里的编号列成 `#1、#2`；空表说"没有断点"。
+func bpNumsText(bps []bpView) string {
+	if len(bps) == 0 {
+		return "没有断点"
+	}
+	parts := make([]string, 0, len(bps))
+	for _, b := range bps {
+		parts = append(parts, "#"+strconv.Itoa(b.Num))
+	}
+	return strings.Join(parts, "、")
+}
+
+// bpPrintRemaining 删完自动重列 —— 编号会重排，不重列的话下一次 `bp del <编号>`
+// 用的就是过期编号（这正是现场删错断点的直接原因）。
+func bpPrintRemaining(id string) error {
+	bps, fresh, note, err := bpListFresh(id)
+	if err != nil {
+		return nil // 重列只是附带信息，失败不该把"已经删掉了"判成失败
+	}
+	printBPList(id, bps)
+	if !fresh && strings.TrimSpace(note) != "" {
+		fmt.Println("  ！" + note)
+	}
+	return nil
+}
+
+// bpFiles 列出这次运行**加载了哪些源文件**（info sources）—— 下断前核位置的权威来源。
+func bpFiles(id string) error {
+	path := dbgSessionURL(id, "/sources")
+	if path == "" {
+		return fmt.Errorf("没有可用的会话句柄（先 tt debug start 或 tt debug status 看看有没有会话）")
+	}
+	data, err := dbgAPI("GET", path, nil)
+	if err != nil {
+		return withRunningHint(err)
+	}
+	var r struct {
+		Sources []string `json:"sources"`
+	}
+	if err := jsonUnmarshal(data, &r); err != nil {
+		return fmt.Errorf("解析 info sources 回包失败: %w", err)
+	}
+	if IsJSON() {
+		srcs := r.Sources
+		if srcs == nil {
+			srcs = []string{}
+		}
+		return dbgJSONOut(map[string]any{"ok": true, "sessionId": id, "sources": srcs})
+	}
+	if len(r.Sources) == 0 {
+		fmt.Printf("这次运行没有加载任何源文件（会话 %s）\n", id)
+		fmt.Println("  running 时读不到：先 tt debug interrupt，停在 (fgldb) 再查")
+		return nil
+	}
+	fmt.Printf("已加载源文件 %d 个（会话 %s）\n", len(r.Sources), id)
+	for _, s := range r.Sources {
+		fmt.Println("  " + s)
+	}
 	return nil
 }
 
@@ -250,10 +421,17 @@ var debugBPCmd = &cobra.Command{
 
   tt debug bp list                 列表（每条都带「命中 N 次」）
   tt debug bp list --json          同上，含 hits 字段（没命中的是 0，不是缺键）
+  tt debug bp files                这次运行加载了哪些源文件（info sources）
   tt debug bp add axm_axmt500_wf.4gl:4130
   tt debug bp add 4130 --cond "1=1" --ignore 2
   tt debug bp add g_current_row --kind watch
-  tt debug bp del 3
+  tt debug bp del 3                按编号删
+  tt debug bp del axm_axmt500_wf.4gl:4130   按位置删（编号会重排，位置不会）
+  tt debug bp del --all            清空
+
+下断前会核 「info sources」：位置里的文件没被**这次运行**加载就直接拒（fgldb 自己会照单全收，
+然后 0 命中 —— 现场踩过：sub_s_bsft001_wf.4gl 从没被加载，真正在跑的是 csub_ 那份）。
+被拒时会把已加载的相近文件名给出来，照着改名重下即可。读不到 info sources 时放行（不知道 ≠ 没加载）。
 
 两条现场纪律（契约 A33 / A34）：
   · **命中计数才是判据**：` + "`Address`" + ` 恒 0x00000000（命中与否都是 0），别拿它判"装没装上"；
@@ -316,19 +494,44 @@ var debugBPAddCmd = &cobra.Command{
 }
 
 var debugBPDelCmd = &cobra.Command{
-	Use:   "del <编号>",
-	Short: "删除一条断点（编号见 bp list）",
-	Args:  cobra.ExactArgs(1),
+	Use:   "del <编号 | 文件[:行号]> | --all",
+	Short: "删断点：按编号 / 按位置（file:line）/ --all 清空；删完自动重列",
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id, err := dbgSessionID()
 		if err != nil {
 			return err
 		}
-		num, err := strconv.Atoi(strings.TrimSpace(args[0]))
-		if err != nil || num <= 0 {
-			return fmt.Errorf("断点编号得是正整数（实得 %q）；编号见 tt debug bp list", args[0])
+		if bpDelAllFlag {
+			if len(args) > 0 {
+				return fmt.Errorf("--all 不跟参数（它已经表示全部）；要删一条就只给编号或位置")
+			}
+			return bpDeleteAll(id)
 		}
-		return bpDel(id, num)
+		if len(args) == 0 {
+			return fmt.Errorf("要给删哪一条：`bp del <编号>`、`bp del <文件>.4gl[:行号]`，或 `bp del --all`")
+		}
+		arg := strings.TrimSpace(args[0])
+		if num, err := strconv.Atoi(arg); err == nil {
+			if num <= 0 {
+				return fmt.Errorf("断点编号得是正整数（实得 %q）；编号见 tt debug bp list", arg)
+			}
+			return bpDeleteByNum(id, num)
+		}
+		return bpDeleteByLocation(id, arg)
+	},
+}
+
+var debugBPFilesCmd = &cobra.Command{
+	Use:   "files",
+	Short: "这次运行加载了哪些源文件（info sources；下断位置的权威来源）",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := dbgSessionID()
+		if err != nil {
+			return err
+		}
+		return bpFiles(id)
 	},
 }
 
@@ -339,14 +542,16 @@ func init() {
 	debugBPAddCmd.Flags().StringVar(&bpCondFlag, "cond", "", "条件表达式（内联成 `break <loc> if <expr>`，A26）")
 	debugBPAddCmd.Flags().IntVar(&bpIgnoreFlag, "ignore", 0, "忽略前 N 次命中（0 = 不忽略；不支持清零，要改就删了重建）")
 	debugBPAddCmd.Flags().StringVar(&bpKindFlag, "kind", "", "断点种类：break（默认）/ watch（监视点，位置当表达式）")
-	dbgRegisterSessionFlag(debugBPListCmd, debugBPAddCmd, debugBPDelCmd)
-	debugBPCmd.AddCommand(debugBPListCmd, debugBPAddCmd, debugBPDelCmd)
+	dbgRegisterSessionFlag(debugBPListCmd, debugBPAddCmd, debugBPDelCmd, debugBPFilesCmd)
+	debugBPDelCmd.Flags().BoolVar(&bpDelAllFlag, "all", false, "删除全部断点（倒序删：fgldb 删完会重排序号）")
+	debugBPCmd.AddCommand(debugBPListCmd, debugBPAddCmd, debugBPDelCmd, debugBPFilesCmd)
 	Group.AddCommand(debugBPCmd)
 }
 
-// 命令行开关（`tt debug bp add`）。
+// 命令行开关（`tt debug bp add` / `bp del`）。
 var (
 	bpCondFlag   string
 	bpIgnoreFlag int
 	bpKindFlag   string
+	bpDelAllFlag bool
 )
