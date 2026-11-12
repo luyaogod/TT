@@ -713,11 +713,16 @@ export const api = {
     return req<SkillsOverview>('/api/skills/overview' + (tail ? '?' + tail : ''))
   },
   // 期望态同步：targets 是完整的（页面一次发五个），没出现的平台不动。
+  // 全局时不能带 project（后端约定），项目路径只在项目范围里发。
   skillsDeploy: (project: string, targets: { id: string; skills: string[] }[],
-    scope: 'project' | 'global' = 'project', dryRun = false) =>
-    req<SkillDeployResult>('/api/skills/deploy', {
+    scope: 'project' | 'global' = 'project', dryRun = false) => {
+    const body: { project?: string; targets: { id: string; skills: string[] }[]; scope: string; dryRun: boolean } =
+      { targets, scope, dryRun }
+    if (scope !== 'global') body.project = project
+    return req<SkillDeployResult>('/api/skills/deploy', {
       method: 'POST',
-      body: JSON.stringify({ project, targets, scope, dryRun }),
-    }),
+      body: JSON.stringify(body),
+    })
+  },
 
 }

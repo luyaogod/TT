@@ -1,7 +1,7 @@
-// 设置页「技能 → 分发」：项目行 + 五平台矩阵 + 同步。
+// 设置页「技能 → 分发」：范围行 + 五平台矩阵 + 安装/卸载。
 //
-// 页面刻意只留三块：项目行、矩阵、底部计数 + 同步。没有图例、没有说明段、
-// 没有版本号：勾选状态就代表“这个平台该不该有它”，点同步就是覆盖。
+// 页面刻意只留三块：范围行、矩阵、底部计数 + 安装/卸载。没有图例、没有说明段、
+// 没有版本号：勾选状态就代表“这个平台该不该有它”，点安装就是覆盖。
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertCircle, Check, Minus, RefreshCw } from 'lucide-react'
 import {
@@ -71,6 +71,7 @@ export function SkillsDeploy() {
   const [picking, setPicking] = useState(false)
   const [scope, setScope] = useState<Scope>(savedScope)
   const [confirm, setConfirm] = useState<{ removals: { target: string; skill: string }[]; targets: { id: string; skills: string[] }[] } | null>(null)
+  const [uninstallOpen, setUninstallOpen] = useState(false)
 
   const load = useCallback(async (project?: string, wantScope?: Scope) => {
     const nextScope = wantScope ?? savedScope()
@@ -153,20 +154,27 @@ export function SkillsDeploy() {
   const removals = data.targets.flatMap((t) => t.skills
     .filter((n) => availNames.has(n) && !picked.has(key(t.id, n)))
     .map((n) => ({ target: t.id, skill: n })))
+  const removable = data.targets.flatMap((t) => t.skills
+    .filter((n) => availNames.has(n))
+    .map((n) => ({ target: t.id, skill: n })))
 
   const buildTargets = () => data.targets.map((t) => ({
     id: t.id,
     skills: avail.filter((s) => picked.has(key(t.id, s.id))).map((s) => s.id),
   }))
 
-  const run = async (targets: { id: string; skills: string[] }[]) => {
+  const run = async (targets: { id: string; skills: string[] }[], mode: 'install' | 'uninstall' = 'install') => {
     if (busy) return
     setBusy(true)
     try {
       const r: SkillDeployResult = await api.skillsDeploy(data.project, targets, data.scope)
       const files = r.written.reduce((n, w) => n + (w.files?.length || 0), 0)
       const removed = r.removed.length
-      toast.success(`已同步：写入 ${files} 个文件` + (removed ? `，删除 ${removed} 个` : ''))
+      if (mode === 'uninstall') {
+        toast.success(`已卸载 ${removed} 个技能`)
+      } else {
+        toast.success(`已安装：写入 ${files} 个文件` + (removed ? `，删除 ${removed} 个` : ''))
+      }
       await load(data.project, data.scope)
     } catch (e: any) {
       toast.error(e?.message || String(e))
@@ -175,13 +183,18 @@ export function SkillsDeploy() {
     }
   }
 
-  const sync = () => {
+  const install = () => {
     const targets = buildTargets()
     if (removals.length > 0) {
       setConfirm({ removals, targets })
       return
     }
     void run(targets)
+  }
+
+  const uninstall = () => {
+    if (removable.length === 0) return
+    setUninstallOpen(true)
   }
 
   const targetName = (id: string) => data.targets.find((t) => t.id === id)?.dir || id
@@ -238,7 +251,7 @@ export function SkillsDeploy() {
             </TableHead>
             {data.targets.map((t) => (
               <TableHead key={t.id} className="min-w-[116px] align-top"
-                title={t.detected ? '已存在' : '未检测到；勾选后同步会创建目录'}>
+                title={t.detected ? '已存在' : '未检测到；勾选后安装会创建目录'}>
                 <div className="px-2 py-1.5">
                   <div className="flex items-center gap-1.5">
                     <span className={cn('size-1.5 rounded-full', t.detected ? 'bg-emerald-500' : 'bg-muted-foreground/40')} />
@@ -273,7 +286,7 @@ export function SkillsDeploy() {
                 return (
                   <TableCell key={t.id} className="p-0 text-center">
                     <button type="button" disabled={!s.available} onClick={() => toggle(t, s)}
-                      title={s.available ? (on ? '取消勾选：同步时删除' : '勾选：同步时写入') : s.why}
+                      title={s.available ? (on ? '取消勾选：安装时删除' : '勾选：安装时写入') : s.why}
                       className="flex h-7 w-full items-center justify-center hover:bg-muted/40 disabled:cursor-not-allowed">
                       <CheckBox checked={on ? 'on' : 'off'} disabled={!s.available} />
                     </button>
@@ -294,9 +307,17 @@ export function SkillsDeploy() {
           已选 {selTargets} 个平台 · {selSkills} 个技能
           {removals.length > 0 && <span className="ml-2 text-red-600 dark:text-red-400">将删除 {removals.length} 个</span>}
         </span>
-        <Button size="sm" onClick={sync} disabled={busy || loading || !!data.officialError || (selTargets === 0 && removals.length === 0)}>
-          {busy ? '同步中…' : '同步'}
-        </Button>
+        <div className="flex items-center gap-1.5">
+          <Button size="sm" variant="ghost" onClick={uninstall}
+            disabled={busy || loading || removable.length === 0}
+            title={`卸载当前范围的全部技能（${removable.length}）`}
+            className="px-1.5 text-muted-foreground hover:text-red-600 dark:hover:text-red-400">
+            卸载
+          </Button>
+          <Button size="sm" onClick={install} disabled={busy || loading || !!data.officialError || (selTargets === 0 && removals.length === 0)}>
+            {busy ? '安装中…' : '安装'}
+          </Button>
+        </div>
       </div>
 
       <DirPicker
@@ -310,9 +331,9 @@ export function SkillsDeploy() {
       <AlertDialog open={confirm !== null} onOpenChange={(o) => { if (!o) setConfirm(null) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>同步会删除 {confirm?.removals.length} 个目录</AlertDialogTitle>
+            <AlertDialogTitle>安装会删除 {confirm?.removals.length} 个目录</AlertDialogTitle>
             <AlertDialogDescription>
-              这些条目在清单里，是 TT 装的；取消勾选后同步会删掉它们。
+              这些条目在清单里，是 TT 装的；取消勾选后安装会删掉它们。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="max-h-40 overflow-auto rounded-ui border border-border p-2 font-mono text-[11px] text-muted-foreground">
@@ -323,7 +344,33 @@ export function SkillsDeploy() {
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction onClick={() => { const c = confirm; setConfirm(null); if (c) void run(c.targets) }}>
-              继续同步
+              继续安装
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={uninstallOpen} onOpenChange={setUninstallOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>卸载 {removable.length} 个技能？</AlertDialogTitle>
+            <AlertDialogDescription>
+              将删除清单里记录的目录，不影响其它内容。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="max-h-40 overflow-auto rounded-ui border border-border p-2 font-mono text-[11px] text-muted-foreground">
+            {removable.map((r) => (
+              <div key={r.target + '::' + r.skill}>{targetName(r.target)}/{r.skill}</div>
+            ))}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-white hover:bg-destructive/90"
+              onClick={() => {
+                setUninstallOpen(false)
+                void run(data.targets.map((t) => ({ id: t.id, skills: [] })), 'uninstall')
+              }}>
+              卸载
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
