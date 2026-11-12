@@ -77,7 +77,7 @@ export function SkillsDeploy() {
     setLoading(true)
     setErr('')
     try {
-      const r = await api.skillsOverview(project, nextScope)
+      const r = await api.skillsOverview(nextScope === 'global' ? undefined : project, nextScope)
       setData(r)
       setScope(r.scope)
       rememberScope(r.scope)

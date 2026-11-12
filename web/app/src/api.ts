@@ -707,7 +707,8 @@ export const api = {
   skillsOverview: (project?: string, scope?: 'project' | 'global') => {
     const q = new URLSearchParams()
     if (scope && scope !== 'project') q.set('scope', scope)
-    if (project) q.set('project', project)
+    // 全局时后端不接受 project（那份清单在用户目录），别把上次记的项目一起发过去。
+    if (project && scope !== 'global') q.set('project', project)
     const tail = q.toString()
     return req<SkillsOverview>('/api/skills/overview' + (tail ? '?' + tail : ''))
   },
