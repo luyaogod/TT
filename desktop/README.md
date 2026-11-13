@@ -10,11 +10,12 @@ desktop/
 ├─ electron-builder.yml  appId / productName / 用户级 NSIS / extraResources
 ├─ .npmrc                npm 镜像（electron 运行时另由 ELECTRON_MIRROR 指，见下）
 ├─ build/icon.ico        窗口与安装包图标（沿用 installer/icon.ico）
-├─ src/main.js           生命周期、单实例、窗口、菜单、外链、日志、IPC
+├─ src/main.js           生命周期、单实例、窗口、标题栏按钮配色、外链、日志、IPC
 ├─ src/serve.js          起服务 / 等就绪 / 判断所有权 / 收尾（纯 Node，可单测）
-├─ src/splash.html       启动页与失败页（loading / error / crashed 三态）
+├─ src/splash.html       启动页与失败页（无边框；loading / error / crashed 三态）
 ├─ src/welcome.html      首次启动的三步入口（不做第二套配置表单）
-├─ src/preload.cjs       只挂给上面两个本地窗口（主窗口刻意不挂）
+├─ src/preload.cjs       只挂给启动页/欢迎页两个本地窗口
+├─ src/shell-preload.cjs 主窗口的白名单窗口 API（换色 / 打开数据目录 / 检查更新…）
 ├─ scripts/dev.mjs       npm run dev
 ├─ scripts/check-syntax.mjs  语法闸门（main.js 没法单测，但语法错会让它双击没反应）
 └─ test/serve.test.mjs   node --test
@@ -29,6 +30,20 @@ desktop/
 | `--ready-json` | `tt serve --foreground` | 读**一行** JSON 拿真实地址（端口会顺延）、pid、配置路径；`attached:true` 表示同目录已有实例，壳只开窗、退出时**不**收它 |
 | `--exit-on-stdin-close` | 同上 | 壳被强杀 → 管道关闭 → 服务自己优雅退出，不留隐形 `tt.exe` 占着端口 |
 | `<exe目录>\.desktop` | `build_desktop.bat` | 让 `tt update` 认出"这份二进制随桌面版安装"，拒绝命令行自替（`KindDesktop`） |
+
+## 窗口外观（标题栏是应用自己画的）
+
+原生标题栏与菜单在桌面版里**收掉**：Windows 的标题栏/菜单栏只跟**系统**明暗走，而 tt 的主题是
+应用内设置（默认暗色）。两者会打起来 —— 深色的工作面顶着一张白条。
+
+所以：
+
+- `BrowserWindow` 用 `titleBarStyle: 'hidden'` + `titleBarOverlay`：右上角三颗按钮仍是
+  **原生**的（窗口贴靠、高 DPI 绘制都交给系统），配色由 SPA 通过 `desktopShell.setTheme(dark)` 改；
+- 标题栏与菜单由 SPA 自己画：[../web/app/src/DesktopTitleBar.tsx](../web/app/src/DesktopTitleBar.tsx)，
+  高度 36px，与 `main.js` 的 `TITLEBAR_HEIGHT` 必须一致；
+- 主窗口的 preload 只有一份**白名单窗口 API**（`src/shell-preload.cjs`），业务数据一条都不经过它；
+- 启动页/失败页是**无边框**的（只活几秒，顶一条系统浅色标题栏会闪）。
 
 ## 跑起来
 

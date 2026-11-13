@@ -26,6 +26,16 @@ const APP_ID = 'com.luyao.tt.desktop'
 // 这里只在"打不开服务、读不到 source"时兜底用，正常以 /api/update 回的 source 为准。
 const REPO_SLUG = 'luyaogod/TT'
 
+// 自绘标题栏的高度与两套配色。**必须与 web/app/src/DesktopTitleBar.tsx 的 h-9 一致**：
+// 那一条栏占掉 36px，原生窗口按钮也按这个高度画。
+const TITLEBAR_HEIGHT = 36
+// 颜色取自 SPA 的 card token（暗色 .dark .dsh-shell 的 --card、亮色默认的 --card），
+// 否则右上角按钮的底色会和标题栏差一档，看起来像贴了块补丁。
+const TITLEBAR_COLORS = {
+  dark: { color: '#1b1b1c', symbolColor: '#cccccc' },
+  light: { color: '#ffffff', symbolColor: '#3b3b3b' },
+}
+
 const here = path.dirname(fileURLToPath(import.meta.url))
 // desktop/src → 仓库根（只在开发态用：打包后 exe 在 resources/tt/）
 const repoRoot = path.resolve(here, '..', '..')
@@ -159,9 +169,13 @@ function showSplash(payload) {
   const win = new BrowserWindow({
     width,
     height,
+    // 启动页/失败页没有标题栏：它只活几秒，顶一条系统浅色标题栏会闪一下 ——
+    // 而 tt 是暗色的。整页可拖（见 splash.html 的 app-region），按钮自己标 no-drag。
+    frame: false,
     resizable: false,
     maximizable: false,
     fullscreenable: false,
+    skipTaskbar: true,
     title: 'TT Desktop',
     backgroundColor: '#181818',
     show: false,
@@ -242,6 +256,32 @@ function hardenMain(win) {
     if (/^https?:/i.test(target)) shell.openExternal(target)
   })
   wc.on('will-attach-webview', (e) => e.preventDefault())
+  // 菜单收掉之后，这些快捷键要自己接（原来是原生菜单的 role 提供的）。
+  // 只接"窗口级"的四个：编辑类快捷键由 Chromium 自己处理，不需要再管。
+  wc.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown') return
+    const key = String(input.key || '')
+    const ctrl = input.control || input.meta
+    if (key === 'F11') {
+      event.preventDefault()
+      win.setFullScreen(!win.isFullScreen())
+      return
+    }
+    if (key === 'F5' || (ctrl && (key === 'r' || key === 'R'))) {
+      event.preventDefault()
+      wc.reload()
+      return
+    }
+    if (ctrl && key === '0') {
+      event.preventDefault()
+      wc.setZoomLevel(0)
+      return
+    }
+    if (!app.isPackaged && ctrl && input.shift && (key === 'i' || key === 'I')) {
+      event.preventDefault()
+      wc.toggleDevTools()
+    }
+  })
   wc.on('render-process-gone', (_e, details) => {
     log(`渲染进程退出: ${details?.reason || '未知'}`)
     dropMainAndShowError({
@@ -264,8 +304,15 @@ function createMain(hash) {
     backgroundColor: '#181818',
     show: false,
     icon: iconPath(),
+    // 标题栏与菜单都由应用自己画（见 web/app/src/DesktopTitleBar.tsx）：
+    // 系统标题栏只跟 Windows 的明暗走，而 tt 的主题是应用内设置，两者会对不上。
+    // 右上角三颗按钮仍是原生的（titleBarOverlay），配色由 SPA 通过 IPC 告诉我们。
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { ...TITLEBAR_COLORS.dark, height: TITLEBAR_HEIGHT },
     webPreferences: {
-      // 主窗口**刻意不挂 preload**：它加载的是服务提供的页面，不该能调主进程 IPC
+      // 这份 preload 只给**标题栏窗口动作**（换色、打开数据目录、检查更新…），
+      // 是一份白名单；业务数据一条都不经过它。
+      preload: path.join(here, 'shell-preload.cjs'),
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
@@ -413,7 +460,6 @@ async function boot(retry = false) {
     S.configPath = srv.config || ''
     log(`服务就绪 ${srv.url} pid=${srv.pid} attached=${srv.attached} config=${srv.config}`)
 
-    buildMenu()
     if (await isFirstRun()) openWelcome()
     else openMain('')
   } catch (err) {
@@ -427,63 +473,57 @@ async function boot(retry = false) {
 }
 
 // ---------- 菜单 ----------
+//
+// 原生菜单不设：Windows 的菜单栏只跟系统明暗走，和"应用内主题"对不上，
+// 所以标题栏与菜单都交给 SPA 画（web/app/src/DesktopTitleBar.tsx），
+// 菜单里的动作从 desktop:shell 那条 IPC 回来。这里只把它们接住。
 
-function buildMenu() {
-  const ready = !!S.server
-  const template = [
-    {
-      label: '文件',
-      submenu: [
-        { label: '打开设置页', accelerator: 'CmdOrCtrl+,', enabled: ready, click: () => openMain('settings/sites') },
-        { label: '在浏览器中打开', enabled: ready, click: () => shell.openExternal(appUrl(S.server.url)) },
-        {
-          label: '打开数据目录',
-          enabled: !!S.configPath,
-          click: () => shell.openPath(path.dirname(S.configPath)),
-        },
-        { type: 'separator' },
-        { role: 'quit', label: '退出' },
-      ],
-    },
-    {
-      label: '编辑',
-      submenu: [
-        { role: 'undo', label: '撤销' },
-        { role: 'redo', label: '重做' },
-        { type: 'separator' },
-        { role: 'cut', label: '剪切' },
-        { role: 'copy', label: '复制' },
-        { role: 'paste', label: '粘贴' },
-        { role: 'selectAll', label: '全选' },
-      ],
-    },
-    {
-      label: '视图',
-      submenu: [
-        { role: 'reload', label: '重新加载' },
-        ...(app.isPackaged ? [] : [{ role: 'toggleDevTools', label: '开发者工具' }]),
-        { type: 'separator' },
-        { role: 'resetZoom', label: '实际大小' },
-        { role: 'zoomIn', label: '放大' },
-        { role: 'zoomOut', label: '缩小' },
-        { type: 'separator' },
-        { role: 'togglefullscreen', label: '全屏' },
-      ],
-    },
-    {
-      label: '帮助',
-      submenu: [
-        { label: '检查更新', enabled: ready, click: () => checkUpdate() },
-        {
-          label: '打开发布页',
-          click: () => shell.openExternal(`https://github.com/${REPO_SLUG}/releases`),
-        },
-        { type: 'separator' },
-        { label: '关于 TT Desktop', click: () => showAbout() },
-      ],
-    },
-  ]
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+/** 把窗口右上角原生按钮的配色换成与标题栏一致的那一套。 */
+function applyOverlayTheme(win, dark) {
+  if (!win || win.isDestroyed()) return
+  try {
+    win.setTitleBarOverlay({ ...(dark ? TITLEBAR_COLORS.dark : TITLEBAR_COLORS.light), height: TITLEBAR_HEIGHT })
+  } catch {
+    /* 老系统上 titleBarOverlay 可能不支持：按钮配色退回系统默认，不影响功能 */
+  }
+}
+
+/** 标题栏发来的窗口级动作。**白名单**：认不出的类型直接丢。 */
+function handleShellAction(win, type, payload) {
+  switch (type) {
+    case 'set-theme':
+      applyOverlayTheme(win, payload === true)
+      return
+    case 'open-in-browser':
+      if (S.server) shell.openExternal(appUrl(S.server.url))
+      return
+    case 'open-data-dir':
+      if (S.configPath) shell.openPath(path.dirname(S.configPath))
+      return
+    case 'reload':
+      win?.webContents.reload()
+      return
+    case 'reset-zoom':
+      win?.webContents.setZoomLevel(0)
+      return
+    case 'toggle-fullscreen':
+      if (win) win.setFullScreen(!win.isFullScreen())
+      return
+    case 'check-update':
+      void checkUpdate()
+      return
+    case 'open-releases':
+      shell.openExternal(releaseUrl())
+      return
+    case 'about':
+      void showAbout()
+      return
+    case 'quit':
+      app.quit()
+      return
+    default:
+      return
+  }
 }
 
 function releaseUrl(source) {
@@ -655,7 +695,14 @@ if (!app.requestSingleInstanceLock()) {
     session.defaultSession.on('will-download', (_e, item) => {
       log(`下载 ${item.getFilename()}`)
     })
-    buildMenu()
+    // 原生菜单与原生标题栏都不用：Windows 的菜单栏只跟系统明暗走，
+    // 而 tt 的主题是应用内设置（默认暗色）。两者会打起来，见 applyOverlayTheme。
+    Menu.setApplicationMenu(null)
+    ipcMain.on('desktop:shell', (event, msg) => {
+      if (!msg || typeof msg.type !== 'string') return
+      const win = BrowserWindow.fromWebContents(event.sender)
+      handleShellAction(win, msg.type, msg.payload)
+    })
     boot(false)
   })
 }

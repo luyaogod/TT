@@ -11,6 +11,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { PanelLeft, RotateCcw, WifiOff, X } from 'lucide-react'
 import { connectWS, useStore, type SessionDraft, type SessionItem } from './store'
 import { Sidebar } from './Sidebar'
+import { DesktopTitleBar } from './DesktopTitleBar'
 import { EnvView } from './EnvView'
 import { SessionView } from './SessionView'
 import { SettingsView } from './SettingsView'
@@ -299,6 +300,9 @@ export function App() {
 
   return (
     <div className="dsh-shell flex h-screen flex-col overflow-hidden bg-background text-foreground">
+      {/* 桌面版：原生标题栏与菜单收掉了，这一条自己画（浏览器版渲染 null）。
+          必须是最外层 shell 的第一个子元素 —— 它要占掉窗口顶部那 36px。 */}
+      <DesktopTitleBar />
       {banner && (
         <div className="flex shrink-0 items-center gap-2 border-b border-red-500/20 bg-red-500/10 px-3 py-1.5 text-xs text-red-600 dark:text-red-400">
           <WifiOff className="h-3.5 w-3.5" />
