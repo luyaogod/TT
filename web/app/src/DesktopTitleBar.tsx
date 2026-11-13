@@ -89,16 +89,10 @@ export function DesktopTitleBar() {
   return (
     <div
       style={{ ...DRAG, height: BAR_HEIGHT }}
-      className="flex shrink-0 select-none items-center gap-1 border-b border-border bg-card pl-2 pr-[148px]"
+      className="flex shrink-0 select-none items-center gap-1 border-b border-border bg-card pl-1.5 pr-[148px]"
     >
-      {/* 品牌块：与左树的「TT T100」同一套语汇，但这里只有一个字标 —— 标题栏不该重复左树的信息 */}
-      <div className="flex items-center gap-2 px-1">
-        <span className="flex h-[18px] w-[18px] items-center justify-center rounded-[5px] bg-[var(--dsh-accent)] text-[9px] font-bold leading-none text-white">
-          TT
-        </span>
-        <span className="text-[12px] font-medium tracking-tight text-foreground">TT Desktop</span>
-      </div>
-      <span className="mx-1 h-4 w-px bg-border" aria-hidden />
+      {/* 不放假品牌块：窗口按钮右边那三颗系统的已经说明"这是什么应用"，
+          再挂一个 TT 字标只是把界面又缩小一寸。拖拽区靠右边的空白（整条都是 drag）。 */}
       <Menu label="文件" entries={fileMenu} />
       <Menu label="视图" entries={viewMenu} />
       <Menu label="帮助" entries={helpMenu} />
