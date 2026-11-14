@@ -18,12 +18,12 @@
 // 于是 `debug.aiTakeover`、`query.limit` 这种"后端有、界面没有"的字段每次保存都被静默抹掉。
 // 现在两端各有一道:后端补回缺席的键,前端也**只提交自己管得着的**字段(不再把读到的
 // 一整套默认值写回去 —— 那会在配置里凭空写出 `termWidth: 200` 这种用户从没设过的值)。
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   AlertCircle, CheckCircle2, Copy, Download, Eye, EyeOff,
   FolderOpen, Monitor, Plus, RefreshCw, Search, Sun, Moon,
   SquareArrowOutUpRight, SquareArrowRightEnter,
-  Terminal, Trash2, Zap,
+  Terminal, Trash2, X, Zap,
 } from 'lucide-react'
 import {
   api, type ConfigMeta, type ConfigStatus, type DBSyncJob, type DBSyncResp,
@@ -50,6 +50,7 @@ import { SkillsView } from './SkillsView'
 import { useToast } from './toast'
 import { useStore, type ThemeMode } from './store'
 import { cn } from '../../shared/utils'
+import { fmtBytes, fmtRate, mirrorCells, mirrorPct, pushSample, rateOf, type Sample } from './progress'
 import { SETTINGS_SECTIONS, parseRoute, settingsHash } from './routing'
 
 // ---------- 表单模型 ----------
@@ -155,36 +156,6 @@ function ThemeCards({ value, onChange }: { value: ThemeMode; onChange: (t: Theme
 }
 
 /**
- * Go 的 time.Duration.String() → 秒数(后端把耗时按这个格式直接下发:
- * "2.1s" / "1m20.5s" / "1h2m3s")。解析不出来就返回 0,调用方据此不显示速度。
- */
-function durSeconds(s: string): number {
-  if (!s) return 0
-  const re = /(\d+(?:\.\d+)?)(h|m|s)/g
-  let total = 0, found = false, m: RegExpExecArray | null
-  while ((m = re.exec(s))) {
-    found = true
-    const n = Number(m[1])
-    total += m[2] === 'h' ? n * 3600 : m[2] === 'm' ? n * 60 : n
-  }
-  return found ? total : 0
-}
-
-// 镜像任务的数值行:**裸值**,从左到右按"先看什么"排 —— 大小(当前/总量)、速度、耗时、文件数。
-// 速度是算出来的(bytes / elapsed):后端只下发耗时字符串,不为一个展示值再加 JSON 字段。
-// 算不出来时(耗时为 0、刚开始)省掉那一格,不显示 "0 KB/s" 这种噪音。
-function mirrorCellTexts(j: MirrorJob): ReactNode[] {
-  const secs = durSeconds(j.elapsed)
-  const rate = secs > 0 ? j.bytes / secs : 0
-  return [
-    fmtBytes(j.bytes) + (j.total > 0 ? ` / ${fmtBytes(j.total)}` : ''),
-    rate > 0 ? `${(rate / 1024).toFixed(0)} KB/s` : '',
-    j.elapsed ? (secs > 0 ? `${secs.toFixed(1)}s` : j.elapsed) : '',
-    j.files > 0 ? `${j.files} 个文件` : '',
-  ].filter(Boolean)
-}
-
-/**
  * 长跑任务的进度块(镜像拉取 / 字典同步共用)。
  *
  * 两类任务的"进度量"不是同一种东西:镜像按**字节**走,字典同步按**表**走。
@@ -195,11 +166,11 @@ function mirrorCellTexts(j: MirrorJob): ReactNode[] {
  * 单位本身已经把含义说清(B/s 是速度、`a / b` 是总量、后面带 s 是秒数),
  * 再给每个数配个词只会把一行塞满,真正要看的数字被埋进文字里。
  */
-function JobProgress({ env, phaseLabel, tag, pct, cells, error, message, stopping, onStop }: {
+function JobProgress({ env, phaseLabel, tag, pct, cells, error, message, stopping, onStop, onDismiss }: {
   env: string; phaseLabel: string
   /** 右上角的小标记(全量/增量、进行中/已结束) */
   tag?: string
-  /** 0-100。算不出来(如刚开始、总量未知)时传 undefined,进度条显示为 0 */
+  /** 0-100。算不出来(总量未知)时传 undefined:百分比显示为 —,不假装 0% */
   pct?: number
   /** 数值行:**裸值,不写前缀标签**。按"先看什么"从左到右排 */
   cells: ReactNode[]
@@ -208,28 +179,41 @@ function JobProgress({ env, phaseLabel, tag, pct, cells, error, message, stoppin
   stopping?: boolean
   /** 有它才显示「停止」。取消后不该只是把按钮变灰 —— 要点得动,并由 stopping 反馈 */
   onStop?: () => void
+  /** 跑完之后才给:收起这条进度(数据照旧,下一个任务会重新出现) */
+  onDismiss?: () => void
 }) {
   const failed = !!error
+  const known = pct != null
   const v = Math.max(0, Math.min(100, pct ?? 0))
   return (
-    <div className="border border-border bg-muted/20 p-2">
+    <div className="rounded-ui border border-border bg-muted/20 p-2">
       <div className="mb-1.5 flex items-center gap-2 text-xs">
         <span className="font-medium">{env}</span>
         <span className="text-muted-foreground">{phaseLabel}</span>
-        {onStop && (
-          // 停止放在这一行的最右:它作用的对象就是这条进度(误点「全量重建」后想收手)
-          <Button variant="outline" size="sm" className="ml-auto h-6 px-2 text-[11px]"
-            disabled={stopping} onClick={onStop}>
-            {stopping ? '正在停止…' : '停止'}
-          </Button>
-        )}
-        {tag && <span className={cn('text-[11px] text-muted-foreground', !onStop && 'ml-auto')}>{tag}</span>}
+        <div className="ml-auto flex items-center gap-2">
+          {onStop && (
+            // 停止放在这一行的最右:它作用的对象就是这条进度(误点「全量重建」后想收手)
+            <Button variant="outline" size="sm" className="h-6 px-2 text-[11px]"
+              disabled={stopping} onClick={onStop}>
+              {stopping ? '正在停止…' : '停止'}
+            </Button>
+          )}
+          {tag && <span className="text-[11px] text-muted-foreground">{tag}</span>}
+          {onDismiss && (
+            <button onClick={onDismiss} title="收起这条进度"
+              className="flex h-5 w-5 items-center justify-center rounded-ui text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
       </div>
       {/* 失败时把填充改成 destructive:进度条是这一块里唯一的视觉主体,
-          出错还留着主色填充会让人以为还在正常跑 */}
+          出错还留着主色填充会让人以为还在正常跑。
+          总量未知(服务器还在量/刚开始打包)时百分比写 —:与其画一根假的 0%,
+          不如让下面那行"已打包 xx MB"自己说明进展。 */}
       <Progress value={v} barClassName={failed ? 'bg-destructive' : undefined} />
       <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-        <span className="font-mono text-foreground">{v}%</span>
+        <span className="font-mono text-foreground">{known ? `${v}%` : '—'}</span>
         {cells.map((c, i) => <span key={i} className="font-mono">{c}</span>)}
       </div>
       {message && (
@@ -241,6 +225,27 @@ function JobProgress({ env, phaseLabel, tag, pct, cells, error, message, stoppin
       )}
     </div>
   )
+}
+
+/**
+ * 传输速度:按最近 5 秒的字节差算(实现见 progress.ts 的 pushSample / rateOf)。
+ *
+ * 只在**下载阶段**采样:打包阶段的"字节"是服务器上归档文件的增长量,拿它算速度
+ * 得到的是打包速率,不是用户要看的下载速度 —— 那一阶段干脆不显示速度。
+ * key 变了(换环境 / 换阶段 / 换一次任务)就重新开窗,不把上一次的采样混进来。
+ */
+function useTransferRate(key: string, bytes: number, active: boolean): number {
+  const samples = useRef<Sample[]>([])
+  const lastKey = useRef('')
+  return useMemo(() => {
+    if (lastKey.current !== key) {
+      lastKey.current = key
+      samples.current = []
+    }
+    if (!active) return 0
+    samples.current = pushSample(samples.current, bytes, Date.now())
+    return rateOf(samples.current)
+  }, [key, bytes, active])
 }
 
 // 阶段标签与字节格式化:原先在字典页的两个视图里,随功能一起搬进来。
@@ -272,13 +277,6 @@ function EnvStatus({ busy, running, idle, error }: {
       {error || idle}
     </span>
   )
-}
-function fmtBytes(n: number): string {
-  if (!n) return '0 B'
-  if (n >= 1 << 30) return (n / (1 << 30)).toFixed(2) + ' GB'
-  if (n >= 1 << 20) return (n / (1 << 20)).toFixed(1) + ' MB'
-  if (n >= 1 << 10) return (n / (1 << 10)).toFixed(1) + ' KB'
-  return n + ' B'
 }
 
 // 设置控件的统一尺寸。w-full 是必须的:控件都住在「说明 + 控件」这一列里,
@@ -440,6 +438,18 @@ export function SettingsView() {
   const [mirror, setMirror] = useState<MirrorResp | null>(null)
   const [sync, setSync] = useState<DBSyncResp | null>(null)
   const [opBusy, setOpBusy] = useState('')
+  // 进度卡片的"收起"状态：记的是**这一次任务**的标识（环境 + 开始时间）。
+  // 收起后卡片不再出现，但数据照旧在；下一次拉取/同步开始时标识变了，卡片自己回来。
+  const [closedMirrorJob, setClosedMirrorJob] = useState('')
+  const [closedSyncJob, setClosedSyncJob] = useState('')
+  const mirrorJobKey = mirror?.job ? `${mirror.job.env}|${mirror.job.startedAt || ''}` : ''
+  const syncJobKey = sync?.job ? `${sync.job.env}|${sync.job.startedAt || ''}` : ''
+  // 下载速度：客户端按最近 5 秒的字节差算（见 progress.ts）。打包阶段不采样也不显示。
+  const mirrorRate = useTransferRate(
+    `${mirrorJobKey}|${mirror?.job?.phase || ''}`,
+    mirror?.job?.bytes || 0,
+    !!mirror?.job?.running && mirror?.job?.phase === 'download',
+  )
   // 正在弹原生文件夹选择器的环境名；弹窗期间只禁用该行的文件夹按钮。
   // 目录选择器：前端自绘（后端 /api/fs/list 列目录）。原来这里只有一个 picking 字符串
   // 表示"正在弹系统对话框"，现在弹的是自己的弹窗，需要记 initial/title/回写动作。
@@ -1861,13 +1871,13 @@ export function SettingsView() {
                     </TableBody>
                   </Table>
                 )}
-                {sync?.job && (sync.job.running || sync.job.done) && (
+                {sync?.job && (sync.job.running || (sync.job.done && closedSyncJob !== syncJobKey)) && (
                   <JobProgress
                     env={sync.job.env}
                     phaseLabel={SYNC_PHASE[sync.job.phase] || sync.job.phase}
                     tag={sync.job.running ? '进行中' : '已结束'}
                     pct={sync.job.phase === 'done' ? 100
-                      : sync.job.tableTotal > 0 ? Math.round((sync.job.tableIndex * 100) / sync.job.tableTotal) : 0}
+                      : sync.job.tableTotal > 0 ? Math.round((sync.job.tableIndex * 100) / sync.job.tableTotal) : undefined}
                     error={sync.job.phase === 'error' ? (sync.job.error || sync.job.message) : undefined}
                     message={sync.job.running ? undefined
                       : (sync.job.phase === 'cancelled' ? sync.job.message
@@ -1881,6 +1891,7 @@ export function SettingsView() {
                     ].filter(Boolean)}
                     stopping={sync.job.phase !== 'error' && sync.job.message === '正在停止…'}
                     onStop={sync.job.running ? () => void stopSync() : undefined}
+                    onDismiss={sync.job.running ? undefined : () => setClosedSyncJob(syncJobKey)}
                   />
                 )}
                 {sync?.job?.backup && <p className="text-[11px] text-muted-foreground">原库已备份:{sync.job.backup}</p>}
@@ -2006,24 +2017,20 @@ export function SettingsView() {
                     </TableBody>
                   </Table>
                 )}
-                {mirror?.job && (mirror.job.running || mirror.job.done) && (
+                {mirror?.job && (mirror.job.running || (mirror.job.done && closedMirrorJob !== mirrorJobKey)) && (
                   <JobProgress
                     env={mirror.job.env}
                     phaseLabel={MIRROR_PHASE[mirror.job.phase] || mirror.job.phase}
                     tag={`${mirror.job.full ? '全量' : '增量'} · ${mirror.job.running ? '进行中' : '已结束'}`}
-                    pct={mirror.job.total > 0
-                      ? Math.round((mirror.job.bytes * 100) / mirror.job.total)
-                      : mirror.job.phase === 'done' ? 100 : 0}
+                    pct={mirrorPct(mirror.job)}
                     error={mirror.job.phase === 'error' ? (mirror.job.error || mirror.job.message) : undefined}
                     message={mirror.job.running ? undefined
                       : (mirror.job.phase === 'cancelled' ? mirror.job.message
                         : (mirror.job.phase === 'done' ? mirror.job.message : undefined))}
-                    cells={[
-                      ...mirrorCellTexts(mirror.job),
-                      !mirror.job.running && mirror.job.elapsed ? `${mirror.job.elapsed}` : '',
-                    ].filter(Boolean)}
+                    cells={mirrorCells(mirror.job, mirrorRate)}
                     stopping={mirror.job.phase !== 'error' && mirror.job.message === '正在停止…'}
                     onStop={mirror.job.running ? () => void stopMirror() : undefined}
+                    onDismiss={mirror.job.running ? undefined : () => setClosedMirrorJob(mirrorJobKey)}
                   />
                 )}
               </Card>

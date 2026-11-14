@@ -112,7 +112,7 @@ type MirrorProgress struct {
 	Phase   string // connect|probe|pack|download|done
 	Message string // 人类可读说明
 	Bytes   int64  // 已处理字节:pack=服务器归档当前大小,download=已读压缩字节
-	Total   int64  // 总字节(仅 download 阶段已知;0=未知)
+	Total   int64  // 归档大小:download=真实值;pack=**预估**值(见 packEstimate);0=未知
 	Files   int    // 文件数(已知时)
 }
 
@@ -350,10 +350,61 @@ func (c *countingReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
+// archiveSizeRatio 源码树压成 tar.gz 的经验压缩比（源文件字节 → 归档字节）。
+//
+// 它只用来给「服务器打包」阶段一个**预估**分母，让进度条能动起来；界面标签写的是
+// "预估"。估偏了也只影响那根条走得快慢：打包完成时前端直接跳到 100%。
+// 实测这套 T100 源码树约 0.15（265 MB 归档 / ~1.8 GB 源文件）。
+const archiveSizeRatio = 0.15
+
+// packEstimate 估算这次打包的归档大小：按与 mirrorPack **完全相同**的选文件规则
+// （白名单 + 备份排除 + 增量的 -newer）量出源文件总字节，再按经验压缩比折算。
+// 任何一步失败都返回 0 —— 拿不到预估时前端退化成"总量未知"，不影响拉取本身。
+func packEstimate(ctx context.Context, conn *SSHConn, top, markPath string, full bool, profile MirrorProfile) int64 {
+	findExpr := mirrorWhitelistFindExpr(profile) + " " + mirrorBackupFindExpr()
+	newer := ""
+	if !full {
+		newer = " -newer " + shdq(markPath)
+	}
+	script := `cd ` + shdq(top) + ` 2>/dev/null || exit 0
+R=""
+for d in erp com; do
+  [ -d "$d" ] && R="$R $d"
+done
+[ -z "$R" ] && exit 0
+find $R -type f ` + findExpr + newer + ` -printf '%s\n' 2>/dev/null | awk '{s+=$1} END{print s+0}'`
+	if err := ctx.Err(); err != nil {
+		return 0
+	}
+	out, err := conn.Output(script, 2*time.Minute)
+	if err != nil {
+		return 0
+	}
+	var src int64
+	if _, err := fmt.Sscanf(strings.TrimSpace(lastLine(out)), "%d", &src); err != nil || src <= 0 {
+		return 0
+	}
+	return int64(float64(src) * archiveSizeRatio)
+}
+
+// lastLine 取输出的最后一行（服务器脚本前面可能带着 find/tar 的告警）。
+func lastLine(s string) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	return strings.TrimSpace(lines[len(lines)-1])
+}
+
 // mirrorPackProgress 在服务器打包期间轮询归档大小回报进度(pack 阶段无法预知总量)。
 // ctx 取消时主动返回:打包在服务器上是 `tar` 子进程,取消不会杀它,但至少本端立刻收手,
 // 不再等它跑完(服务器归档是临时文件,下次拉取会重建)。
 func mirrorPackProgress(ctx context.Context, conn *SSHConn, base, top string, full bool, profile MirrorProfile, report ProgressFunc) (int, int64, error) {
+	// 先估一个"归档会有多大":打包阶段用户看到的进度条需要一个分母。
+	// 量不出来(0)就照旧只报已打包字节,前端会显示成"总量未知"。
+	// 没有进度回调(CLI 的 tt file mirror)时不做这次测量:多一趟 find 没意义。
+	if report != nil {
+		if est := packEstimate(ctx, conn, top, base+".mark", full, profile); est > 0 {
+			report(MirrorProgress{Phase: "pack", Message: "服务器打包中…", Total: est})
+		}
+	}
 	var stopped atomic.Bool
 	done := make(chan struct{})
 	defer func() {
