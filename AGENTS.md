@@ -12,7 +12,7 @@ TT/
 ├─ VERSION              版本号唯一出处（三个打包脚本读它，make version-check 对照 web/desktop）
 ├─ build_portable.bat   便携包构建：前端 + Go 二进制 + skills/ + 引擎 + 设计器
 ├─ build_msi.bat        MSI 构建：复用便携载荷，生成 perUser 安装包
-├─ build_desktop.bat    桌面版构建：复用便携载荷 → Electron 壳 → 安装包 + 免安装 zip
+├─ build_desktop.bat    桌面版构建：复用便携载荷 → Electron 壳 → 安装包 + 免安装 zip（`inno` 参数改用 Inno Setup 出安装包）
 │
 ├─ .agents/             项目 Agent 技能与说明（不随发行包装到用户目录）
 │  ├─ docs/             协作者共享文档
@@ -93,6 +93,7 @@ TT/
 │
 ├─ desktop/             TT Desktop（Electron 壳）：只做窗口/单实例/收尾，业务全在 Go
 │  ├─ src/              main 进程、serve 契约（等就绪/判所有权/收尾）、启动页/欢迎页、preload
+│  ├─ installer/        Inno Setup 安装包定义（tt-desktop.iss）：NSIS 被安全软件拦时用它出 Setup.exe
 │  ├─ scripts/          dev 启动器 + 语法闸门
 │  ├─ test/             node --test（纯 Node，不启 Electron）
 │  └─ payload/          打包时从 dist\tt-portable 拷入（不入库）
