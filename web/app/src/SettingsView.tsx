@@ -1444,11 +1444,11 @@ export function SettingsView() {
 
                       <TabsContent value="ssh" forceMount className="mt-3 flex min-h-0 flex-1 flex-col space-y-3 overflow-auto data-[state=inactive]:hidden">
                         <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-                          <Field label="环境名称">
+                          <Field label="环境名称" required>
                             <Input className={input} value={cur.name} placeholder="如 正式区"
                               onChange={(e) => patchSsh(selSsh, { name: e.target.value })} />
                           </Field>
-                          <Field label="IP 主机">
+                          <Field label="IP 主机" required>
                             <Input className={input} value={cur.host} onChange={(e) => patchSsh(selSsh, { host: e.target.value })} />
                           </Field>
                           <Field label="端口">
@@ -1460,10 +1460,10 @@ export function SettingsView() {
                             <Input className={input} value={cur.zone} placeholder="31开发/35测试/36正式/39PATCH/t出货"
                               onChange={(e) => patchSsh(selSsh, { zone: e.target.value })} />
                           </Field>
-                          <Field label="账号">
+                          <Field label="账号" required>
                             <Input className={input} value={cur.user} onChange={(e) => patchSsh(selSsh, { user: e.target.value })} />
                           </Field>
-                          <Field label="密码">
+                          <Field label="密码" required>
                             <div className="relative">
                               <Input className={input} type={showPwd ? 'text' : 'password'} value={cur.password}
                                 onChange={(e) => patchSsh(selSsh, { password: e.target.value })} />
@@ -1507,7 +1507,7 @@ export function SettingsView() {
                       ) : (
                         <>
                           <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-                            <Field label="类型">
+                            <Field label="类型" required>
                               <Select value={curDb.type || 'oracle'} onValueChange={(v) => patchDb(selSsh, { type: v })}>
                                 <SelectTrigger className="h-7 w-full text-xs"><SelectValue /></SelectTrigger>
                                 <SelectContent>
@@ -1516,7 +1516,7 @@ export function SettingsView() {
                                 </SelectContent>
                               </Select>
                             </Field>
-                            <Field label="主机地址">
+                            <Field label="主机地址" required>
                               <Input className={input} value={curDb.host} placeholder="客户端与服务器侧均可达"
                                 onChange={(e) => patchDb(selSsh, { host: e.target.value })} />
                             </Field>
@@ -1526,12 +1526,12 @@ export function SettingsView() {
                                 onChange={(e) => patchDb(selSsh, { port: Number(e.target.value) || 0 })} />
                             </Field>
                             {curDb.type === 'kingbase' ? (
-                              <Field label="库名">
+                              <Field label="库名" required>
                                 <Input className={input} value={curDb.database} placeholder="如 topprd"
                                   onChange={(e) => patchDb(selSsh, { database: e.target.value })} />
                               </Field>
                             ) : (
-                              <Field label="服务名(SERVICE_NAME)">
+                              <Field label="服务名(SERVICE_NAME)" required>
                                 <Input className={input} value={curDb.service} placeholder="如 t35prd"
                                   onChange={(e) => patchDb(selSsh, { service: e.target.value })} />
                               </Field>
