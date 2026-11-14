@@ -302,6 +302,7 @@ export interface MirrorEnv {
   name: string
   zone: string
   path: string
+  exists: boolean // 目录存在(哪怕没拉完)——「清理」按它决定能不能点
   ready: boolean // 本地已有完整基线(增量前提)
 }
 export interface MirrorJob {
@@ -568,10 +569,20 @@ export const api = {
     req<{ ok: boolean }>('/api/mirror/pull', { method: 'POST', body: JSON.stringify({ env, full }) }),
   // 中途取消:ok=false 表示当时没有任务在跑(用户在轮询间隙多点了一次,不算错误)
   mirrorStop: () => req<{ ok: boolean; error?: string }>('/api/mirror/stop', { method: 'POST' }),
+  // 「清理」:删掉该环境在本机那份数据(不可撤销)。服务端会拒绝共用目录/根目录/任务在跑,
+  // 失败时 req 抛错,调用方照常 toast(见 internal/dict/server/clear.go)。
+  mirrorClear: (env: string) =>
+    req<{ ok: boolean; path?: string; freed?: number; error?: string }>('/api/mirror/clear', {
+      method: 'POST', body: JSON.stringify({ env }),
+    }),
   dbsync: () => req<DBSyncResp>('/api/dbsync'),
   dbsyncRun: (env: string) =>
     req<{ ok: boolean }>('/api/dbsync', { method: 'POST', body: JSON.stringify({ env }) }),
   dbsyncStop: () => req<{ ok: boolean; error?: string }>('/api/dbsync/stop', { method: 'POST' }),
+  dbsyncClear: (env: string) =>
+    req<{ ok: boolean; path?: string; freed?: number; removed?: number; error?: string }>('/api/dbsync/clear', {
+      method: 'POST', body: JSON.stringify({ env }),
+    }),
   list: () => req<{ sessions: SessionBrief[] }>(`${API_BASE}/sessions`),
   launch: (module: string, prog: string, opts?: { ssh?: string; zone?: string; session?: string; ent?: string }) =>
     req<{ sessionId: string; module?: string; prog?: string; runProg?: string }>(`${API_BASE}/sessions`, { method: 'POST', body: JSON.stringify({ module, prog, ...opts }), timeoutMs: 180000 }),

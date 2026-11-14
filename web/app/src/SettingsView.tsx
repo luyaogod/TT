@@ -1248,6 +1248,44 @@ export function SettingsView() {
     }
   }
 
+  // 「清理」：删掉该环境在本机的那份数据（镜像目录 / 本地字典库）。**不可撤销**，所以先确认；
+  // 删完立刻回读，那一行的「已同步 / 已有镜像」当场变回未同步/未拉取 —— 用户自己看得见结果，
+  // 不需要再弹一句"清理成功"。
+  const clearMirror = (env: string, path: string) => {
+    setAsk({
+      title: `清理环境「${env}」的源码镜像？`,
+      desc: `将删除目录：${path}\n删完可以重新拉取；删掉的内容不能恢复。`,
+      confirmText: '清理',
+      run: () => void doClearMirror(env),
+    })
+  }
+  const doClearMirror = async (env: string) => {
+    setOpBusy('mirror')
+    try {
+      await api.mirrorClear(env)
+      await refreshMirror()
+    } catch (ex: any) {
+      toast.error('清理镜像失败', { description: ex?.message || String(ex) })
+    } finally { setOpBusy('') }
+  }
+  const clearSync = (env: string, dbPath: string) => {
+    setAsk({
+      title: `清理环境「${env}」的本地字典库？`,
+      desc: `将删除文件：${dbPath}\n删完可以重新同步；本地那份不能恢复。`,
+      confirmText: '清理',
+      run: () => void doClearSync(env),
+    })
+  }
+  const doClearSync = async (env: string) => {
+    setOpBusy('sync')
+    try {
+      await api.dbsyncClear(env)
+      await refreshSync()
+    } catch (ex: any) {
+      toast.error('清理本地字典库失败', { description: ex?.message || String(ex) })
+    } finally { setOpBusy('') }
+  }
+
   // 还没读到配置：失败就给失败态 + 重试，别让人永远停在"加载配置中…"
   // （实测：挡住 /api/hosts 后这一页永久转圈，恢复网络也不会自己回来 —— 只有切走再回来才重新拉）。
   if (!cfg) {
@@ -1748,21 +1786,29 @@ export function SettingsView() {
                   <Table>
                     <TableHeader>
                       <TableRow className="hover:bg-transparent">
+                        <TableHead className="w-20">清理</TableHead>
                         <TableHead>环境</TableHead>
                         <TableHead className="w-28">类型</TableHead>
                         <TableHead>地址</TableHead>
                         <TableHead className="w-36">本地库文件</TableHead>
                         <TableHead className="w-28">同步结果</TableHead>
-                        <TableHead className="w-24">状态</TableHead>
                         <TableHead className="w-24">操作</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {sync.envs.map((e) => {
-                        const busy = !!sync.job && sync.job.env === e.name && (sync.job.running || sync.job.done)
-                        const failed = busy && sync.job.phase === 'error'
                         return (
                           <TableRow key={e.name} className="hover:bg-transparent">
+                            <TableCell className="px-2">
+                              {/* 清理是**删**，不是"停止"：只在真有本地库时可点，且要过确认。 */}
+                              <Button variant="ghost" size="sm" disabled={syncBusy || !e.exists}
+                                title={e.exists
+                                  ? `删除「${e.name}」已同步到本机的字典库（可重新同步）`
+                                  : '本机还没有该环境的字典库'}
+                                onClick={() => clearSync(e.name, e.dbPath)}>
+                                清理
+                              </Button>
+                            </TableCell>
                             <TableCell className="px-2">
                               {e.name}
                             </TableCell>
@@ -1799,10 +1845,6 @@ export function SettingsView() {
                               {e.exists
                                 ? <span className="text-emerald-600 dark:text-emerald-400">已同步 · {fmtBytes(e.size)}</span>
                                 : <span className="text-muted-foreground">未同步</span>}
-                            </TableCell>
-                            <TableCell className="px-2">
-                              <EnvStatus busy={busy} running={!!sync.job?.running} idle="空闲"
-                                error={failed ? (sync.job.error || sync.job.message || '失败') : undefined} />
                             </TableCell>
                             <TableCell className="px-2">
                               {/* 表格里的行内动作一律用 ghost 文本按钮(与账号表、环境动作行一致):
@@ -1879,6 +1921,7 @@ export function SettingsView() {
                   <Table>
                     <TableHeader>
                       <TableRow className="hover:bg-transparent">
+                        <TableHead className="w-20">清理</TableHead>
                         <TableHead>环境</TableHead>
                         <TableHead className="w-28">状态</TableHead>
                         <TableHead>镜像目录</TableHead>
@@ -1899,6 +1942,16 @@ export function SettingsView() {
                             : ''
                         return (
                           <TableRow key={e.name} className="hover:bg-transparent">
+                            <TableCell className="px-2">
+                              {/* 目录不存在时禁用：没有东西可删，点了只会弹一句"目录本来就不存在"。 */}
+                              <Button variant="ghost" size="sm" disabled={mirrorBusy || !e.exists}
+                                title={e.exists
+                                  ? `删除「${e.name}」的镜像目录（可重新拉取）`
+                                  : '该环境还没有镜像目录'}
+                                onClick={() => clearMirror(e.name, e.path)}>
+                                清理
+                              </Button>
+                            </TableCell>
                             <TableCell className="px-2">
                               {e.name}
                             </TableCell>
