@@ -1,0 +1,36 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<TopMenu>
+  <TopMenuGroup text="DBA专用">
+    <TopMenuCommand name="tm_gen_sql" text="产出数据表纲要(sch)" comment="" image="tabledesigner/tm_gen_sql.png"/>
+    <TopMenuCommand name="tm_gen_table_list" text="产出数据表清单(tables.xml)" comment="" image="tabledesigner/tm_gen_table_list.png"/>
+    <TopMenuCommand name="tm_gen_table_structure" text="产出数据表结构与规格设置(tbl)" comment="" image="tabledesigner/tm_gen_table_structure.png"/>
+    <TopMenuCommand name="tm_gen_aps_grant_file" text="重产APS权限数据" comment="" image="tabledesigner/tm_gen_aps_grant_file.png"/>
+    <TopMenuSeparator/>
+    <TopMenuCommand name="tm_batch_gen_sql" text="批次产出数据表纲要(sch)" comment="" image="tabledesigner/tm_batch_gen_sql.png"/>
+    <TopMenuCommand name="tm_batch_gen_table_structure" text="批次产出数据表结构与规格设置(tbl)" comment="" image="tabledesigner/tm_batch_gen_table_structure.png"/>
+    <TopMenuCommand name="tm_batch_exec_alter" text="批次执行异动" comment="" image="tabledesigner/tm_batch_exec_alter.png"/>
+    <TopMenuCommand name="tm_batch_table_rebuild" text="批次表格重建" comment="" image="tabledesigner/tm_batch_table_rebuild.png"/>
+    <TopMenuSeparator/>
+    <TopMenuCommand name="tm_rev_list" text="版本比对及回复" comment="" image="tabledesigner/tm_rev_list.png"/>
+    <TopMenuCommand name="tm_drop_backdoor_column" text="删除非正规字段" comment="" image="tabledesigner/tm_drop_backdoor_column.png"/>
+    <TopMenuCommand name="tm_table_rebuild" text="表格重建" comment="" image="tabledesigner/tm_table_rebuild.png"/>
+    <TopMenuCommand name="tm_fix_column_sequence" text="修正设计数据字段序号" comment="" image="tabledesigner/tm_fix_column_sequence.png"/>
+  </TopMenuGroup>
+  <TopMenuGroup text="工具">
+    <TopMenuCommand name="tm_export" text="表格设计数据导出" comment="" image="tabledesigner/tm_export.png"/>
+    <TopMenuCommand name="tm_import" text="表格设计数据导入" comment="" image="tabledesigner/tm_import.png"/>
+    <TopMenuCommand name="tm_clone_import" text="快速复制导入" comment="" image="tabledesigner/tm_clone_import.png"/>
+    <TopMenuSeparator/>
+    <TopMenuCommand name="tm_sql_querizer" text="简易数据操作工具" comment="" image="tabledesigner/tm_sql_querizer.png"/>
+    <TopMenuCommand name="tm_affect_prog_list" text="查看使用表格程序清单" comment="" image="tabledesigner/tm_affect_prog_list.png"/>
+    <TopMenuSeparator/>
+    <TopMenuCommand name="tm_import_sco" text="分镜档表格导入" comment="" image="tabledesigner/tm_import_sco.png"/>
+    <TopMenuCommand name="tm_selection_import" text="字段挑选式导入" comment="" image="tabledesigner/tm_selection_import.png"/>
+    <TopMenuCommand name="tm_del_std_column" text="删除标准字段" comment="" image="tabledesigner/tm_del_std_column.png"/>
+    <TopMenuCommand name="tm_batch_checkout" text="批次签出" comment="" image="tabledesigner/tm_batch_checkout.png"/>
+  </TopMenuGroup>
+  <TopMenuGroup text="其他">
+    <TopMenuCommand name="tm_about" text="关于" comment="" image="tabledesigner/tm_about.png"/>
+  </TopMenuGroup>
+</TopMenu>
+

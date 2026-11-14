@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ManagedForm fileVersion="23200" gstVersion="23215" name="ManagedForm" uid="{6b398f58-454b-43fe-bf41-97bf71580da2}">
+  <AGSettings/>
+  <Record additionalTables="" joinLeft="" joinOperator="" joinRight="" name="sr_function_table_list" order="" uid="{59dba05a-afc7-45b4-8749-3061074d0412}" where="">
+    <RecordField colName="" fieldIdRef="4" name="lb_module_name" sqlTabName="" table_alias_name="" uid="{f1bfe889-b301-4874-9cec-748db7ca02de}"/>
+    <RecordField colName="" fieldIdRef="10" name="lb_front_word" sqlTabName="" table_alias_name="" uid="{ccb6b086-ddc6-4a38-9f0b-242a137cac00}"/>
+    <RecordField colName="" fieldIdRef="8" name="lb_table_name" sqlTabName="" table_alias_name="" uid="{f099a430-21ee-432a-8d31-2b6968ca0b65}"/>
+    <RecordField colName="" fieldIdRef="3" name="lb_pre_table_name" sqlTabName="" table_alias_name="" uid="{744d71ff-35f1-4087-bf0e-0e6a87ec23a8}"/>
+    <RecordField colName="" fieldIdRef="11" name="lb_aux_type" sqlTabName="" table_alias_name="" uid="{811bddaf-5ce9-4cd6-b546-4dac7b24a27b}"/>
+    <RecordField colName="" fieldIdRef="9" name="lb_table_type" sqlTabName="" table_alias_name="" uid="{73740430-2c13-430d-a53c-6cc2ca030203}"/>
+    <RecordField colName="" fieldIdRef="1" name="lbl_type" sqlTabName="" table_alias_name="" uid="{73ffcbc2-f8ac-4d35-a5d7-39648be62df0}"/>
+    <RecordField colName="" defaultValue="Y" fieldIdRef="2" name="ed_checkbox" sqlTabName="" table_alias_name="" uid="{a0f81042-4a8e-4222-bd1a-5b37d7d2255a}"/>
+    <RecordField colName="" fieldIdRef="5" name="lb_functab_type" sqlTabName="" table_alias_name="" uid="{3a0f923e-adcc-4e08-b191-26a150cdc149}"/>
+    <RecordField colName="" fieldIdRef="6" name="lb_functab_desc" sqlTabName="" table_alias_name="" uid="{611b8881-298d-4702-97a9-f287e4afee19}"/>
+  </Record>
+  <Record additionalTables="" joinLeft="" joinOperator="" joinRight="" name="Undefined" order="" uid="{9285ab18-bba1-4530-aa3e-9e04b502f136}" where="">
+    <RecordField colName="" fieldIdRef="7" name="ed_TableName" sqlTabName="" table_alias_name="" uid="{392906f2-efdd-4f6b-9d3f-4478136d6a3b}"/>
+    <RecordField colName="" fieldIdRef="12" length="6" name="lbl_memo" sqlTabName="" table_alias_name="" uid="{990b2a80-c95b-4141-95a6-42c1b72a1e87}"/>
+  </Record>
+  <Form gridHeight="25" gridWidth="131" name="sadzi140_fnct" text="sadzi140_fnct" windowStyle="withoutToolBar">
+    <VBox gridHeight="20" gridWidth="82" name="vbox1" posX="0" posY="1">
+      <Grid gridHeight="2" gridWidth="82" name="Grid1" posX="0" posY="1">
+        <Image gridHeight="1" gridWidth="2" height="4" image="tabledesigner/tbd_new_functab.png" name="Image1" posX="1" posY="0" style="noBorder" unitHeight="characters" unitWidth="characters" width="15"/>
+      </Grid>
+      <HBox gridHeight="12" gridWidth="82" name="hbox1" posX="0" posY="3">
+        <Grid gridHeight="12" gridWidth="26" name="Grid3" posX="2" posY="0">
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="7" gridHeight="1" gridWidth="12" name="ed_TableName" noEntry="true" posX="1" posY="0" sqlTabName="" tabIndex="4" table_alias_name="" title="Edit1" widget="Edit"/>
+          <FFLabel aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="12" gridHeight="11" gridWidth="25" length="6" name="lbl_memo" posX="1" posY="1" sizePolicy="dynamic" sqlTabName="" table_alias_name="" title="fflabel1" widget="FFLabel"/>
+        </Grid>
+        <Table gridHeight="12" gridWidth="52" name="tbl_function_table_list" posX="28" posY="0" totalRows="8" unhidableColumns="true" unmovableColumns="true" unsortableColumns="true">
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="4" gridHeight="1" gridWidth="1" hidden="true" name="lb_module_name" posX="0" posY="0" sqlTabName="" tabIndex="6" table_alias_name="" title="" widget="Edit"/>
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="10" gridHeight="1" gridWidth="1" hidden="true" name="lb_front_word" posX="1" posY="0" sqlTabName="" tabIndex="9" table_alias_name="" title="" widget="Edit"/>
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="8" gridHeight="1" gridWidth="1" hidden="true" name="lb_table_name" posX="2" posY="0" sqlTabName="" tabIndex="7" table_alias_name="" title="" widget="Edit"/>
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="3" gridHeight="1" gridWidth="2" hidden="true" name="lb_pre_table_name" posX="3" posY="0" sqlTabName="" tabIndex="5" table_alias_name="" title="" widget="Edit"/>
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="11" gridHeight="1" gridWidth="2" hidden="true" name="lb_aux_type" posX="5" posY="0" sqlTabName="" tabIndex="10" table_alias_name="" title="" widget="Edit"/>
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="9" gridHeight="1" gridWidth="2" hidden="true" name="lb_table_type" posX="7" posY="0" sqlTabName="" tabIndex="8" table_alias_name="" title="" widget="Edit"/>
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="1" gridHeight="1" gridWidth="2" name="lbl_type" noEntry="true" posX="9" posY="0" sqlTabName="" tabIndex="-1" table_alias_name="" title="" unhidable="true" unmovable="true" unsortable="true" widget="Edit"/>
+          <CheckBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" defaultValue="Y" fieldId="2" gridHeight="1" gridWidth="2" name="ed_checkbox" notNull="true" posX="11" posY="0" sqlTabName="" tabIndex="-1" table_alias_name="" text="" title="" unhidable="true" unmovable="true" unsortable="true" valueChecked="Y" valueUnchecked="N" widget="CheckBox"/>
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="5" gridHeight="1" gridWidth="10" name="lb_functab_type" noEntry="true" posX="13" posY="0" sqlTabName="" tabIndex="-1" table_alias_name="" title="lb_functab_type" unhidable="true" unmovable="true" unsortable="true" widget="Edit"/>
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="6" gridHeight="1" gridWidth="18" name="lb_functab_desc" posX="23" posY="0" scroll="true" sizePolicy="dynamic" sqlTabName="" tabIndex="-1" table_alias_name="" title="lb_functab_desc" unhidable="true" unmovable="true" unsortable="true" widget="Edit"/>
+        </Table>
+      </HBox>
+      <Grid gridHeight="2" gridWidth="82" name="grid5" posX="0" posY="15">
+        <Image gridHeight="1" gridWidth="2" name="image3" posX="1" posY="0" stretch="x" style="noBorder"/>
+      </Grid>
+      <Grid gridHeight="2" gridWidth="82" name="Grid2" posX="0" posY="17">
+        <Image gridHeight="1" gridWidth="2" name="image2" posX="1" posY="0" stretch="x" style="noBorder"/>
+        <Button gridHeight="1" gridWidth="10" name="btn_back" posX="35" posY="0" tabIndex="11" text="btn_back"/>
+        <Button gridHeight="1" gridWidth="10" hidden="true" name="btn_next" posX="46" posY="0" tabIndex="12" text="btn_next"/>
+        <Button gridHeight="1" gridWidth="10" name="btn_OK" posX="57" posY="0" tabIndex="13" text="btn_OK"/>
+        <Button gridHeight="1" gridWidth="10" name="btn_Cancel" posX="68" posY="0" tabIndex="14" text="btn_Cancel"/>
+      </Grid>
+    </VBox>
+  </Form>
+  <DiagramLayout>
+    <![CDATA[AAAAAgAAAEwAewA5ADIAOAA1AGEAYgAxADgALQBiAGIAYQAxAC0ANAA1ADMAMAAtAGEAYQAzAGUALQA5AGUAMAA0AGIANQAwADIAZgAxADMANgB9AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAEwAewA1ADkAZABiAGEAMAA1AGEALQBhAGYAYwA3AC0ANAA1AGIANAAtADgANwA0ADkALQAzADAANgAxADAANwA0AGQAMAA0ADEAMgB9QGiAAAAAAAA/8AAAAAAAAD+Ik3S8an78AQ==]]>
+  </DiagramLayout>
+</ManagedForm>

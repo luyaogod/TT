@@ -6,7 +6,7 @@
 //
 // # 设计器的站点文件在哪、怎么加密的
 //
-// 依据反编译源码 designer-src/SpecDesignerCommon/site/SiteFileHelper.cs:
+// 依据反编译源码 .agents/docs/t100/designer-src/SpecDesignerCommon/site/SiteFileHelper.cs:
 //
 //   - 路径:GetSettingDir() = %APPDATA%\SpecDesigner,s文件名 sites.xml
 //     (Environment.SpecialFolder.ApplicationData + "SpecDesigner")

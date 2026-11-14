@@ -1,0 +1,17 @@
+#!/bin/ksh
+
+cd $TOP
+find . -name *.42m.cov > $TEMPDIR/awcut.txt
+
+files=`cat $TEMPDIR/awcut.txt `
+for d in $files
+do
+    dirid=`echo $d |cut -c 1-13 `
+    fileid=`echo $d | awk -F "/" '{print $NF}'`
+    a42mfile=${fileid%.*}
+    basefile=${a42mfile%.*}
+    cd $dirid
+    fglrun --merge-cov ${basefile}.4gl
+    rm -rf ${fileid}
+    cd $TOP
+done

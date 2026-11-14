@@ -1,0 +1,41 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<ActionDefaultList>
+  <ActionDefault name="advanced_condition" text="Accounts detail query" comment="aooi060"/>
+  <ActionDefault name="btn_back" text="Consolidated affiliates stake inquiry" comment="Other parameters to produce documents"/>
+  <ActionDefault name="button1" text="button1" comment=""/>
+  <ActionDefault name="cmd" text="单身串查" comment=""/>
+  <ActionDefault name="docdownload" text="文档下载" comment=""/>
+  <ActionDefault name="docremove" text="Maintenance work orders" comment="Query Voucher"/>
+  <ActionDefault name="docupload" text="文档上传" comment="Produce multiple billing period"/>
+  <ActionDefault name="modify_detail" text="领用明细更改" comment="Produce multiple billing period"/>
+  <ActionDefault name="picremove" text="Maintenance work orders" comment="Query Voucher"/>
+  <ActionDefault name="sql_add" text="　" comment="Produce multiple billing period"/>
+  <ActionDefault name="sql_and" text="AND" comment="Query Voucher"/>
+  <ActionDefault name="sql_or" text="OR" comment="Query Voucher"/>
+  <ActionDefault name="suggest_exe" text="Inventory management label maintenance work" comment="User Authorization"/>
+  <ActionDefault name="tm_about" text="关于" comment=""/>
+  <ActionDefault name="tm_affect_prog_list" text="查看使用表格程序清单" comment=""/>
+  <ActionDefault name="tm_batch_checkout" text="批次签出" comment=""/>
+  <ActionDefault name="tm_batch_exec_alter" text="批次执行异动" comment=""/>
+  <ActionDefault name="tm_batch_gen_sql" text="批次产出数据表纲要(sch)" comment=""/>
+  <ActionDefault name="tm_batch_gen_table_structure" text="批次产出数据表结构与规格设置(tbl)" comment=""/>
+  <ActionDefault name="tm_batch_table_rebuild" text="批次表格重建" comment=""/>
+  <ActionDefault name="tm_clone_import" text="快速复制导入" comment=""/>
+  <ActionDefault name="tm_del_std_column" text="删除标准字段" comment=""/>
+  <ActionDefault name="tm_drop_backdoor_column" text="删除非正规字段" comment=""/>
+  <ActionDefault name="tm_export" text="表格设计数据导出" comment=""/>
+  <ActionDefault name="tm_fix_column_sequence" text="修正设计数据字段序号" comment=""/>
+  <ActionDefault name="tm_gen_aps_grant_file" text="重产APS权限数据" comment=""/>
+  <ActionDefault name="tm_gen_sql" text="产出数据表纲要(sch)" comment=""/>
+  <ActionDefault name="tm_gen_table_list" text="产出数据表清单(tables.xml)" comment=""/>
+  <ActionDefault name="tm_gen_table_structure" text="产出数据表结构与规格设置(tbl)" comment=""/>
+  <ActionDefault name="tm_import" text="表格设计数据导入" comment=""/>
+  <ActionDefault name="tm_import_sco" text="分镜档表格导入" comment=""/>
+  <ActionDefault name="tm_rev_list" text="版本比对及回复" comment=""/>
+  <ActionDefault name="tm_selection_import" text="字段挑选式导入" comment=""/>
+  <ActionDefault name="tm_sql_querizer" text="简易数据操作工具" comment=""/>
+  <ActionDefault name="tm_table_rebuild" text="表格重建" comment=""/>
+  <ActionDefault name="unpicdefault" text="取消默认图片" comment="Generate vouchers"/>
+  <ActionDefault name="useto" text="使用" comment=""/>
+</ActionDefaultList>
+
