@@ -11,6 +11,6 @@
     "build": "npm run build --workspace app",
     "build:app": "npm run build --workspace app",
     "dev:app": "npm run dev --workspace app",
-    "check:app": "npm run check:tokens --workspace app && npm run check:outline --workspace app && npm run check:store --workspace app"
+    "check:app": "npm run check:tokens --workspace app && npm run check:outline --workspace app && npm run check:store --workspace app && npm run check:progress --workspace app"
   }
 }
