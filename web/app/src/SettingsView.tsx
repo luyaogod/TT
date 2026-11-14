@@ -108,6 +108,8 @@ interface DictForm {
   /** '' = 在线 | 'local:<环境>' = 该环境的本地 SQLite | 环境名 = 固定走该环境的在线库。 */
   querySource: string
   mirrorDir: string
+  // mirrorTmp 服务器侧临时目录（归档先落这里再下载）。空 = 服务器上的 ${TMPDIR:-/tmp}。
+  mirrorTmp: string
   // dictDir 本地字典库根目录；空 = 缺省 <数据目录>/dict
   dictDir: string
   // 刻意没有 syncTarget:字典库按环境分文件,位置由服务端算;卡片里只读显示库目录。
@@ -168,7 +170,7 @@ function ThemeCards({ value, onChange }: { value: ThemeMode; onChange: (t: Theme
  */
 function JobProgress({ env, phaseLabel, tag, pct, cells, error, message, stopping, onStop, onDismiss }: {
   env: string; phaseLabel: string
-  /** 右上角的小标记(全量/增量、进行中/已结束) */
+  /** 右上角的小标记(全量拉取、进行中/已结束) */
   tag?: string
   /** 0-100。算不出来(总量未知)时传 undefined:百分比显示为 —,不假装 0% */
   pct?: number
@@ -192,7 +194,7 @@ function JobProgress({ env, phaseLabel, tag, pct, cells, error, message, stoppin
         <span className="text-muted-foreground">{phaseLabel}</span>
         <div className="ml-auto flex items-center gap-2">
           {onStop && (
-            // 停止放在这一行的最右:它作用的对象就是这条进度(误点「全量重建」后想收手)
+            // 停止放在这一行的最右:它作用的对象就是这条进度(误点「全量拉取」后想收手)
             <Button variant="outline" size="sm" className="h-6 px-2 text-[11px]"
               disabled={stopping} onClick={onStop}>
               {stopping ? '正在停止…' : '停止'}
@@ -422,7 +424,7 @@ export function SettingsView() {
   const [cfg, setCfg] = useState<HostsView | null>(null)
   const [sshs, setSshs] = useState<SshItem[]>([])
   const [dbg, setDbg] = useState<DebugForm>({ watchdogSeconds: 0 })
-  const [dict, setDict] = useState<DictForm>({ querySource: '', mirrorDir: '', dictDir: '' })
+  const [dict, setDict] = useState<DictForm>({ querySource: '', mirrorDir: '', mirrorTmp: '', dictDir: '' })
   const [listen, setListen] = useState('')
   // 派生状态(路径存不存在只有服务端算得出来)与配置元信息,以及 PATH 安装状态
   const [status, setStatus] = useState<ConfigStatus | null>(null)
@@ -461,7 +463,7 @@ export function SettingsView() {
   // 失败原来是一段内联在卡片里的红字 —— 它出现/消失会顶动卡片高度,
   // 而这段话往往很长(带原因与下一步),内联时还会把下面的表格挤下去。
 
-  // 需要二次确认的动作(全量重建 / 开始同步 / 升级 tt)。
+  // 需要二次确认的动作(全量拉取 / 开始同步 / 升级 tt)。
   // 这几个动作原先用 window.confirm:它是浏览器原生弹窗,样式与本界面无关、
   // 在 iframe/无头环境里还会被直接拦掉(拦掉时返回值按"取消"算,点了没反应还没提示)。
   // 统一改成与「删除环境」同一套 AlertDialog:文案里带上会被影响的环境与路径,
@@ -494,7 +496,7 @@ export function SettingsView() {
       : k === 'debug' ? debugPatchOf(f.dbg)
         : k === 'listen' ? f.listen.trim()
           : k === 'query' ? { source: f.dict.querySource }
-            : k === 'mirror' ? { dir: f.dict.mirrorDir.trim() }
+            : k === 'mirror' ? { dir: f.dict.mirrorDir.trim(), tmpDir: f.dict.mirrorTmp.trim() }
                 : { dir: f.dict.dictDir.trim() })
   const sectionSnap = (k: ConfigKey): string => sectionSnapOf(k, formsRef.current)
   const dirtyRefAny = () => (Object.keys(dirtyRef.current) as ConfigKey[])
@@ -541,6 +543,7 @@ export function SettingsView() {
       setDict({
         querySource: c.query?.source === 'auto' ? '' : (c.query?.source || ''),
         mirrorDir: c.mirror?.dir || '',
+        mirrorTmp: c.mirror?.tmpDir || '',
         dictDir: c.dict?.dir || '',
       })
       setListen(c.listen || '')
@@ -632,7 +635,7 @@ export function SettingsView() {
     if (keys.includes('debug')) body.debug = debugPatchOf(forms.dbg)
     if (keys.includes('listen')) body.listen = forms.listen.trim()
     if (keys.includes('query')) body.query = { source: forms.dict.querySource }
-    if (keys.includes('mirror')) body.mirror = { dir: forms.dict.mirrorDir.trim() }
+    if (keys.includes('mirror')) body.mirror = { dir: forms.dict.mirrorDir.trim(), tmpDir: forms.dict.mirrorTmp.trim() }
     if (keys.includes('dict')) body.dict = { dir: forms.dict.dictDir.trim() }
 
     try {
@@ -662,7 +665,7 @@ export function SettingsView() {
       })
 
       // 镜像目录保存后立刻回读：表格里的实际路径/基线随之更新，
-      // 不要让用户点“增量更新”时还用着保存前的旧路径。
+      // 不要让用户点“全量拉取”时还用着保存前的旧路径。
       if (keys.includes('hosts') || keys.includes('mirror')) {
         void api.mirror().then(setMirror).catch(() => { /* 提示性信息，失败不打断保存 */ })
       }
@@ -1181,16 +1184,15 @@ export function SettingsView() {
   }, [sync?.job?.done, sync?.job?.running, refreshSync])
 
   // 环境名由调用的那一行给出 —— 表格里每行一个按钮,不再有"先选环境"这一步。
-  // 全量重建会整目录替换,先弹确认;确认后走 doMirror(动作与确认分开,
-  // 弹窗那一侧只负责 setAsk 与描述文案)。
-  const pullMirror = (full: boolean, env: string) => {
+  // 只有一种模式(全量拉取),而且它会整目录替换本地镜像,所以先弹确认;
+  // 确认后走 doMirror(动作与确认分开,弹窗那一侧只负责 setAsk 与描述文案)。
+  const pullMirror = (env: string) => {
     if (!env) return
-    if (!full) { void doMirror(false, env); return }
     setAsk({
-      title: `全量重建环境「${env}」?`,
-      desc: '将整目录替换本地镜像(删除服务器上已不存在的残留)。\n首次或按需执行,耗时较长。',
-      confirmText: '全量重建',
-      run: () => void doMirror(true, env),
+      title: `全量拉取环境「${env}」?`,
+      desc: '将在服务器上重压全部白名单文件,并整目录替换本地镜像\n(服务器上已删除的文件,本地也会消失)。耗时约几分钟。',
+      confirmText: '全量拉取',
+      run: () => void doMirror(env),
     })
   }
   // 目录选择器（前端自绘，后端 /api/fs/list 列目录）；选中后写回该环境的 mirrorDir。
@@ -1204,13 +1206,13 @@ export function SettingsView() {
     })
   }
 
-  const doMirror = async (full: boolean, env: string) => {
+  const doMirror = async (env: string) => {
     setOpBusy('mirror')
     try {
-      await api.mirrorPull(env, full)
+      await api.mirrorPull(env)
       await refreshMirror()
-      // 刻意不给"已开始…"这种成功提示:进度块马上就会出现,并写着环境、
-      // 全量/增量与进行中状态 —— 同一件事在一屏里说两遍就是噪音。
+      // 刻意不给"已开始…"这种成功提示:进度块马上就会出现,并写着环境与进行中状态 ——
+      // 同一件事在一屏里说两遍就是噪音。
       // (失败才留提示:失败原因只有它能说清,见下面的 catch。)
     } catch (ex: any) {
       toast.error('拉取源码镜像失败', { description: ex?.message || String(ex) })
@@ -1921,6 +1923,19 @@ export function SettingsView() {
                   control={<Input className={input} value={dict.mirrorDir} placeholder="如 D:\t100\mirror"
                     onChange={(e) => { setDict((s) => ({ ...s, mirrorDir: e.target.value })); markDirty('mirror') }} />}
                 />
+                {/* 归档先落在服务器临时目录再下载，结束（或取消/失败）就删。
+                    绝大多数人不用管；/tmp 分区太小或挂成 tmpfs 时才需要改这里。 */}
+                <SettingRow
+                  id="mirror.tmpDir"
+                  label="服务器临时目录"
+                  description={
+                    !dict.mirrorTmp.trim()
+                      ? '留空 = 服务器上的 ${TMPDIR:-/tmp}。归档只在下拉期间存在，任务结束/中断都会删除。'
+                      : '归档落在这个目录；空间不足会在打包前直接报错，不会压到一半。'
+                  }
+                  control={<Input className={input} value={dict.mirrorTmp} placeholder="如 /u2/tmp（留空用 /tmp）"
+                    onChange={(e) => { setDict((s) => ({ ...s, mirrorTmp: e.target.value })); markDirty('mirror') }} />}
+                />
                 {/* 一个环境一行:镜像本来就是**按环境**分开的(每个环境一个镜像目录、一份基线),
                     原先"先在下拉里挑一个环境、再点按钮"把这件事藏进了两步操作里 ——
                     看不出总共有几个环境、各自拉没拉过。改成表之后这些直接摊开。 */}
@@ -1987,20 +2002,15 @@ export function SettingsView() {
                             </TableCell>
                             <TableCell className="px-2">
                               <div className="flex items-center gap-1 whitespace-nowrap">
-                                {/* 同上:两个都走 ghost 文本按钮。原来"增量更新"是实心主色,
-                                    一行里最重的视觉落在按钮上而不是"哪个环境、拉没拉过"。
-                                    「全量」也去掉 Download 图标:同一格几个按钮,一个带图标一个不带
+                                {/* 同上:都走 ghost 文本按钮。以前这里并排两个动作
+                                    (增量更新 / 全量),现在只有一种模式:**全量拉取**。
+                                    去掉 Download 图标:同一格几个按钮,一个带图标一个不带
                                     会让它们看着不是一类东西;动作名已经把事说清了。
                                     「清理」排在最后：破坏性动作离常用按钮远一点，点完还要过确认。 */}
                                 <Button variant="ghost" size="sm" disabled={mirrorBusy || !rowReady}
-                                  title={rowTitle || '只拉服务器上变过的文件'}
-                                  onClick={() => void pullMirror(false, e.name)}>
-                                  增量更新
-                                </Button>
-                                <Button variant="ghost" size="sm" disabled={mirrorBusy || !rowReady}
-                                  title={rowTitle || '整目录替换(含服务器上已删的残留)'}
-                                  onClick={() => void pullMirror(true, e.name)}>
-                                  全量
+                                  title={rowTitle || '在服务器上重压全部白名单文件，本地整目录替换（服务器上已删的也会消失）'}
+                                  onClick={() => void pullMirror(e.name)}>
+                                  全量拉取
                                 </Button>
                                 <Button variant="ghost" size="sm" disabled={mirrorBusy || !e.exists}
                                   title={e.exists
@@ -2021,7 +2031,7 @@ export function SettingsView() {
                   <JobProgress
                     env={mirror.job.env}
                     phaseLabel={MIRROR_PHASE[mirror.job.phase] || mirror.job.phase}
-                    tag={`${mirror.job.full ? '全量' : '增量'} · ${mirror.job.running ? '进行中' : '已结束'}`}
+                    tag={`全量拉取 · ${mirror.job.running ? '进行中' : '已结束'}`}
                     pct={mirrorPct(mirror.job)}
                     error={mirror.job.phase === 'error' ? (mirror.job.error || mirror.job.message) : undefined}
                     message={mirror.job.running ? undefined
@@ -2193,7 +2203,7 @@ export function SettingsView() {
         </div>
       </div>
 
-      {/* 全量重建 / 开始同步 / 升级 tt 的二次确认:同一套 AlertDialog。
+      {/* 全量拉取 / 开始同步 / 升级 tt 的二次确认:同一套 AlertDialog。
           文案里的换行(desc 里的 \n)由 AlertDialogDescription 的 whitespace-pre-line 呈现。 */}
       <AlertDialog open={ask !== null} onOpenChange={(o) => { if (!o) setAsk(null) }}>
         <AlertDialogContent>

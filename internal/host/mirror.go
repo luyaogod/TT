@@ -19,15 +19,25 @@ package host
 // 备份/临时文件(x.4gl.bak、x.bck、x.bck1、*~ 等)不拉,并会清理本地残留。
 //
 // 传输:服务器侧 tar 打包(绝对路径,exec 通道不经登录 profile) → SFTP 流式
-// 下载 → 本地标准库解压(gzip+tar),全程不进内存。
-// 增量:服务器保留 marker 文件(.tdict-mirror-<env>.mark),pull 默认只打包
-// find -newer 的变更文件;--full 全量打包并在本地整目录替换(含删除残留)。
-// 白名单升级(新增文件类型)时,本地基线标记版本不一致 → 自动转全量补齐。
+// 下载 → 本地标准库解压(gzip+tar),全程不进内存。**只有全量拉取这一种模式**:
+// 每次都在服务器上重压一遍白名单内的全部文件,本地整目录替换(含删除服务器已删的文件)。
+//
+// 归档放**服务器临时目录**(默认 ${TMPDIR:-/tmp},可用 mirror.tmpDir 覆盖),
+// 不进 $TOP —— 既不要求 ERP 顶级目录可写,也不在 ERP 目录里留任何东西。
+// 文件名带 nonce,两台机器拉同一环境不会互相覆盖。
+//
+// 服务器上只可能出现两个文件(<base>.list、<base>.tar.gz),清理分四层:
+//  1. 打包脚本自己删(.list 成功/失败都删;tar 失败连半截归档一起删);
+//  2. 客户端 defer 无条件删(成功、失败、取消都走);
+//  3. 取消时关闭 session,远端 tar 收 SIGHUP 立刻退出(OutputContext);
+//  4. 客户端被强杀/断网时没人执行删除 —— 下次拉取前扫掉 3 小时前的遗留。
+// 服务器重启后 /tmp 由系统清空,不需要我们管。
 
 import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"crypto/rand"
 	"crypto/sha1"
 	"fmt"
 	"io"
@@ -72,16 +82,23 @@ type MirrorStats struct {
 	Env     string        // 环境名
 	Profile MirrorProfile // source | interface
 	TopDir  string        // 服务器 TOP(打包根)
-	Full    bool          // 是否全量
-	Files   int           // 归档内文件数(无变更时为 0)
+	TmpDir  string        // 服务器临时目录(归档落点)
+	Files   int           // 归档内文件数(白名单内一个都没有时为 0)
 	Bytes   int64         // 下载字节数(压缩后)
 	Pruned  int           // 本地清理掉的残留备份文件数(历史拉取留下)
 	Elapsed string        // 耗时
-	Note    string        // 附加说明(如 "无变更")
+	Note    string        // 附加说明(如 "白名单内没有文件")
 }
 
-// localMarkName 本地镜像目录内的"完整基线"标记文件:存在表示该目录曾成功
-// 建立/更新过完整镜像,增量更新以此为前提;缺失时强制全量(见 MirrorPull)。
+// MirrorOptions 拉取的附加参数;零值即全部缺省。
+type MirrorOptions struct {
+	// TmpDir 服务器临时目录。空 = 服务器上的 ${TMPDIR:-/tmp}。
+	TmpDir string
+}
+
+// localMarkName 本地镜像目录内的"上次成功"标记文件:存在表示该目录曾完整拉取成功。
+// 全量模式下它不再参与任何拉取决策,只用于判断"这个目录有没有内容"(MirrorReadyDir)
+// 以及记下这份目录拉过哪几类(见 localMark)。
 const localMarkName = ".tdict-mirror.ok"
 
 // mirrorTag 环境名 → 服务器 marker 文件名 ASCII 尾缀。
@@ -92,19 +109,30 @@ func mirrorTag(name string) string {
 	return fmt.Sprintf("%x", sum)[:10]
 }
 
-// mirrorBase 服务器侧 marker / 归档文件的基础路径(不带 .mark/.tar.gz 后缀)。
+// mirrorTempBase 服务器侧归档/清单的基础路径(不带 .list/.tar.gz 后缀)。
 //
-// **带 profile**：服务器上“上次打包到哪个时刻”的记录必须按 profile 分开。否则先用
-// source 拉一次、再按 interface 拉时，`find -newer <marker>` 会把 42f/42s 全当成
-// 老文件排除掉 —— 打包 0 个文件、还报“无变更”，用户在界面上看到的是成功。
+// 落在**临时目录**而不是 $TOP。旧版本写在 `<TOP>/.tdict-mirror-*`：取消或失败时
+// 265 MB 的归档就留在 ERP 顶级目录里，而且要求登录账号对 $TOP 有写权限（很多客户给不了）。
 //
-// v4 及更早的版本用的是 `<TOP>/.tdict-mirror-<tag>`。升到带 profile 的命名后，旧
-// marker 文件会留在服务器上不被引用（不自动删：那是别人的文件，且删了也没收益）。
-func mirrorBase(top, envName string, profile MirrorProfile) string {
+// 名字里的 nonce 不是装饰：以前文件名固定成「环境 × profile」，两台机器同时拉同一环境
+// 会互相覆盖（一台正在下载的归档被另一台重写，gzip 校验必然失败）。nonce 每次拉取唯一，
+// 陈旧遗留由下一次拉取的 3 小时清扫兜掉（见 mirrorTmpProbe）。
+func mirrorTempBase(tmpDir, envName string, profile MirrorProfile, nonce string) string {
 	if profile == "" {
 		profile = MirrorSource
 	}
-	return top + "/.tdict-mirror-" + mirrorTag(envName) + "-" + string(profile)
+	dir := strings.TrimSuffix(strings.TrimSpace(tmpDir), "/")
+	return dir + "/.tt-mirror-" + mirrorTag(envName) + "-" + string(profile) + "-" + nonce
+}
+
+// mirrorNonce 生成 8 位十六进制随机串(归档名用)。随机源失效时退回时间戳 —— 宁可
+// 重复也不能空，空会让名字变成 `.tt-mirror-x-source-` 这种无法区分的东西。
+func mirrorNonce() string {
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("%08x", time.Now().UnixNano()&0xffffffff)
+	}
+	return fmt.Sprintf("%x", b)
 }
 
 // MirrorProgress 拉取过程的进度(Web 进度条用;CLI 传 nil 回调即无进度)。
@@ -119,59 +147,60 @@ type MirrorProgress struct {
 // ProgressFunc 进度回调(可能被多次调用,实现需自行加锁)。
 type ProgressFunc func(MirrorProgress)
 
-// MirrorPull 拉取/更新指定环境(NamedSsh)的 source 镜像(4gl/**/*.4gl + 42f/42s/zh_CN + *.inc)到 mirrorDir/<环境名>/。
-// full=true 全量重建;否则增量(服务器 marker 记录基线)。
-// 增量只在本地已有完整基线(envDir 内存在 .tdict-mirror.ok 标记)时允许;
-// 本地首次/目录被清/旧版无标记 → 自动转全量,防止"服务器 marker 存在而本地
-// 无镜像"时只拉到变更文件造成镜像永久残缺。成功结束后写入/刷新本地基线标记。
+// MirrorPull 对指定环境做一次**全量拉取**(4gl/**/*.4gl + 42f + 42s/zh_CN + *.inc)
+// 到 mirrorDir/<环境名>/。
+//
+// 只有全量：不再有服务器侧基线，也不再有"只拉变更"。成功结束后写入/刷新本地
+// .tdict-mirror.ok 标记(只表示"这个目录拉成功过哪几类")。
 // 镜像目录本身(mirrorDir)由调用方保证已配置;本函数只负责连服务器与落盘。
 // ctx 见 MirrorPullProgress(它才是实现,这里是给不需要取消的调用方的薄封装)。
-func MirrorPull(ctx context.Context, e *NamedSsh, mirrorDir string, full bool) (*MirrorStats, error) {
-	return MirrorPullProgress(ctx, e, mirrorDir, full, nil)
+func MirrorPull(ctx context.Context, e *NamedSsh, mirrorDir string, opts MirrorOptions) (*MirrorStats, error) {
+	return MirrorPullProgress(ctx, e, mirrorDir, opts, nil)
 }
 
 // MirrorPullToDir 把镜像直接拉到一个指定目录（不再拼 <环境名>）。
 // 用于设置页里“每个环境单独指定镜像目录”的场景；默认 source profile。
-func MirrorPullToDir(ctx context.Context, e *NamedSsh, envDir string, full bool) (*MirrorStats, error) {
-	return MirrorPullToDirProgress(ctx, e, envDir, full, nil)
+func MirrorPullToDir(ctx context.Context, e *NamedSsh, envDir string, opts MirrorOptions) (*MirrorStats, error) {
+	return MirrorPullToDirProgress(ctx, e, envDir, opts, nil)
 }
 
 // MirrorPullToDirProfile 按 profile 拉到指定目录。
-func MirrorPullToDirProfile(ctx context.Context, e *NamedSsh, envDir string, full bool, profile MirrorProfile) (*MirrorStats, error) {
-	return MirrorPullToDirProfileProgress(ctx, e, envDir, full, profile, nil)
+func MirrorPullToDirProfile(ctx context.Context, e *NamedSsh, envDir string, profile MirrorProfile, opts MirrorOptions) (*MirrorStats, error) {
+	return MirrorPullToDirProfileProgress(ctx, e, envDir, profile, opts, nil)
 }
 
 // MirrorPullProgress 同 MirrorPull,并在各阶段回调 onProgress(供 Web 显示拉取进度)。
 //
 // 兼容旧调用：mirrorDir 是根目录，实际落点是 mirrorDir/<环境名>。
-func MirrorPullProgress(ctx context.Context, e *NamedSsh, mirrorDir string, full bool, onProgress ProgressFunc) (*MirrorStats, error) {
-	return MirrorPullToDirProgress(ctx, e, MirrorEnvDir(mirrorDir, e.Name), full, onProgress)
+func MirrorPullProgress(ctx context.Context, e *NamedSsh, mirrorDir string, opts MirrorOptions, onProgress ProgressFunc) (*MirrorStats, error) {
+	return MirrorPullToDirProgress(ctx, e, MirrorEnvDir(mirrorDir, e.Name), opts, onProgress)
 }
 
 // MirrorPullToDirProgress 是 source profile 的薄封装。
-func MirrorPullToDirProgress(ctx context.Context, e *NamedSsh, envDir string, full bool, onProgress ProgressFunc) (*MirrorStats, error) {
-	return MirrorPullToDirProfileProgress(ctx, e, envDir, full, MirrorSource, onProgress)
+func MirrorPullToDirProgress(ctx context.Context, e *NamedSsh, envDir string, opts MirrorOptions, onProgress ProgressFunc) (*MirrorStats, error) {
+	return MirrorPullToDirProfileProgress(ctx, e, envDir, MirrorSource, opts, onProgress)
 }
 
 // MirrorPullToDirProfileProgress 是镜像拉取的实现：envDir 就是本环境的最终目录。
 //
 // profile 只影响服务器侧 find 的白名单：source=4gl/**/*.4gl + 42f + 42s/zh_CN + *.inc，
-// interface=42f/42s。落点、基线、增量、取消语义完全一致 —— 同一目录切 profile 不会
-// 删除另一类的文件（全量解压也会把它们原样搬进新目录，见 extractFull）；想只要一类
-// 的干净目录，给 interface profile 单独配一个目录。
+// interface=42f/42s。落点与取消语义一致 —— 同一目录切 profile 不会删除另一类的文件
+// （全量解压也会把它们原样搬进新目录，见 extractFull）；想只要一类的干净目录，
+// 给 interface profile 单独配一个目录。
 //
-// 服务器标记与本地基线都是**按 profile 分开记**的（mirrorBase）：否则 source 拉过一次
-// 之后，再按 interface 拉会命中“没有比标记更新的文件”而报“无变更”——0 个文件、退正常，
-// 用户以为拉到了，其实是空跑。
+// 服务器流程：探测 TOP → 探测临时目录(含陈旧清扫、可写与剩余空间预检) → 估算归档大小
+// → tar 打包 → SFTP 下载 → 本地解压 → 字节数校验 → 写本地标记 → 删服务器归档。
+// 归档只存在于临时目录，$TOP 一个字节都不写(见 mirrorTempBase)。
 //
-// ctx 用来**中途取消**:用户误点「全量重建」时界面上的「停止」按钮走的就是它。
-// 取消点选在三处 —— 连接、服务器打包、下载解压循环(见 countingReader / extractTarGz)。
+// ctx 用来**中途取消**:界面上的「停止」按钮走的就是它。取消点选在连接、预检、
+// 服务器打包、下载解压循环(见 countingReader / extractTarGz)，并且取消时会关闭
+// 远端 session，让服务器上的 tar 立刻退出(OutputContext)。
 // 取消后返回 ctx.Err()(context.Canceled),调用方据此把任务标成"已停止"而不是"失败"。
 //
 // 取消不会留下"看着完整"的半个镜像:.tdict-mirror.ok 只在**解压全部成功之后**才写,
-// 而 MirrorReady() 判的就是这个标记 —— 所以中途停下的目录会被下次拉取当作"缺基线",
-// 自动转全量重建(见上面 needFull 的判定)。
-func MirrorPullToDirProfileProgress(ctx context.Context, e *NamedSsh, envDir string, full bool, profile MirrorProfile, onProgress ProgressFunc) (*MirrorStats, error) {
+// 而 MirrorReady() 判的就是这个标记。服务器侧的归档由 defer 删除;客户端被强杀时
+// 由下一次拉取的陈旧清扫兜底。
+func MirrorPullToDirProfileProgress(ctx context.Context, e *NamedSsh, envDir string, profile MirrorProfile, opts MirrorOptions, onProgress ProgressFunc) (*MirrorStats, error) {
 	if profile == "" {
 		profile = MirrorSource
 	}
@@ -188,7 +217,7 @@ func MirrorPullToDirProfileProgress(ctx context.Context, e *NamedSsh, envDir str
 		}
 	}
 	start := time.Now()
-	st := &MirrorStats{Env: e.Name, Profile: profile, Full: full}
+	st := &MirrorStats{Env: e.Name, Profile: profile}
 	if e.Name == "" {
 		return nil, fmt.Errorf("环境名为空")
 	}
@@ -210,46 +239,40 @@ func MirrorPullToDirProfileProgress(ctx context.Context, e *NamedSsh, envDir str
 	}
 	st.TopDir = top
 
-	base := mirrorBase(top, e.Name, profile)
-
-	// 本地无完整基线(首次拉取/目录被清/旧版本遗留),或白名单升级过(增量补不齐
-	// 新增类型的历史文件)时,自动按全量拉取,避免镜像残缺
-	needFull := full
-	if !needFull {
-		mark := readLocalMark(envDir)
-		switch {
-		case !MirrorReadyDir(envDir):
-			needFull = true
-			logfMirror("本地镜像缺少完整基线标记(%s),本次自动按全量拉取以保证完整", filepath.Join(envDir, localMarkName))
-		case mark.Version != mirrorWhitelistVersion:
-			needFull = true
-			logfMirror("镜像白名单已升级(v%d -> v%d,文件类型有变),本次自动按全量拉取以补齐", mark.Version, mirrorWhitelistVersion)
-		case !mark.Has(profile):
-			// 这份目录还没拉过该 profile:服务器侧没有它的标记,mirrorPack 会按全量
-			// find 打包,本地只需增量写入 —— 不动已有目录,另一类文件原样保留。
-			logfMirror("该目录还没拉过 %s profile,本次只补这一类文件(已有的 %s 保留)",
-				profile, mark.ProfilesLabel())
-		}
+	// 服务器临时目录：旧版本把归档写在 $TOP，取消/失败就把 265 MB 留在 ERP 目录里，
+	// 还要求登录账号对 $TOP 可写。现在归档只在一处、只活一个下载周期。
+	// 这一步同时做掉三件事：解析目录、删 3 小时前的遗留、报可写与剩余空间。
+	tmp, err := mirrorTmpProbe(ctx, conn, opts.TmpDir)
+	if err != nil {
+		return nil, err
 	}
-	st.Full = needFull
+	st.TmpDir = tmp.Dir
 
-	// 服务器打包(输出 TDICT_MIRROR_OK <文件数> <字节> / TDICT_MIRROR_NONE)
-	report(MirrorProgress{Phase: "pack", Message: "服务器打包中…"})
-	n, size, err := mirrorPackProgress(ctx, conn, base, top, needFull, profile, report)
+	nonce := mirrorNonce()
+	base := mirrorTempBase(tmp.Dir, e.Name, profile, nonce)
+	// 从这行往后服务器上就可能有文件了：清理必须发生在**所有**返回路径上。
+	// 注册在 defer conn.Close() 之后 —— LIFO 保证先删文件、再断连接。
+	defer cleanRemoteArchive(conn, base)
+
+	// 本地上次被强杀留下的 .staging-* / .old-*（只清 1 小时前的，别碰另一台正在跑的）
+	cleanLocalStaging(envDir)
+
+	// 预估归档大小：既是打包阶段进度条的分母，也是空间预检的依据。
+	est := packEstimate(ctx, conn, top, profile)
+	if err := mirrorCheckSpace(tmp, est); err != nil {
+		return nil, err
+	}
+
+	report(MirrorProgress{Phase: "pack", Message: "服务器打包中…", Total: est})
+	n, size, err := mirrorPackProgress(ctx, conn, base, top, profile, est, report)
 	if err != nil {
 		return nil, fmt.Errorf("服务器打包失败: %w", err)
 	}
 	if n == 0 {
+		// 白名单内一个文件都没找到(服务器那棵树是空的)。没有归档可下,但本地
+		// 仍可能残留旧版本拉下来的备份文件。
 		st.Elapsed = time.Since(start).Round(100 * time.Millisecond).String()
-		st.Note = "无变更(服务器 " + profile.Label() + " 自上次 pull 后未修改;--full 可强制全量重建)"
-		// 服务器无变更但本地基线标记缺失时,依然补一个基线标记,
-		// 否则下次 pull 仍会误判"无基线"而反复尝试全量
-		if !needFull {
-			if err := writeLocalMark(envDir, profile); err != nil {
-				logfMirror("写入本地基线标记失败(忽略): %v", err)
-			}
-		}
-		// 服务器虽无变更,本地仍可能残留旧版本拉下来的备份文件
+		st.Note = "白名单内没有可打包的文件(服务器 " + profile.Label() + " 是空的?)"
 		st.Pruned = pruneBackupFiles(envDir)
 		if st.Pruned > 0 {
 			st.Note += fmt.Sprintf(";已清理本地备份 %d 个", st.Pruned)
@@ -276,20 +299,27 @@ func MirrorPullToDirProfileProgress(ctx context.Context, e *NamedSsh, envDir str
 
 	report(MirrorProgress{Phase: "download", Message: "下载并解压…", Total: size})
 	cr := &countingReader{ctx: ctx, r: rf, total: size, report: report}
-	var files int
-	if needFull {
-		files, err = extractFull(cr, envDir, profile)
-	} else {
-		files, err = extractIncremental(cr, envDir)
-	}
+	files, err := extractFull(cr, envDir, profile)
 	if err != nil {
 		// 用户中途取消:原样返回 context.Canceled(调用方据此标"已停止",不当失败)。
-		// 此时**不写基线标记** —— 半个镜像不会被下次拉取当成完整基线(见函数注释)。
-		// 全量路径的 .staging 临时目录由 extractFull 自己清掉。
+		// 此时**不写基线标记**，.staging 临时目录由 extractFull 自己清掉。
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 		return nil, fmt.Errorf("本地解压失败: %w", err)
+	}
+	// tar 读到两个 0 块就停,剩下的 gzip 尾部还在管道里;排空后再比字节数,
+	// 否则正常归档也会被判成"下载不完整"。
+	if _, err := io.Copy(io.Discard, cr); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, fmt.Errorf("读取归档尾部失败: %w", err)
+	}
+	// 先压缩后下载的好处:字节数是确定的,能硬校验。断网/半截下载在这里拦住,
+	// 不让它变成"看着完整、其实少了一半"的镜像。
+	if cr.n != size {
+		return nil, fmt.Errorf("下载不完整(实收 %d 字节,应为 %d);服务器归档会被自动清理,请重试", cr.n, size)
 	}
 	// 解压完成、还没落任何"完成"痕迹之前再确认一次取消:
 	// 否则用户刚点停止、这边刚好解压完,会留下一个标记完整但用户以为已停止的镜像。
@@ -300,14 +330,10 @@ func MirrorPullToDirProfileProgress(ctx context.Context, e *NamedSsh, envDir str
 	if err := writeLocalMark(envDir, profile); err != nil {
 		return nil, fmt.Errorf("写入本地基线标记失败: %w", err)
 	}
-	// 增量拉取不会删旧文件:清掉历史版本留在本地的备份文件(全量重建时本就没有)
+	// 历史版本可能留下备份文件(全量解压不会带进来,但旧目录里可能有)
 	st.Pruned = pruneBackupFiles(envDir)
 
-	// 清理服务器归档(marker 保留,供下次增量)
-	if out, err := conn.Output(`rm -f "`+base+`.tar.gz"`, time.Minute); err != nil && !strings.Contains(out, "No such file") {
-		// 清理失败不阻断:下次全量/增量都会重建归档
-		logfMirror("清理服务器归档失败(忽略): %v", err)
-	}
+	// 服务器归档与清单由 defer cleanRemoteArchive 删除(成功/失败/取消都走)。
 	st.Elapsed = time.Since(start).Round(100 * time.Millisecond).String()
 	msg := fmt.Sprintf("完成:%d 个文件", files)
 	if st.Pruned > 0 {
@@ -358,21 +384,19 @@ func (c *countingReader) Read(p []byte) (int, error) {
 const archiveSizeRatio = 0.15
 
 // packEstimate 估算这次打包的归档大小：按与 mirrorPack **完全相同**的选文件规则
-// （白名单 + 备份排除 + 增量的 -newer）量出源文件总字节，再按经验压缩比折算。
-// 任何一步失败都返回 0 —— 拿不到预估时前端退化成"总量未知"，不影响拉取本身。
-func packEstimate(ctx context.Context, conn *SSHConn, top, markPath string, full bool, profile MirrorProfile) int64 {
+// （白名单 + 备份排除）量出源文件总字节，再按经验压缩比折算。全量模式没有 `-newer`。
+//
+// 两个用途：打包阶段进度条的分母、以及空间预检的门槛。任何一步失败都返回 0 ——
+// 拿不到预估时前端退化成"总量未知"，预检退化成 300 MB 兜底下限，都不阻断拉取。
+func packEstimate(ctx context.Context, conn *SSHConn, top string, profile MirrorProfile) int64 {
 	findExpr := mirrorWhitelistFindExpr(profile) + " " + mirrorBackupFindExpr()
-	newer := ""
-	if !full {
-		newer = " -newer " + shdq(markPath)
-	}
 	script := `cd ` + shdq(top) + ` 2>/dev/null || exit 0
 R=""
 for d in erp com; do
   [ -d "$d" ] && R="$R $d"
 done
 [ -z "$R" ] && exit 0
-find $R -type f ` + findExpr + newer + ` -printf '%s\n' 2>/dev/null | awk '{s+=$1} END{print s+0}'`
+find $R -type f ` + findExpr + ` -printf '%s\n' 2>/dev/null | awk '{s+=$1} END{print s+0}'`
 	if err := ctx.Err(); err != nil {
 		return 0
 	}
@@ -393,18 +417,12 @@ func lastLine(s string) string {
 	return strings.TrimSpace(lines[len(lines)-1])
 }
 
-// mirrorPackProgress 在服务器打包期间轮询归档大小回报进度(pack 阶段无法预知总量)。
-// ctx 取消时主动返回:打包在服务器上是 `tar` 子进程,取消不会杀它,但至少本端立刻收手,
-// 不再等它跑完(服务器归档是临时文件,下次拉取会重建)。
-func mirrorPackProgress(ctx context.Context, conn *SSHConn, base, top string, full bool, profile MirrorProfile, report ProgressFunc) (int, int64, error) {
-	// 先估一个"归档会有多大":打包阶段用户看到的进度条需要一个分母。
-	// 量不出来(0)就照旧只报已打包字节,前端会显示成"总量未知"。
-	// 没有进度回调(CLI 的 tt file mirror)时不做这次测量:多一趟 find 没意义。
-	if report != nil {
-		if est := packEstimate(ctx, conn, top, base+".mark", full, profile); est > 0 {
-			report(MirrorProgress{Phase: "pack", Message: "服务器打包中…", Total: est})
-		}
-	}
+// mirrorPackProgress 在服务器打包期间轮询归档大小回报进度。
+//
+// 打包本身跑在**受 ctx 约束**的 goroutine 里：取消时用 OutputContext 关掉远端 session，
+// 服务器上的 tar 收到 SIGHUP 立刻退出（旧实现只是本端不再等它，tar 会继续把
+// 265 MB 写完 —— 在白拿一份 CPU 和磁盘 IO）。
+func mirrorPackProgress(ctx context.Context, conn *SSHConn, base, top string, profile MirrorProfile, est int64, report ProgressFunc) (int, int64, error) {
 	var stopped atomic.Bool
 	done := make(chan struct{})
 	defer func() {
@@ -427,13 +445,12 @@ func mirrorPackProgress(ctx context.Context, conn *SSHConn, base, top string, fu
 					continue
 				}
 				var sz int64
-				if _, err := fmt.Sscanf(strings.TrimSpace(out), "%d", &sz); err == nil && sz > 0 && !stopped.Load() {
+				if _, err := fmt.Sscanf(strings.TrimSpace(out), "%d", &sz); err == nil && sz > 0 && !stopped.Load() && report != nil {
 					report(MirrorProgress{Phase: "pack", Message: "服务器打包中…", Bytes: sz})
 				}
 			}
 		}
 	}()
-	// 打包本身也放进一个受 ctx 约束的等待:取消了就不再阻塞在后端调用上
 	type packResult struct {
 		n    int
 		size int64
@@ -441,7 +458,7 @@ func mirrorPackProgress(ctx context.Context, conn *SSHConn, base, top string, fu
 	}
 	ch := make(chan packResult, 1)
 	go func() {
-		n, size, err := mirrorPack(conn, base, top, full, profile)
+		n, size, err := mirrorPack(ctx, conn, base, top, profile)
 		ch <- packResult{n, size, err}
 	}()
 	select {
@@ -543,8 +560,8 @@ func MirrorEnvDir(mirrorDir, envName string) string {
 	return filepath.Join(mirrorDir, envName)
 }
 
-// MirrorReady 本地是否已有完整镜像基线(.tdict-mirror.ok 标记;增量更新的前提)。
-// 无基线时 MirrorPull 会自动转全量。
+// MirrorReady 本地是否已有完整镜像(.tdict-mirror.ok 标记存在)。
+// 只用于界面显示"拉过没有";拉取本身不依赖它(每次都是全量)。
 func MirrorReady(mirrorDir, envName string) bool {
 	return MirrorReadyDir(MirrorEnvDir(mirrorDir, envName))
 }
@@ -604,15 +621,17 @@ func mirrorPathInProfile(profile MirrorProfile, rel string) bool {
 }
 
 // mirrorWhitelistVersion 白名单版本:新增文件类型时 +1。
-// 本地基线标记(.tdict-mirror.ok)里记录该版本;版本不一致说明白名单升级过,
-// 增量无法补齐新增类型的历史文件,于是下次拉取自动转全量(见 MirrorPullProgress)。
+//
+// 只写进本地标记(.tdict-mirror.ok)供排查:全量模式下**不需要**靠版本判定补拉 ——
+// 每次拉取本来就会重压全部白名单文件,新增的类自然就进来了。
 //
 //	v1: 4gl/4fd
 //	v2: +42s/zh_CN、*.inc
 //	v3: 4fd → 42f（前端画面改为 42f+42s；4fd 不再镜像）
 //	v4: source 收紧为 4gl/**/*.4gl；interface 保留 42f/42s
 //	v5: source 恢复为 4gl + 42f + 42s/zh_CN + *.inc（一个镜像目录必须装齐所有读者的并集）
-const mirrorWhitelistVersion = 5
+//	v6: 删除增量,只剩全量拉取(服务器临时目录 + 四层清理)
+const mirrorWhitelistVersion = 6
 
 // mirrorBackupSuffixes 备份/临时文件名特征(不含点全名包含即算备份)。
 // 服务器侧打包排除与本地残留清理共用同一份列表,避免两边规则漂移:
@@ -687,22 +706,42 @@ func shdq(s string) string {
 	return `"` + s + `"`
 }
 
-// mirrorPack 在服务器 TOP 下打包 profile 白名单文件。返回 (文件数, 归档字节);
-// 无变更时返回 (0, 0) 且不产生归档。marker 保留在 TOP 下供下次增量。
-func mirrorPack(conn *SSHConn, base, top string, full bool, profile MirrorProfile) (int, int64, error) {
-	m := shdq(base + ".mark")
+// mirrorPack 在服务器临时目录里打一个**全量** tar.gz。返回 (文件数, 归档字节);
+// 白名单内一个文件都没有时返回 (0, 0) 且不产生归档。
+//
+// 脚本里没有 `set -e`：每一步自己收尾。这是"打包失败也不留垃圾"的第一层 ——
+// 清单在成功/失败两条路上都删，tar 失败连半截归档一起删。
+// 归档与清单都在调用方给的 base 上（临时目录，见 mirrorTempBase），任务结束后
+// 由 cleanRemoteArchive 删除；这里只负责别把半成品留在服务器上。
+//
+// 输出标记（客户端按最后一个标记判定）：
+//
+//	TDICT_MIRROR_OK <文件数> <字节>
+//	TDICT_MIRROR_NONE          白名单内没有文件
+//	TDICT_MIRROR_CD            进不去 TOP
+//	TDICT_MIRROR_FINDFAIL      find 失败（清单已删）
+//	TDICT_MIRROR_TARFAIL       tar 失败（半截归档与清单已删）
+func mirrorPack(ctx context.Context, conn *SSHConn, base, top string, profile MirrorProfile) (int, int64, error) {
+	out, err := conn.OutputContext(ctx, mirrorPackScript(base, top, profile), 20*time.Minute)
+	if err != nil {
+		if ctx.Err() != nil {
+			return 0, 0, ctx.Err()
+		}
+		return 0, 0, fmt.Errorf("%s(输出: %s)", err, strings.TrimSpace(out))
+	}
+	return parseMirrorPackOutput(out, top)
+}
+
+// mirrorPackScript 生成服务器侧的打包脚本。单独成函数是为了能被单测钉住：
+// 这里少一句 `rm -f`，服务器上就会多一个 265 MB 的文件，而且很难在生产环境复现。
+func mirrorPackScript(base, top string, profile MirrorProfile) string {
 	o := shdq(base + ".tar.gz")
 	l := shdq(base + ".list")
 	t := shdq(top)
-	// 注意:exec 通道不经过登录 profile,但这里只依赖绝对路径与标准工具
-	// 白名单树(按 profile)+ 排除备份/临时文件(如 x.4gl.bak、x.bck、x.bck1)
+	// exec 通道不经过登录 profile，这里只依赖绝对路径与标准工具。
+	// 白名单树(按 profile) + 排除备份/临时文件(如 x.4gl.bak、x.bck、x.bck1)。
 	findExpr := mirrorWhitelistFindExpr(profile) + " " + mirrorBackupFindExpr()
-	fullFlag := "0"
-	if full {
-		fullFlag = "1"
-	}
-	script := `set -e
-cd ` + t + ` || exit 9
+	return `cd ` + t + ` || { echo TDICT_MIRROR_CD; exit 9; }
 R=""
 for d in erp com; do
   [ -d "$d" ] && R="$R $d"
@@ -711,31 +750,39 @@ if [ -z "$R" ]; then
   echo TDICT_MIRROR_NONE
   exit 0
 fi
-if [ "` + fullFlag + `" = "1" ] || [ ! -f ` + m + ` ]; then
-  find $R -type f ` + findExpr + ` > ` + l + `
-else
-  find $R -type f ` + findExpr + ` -newer ` + m + ` > ` + l + `
+if ! find $R -type f ` + findExpr + ` > ` + l + `; then
+  rm -f ` + l + `
+  echo TDICT_MIRROR_FINDFAIL
+  exit 8
 fi
-if [ -s "` + l + `" ]; then
-  n=$(wc -l < "` + l + `")
-  tar -czf ` + o + ` -T "` + l + `"
-  touch ` + m + `
-  s=$(wc -c < "` + o + `")
-  rm -f "` + l + `"
-  echo "TDICT_MIRROR_OK $n $s"
-else
-  rm -f "` + l + `"
+if [ ! -s ` + l + ` ]; then
+  rm -f ` + l + `
   echo TDICT_MIRROR_NONE
-fi`
-	out, err := conn.Output(script, 20*time.Minute)
-	if err != nil {
-		return 0, 0, fmt.Errorf("%s(输出: %s)", err, strings.TrimSpace(out))
-	}
-	// 取最后一行标记(前面可能有 tar 警告)
+  exit 0
+fi
+n=$(wc -l < ` + l + `)
+if ! tar -czf ` + o + ` -T ` + l + `; then
+  rm -f ` + o + ` ` + l + `
+  echo TDICT_MIRROR_TARFAIL
+  exit 0
+fi
+rm -f ` + l + `
+echo "TDICT_MIRROR_OK $n $(wc -c < ` + o + `)"`
+}
+
+// parseMirrorPackOutput 解析打包脚本的输出，取**最后**一个标记行。
+//
+// 取最后一行的原因：tar 会把警告打到同一个通道里，前面的行不可信。
+func parseMirrorPackOutput(out, top string) (int, int64, error) {
 	mark := ""
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "TDICT_MIRROR_OK") || line == "TDICT_MIRROR_NONE" {
+		switch {
+		case strings.HasPrefix(line, "TDICT_MIRROR_OK"),
+			line == "TDICT_MIRROR_NONE",
+			line == "TDICT_MIRROR_CD",
+			line == "TDICT_MIRROR_FINDFAIL",
+			line == "TDICT_MIRROR_TARFAIL":
 			mark = line
 		}
 	}
@@ -749,17 +796,159 @@ fi`
 		return n, s, nil
 	case mark == "TDICT_MIRROR_NONE":
 		return 0, 0, nil
+	case mark == "TDICT_MIRROR_CD":
+		return 0, 0, fmt.Errorf("进不去服务器 TOP: %s", top)
+	case mark == "TDICT_MIRROR_FINDFAIL":
+		return 0, 0, fmt.Errorf("服务器 find 失败(清单已清理)")
+	case mark == "TDICT_MIRROR_TARFAIL":
+		return 0, 0, fmt.Errorf("服务器 tar 打包失败(半截归档已清理,通常是磁盘满或权限)")
 	default:
 		return 0, 0, fmt.Errorf("服务器脚本未输出预期标记(输出: %s)", strings.TrimSpace(out))
 	}
 }
 
-// extractIncremental 增量解压:直接覆盖写入 <mirrorDir>/<环境名>/(文件级幂等)。
-func extractIncremental(r io.Reader, envDir string) (int, error) {
-	if err := os.MkdirAll(envDir, 0o755); err != nil {
-		return 0, err
+// serverTmp 服务器临时目录的探测结果。
+type serverTmp struct {
+	Dir    string // 解析后的绝对路径
+	FreeKB int64  // 剩余空间(df -Pk 的可用列,KB;0=没量到)
+}
+
+// mirrorTmpProbe 解析并检查服务器临时目录，顺便扫掉 3 小时前的遗留归档。
+//
+// 为什么必须走一趟服务器：
+//   - `${TMPDIR:-/tmp}` 是 shell 的展开，客户端拿不到最终路径；
+//   - 不可写要立刻报清楚，而不是让 tar 跑一半报 Permission denied；
+//   - 剩余空间装不下时直接拒绝，避免"压到一半 ENOSPC"留下半截归档；
+//   - **3 小时清扫是唯一能救"客户端被强杀/断网"的机制** —— 那种情况没人执行删除。
+//
+// 清扫只认 `.tt-mirror-*` 且 `-mmin +180`：不会碰另一台机器正在下载的归档。
+func mirrorTmpProbe(ctx context.Context, conn *SSHConn, want string) (serverTmp, error) {
+	out, err := conn.Output(mirrorTmpProbeScript(want), 2*time.Minute)
+	line := ""
+	for _, ln := range strings.Split(out, "\n") {
+		ln = strings.TrimSpace(ln)
+		if strings.HasPrefix(ln, "TDICT_MIRROR_TMP") {
+			line = ln
+		}
 	}
-	return extractTarGz(r, envDir)
+	switch {
+	case strings.HasPrefix(line, "TDICT_MIRROR_TMPMISSING"):
+		dir := strings.TrimPrefix(line, "TDICT_MIRROR_TMPMISSING ")
+		return serverTmp{}, fmt.Errorf("服务器临时目录不存在: %s；请清理/创建它,或在设置里用 mirror.tmpDir 指定别的目录", dir)
+	case strings.HasPrefix(line, "TDICT_MIRROR_TMPNOWRITE"):
+		dir := strings.TrimPrefix(line, "TDICT_MIRROR_TMPNOWRITE ")
+		return serverTmp{}, fmt.Errorf("服务器临时目录不可写: %s；可用 mirror.tmpDir 换一个落点", dir)
+	case strings.HasPrefix(line, "TDICT_MIRROR_TMP "):
+		rest := strings.TrimPrefix(line, "TDICT_MIRROR_TMP ")
+		parts := strings.SplitN(rest, " ", 2)
+		if len(parts) != 2 || strings.TrimSpace(parts[1]) == "" {
+			return serverTmp{}, fmt.Errorf("服务器返回的临时目录格式不认识: %q", line)
+		}
+		free, _ := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64)
+		return serverTmp{Dir: strings.TrimSpace(parts[1]), FreeKB: free}, nil
+	}
+	if err != nil {
+		return serverTmp{}, fmt.Errorf("探测服务器临时目录失败: %w(输出: %s)", err, strings.TrimSpace(out))
+	}
+	return serverTmp{}, fmt.Errorf("服务器未返回临时目录信息(输出: %s)", strings.TrimSpace(out))
+}
+
+// mirrorTmpProbeScript 生成临时目录探测脚本（单独成函数，便于单测钉住清扫规则）。
+func mirrorTmpProbeScript(want string) string {
+	// want 为空时让服务器自己展开 ${TMPDIR:-/tmp}：exec 通道不读登录 profile，
+	// TMPDIR 通常是空的，于是落到 /tmp。
+	spec := `T=${TMPDIR:-/tmp}`
+	if w := strings.TrimSpace(want); w != "" {
+		spec = `T=` + shdq(w)
+	}
+	return spec + `
+[ -d "$T" ] || { echo "TDICT_MIRROR_TMPMISSING $T"; exit 3; }
+[ -w "$T" ] || { echo "TDICT_MIRROR_TMPNOWRITE $T"; exit 4; }
+find "$T"/.tt-mirror-* -type f -mmin +180 -exec rm -f {} + 2>/dev/null
+free=$(df -Pk "$T" 2>/dev/null | awk 'NR==2{print $4}')
+[ -n "$free" ] || free=0
+echo "TDICT_MIRROR_TMP $free $T"`
+}
+
+// mirrorCheckSpace 空间预检：剩余空间 < 预估×1.2 就拒绝（拿不到预估时按 300 MB 兜底）。
+//
+// 宁可提前失败，也不要在服务器上压到 ENOSPC：那时留下的是半截归档 + 一个失败任务，
+// 还得靠 3 小时清扫收尾。`df` 没量到（FreeKB=0）时不拦，交给 tar 自己报错。
+func mirrorCheckSpace(tmp serverTmp, est int64) error {
+	need := est
+	if need <= 0 {
+		need = 300 << 20
+	} else {
+		need += need / 5 // ×1.2：给 tar 的块缓冲和清单留点余量
+	}
+	free := tmp.FreeKB << 10
+	if free > 0 && free < need {
+		return fmt.Errorf("服务器临时目录空间不足: %s 可用 %d MB,本次归档约需 %d MB；请清理该目录或用 mirror.tmpDir 换一个落点",
+			tmp.Dir, tmp.FreeKB/1024, need/(1<<20))
+	}
+	return nil
+}
+
+// cleanRemoteArchive 删除本次拉取在服务器临时目录里留下的归档与清单。
+//
+// 挂在 defer 上：成功、失败、取消都走。必须幂等 —— 文件可能压根没生成（白名单空、
+// 预检失败），也可能被脚本自己删过了，`rm -f` 两种情况都不报错。
+// 发不出去（连接已断）时只能靠下一次拉取的 3 小时清扫。
+func cleanRemoteArchive(conn *SSHConn, base string) {
+	if _, err := conn.Output(mirrorCleanScript(base), time.Minute); err != nil {
+		logfMirror("清理服务器临时归档失败(3 小时后的下一次拉取会清扫): %v", err)
+	}
+}
+
+// mirrorCleanScript 生成"杀掉本次拉起的服务器进程 + 删掉本次两个临时文件"的命令。
+//
+// 为什么还要 kill：取消时关掉 SSH 会话**不足以**让远端停下 —— 实测 OpenSSH 对非 pty
+// 的 exec 通道，会话关掉后 ksh 与 tar 仍会继续跑（PPID 变 1），把 265 MB 写完。
+// 于是"取消"反而留下一个完整归档，比不取消还糟。
+//
+// 按 base 里的随机 nonce 反查进程：唯一、不会误伤别人的进程；只认 tar/sh 两类
+// （ps/awk/grep 自己的命令行里也带着这个串，必须排除）。先 TERM 再 KILL，最后删文件。
+func mirrorCleanScript(base string) string {
+	return `B=` + shdq(base) + `
+me=$$
+for p in $(ps -ef 2>/dev/null | awk -v me="$me" -v b="$B" 'index($0,b)>0 && $2!=me && ($8=="tar" || $8=="ksh" || $8=="sh" || $8=="bash") {print $2}'); do
+  kill -TERM "$p" 2>/dev/null
+done
+sleep 1
+for p in $(ps -ef 2>/dev/null | awk -v me="$me" -v b="$B" 'index($0,b)>0 && $2!=me && ($8=="tar" || $8=="ksh" || $8=="sh" || $8=="bash") {print $2}'); do
+  kill -KILL "$p" 2>/dev/null
+done
+rm -f "$B.tar.gz" "$B.list"`
+}
+
+// cleanLocalStaging 删掉本地上一次被强杀留下的 `.staging-*` / `.old-*` 目录。
+//
+// extractFull 的正常与失败路径都会自己 RemoveAll，只有客户端被强杀才留得下来。
+// 只删 1 小时前的：镜像根目录下可能正有另一台机器（或另一个进程）在写 staging，
+// 见一个删一个会把人家正在解压的目录端掉。
+func cleanLocalStaging(envDir string) {
+	parent := filepath.Dir(envDir)
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-time.Hour)
+	for _, e := range entries {
+		name := e.Name()
+		if !e.IsDir() || (!strings.HasPrefix(name, ".staging-") && !strings.HasPrefix(name, ".old-")) {
+			continue
+		}
+		info, ierr := e.Info()
+		if ierr != nil || !info.ModTime().Before(cutoff) {
+			continue
+		}
+		p := filepath.Join(parent, name)
+		if err := os.RemoveAll(p); err != nil {
+			logfMirror("清理本地残留目录失败(忽略): %s: %v", p, err)
+			continue
+		}
+		logfMirror("已清理本地残留目录: %s", p)
+	}
 }
 
 // extractFull 全量解压:先写 .staging 临时目录,再把**本 profile 之外**的旧文件搬进去,
@@ -785,7 +974,7 @@ func extractFull(r io.Reader, envDir string, profile MirrorProfile) (int, error)
 		os.RemoveAll(staging)
 		return 0, kerr
 	} else if kept > 0 {
-		logfMirror("全量重建保留另一类文件 %d 个(不属于 %s 的白名单)", kept, profile)
+		logfMirror("全量拉取保留另一类文件 %d 个(不属于 %s 的白名单)", kept, profile)
 	}
 	old := envDir + ".old-" + ts
 	if _, err := os.Stat(envDir); err == nil {

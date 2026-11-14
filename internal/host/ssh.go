@@ -2,6 +2,7 @@ package host
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -113,6 +114,42 @@ func (c *SSHConn) Output(cmd string, timeout time.Duration) (string, error) {
 // 自己控制的常量,这一类问题从根上不存在。
 func (c *SSHConn) OutputStdin(cmd string, stdin []byte, timeout time.Duration) (string, error) {
 	return c.run(cmd, bytes.NewReader(stdin), timeout)
+}
+
+// OutputContext 同 Output，但额外受 ctx 约束：ctx 取消时**关闭会话**。
+//
+// 与 Output 的区别不是"早点返回"，而是"让远端进程死掉"：取消时只返回的话，
+// 服务器上的 tar 会把 265 MB 继续写完（白烧 CPU 和磁盘 IO），而且留下一个没人要的
+// 归档。关掉 session 后 sshd 会给命令的进程组发 SIGHUP/SIGPIPE，tar 立刻退出；
+// 它可能留下半截文件，由调用方的 defer 清理兜住。
+func (c *SSHConn) OutputContext(ctx context.Context, cmd string, timeout time.Duration) (string, error) {
+	sess, err := c.cli.NewSession()
+	if err != nil {
+		return "", err
+	}
+	defer sess.Close()
+	type res struct {
+		out []byte
+		err error
+	}
+	done := make(chan res, 1)
+	go func() {
+		out, err := sess.CombinedOutput(cmd)
+		done <- res{out, err}
+	}()
+	select {
+	case r := <-done:
+		if r.err != nil {
+			return string(r.out), r.err
+		}
+		return string(r.out), nil
+	case <-ctx.Done():
+		sess.Close() // 关通道 → 远端命令收 HUP，别让它继续压
+		return "", ctx.Err()
+	case <-time.After(timeout):
+		sess.Close()
+		return "", fmt.Errorf("命令超时: %s", redactCmd(cmd))
+	}
 }
 
 // run 执行/超时的公共实现。输出与错误经 channel 传出 —— 原实现直接写外层变量,
