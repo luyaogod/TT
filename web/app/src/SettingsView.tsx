@@ -1786,29 +1786,18 @@ export function SettingsView() {
                   <Table>
                     <TableHeader>
                       <TableRow className="hover:bg-transparent">
-                        <TableHead className="w-20">清理</TableHead>
                         <TableHead>环境</TableHead>
                         <TableHead className="w-28">类型</TableHead>
                         <TableHead>地址</TableHead>
                         <TableHead className="w-36">本地库文件</TableHead>
                         <TableHead className="w-28">同步结果</TableHead>
-                        <TableHead className="w-24">操作</TableHead>
+                        <TableHead className="w-44">操作</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {sync.envs.map((e) => {
                         return (
                           <TableRow key={e.name} className="hover:bg-transparent">
-                            <TableCell className="px-2">
-                              {/* 清理是**删**，不是"停止"：只在真有本地库时可点，且要过确认。 */}
-                              <Button variant="ghost" size="sm" disabled={syncBusy || !e.exists}
-                                title={e.exists
-                                  ? `删除「${e.name}」已同步到本机的字典库（可重新同步）`
-                                  : '本机还没有该环境的字典库'}
-                                onClick={() => clearSync(e.name, e.dbPath)}>
-                                清理
-                              </Button>
-                            </TableCell>
                             <TableCell className="px-2">
                               {e.name}
                             </TableCell>
@@ -1849,12 +1838,22 @@ export function SettingsView() {
                             <TableCell className="px-2">
                               {/* 表格里的行内动作一律用 ghost 文本按钮(与账号表、环境动作行一致):
                                   一整列实心主色块会把"表格"读成"一堆按钮",行与行的主次也没了。
-                                  ghost 只是没有底色,仍是完整按钮 —— 点击区、禁用态、悬停反馈都在。 */}
-                              <Button variant="ghost" size="sm" disabled={syncBusy}
-                                title={`从「${e.name}」同步字典数据到本机`}
-                                onClick={() => void runSync(e.name)}>
-                                开始同步
-                              </Button>
+                                  ghost 只是没有底色,仍是完整按钮 —— 点击区、禁用态、悬停反馈都在。
+                                  「清理」放在主操作之后（破坏性动作离常用按钮远一点），点完要过确认。 */}
+                              <div className="flex items-center gap-1 whitespace-nowrap">
+                                <Button variant="ghost" size="sm" disabled={syncBusy}
+                                  title={`从「${e.name}」同步字典数据到本机`}
+                                  onClick={() => void runSync(e.name)}>
+                                  开始同步
+                                </Button>
+                                <Button variant="ghost" size="sm" disabled={syncBusy || !e.exists}
+                                  title={e.exists
+                                    ? `删除「${e.name}」已同步到本机的字典库（可重新同步）`
+                                    : '本机还没有该环境的字典库'}
+                                  onClick={() => clearSync(e.name, e.dbPath)}>
+                                  清理
+                                </Button>
+                              </div>
                             </TableCell>
                           </TableRow>
                         )
@@ -1921,11 +1920,10 @@ export function SettingsView() {
                   <Table>
                     <TableHeader>
                       <TableRow className="hover:bg-transparent">
-                        <TableHead className="w-20">清理</TableHead>
                         <TableHead>环境</TableHead>
                         <TableHead className="w-28">状态</TableHead>
                         <TableHead>镜像目录</TableHead>
-                        <TableHead className="w-44">操作</TableHead>
+                        <TableHead className="w-56">操作</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1942,16 +1940,6 @@ export function SettingsView() {
                             : ''
                         return (
                           <TableRow key={e.name} className="hover:bg-transparent">
-                            <TableCell className="px-2">
-                              {/* 目录不存在时禁用：没有东西可删，点了只会弹一句"目录本来就不存在"。 */}
-                              <Button variant="ghost" size="sm" disabled={mirrorBusy || !e.exists}
-                                title={e.exists
-                                  ? `删除「${e.name}」的镜像目录（可重新拉取）`
-                                  : '该环境还没有镜像目录'}
-                                onClick={() => clearMirror(e.name, e.path)}>
-                                清理
-                              </Button>
-                            </TableCell>
                             <TableCell className="px-2">
                               {e.name}
                             </TableCell>
@@ -1990,8 +1978,9 @@ export function SettingsView() {
                               <div className="flex items-center gap-1 whitespace-nowrap">
                                 {/* 同上:两个都走 ghost 文本按钮。原来"增量更新"是实心主色,
                                     一行里最重的视觉落在按钮上而不是"哪个环境、拉没拉过"。
-                                    「全量」也去掉 Download 图标:同一格两个按钮,一个带图标一个不带
-                                    会让它们看着不是一类东西;动作名已经把事说清了。 */}
+                                    「全量」也去掉 Download 图标:同一格几个按钮,一个带图标一个不带
+                                    会让它们看着不是一类东西;动作名已经把事说清了。
+                                    「清理」排在最后：破坏性动作离常用按钮远一点，点完还要过确认。 */}
                                 <Button variant="ghost" size="sm" disabled={mirrorBusy || !rowReady}
                                   title={rowTitle || '只拉服务器上变过的文件'}
                                   onClick={() => void pullMirror(false, e.name)}>
@@ -2001,6 +1990,13 @@ export function SettingsView() {
                                   title={rowTitle || '整目录替换(含服务器上已删的残留)'}
                                   onClick={() => void pullMirror(true, e.name)}>
                                   全量
+                                </Button>
+                                <Button variant="ghost" size="sm" disabled={mirrorBusy || !e.exists}
+                                  title={e.exists
+                                    ? `删除「${e.name}」的镜像目录（可重新拉取）`
+                                    : '该环境还没有镜像目录'}
+                                  onClick={() => clearMirror(e.name, e.path)}>
+                                  清理
                                 </Button>
                               </div>
                             </TableCell>
