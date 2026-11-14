@@ -33,8 +33,13 @@ function rememberProject(project: string) {
   try { localStorage.setItem(PROJECT_KEY, project) } catch { /* 隐私模式/禁用存储：不影响本次 */ }
 }
 
+// 默认范围是**全局**：技能装到用户目录（各项目共用）是绝大多数人的用法，
+// 项目范围要先挑一个项目目录才有意义。这里以前把"没存过"当成 project ——
+// 于是换机、清过 %APPDATA%（升级/重装）之后第一眼看到的页签是「项目」，
+// 与「默认全局」的直觉对不上（用户 2026-11-14 反馈"有时候是项目"）。
+// 只有用户**显式**选过 project 才记住 project。
 function savedScope(): Scope {
-  try { return localStorage.getItem(SCOPE_KEY) === 'global' ? 'global' : 'project' } catch { return 'project' }
+  try { return localStorage.getItem(SCOPE_KEY) === 'project' ? 'project' : 'global' } catch { return 'global' }
 }
 
 function rememberScope(scope: Scope) {
