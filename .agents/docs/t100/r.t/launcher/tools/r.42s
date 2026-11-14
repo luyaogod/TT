@@ -1,0 +1,17 @@
+######
+#Link execute binary
+######
+
+umask 000
+
+# Prompt how to work
+if [ "$1" = "" ] ; then
+   echo "Usage:1.產生程式或作業的42s檔 ---------> r.42s program_name "
+   echo "      2.更新所有使用指定子畫面的42s檔 -> r.42s screen_form_filename "
+   exit 1
+fi        
+         
+# 連結作業
+$FGLRUN $FBIN/42m/gen42s_all.42m $1 $2
+
+

@@ -1,0 +1,39 @@
+---------------------------------------------------------------------------------- 
+-- File created from /u1/toptst/erp/adz/42f/sadzi140_srn.4fd by Genero Studio
+-- WARNING! All changes made in this file will be lost!
+----------------------------------------------------------------------------------
+
+SCHEMA formonly
+
+LAYOUT (text=%"sadzi140_srn", windowStyle="withoutToolBar")
+VBOX VBox1
+GRID Grid1
+{
+
+[lbl_serial|cbox_serialbe]
+[lbl_seria1|cbox_serialen]
+}
+END -- Grid1
+GRID Grid2
+{
+[im|btn_ok    |btn_cancel]
+
+}
+END -- Grid2
+END -- VBox1
+END -- sadzi140_srn
+
+ATTRIBUTES
+LABEL lbl_serial:lbl_SerialBegin, text=%"lbl_SerialBegin";
+EDIT cbox_serialbe=formonly.cbox_SerialBegin, tabIndex=1;
+LABEL lbl_seria1:lbl_SerialEnd, text=%"lbl_SerialEnd";
+EDIT cbox_serialen=formonly.cbox_SerialEnd type VARCHAR, tabIndex=4, not null;
+IMAGE im:image2, stretch=x, style="noBorder";
+BUTTON btn_ok:btn_OK, tabIndex=3, text=%"btn_OK";
+BUTTON btn_cancel:btn_Cancel, tabIndex=2, text=%"btn_Cancel";
+END -- ATTRIBUTES
+
+INSTRUCTIONS
+SCREEN RECORD sr_SerialNumber(formonly.cbox_SerialBegin,formonly.cbox_SerialEnd)
+END -- INSTRUCTIONS
+

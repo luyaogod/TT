@@ -1,0 +1,41 @@
+---------------------------------------------------------------------------------- 
+-- File created from /u1/toptst/erp/adz/42f/sadzi140_clone.4fd by Genero Studio
+-- WARNING! All changes made in this file will be lost!
+----------------------------------------------------------------------------------
+
+SCHEMA formonly
+
+LAYOUT (text=%"表格複製")
+VBOX VBox1
+GRID Grid1
+{
+
+ [lbl_origin|cbox_originaltable ]
+
+ [lbl_newtab|cbox_newtable      ]
+
+}
+END -- Grid1
+GRID Grid2
+{
+      [btn_ok    ]    [btn_cancel]
+
+
+}
+END -- Grid2
+END -- VBox1
+END -- adzi148
+
+ATTRIBUTES
+LABEL lbl_origin:lbl_OriginalTable, text=%"lbl_OriginalTable";
+COMBOBOX cbox_originaltable=formonly.cbox_OriginalTable, tabIndex=1;
+LABEL lbl_newtab:lbl_NewTable, text=%"lbl_NewTable";
+EDIT cbox_newtable=formonly.cbox_NewTable type VARCHAR, tabIndex=4, not null;
+BUTTON btn_ok:btn_OK, tabIndex=3, text=%"btn_OK";
+BUTTON btn_cancel:btn_Cancel, tabIndex=2, text=%"btn_Cancel";
+END -- ATTRIBUTES
+
+INSTRUCTIONS
+SCREEN RECORD sr_CloneTable(formonly.cbox_OriginalTable,formonly.cbox_NewTable)
+END -- INSTRUCTIONS
+

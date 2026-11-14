@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ManagedForm fileVersion="23200" gstVersion="2320b" name="ManagedForm" uid="{7e5b79e7-55d3-421f-be67-a8cc88b7f2ac}">
+  <AGSettings/>
+  <Record additionalTables="" joinLeft="" joinOperator="" joinRight="" name="sr_right" order="" uid="{daba7596-dd88-482d-9540-d0d48b798727}" where="">
+    <RecordField colName="a2" fieldIdRef="1" name="lbl_column_name_right" sqlTabName="formonly" table_alias_name="" uid="{f4109e77-be23-4bc0-9ef2-b048ce6b523d}"/>
+    <RecordField colName="" fieldIdRef="3" name="lbl_column_desc_right" sqlTabName="" table_alias_name="" uid="{2648b1e4-3b08-43b5-8d7b-223d9b90f889}"/>
+  </Record>
+  <Record additionalTables="" joinLeft="" joinOperator="" joinRight="" name="sr_left" order="" uid="{8c5279fa-f92c-4874-93de-5f9055914cb2}" where="">
+    <RecordField colName="a1" fieldIdRef="0" name="lbl_column_name_left" sqlTabName="formonly" table_alias_name="" uid="{532590d4-8348-4eba-adce-0388cce65689}"/>
+    <RecordField colName="" fieldIdRef="2" name="lbl_column_desc_left" sqlTabName="" table_alias_name="" uid="{ebb18bfc-2de6-4446-ab68-d3a4f19100b9}"/>
+  </Record>
+  <Form gridHeight="31" gridWidth="106" minHeight="25" minWidth="80" name="f_sadzi140_cols" style="main2" text="f_sadzi140_cols">
+    <VBox gridHeight="19" gridWidth="61" name="vbox1" posX="1" posY="1">
+      <Grid gridHeight="15" gridWidth="61" name="grid1" posX="0" posY="1">
+        <Label gridHeight="1" gridWidth="10" name="lbl_src_data" posX="4" posY="1" text="lbl_src_data"/>
+        <Label gridHeight="1" gridWidth="10" name="lbl_dest_data" posX="33" posY="1" text="lbl_dest_data"/>
+        <Table doubleClick="right_move" gridHeight="13" gridWidth="25" name="table1" posX="4" posY="2" totalRows="11" unitWidth="characters" width="9">
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="a1" columnCount="" fieldId="0" gridHeight="1" gridWidth="7" name="lbl_column_name_left" posX="0" posY="0" rowCount="" sqlTabName="formonly" stepX="" stepY="" tabIndex="1" table_alias_name="" title="lbl_column_name_left" widget="Edit"/>
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" columnCount="" fieldId="2" gridHeight="1" gridWidth="15" name="lbl_column_desc_left" posX="7" posY="0" rowCount="" scroll="true" sqlTabName="" stepX="" stepY="" tabIndex="11" table_alias_name="" title="lbl_column_desc_left" widget="Edit"/>
+        </Table>
+        <Table doubleClick="left_move" gridHeight="13" gridWidth="25" name="table2" posX="33" posY="2" totalRows="11" unitWidth="characters" width="9">
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="a2" columnCount="" fieldId="1" gridHeight="1" gridWidth="7" name="lbl_column_name_right" posX="0" posY="0" rowCount="" sqlTabName="formonly" stepX="" stepY="" tabIndex="2" table_alias_name="" title="lbl_column_name_left" widget="Edit"/>
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" columnCount="" fieldId="3" gridHeight="1" gridWidth="15" name="lbl_column_desc_right" posX="7" posY="0" rowCount="" scroll="true" sqlTabName="" stepX="" stepY="" tabIndex="12" table_alias_name="" title="lbl_column_desc_left" widget="Edit"/>
+        </Table>
+        <Image gridHeight="1" gridWidth="2" name="image3" posX="30" posY="6" stretch="y" style="noBorder"/>
+        <Button gridHeight="1" gridWidth="2" hidden="true" image="arrup" name="left_up" posX="1" posY="7" tabIndex="3"/>
+        <Button gridHeight="1" gridWidth="2" image="arr2righ" name="right_move" posX="30" posY="7" tabIndex="4"/>
+        <Button gridHeight="1" gridWidth="2" hidden="true" image="arrup" name="right_up" posX="59" posY="7" tabIndex="5"/>
+        <Button gridHeight="1" gridWidth="2" hidden="true" image="arrdown" name="left_down" posX="1" posY="8" tabIndex="6"/>
+        <Button gridHeight="1" gridWidth="2" image="arr2left" name="left_move" posX="30" posY="8" tabIndex="7"/>
+        <Button gridHeight="1" gridWidth="2" hidden="true" image="arrdown" name="right_down" posX="59" posY="8" tabIndex="8"/>
+        <Image gridHeight="1" gridWidth="2" name="image4" posX="30" posY="9" stretch="y" style="noBorder"/>
+      </Grid>
+      <Grid gridHeight="2" gridWidth="61" name="grid2" posX="0" posY="16">
+        <Image gridHeight="1" gridWidth="2" name="image7" posX="1" posY="0" stretch="x" style="noBorder"/>
+        <Button gridHeight="1" gridWidth="10" name="btn_ok" posX="39" posY="0" tabIndex="9" text="btn_ok"/>
+        <Button gridHeight="1" gridWidth="10" name="btn_cancel" posX="50" posY="0" tabIndex="10" text="btn_cancel"/>
+      </Grid>
+    </VBox>
+  </Form>
+  <DiagramLayout>
+    <![CDATA[AAAAAgAAAEwAewBmADQAMQAwADkAZQA3ADcALQBiAGUAMgAzAC0ANABiAGMAMAAtADkAZQBmADIALQBiADAANAA4AGMAZQA2AGIANQAyADMAZAB9QCQAAAAAAABAQoAAAAAAAAAAAAAAAAAAAQAAAEwAewBkAGEAYgBhADcANQA5ADYALQBkAGQAOAA4AC0ANAA4ADIAZAAtADkANQA0ADAALQBkADAAZAA0ADgAYgA3ADkAOAA3ADIANwB9AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAEwAewAyADYANAA4AGIAMQBlADQALQAzAGIAMAA4AC0ANAAzAGIANQAtADgAZAA3AGIALQAyADIAMwBkADkAYgA5ADAAZgA4ADgAOQB9QCQAAAAAAABATYAAAAAAAAAAAAAAAAAAAQAAAEwAewA1ADMAMgA1ADkAMABkADQALQA4ADMANAA4AC0ANABlAGIAYQAtAGEAZABjAGUALQAwADMAOAA4AGMAYwBlADYANQA2ADgAOQB9QCQAAAAAAABAQoAAAAAAAAAAAAAAAAAAAQAAAEwAewA4AGMANQAyADcAOQBmAGEALQBmADkAMgBjAC0ANAA4ADcANAAtADkAMwBkAGUALQA1AGYAOQAwADUANQA5ADEANABjAGIAMgB9QCQAAAAAAABAJAAAAAAAAAAAAAAAAAAAAQAAAEwAewBlAGIAYgAxADgAYgBmAGMALQAyAGQAZQA2AC0ANAA0ADQANgAtAGEAYgA2ADgALQBkADMAYQA0AGYAMQA5ADEAMAAwAGIAOQB9QCQAAAAAAABATYAAAAAAAAAAAAAAAAAAAQ==]]>
+  </DiagramLayout>
+</ManagedForm>

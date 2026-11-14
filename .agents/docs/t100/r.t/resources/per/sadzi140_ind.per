@@ -1,0 +1,97 @@
+---------------------------------------------------------------------------------- 
+-- File created from /u1/toptst/erp/adz/42f/sadzi140_ind.4fd by Genero Studio
+-- WARNING! All changes made in this file will be lost!
+----------------------------------------------------------------------------------
+
+SCHEMA formonly
+
+LAYOUT (text=%"sadzi140_ind", windowStyle="withoutToolBar")
+VBOX vbox1
+GRID Grid1
+{
+[im]
+
+}
+END -- Grid1
+HBOX hbox1
+GRID grid4
+{
+
+[lbl_memo                 ]
+[                         ]
+[                         ]
+[                         ]
+[                         ]
+[                         ]
+[                         ]
+[                         ]
+[                         ]
+[                         ]
+[                         ]
+[                         ]
+}
+END -- grid4
+GRID Grid3
+{
+[lbl_indust|cb_industry_type    ]
+[lbl_tablen|ed_tablename   |ed_t]
+[label3    ]
+[label4    ]
+[label5    ]
+[label6    ]
+[label7    ]
+[label9    ]
+[label10   ]
+[label1    ]
+
+
+
+}
+END -- Grid3
+END -- hbox1
+GRID grid5
+{
+[i1]
+[  ]
+[  ]
+[  ]
+}
+END -- grid5
+GRID Grid2
+{
+[i2]                              [btn_back  |btn_next  |btn_ok    |btn_cancel]
+
+}
+END -- Grid2
+END -- vbox1
+END -- sadzi140_ind
+
+ATTRIBUTES
+IMAGE im:img_wcrt, image="tabledesigner/tbd_table.png", style="noBorder", width = 15 characters, height = 4 characters;
+LABEL lbl_memo=formonly.lbl_memo, sizePolicy=dynamic;
+LABEL lbl_indust:lbl_industry_type, text=%"lbl_industry_type";
+COMBOBOX cb_industry_type=formonly.cb_industry_type;
+LABEL lbl_tablen:lbl_TableName, text=%"lbl_TableName";
+EDIT ed_tablename=formonly.ed_TableName, noEntry, downShift, justify=right, scroll, sizePolicy=dynamic;
+EDIT ed_t=formonly.ed_tail_code, tabIndex=5;
+LABEL label3:label3, text=%"";
+LABEL label4:label4, text=%"";
+LABEL label5:label5, text=%"";
+LABEL label6:label6, text=%"";
+LABEL label7:label7, text=%"", hidden;
+LABEL label9:label9, text=%"", hidden;
+LABEL label10:label10, text=%"", hidden;
+LABEL label1:label1, text=%"", hidden;
+IMAGE i1:image1, stretch=none, style="noBorder";
+IMAGE i2:image2, stretch=x, style="noBorder";
+BUTTON btn_back:btn_back, text=%"btn_back";
+BUTTON btn_next:btn_next, tabIndex=2, text=%"btn_next";
+BUTTON btn_ok:btn_OK, tabIndex=3, text=%"btn_OK";
+BUTTON btn_cancel:btn_Cancel, tabIndex=4, text=%"btn_Cancel";
+END -- ATTRIBUTES
+
+INSTRUCTIONS
+SCREEN RECORD sr_industry_type(formonly.cb_industry_type,formonly.ed_TableName,formonly.ed_tail_code)
+SCREEN RECORD Undefined(formonly.lbl_memo)
+END -- INSTRUCTIONS
+

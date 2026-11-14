@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ManagedForm fileVersion="23200" gstVersion="23215" name="ManagedForm" uid="{3b7f9f06-ef10-443a-8bbe-3caf15fd3215}">
+  <AGSettings/>
+  <Record additionalTables="" joinLeft="" joinOperator="" joinRight="" name="sr_industry_type" order="" uid="{1ecc0c87-ffe4-4259-9ddd-851d1bdafdce}" where="">
+    <RecordField colName="" fieldIdRef="1" name="cb_industry_type" sqlTabName="" table_alias_name="" uid="{962b7ab2-50b3-4e3e-996c-9149538fbb1a}"/>
+    <RecordField colName="" fieldIdRef="2" name="ed_TableName" sqlTabName="" table_alias_name="" uid="{d8c9b4f3-bab9-4d41-9117-c24e1cb9a392}"/>
+    <RecordField colName="" fieldIdRef="5" name="ed_tail_code" sqlTabName="" table_alias_name="" uid="{92e1b30e-f530-40c3-a7c5-dbf52eae2f6a}"/>
+  </Record>
+  <Record additionalTables="" joinLeft="" joinOperator="" joinRight="" name="Undefined" order="" uid="{2e5d2e01-65b3-4f98-9610-2e2d312d1f51}" where="">
+    <RecordField colName="" fieldIdRef="4" length="6" name="lbl_memo" sqlTabName="" table_alias_name="" uid="{b48632ea-4d52-4417-ab6a-47da6224f6c8}"/>
+  </Record>
+  <Form gridHeight="32" gridWidth="108" name="sadzi140_ind" text="sadzi140_ind" windowStyle="withoutToolBar">
+    <VBox gridHeight="23" gridWidth="79" name="vbox1" posX="1" posY="1">
+      <Grid gridHeight="2" gridWidth="79" name="Grid1" posX="0" posY="1">
+        <Image gridHeight="1" gridWidth="2" height="4" image="tabledesigner/tbd_table.png" name="img_wcrt" posX="1" posY="0" style="noBorder" unitHeight="characters" unitWidth="characters" width="15"/>
+      </Grid>
+      <HBox gridHeight="13" gridWidth="79" name="hbox1" posX="0" posY="3">
+        <Grid gridHeight="13" gridWidth="26" name="grid4" posX="2" posY="0">
+          <FFLabel aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="4" gridHeight="12" gridWidth="25" length="6" name="lbl_memo" posX="1" posY="1" sizePolicy="dynamic" sqlTabName="" table_alias_name="" title="fflabel1" widget="FFLabel"/>
+        </Grid>
+        <Grid gridHeight="13" gridWidth="49" name="Grid3" posX="28" posY="0">
+          <Label gridHeight="1" gridWidth="10" name="lbl_industry_type" posX="1" posY="0" text="lbl_industry_type"/>
+          <ComboBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="1" gridHeight="1" gridWidth="20" items="" name="cb_industry_type" posX="12" posY="0" sqlTabName="" tabIndex="-1" table_alias_name="" title="ComboBox1" widget="ComboBox"/>
+          <Label gridHeight="1" gridWidth="10" name="lbl_TableName" posX="1" posY="1" text="lbl_TableName"/>
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" case="lower" colName="" fieldId="2" gridHeight="1" gridWidth="15" justify="right" name="ed_TableName" noEntry="true" posX="12" posY="1" scroll="true" sizePolicy="dynamic" sqlTabName="" tabIndex="-1" table_alias_name="" title="Edit2" widget="Edit"/>
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="5" gridHeight="1" gridWidth="4" name="ed_tail_code" posX="28" posY="1" sqlTabName="" tabIndex="5" table_alias_name="" title="edit1" widget="Edit"/>
+          <Label gridHeight="1" gridWidth="10" name="label3" posX="1" posY="2" text=""/>
+          <Label gridHeight="1" gridWidth="10" name="label4" posX="1" posY="3" text=""/>
+          <Label gridHeight="1" gridWidth="10" name="label5" posX="1" posY="4" text=""/>
+          <Label gridHeight="1" gridWidth="10" name="label6" posX="1" posY="5" text=""/>
+          <Label gridHeight="1" gridWidth="10" hidden="true" name="label7" posX="1" posY="6" text=""/>
+          <Label gridHeight="1" gridWidth="10" hidden="true" name="label9" posX="1" posY="7" text=""/>
+          <Label gridHeight="1" gridWidth="10" hidden="true" name="label10" posX="1" posY="8" text=""/>
+          <Label gridHeight="1" gridWidth="10" hidden="true" name="label1" posX="1" posY="9" text=""/>
+        </Grid>
+      </HBox>
+      <Grid gridHeight="4" gridWidth="79" name="grid5" posX="0" posY="16">
+        <Image gridHeight="4" gridWidth="2" name="image1" posX="1" posY="0" stretch="none" style="noBorder"/>
+      </Grid>
+      <Grid gridHeight="2" gridWidth="79" name="Grid2" posX="0" posY="20">
+        <Image gridHeight="1" gridWidth="2" name="image2" posX="1" posY="0" stretch="x" style="noBorder"/>
+        <Button gridHeight="1" gridWidth="10" name="btn_back" posX="35" posY="0" tabIndex="-1" text="btn_back"/>
+        <Button gridHeight="1" gridWidth="10" hidden="false" name="btn_next" posX="46" posY="0" tabIndex="2" text="btn_next"/>
+        <Button gridHeight="1" gridWidth="10" name="btn_OK" posX="57" posY="0" tabIndex="3" text="btn_OK"/>
+        <Button gridHeight="1" gridWidth="10" name="btn_Cancel" posX="68" posY="0" tabIndex="4" text="btn_Cancel"/>
+      </Grid>
+    </VBox>
+  </Form>
+  <DiagramLayout>
+    <![CDATA[AAAAAgAAAEwAewAxAGUAYwBjADAAYwA4ADcALQBmAGYAZQA0AC0ANAAyADUAOQAtADkAZABkAGQALQA4ADUAMQBkADEAYgBkAGEAZgBkAGMAZQB9wHiQAAAAAADAUAAAAAAAAD+3S8an7523AQAAAEwAewAyAGUANQBkADIAZQAwADEALQA2ADUAYgAzAC0ANABmADkAOAAtADkANgAxADAALQAyAGUAMgBkADMAMQAyAGQAMQBmADUAMQB9QCQAAAAAAABAJAAAAAAAAD+3jU/fO2RfAQ==]]>
+  </DiagramLayout>
+</ManagedForm>

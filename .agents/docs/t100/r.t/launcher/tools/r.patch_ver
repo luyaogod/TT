@@ -1,0 +1,7 @@
+#!/bin/ksh
+
+$FGLRUN $TOP/utl/fbin/42m/chk_patch.42r $1 $2
+
+echo '----------------------------------------------'
+echo 版更片版本為:
+cat $TOP/t100_release

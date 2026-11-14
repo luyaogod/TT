@@ -1,0 +1,64 @@
+---------------------------------------------------------------------------------- 
+-- File created from /u1/toptst/erp/adz/42f/sadzi140_cols.4fd by Genero Studio
+-- WARNING! All changes made in this file will be lost!
+----------------------------------------------------------------------------------
+
+SCHEMA formonly
+
+LAYOUT (minWidth=80, minHeight=25, text=%"f_sadzi140_cols", style="main2")
+VBOX vbox1
+GRID grid1
+{
+
+   [lbl_src_da]                 [lbl_dest_d]
+    <T table1               >    <T table2               >
+    [lbl_col|lbl_column_desc]    [lbl_co1|lbl_column_des1]
+    [lbl_col|lbl_column_desc]    [lbl_co1|lbl_column_des1]
+    [lbl_col|lbl_column_desc]    [lbl_co1|lbl_column_des1]
+    [lbl_col|lbl_column_desc][im][lbl_co1|lbl_column_des1]
+[le][lbl_col|lbl_column_desc][ri][lbl_co1|lbl_column_des1][r1]
+[l1][lbl_col|lbl_column_desc][l2][lbl_co1|lbl_column_des1][r2]
+    [lbl_col|lbl_column_desc][i1][lbl_co1|lbl_column_des1]
+    [lbl_col|lbl_column_desc]    [lbl_co1|lbl_column_des1]
+    [lbl_col|lbl_column_desc]    [lbl_co1|lbl_column_des1]
+    [lbl_col|lbl_column_desc]    [lbl_co1|lbl_column_des1]
+    [lbl_col|lbl_column_desc]    [lbl_co1|lbl_column_des1]
+    <                       >    <                       >
+}
+END -- grid1
+GRID grid2
+{
+[i2]                                  [btn_ok    |btn_cancel]
+
+}
+END -- grid2
+END -- vbox1
+END -- f_sadzi140_cols
+
+ATTRIBUTES
+LABEL lbl_src_da:lbl_src_data, text=%"lbl_src_data";
+LABEL lbl_dest_d:lbl_dest_data, text=%"lbl_dest_data";
+TABLE table1:table1, doubleClick=right_move, width = 9 characters;
+EDIT lbl_col=formonly.lbl_column_name_left, tabIndex=1, title=%"lbl_column_name_left";
+EDIT lbl_column_desc=formonly.lbl_column_desc_left, tabIndex=11, title=%"lbl_column_desc_left", scroll;
+TABLE table2:table2, doubleClick=left_move, width = 9 characters;
+EDIT lbl_co1=formonly.lbl_column_name_right, tabIndex=2, title=%"lbl_column_name_left";
+EDIT lbl_column_des1=formonly.lbl_column_desc_right, tabIndex=12, title=%"lbl_column_desc_left", scroll;
+IMAGE im:image3, stretch=y, style="noBorder";
+BUTTON le:left_up, tabIndex=3, image="arrup", hidden;
+BUTTON ri:right_move, tabIndex=4, image="arr2righ";
+BUTTON r1:right_up, tabIndex=5, image="arrup", hidden;
+BUTTON l1:left_down, tabIndex=6, image="arrdown", hidden;
+BUTTON l2:left_move, tabIndex=7, image="arr2left";
+BUTTON r2:right_down, tabIndex=8, image="arrdown", hidden;
+IMAGE i1:image4, stretch=y, style="noBorder";
+IMAGE i2:image7, stretch=x, style="noBorder";
+BUTTON btn_ok:btn_ok, tabIndex=9, text=%"btn_ok";
+BUTTON btn_cancel:btn_cancel, tabIndex=10, text=%"btn_cancel";
+END -- ATTRIBUTES
+
+INSTRUCTIONS
+SCREEN RECORD sr_right(formonly.lbl_column_name_right,formonly.lbl_column_desc_right)
+SCREEN RECORD sr_left(formonly.lbl_column_name_left,formonly.lbl_column_desc_left)
+END -- INSTRUCTIONS
+

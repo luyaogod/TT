@@ -1,0 +1,91 @@
+---------------------------------------------------------------------------------- 
+-- File created from /u1/toptst/erp/adz/42f/sadzi140_syn.4fd by Genero Studio
+-- WARNING! All changes made in this file will be lost!
+----------------------------------------------------------------------------------
+
+SCHEMA formonly
+
+LAYOUT (text=%"sadzi140_syn", windowStyle="withoutToolBar")
+VBOX vbox1
+GRID Grid1
+{
+[im]
+
+}
+END -- Grid1
+HBOX hbox1
+GRID Grid3
+{
+[ed_tablename]
+[lbl_memo                 ]
+[                         ]
+[                         ]
+[                         ]
+[                         ]
+[                         ]
+[                         ]
+[                         ]
+[                         ]
+[                         ]
+[                         ]
+
+
+}
+END -- Grid3
+TABLE tbl_schema_type(unsortableColumns, unmovableColumns, unhidableColumns)
+{
+[ed|e1|e2|lb|e3|lb_ent_db |lb_sch_type       ]
+[ed|e1|e2|lb|e3|lb_ent_db |lb_sch_type       ]
+[ed|e1|e2|lb|e3|lb_ent_db |lb_sch_type       ]
+[ed|e1|e2|lb|e3|lb_ent_db |lb_sch_type       ]
+[ed|e1|e2|lb|e3|lb_ent_db |lb_sch_type       ]
+[ed|e1|e2|lb|e3|lb_ent_db |lb_sch_type       ]
+[ed|e1|e2|lb|e3|lb_ent_db |lb_sch_type       ]
+
+
+
+
+
+
+}
+END -- tbl_schema_type
+END -- hbox1
+GRID grid5
+{
+[i1]
+
+}
+END -- grid5
+GRID Grid2
+{
+[i2]                              [btn_back  |btn_next  |btn_ok    |btn_cancel]
+
+}
+END -- Grid2
+END -- vbox1
+END -- sadzi140_syn
+
+ATTRIBUTES
+IMAGE im:Image1, image="tabledesigner/tbd_schema_type.png", style="noBorder", width = 15 characters, height = 4 characters;
+EDIT ed_tablename=formonly.ed_TableName, tabIndex=9, noEntry;
+LABEL lbl_memo=formonly.lbl_memo, sizePolicy=dynamic;
+EDIT ed=formonly.ed_row_no, tabIndex=12, title=%"", hidden;
+EDIT e1=formonly.ed_master_table, tabIndex=11, title=%"", hidden;
+EDIT e2=formonly.ed_table_name, tabIndex=10, title=%"", hidden;
+EDIT lb=formonly.lbl_type, tabIndex=5, title=%"", noEntry, unsortable, unmovable, unhidable, unsizable;
+CHECKBOX e3=formonly.ed_checkbox, tabIndex=6, default = "Y", title=%"", text=%"", not null, valueChecked = "Y", valueUnchecked = "N", unsortable, unmovable, unhidable, unsizable;
+EDIT lb_ent_db=formonly.lb_ent_db, tabIndex=7, title=%"lb_ent_db", noEntry, unmovable, unhidable;
+COMBOBOX lb_sch_type=formonly.lb_sch_type, tabIndex=8, title=%"lb_sch_type", unsortable, unmovable, unhidable, items=(("S", "Synonym"),("T", "Table"));
+IMAGE i1:image3, stretch=x, style="noBorder";
+IMAGE i2:image2, stretch=x, style="noBorder";
+BUTTON btn_back:btn_back, tabIndex=2, text=%"btn_back";
+BUTTON btn_next:btn_next, tabIndex=3, text=%"btn_next", hidden;
+BUTTON btn_ok:btn_OK, tabIndex=4, text=%"btn_OK";
+BUTTON btn_cancel:btn_Cancel, tabIndex=1, text=%"btn_Cancel";
+END -- ATTRIBUTES
+
+INSTRUCTIONS
+SCREEN RECORD sr_schema_type(formonly.ed_row_no,formonly.ed_master_table,formonly.ed_table_name,formonly.lbl_type,formonly.ed_checkbox,formonly.lb_ent_db,formonly.lb_sch_type)
+SCREEN RECORD Undefined(formonly.ed_TableName,formonly.lbl_memo)
+END -- INSTRUCTIONS
+

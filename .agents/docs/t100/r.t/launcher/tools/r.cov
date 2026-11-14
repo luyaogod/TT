@@ -1,0 +1,21 @@
+######
+# Run application with code coverage
+####
+cd $TOP
+echo ------查找現存cov檔案-----------
+find . -name *.42m.cov -ok rm -f {} \;
+echo ------查找結束, 開始測試--------
+
+PW=`pwd`
+FGLRUN=${FGLRUN:=fglrun};export FGLRUN 
+cd $TEMPDIR
+
+FGLCOV=1;export FGLCOV
+
+cmd="$FGLRUN $AZZ/42r/azzp000.42r"
+$cmd "$@"
+stus=$?
+
+cd $PW
+
+exit $stus

@@ -1,0 +1,6 @@
+#!/bin/ksh
+cd $TOP
+find . -name *.42m.cov -exec rm -f {} \;
+echo --------砍場景會每一隻都問-----------
+find . -name *.4gl.cov -ok rm -f {} \;
+

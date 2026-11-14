@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ManagedForm fileVersion="23200" gstVersion="2321b" name="ManagedForm" uid="{f63216bd-78af-4d9d-9d21-b95cfc35fa3d}">
+  <AGSettings/>
+  <Record additionalTables="" joinLeft="" joinOperator="" joinRight="" name="sr_version" order="" uid="{2baf9b17-d730-49e2-8c04-42b784553570}" where=""/>
+  <Record additionalTables="" joinLeft="" joinOperator="" joinRight="" name="sr_err_list" order="" uid="{7d1c2a1b-984c-455d-a0c3-d377bfe7b2e3}" where="">
+    <RecordField colName="" fieldIdRef="2" name="cb_db_err_list" sqlTabName="" table_alias_name="" uid="{d268225e-a7c5-4f21-b32c-1d36d3ef339f}"/>
+  </Record>
+  <Record additionalTables="" joinLeft="" joinOperator="" joinRight="" name="sr_messages" order="" uid="{101a0ee6-60f4-4173-807f-c28975dd63c6}" where="">
+    <RecordField colName="" fieldIdRef="1" name="ed_recs" sqlTabName="" table_alias_name="" uid="{2d23d154-2a4e-4704-8674-4bb387560c8e}"/>
+    <RecordField colName="" fieldIdRef="3" name="ed_messages" sqlTabName="" table_alias_name="" uid="{bb4f0346-ffe6-463e-9c82-61c43adc51f8}"/>
+  </Record>
+  <Record additionalTables="" joinLeft="" joinOperator="" joinRight="" name="Undefined" order="" uid="{0318238e-f728-46ee-b2f4-b2ccd8dc9648}" where="">
+    <RecordField colName="" fieldIdRef="4" name="txt_memo" sqlTabName="" table_alias_name="" uid="{daf8724f-c9b4-4f05-af85-51d6fa30da4e}"/>
+  </Record>
+  <Form gridHeight="31" gridWidth="157" minHeight="30" minWidth="50" name="sadzi140_log" text="sadzi140_log" windowStyle="hasToolBarCanSizable">
+    <VBox gridHeight="28" gridWidth="78" name="vbox2" posX="5" posY="1">
+      <Folder gridHeight="24" gridWidth="78" name="folder1" posX="0" posY="1">
+        <Page hidden="true" name="pg_search" text="pg_search">
+          <VBox gridHeight="21" gridWidth="72" name="vbox1" posX="1" posY="0">
+            <Grid gridHeight="17" gridWidth="72" name="Grid1" posX="0" posY="1">
+              <Table gridHeight="15" gridWidth="69" name="tb_err_messages" posX="2" posY="1" style="noTitle" totalRows="14">
+                <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" columnCount="" fieldId="1" gridHeight="1" gridWidth="2" hidden="true" name="ed_recs" noEntry="true" posX="0" posY="0" rowCount="" scroll="true" sqlTabName="" stepX="" stepY="" tabIndex="4" table_alias_name="" title="ed_recs" widget="Edit"/>
+                <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" columnCount="" fieldId="3" gridHeight="1" gridWidth="64" name="ed_messages" noEntry="true" posX="2" posY="0" rowCount="" scroll="true" sizePolicy="dynamic" sqlTabName="" stepX="" stepY="" tabIndex="5" table_alias_name="" title="ed_messages" widget="Edit"/>
+              </Table>
+            </Grid>
+            <Grid gridHeight="2" gridWidth="72" hidden="true" name="grid3" posX="0" posY="18">
+              <Label gridHeight="1" gridWidth="8" name="lbl_error_msg" posX="1" posY="0" text="lbl_error_msg"/>
+              <ComboBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" columnCount="" fieldId="2" gridHeight="1" gridWidth="51" items="" name="cb_db_err_list" posX="10" posY="0" rowCount="" sqlTabName="" stepX="" stepY="" tabIndex="2" table_alias_name="" title="combobox1" widget="ComboBox"/>
+              <Button gridHeight="1" gridWidth="9" hidden="true" name="btn_show_sol" posX="62" posY="0" tabIndex="3" text="btn_show_sol"/>
+            </Grid>
+          </VBox>
+        </Page>
+        <Page hidden="false" name="pg_orig_data" text="pg_orig_data">
+          <Grid gridHeight="19" gridWidth="72" name="grid4" posX="3" posY="1">
+            <TextEdit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" columnCount="" fieldId="4" gridHeight="17" gridWidth="68" name="txt_memo" noEntry="true" posX="2" posY="1" rowCount="" scrollBars="both" sqlTabName="" stepX="" stepY="" stretch="both" tabIndex="6" table_alias_name="" title="textedit1" widget="TextEdit"/>
+          </Grid>
+        </Page>
+      </Folder>
+      <Grid gridHeight="2" gridWidth="78" name="Grid2" posX="0" posY="25">
+        <Image gridHeight="1" gridWidth="10" name="image1" posX="56" posY="0" stretch="x" style="noBorder"/>
+        <Button gridHeight="1" gridWidth="9" name="btn_ok" posX="67" posY="0" tabIndex="1" text="btn_ok"/>
+      </Grid>
+    </VBox>
+  </Form>
+  <DiagramLayout>
+    <![CDATA[AAAAAgAAAEwAewBkAGEAZgA4ADcAMgA0AGYALQBjADkAYgA0AC0ANABmADAANQAtAGEAZgA4ADUALQA1ADEAZAA2AGYAYQAzADAAZABhADQAZQB9QCQAAAAAAABAQoAAAAAAAAAAAAAAAAAAAQAAAEwAewA3AGQAMQBjADIAYQAxAGIALQA5ADgANABjAC0ANAA1ADUAZAAtAGEAMABjADMALQBkADMANwA3AGIAZgBlADcAYgAyAGUAMwB9QHSgAAAAAADARAAAAAAAAD+AYk3S8an8AQAAAEwAewAxADAAMQBhADAAZQBlADYALQA2ADAAZgA0AC0ANAAxADcAMwAtADgAMAA3AGYALQBjADIAOAA5ADcANQBkAGQANgAzAGMANgB9QDQAAAAAAABANAAAAAAAAD+CbpeNT988AQAAAEwAewAyAGQAMgAzAGQAMQA1ADQALQAyAGEANABlAC0ANAA3ADAANAAtADgANgA3ADQALQA0AGIAYgAzADgANwA1ADYAMABjADgAZQB9QCQAAAAAAABAQoAAAAAAAAAAAAAAAAAAAQAAAEwAewAyAGIAYQBmADkAYgAxADcALQBkADcAMwAwAC0ANAA5AGUAMgAtADgAYwAwADQALQA0ADIAYgA3ADgANAA1ADUAMwA1ADcAMAB9QCIAAAAAAADAUAAAAAAAAD9wYk3S8an8AQAAAEwAewBkADIANgA4ADIAMgA1AGUALQBhADcAYwA1AC0ANABmADIAMQAtAGIAMwAyAGMALQAxAGQAMwA2AGQAMwBlAGYAMwAzADkAZgB9QCQAAAAAAABAQoAAAAAAAD98rAgxJul5AQAAAEwAewBiAGIANABmADAAMwA0ADYALQBmAGYAZQA2AC0ANAA2ADMAZQAtADkAYwA4ADIALQA2ADEAYwA0ADMAYQBkAGMANQAxAGYAOAB9QCQAAAAAAABATYAAAAAAAAAAAAAAAAAAAQAAAEwAewAwADMAMQA4ADIAMwA4AGUALQBmADcAMgA4AC0ANAA2AGUAZQAtAGIAMgBmADQALQBiADIAYwBjAGQAOABkAGMAOQA2ADQAOAB9QD4AAAAAAABAPgAAAAAAAAAAAAAAAAAAAQ==]]>
+  </DiagramLayout>
+</ManagedForm>

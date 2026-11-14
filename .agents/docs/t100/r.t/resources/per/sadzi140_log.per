@@ -1,0 +1,94 @@
+---------------------------------------------------------------------------------- 
+-- File created from /u1/toptst/erp/adz/42f/sadzi140_log.4fd by Genero Studio
+-- WARNING! All changes made in this file will be lost!
+----------------------------------------------------------------------------------
+
+SCHEMA formonly
+
+LAYOUT (minWidth=50, minHeight=30, text=%"sadzi140_log", windowStyle="hasToolBarCanSizable")
+VBOX vbox2
+FOLDER folder1
+PAGE pg_search(text=%"pg_search", hidden)
+VBOX vbox1
+GRID Grid1
+{
+
+  <T tb_err_messages                                                  >
+  [ed|ed_messages                                                     ]
+  [ed|ed_messages                                                     ]
+  [ed|ed_messages                                                     ]
+  [ed|ed_messages                                                     ]
+  [ed|ed_messages                                                     ]
+  [ed|ed_messages                                                     ]
+  [ed|ed_messages                                                     ]
+  [ed|ed_messages                                                     ]
+  [ed|ed_messages                                                     ]
+  [ed|ed_messages                                                     ]
+  [ed|ed_messages                                                     ]
+  [ed|ed_messages                                                     ]
+  [ed|ed_messages                                                     ]
+  [ed|ed_messages                                                     ]
+
+}
+END -- Grid1
+GRID grid3(hidden)
+{
+[lbl_erro|cb_db_err_list                                     |btn_show_]
+
+}
+END -- grid3
+END -- vbox1
+END -- pg_search
+PAGE pg_orig_data(text=%"pg_orig_data")
+GRID grid4
+{
+
+ [txt_memo                                                            ]
+ [                                                                    ]
+ [                                                                    ]
+ [                                                                    ]
+ [                                                                    ]
+ [                                                                    ]
+ [                                                                    ]
+ [                                                                    ]
+ [                                                                    ]
+ [                                                                    ]
+ [                                                                    ]
+ [                                                                    ]
+ [                                                                    ]
+ [                                                                    ]
+ [                                                                    ]
+ [                                                                    ]
+ [                                                                    ]
+
+}
+END -- grid4
+END -- pg_orig_data
+END -- folder1
+GRID Grid2
+{
+                                                       [image1    |btn_ok   ]
+
+}
+END -- Grid2
+END -- vbox2
+END -- sadzi140_log
+
+ATTRIBUTES
+TABLE tb_err_messages:tb_err_messages, style="noTitle";
+EDIT ed=formonly.ed_recs, tabIndex=4, title=%"ed_recs", noEntry, hidden, scroll;
+EDIT ed_messages=formonly.ed_messages, tabIndex=5, title=%"ed_messages", noEntry, scroll, sizePolicy=dynamic;
+LABEL lbl_erro:lbl_error_msg, text=%"lbl_error_msg";
+COMBOBOX cb_db_err_list=formonly.cb_db_err_list, tabIndex=2;
+BUTTON btn_show_:btn_show_sol, tabIndex=3, text=%"btn_show_sol", hidden;
+TEXTEDIT txt_memo=formonly.txt_memo, tabIndex=6, noEntry, stretch=both, scrollBars=both;
+IMAGE image1:image1, stretch=x, style="noBorder";
+BUTTON btn_ok:btn_ok, tabIndex=1, text=%"btn_ok";
+END -- ATTRIBUTES
+
+INSTRUCTIONS
+SCREEN RECORD sr_err_list(formonly.cb_db_err_list)
+SCREEN RECORD sr_messages(formonly.ed_recs,formonly.ed_messages)
+SCREEN RECORD Undefined(formonly.txt_memo)
+END -- INSTRUCTIONS
+
