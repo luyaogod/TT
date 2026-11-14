@@ -111,7 +111,10 @@ export function Sidebar({
   const total = sessions.length
 
   return (
-    <aside className="flex w-[272px] shrink-0 flex-col overflow-hidden bg-card">
+    // 与主区之间那道 1px 分割线:颜色取 --border,与调试台面板间的 sash(.col-resizer)同一个口径。
+    // 画在侧栏**自身**的右边而不是另起一个 <div>:收起侧栏时线跟着消失,不会留一道悬空的边。
+    // 亮色下侧栏是 bg-card(#fff)、主区是 bg-background(#f8f8f8),只差一档白、不画线就是一整片白。
+    <aside className="flex w-[272px] shrink-0 flex-col overflow-hidden border-r border-border bg-card">
       {/* 品牌行:与 DSH 的「deepseek HARNESS」同构 —— 字标 + 一个白底小徽章 + 收起按钮 */}
       <div className="flex h-14 shrink-0 items-center gap-2 px-3.5">
         <span className="text-[16px] font-semibold tracking-tight text-foreground">TT</span>
