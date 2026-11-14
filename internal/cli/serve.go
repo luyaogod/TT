@@ -32,9 +32,11 @@ import (
 // 状态文件里（.tt-serve.json），所以 `tt debug status/start/exec` 对着哪个实例都能用。
 func newServeCmd() *cobra.Command {
 	var (
-		listen     string
-		stop       bool
-		foreground bool
+		listen           string
+		stop             bool
+		foreground       bool
+		readyJSON        bool
+		exitOnStdinClose bool
 	)
 	cmd := &cobra.Command{
 		Use:   "serve",
@@ -58,9 +60,26 @@ func newServeCmd() *cobra.Command {
   --foreground  前台运行，日志直出终端（Ctrl+C 停止）
   --stop        停止后台实例
 
+桌面壳（TT Desktop）用的两个开关，都是给进程间契约用的，命令行日常不需要：
+
+  --ready-json           就绪时向 stdout 打**一行** JSON：{"ok":true,"attached":…,
+                         "url":…,"pid":…,"config":…}。已有实例时输出 attached=true
+                         并直接退出 0（不起第二个）。
+  --exit-on-stdin-close  stdin 关闭即优雅退出。壳被强杀时管道会关，服务跟着收尾，
+                         不留一个隐形进程占着端口与状态文件。
+
 同一个配置目录下只能有一个实例：两条进程会争同一份状态文件（--stop 与自动寻址的依据）。`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// 两个桌面壳开关都只对前台运行有意义：后台模式由子进程去就绪，
+			// 父进程既拿不到真实地址（端口会顺延），也不会替子进程收尾。
+			if readyJSON && !foreground {
+				return fmt.Errorf("--ready-json 只能与 --foreground 一起用：后台模式由子进程就绪，父进程拿到的不是真实地址")
+			}
+			if exitOnStdinClose && !foreground {
+				return fmt.Errorf("--exit-on-stdin-close 只能与 --foreground 一起用")
+			}
+
 			path, err := common.ResolveConfig(true)
 			if err != nil {
 				return err
@@ -93,6 +112,19 @@ func newServeCmd() *cobra.Command {
 				return err
 			}
 
+			// 桌面壳：先看同目录有没有已经在跑的实例，有就**附着**，不启动第二个。
+			//
+			// 判据是既有的那一份（状态文件 + HTTP 探活，见 debug.RunningServe），
+			// 与 --stop、tt update 用的是同一套 —— 不另造一个"桌面版专用"的探活。
+			//
+			// 这一步必须在 RunForeground 之前：它会因"服务已在运行"直接报错退出，
+			// 而桌面壳要的是"接上去"。
+			if readyJSON {
+				if st := debugcli.RunningServe(dir); st != nil {
+					return debugcli.WriteServeReady(os.Stdout, st, path, true)
+				}
+			}
+
 			// 允许空环境：首次运行还没有任何环境，服务要能先起来，
 			// 用户再到配置页里添加。CLI 命令那条路径仍然是"没配环境就报错"。
 			cfg, err := debug.LoadConfigAllowEmpty(path)
@@ -122,10 +154,12 @@ func newServeCmd() *cobra.Command {
 			syncDefault := config.LocationsAt(path).SyncTarget("", "")
 			dictSrv := dictserver.New(path)
 
-			return debugcli.RunForeground(path, debugcli.ServeSpec{
-				Prefix:   "TT",
-				StopHint: "tt serve --stop",
-				APIBase:  debugcli.APIBaseUnderDebug,
+			err = debugcli.RunForeground(path, debugcli.ServeSpec{
+				Prefix:           "TT",
+				StopHint:         "tt serve --stop",
+				APIBase:          debugcli.APIBaseUnderDebug,
+				ReadyJSON:        readyJSON,
+				ExitOnStdinClose: exitOnStdinClose,
 			}, func(ctx context.Context, onReady func(addr string)) error {
 				// 停止路径有两条（Ctrl+C 与 /api/shutdown），两条都可能先到，
 				// 所以统一收口到 sync.Once —— 否则会重复 close 同一个 channel 而 panic。
@@ -165,11 +199,26 @@ func newServeCmd() *cobra.Command {
 				<-ctx.Done()
 				return nil
 			})
+
+			// 探活与启动之间被另一条进程抢先：RunForeground 报的是"服务已在运行"。
+			// 这时再探一次，探得到就按附着收场 —— 一个能用的服务不该被报成启动失败
+			// （桌面壳看到非 0 退出会弹失败页）。
+			if err != nil && readyJSON {
+				if st := debugcli.RunningServe(dir); st != nil {
+					fmt.Fprintf(os.Stderr, "%v（改为附着到已在运行的实例）\n", err)
+					return debugcli.WriteServeReady(os.Stdout, st, path, true)
+				}
+			}
+			return err
 		},
 	}
 	cmd.Flags().StringVar(&listen, "listen", "", "监听地址（缺省取配置里的 listen）")
 	cmd.Flags().BoolVar(&stop, "stop", false, "停止后台实例")
 	cmd.Flags().BoolVar(&foreground, "foreground", false, "前台运行，日志直出终端（默认后台常驻）")
+	cmd.Flags().BoolVar(&readyJSON, "ready-json", false,
+		"就绪后向 stdout 打一行 JSON（桌面壳用；需与 --foreground 同用）")
+	cmd.Flags().BoolVar(&exitOnStdinClose, "exit-on-stdin-close", false,
+		"stdin 关闭即优雅退出（桌面壳收尾兜底；需与 --foreground 同用）")
 	return cmd
 }
 

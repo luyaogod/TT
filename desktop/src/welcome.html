@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
+    />
+    <title>欢迎使用 TT</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #181818; --card: #1f1f1f; --fg: #cccccc; --muted: #9a9a9a;
+        --line: #2b2b2b; --accent: #0078d4; --ok: #4ec9b0;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        background: var(--bg); color: var(--fg);
+        font: 13px/1.65 "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif;
+        padding: 26px 30px; display: flex; flex-direction: column; overflow: hidden;
+      }
+      .brand { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
+      .logo {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 26px; height: 26px; border-radius: 6px;
+        background: var(--accent); color: #fff; font-weight: 700; font-size: 12px; letter-spacing: .5px;
+      }
+      h1 { font-size: 19px; font-weight: 600; margin: 20px 0 6px; }
+      .lead { color: var(--muted); margin: 0 0 18px; }
+      .steps { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; overflow: auto; }
+      .step {
+        display: flex; gap: 14px; align-items: flex-start; text-align: left;
+        background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+        padding: 14px 16px; cursor: pointer; color: inherit; font: inherit; width: 100%;
+      }
+      .step:hover { border-color: #3c3c3c; background: #232323; }
+      .step:disabled { opacity: .55; cursor: default; }
+      .num {
+        flex: none; width: 22px; height: 22px; border-radius: 50%;
+        background: #2a2a2a; color: var(--fg); font-size: 12px;
+        display: flex; align-items: center; justify-content: center; margin-top: 1px;
+      }
+      .step h2 { margin: 0 0 3px; font-size: 13px; font-weight: 600; }
+      .step p { margin: 0; color: var(--muted); font-size: 12px; }
+      .done h2 { color: var(--ok); }
+      .foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 18px; }
+      .foot label { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 6px; cursor: pointer; }
+      .foot .hint { color: #6f6f6f; font-size: 11px; text-align: right; }
+      button.link { background: none; border: none; color: var(--accent); cursor: pointer; font: inherit; padding: 0; }
+    </style>
+  </head>
+  <body>
+    <div class="brand"><span class="logo">TT</span><span id="brand">TT Desktop</span></div>
+    <h1>欢迎使用 TT</h1>
+    <p class="lead">三步就能开始。以后都能在「设置」里再改。</p>
+
+    <div class="steps">
+      <button class="step" id="settings">
+        <span class="num">1</span>
+        <span>
+          <h2>连接你的 T100 环境</h2>
+          <p>可以从本机设计器的站点清单导入，也可以手填服务器与账号。</p>
+        </span>
+      </button>
+
+      <button class="step" id="skills">
+        <span class="num">2</span>
+        <span>
+          <h2>让 AI 用起来</h2>
+          <p>把技能装到你正在用的 AI 工具目录（Claude、Codex、DSH 等）。</p>
+        </span>
+      </button>
+
+      <button class="step" id="path">
+        <span class="num">3</span>
+        <span>
+          <h2>把命令行也装好</h2>
+          <p>让脚本和 AI 能直接敲 tt 命令（只改当前用户的 PATH，可撤销）。</p>
+        </span>
+      </button>
+    </div>
+
+    <div class="foot">
+      <label><input type="checkbox" id="dont-show" /> 不再显示这一页</label>
+      <span class="hint">关闭窗口会结束正在进行的调试会话</span>
+    </div>
+
+    <script>
+      const api = window.ttDesktop
+      const $ = (id) => document.getElementById(id)
+
+      api?.boot?.().then((info) => {
+        if (info?.version) $('brand').textContent = `TT Desktop ${info.version}`
+      })
+
+      // 三个入口各走各的：两个是深链（界面在那头，这里不重复造表单），
+      // 第三个是一步动作（写 PATH），做完就在原地改状态。
+      $('settings').addEventListener('click', () => {
+        api?.welcome?.('settings', $('dont-show').checked)
+      })
+      $('skills').addEventListener('click', () => {
+        api?.welcome?.('skills', $('dont-show').checked)
+      })
+      $('path').addEventListener('click', async () => {
+        const btn = $('path')
+        const hint = btn.querySelector('p')
+        btn.disabled = true
+        hint.textContent = '正在写入…'
+        const res = await api?.installPath?.()
+        btn.classList.toggle('done', !!res?.ok)
+        btn.querySelector('h2').textContent = res?.ok ? '命令行已装好' : '没装成，可再试一次'
+        hint.textContent = res?.ok
+          ? '打开新终端就能用 tt 了（已在运行的程序要重开）'
+          : res?.error || '写入失败，稍后再试'
+        btn.disabled = false
+      })
+    </script>
+  </body>
+</html>

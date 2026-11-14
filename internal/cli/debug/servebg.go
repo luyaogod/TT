@@ -24,6 +24,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -54,6 +55,19 @@ type ServeSpec struct {
 	StopHint string   // 停止方式,如 "tt debug serve --stop"
 	Args     []string // 后台子进程重放的子命令(如 ["debug","serve"]);StartBackground 会补 --foreground 与 --config
 	APIBase  string   // 调试 API 前缀,记进状态文件供控制端寻址(见上)
+
+	// ReadyJSON 就绪时向 stdout 打一行机器可读 JSON，而不是那段人读块。
+	//
+	// 只给桌面壳（TT Desktop）用，理由见 serve_ready.go：壳要的是地址/pid/配置三件
+	// 事实，而人读块是界面文案，改一次字距就解析不出来。两个都必须**恰好一行**，
+	// 所以给了它就绝不再打人读块。
+	ReadyJSON bool
+	// ExitOnStdinClose stdin 读到 EOF 即优雅收尾（等同 Ctrl+C）。
+	//
+	// 只在显式给出时生效：命令行前台模式去读 stdin 会抢走用户的输入。桌面壳把
+	// 子进程的 stdin 接成管道，壳被强杀时管道关闭 → 服务自己退出，不留一个隐形的
+	// tt.exe 占着端口与状态文件（Windows 不会把子进程跟着父进程一起收掉）。
+	ExitOnStdinClose bool
 }
 
 // ServeInfo 是后台实例状态:pid/站点地址/调试 API 前缀/日志,供单实例判断与控制端寻址。
@@ -237,12 +251,27 @@ func RunForeground(cfgPath string, spec ServeSpec, start func(ctx context.Contex
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	// 桌面版的收尾兜底：壳被强杀时，子进程接的那根管道会关闭，这里读到 EOF。
+	// 与 Ctrl+C 走同一条优雅路径（收会话、关 SSH），而不是被 Taskkill 硬砍。
+	// 只在 spec 显式要求时读 stdin —— 命令行前台模式读它会把用户的输入吃掉。
+	if spec.ExitOnStdinClose {
+		go func() {
+			_, _ = io.Copy(io.Discard, os.Stdin)
+			stop()
+		}()
+	}
+
 	err := start(ctx, func(addr string) {
 		st := &ServeInfo{
 			PID: os.Getpid(), URL: "http://" + addr, APIBase: spec.APIBase,
 			Log: os.Getenv("TT_SERVE_LOG"), Since: time.Now().Format(time.RFC3339),
 		}
 		_ = writeServeInfo(st, dir)
+		if spec.ReadyJSON {
+			// 契约要求 stdout 恰好一行，所以这里**不再**打人读块（见 serve_ready.go）。
+			_ = WriteServeReady(os.Stdout, st, cfgPath, false)
+			return
+		}
 		printRunning(spec, st, cfgPath)
 	})
 	removeServeInfo(dir)

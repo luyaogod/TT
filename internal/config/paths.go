@@ -35,6 +35,13 @@ const (
 	DefaultConfigName = "config.json"
 	// PortableMark 便携标记：exe 同目录存在该文件即视为便携包。
 	PortableMark = ".portable"
+	// DesktopMark 桌面版标记：由 build_desktop.bat 写在 <安装目录>\resources\tt\ 下。
+	//
+	// 它**不参与配置落点判定**（IsPortable 只认 PortableMark）：桌面版的配置照样落在
+	// %APPDATA%\tt，与 MSI 装的那份共用。它的唯一用途是让 update.DetectKind 认得出
+	// "这份二进制是桌面版载荷的一部分"，从而拒绝命令行自装 —— 那份 tt.exe 要跟着
+	// 桌面版整体升级，单独替换会让桌面版下次启动加载到一个版本不明的载荷。
+	DesktopMark = ".desktop"
 )
 
 // UserConfigDir 统一用户目录：%APPDATA%\tt（os.UserConfigDir() 在 Windows 上即

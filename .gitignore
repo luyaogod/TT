@@ -48,6 +48,18 @@ Thumbs.db
 # 本机预览用的启动配置(含沙箱绝对路径),不入库
 /.claude/launch.json
 
+# 桌面壳(Electron)：依赖、暂存的载荷、打包产物都不入库
+#   payload/ 是 build_desktop.bat 从 dist\tt-portable 拷出来的（含 50MB 的 tt.exe），
+#   release/ 是 electron-builder 的输出目录（最终制品再拷进 dist\）。
+/desktop/node_modules/
+/desktop/payload/
+/desktop/release/
+
+# 本机冒烟用的临时物（真机验证 Electron 时留下的 profile / 配置 / 日志 / 截图）
+# 统一用 .tmp- 前缀，一条规则收掉；别把"验证痕迹"混进仓库。
+/.tmp-*
+/desktop/.tmp-*
+
 # 前端 check runner 的 esbuild 中间产物
 /web/app/scripts/.tmp-*.mjs
 

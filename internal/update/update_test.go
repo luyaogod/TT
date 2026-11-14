@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"tt/internal/config"
 )
 
 // ---------- 版本模型 ----------
@@ -197,6 +199,28 @@ func TestDetectKindAndInstallRefusal(t *testing.T) {
 	}
 	if why := InstallRefusal(KindMSI, filepath.Join(msiDir, "tt.exe"), "0.2.1"); why != "" {
 		t.Errorf("MSI 该允许自装，却被拒: %s", why)
+	}
+
+	// 桌面版：exe 在 <安装目录>\resources\tt，同目录有 .desktop。
+	// 它**不允许**自装（那份二进制要跟着桌面版整体升级）。
+	desktopDir := filepath.Join(base, "Programs", "TT Desktop", "resources", "tt")
+	if err := os.MkdirAll(desktopDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(desktopDir, config.DesktopMark), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := DetectKind(filepath.Join(desktopDir, "tt.exe")); got != KindDesktop {
+		t.Errorf("桌面版标记在时 DetectKind = %v，想要 KindDesktop", got)
+	}
+	deskWhy := InstallRefusal(KindDesktop, filepath.Join(desktopDir, "tt.exe"), "0.5.3")
+	if deskWhy == "" || !strings.Contains(deskWhy, "TT Desktop") {
+		t.Errorf("桌面版该拒绝自装并指向桌面版升级，得到 %q", deskWhy)
+	}
+	// 形态判定优先于版本号：一份没注入版本号的桌面载荷，提示也该指向桌面版升级
+	// （否则会报成"源码态，用 make build 更新"——指错了地方）。
+	if why := InstallRefusal(KindDesktop, filepath.Join(desktopDir, "tt.exe"), ""); !strings.Contains(why, "TT Desktop") {
+		t.Errorf("没有版本号的桌面版该仍指向桌面版升级，得到 %q", why)
 	}
 
 	// 认不出的布局：有版本号也不让自装。

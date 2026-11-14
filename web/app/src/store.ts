@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { api, API_BASE, type Event, type StopInfo, type Breakpoint, type Frame, type VarItem, type WSLogItem, type WSLogContent, type WSLogQuery, type EntItem, type InflightInfo, type SessionBrief } from './api'
 import { THEME_KEY, applyDark, readStoredTheme, resolveDark, watchSystemTheme, type ThemeMode } from '../../shared/theme'
+import { syncShellTheme } from './desktopShell'
 // 统一消息出口(零依赖的那个文件,见 toastBus.ts 的说明:store 要能在裸 Node 里加载)
 import { toast } from './toastBus'
 // 只取类型:routing.ts 里有 DOM 相关逻辑,虽然都在函数体内,这里也只导入类型
@@ -1322,6 +1323,8 @@ export const useStore = create<Store>((set, get) => ({
     const dark = resolveDark(t)
     localStorage.setItem(THEME_KEY, t)
     applyDark(dark)
+    // 桌面版:右上角那三颗原生窗口按钮跟着换色(浏览器里是空操作)
+    syncShellTheme(dark)
     set({ theme: t, dark })
   },
 
@@ -2409,8 +2412,14 @@ watchSystemTheme(() => {
   if (st.theme !== 'system') return
   const dark = resolveDark('system')
   applyDark(dark)
+  syncShellTheme(dark)
   useStore.setState({ dark })
 })
+
+// 桌面版:页面刚起来时把首屏的明暗**先告诉壳一遍**。壳在页面加载前只知道
+// "应用默认是暗色"，用户如果选的是亮色，右上角按钮会白一瞬 —— 这里消掉那一瞬。
+// 浏览器里是空操作。
+syncShellTheme(useStore.getState().dark)
 
 // 连接 WebSocket(自动重连)
 export function connectWS() {
