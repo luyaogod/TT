@@ -513,7 +513,7 @@ export function WsLogView() {
             </Select>
             <button onClick={() => void loadEnts(activeEnv, true)} disabled={!activeEnv || entsView?.loading}
               title="重新读取企业清单"
-              className="p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40">
+              className="rounded-ui p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40">
               <RefreshCw className={`h-3.5 w-3.5 ${entsView?.loading ? 'animate-spin' : ''}`} />
             </button>
           </div>
@@ -589,12 +589,12 @@ export function WsLogView() {
           <div className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
             <span>{wsLogs.length} 条</span>
             <button onClick={() => loadPage(page - 1)} disabled={loading || page <= 1} title="上一页"
-              className="p-1 hover:bg-accent hover:text-foreground disabled:opacity-30">
+              className="rounded-ui p-1 hover:bg-accent hover:text-foreground disabled:opacity-30">
               <ChevronLeft className="h-4 w-4" />
             </button>
             <span className="whitespace-nowrap font-mono">第 {page} 页</span>
             <button onClick={() => loadPage(page + 1)} disabled={loading || !hasMore} title="下一页"
-              className="p-1 hover:bg-accent hover:text-foreground disabled:opacity-30">
+              className="rounded-ui p-1 hover:bg-accent hover:text-foreground disabled:opacity-30">
               <ChevronRight className="h-4 w-4" />
             </button>
           </div>
@@ -725,12 +725,12 @@ export function WsLogView() {
                 : 'flex shrink-0 flex-col overflow-hidden bg-card'}>
               <div className="flex h-8 shrink-0 items-center gap-1 overflow-x-auto whitespace-nowrap border-b border-border px-2">
                 <button onClick={closeWsLogDetail} title={narrowSplit ? '返回列表(Esc)' : '关闭详情(Esc)'}
-                  className="p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+                  className="rounded-ui p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
                   <X className="h-3.5 w-3.5" />
                 </button>
                 {([['info', '基本信息'], ['request', 'Request'], ['response', 'Response']] as const).map(([k, label]) => (
                   <button key={k} onClick={() => setWsLogTab(k)}
-                    className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs ${tab === k ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                    className={`inline-flex items-center gap-1 rounded-ui px-2 py-0.5 text-xs transition-colors ${tab === k ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
                     {label}
                     {k === 'request' && reqDirty && <span className="text-amber-600 dark:text-amber-400" title="入参已修改,重放会用它">•</span>}
                   </button>
@@ -738,7 +738,7 @@ export function WsLogView() {
                 {reqDirty && (
                   <button onClick={() => setReqDraft(content?.request ?? '')}
                     title="放弃修改,还原为日志里的原始入参"
-                    className="inline-flex items-center gap-1 border border-border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground">
+                    className="inline-flex items-center gap-1 rounded-ui border border-border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground">
                     <Undo2 className="h-3.5 w-3.5" />
                     还原入参
                   </button>
@@ -751,7 +751,7 @@ export function WsLogView() {
                     : reqDirty
                       ? '用上面编辑器里改过的入参重放此接口调用'
                       : '用原始报文重放这次调用（会先结束当前调试）'}
-                  className="ml-auto inline-flex items-center gap-1 border border-emerald-500/20 px-2 py-0.5 text-xs text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 disabled:pointer-events-none disabled:opacity-40"
+                  className="ml-auto inline-flex items-center gap-1 rounded-ui border border-emerald-500/20 px-2 py-0.5 text-xs text-emerald-600 transition-colors hover:bg-emerald-500/10 disabled:pointer-events-none disabled:opacity-40 dark:text-emerald-400"
                 >
                   <Bug className="h-3.5 w-3.5" />
                   {reqDirty ? '用修改后的入参重放' : '调试此调用'}
@@ -760,7 +760,7 @@ export function WsLogView() {
                 <button
                   onClick={() => void copyRowID()}
                   title="复制这行日志的标识，交给 AI 就能重放这一行"
-                  className={`inline-flex shrink-0 items-center gap-1 border px-2 py-0.5 text-xs transition-colors ${
+                  className={`inline-flex shrink-0 items-center gap-1 rounded-ui border px-2 py-0.5 text-xs transition-colors ${
                     idState === 'fail'
                       ? 'border-red-500/20 text-red-600 dark:text-red-400'
                       : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground'
@@ -775,7 +775,7 @@ export function WsLogView() {
                     onClick={() => void copyPayload()}
                     disabled={!payloadText}
                     title={payloadText ? '复制报文到剪贴板' : '报文未加载或无内容'}
-                    className={`inline-flex shrink-0 items-center gap-1 border px-2 py-0.5 text-xs transition-colors disabled:pointer-events-none disabled:opacity-40 ${
+                    className={`inline-flex shrink-0 items-center gap-1 rounded-ui border px-2 py-0.5 text-xs transition-colors disabled:pointer-events-none disabled:opacity-40 ${
                       copyState === 'fail'
                         ? 'border-red-500/20 text-red-600 dark:text-red-400'
                         : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground'
