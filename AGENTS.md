@@ -15,11 +15,15 @@ TT/
 ├─ build_desktop.bat    桌面版构建：复用便携载荷 → Electron 壳 → 安装包 + 免安装 zip
 │
 ├─ .agents/             项目 Agent 技能与说明（不随发行包装到用户目录）
-│  ├─ docs/             协作者共享文档与项目架构图
+│  ├─ docs/             协作者共享文档
+│  │  ├─ architecture/  命令树架构图（commands.html + 生成脚本）
+│  │  └─ t100/          T100 参考资料：designer-src（设计器反编译源码，只读）+ r.t（表设计器 adzi140 语料）
 │  └─ skills/           项目内技能
-│     ├─ asd-ste100/    技术英语/简化英语写作与检查
-│     ├─ tt-add-cli/    新增 CLI 命令的设计指南
-│     └─ tt-test/       真机集成测试与链路验证指南
+│     ├─ tt-pj-add-cli/ 新增 CLI 命令的设计指南
+│     ├─ tt-pj-frontend/ 前端开发约定（画面文案只讲功能）
+│     ├─ tt-pj-git/     分支 / 提交 / PR 规范
+│     ├─ tt-pj-plan/    计划文件规范（plan + tasks 两份）
+│     └─ tt-pj-test/    真机集成测试与链路验证指南
 │
 ├─ internal/            Go 后端全部实现
 │  ├─ cli/              cobra 命令树装配处：各能力线 + 共用命令；唯一的接线处
@@ -100,7 +104,6 @@ TT/
 │  ├─ out/              构建产物 + 探测程序（不进发行包、不能落 dist/ 下）
 │  └─ test/             引擎测试
 │
-├─ designer-src/        设计器反编译源码（只读）：16 工程 + 子包地图，注释 file:line 的核对落点
 ├─ installer/           MSI 安装包定义（WiX v3；perUser 装到 %LOCALAPPDATA%\Programs\TT）
 ├─ tools/               构建辅助 Go 工具
 │  ├─ zip/              跨平台确定性打包

@@ -1,0 +1,115 @@
+---------------------------------------------------------------------------------- 
+-- File created from /u1/toptst/erp/adz/42f/sadzi140_wcrt.4fd by Genero Studio
+-- WARNING! All changes made in this file will be lost!
+----------------------------------------------------------------------------------
+
+SCHEMA formonly
+
+LAYOUT (text=%"新增表格", windowStyle="withoutToolBar")
+VBOX vbox1
+GRID Grid1
+{
+[im]
+
+}
+END -- Grid1
+HBOX hbox1
+GRID Grid4
+{
+
+[lbl_memo                 ]
+[                         ]
+[                         ]
+[                         ]
+[                         ]
+[                         ]
+[                         ]
+[                         ]
+[                         ]
+[                         ]
+[                         ]
+[                         ]
+}
+END -- Grid4
+GRID Grid3
+{
+[lbl_module|cb_modulename       ]
+[lbl_tablet|cb_tabletype        ]
+[lbl_clone_|edt_clone_table     ]
+[lbl_tablen|ed_tablename    |lbl]
+[lbl_tabled|ed_tabledescription ]
+           [                    ]
+           [lbl_multilang      ]
+           [lbl_systemtable    ]
+           [lbl_create_notice_t]
+[definegrou|prevtablen|tablespace]
+[masterdb  |masteruser|lbl_altere]
+[ind|alm|al1|al2|dge|ori|shi|or1]
+
+}
+END -- Grid3
+END -- hbox1
+GRID grid5
+{
+[i1]
+[  ]
+[  ]
+[  ]
+
+}
+END -- grid5
+GRID Grid2
+{
+[i2]                              [btn_back  |btn_next  |btn_ok    |btn_cancel]
+
+
+}
+END -- Grid2
+END -- vbox1
+END -- sadzi140_wcrt
+
+ATTRIBUTES
+IMAGE im:img_wcrt, image="tabledesigner/tbd_new_schema.png", style="noBorder", width = 15 characters, height = 4 characters;
+LABEL lbl_memo=formonly.lbl_memo, sizePolicy=dynamic;
+LABEL lbl_module:lbl_ModuleName, text=%"lbl_ModuleName";
+COMBOBOX cb_modulename=formonly.cb_ModuleName, tabIndex=1;
+LABEL lbl_tablet:lbl_TableType, text=%"lbl_TableType";
+COMBOBOX cb_tabletype=formonly.cb_TableType type VARCHAR, tabIndex=2, not null;
+LABEL lbl_clone_:lbl_clone_table, text=%"lbl_clone_table";
+EDIT edt_clone_table=formonly.edt_clone_table, tabIndex=14, noEntry;
+LABEL lbl_tablen:lbl_TableName, text=%"lbl_TableName";
+EDIT ed_tablename=formonly.ed_TableName, tabIndex=3, downShift, justify=right, sizePolicy=dynamic;
+LABEL lbl=formonly.lbl_tail_code;
+LABEL lbl_tabled:lbl_TableDesc, text=%"lbl_TableDesc";
+TEXTEDIT ed_tabledescription=formonly.ed_TableDescription, tabIndex=4;
+CHECKBOX lbl_multilang=formonly.lbl_MultiLang, tabIndex=5, default = "N", text=%"lbl_MultiLang", valueChecked = "Y", valueUnchecked = "N", hidden;
+CHECKBOX lbl_systemtable=formonly.lbl_SystemTable, tabIndex=6, default = "N", text=%"lbl_SystemTable", noEntry, valueChecked = "Y", valueUnchecked = "N", hidden;
+CHECKBOX lbl_create_notice_t=formonly.lbl_create_notice_trigger, tabIndex=7, default = "N", text=%"lbl_create_notice_trigger", not null, valueChecked = "Y", valueUnchecked = "N", hidden;
+EDIT definegrou=formonly.DefineGroup, tabIndex=8, hidden;
+EDIT prevtablen=formonly.PrevTableName, tabIndex=9, hidden;
+EDIT tablespace=formonly.TableSpace, tabIndex=10, hidden;
+EDIT masterdb=formonly.MasterDB, tabIndex=11, hidden;
+EDIT masteruser=formonly.MasterUser, tabIndex=12, hidden;
+CHECKBOX lbl_altere=formonly.lbl_altered, tabIndex=13, default = "Y", text=%"lbl_altered", valueChecked = "Y", valueUnchecked = "N", hidden;
+EDIT ind=formonly.IndustryType, tabIndex=15, hidden;
+EDIT alm=formonly.alm_construct_version, tabIndex=16, hidden;
+EDIT al1=formonly.alm_sd_version, tabIndex=17, hidden;
+EDIT al2=formonly.alm_request_no, tabIndex=18, hidden;
+EDIT dge=formonly.dgenv, tabIndex=19, hidden;
+EDIT ori=formonly.orig_module_name, tabIndex=20, hidden;
+EDIT shi=formonly.shipping_notice, tabIndex=21, hidden;
+EDIT or1=formonly.orig_dgenv, tabIndex=22, hidden;
+IMAGE i1:image1, stretch=none, style="noBorder";
+IMAGE i2:image2, stretch=x, style="noBorder";
+BUTTON btn_back:btn_back, tabIndex=23, text=%"btn_back";
+BUTTON btn_next:btn_next, tabIndex=24, text=%"btn_next";
+BUTTON btn_ok:btn_OK, tabIndex=25, text=%"btn_OK";
+BUTTON btn_cancel:btn_Cancel, tabIndex=26, text=%"btn_Cancel";
+END -- ATTRIBUTES
+
+INSTRUCTIONS
+SCREEN RECORD sr_CreateTable(formonly.cb_ModuleName,formonly.cb_TableType,formonly.ed_TableName,formonly.lbl_tail_code,formonly.ed_TableDescription,formonly.lbl_MultiLang,formonly.lbl_SystemTable,formonly.lbl_create_notice_trigger,formonly.DefineGroup,formonly.PrevTableName,formonly.TableSpace,formonly.MasterDB,formonly.MasterUser,formonly.lbl_altered,formonly.IndustryType,formonly.alm_construct_version,formonly.alm_sd_version,formonly.alm_request_no,formonly.dgenv,formonly.orig_module_name,formonly.shipping_notice,formonly.orig_dgenv)
+SCREEN RECORD sr_clone(formonly.edt_clone_table)
+SCREEN RECORD Undefined(formonly.lbl_memo)
+END -- INSTRUCTIONS
+

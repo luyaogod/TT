@@ -1,0 +1,39 @@
+---------------------------------------------------------------------------------- 
+-- File created from /u1/toptst/erp/adz/42f/sadzi140_inp.4fd by Genero Studio
+-- WARNING! All changes made in this file will be lost!
+----------------------------------------------------------------------------------
+
+SCHEMA formonly
+
+LAYOUT (text=%"sadzi140_srn", windowStyle="withoutToolBar")
+VBOX VBox1
+GRID Grid1
+{
+
+[lbl_column|ed_column_nam]
+[lbl_assign|ed_assign_val]
+}
+END -- Grid1
+GRID Grid2
+{
+[im|btn_ok    |btn_cancel]
+
+}
+END -- Grid2
+END -- VBox1
+END -- sadzi140_srn
+
+ATTRIBUTES
+LABEL lbl_column:lbl_column_name, text=%"lbl_column_name";
+EDIT ed_column_nam=formonly.ed_column_name, tabIndex=1, noEntry, scroll;
+LABEL lbl_assign:lbl_assign_value, text=%"lbl_assign_value";
+EDIT ed_assign_val=formonly.ed_assign_value type VARCHAR, tabIndex=4, not null, scroll;
+IMAGE im:image2, stretch=x, style="noBorder";
+BUTTON btn_ok:btn_OK, tabIndex=3, text=%"btn_OK";
+BUTTON btn_cancel:btn_Cancel, tabIndex=2, text=%"btn_Cancel", hidden;
+END -- ATTRIBUTES
+
+INSTRUCTIONS
+SCREEN RECORD sr_assign_value(formonly.ed_column_name,formonly.ed_assign_value)
+END -- INSTRUCTIONS
+

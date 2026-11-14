@@ -1,0 +1,90 @@
+---------------------------------------------------------------------------------- 
+-- File created from /u1/toptst/erp/adz/42f/sadzi140_fnct.4fd by Genero Studio
+-- WARNING! All changes made in this file will be lost!
+----------------------------------------------------------------------------------
+
+SCHEMA formonly
+
+LAYOUT (text=%"sadzi140_fnct", windowStyle="withoutToolBar")
+VBOX vbox1
+GRID Grid1
+{
+[im]
+
+}
+END -- Grid1
+HBOX hbox1
+GRID Grid3
+{
+[ed_tablename]
+[lbl_memo                 ]
+[                         ]
+[                         ]
+[                         ]
+[                         ]
+[                         ]
+[                         ]
+[                         ]
+[                         ]
+[                         ]
+[                         ]
+}
+END -- Grid3
+TABLE tbl_function_table_list(unsortableColumns, unmovableColumns, unhidableColumns)
+{
+[l|a|b|lb|l1|l2|l3|ed|lb_functab|lb_functab_desc   ]
+[l|a|b|lb|l1|l2|l3|ed|lb_functab|lb_functab_desc   ]
+[l|a|b|lb|l1|l2|l3|ed|lb_functab|lb_functab_desc   ]
+[l|a|b|lb|l1|l2|l3|ed|lb_functab|lb_functab_desc   ]
+[l|a|b|lb|l1|l2|l3|ed|lb_functab|lb_functab_desc   ]
+[l|a|b|lb|l1|l2|l3|ed|lb_functab|lb_functab_desc   ]
+[l|a|b|lb|l1|l2|l3|ed|lb_functab|lb_functab_desc   ]
+[l|a|b|lb|l1|l2|l3|ed|lb_functab|lb_functab_desc   ]
+
+
+
+}
+END -- tbl_function_table_list
+END -- hbox1
+GRID grid5
+{
+[i1]
+
+}
+END -- grid5
+GRID Grid2
+{
+[i2]                              [btn_back  |btn_next  |btn_ok    |btn_cancel]
+
+}
+END -- Grid2
+END -- vbox1
+END -- sadzi140_fnct
+
+ATTRIBUTES
+IMAGE im:Image1, image="tabledesigner/tbd_new_functab.png", style="noBorder", width = 15 characters, height = 4 characters;
+EDIT ed_tablename=formonly.ed_TableName, tabIndex=4, noEntry;
+LABEL lbl_memo=formonly.lbl_memo, sizePolicy=dynamic;
+EDIT l=formonly.lb_module_name, tabIndex=6, title=%"", hidden;
+EDIT a=formonly.lb_front_word, tabIndex=9, title=%"", hidden;
+EDIT b=formonly.lb_table_name, tabIndex=7, title=%"", hidden;
+EDIT lb=formonly.lb_pre_table_name, tabIndex=5, title=%"", hidden;
+EDIT l1=formonly.lb_aux_type, tabIndex=10, title=%"", hidden;
+EDIT l2=formonly.lb_table_type, tabIndex=8, title=%"", hidden;
+EDIT l3=formonly.lbl_type, title=%"", noEntry, unsortable, unmovable, unhidable;
+CHECKBOX ed=formonly.ed_checkbox, default = "Y", title=%"", text=%"", not null, valueChecked = "Y", valueUnchecked = "N", unsortable, unmovable, unhidable;
+EDIT lb_functab=formonly.lb_functab_type, title=%"lb_functab_type", noEntry, unsortable, unmovable, unhidable;
+EDIT lb_functab_desc=formonly.lb_functab_desc, title=%"lb_functab_desc", scroll, sizePolicy=dynamic, unsortable, unmovable, unhidable;
+IMAGE i1:image3, stretch=x, style="noBorder";
+IMAGE i2:image2, stretch=x, style="noBorder";
+BUTTON btn_back:btn_back, tabIndex=11, text=%"btn_back";
+BUTTON btn_next:btn_next, tabIndex=12, text=%"btn_next", hidden;
+BUTTON btn_ok:btn_OK, tabIndex=13, text=%"btn_OK";
+BUTTON btn_cancel:btn_Cancel, tabIndex=14, text=%"btn_Cancel";
+END -- ATTRIBUTES
+
+INSTRUCTIONS
+SCREEN RECORD sr_function_table_list(formonly.lb_module_name,formonly.lb_front_word,formonly.lb_table_name,formonly.lb_pre_table_name,formonly.lb_aux_type,formonly.lb_table_type,formonly.lbl_type,formonly.ed_checkbox,formonly.lb_functab_type,formonly.lb_functab_desc)
+SCREEN RECORD Undefined(formonly.ed_TableName,formonly.lbl_memo)
+END -- INSTRUCTIONS
+

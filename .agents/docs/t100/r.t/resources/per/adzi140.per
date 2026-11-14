@@ -1,0 +1,375 @@
+---------------------------------------------------------------------------------- 
+-- File created from /u1/toptst/erp/adz/42f/adzi140.4fd by Genero Studio
+-- WARNING! All changes made in this file will be lost!
+----------------------------------------------------------------------------------
+
+SCHEMA formonly
+
+ACTION DEFAULTS
+  ACTION controlp(accelerator = CONTROL-P)
+END -- ACTION DEFAULTS
+
+LAYOUT (text=%"Form", windowStyle="hasToolBarCanSizable")
+VBOX vbox6
+HBOX hbox1(splitter)
+FOLDER Folder2
+PAGE page_MasterTable(text=%"page_MasterTable")
+VBOX vbox5
+GRID grid2
+{
+[lbl_module|cb_moduleselect |im|cb_get_checkout_ta]
+[lbl_search|edt_search      |btn_adv_fi]
+
+}
+END -- grid2
+GRID grid_adv_filter(hidden)
+{
+[cb_get_issue_table][cb_get_industry_ta]
+
+
+}
+END -- grid_adv_filter
+TABLE tbl_TableList(doubleClick=modify, unsortableColumns, unhidableColumns)
+{
+[r|lb|lbl_|lbl_dze|lbl_dzea002    |lbl_dzea0|l|a|b|c|d|e|f|g|h|l1|i|j|k|m|n|o|p|q|s|t|u|v]
+[r|lb|lbl_|lbl_dze|lbl_dzea002    |lbl_dzea0|l|a|b|c|d|e|f|g|h|l1|i|j|k|m|n|o|p|q|s|t|u|v]
+[r|lb|lbl_|lbl_dze|lbl_dzea002    |lbl_dzea0|l|a|b|c|d|e|f|g|h|l1|i|j|k|m|n|o|p|q|s|t|u|v]
+[r|lb|lbl_|lbl_dze|lbl_dzea002    |lbl_dzea0|l|a|b|c|d|e|f|g|h|l1|i|j|k|m|n|o|p|q|s|t|u|v]
+[r|lb|lbl_|lbl_dze|lbl_dzea002    |lbl_dzea0|l|a|b|c|d|e|f|g|h|l1|i|j|k|m|n|o|p|q|s|t|u|v]
+[r|lb|lbl_|lbl_dze|lbl_dzea002    |lbl_dzea0|l|a|b|c|d|e|f|g|h|l1|i|j|k|m|n|o|p|q|s|t|u|v]
+[r|lb|lbl_|lbl_dze|lbl_dzea002    |lbl_dzea0|l|a|b|c|d|e|f|g|h|l1|i|j|k|m|n|o|p|q|s|t|u|v]
+[r|lb|lbl_|lbl_dze|lbl_dzea002    |lbl_dzea0|l|a|b|c|d|e|f|g|h|l1|i|j|k|m|n|o|p|q|s|t|u|v]
+[r|lb|lbl_|lbl_dze|lbl_dzea002    |lbl_dzea0|l|a|b|c|d|e|f|g|h|l1|i|j|k|m|n|o|p|q|s|t|u|v]
+[r|lb|lbl_|lbl_dze|lbl_dzea002    |lbl_dzea0|l|a|b|c|d|e|f|g|h|l1|i|j|k|m|n|o|p|q|s|t|u|v]
+[r|lb|lbl_|lbl_dze|lbl_dzea002    |lbl_dzea0|l|a|b|c|d|e|f|g|h|l1|i|j|k|m|n|o|p|q|s|t|u|v]
+[r|lb|lbl_|lbl_dze|lbl_dzea002    |lbl_dzea0|l|a|b|c|d|e|f|g|h|l1|i|j|k|m|n|o|p|q|s|t|u|v]
+[r|lb|lbl_|lbl_dze|lbl_dzea002    |lbl_dzea0|l|a|b|c|d|e|f|g|h|l1|i|j|k|m|n|o|p|q|s|t|u|v]
+[r|lb|lbl_|lbl_dze|lbl_dzea002    |lbl_dzea0|l|a|b|c|d|e|f|g|h|l1|i|j|k|m|n|o|p|q|s|t|u|v]
+[r|lb|lbl_|lbl_dze|lbl_dzea002    |lbl_dzea0|l|a|b|c|d|e|f|g|h|l1|i|j|k|m|n|o|p|q|s|t|u|v]
+[r|lb|lbl_|lbl_dze|lbl_dzea002    |lbl_dzea0|l|a|b|c|d|e|f|g|h|l1|i|j|k|m|n|o|p|q|s|t|u|v]
+[r|lb|lbl_|lbl_dze|lbl_dzea002    |lbl_dzea0|l|a|b|c|d|e|f|g|h|l1|i|j|k|m|n|o|p|q|s|t|u|v]
+[r|lb|lbl_|lbl_dze|lbl_dzea002    |lbl_dzea0|l|a|b|c|d|e|f|g|h|l1|i|j|k|m|n|o|p|q|s|t|u|v]
+[r|lb|lbl_|lbl_dze|lbl_dzea002    |lbl_dzea0|l|a|b|c|d|e|f|g|h|l1|i|j|k|m|n|o|p|q|s|t|u|v]
+[r|lb|lbl_|lbl_dze|lbl_dzea002    |lbl_dzea0|l|a|b|c|d|e|f|g|h|l1|i|j|k|m|n|o|p|q|s|t|u|v]
+}
+END -- tbl_TableList
+END -- vbox5
+END -- page_MasterTable
+PAGE page_ColumnDefineList(text=%"page_ColumnDefineList")
+VBOX vbox1
+GRID Grid12
+{
+[btn_addcdf|btn_cancel]
+
+}
+END -- Grid12
+TABLE tb_cdfList(unsortableColumns, unhidableColumns)
+{
+[w|lbl_dzel001    |lbl_dzel002              ]
+[w|lbl_dzel001    |lbl_dzel002              ]
+[w|lbl_dzel001    |lbl_dzel002              ]
+[w|lbl_dzel001    |lbl_dzel002              ]
+[w|lbl_dzel001    |lbl_dzel002              ]
+[w|lbl_dzel001    |lbl_dzel002              ]
+[w|lbl_dzel001    |lbl_dzel002              ]
+[w|lbl_dzel001    |lbl_dzel002              ]
+[w|lbl_dzel001    |lbl_dzel002              ]
+[w|lbl_dzel001    |lbl_dzel002              ]
+[w|lbl_dzel001    |lbl_dzel002              ]
+[w|lbl_dzel001    |lbl_dzel002              ]
+[w|lbl_dzel001    |lbl_dzel002              ]
+[w|lbl_dzel001    |lbl_dzel002              ]
+[w|lbl_dzel001    |lbl_dzel002              ]
+[w|lbl_dzel001    |lbl_dzel002              ]
+[w|lbl_dzel001    |lbl_dzel002              ]
+[w|lbl_dzel001    |lbl_dzel002              ]
+[w|lbl_dzel001    |lbl_dzel002              ]
+[w|lbl_dzel001    |lbl_dzel002              ]
+
+
+
+
+
+
+}
+END -- tb_cdfList
+END -- vbox1
+END -- page_ColumnDefineList
+END -- Folder2
+VBOX vbox7
+GRID grid1
+{
+[btn_] [l2|lbl_table_name    ]
+[    ] [  |lbl_editor_mode   |lbl_check_out_full_name                                                                            |i1|btn_c|btn_r|btn_1|btn_2]
+}
+END -- grid1
+FOLDER Folder1
+PAGE page_PageTableContents(text=%"page_PageTableContents")
+VBOX VBox2
+TABLE tbl_Columns(style="", doubleClick=modify, unsortableColumns, unhidableColumns)
+{
+[x|l3|lbl|l4|lbl_dzeb00|lbl_dzeb003    |lbl_d|lbl_1|lbl_2|lbl_dzeb01|lbl_dzeb02|lbl_dzeb|lbl_dze1|l5|l6|l7|lbl_dzeb03|l8|l9|l0|la|lbl1|lc|ld|lbl_cate|le]
+[x|l3|lbl|l4|lbl_dzeb00|lbl_dzeb003    |lbl_d|lbl_1|lbl_2|lbl_dzeb01|lbl_dzeb02|lbl_dzeb|lbl_dze1|l5|l6|l7|lbl_dzeb03|l8|l9|l0|la|lbl1|lc|ld|lbl_cate|le]
+[x|l3|lbl|l4|lbl_dzeb00|lbl_dzeb003    |lbl_d|lbl_1|lbl_2|lbl_dzeb01|lbl_dzeb02|lbl_dzeb|lbl_dze1|l5|l6|l7|lbl_dzeb03|l8|l9|l0|la|lbl1|lc|ld|lbl_cate|le]
+[x|l3|lbl|l4|lbl_dzeb00|lbl_dzeb003    |lbl_d|lbl_1|lbl_2|lbl_dzeb01|lbl_dzeb02|lbl_dzeb|lbl_dze1|l5|l6|l7|lbl_dzeb03|l8|l9|l0|la|lbl1|lc|ld|lbl_cate|le]
+[x|l3|lbl|l4|lbl_dzeb00|lbl_dzeb003    |lbl_d|lbl_1|lbl_2|lbl_dzeb01|lbl_dzeb02|lbl_dzeb|lbl_dze1|l5|l6|l7|lbl_dzeb03|l8|l9|l0|la|lbl1|lc|ld|lbl_cate|le]
+[x|l3|lbl|l4|lbl_dzeb00|lbl_dzeb003    |lbl_d|lbl_1|lbl_2|lbl_dzeb01|lbl_dzeb02|lbl_dzeb|lbl_dze1|l5|l6|l7|lbl_dzeb03|l8|l9|l0|la|lbl1|lc|ld|lbl_cate|le]
+[x|l3|lbl|l4|lbl_dzeb00|lbl_dzeb003    |lbl_d|lbl_1|lbl_2|lbl_dzeb01|lbl_dzeb02|lbl_dzeb|lbl_dze1|l5|l6|l7|lbl_dzeb03|l8|l9|l0|la|lbl1|lc|ld|lbl_cate|le]
+[x|l3|lbl|l4|lbl_dzeb00|lbl_dzeb003    |lbl_d|lbl_1|lbl_2|lbl_dzeb01|lbl_dzeb02|lbl_dzeb|lbl_dze1|l5|l6|l7|lbl_dzeb03|l8|l9|l0|la|lbl1|lc|ld|lbl_cate|le]
+[x|l3|lbl|l4|lbl_dzeb00|lbl_dzeb003    |lbl_d|lbl_1|lbl_2|lbl_dzeb01|lbl_dzeb02|lbl_dzeb|lbl_dze1|l5|l6|l7|lbl_dzeb03|l8|l9|l0|la|lbl1|lc|ld|lbl_cate|le]
+[x|l3|lbl|l4|lbl_dzeb00|lbl_dzeb003    |lbl_d|lbl_1|lbl_2|lbl_dzeb01|lbl_dzeb02|lbl_dzeb|lbl_dze1|l5|l6|l7|lbl_dzeb03|l8|l9|l0|la|lbl1|lc|ld|lbl_cate|le]
+[x|l3|lbl|l4|lbl_dzeb00|lbl_dzeb003    |lbl_d|lbl_1|lbl_2|lbl_dzeb01|lbl_dzeb02|lbl_dzeb|lbl_dze1|l5|l6|l7|lbl_dzeb03|l8|l9|l0|la|lbl1|lc|ld|lbl_cate|le]
+[x|l3|lbl|l4|lbl_dzeb00|lbl_dzeb003    |lbl_d|lbl_1|lbl_2|lbl_dzeb01|lbl_dzeb02|lbl_dzeb|lbl_dze1|l5|l6|l7|lbl_dzeb03|l8|l9|l0|la|lbl1|lc|ld|lbl_cate|le]
+[x|l3|lbl|l4|lbl_dzeb00|lbl_dzeb003    |lbl_d|lbl_1|lbl_2|lbl_dzeb01|lbl_dzeb02|lbl_dzeb|lbl_dze1|l5|l6|l7|lbl_dzeb03|l8|l9|l0|la|lbl1|lc|ld|lbl_cate|le]
+[x|l3|lbl|l4|lbl_dzeb00|lbl_dzeb003    |lbl_d|lbl_1|lbl_2|lbl_dzeb01|lbl_dzeb02|lbl_dzeb|lbl_dze1|l5|l6|l7|lbl_dzeb03|l8|l9|l0|la|lbl1|lc|ld|lbl_cate|le]
+[x|l3|lbl|l4|lbl_dzeb00|lbl_dzeb003    |lbl_d|lbl_1|lbl_2|lbl_dzeb01|lbl_dzeb02|lbl_dzeb|lbl_dze1|l5|l6|l7|lbl_dzeb03|l8|l9|l0|la|lbl1|lc|ld|lbl_cate|le]
+[x|l3|lbl|l4|lbl_dzeb00|lbl_dzeb003    |lbl_d|lbl_1|lbl_2|lbl_dzeb01|lbl_dzeb02|lbl_dzeb|lbl_dze1|l5|l6|l7|lbl_dzeb03|l8|l9|l0|la|lbl1|lc|ld|lbl_cate|le]
+[x|l3|lbl|l4|lbl_dzeb00|lbl_dzeb003    |lbl_d|lbl_1|lbl_2|lbl_dzeb01|lbl_dzeb02|lbl_dzeb|lbl_dze1|l5|l6|l7|lbl_dzeb03|l8|l9|l0|la|lbl1|lc|ld|lbl_cate|le]
+[x|l3|lbl|l4|lbl_dzeb00|lbl_dzeb003    |lbl_d|lbl_1|lbl_2|lbl_dzeb01|lbl_dzeb02|lbl_dzeb|lbl_dze1|l5|l6|l7|lbl_dzeb03|l8|l9|l0|la|lbl1|lc|ld|lbl_cate|le]
+[x|l3|lbl|l4|lbl_dzeb00|lbl_dzeb003    |lbl_d|lbl_1|lbl_2|lbl_dzeb01|lbl_dzeb02|lbl_dzeb|lbl_dze1|l5|l6|l7|lbl_dzeb03|l8|l9|l0|la|lbl1|lc|ld|lbl_cate|le]
+[x|l3|lbl|l4|lbl_dzeb00|lbl_dzeb003    |lbl_d|lbl_1|lbl_2|lbl_dzeb01|lbl_dzeb02|lbl_dzeb|lbl_dze1|l5|l6|l7|lbl_dzeb03|l8|l9|l0|la|lbl1|lc|ld|lbl_cate|le]
+
+
+
+
+
+}
+END -- tbl_Columns
+END -- VBox2
+END -- page_PageTableContents
+PAGE page_PageKeys(text=%"page_PageKeys")
+VBOX VBox3
+TABLE tbl_Keys(doubleClick=modify, unsortableColumns, unhidableColumns)
+{
+[y|lf|lbl_dzed00|lbl_dzed01|lbl_dzed004                   |lbl_dzed02|lbl_dzed006                   |lg|lh|li|lj|lk]
+[y|lf|lbl_dzed00|lbl_dzed01|lbl_dzed004                   |lbl_dzed02|lbl_dzed006                   |lg|lh|li|lj|lk]
+[y|lf|lbl_dzed00|lbl_dzed01|lbl_dzed004                   |lbl_dzed02|lbl_dzed006                   |lg|lh|li|lj|lk]
+[y|lf|lbl_dzed00|lbl_dzed01|lbl_dzed004                   |lbl_dzed02|lbl_dzed006                   |lg|lh|li|lj|lk]
+[y|lf|lbl_dzed00|lbl_dzed01|lbl_dzed004                   |lbl_dzed02|lbl_dzed006                   |lg|lh|li|lj|lk]
+[y|lf|lbl_dzed00|lbl_dzed01|lbl_dzed004                   |lbl_dzed02|lbl_dzed006                   |lg|lh|li|lj|lk]
+[y|lf|lbl_dzed00|lbl_dzed01|lbl_dzed004                   |lbl_dzed02|lbl_dzed006                   |lg|lh|li|lj|lk]
+[y|lf|lbl_dzed00|lbl_dzed01|lbl_dzed004                   |lbl_dzed02|lbl_dzed006                   |lg|lh|li|lj|lk]
+[y|lf|lbl_dzed00|lbl_dzed01|lbl_dzed004                   |lbl_dzed02|lbl_dzed006                   |lg|lh|li|lj|lk]
+[y|lf|lbl_dzed00|lbl_dzed01|lbl_dzed004                   |lbl_dzed02|lbl_dzed006                   |lg|lh|li|lj|lk]
+[y|lf|lbl_dzed00|lbl_dzed01|lbl_dzed004                   |lbl_dzed02|lbl_dzed006                   |lg|lh|li|lj|lk]
+[y|lf|lbl_dzed00|lbl_dzed01|lbl_dzed004                   |lbl_dzed02|lbl_dzed006                   |lg|lh|li|lj|lk]
+[y|lf|lbl_dzed00|lbl_dzed01|lbl_dzed004                   |lbl_dzed02|lbl_dzed006                   |lg|lh|li|lj|lk]
+[y|lf|lbl_dzed00|lbl_dzed01|lbl_dzed004                   |lbl_dzed02|lbl_dzed006                   |lg|lh|li|lj|lk]
+[y|lf|lbl_dzed00|lbl_dzed01|lbl_dzed004                   |lbl_dzed02|lbl_dzed006                   |lg|lh|li|lj|lk]
+[y|lf|lbl_dzed00|lbl_dzed01|lbl_dzed004                   |lbl_dzed02|lbl_dzed006                   |lg|lh|li|lj|lk]
+[y|lf|lbl_dzed00|lbl_dzed01|lbl_dzed004                   |lbl_dzed02|lbl_dzed006                   |lg|lh|li|lj|lk]
+[y|lf|lbl_dzed00|lbl_dzed01|lbl_dzed004                   |lbl_dzed02|lbl_dzed006                   |lg|lh|li|lj|lk]
+[y|lf|lbl_dzed00|lbl_dzed01|lbl_dzed004                   |lbl_dzed02|lbl_dzed006                   |lg|lh|li|lj|lk]
+[y|lf|lbl_dzed00|lbl_dzed01|lbl_dzed004                   |lbl_dzed02|lbl_dzed006                   |lg|lh|li|lj|lk]
+
+
+
+
+
+
+}
+END -- tbl_Keys
+END -- VBox3
+END -- page_PageKeys
+PAGE page_PageIndex(text=%"page_PageIndex")
+VBOX VBox4
+TABLE tbl_Index(doubleClick=modify, unsortableColumns, unhidableColumns)
+{
+[z|ll|lbl_dzec00|lbl_dzec01|lbl_dzec004                   |lm|ln|lo|lp|lq|lr]
+[z|ll|lbl_dzec00|lbl_dzec01|lbl_dzec004                   |lm|ln|lo|lp|lq|lr]
+[z|ll|lbl_dzec00|lbl_dzec01|lbl_dzec004                   |lm|ln|lo|lp|lq|lr]
+[z|ll|lbl_dzec00|lbl_dzec01|lbl_dzec004                   |lm|ln|lo|lp|lq|lr]
+[z|ll|lbl_dzec00|lbl_dzec01|lbl_dzec004                   |lm|ln|lo|lp|lq|lr]
+[z|ll|lbl_dzec00|lbl_dzec01|lbl_dzec004                   |lm|ln|lo|lp|lq|lr]
+[z|ll|lbl_dzec00|lbl_dzec01|lbl_dzec004                   |lm|ln|lo|lp|lq|lr]
+[z|ll|lbl_dzec00|lbl_dzec01|lbl_dzec004                   |lm|ln|lo|lp|lq|lr]
+[z|ll|lbl_dzec00|lbl_dzec01|lbl_dzec004                   |lm|ln|lo|lp|lq|lr]
+[z|ll|lbl_dzec00|lbl_dzec01|lbl_dzec004                   |lm|ln|lo|lp|lq|lr]
+[z|ll|lbl_dzec00|lbl_dzec01|lbl_dzec004                   |lm|ln|lo|lp|lq|lr]
+[z|ll|lbl_dzec00|lbl_dzec01|lbl_dzec004                   |lm|ln|lo|lp|lq|lr]
+[z|ll|lbl_dzec00|lbl_dzec01|lbl_dzec004                   |lm|ln|lo|lp|lq|lr]
+[z|ll|lbl_dzec00|lbl_dzec01|lbl_dzec004                   |lm|ln|lo|lp|lq|lr]
+[z|ll|lbl_dzec00|lbl_dzec01|lbl_dzec004                   |lm|ln|lo|lp|lq|lr]
+[z|ll|lbl_dzec00|lbl_dzec01|lbl_dzec004                   |lm|ln|lo|lp|lq|lr]
+[z|ll|lbl_dzec00|lbl_dzec01|lbl_dzec004                   |lm|ln|lo|lp|lq|lr]
+[z|ll|lbl_dzec00|lbl_dzec01|lbl_dzec004                   |lm|ln|lo|lp|lq|lr]
+[z|ll|lbl_dzec00|lbl_dzec01|lbl_dzec004                   |lm|ln|lo|lp|lq|lr]
+[z|ll|lbl_dzec00|lbl_dzec01|lbl_dzec004                   |lm|ln|lo|lp|lq|lr]
+
+
+
+
+
+
+}
+END -- tbl_Index
+END -- VBox4
+END -- page_PageIndex
+PAGE page_PagePrivilege(text=%"page_PagePrivilege")
+VBOX vbox8
+TABLE table_Privilege(doubleClick=modify_grant, unsortableColumns, unhidableColumns)
+{
+[_|lbl_3|lbl_dzen|lbl_dze2|lbl_4|lbl_5|lbl_6|lbl_7|lbl_8|lbl_9|lbl_0|lbl2|lbl3|lbl4|lbl5]
+[_|lbl_3|lbl_dzen|lbl_dze2|lbl_4|lbl_5|lbl_6|lbl_7|lbl_8|lbl_9|lbl_0|lbl2|lbl3|lbl4|lbl5]
+[_|lbl_3|lbl_dzen|lbl_dze2|lbl_4|lbl_5|lbl_6|lbl_7|lbl_8|lbl_9|lbl_0|lbl2|lbl3|lbl4|lbl5]
+[_|lbl_3|lbl_dzen|lbl_dze2|lbl_4|lbl_5|lbl_6|lbl_7|lbl_8|lbl_9|lbl_0|lbl2|lbl3|lbl4|lbl5]
+[_|lbl_3|lbl_dzen|lbl_dze2|lbl_4|lbl_5|lbl_6|lbl_7|lbl_8|lbl_9|lbl_0|lbl2|lbl3|lbl4|lbl5]
+[_|lbl_3|lbl_dzen|lbl_dze2|lbl_4|lbl_5|lbl_6|lbl_7|lbl_8|lbl_9|lbl_0|lbl2|lbl3|lbl4|lbl5]
+[_|lbl_3|lbl_dzen|lbl_dze2|lbl_4|lbl_5|lbl_6|lbl_7|lbl_8|lbl_9|lbl_0|lbl2|lbl3|lbl4|lbl5]
+[_|lbl_3|lbl_dzen|lbl_dze2|lbl_4|lbl_5|lbl_6|lbl_7|lbl_8|lbl_9|lbl_0|lbl2|lbl3|lbl4|lbl5]
+[_|lbl_3|lbl_dzen|lbl_dze2|lbl_4|lbl_5|lbl_6|lbl_7|lbl_8|lbl_9|lbl_0|lbl2|lbl3|lbl4|lbl5]
+[_|lbl_3|lbl_dzen|lbl_dze2|lbl_4|lbl_5|lbl_6|lbl_7|lbl_8|lbl_9|lbl_0|lbl2|lbl3|lbl4|lbl5]
+[_|lbl_3|lbl_dzen|lbl_dze2|lbl_4|lbl_5|lbl_6|lbl_7|lbl_8|lbl_9|lbl_0|lbl2|lbl3|lbl4|lbl5]
+[_|lbl_3|lbl_dzen|lbl_dze2|lbl_4|lbl_5|lbl_6|lbl_7|lbl_8|lbl_9|lbl_0|lbl2|lbl3|lbl4|lbl5]
+[_|lbl_3|lbl_dzen|lbl_dze2|lbl_4|lbl_5|lbl_6|lbl_7|lbl_8|lbl_9|lbl_0|lbl2|lbl3|lbl4|lbl5]
+[_|lbl_3|lbl_dzen|lbl_dze2|lbl_4|lbl_5|lbl_6|lbl_7|lbl_8|lbl_9|lbl_0|lbl2|lbl3|lbl4|lbl5]
+[_|lbl_3|lbl_dzen|lbl_dze2|lbl_4|lbl_5|lbl_6|lbl_7|lbl_8|lbl_9|lbl_0|lbl2|lbl3|lbl4|lbl5]
+[_|lbl_3|lbl_dzen|lbl_dze2|lbl_4|lbl_5|lbl_6|lbl_7|lbl_8|lbl_9|lbl_0|lbl2|lbl3|lbl4|lbl5]
+[_|lbl_3|lbl_dzen|lbl_dze2|lbl_4|lbl_5|lbl_6|lbl_7|lbl_8|lbl_9|lbl_0|lbl2|lbl3|lbl4|lbl5]
+[_|lbl_3|lbl_dzen|lbl_dze2|lbl_4|lbl_5|lbl_6|lbl_7|lbl_8|lbl_9|lbl_0|lbl2|lbl3|lbl4|lbl5]
+[_|lbl_3|lbl_dzen|lbl_dze2|lbl_4|lbl_5|lbl_6|lbl_7|lbl_8|lbl_9|lbl_0|lbl2|lbl3|lbl4|lbl5]
+[_|lbl_3|lbl_dzen|lbl_dze2|lbl_4|lbl_5|lbl_6|lbl_7|lbl_8|lbl_9|lbl_0|lbl2|lbl3|lbl4|lbl5]
+
+
+
+
+}
+END -- table_Privilege
+END -- vbox8
+END -- page_PagePrivilege
+END -- Folder1
+END -- vbox7
+END -- hbox1
+END -- vbox6
+END -- adzi140
+
+ATTRIBUTES
+LABEL lbl_module:lbl_ModuleSelect, text=%"lbl_ModuleSelect";
+COMBOBOX cb_moduleselect=formonly.cb_ModuleSelect, tabIndex=1;
+IMAGE im:image1, autoScale, stretch=x, style="noBorder";
+CHECKBOX cb_get_checkout_ta=formonly.cb_get_checkout_tables, tabIndex=105, default = "N", text=%"cb_get_checkout_tables", not null, valueChecked = "Y", valueUnchecked = "N", hidden;
+LABEL lbl_search:lbl_search, text=%"lbl_search";
+BUTTONEDIT edt_search=formonly.edt_Search, action=find_data, tabIndex=54, image="find", scroll;
+BUTTON btn_adv_fi:btn_adv_filter, tabIndex=107, text=%"Advanced Filter";
+CHECKBOX cb_get_issue_table=formonly.cb_get_issue_tables, tabIndex=53, default = "N", text=%"cb_get_issue_tables", not null, valueChecked = "Y", valueUnchecked = "N";
+CHECKBOX cb_get_industry_ta=formonly.cb_get_industry_table, tabIndex=108, default = "N", text=%"cb_get_industry_table", not null, valueChecked = "Y", valueUnchecked = "N";
+EDIT r=formonly.RecordType_TableList, tabIndex=2, default = "+", title=%"", noEntry, scroll;
+EDIT lb=formonly.lbl_dzeaseq, tabIndex=3, title=%"lbl_dzeaseq", noEntry, scroll;
+COMBOBOX lbl_=formonly.lbl_dzea003, tabIndex=4, title=%"lbl_dzea003", noEntry, scroll;
+EDIT lbl_dze=formonly.lbl_dzea001, tabIndex=5, title=%"lbl_dzea001", noEntry, not null, downShift, scroll;
+BUTTONEDIT lbl_dzea002=formonly.lbl_dzea002, action=act_lang_modify, tabIndex=6, title=%"lbl_dzea002", image="16/langmodify.png", scroll;
+COMBOBOX lbl_dzea0=formonly.lbl_dzea004, tabIndex=7, title=%"lbl_dzea004", scroll;
+CHECKBOX l=formonly.lbl_dzea005, tabIndex=8, default = "N", title=%"lbl_dzea005", text=%"", not null, valueChecked = "Y", valueUnchecked = "N", hidden;
+CHECKBOX a=formonly.lbl_dzea006, tabIndex=9, default = "N", title=%"lbl_dzea006", text=%"", not null, valueChecked = "Y", valueUnchecked = "N", hidden;
+CHECKBOX b=formonly.lbl_dzea007, tabIndex=10, default = "N", title=%"lbl_dzea007", text=%"", not null, valueChecked = "Y", valueUnchecked = "N", hidden;
+CHECKBOX c=formonly.lbl_dzea011, tabIndex=45, default = "Y", title=%"lbl_dzea011", text=%"lbl_dzea011", valueChecked = "Y", valueUnchecked = "N", hidden;
+EDIT d=formonly.lbl_dzlm005, tabIndex=49, title=%"lbl_dzlm005", noEntry, hidden, scroll;
+EDIT e=formonly.lbl_dzlm006, tabIndex=58, title=%"lbl_dzlm006", noEntry, hidden, scroll;
+EDIT f=formonly.lbl_dzlm007, tabIndex=59, title=%"lbl_dzlm007", noEntry, hidden, scroll;
+EDIT g=formonly.lbl_dzlm008, tabIndex=60, title=%"lbl_dzlm008", noEntry, hidden, scroll;
+EDIT h=formonly.lbl_dzlm012, tabIndex=61, title=%"lbl_dzlm012", noEntry, hidden, scroll;
+EDIT l1=formonly.lbl_dzlm015, tabIndex=102, title=%"lbl_dzlm015", noEntry, hidden, scroll;
+EDIT i=formonly.lbl_ooag011, tabIndex=62, title=%"ooag011", noEntry, hidden, scroll;
+EDIT j=formonly.lbl_dzea012, tabIndex=65, title=%"lbl_dzea012", noEntry, hidden, scroll;
+EDIT k=formonly.lbl_dzea013, tabIndex=66, title=%"lbl_dzea013", noEntry, hidden, scroll;
+EDIT m=formonly.lbl_dzea014, tabIndex=67, title=%"lbl_dzea014", noEntry, hidden, scroll;
+EDIT n=formonly.lbl_dzea015, tabIndex=68, title=%"lbl_dzea015", noEntry, hidden, scroll;
+EDIT o=formonly.lbl_dzea016, tabIndex=69, title=%"lbl_dzea016", noEntry, hidden, scroll;
+EDIT p=formonly.lbl_dzea017, tabIndex=70, title=%"lbl_dzea017", noEntry, hidden, scroll;
+EDIT q=formonly.lbl_dzea018, tabIndex=78, title=%"lbl_dzea018", noEntry, hidden, scroll;
+EDIT s=formonly.lbl_dzea019, tabIndex=82, title=%"lbl_dzea019", noEntry, hidden, scroll;
+EDIT t=formonly.lbl_dzea020, tabIndex=83, title=%"lbl_dzea020", noEntry, hidden, scroll;
+EDIT u=formonly.lbl_dzea021, tabIndex=84, title=%"lbl_dzea021", noEntry, hidden, scroll;
+EDIT v=formonly.lbl_dzeastus, tabIndex=100, title=%"lbl_dzeastus", noEntry, hidden, scroll;
+BUTTON btn_addcdf:btn_AddCDFConfirm, tabIndex=11, text=%"btn_AddCDFConfirm", image="16/lib_accept.png";
+BUTTON btn_cancel:btn_CancelCDF, tabIndex=12, text=%"btn_CancelCDF", image="16/lib_cancel.png";
+EDIT w=formonly.RecordType_CDFList, tabIndex=13, title=%"", noEntry, scroll;
+EDIT lbl_dzel001=formonly.lbl_dzel001, tabIndex=14, title=%"lbl_dzel001", scroll;
+EDIT lbl_dzel002=formonly.lbl_dzel002, tabIndex=15, title=%"lbl_dzel002", scroll;
+BUTTON btn_:btn_table_detail, tabIndex=101, text=%"", image="tabledesigner/tbv_table.png", style="noBorder";
+LABEL l2:lbl_space, text=%"";
+LABEL lbl_table_name=formonly.lbl_table_name, style="";
+LABEL lbl_editor_mode=formonly.lbl_editor_mode;
+LABEL lbl_check_out_full_name=formonly.lbl_check_out_full_name, sizePolicy=dynamic;
+IMAGE i1:image3, stretch=x, style="noBorder";
+BUTTON btn_c:btn_check_out, tabIndex=55, text=%"btn_check_out", image="tabledesigner/check_out.png";
+BUTTON btn_r:btn_recall, tabIndex=56, text=%"btn_recall", image="tabledesigner/recall.png", hidden;
+BUTTON btn_1:btn_check_in, tabIndex=57, text=%"btn_check_in", image="tabledesigner/check_in.png";
+BUTTON btn_2:btn_release, tabIndex=104, text=%"btn_release", image="tabledesigner/check_in.png";
+EDIT x=formonly.RecordType_Column, default = "+", title=%"", noEntry, scroll, unmovable, unsizable;
+EDIT l3=formonly.lbl_GroudID, title=%"lbl_GroudID", noEntry, hidden, scroll;
+EDIT lbl=formonly.lbl_dzebseq, title=%"lbl_dzebseq", noEntry, scroll;
+EDIT l4=formonly.lbl_dzeb001, title=%"lbl_dzeb001", hidden, scroll;
+EDIT lbl_dzeb00=formonly.lbl_dzeb002, title=%"lbl_dzeb002", not null, downShift, scroll;
+BUTTONEDIT lbl_dzeb003=formonly.lbl_dzeb003, action=lbl_dzeb003, title=%"lbl_dzeb003", image="16/langmodify.png", scroll, picture="";
+CHECKBOX lbl_d=formonly.lbl_dzeb004, default = "N", title=%"lbl_dzeb004", text=%"", not null, valueChecked = "Y", valueUnchecked = "N";
+CHECKBOX lbl_1=formonly.lbl_dzeb005, default = "N", title=%"lbl_dzeb005", text=%"", not null, valueChecked = "Y", valueUnchecked = "N", hidden;
+BUTTONEDIT lbl_2=formonly.lbl_dzeb006, action=lbl_dzeb006, title=%"lbl_dzeb006", image="16/openwindow.png", upShift, scroll;
+EDIT lbl_dzeb01=formonly.lbl_dzeb006_desc, title=%"lbl_dzeb006_desc", noEntry, scroll;
+EDIT lbl_dzeb02=formonly.lbl_dzeb007, title=%"lbl_dzeb007", noEntry, color = black, scroll;
+EDIT lbl_dzeb=formonly.lbl_dzeb008, title=%"lbl_dzeb008", noEntry, scroll;
+EDIT lbl_dze1=formonly.lbl_dzeb012, title=%"lbl_dzeb012", scroll;
+EDIT l5=formonly.lbl_dzeb021, title=%"lbl_dzeb021", hidden, scroll;
+EDIT l6=formonly.lbl_dzeb022, title=%"lbl_dzeb022", hidden, scroll;
+EDIT l7=formonly.lbl_dzeb023, title=%"lbl_dzeb023", hidden, scroll;
+BUTTONEDIT lbl_dzeb03=formonly.lbl_dzeb024, action=act_lang_modify, title=%"lbl_dzeb024", image="16/langmodify.png", scroll;
+EDIT l8=formonly.lbl_dzeb027, title=%"lbl_dzeb027", noEntry, hidden;
+EDIT l9=formonly.lbl_dzeb028, title=%"lbl_dzeb028", noEntry, hidden;
+EDIT l0=formonly.lbl_dzeb029, title=%"lbl_dzeb029", noEntry, hidden;
+EDIT la=formonly.lbl_dzeb030, title=%"lbl_dzeb030", noEntry, hidden, scroll;
+EDIT lbl1=formonly.lbl_dzeb031, title=%"lbl_dzeb031", noEntry, scroll;
+EDIT lc=formonly.lbl_dzeb002_orig, title=%"lbl_dzeb002_orig", hidden;
+EDIT ld=formonly.lbl_dzep012, title=%"Default", noEntry, hidden, scroll;
+EDIT lbl_cate=formonly.lbl_category, title=%"lbl_category", noEntry, scroll;
+EDIT le=formonly.lbl_lang_modified, tabIndex=103, title=%"lbl_lang_modified", noEntry, hidden;
+EDIT y=formonly.RecordType_Key, default = "+", title=%"", noEntry, scroll, unmovable, unhidable, unsizable;
+EDIT lf=formonly.lbl_dzed001, title=%"lbl_dzed001", hidden;
+EDIT lbl_dzed00=formonly.lbl_dzed002, title=%"lbl_dzed002", not null, required, downShift, scroll;
+COMBOBOX lbl_dzed01=formonly.lbl_dzed003, title=%"lbl_dzed003", upShift, scroll;
+BUTTONEDIT lbl_dzed004=formonly.lbl_dzed004, action=controlp, title=%"lbl_dzed004", image="16/openwindow.png", downShift, scroll;
+BUTTONEDIT lbl_dzed02=formonly.lbl_dzed005, action=controlp, title=%"lbl_dzed005", image="16/openwindow.png", downShift, scroll;
+BUTTONEDIT lbl_dzed006=formonly.lbl_dzed006, action=controlp, title=%"lbl_dzed006", image="16/openwindow.png", downShift, scroll;
+EDIT lg=formonly.lbl_dzed007, title=%"lbl_dzed007", hidden;
+EDIT lh=formonly.lbl_dzed008, title=%"lbl_dzed008", noEntry, hidden;
+EDIT li=formonly.lbl_dzed009, title=%"lbl_dzed009", noEntry, hidden, scroll;
+EDIT lj=formonly.lbl_dzed010, title=%"lbl_dzed010", noEntry, hidden, scroll;
+EDIT lk=formonly.lbl_dzed002_orig, title=%"lbl_dzed002_orig", hidden;
+EDIT z=formonly.RecordType_Index, default = "+", title=%"", noEntry, unmovable, unhidable, unsizable;
+EDIT ll=formonly.lbl_dzec001, title=%"lbl_dzec001", hidden;
+EDIT lbl_dzec00=formonly.lbl_dzec002, title=%"lbl_dzec002", not null, required, downShift, scroll;
+COMBOBOX lbl_dzec01=formonly.lbl_dzec003, title=%"lbl_dzec003", upShift, scroll;
+BUTTONEDIT lbl_dzec004=formonly.lbl_dzec004, action=controlp, title=%"lbl_dzec004", image="16/openwindow.png", downShift, scroll;
+EDIT lm=formonly.lbl_dzec005, title=%"lbl_dzec005", hidden;
+EDIT ln=formonly.lbl_dzec006, title=%"lbl_dzec006", noEntry, hidden, scroll;
+EDIT lo=formonly.lbl_dzec007, title=%"lbl_dzec007", noEntry, hidden, scroll;
+EDIT lp=formonly.lbl_dzec008, title=%"lbl_dzec008", noEntry, hidden, scroll;
+EDIT lq=formonly.lbl_dzecstus, tabIndex=106, title=%"lbl_dzecstus", noEntry, hidden, scroll;
+EDIT lr=formonly.lbl_dzec002_orig, title=%"lbl_dzec002_orig", noEntry, hidden, scroll;
+EDIT _=formonly.RecordType_Privilege, tabIndex=85, title=%"", noEntry, scroll;
+EDIT lbl_3=formonly.lbl_dzen001, tabIndex=86, title=%"lbl_dzen001", noEntry, hidden, scroll;
+COMBOBOX lbl_dzen=formonly.lbl_dzen002, tabIndex=87, title=%"lbl_dzen002", justify=left, scroll, unsizable;
+COMBOBOX lbl_dze2=formonly.lbl_dzen003, tabIndex=88, title=%"lbl_dzen003", justify=left, scroll, unsizable;
+CHECKBOX lbl_4=formonly.lbl_dzen004, tabIndex=89, default = "N", title=%"lbl_dzen004", text=%"", not null, valueChecked = "Y", valueUnchecked = "N";
+CHECKBOX lbl_5=formonly.lbl_dzen005, tabIndex=90, default = "N", title=%"lbl_dzen005", text=%"", not null, valueChecked = "Y", valueUnchecked = "N";
+CHECKBOX lbl_6=formonly.lbl_dzen006, tabIndex=91, default = "N", title=%"lbl_dzen006", text=%"", not null, valueChecked = "Y", valueUnchecked = "N";
+CHECKBOX lbl_7=formonly.lbl_dzen007, tabIndex=92, default = "N", title=%"lbl_dzen007", text=%"", not null, valueChecked = "Y", valueUnchecked = "N";
+CHECKBOX lbl_8=formonly.lbl_dzen008, tabIndex=93, default = "N", title=%"lbl_dzen008", text=%"", not null, valueChecked = "Y", valueUnchecked = "N", hidden;
+CHECKBOX lbl_9=formonly.lbl_dzen009, tabIndex=94, default = "N", title=%"lbl_dzen009", text=%"", not null, valueChecked = "Y", valueUnchecked = "N", hidden;
+CHECKBOX lbl_0=formonly.lbl_dzen010, tabIndex=95, default = "N", title=%"lbl_dzen010", text=%"", not null, valueChecked = "Y", valueUnchecked = "N", hidden;
+EDIT lbl2=formonly.lbl_dzen011, tabIndex=96, title=%"lbl_dzen011", hidden, scroll;
+EDIT lbl3=formonly.lbl_dzen012, tabIndex=97, title=%"lbl_dzen012", hidden, scroll;
+EDIT lbl4=formonly.lbl_dzen013, tabIndex=99, title=%"lbl_dzen013", hidden, scroll;
+EDIT lbl5=formonly.lbl_dzen002_orig, tabIndex=98, title=%"lbl_dzen002_orig", noEntry, hidden, scroll;
+END -- ATTRIBUTES
+
+INSTRUCTIONS
+SCREEN RECORD sr_TableList(formonly.RecordType_TableList,formonly.lbl_dzeaseq,formonly.lbl_dzea003,formonly.lbl_dzea001,formonly.lbl_dzea002,formonly.lbl_dzea004,formonly.lbl_dzea005,formonly.lbl_dzea006,formonly.lbl_dzea007,formonly.lbl_dzea011,formonly.lbl_dzlm005,formonly.lbl_dzlm006,formonly.lbl_dzlm007,formonly.lbl_dzlm008,formonly.lbl_dzlm012,formonly.lbl_dzlm015,formonly.lbl_ooag011,formonly.lbl_dzea012,formonly.lbl_dzea013,formonly.lbl_dzea014,formonly.lbl_dzea015,formonly.lbl_dzea016,formonly.lbl_dzea017,formonly.lbl_dzea018,formonly.lbl_dzea019,formonly.lbl_dzea020,formonly.lbl_dzea021,formonly.lbl_dzeastus)
+SCREEN RECORD sr_cdfList(formonly.RecordType_CDFList,formonly.lbl_dzel001,formonly.lbl_dzel002)
+SCREEN RECORD sr_TableColumns(formonly.RecordType_Column,formonly.lbl_GroudID,formonly.lbl_dzebseq,formonly.lbl_dzeb001,formonly.lbl_dzeb002,formonly.lbl_dzeb003,formonly.lbl_dzeb004,formonly.lbl_dzeb005,formonly.lbl_dzeb006,formonly.lbl_dzeb006_desc,formonly.lbl_dzeb007,formonly.lbl_dzeb008,formonly.lbl_dzeb012,formonly.lbl_dzeb021,formonly.lbl_dzeb022,formonly.lbl_dzeb023,formonly.lbl_dzeb024,formonly.lbl_dzeb027,formonly.lbl_dzeb028,formonly.lbl_dzeb029,formonly.lbl_dzeb030,formonly.lbl_dzeb031,formonly.lbl_dzeb002_orig,formonly.lbl_dzep012,formonly.lbl_category,formonly.lbl_lang_modified)
+SCREEN RECORD sr_TableKey(formonly.RecordType_Key,formonly.lbl_dzed001,formonly.lbl_dzed002,formonly.lbl_dzed003,formonly.lbl_dzed004,formonly.lbl_dzed005,formonly.lbl_dzed006,formonly.lbl_dzed007,formonly.lbl_dzed008,formonly.lbl_dzed009,formonly.lbl_dzed010,formonly.lbl_dzed002_orig)
+SCREEN RECORD sr_TableIndex(formonly.RecordType_Index,formonly.lbl_dzec001,formonly.lbl_dzec002,formonly.lbl_dzec003,formonly.lbl_dzec004,formonly.lbl_dzec005,formonly.lbl_dzec006,formonly.lbl_dzec007,formonly.lbl_dzec008,formonly.lbl_dzecstus,formonly.lbl_dzec002_orig)
+SCREEN RECORD sr_select(formonly.cb_ModuleSelect,formonly.lbl_table_name,formonly.lbl_editor_mode,formonly.cb_get_issue_tables,formonly.edt_Search)
+SCREEN RECORD sr_TablePrivileges(formonly.RecordType_Privilege,formonly.lbl_dzen001,formonly.lbl_dzen002,formonly.lbl_dzen003,formonly.lbl_dzen004,formonly.lbl_dzen005,formonly.lbl_dzen006,formonly.lbl_dzen007,formonly.lbl_dzen008,formonly.lbl_dzen009,formonly.lbl_dzen010,formonly.lbl_dzen011,formonly.lbl_dzen012,formonly.lbl_dzen013,formonly.lbl_dzen002_orig)
+SCREEN RECORD Undefined(formonly.lbl_check_out_full_name,formonly.cb_get_checkout_tables,formonly.cb_get_industry_table)
+END -- INSTRUCTIONS
+

@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ManagedForm fileVersion="23200" gstVersion="23215" name="ManagedForm" uid="{6b398f58-454b-43fe-bf41-97bf71580da2}">
+  <AGSettings/>
+  <Record additionalTables="" joinLeft="" joinOperator="" joinRight="" name="sr_schema_type" order="" uid="{59dba05a-afc7-45b4-8749-3061074d0412}" where="">
+    <RecordField colName="" fieldIdRef="8" name="ed_row_no" sqlTabName="" table_alias_name="" uid="{f3bab0a9-514c-4ed2-90c0-85d660b4b6ee}"/>
+    <RecordField colName="" fieldIdRef="4" name="ed_master_table" sqlTabName="" table_alias_name="" uid="{f799a7bb-aaa1-4b75-8722-5a5ef831a8b0}"/>
+    <RecordField colName="" fieldIdRef="3" name="ed_table_name" sqlTabName="" table_alias_name="" uid="{d5ebcab4-f401-4221-ad7b-2f3bd8ed6993}"/>
+    <RecordField colName="" fieldIdRef="1" name="lbl_type" sqlTabName="" table_alias_name="" uid="{73ffcbc2-f8ac-4d35-a5d7-39648be62df0}"/>
+    <RecordField colName="" defaultValue="Y" fieldIdRef="2" name="ed_checkbox" sqlTabName="" table_alias_name="" uid="{a0f81042-4a8e-4222-bd1a-5b37d7d2255a}"/>
+    <RecordField colName="" fieldIdRef="5" name="lb_ent_db" sqlTabName="" table_alias_name="" uid="{3a0f923e-adcc-4e08-b191-26a150cdc149}"/>
+    <RecordField colName="" fieldIdRef="6" name="lb_sch_type" sqlTabName="" table_alias_name="" uid="{611b8881-298d-4702-97a9-f287e4afee19}"/>
+  </Record>
+  <Record additionalTables="" joinLeft="" joinOperator="" joinRight="" name="Undefined" order="" uid="{9285ab18-bba1-4530-aa3e-9e04b502f136}" where="">
+    <RecordField colName="" fieldIdRef="7" name="ed_TableName" sqlTabName="" table_alias_name="" uid="{392906f2-efdd-4f6b-9d3f-4478136d6a3b}"/>
+    <RecordField colName="" fieldIdRef="9" length="6" name="lbl_memo" sqlTabName="" table_alias_name="" uid="{8203c9ca-eaae-4da7-9c51-99cee29ee12a}"/>
+  </Record>
+  <Form gridHeight="25" gridWidth="89" name="sadzi140_syn" text="sadzi140_syn" windowStyle="withoutToolBar">
+    <VBox gridHeight="22" gridWidth="79" name="vbox1" posX="1" posY="1">
+      <Grid gridHeight="2" gridWidth="79" name="Grid1" posX="0" posY="1">
+        <Image gridHeight="1" gridWidth="2" height="4" image="tabledesigner/tbd_schema_type.png" name="Image1" posX="1" posY="0" style="noBorder" unitHeight="characters" unitWidth="characters" width="15"/>
+      </Grid>
+      <HBox gridHeight="14" gridWidth="79" name="hbox1" posX="0" posY="3">
+        <Grid gridHeight="14" gridWidth="26" name="Grid3" posX="2" posY="0">
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" columnCount="" fieldId="7" gridHeight="1" gridWidth="12" name="ed_TableName" noEntry="true" posX="1" posY="0" rowCount="" sqlTabName="" stepX="" stepY="" tabIndex="9" table_alias_name="" title="Edit1" widget="Edit"/>
+          <FFLabel aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" columnCount="" fieldId="9" gridHeight="11" gridWidth="25" length="6" name="lbl_memo" posX="1" posY="1" rowCount="" sizePolicy="dynamic" sqlTabName="" stepX="" stepY="" table_alias_name="" title="fflabel1" widget="FFLabel"/>
+        </Grid>
+        <Table gridHeight="14" gridWidth="49" name="tbl_schema_type" posX="28" posY="0" totalRows="7" unhidableColumns="true" unmovableColumns="true" unsortableColumns="true">
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" columnCount="" fieldId="8" gridHeight="1" gridWidth="2" hidden="true" name="ed_row_no" posX="0" posY="0" rowCount="" sqlTabName="" stepX="" stepY="" tabIndex="12" table_alias_name="" title="" widget="Edit"/>
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" columnCount="" fieldId="4" gridHeight="1" gridWidth="2" hidden="true" name="ed_master_table" posX="2" posY="0" rowCount="" sqlTabName="" stepX="" stepY="" tabIndex="11" table_alias_name="" title="" widget="Edit"/>
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" columnCount="" fieldId="3" gridHeight="1" gridWidth="2" hidden="true" name="ed_table_name" posX="4" posY="0" rowCount="" sqlTabName="" stepX="" stepY="" tabIndex="10" table_alias_name="" title="" widget="Edit"/>
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" columnCount="" fieldId="1" gridHeight="1" gridWidth="2" name="lbl_type" noEntry="true" posX="6" posY="0" rowCount="" sqlTabName="" stepX="" stepY="" tabIndex="5" table_alias_name="" title="" unhidable="true" unmovable="true" unsizable="true" unsortable="true" widget="Edit"/>
+          <CheckBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" columnCount="" defaultValue="Y" fieldId="2" gridHeight="1" gridWidth="2" name="ed_checkbox" notNull="true" posX="8" posY="0" rowCount="" sqlTabName="" stepX="" stepY="" tabIndex="6" table_alias_name="" text="" title="" unhidable="true" unmovable="true" unsizable="true" unsortable="true" valueChecked="Y" valueUnchecked="N" widget="CheckBox"/>
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" columnCount="" fieldId="5" gridHeight="1" gridWidth="10" name="lb_ent_db" noEntry="true" posX="10" posY="0" rowCount="" sqlTabName="" stepX="" stepY="" tabIndex="7" table_alias_name="" title="lb_ent_db" unhidable="true" unmovable="true" unsizable="false" unsortable="false" widget="Edit"/>
+          <ComboBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" columnCount="" fieldId="6" gridHeight="1" gridWidth="18" items="Synonym, Table" name="lb_sch_type" posX="20" posY="0" rowCount="" sqlTabName="" stepX="" stepY="" tabIndex="8" table_alias_name="" title="lb_sch_type" unhidable="true" unmovable="true" unsortable="true" widget="ComboBox">
+            <Item lstrtext="false" name="S" text="Synonym"/>
+            <Item lstrtext="false" name="T" text="Table"/>
+          </ComboBox>
+        </Table>
+      </HBox>
+      <Grid gridHeight="2" gridWidth="79" name="grid5" posX="0" posY="17">
+        <Image gridHeight="1" gridWidth="2" name="image3" posX="1" posY="0" stretch="x" style="noBorder"/>
+      </Grid>
+      <Grid gridHeight="2" gridWidth="79" name="Grid2" posX="0" posY="19">
+        <Image gridHeight="1" gridWidth="2" name="image2" posX="1" posY="0" stretch="x" style="noBorder"/>
+        <Button gridHeight="1" gridWidth="10" name="btn_back" posX="35" posY="0" tabIndex="2" text="btn_back"/>
+        <Button gridHeight="1" gridWidth="10" hidden="true" name="btn_next" posX="46" posY="0" tabIndex="3" text="btn_next"/>
+        <Button gridHeight="1" gridWidth="10" name="btn_OK" posX="57" posY="0" tabIndex="4" text="btn_OK"/>
+        <Button gridHeight="1" gridWidth="10" name="btn_Cancel" posX="68" posY="0" tabIndex="1" text="btn_Cancel"/>
+      </Grid>
+    </VBox>
+  </Form>
+  <DiagramLayout>
+    <![CDATA[AAAAAgAAAEwAewA2ADEAMQBiADgAOAA4ADEALQAyADkAOABkAC0ANAA3ADAAMgAtADkANwBhADkALQBmADIAOAA3AGUANABhAGYAZQBlADEAOQB9QCQAAAAAAABAZSAAAAAAAAAAAAAAAAAAAQAAAEwAewA5ADIAOAA1AGEAYgAxADgALQBiAGIAYQAxAC0ANAA1ADMAMAAtAGEAYQAzAGUALQA5AGUAMAA0AGIANQAwADIAZgAxADMANgB9AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAEwAewA3ADMAZgBmAGMAYgBjADIALQBmADgAYQBjAC0ANABkADMANQAtAGEANQBkADcALQAzADkANgA0ADgAYgBlADYAMgBkAGYAMAB9QCQAAAAAAABAWcAAAAAAAAAAAAAAAAAAAQAAAEwAewAzAGEAMABmADkAMgAzAGUALQBhAGQAYwBjAC0ANABlADAAOAAtAGIAMQA5ADEALQAyADYAYQAxADUAMABjAGQAYwAxADQAOQB9QCQAAAAAAABAYmAAAAAAAAAAAAAAAAAAAQAAAEwAewAzADkAMgA5ADAANgBmADIALQBlAGYAZABkAC0ANABmADYAYgAtADkAZAAzAGYALQA0ADQANwA4ADEAMwA2AGQANgBhADMAYgB9QCQAAAAAAABAQoAAAAAAAAAAAAAAAAAAAQAAAEwAewBmADMAYgBhAGIAMABhADkALQA1ADEANABjAC0ANABlAGQAMgAtADkAMABjADAALQA4ADUAZAA2ADYAMABiADQAYgA2AGUAZQB9QCQAAAAAAABAQoAAAAAAAAAAAAAAAAAAAQAAAEwAewA1ADkAZABiAGEAMAA1AGEALQBhAGYAYwA3AC0ANAA1AGIANAAtADgANwA0ADkALQAzADAANgAxADAANwA0AGQAMAA0ADEAMgB9QGiAAAAAAAA/8AAAAAAAAD+EeuFHrhR8AQAAAEwAewBmADcAOQA5AGEANwBiAGIALQBhAGEAYQAxAC0ANABiADcANQAtADgANwAyADIALQA1AGEANQBlAGYAOAAzADEAYQA4AGIAMAB9QCQAAAAAAABATYAAAAAAAAAAAAAAAAAAAQAAAEwAewA4ADIAMAAzAGMAOQBjAGEALQBlAGEAYQBlAC0ANABkAGEANwAtADkAYwA1ADEALQA5ADkAYwBlAGUAMgA5AGUAZQAxADIAYQB9QCQAAAAAAABATYAAAAAAAAAAAAAAAAAAAQAAAEwAewBkADUAZQBiAGMAYQBiADQALQBmADQAMAAxAC0ANAAyADIAMQAtAGEAZAA3AGIALQAyAGYAMwBiAGQAOABlAGQANgA5ADkAMwB9QCQAAAAAAABAVEAAAAAAAAAAAAAAAAAAAQAAAEwAewBhADAAZgA4ADEAMAA0ADIALQA0AGEAOABlAC0ANAAyADIAMgAtAGIAZAAxAGEALQA1AGIAMwA3AGQANwBkADIAMgA1ADUAYQB9QCQAAAAAAABAX0AAAAAAAAAAAAAAAAAAAQ==]]>
+  </DiagramLayout>
+</ManagedForm>

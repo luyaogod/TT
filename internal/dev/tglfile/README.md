@@ -48,4 +48,4 @@ go test ./internal/dev/tglfile -count=1
 ## 细节去哪
 
 - 三类标记怎么与 TAP 配对、配对不上各是什么后果 → [../synth/README.md](../synth/README.md)、[../verify/README.md](../verify/README.md)
-- 三方依据（四个正则原文与锚点展开逻辑的出处） → 设计器反编译源码 [`designer-src/`](../../../designer-src/README.md) 的 `CodeEditorManager.cs`
+- 三方依据（四个正则原文与锚点展开逻辑的出处） → 设计器反编译源码 [`designer-src/`](../../../.agents/docs/t100/designer-src/README.md) 的 `CodeEditorManager.cs`

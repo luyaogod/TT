@@ -1,0 +1,68 @@
+---------------------------------------------------------------------------------- 
+-- File created from /u1/toptst/erp/adz/42f/sadzi140_rev.4fd by Genero Studio
+-- WARNING! All changes made in this file will be lost!
+----------------------------------------------------------------------------------
+
+SCHEMA formonly
+
+LAYOUT (text=%"sadzi140_rev", windowStyle="withoutToolBar")
+VBOX vbox1
+GRID grid2
+{
+[im]
+
+}
+END -- grid2
+GRID grid3
+{
+[lbl_comp|rdg_compare_select      ]
+
+}
+END -- grid3
+TABLE tbl_runversion(unsortableColumns, unmovableColumns, unhidableColumns)
+{
+[l|lbl_c|lbl_version    |lbl_rev_desc       |lb_card_no_p|lb|lbl_mdy_num_|l1]
+[l|lbl_c|lbl_version    |lbl_rev_desc       |lb_card_no_p|lb|lbl_mdy_num_|l1]
+[l|lbl_c|lbl_version    |lbl_rev_desc       |lb_card_no_p|lb|lbl_mdy_num_|l1]
+[l|lbl_c|lbl_version    |lbl_rev_desc       |lb_card_no_p|lb|lbl_mdy_num_|l1]
+[l|lbl_c|lbl_version    |lbl_rev_desc       |lb_card_no_p|lb|lbl_mdy_num_|l1]
+[l|lbl_c|lbl_version    |lbl_rev_desc       |lb_card_no_p|lb|lbl_mdy_num_|l1]
+[l|lbl_c|lbl_version    |lbl_rev_desc       |lb_card_no_p|lb|lbl_mdy_num_|l1]
+[l|lbl_c|lbl_version    |lbl_rev_desc       |lb_card_no_p|lb|lbl_mdy_num_|l1]
+[l|lbl_c|lbl_version    |lbl_rev_desc       |lb_card_no_p|lb|lbl_mdy_num_|l1]
+[l|lbl_c|lbl_version    |lbl_rev_desc       |lb_card_no_p|lb|lbl_mdy_num_|l1]
+}
+END -- tbl_runversion
+GRID Grid1
+{
+ [btn_recove][image2     ] [btn_diff  |btn_export|btn_cancel]
+
+}
+END -- Grid1
+END -- vbox1
+END -- sadzi140_rev
+
+ATTRIBUTES
+IMAGE im:Image1, image="tabledesigner/tbd_svn_switch.png", style="noBorder", width = 15 characters, height = 4 characters;
+LABEL lbl_comp:lbl_compare_base, text=%"lbl_compare_base";
+RADIOGROUP rdg_compare_select=formonly.rdg_compare_select, tabIndex=8, default = "RT", orientation=horizontal, items=(("DB", "Database"),("RT", "r.t"));
+EDIT l=formonly.lbl_type, tabIndex=1, title=%"", noEntry, unsortable, unmovable, unhidable, unsizable;
+CHECKBOX lbl_c=formonly.lbl_check, tabIndex=2, default = "N", title=%"lbl_check", text=%"", not null, valueChecked = "Y", valueUnchecked = "N", unsortable, unmovable, unhidable, unsizable;
+EDIT lbl_version=formonly.lbl_version, tabIndex=3, title=%"lbl_version", noEntry, not null, scroll, picture="", unmovable, unhidable;
+EDIT lbl_rev_desc=formonly.lbl_rev_desc, tabIndex=5, title=%"lbl_rev_desc", noEntry, scroll, unmovable, unhidable;
+EDIT lb_card_no_p=formonly.lb_card_no_pad type CHAR, tabIndex=4, title=%"lb_card_no_pad", noEntry, unmovable, unhidable;
+EDIT lb=formonly.lb_card_no, tabIndex=9, title=%"lb_card_no", hidden, unsortable, unmovable;
+EDIT lbl_mdy_num_=formonly.lbl_mdy_num_pad, tabIndex=12, title=%"lbl_mdy_num_pad", noEntry, unsortable, unmovable;
+EDIT l1=formonly.lbl_mdy_num, tabIndex=13, title=%"lbl_mdy_num", noEntry, hidden, unsortable, unmovable;
+BUTTON btn_recove:btn_recover, tabIndex=6, text=%"btn_recover", image="";
+IMAGE image2:image2, stretch=x, style="noBorder";
+BUTTON btn_diff:btn_diff, tabIndex=11, text=%"btn_diff", image="";
+BUTTON btn_export:btn_export, tabIndex=10, text=%"btn_export", image="";
+BUTTON btn_cancel:btn_cancel, tabIndex=7, text=%"btn_cancel", image="";
+END -- ATTRIBUTES
+
+INSTRUCTIONS
+SCREEN RECORD sr_runversion(formonly.lbl_type,formonly.lbl_check,formonly.lbl_version,formonly.lbl_rev_desc,formonly.lb_card_no_pad,formonly.lb_card_no,formonly.lbl_mdy_num_pad,formonly.lbl_mdy_num)
+SCREEN RECORD sr_compare_base(formonly.rdg_compare_select)
+END -- INSTRUCTIONS
+
