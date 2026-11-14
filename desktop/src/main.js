@@ -257,16 +257,15 @@ function hardenMain(win) {
   })
   wc.on('will-attach-webview', (e) => e.preventDefault())
   // 菜单收掉之后，这些快捷键要自己接（原来是原生菜单的 role 提供的）。
-  // 只接"窗口级"的四个：编辑类快捷键由 Chromium 自己处理，不需要再管。
+  // 只接"窗口级"的三项：编辑类快捷键由 Chromium 自己处理，不需要再管。
+  //
+  // **F11 不接**：它是调试台的「步入」，页面自己要收这个键（web/app/src/App.tsx 的
+  // 调试快捷键）。主进程抢先 preventDefault 的话，页面永远收不到 —— 之前接成全屏时，
+  // F11 在调试台里一直是"切全屏"而不是"步入"，且没有别的入口能用键盘切全屏。
   wc.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown') return
     const key = String(input.key || '')
     const ctrl = input.control || input.meta
-    if (key === 'F11') {
-      event.preventDefault()
-      win.setFullScreen(!win.isFullScreen())
-      return
-    }
     if (key === 'F5' || (ctrl && (key === 'r' || key === 'R'))) {
       event.preventDefault()
       wc.reload()
@@ -505,9 +504,6 @@ function handleShellAction(win, type, payload) {
       return
     case 'reset-zoom':
       win?.webContents.setZoomLevel(0)
-      return
-    case 'toggle-fullscreen':
-      if (win) win.setFullScreen(!win.isFullScreen())
       return
     case 'check-update':
       void checkUpdate()
