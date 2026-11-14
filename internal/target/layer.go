@@ -151,7 +151,7 @@ var layerExceptions = map[string]Layer{
 
 	// ---- tt dict（4 条例外） ----
 	"dict db discover": Layer1, // 登录 SSH 探库要素
-	"dict mirror pull": Layer1, // 隐藏转发：SFTP 增量下载该环境镜像
+	"dict mirror pull": Layer1, // 隐藏转发：全量拉取该环境镜像
 	"dict mirror path": Layer1, // 隐藏转发：该环境镜像目录（与环境绑定）
 	"dict db sync":     Layer2, // 账号由企业编号决定
 

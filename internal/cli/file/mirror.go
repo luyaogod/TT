@@ -3,7 +3,7 @@ package file
 // tt file mirror：离线镜像（source: 4gl/42f/42s/inc；interface: 42f/42s）。
 //
 //   mirror dir [<目录>]              查看/设置镜像根目录（config.json 顶层 mirror.dir）
-//   mirror pull [<环境>] [--full]    下载/更新该环境镜像（默认增量）
+//   mirror pull [<环境>]             全量拉取该环境镜像
 //   mirror path [<环境>]             打印该环境镜像目录的绝对路径（AI 直接前往）
 //
 // 镜像根必须显式设置（不设默认），避免隐式落盘位置。目录结构与服务器同构：
@@ -30,6 +30,7 @@ import (
 func NewMirrorCmd() *cobra.Command {
 	var full bool
 	var profile string
+	var tmpDir string
 	g := &cobra.Command{
 		Use:   "mirror",
 		Short: "管理 T100 本地镜像（source: 4gl/42f/42s/inc；interface: 只 42f/42s）",
@@ -41,11 +42,17 @@ tt outline 只认 4gl，tt interface 只认 42f/42s，而两者读的是同一�
 profile=interface 只取 42f/42s，想只要画面时配一个独立目录用。
 4fd 不镜像（设计期 fieldId 不稳定）。per、其它语言目录、.4gl.src 等不拉；
 备份文件（*.bak/*.bck/*~）也排除。目录结构与服务器同构：<镜像目录>/erp/... com/...。
-每个环境可以单独指定镜像目录；未单独指定时回退到全局根目录/<环境名>。
+
+拉取方式只有一种：**全量拉取**。每次都在服务器上重压一遍白名单内的全部文件，
+本地整目录替换（服务器上已删的文件，镜像里也会消失）。没有增量、没有服务器侧基线。
+
+服务器上**不留文件**：归档先写到服务器临时目录（默认 ${TMPDIR:-/tmp}，可用
+--tmp 或配置 mirror.tmpDir 改），下完就删；中途取消、失败也删。只有客户端被强杀
+才可能留下一个归档，下次拉取前会自动扫掉 3 小时前的遗留。
 
 子命令：
   dir [<目录>]      查看/设置全局根目录；加 --at <环境> 则设置该环境单独目录
-  pull [<环境>]     下载/更新该环境镜像（默认增量；--full 全量重建）
+  pull [<环境>]     全量拉取该环境镜像
   path [<环境>]     打印该环境镜像目录的绝对路径（AI 直接前往）
 
 环境用 --at <环境> 点名（也可给位置参数，二选一）；全局根与该环境单独目录都未设置时，
@@ -53,9 +60,10 @@ profile=interface 只取 42f/42s，想只要画面时配一个独立目录用。
 		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
 	dirCmd := newMirrorDirCmd()
-	pullCmd := newMirrorPullCmd(&full, &profile)
+	pullCmd := newMirrorPullCmd(&full, &profile, &tmpDir)
 	pathCmd := newMirrorPathCmd()
-	pullCmd.Flags().BoolVar(&full, "full", false, "全量重建（本 profile 的白名单内以服务器为准，含删除服务器已不存在的文件）")
+	pullCmd.Flags().BoolVar(&full, "full", false, "已弃用：现在只有全量拉取，此开关无作用")
+	pullCmd.Flags().StringVar(&tmpDir, "tmp", "", "服务器临时目录（覆盖配置 mirror.tmpDir；空=服务器 ${TMPDIR:-/tmp}）")
 	pullCmd.Flags().StringVar(&profile, "profile", "source", "镜像白名单：source(4gl+42f+42s+inc) | interface(只 42f/42s)")
 	g.AddCommand(dirCmd, pullCmd, pathCmd)
 	return g
@@ -94,6 +102,16 @@ func writeMirrorDir(cfgPath, dir string) error {
 		sec["dir"] = dir
 		return nil
 	})
+}
+
+// readMirrorTmpDir 读 config.json 顶层 mirror.tmpDir（服务器临时目录）。
+// 空 = 用服务器上的 ${TMPDIR:-/tmp}，这里不做任何默认值填充。
+func readMirrorTmpDir(cfgPath string) (string, error) {
+	root, err := config.Load(cfgPath)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(root.Mirror.TmpDir), nil
 }
 
 // setEnvMirrorDir 写某环境自己的镜像目录（空串 = 删除覆盖，回退全局根目录）。
@@ -265,21 +283,26 @@ func newMirrorDirCmd() *cobra.Command {
 
 // ---- mirror pull ----
 
-func newMirrorPullCmd(full *bool, profile *string) *cobra.Command {
+func newMirrorPullCmd(full *bool, profile *string, tmpDir *string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "pull [<环境>]",
-		Short: "下载/更新该环境镜像（默认增量；--full 全量重建）",
+		Short: "全量拉取该环境镜像（每次重压全部白名单文件）",
 		Long: `SSH 登录环境，按 profile 的白名单打包：source 取 4gl 目录下的 .4gl + 42f + 42s/zh_CN + *.inc；interface 只取 42f/42s，供 tt interface 合成画面。
-下载到该环境的镜像目录（环境单独指定，未指定则用全局根目录/<环境名>）。默认增量：
-服务器标记**按 profile 分别记**，只拉各自自上次以来的变更文件；先拉 source 再拉 interface
-也能真的拉到 42f/42s（不会“无变更”空跑）。--full 全量重建：**只对本 profile 的白名单负责**，
-不属于它的既有文件（如给 interface 做全量时的 4gl/inc）原样保留。
-白名单升级后，下次拉取会自动转全量以补齐新增类型。
+下载到该环境的镜像目录（环境单独指定，未指定则用全局根目录/<环境名>）。
 
-打包根（$TOP）按登录区域动态探测；探测失败直接报错。`,
+**只有全量拉取**：每次都在服务器上重压一遍白名单内的全部文件，本地整目录替换。
+只对本 profile 的白名单负责：不属于它的既有文件（如给 interface 拉取时的 4gl/inc）
+原样保留。服务器上已删的文件，镜像里也会消失。
+
+归档先写到**服务器临时目录**（默认 ${TMPDIR:-/tmp}，可用 --tmp <目录> 或配置
+mirror.tmpDir 指定），下载完立即删除；取消、失败也删。所以 $TOP 里不会多出任何文件，
+也不要求登录账号对 $TOP 有写权限。
+
+打包根（$TOP）按登录区域动态探测；探测失败直接报错。
+--full 已弃用（现在恒为全量），保留只是为了不打断旧脚本。`,
 		Example: `  tt file mirror pull --at 主机109
   tt file mirror pull --at 主机109 --profile interface
-  tt file mirror pull --at 主机109 --full`,
+  tt file mirror pull --at 主机109 --tmp /u2/tmp`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			hosts, cfgPath, err := mirrorConfig()
@@ -301,19 +324,25 @@ func newMirrorPullCmd(full *bool, profile *string) *cobra.Command {
 			if envDir == "" {
 				return usageErr("环境 %s 的镜像目录未设置。请先执行: tt file mirror dir <目录>（可加 --at %s 只给该环境）", e.Name, e.Name)
 			}
-			mode := "增量"
-			if *full {
-				mode = "全量"
-			}
 			prof, err := host.ParseMirrorProfile(*profile)
 			if err != nil {
 				return usageErr("%v", err)
 			}
+			tmp, err := readMirrorTmpDir(cfgPath)
+			if err != nil {
+				return err
+			}
+			if strings.TrimSpace(*tmpDir) != "" {
+				tmp = strings.TrimSpace(*tmpDir)
+			}
 			jsonOut := common.IsJSON()
 			if !jsonOut {
-				fmt.Printf("正在拉取 %s 镜像（%s，%s）: %s -> %s\n", e.Name, mode, prof.Label(), e.Host, envDir)
+				fmt.Printf("正在拉取 %s 镜像（全量，%s）: %s -> %s\n", e.Name, prof.Label(), e.Host, envDir)
+				if *full {
+					fmt.Println("(--full 已弃用：现在恒为全量拉取，此开关无作用)")
+				}
 			}
-			st, err := host.MirrorPullToDirProfile(cmd.Context(), e, envDir, *full, prof)
+			st, err := host.MirrorPullToDirProfile(cmd.Context(), e, envDir, prof, host.MirrorOptions{TmpDir: tmp})
 			if err != nil {
 				return outputErrConn(err)
 			}
@@ -321,8 +350,8 @@ func newMirrorPullCmd(full *bool, profile *string) *cobra.Command {
 				return common.PrintJSON(map[string]any{
 					"ok": true, "env": e.Name, "dir": envDir,
 					"files": st.Files, "bytes": st.Bytes, "pruned": st.Pruned,
-					"elapsed": st.Elapsed, "topDir": st.TopDir, "note": st.Note,
-					"full": st.Full, "profile": string(st.Profile),
+					"elapsed": st.Elapsed, "topDir": st.TopDir, "tmpDir": st.TmpDir,
+					"note": st.Note, "profile": string(st.Profile),
 				})
 			}
 			if st.Note != "" {
@@ -333,12 +362,12 @@ func newMirrorPullCmd(full *bool, profile *string) *cobra.Command {
 					fmt.Printf("已清理本地残留备份文件: %d 个（如 *.bak/*.bck；本 profile 只保留 %s）\n", st.Pruned, st.Profile.Label())
 				}
 			}
-			if st.Full && !*full {
-				fmt.Println("(本地无完整基线或镜像白名单已升级，本次自动按全量拉取)")
-			}
 			fmt.Printf("镜像目录: %s\n", envDir)
 			if st.TopDir != "" {
 				fmt.Printf("服务器 TOP: %s\n", st.TopDir)
+			}
+			if st.TmpDir != "" {
+				fmt.Printf("服务器临时目录: %s（归档已删除）\n", st.TmpDir)
 			}
 			return nil
 		},

@@ -17,8 +17,7 @@ import (
 type mirrorJob struct {
 	Running   bool   `json:"running"`
 	Env       string `json:"env"`
-	Full      bool   `json:"full"`
-	Phase     string `json:"phase"` // connect|probe|pack|download|done|error
+	Phase     string `json:"phase"` // connect|probe|pack|download|done|error|cancelled
 	Message   string `json:"message"`
 	Bytes     int64  `json:"bytes"`
 	Total     int64  `json:"total"` // 下载阶段=归档总字节;0=未知(pack 阶段)
@@ -37,7 +36,7 @@ type mirrorEnv struct {
 	Zone   string `json:"zone"`
 	Path   string `json:"path"`
 	Exists bool   `json:"exists"` // 目录存在（哪怕没拉完）——「清理」按它决定能不能点
-	Ready  bool   `json:"ready"`  // 本地已有完整基线(增量前提)
+	Ready  bool   `json:"ready"`  // 本地已有完整镜像(.tdict-mirror.ok 存在)
 }
 
 type mirrorResp struct {
@@ -75,23 +74,29 @@ func (s *Server) hMirrorGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, resp)
 }
 
-// hMirrorPull 启动一次拉取(单实例:已有任务在跑返回 409);返回后前端轮询 /api/mirror。
+// hMirrorPull 启动一次**全量拉取**(单实例:已有任务在跑返回 409);返回后前端轮询 /api/mirror。
+// 请求体只需要 {"env": "..."}；老客户端带的 "full" 字段会被忽略(只打一行日志)。
 func (s *Server) hMirrorPull(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Env  string `json:"env"`
-		Full bool   `json:"full"`
+		Full *bool  `json:"full"`
 	}
 	if !readBody(w, r, &req) {
 		return
+	}
+	if req.Full != nil && !*req.Full {
+		// 旧版前端会传 full=false 表示"增量"；现在没有增量了,静默按全量执行。
+		fmt.Fprintln(os.Stderr, "[mirror] 收到已弃用的 full=false 请求,按全量拉取执行")
 	}
 	envName := strings.TrimSpace(req.Env)
 	if envName == "" {
 		fail(w, 400, fmt.Errorf("请选择环境"))
 		return
 	}
-	rootDir := ""
+	rootDir, tmpDir := "", ""
 	if root, err := loadConfig(s.cfgPath); err == nil {
 		rootDir = root.Mirror.Dir
+		tmpDir = root.Mirror.TmpDir
 	}
 	hosts, err := config.LoadHosts(s.cfgPath)
 	if err != nil {
@@ -118,7 +123,6 @@ func (s *Server) hMirrorPull(w http.ResponseWriter, r *http.Request) {
 	s.mirror = mirrorJob{
 		Running:   true,
 		Env:       e.Name,
-		Full:      req.Full,
 		Phase:     "connect",
 		Message:   "准备中…",
 		StartedAt: time.Now().Format(time.RFC3339),
@@ -131,7 +135,7 @@ func (s *Server) hMirrorPull(w http.ResponseWriter, r *http.Request) {
 	s.mirrorCancel = cancel
 	s.mirrorMu.Unlock()
 
-	go s.runMirror(ctx, e, envDir, req.Full)
+	go s.runMirror(ctx, e, envDir, host.MirrorOptions{TmpDir: tmpDir})
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -156,8 +160,8 @@ func (s *Server) hMirrorStop(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
-// runMirror 后台执行拉取,把 host 的进度回调同步到任务状态。
-func (s *Server) runMirror(ctx context.Context, e *host.NamedSsh, envDir string, full bool) {
+// runMirror 后台执行一次全量拉取,把 host 的进度回调同步到任务状态。
+func (s *Server) runMirror(ctx context.Context, e *host.NamedSsh, envDir string, opts host.MirrorOptions) {
 	onProgress := func(p host.MirrorProgress) {
 		s.mirrorMu.Lock()
 		if p.Phase != "" {
@@ -179,7 +183,7 @@ func (s *Server) runMirror(ctx context.Context, e *host.NamedSsh, envDir string,
 		s.mirrorMu.Unlock()
 	}
 
-	st, err := host.MirrorPullToDirProgress(ctx, e, envDir, full, onProgress)
+	st, err := host.MirrorPullToDirProgress(ctx, e, envDir, opts, onProgress)
 
 	s.mirrorMu.Lock()
 	defer s.mirrorMu.Unlock()
@@ -190,10 +194,11 @@ func (s *Server) runMirror(ctx context.Context, e *host.NamedSsh, envDir string,
 	if err != nil {
 		// 用户取消 ≠ 失败:标成 cancelled 并给一句人话,不要把 context.Canceled
 		// 原样丢到界面上("context canceled" 对用户毫无意义)。
-		// 中途取消不会留下被误判的完整基线:.tdict-mirror.ok 没写(见 host.MirrorPullProgress)。
+		// 中途取消不会留下被误判的完整基线:.tdict-mirror.ok 没写(见 host.MirrorPullToDirProfileProgress);
+		// 服务器上的归档也由 defer 删掉了。
 		if errors.Is(err, context.Canceled) {
 			s.mirror.Phase = "cancelled"
-			s.mirror.Message = "已停止;本地镜像未写完,下次拉取会自动按全量重建"
+			s.mirror.Message = "已停止;本地镜像未写完,下次拉取会重新全量拉取"
 			return
 		}
 		s.mirror.Phase = "error"
@@ -201,7 +206,6 @@ func (s *Server) runMirror(ctx context.Context, e *host.NamedSsh, envDir string,
 		return
 	}
 	s.mirror.Phase = "done"
-	s.mirror.Full = st.Full // 可能因缺基线或白名单升级而自动转全量,以实际为准
 	s.mirror.Bytes = st.Bytes
 	s.mirror.Total = st.Bytes
 	s.mirror.Files = st.Files
