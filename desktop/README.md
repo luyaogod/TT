@@ -13,8 +13,7 @@ desktop/
 ├─ src/main.js           生命周期、单实例、窗口、标题栏按钮配色、外链、日志、IPC
 ├─ src/serve.js          起服务 / 等就绪 / 判断所有权 / 收尾（纯 Node，可单测）
 ├─ src/splash.html       启动页与失败页（无边框；loading / error / crashed 三态）
-├─ src/welcome.html      首次启动的三步入口（不做第二套配置表单）
-├─ src/preload.cjs       只挂给启动页/欢迎页两个本地窗口
+├─ src/preload.cjs       只挂给启动页这个本地窗口
 ├─ src/shell-preload.cjs 主窗口的白名单窗口 API（换色 / 打开数据目录 / 检查更新…）
 ├─ scripts/dev.mjs       npm run dev
 ├─ scripts/check-syntax.mjs  语法闸门（main.js 没法单测，但语法错会让它双击没反应）
@@ -77,7 +76,7 @@ make desktop-dist   # = build_desktop.bat：复用便携包载荷 → 依赖 →
 | 目录 | 放什么 |
 |---|---|
 | `%APPDATA%\tt` | **业务数据**：`config.json`、字典库、企业快照、源码镜像、`.tt-serve.json`（与 CLI 共用） |
-| `%APPDATA%\TT Desktop` | **壳自己的**：窗口位置、`welcomed.json`、`logs\desktop.log` |
+| `%APPDATA%\TT Desktop` | **壳自己的**：窗口位置、`logs\desktop.log` |
 
 ## 判据
 

@@ -47,8 +47,6 @@ const S = {
   exePath: '',
   splash: null,
   main: null,
-  welcome: null,
-  openingMain: false,
   starting: false,
   quitting: false,
   quittingDone: false,
@@ -144,11 +142,8 @@ function iconPath() {
   return fs.existsSync(p) ? p : undefined
 }
 
-function welcomeMarkFile() {
-  return path.join(app.getPath('userData'), 'welcomed.json')
-}
+// ---------- 启动页 ----------
 
-// ---------- 启动页 / 欢迎页 ----------
 
 function asQuery(obj) {
   const out = {}
@@ -201,44 +196,6 @@ function closeSplash() {
   S.splash = null
 }
 
-function openWelcome() {
-  const win = new BrowserWindow({
-    width: 780,
-    height: 620,
-    minWidth: 640,
-    minHeight: 520,
-    title: '欢迎使用 TT',
-    backgroundColor: '#181818',
-    show: false,
-    icon: iconPath(),
-    webPreferences: {
-      preload: path.join(here, 'preload.cjs'),
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: true,
-    },
-  })
-  win.once('ready-to-show', () => {
-    win.show()
-    closeSplash()
-  })
-  win.loadFile(path.join(here, 'welcome.html'))
-  win.on('closed', () => {
-    if (S.welcome === win) S.welcome = null
-    // 欢迎页是过渡屏：关掉它（或点了任一步）就该看到主界面。
-    // 但 openMain 自己会销毁这一页 —— 那时不能再递归开一次窗口（会开成"没有哈希"的
-    // 那一屏，用户点了"开始配置"却落在首页）；启动过程中（S.starting）也不该开。
-    if (S.openingMain || S.starting) return
-    if (!S.main && S.server && !S.quitting) openMain('')
-  })
-  S.welcome = win
-  return win
-}
-
-function closeWelcome() {
-  if (S.welcome && !S.welcome.isDestroyed()) S.welcome.destroy()
-  S.welcome = null
-}
 
 // ---------- 主窗口 ----------
 
@@ -355,22 +312,14 @@ function navigateMain(hash) {
 }
 
 function openMain(hash = '') {
-  // 销毁欢迎页会触发它的 'closed' 回调（那里会"兜底开主窗"）。开主窗这件事由下面
-  // 唯一负责，所以用一个标志把它短路掉 —— 否则用户点「开始配置」会落到首页。
-  S.openingMain = true
-  try {
-    closeWelcome()
-    if (S.main && !S.main.isDestroyed()) {
-      navigateMain(hash)
-      S.main.show()
-      S.main.focus()
-      return S.main
-    }
-    S.main = createMain(hash)
+  if (S.main && !S.main.isDestroyed()) {
+    navigateMain(hash)
+    S.main.show()
+    S.main.focus()
     return S.main
-  } finally {
-    S.openingMain = false
   }
+  S.main = createMain(hash)
+  return S.main
 }
 
 /** 主窗口没救了：换成失败页（先建失败页再毁主窗，避免"全部窗口关闭"把应用带走）。 */
@@ -406,16 +355,6 @@ function onServerExit({ code, signal }) {
   })
 }
 
-async function isFirstRun() {
-  try {
-    if (fs.existsSync(welcomeMarkFile())) return false
-    const hosts = await apiJson('/api/hosts')
-    const list = Array.isArray(hosts?.sshs) ? hosts.sshs : []
-    return list.length === 0
-  } catch {
-    return false
-  }
-}
 
 async function boot(retry = false) {
   if (S.starting) return
@@ -427,8 +366,7 @@ async function boot(retry = false) {
     if (retry) {
       if (S.main && !S.main.isDestroyed()) S.main.destroy()
       S.main = null
-      if (S.welcome && !S.welcome.isDestroyed()) S.welcome.destroy()
-      S.welcome = null
+
       if (S.server) {
         await stopServer(S.server).catch(() => {})
         S.server = null
@@ -459,8 +397,7 @@ async function boot(retry = false) {
     S.configPath = srv.config || ''
     log(`服务就绪 ${srv.url} pid=${srv.pid} attached=${srv.attached} config=${srv.config}`)
 
-    if (await isFirstRun()) openWelcome()
-    else openMain('')
+    openMain('')
   } catch (err) {
     const msg = err?.message || String(err)
     const tail = err?.tail || ''
@@ -589,7 +526,7 @@ async function showAbout() {
   })
 }
 
-// ---------- IPC（只服务启动页/欢迎页两个本地窗口） ----------
+// ---------- IPC（只服务启动页这个本地窗口） ----------
 
 ipcMain.handle('desktop:info', () => ({ version: app.getVersion(), logPath: S.logFile }))
 ipcMain.on('desktop:retry', () => {
@@ -604,31 +541,9 @@ ipcMain.handle('desktop:copy-diag', () => {
   return text
 })
 ipcMain.on('desktop:quit', () => app.quit())
-ipcMain.on('desktop:welcome', (_e, arg = {}) => {
-  if (arg.dontShow) markWelcomed()
-  openMain(arg.where === 'skills' ? 'settings/skills' : 'settings/sites')
-})
-ipcMain.handle('desktop:install-path', async () => {
-  try {
-    const st = await apiJson('/api/install', { method: 'POST' })
-    if (st?.error) {
-      return { ok: false, error: typeof st.error === 'string' ? st.error : st.error?.message || '写入失败' }
-    }
-    if (st?.inUserPath === true) return { ok: true, exeDir: st.exeDir || '' }
-    return { ok: false, error: st?.manual || `没有把 ${st?.exeDir || 'tt'} 写入 PATH` }
-  } catch (err) {
-    return { ok: false, error: String(err?.message || err) }
-  }
-})
 
-function markWelcomed() {
-  try {
-    fs.mkdirSync(path.dirname(welcomeMarkFile()), { recursive: true })
-    fs.writeFileSync(welcomeMarkFile(), JSON.stringify({ at: new Date().toISOString() }))
-  } catch {
-    /* 记不住就下次再问一遍，不算故障 */
-  }
-}
+
+
 
 // ---------- 应用生命周期 ----------
 
@@ -639,7 +554,7 @@ if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
   app.on('second-instance', () => {
-    const win = S.main || S.welcome || S.splash
+    const win = S.main || S.splash
     if (!win || win.isDestroyed()) return
     if (win.isMinimized()) win.restore()
     win.show()
@@ -648,9 +563,9 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on('window-all-closed', () => {
     if (S.quitting) return
-    // 窗口切换（启动页→主窗、欢迎页→主窗）会有极短的"零窗口"窗口期，
-    // 那时引用还在 —— 用户没关应用，不该把它带走。
-    if (S.main || S.splash || S.welcome) return
+    // 启动页→主窗的切换会有极短的"零窗口"窗口期，那时引用还在 ——
+    // 用户没关应用，不该把它带走。
+    if (S.main || S.splash) return
     app.quit()
   })
 

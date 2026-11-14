@@ -88,7 +88,7 @@ TT/
 │  └─ dist/             构建产物，被 Go 嵌入（.gitkeep 是承重墙）
 │
 ├─ desktop/             TT Desktop（Electron 壳）：只做窗口/单实例/收尾，业务全在 Go
-│  ├─ src/              main 进程、serve 契约（等就绪/判所有权/收尾）、启动页/欢迎页、preload
+│  ├─ src/              main 进程、serve 契约（等就绪/判所有权/收尾）、启动页、preload
 │  ├─ installer/        Inno Setup 安装包定义（tt-desktop.iss）：NSIS 被安全软件拦时用它出 Setup.exe
 │  ├─ scripts/          dev 启动器 + 语法闸门
 │  ├─ test/             node --test（纯 Node，不启 Electron）
