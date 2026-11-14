@@ -1,0 +1,99 @@
+---------------------------------------------------------------------------------- 
+-- File created from /u1/t10dev/erp/adz/42f/sadzi140_alm.4fd by Genero Studio
+-- WARNING! All changes made in this file will be lost!
+----------------------------------------------------------------------------------
+
+SCHEMA formonly
+
+LAYOUT (text=%"Application Lifecycle Management ")
+VBox VBox1
+Grid Grid1
+{
+[image1         ]
+[               ]
+[               ]
+[               ]
+
+
+}
+END -- Grid1
+HBox HBox1
+Grid Grid4
+{
+ [label4                 ]
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+}
+END -- Grid4
+Grid Grid3
+{
+
+[lbl_module|cb_modulename      ]
+[label7                        ]
+[lbl_tablen|cb_tablename       ]
+[label10                       ]
+[ed_table_desc                 ]
+[label8                        ]
+[ed_version                    ]
+[label9                        ]
+
+
+
+
+
+
+
+}
+END -- Grid3
+END -- HBox1
+Grid Grid2
+{
+[label1                                                                          ]
+[label5                                |l|btn_ok    |a|btn_ba|btn_ne|b|btn_cancel]
+
+}
+END -- Grid2
+END -- VBox1
+END -- sadzi140_alm
+
+ATTRIBUTES
+Image image1:Image1, image="tabledesigner/tbd_lifecycle.png", width = 15 characters, height = 4 characters;
+Label label4:Label4, text=%"";
+Label lbl_module:lbl_ModuleName, text=%"lbl_ModuleName";
+ComboBox cb_modulename=formonly.cb_ModuleName, tabIndex=5;
+Label label7:label7, text=%"";
+Label lbl_tablen:lbl_TableName, text=%"lbl_TableName";
+ComboBox cb_tablename=formonly.cb_TableName, tabIndex=6, downShift, sizePolicy=dynamic;
+Label label10:label10, text=%"";
+Edit ed_table_desc=formonly.ed_table_desc, tabIndex=7, hidden;
+Label label8:label8, text=%"";
+Edit ed_version=formonly.ed_version, tabIndex=8, hidden;
+Label label9:label9, text=%"";
+Label label1:Label1, text=%"";
+Label label5:Label5, text=%"";
+Label l:Label3, text=%" ", hidden;
+Button btn_ok:btn_OK, tabIndex=4, text=%"btn_OK", hidden;
+Label a:Label2, text=%" ", hidden;
+Button btn_ba:btn_back, tabIndex=2, text=%"btn_back", hidden;
+Button btn_ne:btn_next, tabIndex=3, text=%"btn_next";
+Label b:label6, text=%" ", hidden;
+Button btn_cancel:btn_Cancel, tabIndex=1, text=%"btn_Cancel";
+END -- ATTRIBUTES
+
+INSTRUCTIONS
+SCREEN RECORD sr_dzlm_list(formonly.cb_ModuleName,formonly.cb_TableName,formonly.ed_table_desc,formonly.ed_version)
+END -- INSTRUCTIONS
+

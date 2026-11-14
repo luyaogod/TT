@@ -1248,6 +1248,44 @@ export function SettingsView() {
     }
   }
 
+  // 「清理」：删掉该环境在本机的那份数据（镜像目录 / 本地字典库）。**不可撤销**，所以先确认；
+  // 删完立刻回读，那一行的「已同步 / 已有镜像」当场变回未同步/未拉取 —— 用户自己看得见结果，
+  // 不需要再弹一句"清理成功"。
+  const clearMirror = (env: string, path: string) => {
+    setAsk({
+      title: `清理环境「${env}」的源码镜像？`,
+      desc: `将删除目录：${path}\n删完可以重新拉取；删掉的内容不能恢复。`,
+      confirmText: '清理',
+      run: () => void doClearMirror(env),
+    })
+  }
+  const doClearMirror = async (env: string) => {
+    setOpBusy('mirror')
+    try {
+      await api.mirrorClear(env)
+      await refreshMirror()
+    } catch (ex: any) {
+      toast.error('清理镜像失败', { description: ex?.message || String(ex) })
+    } finally { setOpBusy('') }
+  }
+  const clearSync = (env: string, dbPath: string) => {
+    setAsk({
+      title: `清理环境「${env}」的本地字典库？`,
+      desc: `将删除文件：${dbPath}\n删完可以重新同步；本地那份不能恢复。`,
+      confirmText: '清理',
+      run: () => void doClearSync(env),
+    })
+  }
+  const doClearSync = async (env: string) => {
+    setOpBusy('sync')
+    try {
+      await api.dbsyncClear(env)
+      await refreshSync()
+    } catch (ex: any) {
+      toast.error('清理本地字典库失败', { description: ex?.message || String(ex) })
+    } finally { setOpBusy('') }
+  }
+
   // 还没读到配置：失败就给失败态 + 重试，别让人永远停在"加载配置中…"
   // （实测：挡住 /api/hosts 后这一页永久转圈，恢复网络也不会自己回来 —— 只有切走再回来才重新拉）。
   if (!cfg) {
@@ -1406,11 +1444,11 @@ export function SettingsView() {
 
                       <TabsContent value="ssh" forceMount className="mt-3 flex min-h-0 flex-1 flex-col space-y-3 overflow-auto data-[state=inactive]:hidden">
                         <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-                          <Field label="环境名称">
+                          <Field label="环境名称" required>
                             <Input className={input} value={cur.name} placeholder="如 正式区"
                               onChange={(e) => patchSsh(selSsh, { name: e.target.value })} />
                           </Field>
-                          <Field label="IP 主机">
+                          <Field label="IP 主机" required>
                             <Input className={input} value={cur.host} onChange={(e) => patchSsh(selSsh, { host: e.target.value })} />
                           </Field>
                           <Field label="端口">
@@ -1422,10 +1460,10 @@ export function SettingsView() {
                             <Input className={input} value={cur.zone} placeholder="31开发/35测试/36正式/39PATCH/t出货"
                               onChange={(e) => patchSsh(selSsh, { zone: e.target.value })} />
                           </Field>
-                          <Field label="账号">
+                          <Field label="账号" required>
                             <Input className={input} value={cur.user} onChange={(e) => patchSsh(selSsh, { user: e.target.value })} />
                           </Field>
-                          <Field label="密码">
+                          <Field label="密码" required>
                             <div className="relative">
                               <Input className={input} type={showPwd ? 'text' : 'password'} value={cur.password}
                                 onChange={(e) => patchSsh(selSsh, { password: e.target.value })} />
@@ -1469,7 +1507,7 @@ export function SettingsView() {
                       ) : (
                         <>
                           <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-                            <Field label="类型">
+                            <Field label="类型" required>
                               <Select value={curDb.type || 'oracle'} onValueChange={(v) => patchDb(selSsh, { type: v })}>
                                 <SelectTrigger className="h-7 w-full text-xs"><SelectValue /></SelectTrigger>
                                 <SelectContent>
@@ -1478,7 +1516,7 @@ export function SettingsView() {
                                 </SelectContent>
                               </Select>
                             </Field>
-                            <Field label="主机地址">
+                            <Field label="主机地址" required>
                               <Input className={input} value={curDb.host} placeholder="客户端与服务器侧均可达"
                                 onChange={(e) => patchDb(selSsh, { host: e.target.value })} />
                             </Field>
@@ -1488,12 +1526,12 @@ export function SettingsView() {
                                 onChange={(e) => patchDb(selSsh, { port: Number(e.target.value) || 0 })} />
                             </Field>
                             {curDb.type === 'kingbase' ? (
-                              <Field label="库名">
+                              <Field label="库名" required>
                                 <Input className={input} value={curDb.database} placeholder="如 topprd"
                                   onChange={(e) => patchDb(selSsh, { database: e.target.value })} />
                               </Field>
                             ) : (
-                              <Field label="服务名(SERVICE_NAME)">
+                              <Field label="服务名(SERVICE_NAME)" required>
                                 <Input className={input} value={curDb.service} placeholder="如 t35prd"
                                   onChange={(e) => patchDb(selSsh, { service: e.target.value })} />
                               </Field>
@@ -1753,14 +1791,11 @@ export function SettingsView() {
                         <TableHead>地址</TableHead>
                         <TableHead className="w-36">本地库文件</TableHead>
                         <TableHead className="w-28">同步结果</TableHead>
-                        <TableHead className="w-24">状态</TableHead>
-                        <TableHead className="w-24">操作</TableHead>
+                        <TableHead className="w-44">操作</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {sync.envs.map((e) => {
-                        const busy = !!sync.job && sync.job.env === e.name && (sync.job.running || sync.job.done)
-                        const failed = busy && sync.job.phase === 'error'
                         return (
                           <TableRow key={e.name} className="hover:bg-transparent">
                             <TableCell className="px-2">
@@ -1779,7 +1814,7 @@ export function SettingsView() {
                                 </span>
                                 <button
                                   type="button"
-                                  className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+                                  className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-ui text-muted-foreground hover:bg-accent hover:text-foreground"
                                   title={`选择「${e.name}」的库目录`}
                                   onClick={() => {
                                     const idx = sshs.findIndex((x) => sshName(x) === e.name)
@@ -1801,18 +1836,24 @@ export function SettingsView() {
                                 : <span className="text-muted-foreground">未同步</span>}
                             </TableCell>
                             <TableCell className="px-2">
-                              <EnvStatus busy={busy} running={!!sync.job?.running} idle="空闲"
-                                error={failed ? (sync.job.error || sync.job.message || '失败') : undefined} />
-                            </TableCell>
-                            <TableCell className="px-2">
                               {/* 表格里的行内动作一律用 ghost 文本按钮(与账号表、环境动作行一致):
                                   一整列实心主色块会把"表格"读成"一堆按钮",行与行的主次也没了。
-                                  ghost 只是没有底色,仍是完整按钮 —— 点击区、禁用态、悬停反馈都在。 */}
-                              <Button variant="ghost" size="sm" disabled={syncBusy}
-                                title={`从「${e.name}」同步字典数据到本机`}
-                                onClick={() => void runSync(e.name)}>
-                                开始同步
-                              </Button>
+                                  ghost 只是没有底色,仍是完整按钮 —— 点击区、禁用态、悬停反馈都在。
+                                  「清理」放在主操作之后（破坏性动作离常用按钮远一点），点完要过确认。 */}
+                              <div className="flex items-center gap-1 whitespace-nowrap">
+                                <Button variant="ghost" size="sm" disabled={syncBusy}
+                                  title={`从「${e.name}」同步字典数据到本机`}
+                                  onClick={() => void runSync(e.name)}>
+                                  开始同步
+                                </Button>
+                                <Button variant="ghost" size="sm" disabled={syncBusy || !e.exists}
+                                  title={e.exists
+                                    ? `删除「${e.name}」已同步到本机的字典库（可重新同步）`
+                                    : '本机还没有该环境的字典库'}
+                                  onClick={() => clearSync(e.name, e.dbPath)}>
+                                  清理
+                                </Button>
+                              </div>
                             </TableCell>
                           </TableRow>
                         )
@@ -1882,7 +1923,7 @@ export function SettingsView() {
                         <TableHead>环境</TableHead>
                         <TableHead className="w-28">状态</TableHead>
                         <TableHead>镜像目录</TableHead>
-                        <TableHead className="w-44">操作</TableHead>
+                        <TableHead className="w-56">操作</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1923,7 +1964,7 @@ export function SettingsView() {
                                   }} />
                                 <button
                                   type="button"
-                                  className="mr-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
+                                  className="mr-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-ui text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
                                   title="选择文件夹"
                                   aria-label="选择文件夹"
                                   disabled={sshIndex < 0}
@@ -1937,8 +1978,9 @@ export function SettingsView() {
                               <div className="flex items-center gap-1 whitespace-nowrap">
                                 {/* 同上:两个都走 ghost 文本按钮。原来"增量更新"是实心主色,
                                     一行里最重的视觉落在按钮上而不是"哪个环境、拉没拉过"。
-                                    「全量」也去掉 Download 图标:同一格两个按钮,一个带图标一个不带
-                                    会让它们看着不是一类东西;动作名已经把事说清了。 */}
+                                    「全量」也去掉 Download 图标:同一格几个按钮,一个带图标一个不带
+                                    会让它们看着不是一类东西;动作名已经把事说清了。
+                                    「清理」排在最后：破坏性动作离常用按钮远一点，点完还要过确认。 */}
                                 <Button variant="ghost" size="sm" disabled={mirrorBusy || !rowReady}
                                   title={rowTitle || '只拉服务器上变过的文件'}
                                   onClick={() => void pullMirror(false, e.name)}>
@@ -1948,6 +1990,13 @@ export function SettingsView() {
                                   title={rowTitle || '整目录替换(含服务器上已删的残留)'}
                                   onClick={() => void pullMirror(true, e.name)}>
                                   全量
+                                </Button>
+                                <Button variant="ghost" size="sm" disabled={mirrorBusy || !e.exists}
+                                  title={e.exists
+                                    ? `删除「${e.name}」的镜像目录（可重新拉取）`
+                                    : '该环境还没有镜像目录'}
+                                  onClick={() => clearMirror(e.name, e.path)}>
+                                  清理
                                 </Button>
                               </div>
                             </TableCell>

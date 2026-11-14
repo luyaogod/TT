@@ -376,7 +376,7 @@ export function App() {
                   <div className="text-red-600 dark:text-red-400">读取环境清单失败</div>
                   <div className="max-w-xl break-all">{envsErr}</div>
                   <button onClick={() => void loadEnvs()}
-                    className="rounded-[7px] border border-border px-2 py-1 text-foreground hover:bg-accent">
+                    className="rounded-ui border border-border px-2 py-1 text-foreground hover:bg-accent">
                     重试
                   </button>
                 </>
@@ -401,7 +401,7 @@ export function App() {
           // Radix 默认会聚焦它,于是每开一次设置都有一圈聚焦框挂在关闭按钮上。
           // 弹窗带 outline-none,焦点留在里面(键盘可达)但不多画一笔。
           onOpenAutoFocus={(e) => { e.preventDefault(); (e.currentTarget as HTMLElement | null)?.focus?.() }}
-          className="flex h-[min(860px,88vh)] max-h-[88vh] w-[min(1120px,94vw)] max-w-none flex-col gap-0 overflow-hidden rounded-[12px] p-0 shadow-2xl"
+          className="flex h-[min(860px,88vh)] max-h-[88vh] w-[min(1120px,94vw)] max-w-none flex-col gap-0 overflow-hidden p-0 shadow-2xl"
         >
           <div className="flex h-12 shrink-0 items-center gap-3 border-b border-border px-4">
             <DialogTitle className="text-[15px] font-semibold tracking-tight">设置</DialogTitle>

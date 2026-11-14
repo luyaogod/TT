@@ -26,8 +26,21 @@ rem
 rem Products land in dist\ next to the MSI and the portable zip:
 rem   TT-Desktop-<version>-x64-Setup.exe   per-user installer (no admin)
 rem   TT-Desktop-<version>-x64.zip         unzip-and-run
+rem
+rem Usage: build_desktop.bat [inno]
+rem   inno  -> build the installer with Inno Setup instead of electron-builder's NSIS.
+rem            Why this exists: NSIS installers cannot RUN on this build box (endpoint
+rem            security blocks the NSIS runtime -- a 38KB blank NSIS installer exits 2
+rem            without running a single line), and electron-builder must run the installer
+rem            once while packaging to extract the uninstaller, so the NSIS target dies at
+rem            its last step. Inno Setup does everything at compile time and runs fine.
+rem            See desktop\installer\tt-desktop.iss for the full story.
 setlocal
 cd /d "%~dp0"
+
+rem `inno` mode: skip the NSIS/zip targets, produce dist\TT-Desktop-<version>-x64-Setup.exe
+set "INNO="
+if /i "%~1"=="inno" set "INNO=1"
 
 set STAGE=dist\tt-portable
 set PAYLOAD=desktop\payload\tt
@@ -89,14 +102,49 @@ if errorlevel 1 (echo DESKTOP CHECKS FAILED & popd & exit /b 1)
 
 echo [5/6] Packaging ^(electron-builder^) ...
 if exist release rmdir /s /q release
-call npm run dist
-if errorlevel 1 (echo ELECTRON-BUILDER FAILED & popd & exit /b 1)
+if defined INNO (
+    rem --dir only: the app directory is all Inno Setup needs (it never touches NSIS)
+    call npx electron-builder --win --x64 --dir
+    if errorlevel 1 (echo ELECTRON-BUILDER ^(--dir^) FAILED & popd & exit /b 1)
+    call :run_inno
+    if errorlevel 1 (popd & exit /b 1)
+) else (
+    call npm run dist
+    if errorlevel 1 (echo ELECTRON-BUILDER FAILED & popd & exit /b 1)
+)
 popd
 
 echo [6/6] Copying artifacts to dist\ ...
 if not exist "dist" mkdir "dist" || exit /b 1
-copy /y "%RELDIR%\TT-Desktop-%VERSION%-x64-Setup.exe" "dist\" >nul || (echo MISSING Setup.exe in %RELDIR% & exit /b 1)
-copy /y "%RELDIR%\TT-Desktop-%VERSION%-x64.zip" "dist\" >nul || (echo MISSING portable zip in %RELDIR% & exit /b 1)
-echo [done] dist\TT-Desktop-%VERSION%-x64-Setup.exe / .zip
+if defined INNO (
+    if not exist "dist\TT-Desktop-%VERSION%-x64-Setup.exe" (echo MISSING Inno Setup output in dist\ & exit /b 1)
+    echo [done] dist\TT-Desktop-%VERSION%-x64-Setup.exe
+) else (
+    copy /y "%RELDIR%\TT-Desktop-%VERSION%-x64-Setup.exe" "dist\" >nul || (echo MISSING Setup.exe in %RELDIR% & exit /b 1)
+    copy /y "%RELDIR%\TT-Desktop-%VERSION%-x64.zip" "dist\" >nul || (echo MISSING portable zip in %RELDIR% & exit /b 1)
+    echo [done] dist\TT-Desktop-%VERSION%-x64-Setup.exe / .zip
+)
 dir /b dist
 endlocal
+exit /b 0
+
+rem ---- Inno Setup step (runs inside desktop\) ----
+rem NOTE: no parenthesised blocks in here. `%ISCC%` expands to a path containing
+rem "(x86)"; inside an if-block that `)` would close the block early and cmd dies with
+rem "\Inno was unexpected at this time" (hit once, keeping it flat).
+:run_inno
+set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
+if exist "%ISCC%" goto :inno_compile
+echo MISSING Inno Setup 6 ^(ISCC.exe^) under Program Files ^(x86^).
+echo   install it from https://jrsoftware.org/isdl.php, then re-run: build_desktop.bat inno
+exit /b 1
+
+:inno_compile
+echo Compiling installer with Inno Setup ...
+"%ISCC%" /Qp /DAppVersion=%VERSION% "installer\tt-desktop.iss"
+if errorlevel 1 goto :inno_failed
+exit /b 0
+
+:inno_failed
+echo INNO SETUP COMPILE FAILED
+exit /b 1

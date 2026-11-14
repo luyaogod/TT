@@ -1,0 +1,177 @@
+<StyleList>
+  <Style name="Window">
+     <StyleAttribute name="backgroundColor" value="#dbe8ff" />
+     <StyleAttribute name="lookAndFeel" value="dotnet" />
+     <StyleAttribute name="fontFamily" value="微軟正黑體" />
+     <StyleAttribute name="actionPanelButtonSpace" value="tiny" />
+     <StyleAttribute name="tabbedContainer" value="yes" />
+     <StyleAttribute name="tabbedContainerCloseMethod" value="container" />
+     <StyleAttribute name="statusBarType" value="panels5" />
+     <StyleAttribute name="actionPanelPosition" value="none" />
+     <StyleAttribute name="ringMenuPosition" value="none" />
+  </Style>
+  <Style name="Window.openwin">
+     <StyleAttribute name="windowType" value="modal" />
+     <StyleAttribute name="backgroundColor" value="#CADAED" />
+     <StyleAttribute name="lookAndFeel" value="dotnet" />
+     <StyleAttribute name="sizable" value="no" />
+     <StyleAttribute name="border" value="frame" />
+     <StyleAttribute name="actionPanelPosition" value="none" />
+     <StyleAttribute name="ringMenuPosition" value="none" />
+     <StyleAttribute name="toolBarPosition" value="bottom" />
+     <StyleAttribute name="statusBarType" value="none" />
+     <StyleAttribute name="position" value="field" />
+     <StyleAttribute name="forceDefaultSettings" value="1" />
+  </Style>
+  <Style name="Window.layoutwin">
+     <StyleAttribute name="windowType" value="modal" />
+     <StyleAttribute name="backgroundColor" value="#D3E5E5" />
+     <StyleAttribute name="lookAndFeel" value="dotnet" />
+     <StyleAttribute name="border" value="tool" />
+     <StyleAttribute name="actionPanelPosition" value="none" />
+     <StyleAttribute name="ringMenuPosition" value="none" />
+     <StyleAttribute name="toolBarPosition" value="bottom" />
+     <StyleAttribute name="statusBarType" value="none" />
+     <StyleAttribute name="position" value="previous" />
+  </Style>
+  <Style name="Window.functionwin">
+     <StyleAttribute name="windowType" value="modal" />
+     <StyleAttribute name="lookAndFeel" value="dotnet" />
+     <StyleAttribute name="sizable" value="no" />
+     <StyleAttribute name="border" value="frame" />
+     <StyleAttribute name="actionPanelPosition" value="bottom" />
+     <StyleAttribute name="actionPanelHAlign" value="right" />
+     <StyleAttribute name="ringMenuPosition" value="bottom" />
+     <StyleAttribute name="ringMenuHAlign" value="right" />
+     <StyleAttribute name="position" value="field" />
+  </Style>
+  <Style name=".toolBar_adzi140">
+     <StyleAttribute name="scaleIcon" value="24px" />
+  </Style>
+  <Style name=".toolBar_system">
+     <StyleAttribute name="backgroundColor" value="#D0DBEE" />
+     <StyleAttribute name="scaleIcon" value="24px" />
+  </Style>
+  <Style name=".toolBar_system2">
+     <StyleAttribute name="backgroundColor" value="#d9ceee" />
+     <StyleAttribute name="backgroundImage" value="tiptop_logo" />
+     <StyleAttribute name="scaleIcon" value="24px" />
+  </Style>
+  <Style name=".toolBar_function">
+     <StyleAttribute name="backgroundColor" value="#ebf6f8" />
+     <StyleAttribute name="scaleIcon" value="24px" />
+  </Style>
+  <Style name=".toolBar_openwin">
+     <StyleAttribute name="backgroundColor" value="#B8C9E1" />
+     <StyleAttribute name="scaleIcon" value="16px" />
+  </Style>
+  <Style name="Folder">
+     <StyleAttribute name="backgroundColor" value="#ffffff" />
+  </Style>
+  <Style name="Table">
+     <StyleAttribute name="showGrid" value="yes" />
+     <StyleAttribute name="highlightColor" value="#AEC2E2" />
+     <StyleAttribute name="highlightTextColor" value="#000000" />
+     <StyleAttribute name="highlightCurrentRow" value="yes" />
+     <StyleAttribute name="tableType" value="frozenTable" />
+  </Style>
+  <Style name="Table:even">
+     <StyleAttribute name="backgroundColor" value="#ffffff" />
+  </Style>
+  <Style name="Table:odd">
+     <StyleAttribute name="backgroundColor" value="#f0f0f0" />
+  </Style>
+  <Style name=".table_browser:even">
+     <StyleAttribute name="backgroundColor" value="#ffffff" />
+  </Style>
+  <Style name=".table_browser:odd">
+     <StyleAttribute name="backgroundColor" value="#f0f0f0" />
+  </Style>
+  <Style name="Table.dbtree">
+     <StyleAttribute name="headerHidden" value="yes" />
+     <StyleAttribute name="border" value="none" />
+     <StyleAttribute name="highlightColor" value="#10abf4" />
+  </Style>
+  <Style name="Table.dbtree:even">
+     <StyleAttribute name="backgroundColor" value="#E5DDD3" />
+  </Style>
+  <Style name="Table.dbtree:odd">
+     <StyleAttribute name="backgroundColor" value="#FFFFFF" />
+  </Style>
+  <Style name="Table:summaryLine">
+     <StyleAttribute name="backgroundColor" value="#5F7DB5" />
+     <StyleAttribute name="textColor" value="#FFFFFF" />
+     <StyleAttribute name="fontWeight" value="bold" />
+  </Style>
+  <Style name="Edit">
+     <StyleAttribute name="backgroundColor" value="#ffffff" />
+  </Style>
+  <Style name="ButtonEdit">
+     <StyleAttribute name="backgroundColor" value="#ffffff" />
+  </Style>
+  <Style name="ComboBox">
+     <StyleAttribute name="backgroundColor" value="#ffffff" />
+  </Style>
+  <Style name="ComboBox.autocomplete">
+     <StyleAttribute name="autoSelectionStart" value="first" />
+     <StyleAttribute name="comboboxCompleter" value="yes" />
+  </Style>
+  <Style name="TextEdit">
+     <StyleAttribute name="backgroundColor" value="#ffffff" />
+  </Style>
+  <Style name="TextEdit.textFormat_html">
+     <StyleAttribute name="textFormat" value="html" />
+     <StyleAttribute name="showEditToolBox" value="no" />
+  </Style>
+  <Style name="DateEdit">
+     <StyleAttribute name="backgroundColor" value="#ffffff" />
+     <StyleAttribute name="buttonIcon" value="16/dateedit.png" />
+  </Style>
+  <Style name="SpinEdit">
+     <StyleAttribute name="backgroundColor" value="#ffffff" />
+  </Style>
+  <Style name="TimeEdit">
+     <StyleAttribute name="backgroundColor" value="#ffffff" />
+  </Style>
+  <Style name="Label.reference">
+     <StyleAttribute name="textColor" value="#7272ac" />
+  </Style>
+  <Style name="Label.maininfo">
+     <StyleAttribute name="fontSize" value="12pt" />
+     <StyleAttribute name="fontWeight" value="bold" />
+     <StyleAttribute name="textColor" value="#3F8DDB" />
+  </Style>
+  <Style name="ProgressBar">
+     <StyleAttribute name="percentageVisible" value="center" />
+  </Style>
+  <Style name=".required:input">
+     <StyleAttribute name="backgroundColor" value="#ffdddd" />
+  </Style>
+  <Style name=".button_qrystr">
+     <StyleAttribute name="buttonType" value="link" />
+  </Style>
+  <Style name=".textFormat_html">
+     <StyleAttribute name="textFormat" value="html" />
+  </Style>
+  <Style name=".noBorder">
+     <StyleAttribute name="border" value="none" />
+  </Style>
+  <Style name=":message">
+     <StyleAttribute name="backgroundColor" value="#B9D9E6" />
+     <StyleAttribute name="fontFamily" value="微軟正黑體" />
+  </Style>
+  <Style name=":error">
+     <StyleAttribute name="backgroundColor" value="#BF6D8B" />
+     <StyleAttribute name="fontFamily" value="微軟正黑體" />
+     <StyleAttribute name="position" value="statustip" />
+  </Style>
+  <Style name="Table.detail">
+    <StyleAttribute name="tableType" value="frozenTable" />
+    <StyleAttribute name="leftFrozenColumns" value="1" />
+    <StyleAttribute name="rightFrozenColumns" value="2" />
+  </Style>
+  <Style name=".table_font">
+     <StyleAttribute name="fontFamily" value="微軟正黑體" />
+     <StyleAttribute name="fontSize" value="large" />
+  </Style>
+</StyleList>

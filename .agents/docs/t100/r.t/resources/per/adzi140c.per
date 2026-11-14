@@ -1,0 +1,53 @@
+---------------------------------------------------------------------------------- 
+-- File created from /u1/t10dev/erp/adz/42f/adzi140c.4fd by Genero Studio
+-- WARNING! All changes made in this file will be lost!
+----------------------------------------------------------------------------------
+
+SCHEMA formonly
+
+LAYOUT (text=%"adzi140c-新增表格")
+VBox VBox1
+Grid Grid1
+{
+
+ [lbl_module|cb_modulename      ]
+
+ [lbl_tablet|cb_datatype        ]
+
+ [lbl_tablen|ed_tablename       ]
+
+ [lbl_table1|ed_tabledescription]
+            [                   ]
+            [cb_multilang       ]
+            [cb_systemtable     ]
+
+}
+END -- Grid1
+Grid Grid2
+{
+      [btn_ok    ]    [btn_cancel]
+
+}
+END -- Grid2
+END -- VBox1
+END -- adzi140c
+
+ATTRIBUTES
+Label lbl_module:lbl_ModuleName, text=%"模組別";
+ComboBox cb_modulename=formonly.cb_ModuleName, tabIndex=1;
+Label lbl_tablet:lbl_TableType, text=%"表格型態";
+ComboBox cb_datatype=formonly.cb_DataType type VARCHAR, tabIndex=6, not null, items=(("M", %"主檔"),("B", %"基礎資料檔"),("P", %"參數檔"),("H", %"歷史資料檔"),("T", %"交易檔"),("S", %"統計餘額檔"));
+Label lbl_tablen:lbl_TableName, text=%"表格名稱";
+Edit ed_tablename=formonly.ed_TableName, tabIndex=2, sizePolicy=dynamic;
+Label lbl_table1:lbl_TableName1, text=%"表格說明";
+TextEdit ed_tabledescription=formonly.ed_TableDescription, tabIndex=5;
+CheckBox cb_multilang=formonly.cb_MultiLang, tabIndex=7, default = "N", text=%"表格中含有多語言資料", valueChecked = "Y", valueUnchecked = "N";
+CheckBox cb_systemtable=formonly.cb_SystemTable, tabIndex=8, default = "N", text=%"屬於系統表格", valueChecked = "Y", valueUnchecked = "N";
+Button btn_ok:btn_OK, tabIndex=4, text=%"確認";
+Button btn_cancel:btn_Cancel, tabIndex=3, text=%"取消";
+END -- ATTRIBUTES
+
+INSTRUCTIONS
+SCREEN RECORD sr_CreateTable(formonly.cb_ModuleName,formonly.cb_DataType,formonly.ed_TableName,formonly.ed_TableDescription,formonly.cb_MultiLang,formonly.cb_SystemTable)
+END -- INSTRUCTIONS
+

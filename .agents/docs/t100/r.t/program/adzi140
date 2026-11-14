@@ -1,0 +1,134 @@
+
+r.l adz
+
+r.c sadzi140_bkrv
+r.c sadzi140_clone
+r.c sadzi140_cols
+r.c sadzi140_crud
+r.c sadzi140_db
+r.c sadzi140_diff
+r.c sadzi140_dlg
+r.c sadzi140_exim
+r.c sadzi140_inp
+r.c sadzi140_lang
+r.c sadzi140_lbl
+r.c sadzi140_log
+r.c sadzi140_logs
+r.c sadzi140_prc
+r.c sadzi140_rdif
+r.c sadzi140_rev
+r.c sadzi140_shot
+r.c sadzi140_util
+r.c sadzi140_vcs
+r.c sadzi140_xml
+r.c adzi140
+
+r.c sadzi888_04
+
+r.c sadzp220
+r.c adzp220
+
+mv adzi140.4fd ../4fd
+mv sadzi140_cols.4fd ../4fd
+mv sadzi140_diff.4fd ../4fd
+mv sadzi140_fnct.4fd ../4fd
+mv sadzi140_ind.4fd ../4fd
+mv sadzi140_inp.4fd ../4fd
+mv sadzi140_log.4fd ../4fd
+mv sadzi140_rdif.4fd ../4fd
+mv sadzi140_rev.4fd ../4fd
+mv sadzi140_revl.4fd ../4fd
+mv sadzi140_srn.4fd ../4fd
+mv sadzi140_syn.4fd ../4fd
+mv sadzi140_wcrt.4fd ../4fd
+
+mv adzi140.4st $ERP/cfg/4st
+
+cp adzi140.4ad ../4ad/zh_TW
+cp adzi140.4ad ../4ad/zh_CN
+rm adzi140.4ad
+
+if [ -f "toolbar_adzi140_zh_CN.4tb" ]
+then
+  rm $ERP/cfg/4tb/toolbar_adzi140_zh_CN.4tb
+fi
+
+if [ -f "toolbar_adzi140_zh_TW.4tb" ]
+then
+  rm $ERP/cfg/4tb/toolbar_adzi140_zh_TW.4tb
+fi
+
+if [ -f "toolbar_adzi140_vi_VN.4tb" ]
+then
+  rm $ERP/cfg/4tb/toolbar_adzi140_vi_VN.4tb
+fi
+
+if [ -f "toolbar_adzi140_en_US.4tb" ]
+then
+  rm $ERP/cfg/4tb/toolbar_adzi140_en_US.4tb
+fi
+
+cp toolbar_adzi140_zh_CN.4tb $ERP/cfg/4tb
+cp toolbar_adzi140_zh_TW.4tb $ERP/cfg/4tb
+cp toolbar_adzi140_vi_VN.4tb $ERP/cfg/4tb
+cp toolbar_adzi140_en_US.4tb $ERP/cfg/4tb
+
+rm toolbar_adzi140_zh_CN.4tb
+rm toolbar_adzi140_zh_TW.4tb
+rm toolbar_adzi140_vi_VN.4tb
+rm toolbar_adzi140_en_US.4tb
+
+if [ -f "adzi140_zh_CN.4tm" ]
+then
+  rm $ERP/adz/4tm/zh_CN/adzi140.4tm
+fi
+
+if [ -f "adzi140_zh_TW.4tm" ]
+then
+  rm $ERP/adz/4tm/zh_TW/adzi140.4tm
+fi
+
+if [ -f "adzi140_vi_VN.4tm" ]
+then
+  rm $ERP/adz/4tm/vi_VN/adzi140.4tm
+fi
+
+if [ -f "adzi140_en_US.4tm" ]
+then
+  rm $ERP/adz/4tm/en_US/adzi140.4tm
+fi
+
+cp adzi140_zh_CN.4tm $ERP/adz/4tm/zh_CN/adzi140.4tm
+cp adzi140_zh_TW.4tm $ERP/adz/4tm/zh_TW/adzi140.4tm
+cp adzi140_vi_VN.4tm $ERP/adz/4tm/vi_VN/adzi140.4tm
+cp adzi140_en_US.4tm $ERP/adz/4tm/en_US/adzi140.4tm
+
+rm adzi140_zh_CN.4tm 
+rm adzi140_zh_TW.4tm
+rm adzi140_vi_VN.4tm
+rm adzi140_en_US.4tm
+
+cd ../4fd
+r.f sadzi140_cols
+r.f sadzi140_diff
+r.f sadzi140_fnct
+r.f sadzi140_ind
+r.f sadzi140_inp
+r.f sadzi140_log
+r.f sadzi140_rdif
+r.f sadzi140_rev
+r.f sadzi140_revl
+r.f sadzi140_srn
+r.f sadzi140_syn
+r.f sadzi140_wcrt
+r.f adzi140
+
+r.l adz
+
+r.l adzi140
+r.l adzp220
+r.l adzp230
+r.l adzp240
+r.l adzp250
+r.l adzp999
+

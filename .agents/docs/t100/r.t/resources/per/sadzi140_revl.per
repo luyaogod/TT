@@ -1,0 +1,49 @@
+---------------------------------------------------------------------------------- 
+-- File created from /u1/toptst/erp/adz/42f/sadzi140_revl.4fd by Genero Studio
+-- WARNING! All changes made in this file will be lost!
+----------------------------------------------------------------------------------
+
+SCHEMA formonly
+
+LAYOUT (text=%"sadzi140_revl", windowStyle="withoutToolBar")
+VBOX VBox1
+GRID Grid3
+{
+ [lbl_versi|ed_version       ]
+
+}
+END -- Grid3
+GRID Grid1
+{
+[txt_sqlscript                          ]
+[                                       ]
+[                                       ]
+[                                       ]
+[                                       ]
+[                                       ]
+[                                       ]
+[                                       ]
+}
+END -- Grid1
+GRID Grid2
+{
+[image2    ]     [btn_execut|btn_cancel]
+
+}
+END -- Grid2
+END -- VBox1
+END -- sadzi140_revl
+
+ATTRIBUTES
+LABEL lbl_versi:lbl_version, text=%"lbl_version";
+EDIT ed_version=formonly.ed_version, tabIndex=4, noEntry;
+TEXTEDIT txt_sqlscript=formonly.txt_SQLScript type CHAR, tabIndex=1, stretch=both, scrollBars=both, sizePolicy=dynamic;
+IMAGE image2:image2, stretch=x, style="noBorder";
+BUTTON btn_execut:btn_execute, tabIndex=2, text=%"btn_execute";
+BUTTON btn_cancel:btn_cancel, tabIndex=3, text=%"btn_cancel";
+END -- ATTRIBUTES
+
+INSTRUCTIONS
+SCREEN RECORD sr_version(formonly.txt_SQLScript,formonly.ed_version)
+END -- INSTRUCTIONS
+

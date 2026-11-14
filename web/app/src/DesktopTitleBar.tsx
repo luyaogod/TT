@@ -30,7 +30,7 @@ function MenuItem({ entry, close }: { entry: Extract<Entry, { kind: 'item' }>; c
     <button
       role="menuitem"
       onClick={() => { close(); entry.run() }}
-      className="flex w-full items-center gap-6 rounded-[5px] px-2.5 py-1.5 text-left text-[12px] text-foreground transition-colors hover:bg-accent"
+      className="flex w-full items-center gap-6 rounded-ui px-2.5 py-1.5 text-left text-[12px] text-foreground transition-colors hover:bg-accent"
     >
       <span className="flex-1 whitespace-nowrap">{entry.label}</span>
       {entry.hint && <span className="text-[11px] text-muted-foreground">{entry.hint}</span>}
@@ -46,14 +46,14 @@ function Menu({ label, entries }: { label: string; entries: Entry[] }) {
         <button
           style={NO_DRAG}
           className={cn(
-            'rounded-[5px] px-2 py-1 text-[12px] transition-colors',
+            'rounded-ui px-2 py-1 text-[12px] transition-colors',
             open ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/70 hover:text-foreground',
           )}
         >
           {label}
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" sideOffset={6} className="min-w-[196px] rounded-[8px] border-border bg-popover p-1 shadow-lg">
+      <PopoverContent align="start" sideOffset={6} className="min-w-[196px] border-border bg-popover p-1 shadow-lg">
         {entries.map((e, i) =>
           e.kind === 'sep'
             ? <div key={`sep-${i}`} className="my-1 h-px bg-border" />
@@ -74,10 +74,11 @@ export function DesktopTitleBar() {
     { kind: 'sep' },
     { kind: 'item', label: '退出', run: () => shell.quit() },
   ]
+  // 菜单里**没有全屏**：F11 是调试台的「步入」（see App.tsx 的调试快捷键），
+  // 留着这一项等于把同一个键解释成两件事，而且桌面版真的很少需要全屏。
   const viewMenu: Entry[] = [
     { kind: 'item', label: '重新加载', hint: 'F5', run: () => shell.reload() },
     { kind: 'item', label: '实际大小', hint: 'Ctrl+0', run: () => shell.resetZoom() },
-    { kind: 'item', label: '全屏', hint: 'F11', run: () => shell.toggleFullscreen() },
   ]
   const helpMenu: Entry[] = [
     { kind: 'item', label: '检查更新', run: () => shell.checkUpdate() },

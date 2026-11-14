@@ -91,9 +91,11 @@ func (s *Server) dbPathFor(env string) string {
 //	GET    /api/mirror         镜像根 + 各环境镜像现状 + 拉取任务状态
 //	POST   /api/mirror/pull    启动一次源码镜像拉取
 //	POST   /api/mirror/stop    取消正在跑的拉取(用户点「停止」)
+//	POST   /api/mirror/clear   清理某环境的镜像目录(删整棵;有拒绝条件,见 clear.go)
 //	GET    /api/dbsync         同步目标 + 可同步环境 + 同步任务状态
 //	POST   /api/dbsync         启动一次字典同步
 //	POST   /api/dbsync/stop    取消正在跑的同步
+//	POST   /api/dbsync/clear   清理某环境的本地字典库(连带伴生文件,见 clear.go)
 //	(未知 /api/ 路径)        404 JSON(见 hUnknownAPI)
 //
 // 主机/环境的读写走共享的顶层 /api/hosts;dbprobe / dbaccverify / conntest、
@@ -110,9 +112,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/mirror", s.hMirrorGet)
 	mux.HandleFunc("POST /api/mirror/pull", s.hMirrorPull)
 	mux.HandleFunc("POST /api/mirror/stop", s.hMirrorStop)
+	// 「清理」：删掉该环境在本机的那份数据（镜像是整棵目录，字典库是 <env>.db 那组文件）。
+	// 见 clear.go —— 两个动作都不可撤销，都有各自的拒绝条件。
+	mux.HandleFunc("POST /api/mirror/clear", s.hMirrorClear)
 	mux.HandleFunc("GET /api/dbsync", s.hDBSyncGet)
 	mux.HandleFunc("POST /api/dbsync", s.hDBSyncPost)
 	mux.HandleFunc("POST /api/dbsync/stop", s.hDBSyncStop)
+	mux.HandleFunc("POST /api/dbsync/clear", s.hDBSyncClear)
 	// API 路径掉到这里说明接口不存在(写错了,或者是已经移到统一层的那些,如
 	// /api/install)。必须回 404 JSON 而不是落到下面的 HTML 兜底页 —— 后者会让调用方
 	// 拿到 200 + HTML,解析失败时报的错与真实原因(接口不存在)完全对不上。

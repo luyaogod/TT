@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ManagedForm fileVersion="23200" gstVersion="23215" name="ManagedForm" uid="{7e5b79e7-55d3-421f-be67-a8cc88b7f2ac}">
+  <AGSettings/>
+  <Record additionalTables="" joinLeft="" joinOperator="" joinRight="" name="sr_right" order="" uid="{daba7596-dd88-482d-9540-d0d48b798727}" where="">
+    <RecordField colName="" fieldIdRef="14" name="lbl_record_type_right" sqlTabName="" table_alias_name="" uid="{73a793d9-0720-48ce-a3df-393d87c99c9f}"/>
+    <RecordField colName="a2" fieldIdRef="1" name="lbl_table_name_right" sqlTabName="formonly" table_alias_name="" uid="{f4109e77-be23-4bc0-9ef2-b048ce6b523d}"/>
+    <RecordField colName="" fieldIdRef="3" name="lbl_table_desc_right" sqlTabName="" table_alias_name="" uid="{2648b1e4-3b08-43b5-8d7b-223d9b90f889}"/>
+    <RecordField colName="" fieldIdRef="9" name="lbl_module_name_right" sqlTabName="" table_alias_name="" uid="{13a923db-ca36-4b55-9499-bcd43535c84e}"/>
+    <RecordField colName="" fieldIdRef="4" name="lbl_alter_result_right" sqlTabName="" table_alias_name="" uid="{684befe7-22f0-465a-bed5-cc24c38158ed}"/>
+    <RecordField colName="" fieldIdRef="15" name="lbl_checkout_by_right" sqlTabName="" table_alias_name="" uid="{333d43a0-1eb9-4242-9d18-3cf82b748bf4}"/>
+  </Record>
+  <Record additionalTables="" joinLeft="" joinOperator="" joinRight="" name="sr_left" order="" uid="{8c5279fa-f92c-4874-93de-5f9055914cb2}" where="">
+    <RecordField colName="" fieldIdRef="13" name="lbl_record_type_left" sqlTabName="" table_alias_name="" uid="{2a5c8913-26c1-43d8-806e-913eb76d0462}"/>
+    <RecordField colName="a1" fieldIdRef="0" name="lbl_table_name_left" sqlTabName="formonly" table_alias_name="" uid="{532590d4-8348-4eba-adce-0388cce65689}"/>
+    <RecordField colName="" fieldIdRef="2" name="lbl_table_desc_left" sqlTabName="" table_alias_name="" uid="{ebb18bfc-2de6-4446-ab68-d3a4f19100b9}"/>
+    <RecordField colName="" fieldIdRef="8" name="lbl_module_name_left" sqlTabName="" table_alias_name="" uid="{3639c1ab-35a1-4cad-87c1-85f9508481e6}"/>
+    <RecordField colName="" fieldIdRef="5" name="lbl_alter_result_left" sqlTabName="" table_alias_name="" uid="{24b39beb-c9dd-49d6-985b-76b91427e89a}"/>
+    <RecordField colName="" fieldIdRef="12" name="lbl_checkout_by_left" sqlTabName="" table_alias_name="" uid="{9d1684f5-ef08-4960-894f-e26a5d5d4572}"/>
+  </Record>
+  <Record additionalTables="" joinLeft="" joinOperator="" joinRight="" name="Undefined" order="" uid="{bbe54b96-f3d6-4927-8a88-4bfb01def643}" where="">
+    <RecordField colName="" fieldIdRef="6" name="edt_Search" sqlTabName="" table_alias_name="" uid="{6f4cfc7a-bc8b-4165-a15b-6d3325f1793e}"/>
+    <RecordField colName="" fieldIdRef="7" name="cb_ModuleSelect" sqlTabName="" table_alias_name="" uid="{72926570-d4d8-4595-a36f-6e8b6e879532}"/>
+    <RecordField colName="" defaultValue="Y" fieldIdRef="10" name="lbl_show_err_only" sqlTabName="" table_alias_name="" uid="{18596735-f5b2-4c18-9228-8f681f266b53}"/>
+    <RecordField colName="" defaultValue="Y" fieldIdRef="11" name="lbl_show_my_check_out" sqlTabName="" table_alias_name="" uid="{4e20fbe5-8fb5-438a-86ef-ab564aae3830}"/>
+  </Record>
+  <Form fourSTFile="" gridHeight="34" gridWidth="115" minHeight="30" minWidth="110" name="f_sadzp090" text="f_sadzp090">
+    <VBox gridHeight="32" gridWidth="114" name="vbox1" posX="1" posY="1">
+      <Grid gridHeight="2" gridWidth="114" name="grid3" posX="0" posY="1">
+        <Label gridHeight="1" gridWidth="10" name="lbl_module_select" posX="3" posY="0" text="lbl_module_select"/>
+        <ComboBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" columnCount="" fieldId="7" gridHeight="1" gridWidth="14" items="" name="cb_ModuleSelect" posX="14" posY="0" rowCount="" sqlTabName="" stepX="" stepY="" tabIndex="16" table_alias_name="" title="ComboBox1" widget="ComboBox"/>
+        <Label gridHeight="1" gridWidth="4" name="label1" posX="29" posY="0" text=""/>
+        <CheckBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" columnCount="" defaultValue="Y" fieldId="10" gridHeight="1" gridWidth="18" name="lbl_show_err_only" notNull="true" posX="34" posY="0" rowCount="" sqlTabName="" stepX="" stepY="" tabIndex="19" table_alias_name="" text="lbl_show_err_only" title="checkbox1" valueChecked="Y" valueUnchecked="N" widget="CheckBox"/>
+        <Label gridHeight="1" gridWidth="10" name="lbl_search" posX="3" posY="1" text="lbl_search"/>
+        <ButtonEdit action="find_data" aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" columnCount="" fieldId="6" gridHeight="1" gridWidth="14" image="find" name="edt_Search" posX="14" posY="1" rowCount="" scroll="true" sqlTabName="" stepX="" stepY="" tabIndex="15" table_alias_name="" title="Edit3" widget="ButtonEdit"/>
+        <Label gridHeight="1" gridWidth="4" name="label2" posX="29" posY="1" text=""/>
+        <CheckBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" columnCount="" defaultValue="Y" fieldId="11" gridHeight="1" gridWidth="18" name="lbl_show_my_check_out" notNull="true" posX="34" posY="1" rowCount="" sqlTabName="" stepX="" stepY="" tabIndex="20" table_alias_name="" text="lbl_show_my_check_out" title="checkbox1" valueChecked="Y" valueUnchecked="N" widget="CheckBox"/>
+      </Grid>
+      <Grid gridHeight="26" gridWidth="114" name="grid1" posX="0" posY="3">
+        <Label gridHeight="1" gridWidth="10" name="lbl_src_data" posX="7" posY="3" text="lbl_src_data"/>
+        <Label gridHeight="1" gridWidth="10" name="lbl_dest_data" posX="54" posY="3" text="lbl_dest_data"/>
+        <Table doubleClick="right_move" gridHeight="13" gridWidth="42" name="table1" posX="7" posY="4" totalRows="11" unitWidth="characters" width="9">
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" columnCount="" fieldId="13" gridHeight="1" gridWidth="1" name="lbl_record_type_left" noEntry="true" posX="0" posY="0" rowCount="" scroll="true" sqlTabName="" stepX="" stepY="" tabIndex="22" table_alias_name="" title="" widget="Edit"/>
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="a1" columnCount="" fieldId="0" gridHeight="1" gridWidth="7" name="lbl_table_name_left" posX="1" posY="0" rowCount="" scroll="true" sqlTabName="formonly" stepX="" stepY="" tabIndex="1" table_alias_name="" title="lbl_table_name_left" widget="Edit"/>
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" columnCount="" fieldId="2" gridHeight="1" gridWidth="15" name="lbl_table_desc_left" posX="8" posY="0" rowCount="" scroll="true" sqlTabName="" stepX="" stepY="" tabIndex="11" table_alias_name="" title="lbl_table_desc_left" widget="Edit"/>
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" columnCount="" fieldId="8" gridHeight="1" gridWidth="1" hidden="true" name="lbl_module_name_left" noEntry="false" posX="23" posY="0" rowCount="" scroll="true" sqlTabName="" stepX="" stepY="" tabIndex="17" table_alias_name="" title="lbl_module_name_left" widget="Edit"/>
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" columnCount="" fieldId="5" gridHeight="1" gridWidth="1" hidden="true" name="lbl_alter_result_left" posX="24" posY="0" rowCount="" scroll="true" sqlTabName="" stepX="" stepY="" tabIndex="14" table_alias_name="" title="lbl_alter_result_left" widget="Edit"/>
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" columnCount="" fieldId="12" gridHeight="1" gridWidth="10" name="lbl_checkout_by_left" noEntry="true" posX="25" posY="0" rowCount="" scroll="true" sqlTabName="" stepX="" stepY="" tabIndex="21" table_alias_name="" title="lbl_checkout_by_left" widget="Edit"/>
+        </Table>
+        <Table doubleClick="left_move" gridHeight="13" gridWidth="42" name="table2" posX="54" posY="4" totalRows="11" unitWidth="characters" width="9">
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" columnCount="" fieldId="14" gridHeight="1" gridWidth="1" name="lbl_record_type_right" noEntry="true" posX="0" posY="0" rowCount="" scroll="true" sqlTabName="" stepX="" stepY="" tabIndex="23" table_alias_name="" title="" widget="Edit"/>
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="a2" columnCount="" fieldId="1" gridHeight="1" gridWidth="7" name="lbl_table_name_right" posX="1" posY="0" rowCount="" scroll="true" sqlTabName="formonly" stepX="" stepY="" tabIndex="2" table_alias_name="" title="lbl_table_name_right" widget="Edit"/>
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" columnCount="" fieldId="3" gridHeight="1" gridWidth="15" name="lbl_table_desc_right" posX="8" posY="0" rowCount="" scroll="true" sqlTabName="" stepX="" stepY="" tabIndex="12" table_alias_name="" title="lbl_table_desc_right" widget="Edit"/>
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" columnCount="" fieldId="9" gridHeight="1" gridWidth="1" hidden="true" name="lbl_module_name_right" posX="23" posY="0" rowCount="" scroll="true" sqlTabName="" stepX="" stepY="" tabIndex="18" table_alias_name="" title="lbl_module_name_right" widget="Edit"/>
+          <ButtonEdit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" columnCount="" fieldId="4" gridHeight="1" gridWidth="1" hidden="true" name="lbl_alter_result_right" posX="24" posY="0" rowCount="" scroll="true" sqlTabName="" stepX="" stepY="" tabIndex="13" table_alias_name="" title="lbl_alter_result" widget="ButtonEdit"/>
+          <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" columnCount="" fieldId="15" gridHeight="1" gridWidth="10" name="lbl_checkout_by_right" noEntry="true" posX="25" posY="0" rowCount="" scroll="true" sqlTabName="" stepX="" stepY="" tabIndex="24" table_alias_name="" title="lbl_checkout_by_right" widget="Edit"/>
+        </Table>
+        <Image gridHeight="1" gridWidth="2" name="image3" posX="50" posY="8" stretch="y" style="noBorder"/>
+        <Button gridHeight="1" gridWidth="2" hidden="true" image="arrup" name="left_up" posX="1" posY="9" tabIndex="3"/>
+        <Button gridHeight="1" gridWidth="2" image="arr2righ" name="right_move" posX="50" posY="9" tabIndex="4"/>
+        <Button gridHeight="1" gridWidth="2" hidden="true" image="arrup" name="right_up" posX="101" posY="9" tabIndex="5"/>
+        <Button gridHeight="1" gridWidth="2" hidden="true" image="arrdown" name="left_down" posX="1" posY="10" tabIndex="6"/>
+        <Button gridHeight="1" gridWidth="2" image="arr2left" name="left_move" posX="50" posY="10" tabIndex="7"/>
+        <Button gridHeight="1" gridWidth="2" hidden="true" image="arrdown" name="right_down" posX="101" posY="10" tabIndex="8"/>
+        <Image gridHeight="1" gridWidth="2" name="image4" posX="50" posY="11" stretch="y" style="noBorder"/>
+      </Grid>
+      <Grid gridHeight="2" gridWidth="114" name="grid2" posX="0" posY="29">
+        <Image gridHeight="1" gridWidth="2" name="image7" posX="1" posY="0" stretch="x" style="noBorder"/>
+        <Button gridHeight="1" gridWidth="10" image="goforw.png" name="btn_exec" posX="39" posY="0" tabIndex="9" text="btn_exec"/>
+        <Button gridHeight="1" gridWidth="10" image="quit.png" name="btn_exit" posX="50" posY="0" tabIndex="10" text="btn_exit"/>
+      </Grid>
+    </VBox>
+  </Form>
+  <DiagramLayout>
+    <![CDATA[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]]>
+  </DiagramLayout>
+</ManagedForm>

@@ -12,14 +12,18 @@ TT/
 ├─ VERSION              版本号唯一出处（三个打包脚本读它，make version-check 对照 web/desktop）
 ├─ build_portable.bat   便携包构建：前端 + Go 二进制 + skills/ + 引擎 + 设计器
 ├─ build_msi.bat        MSI 构建：复用便携载荷，生成 perUser 安装包
-├─ build_desktop.bat    桌面版构建：复用便携载荷 → Electron 壳 → 安装包 + 免安装 zip
+├─ build_desktop.bat    桌面版构建：复用便携载荷 → Electron 壳 → 安装包 + 免安装 zip（`inno` 参数改用 Inno Setup 出安装包）
 │
 ├─ .agents/             项目 Agent 技能与说明（不随发行包装到用户目录）
-│  ├─ docs/             协作者共享文档与项目架构图
+│  ├─ docs/             协作者共享文档
+│  │  ├─ architecture/  命令树架构图（commands.html + 生成脚本）
+│  │  └─ t100/          T100 参考资料：designer-src（设计器反编译源码，只读）+ r.t（表设计器 adzi140 语料）
 │  └─ skills/           项目内技能
-│     ├─ asd-ste100/    技术英语/简化英语写作与检查
-│     ├─ tt-add-cli/    新增 CLI 命令的设计指南
-│     └─ tt-test/       真机集成测试与链路验证指南
+│     ├─ tt-pj-add-cli/ 新增 CLI 命令的设计指南
+│     ├─ tt-pj-frontend/ 前端开发约定（画面文案只讲功能）
+│     ├─ tt-pj-git/     分支 / 提交 / PR 规范
+│     ├─ tt-pj-plan/    计划文件规范（plan + tasks 两份）
+│     └─ tt-pj-test/    真机集成测试与链路验证指南
 │
 ├─ internal/            Go 后端全部实现
 │  ├─ cli/              cobra 命令树装配处：各能力线 + 共用命令；唯一的接线处
@@ -89,6 +93,7 @@ TT/
 │
 ├─ desktop/             TT Desktop（Electron 壳）：只做窗口/单实例/收尾，业务全在 Go
 │  ├─ src/              main 进程、serve 契约（等就绪/判所有权/收尾）、启动页、preload
+│  ├─ installer/        Inno Setup 安装包定义（tt-desktop.iss）：NSIS 被安全软件拦时用它出 Setup.exe
 │  ├─ scripts/          dev 启动器 + 语法闸门
 │  ├─ test/             node --test（纯 Node，不启 Electron）
 │  └─ payload/          打包时从 dist\tt-portable 拷入（不入库）
@@ -100,7 +105,6 @@ TT/
 │  ├─ out/              构建产物 + 探测程序（不进发行包、不能落 dist/ 下）
 │  └─ test/             引擎测试
 │
-├─ designer-src/        设计器反编译源码（只读）：16 工程 + 子包地图，注释 file:line 的核对落点
 ├─ installer/           MSI 安装包定义（WiX v3；perUser 装到 %LOCALAPPDATA%\Programs\TT）
 ├─ tools/               构建辅助 Go 工具
 │  ├─ zip/              跨平台确定性打包

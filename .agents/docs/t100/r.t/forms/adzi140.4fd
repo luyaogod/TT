@@ -1,0 +1,301 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ManagedForm fileVersion="23200" gstVersion="23215" name="r_TableContainer" uid="">
+  <AGSettings/>
+  <Record additionalTables="" joinLeft="" joinOperator="" joinRight="" name="sr_TableList" order="" uid="{91a9cc87-2d4a-42b3-a860-fff0e50578f3}" where="">
+    <RecordField colName="" defaultValue="+" fieldIdRef="3" name="RecordType_TableList" sqlTabName="" table_alias_name="" uid="{b8562726-2677-40b1-a488-77797d331cb5}"/>
+    <RecordField colName="" fieldIdRef="4" name="lbl_dzeaseq" sqlTabName="" table_alias_name="" uid="{374ba2b9-e400-4f54-8f0d-e58b310efa3c}"/>
+    <RecordField colName="" fieldIdRef="5" name="lbl_dzea003" sqlTabName="" table_alias_name="" uid="{d170e3e6-38b3-471c-bd71-91a8434712b7}"/>
+    <RecordField colName="" fieldIdRef="6" name="lbl_dzea001" sqlTabName="" table_alias_name="" uid="{8cd26a1b-a21d-476f-a052-c5e950dc0180}"/>
+    <RecordField colName="" fieldIdRef="7" name="lbl_dzea002" sqlTabName="" table_alias_name="" uid="{99e5198b-094a-44c4-8ee9-0ac650e2d44f}"/>
+    <RecordField colName="" fieldIdRef="8" name="lbl_dzea004" sqlTabName="" table_alias_name="" uid="{b25664cf-c0c1-4719-9f1a-f61a5bb3522d}"/>
+    <RecordField colName="" defaultValue="N" fieldIdRef="9" name="lbl_dzea005" sqlTabName="" table_alias_name="" uid="{2697b87d-7f38-4448-bb28-42e73edbb458}"/>
+    <RecordField colName="" defaultValue="N" fieldIdRef="10" name="lbl_dzea006" sqlTabName="" table_alias_name="" uid="{be3ae8c9-220e-4ab5-ae24-08df061fea94}"/>
+    <RecordField colName="" defaultValue="N" fieldIdRef="11" name="lbl_dzea007" sqlTabName="" table_alias_name="" uid="{243f78ce-2755-4342-a92d-cebfbbe83a6e}"/>
+    <RecordField colName="" defaultValue="Y" fieldIdRef="58" name="lbl_dzea011" sqlTabName="" table_alias_name="" uid="{e12c42eb-31e7-449e-85c1-b84af08edb93}"/>
+    <RecordField colName="" fieldIdRef="62" name="lbl_dzlm005" sqlTabName="" table_alias_name="" uid="{f2ae80e1-8af4-4b79-9649-34592037a905}"/>
+    <RecordField colName="" fieldIdRef="27" name="lbl_dzlm006" sqlTabName="" table_alias_name="" uid="{3eeb61c9-301b-4622-b541-6f913ba387ca}"/>
+    <RecordField colName="" fieldIdRef="28" name="lbl_dzlm007" sqlTabName="" table_alias_name="" uid="{a92d3a2d-8e37-4d1d-bcc1-e19f2527f7ff}"/>
+    <RecordField colName="" fieldIdRef="29" name="lbl_dzlm008" sqlTabName="" table_alias_name="" uid="{59b4c311-d602-4289-b88a-c9632fbe79cf}"/>
+    <RecordField colName="" fieldIdRef="30" name="lbl_dzlm012" sqlTabName="" table_alias_name="" uid="{7a1991ef-d503-43c5-943f-c28b7151a9e7}"/>
+    <RecordField colName="" fieldIdRef="99" name="lbl_dzlm015" sqlTabName="" table_alias_name="" uid="{a85b54ff-8365-4490-88e7-c4e028d9359d}"/>
+    <RecordField colName="" fieldIdRef="34" name="lbl_ooag011" sqlTabName="" table_alias_name="" uid="{bb161f39-1ef0-4683-82de-df496360839a}"/>
+    <RecordField colName="" fieldIdRef="35" name="lbl_dzea012" sqlTabName="" table_alias_name="" uid="{c94cbc0b-7007-42fb-ad10-e88c6e702297}"/>
+    <RecordField colName="" fieldIdRef="36" name="lbl_dzea013" sqlTabName="" table_alias_name="" uid="{5f7c33ad-a752-4077-87ca-e35ed6a4c81d}"/>
+    <RecordField colName="" fieldIdRef="37" name="lbl_dzea014" sqlTabName="" table_alias_name="" uid="{f6b69a7f-2e72-44f0-8160-b14f266e224e}"/>
+    <RecordField colName="" fieldIdRef="38" name="lbl_dzea015" sqlTabName="" table_alias_name="" uid="{2b735e20-c7da-42bc-9167-9c41057ac0a8}"/>
+    <RecordField colName="" fieldIdRef="39" name="lbl_dzea016" sqlTabName="" table_alias_name="" uid="{a95feb58-391b-4444-af40-020b223c409c}"/>
+    <RecordField colName="" fieldIdRef="40" name="lbl_dzea017" sqlTabName="" table_alias_name="" uid="{848e6f9c-e23c-4a76-8fdb-b59f731f3fc3}"/>
+    <RecordField colName="" fieldIdRef="76" name="lbl_dzea018" sqlTabName="" table_alias_name="" uid="{767d8a07-b856-4300-910b-c6d8241a05c3}"/>
+    <RecordField colName="" fieldIdRef="80" name="lbl_dzea019" sqlTabName="" table_alias_name="" uid="{a151e4a1-40e3-41a5-8cf9-abd126740761}"/>
+    <RecordField colName="" fieldIdRef="81" name="lbl_dzea020" sqlTabName="" table_alias_name="" uid="{68bb4193-aac7-4c24-820a-37fbfad5e587}"/>
+    <RecordField colName="" fieldIdRef="82" name="lbl_dzea021" sqlTabName="" table_alias_name="" uid="{0a273f07-b357-40a9-9baf-f29ada14a086}"/>
+    <RecordField colName="" fieldIdRef="98" name="lbl_dzeastus" sqlTabName="" table_alias_name="" uid="{f6b57ed3-fced-4463-820a-3c401873b301}"/>
+  </Record>
+  <Record additionalTables="" joinLeft="" joinOperator="" joinRight="" name="sr_cdfList" order="" uid="{53be5d1a-6630-4bcf-b0c8-d1c0b5bafad7}" where="">
+    <RecordField colName="" fieldIdRef="12" name="RecordType_CDFList" sqlTabName="" table_alias_name="" uid="{31d7fec9-c47e-40b7-8a1e-3269d44f9cc6}"/>
+    <RecordField colName="" fieldIdRef="13" name="lbl_dzel001" sqlTabName="" table_alias_name="" uid="{8b38c15d-435f-46b7-8def-622f4ee785e4}"/>
+    <RecordField colName="" fieldIdRef="14" name="lbl_dzel002" sqlTabName="" table_alias_name="" uid="{5b6f3fc6-89f4-409b-b3b4-e483f892dea2}"/>
+  </Record>
+  <Record additionalTables="" joinLeft="" joinOperator="" joinRight="" name="sr_TableColumns" order="" uid="{b44053ef-6051-4431-8393-9abaf427dc38}" where="">
+    <RecordField colName="" defaultValue="+" fieldIdRef="15" name="RecordType_Column" sqlTabName="" table_alias_name="" uid="{d8155591-2393-4c20-8f9f-e833957c590f}"/>
+    <RecordField colName="" fieldIdRef="16" name="lbl_GroudID" sqlTabName="" table_alias_name="" uid="{278b6717-ab5d-44d5-8af9-db69381ef2f6}"/>
+    <RecordField colName="" fieldIdRef="17" name="lbl_dzebseq" sqlTabName="" table_alias_name="" uid="{58dd952f-5781-4487-b985-4b618e86eb54}"/>
+    <RecordField colName="" fieldIdRef="18" name="lbl_dzeb001" sqlTabName="" table_alias_name="" uid="{6fde7309-aac9-45f8-9f4e-027585f55a20}"/>
+    <RecordField colName="" fieldIdRef="19" name="lbl_dzeb002" sqlTabName="" table_alias_name="" uid="{ab008854-419b-4c5d-a93b-e7cf1b3b2c63}"/>
+    <RecordField colName="" fieldIdRef="20" name="lbl_dzeb003" sqlTabName="" table_alias_name="" uid="{207cb738-a6b0-42b8-b682-9f7fe406d1d4}"/>
+    <RecordField colName="" defaultValue="N" fieldIdRef="21" name="lbl_dzeb004" sqlTabName="" table_alias_name="" uid="{87213c68-2b14-411f-a339-737b0776f79e}"/>
+    <RecordField colName="" defaultValue="N" fieldIdRef="22" name="lbl_dzeb005" sqlTabName="" table_alias_name="" uid="{0eb944fd-4d62-4d20-867d-70933eaf2f1c}"/>
+    <RecordField colName="" fieldIdRef="23" name="lbl_dzeb006" sqlTabName="" table_alias_name="" uid="{613e5ade-0edc-47a4-919b-69052190cdf5}"/>
+    <RecordField colName="" fieldIdRef="24" name="lbl_dzeb006_desc" sqlTabName="" table_alias_name="" uid="{cbc2634f-e562-4bc4-b5cf-2c74d9a4c47d}"/>
+    <RecordField colName="" fieldIdRef="25" name="lbl_dzeb007" sqlTabName="" table_alias_name="" uid="{3b07d3ed-1c9c-4e51-893f-97773f0ca45b}"/>
+    <RecordField colName="" fieldIdRef="26" name="lbl_dzeb008" sqlTabName="" table_alias_name="" uid="{7d20b293-0fc0-442f-a188-489edc493995}"/>
+    <RecordField colName="" fieldIdRef="69" name="lbl_dzeb012" sqlTabName="" table_alias_name="" uid="{f8f5ef65-86dc-441d-aa5e-32fd41ae5e0c}"/>
+    <RecordField colName="" fieldIdRef="41" name="lbl_dzeb021" sqlTabName="" table_alias_name="" uid="{a63e0852-5f15-4313-8f64-973806dbab9f}"/>
+    <RecordField colName="" fieldIdRef="42" name="lbl_dzeb022" sqlTabName="" table_alias_name="" uid="{d65fcea8-7065-40d6-bd4c-36acaf08241c}"/>
+    <RecordField colName="" fieldIdRef="43" name="lbl_dzeb023" sqlTabName="" table_alias_name="" uid="{85715281-01a5-495e-94a8-b4fe667f3238}"/>
+    <RecordField colName="" fieldIdRef="44" name="lbl_dzeb024" sqlTabName="" table_alias_name="" uid="{fe5f1968-3912-49c8-b54d-1b118073c519}"/>
+    <RecordField colName="" fieldIdRef="55" name="lbl_dzeb027" sqlTabName="" table_alias_name="" uid="{b6832e4d-4bf0-40bf-b9ac-74d0fc315e16}"/>
+    <RecordField colName="" fieldIdRef="59" name="lbl_dzeb028" sqlTabName="" table_alias_name="" uid="{30598f46-dc35-4ff1-b2d9-5e5a08e921ac}"/>
+    <RecordField colName="" fieldIdRef="70" name="lbl_dzeb029" sqlTabName="" table_alias_name="" uid="{67b2ae3d-0dbc-4810-961d-ee55d02e7eaf}"/>
+    <RecordField colName="" fieldIdRef="73" name="lbl_dzeb030" sqlTabName="" table_alias_name="" uid="{f09267a5-2fc4-4b7a-b959-b774339c648f}"/>
+    <RecordField colName="" fieldIdRef="77" name="lbl_dzeb031" sqlTabName="" table_alias_name="" uid="{948f3ed7-e4a0-46e2-90bc-454ff05404a2}"/>
+    <RecordField colName="" fieldIdRef="65" name="lbl_dzeb002_orig" sqlTabName="" table_alias_name="" uid="{9aeb4bf1-0be8-47f1-a3e8-3eca4004d34f}"/>
+    <RecordField colName="" fieldIdRef="32" name="lbl_dzep012" sqlTabName="" table_alias_name="" uid="{9e5fe509-2e9c-452f-95e1-da34174d3d97}"/>
+    <RecordField colName="" fieldIdRef="33" name="lbl_category" sqlTabName="" table_alias_name="" uid="{da96eb7b-2b44-4c33-807f-56159ee6c558}"/>
+    <RecordField colName="" fieldIdRef="100" name="lbl_lang_modified" sqlTabName="" table_alias_name="" uid="{58db32cf-ed4e-4669-a408-c97af67b53b0}"/>
+  </Record>
+  <Record additionalTables="" joinLeft="" joinOperator="" joinRight="" name="sr_TableKey" order="" uid="{5854eac4-6f2d-42f6-8e3e-b777f15e6b2c}" where="">
+    <RecordField colName="" defaultValue="+" fieldIdRef="45" name="RecordType_Key" sqlTabName="" table_alias_name="" uid="{d484cff2-5a90-4249-aca4-200f08ebc8c5}"/>
+    <RecordField colName="" fieldIdRef="57" name="lbl_dzed001" sqlTabName="" table_alias_name="" uid="{b95e798c-2b04-45be-980b-b00353181a2e}"/>
+    <RecordField colName="" fieldIdRef="46" name="lbl_dzed002" sqlTabName="" table_alias_name="" uid="{043b72e5-f7a1-45a9-929c-a18144bbdb4d}"/>
+    <RecordField colName="" fieldIdRef="47" name="lbl_dzed003" sqlTabName="" table_alias_name="" uid="{38da9294-d2ea-4ec8-93ee-6f1275464fdd}"/>
+    <RecordField colName="" fieldIdRef="48" name="lbl_dzed004" sqlTabName="" table_alias_name="" uid="{13e525fd-1edf-40a6-bf8b-95686504a57c}"/>
+    <RecordField colName="" fieldIdRef="49" name="lbl_dzed005" sqlTabName="" table_alias_name="" uid="{49105e75-d79f-44b7-9ef6-0dbad7df4f20}"/>
+    <RecordField colName="" fieldIdRef="50" name="lbl_dzed006" sqlTabName="" table_alias_name="" uid="{e1d5d65a-36e9-42d0-8774-f0bfdbb3e237}"/>
+    <RecordField colName="" fieldIdRef="61" name="lbl_dzed007" sqlTabName="" table_alias_name="" uid="{3245644f-6d4f-472b-bef9-2c298f09ecd3}"/>
+    <RecordField colName="" fieldIdRef="72" name="lbl_dzed008" sqlTabName="" table_alias_name="" uid="{cf33e148-bdbd-4df0-9f0f-954ccad37baf}"/>
+    <RecordField colName="" fieldIdRef="74" name="lbl_dzed009" sqlTabName="" table_alias_name="" uid="{5881f45a-0f47-4f70-827f-2bfb66e9dc1f}"/>
+    <RecordField colName="" fieldIdRef="78" name="lbl_dzed010" sqlTabName="" table_alias_name="" uid="{4e6f2c06-2ce4-4560-b55c-552454dc4093}"/>
+    <RecordField colName="" fieldIdRef="66" name="lbl_dzed002_orig" sqlTabName="" table_alias_name="" uid="{64057088-2653-4470-a0dc-2b4f1a1d8295}"/>
+  </Record>
+  <Record additionalTables="" joinLeft="" joinOperator="" joinRight="" name="sr_TableIndex" order="" uid="{452a606f-4a5b-402f-a7c7-34f48ea9c470}" where="">
+    <RecordField colName="" defaultValue="+" fieldIdRef="51" name="RecordType_Index" sqlTabName="" table_alias_name="" uid="{a5e34b90-1a89-4107-a416-4a2cae7200d2}"/>
+    <RecordField colName="" fieldIdRef="56" name="lbl_dzec001" sqlTabName="" table_alias_name="" uid="{5f9d44ce-a7f5-4a7c-aa9a-370bc6f3a880}"/>
+    <RecordField colName="" fieldIdRef="52" name="lbl_dzec002" sqlTabName="" table_alias_name="" uid="{bb6f70aa-dc8c-4b61-86af-b3aa239e1a12}"/>
+    <RecordField colName="" fieldIdRef="53" name="lbl_dzec003" sqlTabName="" table_alias_name="" uid="{1e25356a-b4f5-430d-a3da-2dbc2b3953f2}"/>
+    <RecordField colName="" fieldIdRef="54" name="lbl_dzec004" sqlTabName="" table_alias_name="" uid="{fc558503-d0de-4edb-a959-c9c5a575e19f}"/>
+    <RecordField colName="" fieldIdRef="60" name="lbl_dzec005" sqlTabName="" table_alias_name="" uid="{9dd929fc-4054-44fc-b457-564a1643a653}"/>
+    <RecordField colName="" fieldIdRef="71" name="lbl_dzec006" sqlTabName="" table_alias_name="" uid="{41dbf08f-7785-4845-b3f1-9a4eaf6d1639}"/>
+    <RecordField colName="" fieldIdRef="75" name="lbl_dzec007" sqlTabName="" table_alias_name="" uid="{034e566e-d0b1-411f-8ab3-218a04c39adc}"/>
+    <RecordField colName="" fieldIdRef="79" name="lbl_dzec008" sqlTabName="" table_alias_name="" uid="{5131a3c8-3b36-4907-9ea0-b029999d25f1}"/>
+    <RecordField colName="" fieldIdRef="102" name="lbl_dzecstus" sqlTabName="" table_alias_name="" uid="{f75ec764-486b-47d9-b6ac-1f28f70513e2}"/>
+    <RecordField colName="" fieldIdRef="67" name="lbl_dzec002_orig" sqlTabName="" table_alias_name="" uid="{ea1cdfdb-9adc-49c2-a43a-72aeb53f6c64}"/>
+  </Record>
+  <Record additionalTables="" joinLeft="" joinOperator="" joinRight="" name="sr_select" order="" uid="{33692bce-c6b9-4414-a531-257c65013af1}" where="">
+    <RecordField colName="" fieldIdRef="1" name="cb_ModuleSelect" sqlTabName="" table_alias_name="" uid="{40c3aa44-67ae-4f29-bb58-a6d845388a1f}"/>
+    <RecordField colName="" fieldIdRef="63" name="lbl_table_name" sqlTabName="" table_alias_name="" uid="{28c76dc0-f6b0-4db9-ac72-2fe268bc74a6}"/>
+    <RecordField colName="" fieldIdRef="64" name="lbl_editor_mode" sqlTabName="" table_alias_name="" uid="{e4e7a252-1879-4be3-9b23-27bb408bcad4}"/>
+    <RecordField colName="" defaultValue="N" fieldIdRef="68" name="cb_get_issue_tables" sqlTabName="" table_alias_name="" uid="{bf972f6e-083d-4563-a879-e5d03a3fa31a}"/>
+    <RecordField colName="" fieldIdRef="2" name="edt_Search" sqlTabName="" table_alias_name="" uid="{e8fa8b70-a459-4380-9ff7-f70d123effc7}"/>
+  </Record>
+  <Record additionalTables="" joinLeft="" joinOperator="" joinRight="" name="sr_TablePrivileges" order="" uid="{20e70b2f-e8e2-49e5-a9a6-94d9ebea65c0}" where="">
+    <RecordField colName="" fieldIdRef="83" name="RecordType_Privilege" sqlTabName="" table_alias_name="" uid="{1675eb27-1e9f-4ce4-9131-2c0cdc0d7291}"/>
+    <RecordField colName="" fieldIdRef="84" name="lbl_dzen001" sqlTabName="" table_alias_name="" uid="{f7635efe-7b65-4466-b6df-3f96a2c74cda}"/>
+    <RecordField colName="" fieldIdRef="85" name="lbl_dzen002" sqlTabName="" table_alias_name="" uid="{227ec6f5-ffdf-4b9f-af97-1b850b4f78fb}"/>
+    <RecordField colName="" fieldIdRef="86" name="lbl_dzen003" sqlTabName="" table_alias_name="" uid="{8b5f99ca-0e77-4f83-99e8-f1763d85e80b}"/>
+    <RecordField colName="" defaultValue="N" fieldIdRef="87" name="lbl_dzen004" sqlTabName="" table_alias_name="" uid="{1f59c6a2-c93d-4832-ae68-c4873cf71968}"/>
+    <RecordField colName="" defaultValue="N" fieldIdRef="88" name="lbl_dzen005" sqlTabName="" table_alias_name="" uid="{5783d089-f7fb-4b26-8397-b6bfe456e4da}"/>
+    <RecordField colName="" defaultValue="N" fieldIdRef="89" name="lbl_dzen006" sqlTabName="" table_alias_name="" uid="{ce984b17-94cf-44d3-b11b-efec9398932b}"/>
+    <RecordField colName="" defaultValue="N" fieldIdRef="90" name="lbl_dzen007" sqlTabName="" table_alias_name="" uid="{278990da-57f7-49ad-8919-b31764dabf0b}"/>
+    <RecordField colName="" defaultValue="N" fieldIdRef="91" name="lbl_dzen008" sqlTabName="" table_alias_name="" uid="{8876ef94-0df7-453c-8af6-67074003005c}"/>
+    <RecordField colName="" defaultValue="N" fieldIdRef="92" name="lbl_dzen009" sqlTabName="" table_alias_name="" uid="{51319227-617e-493a-a9b7-41f45e9fb475}"/>
+    <RecordField colName="" defaultValue="N" fieldIdRef="93" name="lbl_dzen010" sqlTabName="" table_alias_name="" uid="{cc1163da-d538-469d-a2d3-c286ca151305}"/>
+    <RecordField colName="" fieldIdRef="94" name="lbl_dzen011" sqlTabName="" table_alias_name="" uid="{c3fb9a52-1dc0-461f-bfce-e19d51f0f36d}"/>
+    <RecordField colName="" fieldIdRef="95" name="lbl_dzen012" sqlTabName="" table_alias_name="" uid="{0c3685a1-ccb9-40d7-b069-ae78ba84b403}"/>
+    <RecordField colName="" fieldIdRef="97" name="lbl_dzen013" sqlTabName="" table_alias_name="" uid="{b37bfcca-e63b-4177-b5ae-a9aa0a4a69f2}"/>
+    <RecordField colName="" fieldIdRef="96" name="lbl_dzen002_orig" sqlTabName="" table_alias_name="" uid="{16e5e822-a7c1-4cd4-aac7-eb48570d30a0}"/>
+  </Record>
+  <Record additionalTables="" joinLeft="" joinOperator="" joinRight="" name="Undefined" order="" uid="{b40cccf9-d8e5-42b7-beae-1ebffe26bcaf}" where="">
+    <RecordField colName="" fieldIdRef="31" name="lbl_check_out_full_name" sqlTabName="" table_alias_name="" uid="{d1df60a6-7743-4cb4-bf2a-67b20d9b32a3}"/>
+    <RecordField colName="" defaultValue="N" fieldIdRef="101" name="cb_get_checkout_tables" sqlTabName="" table_alias_name="" uid="{629db14b-e75f-4715-978d-1018fe80b7f9}"/>
+    <RecordField colName="" defaultValue="N" fieldIdRef="103" name="cb_get_industry_table" sqlTabName="" table_alias_name="" uid="{bb985c1a-e8c0-4722-929e-93516c060197}"/>
+  </Record>
+  <Form fourSTFile="" gridHeight="52" gridWidth="472" name="adzi140" text="Form" windowStyle="hasToolBarCanSizable">
+    <ActionDefaultList name="actiondefaultlist1">
+      <ActionDefault acceleratorName="CONTROL-P" name="controlp"/>
+    </ActionDefaultList>
+    <VBox gridHeight="36" gridWidth="259" name="vbox6" posX="2" posY="1">
+      <HBox gridHeight="34" gridWidth="259" name="hbox1" posX="0" posY="1" splitter="true">
+        <Folder gridHeight="34" gridWidth="96" name="Folder2" posX="2" posY="0">
+          <Page name="page_MasterTable" text="page_MasterTable">
+            <VBox gridHeight="29" gridWidth="96" name="vbox5" posX="0" posY="0">
+              <Grid gridHeight="3" gridWidth="96" name="grid2" posX="0" posY="1">
+                <Label gridHeight="1" gridWidth="10" name="lbl_ModuleSelect" posX="1" posY="0" text="lbl_ModuleSelect"/>
+                <ComboBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="1" gridHeight="1" gridWidth="16" items="" name="cb_ModuleSelect" posX="12" posY="0" sqlTabName="" tabIndex="1" table_alias_name="" title="ComboBox1" widget="ComboBox"/>
+                <Image autoScale="true" gridHeight="1" gridWidth="2" name="image1" posX="29" posY="0" stretch="x" style="noBorder"/>
+                <CheckBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" defaultValue="N" fieldId="101" gridHeight="1" gridWidth="18" hidden="true" name="cb_get_checkout_tables" notNull="true" posX="32" posY="0" required="false" sqlTabName="" tabIndex="105" table_alias_name="" text="cb_get_checkout_tables" title="checkbox1" valueChecked="Y" valueUnchecked="N" widget="CheckBox"/>
+                <Label gridHeight="1" gridWidth="10" name="lbl_search" posX="1" posY="1" text="lbl_search"/>
+                <ButtonEdit action="find_data" aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="2" gridHeight="1" gridWidth="16" image="find" name="edt_Search" posX="12" posY="1" scroll="true" sqlTabName="" tabIndex="54" table_alias_name="" title="Edit3" widget="ButtonEdit"/>
+                <Button gridHeight="1" gridWidth="10" name="btn_adv_filter" posX="29" posY="1" tabIndex="107" text="Advanced Filter"/>
+              </Grid>
+              <Grid gridHeight="3" gridWidth="96" hidden="true" name="grid_adv_filter" posX="0" posY="4">
+                <CheckBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" defaultValue="N" fieldId="68" gridHeight="1" gridWidth="18" name="cb_get_issue_tables" notNull="true" posX="1" posY="0" required="false" sqlTabName="" tabIndex="53" table_alias_name="" text="cb_get_issue_tables" title="checkbox1" valueChecked="Y" valueUnchecked="N" widget="CheckBox"/>
+                <CheckBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" defaultValue="N" fieldId="103" gridHeight="1" gridWidth="18" name="cb_get_industry_table" notNull="true" posX="21" posY="0" required="false" sqlTabName="" tabIndex="108" table_alias_name="" text="cb_get_industry_table" title="checkbox1" valueChecked="Y" valueUnchecked="N" widget="CheckBox"/>
+              </Grid>
+              <Table doubleClick="modify" gridHeight="21" gridWidth="96" name="tbl_TableList" posX="0" posY="7" totalRows="20" unhidableColumns="true" unsortableColumns="true">
+                <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" defaultValue="+" fieldId="3" gridHeight="1" gridWidth="1" name="RecordType_TableList" noEntry="true" posX="0" posY="0" scroll="true" sqlTabName="" tabIndex="2" table_alias_name="" title="" widget="Edit"/>
+                <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="4" gridHeight="1" gridWidth="2" name="lbl_dzeaseq" noEntry="true" posX="1" posY="0" scroll="true" sqlTabName="" tabIndex="3" table_alias_name="" title="lbl_dzeaseq" widget="Edit"/>
+                <ComboBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="5" gridHeight="1" gridWidth="4" items="" name="lbl_dzea003" noEntry="true" posX="3" posY="0" scroll="true" sqlTabName="" tabIndex="4" table_alias_name="" title="lbl_dzea003" widget="ComboBox"/>
+                <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" case="lower" colName="" fieldId="6" gridHeight="1" gridWidth="7" name="lbl_dzea001" noEntry="true" notNull="true" posX="7" posY="0" scroll="true" sqlTabName="" tabIndex="5" table_alias_name="" title="lbl_dzea001" widget="Edit"/>
+                <ButtonEdit action="act_lang_modify" aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="7" gridHeight="1" gridWidth="15" image="16/langmodify.png" name="lbl_dzea002" posX="14" posY="0" scroll="true" sqlTabName="" tabIndex="6" table_alias_name="" title="lbl_dzea002" widget="ButtonEdit"/>
+                <ComboBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="8" gridHeight="1" gridWidth="9" items="" name="lbl_dzea004" noEntry="false" posX="29" posY="0" scroll="true" sqlTabName="" tabIndex="7" table_alias_name="" title="lbl_dzea004" widget="ComboBox"/>
+                <CheckBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" defaultValue="N" fieldId="9" gridHeight="1" gridWidth="1" hidden="true" name="lbl_dzea005" notNull="true" posX="38" posY="0" sqlTabName="" tabIndex="8" table_alias_name="" text="" title="lbl_dzea005" valueChecked="Y" valueUnchecked="N" widget="CheckBox"/>
+                <CheckBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" defaultValue="N" fieldId="10" gridHeight="1" gridWidth="1" hidden="true" name="lbl_dzea006" notNull="true" posX="39" posY="0" sqlTabName="" tabIndex="9" table_alias_name="" text="" title="lbl_dzea006" valueChecked="Y" valueUnchecked="N" widget="CheckBox"/>
+                <CheckBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" defaultValue="N" fieldId="11" gridHeight="1" gridWidth="1" hidden="true" name="lbl_dzea007" notNull="true" posX="40" posY="0" sqlTabName="" tabIndex="10" table_alias_name="" text="" title="lbl_dzea007" valueChecked="Y" valueUnchecked="N" widget="CheckBox"/>
+                <CheckBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" defaultValue="Y" fieldId="58" gridHeight="1" gridWidth="1" hidden="true" name="lbl_dzea011" posX="41" posY="0" sqlTabName="" tabIndex="45" table_alias_name="" text="lbl_dzea011" title="lbl_dzea011" valueChecked="Y" valueUnchecked="N" widget="CheckBox"/>
+                <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="62" gridHeight="1" gridWidth="1" hidden="true" name="lbl_dzlm005" noEntry="true" posX="42" posY="0" scroll="true" sqlTabName="" tabIndex="49" table_alias_name="" title="lbl_dzlm005" widget="Edit"/>
+                <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="27" gridHeight="1" gridWidth="1" hidden="true" name="lbl_dzlm006" noEntry="true" posX="43" posY="0" scroll="true" sqlTabName="" tabIndex="58" table_alias_name="" title="lbl_dzlm006" widget="Edit"/>
+                <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="28" gridHeight="1" gridWidth="1" hidden="true" name="lbl_dzlm007" noEntry="true" posX="44" posY="0" scroll="true" sqlTabName="" tabIndex="59" table_alias_name="" title="lbl_dzlm007" widget="Edit"/>
+                <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="29" gridHeight="1" gridWidth="1" hidden="true" name="lbl_dzlm008" noEntry="true" posX="45" posY="0" scroll="true" sqlTabName="" tabIndex="60" table_alias_name="" title="lbl_dzlm008" widget="Edit"/>
+                <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="30" gridHeight="1" gridWidth="1" hidden="true" name="lbl_dzlm012" noEntry="true" posX="46" posY="0" scroll="true" sqlTabName="" tabIndex="61" table_alias_name="" title="lbl_dzlm012" widget="Edit"/>
+                <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="99" gridHeight="1" gridWidth="2" hidden="true" name="lbl_dzlm015" noEntry="true" posX="47" posY="0" scroll="true" sqlTabName="" tabIndex="102" table_alias_name="" title="lbl_dzlm015" widget="Edit"/>
+                <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="34" gridHeight="1" gridWidth="1" hidden="true" name="lbl_ooag011" noEntry="true" posX="49" posY="0" scroll="true" sqlTabName="" tabIndex="62" table_alias_name="" title="ooag011" widget="Edit"/>
+                <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="35" gridHeight="1" gridWidth="1" hidden="true" name="lbl_dzea012" noEntry="true" posX="50" posY="0" scroll="true" sqlTabName="" tabIndex="65" table_alias_name="" title="lbl_dzea012" widget="Edit"/>
+                <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="36" gridHeight="1" gridWidth="1" hidden="true" name="lbl_dzea013" noEntry="true" posX="51" posY="0" scroll="true" sqlTabName="" tabIndex="66" table_alias_name="" title="lbl_dzea013" widget="Edit"/>
+                <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="37" gridHeight="1" gridWidth="1" hidden="true" name="lbl_dzea014" noEntry="true" posX="52" posY="0" scroll="true" sqlTabName="" tabIndex="67" table_alias_name="" title="lbl_dzea014" widget="Edit"/>
+                <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="38" gridHeight="1" gridWidth="1" hidden="true" name="lbl_dzea015" noEntry="true" posX="53" posY="0" scroll="true" sqlTabName="" tabIndex="68" table_alias_name="" title="lbl_dzea015" widget="Edit"/>
+                <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="39" gridHeight="1" gridWidth="1" hidden="true" name="lbl_dzea016" noEntry="true" posX="54" posY="0" scroll="true" sqlTabName="" tabIndex="69" table_alias_name="" title="lbl_dzea016" widget="Edit"/>
+                <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="40" gridHeight="1" gridWidth="1" hidden="true" name="lbl_dzea017" noEntry="true" posX="55" posY="0" scroll="true" sqlTabName="" tabIndex="70" table_alias_name="" title="lbl_dzea017" widget="Edit"/>
+                <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="76" gridHeight="1" gridWidth="1" hidden="true" name="lbl_dzea018" noEntry="true" posX="56" posY="0" scroll="true" sqlTabName="" tabIndex="78" table_alias_name="" title="lbl_dzea018" widget="Edit"/>
+                <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="80" gridHeight="1" gridWidth="1" hidden="true" name="lbl_dzea019" noEntry="true" posX="57" posY="0" scroll="true" sqlTabName="" tabIndex="82" table_alias_name="" title="lbl_dzea019" widget="Edit"/>
+                <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="81" gridHeight="1" gridWidth="1" hidden="true" name="lbl_dzea020" noEntry="true" posX="58" posY="0" scroll="true" sqlTabName="" tabIndex="83" table_alias_name="" title="lbl_dzea020" widget="Edit"/>
+                <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="82" gridHeight="1" gridWidth="1" hidden="true" name="lbl_dzea021" noEntry="true" posX="59" posY="0" scroll="true" sqlTabName="" tabIndex="84" table_alias_name="" title="lbl_dzea021" widget="Edit"/>
+                <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="98" gridHeight="1" gridWidth="1" hidden="true" name="lbl_dzeastus" noEntry="true" posX="60" posY="0" scroll="true" sqlTabName="" tabIndex="100" table_alias_name="" title="lbl_dzeastus" widget="Edit"/>
+              </Table>
+            </VBox>
+          </Page>
+          <Page name="page_ColumnDefineList" text="page_ColumnDefineList">
+            <VBox gridHeight="31" gridWidth="59" name="vbox1" posX="1" posY="0">
+              <Grid gridHeight="2" gridWidth="59" name="Grid12" posX="0" posY="1">
+                <Button gridHeight="1" gridWidth="10" image="16/lib_accept.png" name="btn_AddCDFConfirm" posX="1" posY="0" tabIndex="11" text="btn_AddCDFConfirm"/>
+                <Button gridHeight="1" gridWidth="10" image="16/lib_cancel.png" name="btn_CancelCDF" posX="12" posY="0" tabIndex="12" text="btn_CancelCDF"/>
+              </Grid>
+              <Table gridHeight="27" gridWidth="59" name="tb_cdfList" posX="0" posY="3" totalRows="20" unhidableColumns="true" unsortableColumns="true">
+                <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="12" gridHeight="1" gridWidth="1" name="RecordType_CDFList" noEntry="true" posX="0" posY="0" scroll="true" sqlTabName="" tabIndex="13" table_alias_name="" title="" widget="Edit"/>
+                <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="13" gridHeight="1" gridWidth="15" name="lbl_dzel001" posX="1" posY="0" scroll="true" sqlTabName="" tabIndex="14" table_alias_name="" title="lbl_dzel001" widget="Edit"/>
+                <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="14" gridHeight="1" gridWidth="25" name="lbl_dzel002" posX="16" posY="0" scroll="true" sqlTabName="" tabIndex="15" table_alias_name="" title="lbl_dzel002" widget="Edit"/>
+              </Table>
+            </VBox>
+          </Page>
+        </Folder>
+        <VBox gridHeight="34" gridWidth="159" name="vbox7" posX="98" posY="0">
+          <Grid gridHeight="2" gridWidth="159" name="grid1" posX="0" posY="1">
+            <Button gridHeight="2" gridWidth="4" image="tabledesigner/tbv_table.png" name="btn_table_detail" posX="1" posY="0" style="noBorder" tabIndex="101" text=""/>
+            <Label gridHeight="2" gridWidth="2" name="lbl_space" posX="8" posY="0" text=""/>
+            <FFLabel aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="63" gridHeight="1" gridWidth="18" name="lbl_table_name" posX="11" posY="0" sqlTabName="" style="" table_alias_name="" title="edit1" widget="FFLabel"/>
+            <FFLabel aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="64" gridHeight="1" gridWidth="18" name="lbl_editor_mode" posX="11" posY="1" sqlTabName="" table_alias_name="" title="fflabel1" widget="FFLabel"/>
+            <FFLabel aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="31" gridHeight="1" gridWidth="99" name="lbl_check_out_full_name" posX="30" posY="1" sizePolicy="dynamic" sqlTabName="" table_alias_name="" title="fflabel1" widget="FFLabel"/>
+            <Image gridHeight="1" gridWidth="2" name="image3" posX="130" posY="1" stretch="x" style="noBorder"/>
+            <Button gridHeight="1" gridWidth="5" image="tabledesigner/check_out.png" name="btn_check_out" posX="133" posY="1" tabIndex="55" text="btn_check_out"/>
+            <Button gridHeight="1" gridWidth="5" hidden="true" image="tabledesigner/recall.png" name="btn_recall" posX="139" posY="1" tabIndex="56" text="btn_recall"/>
+            <Button gridHeight="1" gridWidth="5" image="tabledesigner/check_in.png" name="btn_check_in" posX="145" posY="1" tabIndex="57" text="btn_check_in"/>
+            <Button gridHeight="1" gridWidth="5" hidden="false" image="tabledesigner/check_in.png" name="btn_release" posX="151" posY="1" tabIndex="104" text="btn_release"/>
+          </Grid>
+          <Folder gridHeight="30" gridWidth="159" name="Folder1" posX="0" posY="3">
+            <Page action="" name="page_PageTableContents" text="page_PageTableContents">
+              <VBox gridHeight="28" gridWidth="159" name="VBox2" posX="0" posY="0">
+                <Table doubleClick="modify" gridHeight="26" gridWidth="159" name="tbl_Columns" posX="0" posY="1" style="" totalRows="20" unhidableColumns="true" unsortableColumns="true">
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" defaultValue="+" fieldId="15" gridHeight="1" gridWidth="1" name="RecordType_Column" noEntry="true" posX="0" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="" unmovable="true" unsizable="true" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="16" gridHeight="1" gridWidth="2" hidden="true" name="lbl_GroudID" noEntry="true" posX="1" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_GroudID" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="17" gridHeight="1" gridWidth="3" name="lbl_dzebseq" noEntry="true" posX="3" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzebseq" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="18" gridHeight="1" gridWidth="2" hidden="true" name="lbl_dzeb001" posX="6" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzeb001" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" case="lower" colName="" fieldId="19" gridHeight="1" gridWidth="10" name="lbl_dzeb002" notNull="true" posX="8" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzeb002" unmovable="false" widget="Edit"/>
+                  <ButtonEdit action="lbl_dzeb003" aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="20" gridHeight="1" gridWidth="15" image="16/langmodify.png" name="lbl_dzeb003" picture="" posX="18" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzeb003" widget="ButtonEdit"/>
+                  <CheckBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" defaultValue="N" fieldId="21" gridHeight="1" gridWidth="5" name="lbl_dzeb004" notNull="true" posX="33" posY="0" sqlTabName="" tabIndex="-1" table_alias_name="" text="" title="lbl_dzeb004" valueChecked="Y" valueUnchecked="N" widget="CheckBox"/>
+                  <CheckBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" defaultValue="N" fieldId="22" gridHeight="1" gridWidth="5" hidden="true" name="lbl_dzeb005" notNull="true" posX="38" posY="0" sqlTabName="" tabIndex="-1" table_alias_name="" text="" title="lbl_dzeb005" valueChecked="Y" valueUnchecked="N" widget="CheckBox"/>
+                  <ButtonEdit action="lbl_dzeb006" aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" case="upper" colName="" fieldId="23" gridHeight="1" gridWidth="5" image="16/openwindow.png" name="lbl_dzeb006" posX="43" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzeb006" widget="ButtonEdit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="24" gridHeight="1" gridWidth="10" name="lbl_dzeb006_desc" noEntry="true" posX="48" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzeb006_desc" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" color="black" fieldId="25" gridHeight="1" gridWidth="10" name="lbl_dzeb007" noEntry="true" posX="58" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzeb007" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="26" gridHeight="1" gridWidth="8" hidden="false" name="lbl_dzeb008" noEntry="true" posX="68" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzeb008" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="69" gridHeight="1" gridWidth="8" hidden="false" name="lbl_dzeb012" posX="76" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzeb012" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="41" gridHeight="1" gridWidth="2" hidden="true" name="lbl_dzeb021" posX="84" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzeb021" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="42" gridHeight="1" gridWidth="2" hidden="true" name="lbl_dzeb022" posX="86" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzeb022" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="43" gridHeight="1" gridWidth="2" hidden="true" name="lbl_dzeb023" posX="88" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzeb023" widget="Edit"/>
+                  <ButtonEdit action="act_lang_modify" aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="44" gridHeight="1" gridWidth="10" hidden="false" image="16/langmodify.png" name="lbl_dzeb024" posX="90" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzeb024" widget="ButtonEdit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="55" gridHeight="1" gridWidth="2" hidden="true" name="lbl_dzeb027" noEntry="true" posX="100" posY="0" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzeb027" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="59" gridHeight="1" gridWidth="2" hidden="true" name="lbl_dzeb028" noEntry="true" posX="102" posY="0" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzeb028" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="70" gridHeight="1" gridWidth="2" hidden="true" name="lbl_dzeb029" noEntry="true" posX="104" posY="0" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzeb029" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="73" gridHeight="1" gridWidth="2" hidden="true" name="lbl_dzeb030" noEntry="true" posX="106" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzeb030" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="77" gridHeight="1" gridWidth="4" hidden="false" name="lbl_dzeb031" noEntry="true" posX="108" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzeb031" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="65" gridHeight="1" gridWidth="2" hidden="true" name="lbl_dzeb002_orig" posX="112" posY="0" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzeb002_orig" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="32" gridHeight="1" gridWidth="2" hidden="true" name="lbl_dzep012" noEntry="true" posX="114" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="Default" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="33" gridHeight="1" gridWidth="8" name="lbl_category" noEntry="true" posX="116" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_category" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="100" gridHeight="1" gridWidth="2" hidden="true" name="lbl_lang_modified" noEntry="true" posX="124" posY="0" sqlTabName="" tabIndex="103" table_alias_name="" title="lbl_lang_modified" widget="Edit"/>
+                </Table>
+              </VBox>
+            </Page>
+            <Page action="" name="page_PageKeys" text="page_PageKeys">
+              <VBox gridHeight="29" gridWidth="118" name="VBox3" posX="0" posY="0">
+                <Table doubleClick="modify" gridHeight="27" gridWidth="118" name="tbl_Keys" posX="0" posY="1" totalRows="20" unhidableColumns="true" unsortableColumns="true">
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" defaultValue="+" fieldId="45" gridHeight="1" gridWidth="1" name="RecordType_Key" noEntry="true" posX="0" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="" unhidable="true" unmovable="true" unsizable="true" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="57" gridHeight="1" gridWidth="2" hidden="true" name="lbl_dzed001" posX="1" posY="0" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzed001" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" case="lower" colName="" fieldId="46" gridHeight="1" gridWidth="10" name="lbl_dzed002" notNull="true" posX="3" posY="0" required="true" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzed002" widget="Edit"/>
+                  <ComboBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" case="upper" colName="" fieldId="47" gridHeight="1" gridWidth="10" items="" name="lbl_dzed003" posX="13" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzed003" widget="ComboBox"/>
+                  <ButtonEdit action="controlp" aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" case="lower" colName="" fieldId="48" gridHeight="1" gridWidth="30" image="16/openwindow.png" name="lbl_dzed004" noEntry="false" posX="23" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzed004" widget="ButtonEdit"/>
+                  <ButtonEdit action="controlp" aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" case="lower" colName="" fieldId="49" gridHeight="1" gridWidth="10" image="16/openwindow.png" name="lbl_dzed005" posX="53" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzed005" widget="ButtonEdit"/>
+                  <ButtonEdit action="controlp" aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" case="lower" colName="" fieldId="50" gridHeight="1" gridWidth="30" image="16/openwindow.png" name="lbl_dzed006" noEntry="false" posX="63" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzed006" widget="ButtonEdit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="61" gridHeight="1" gridWidth="2" hidden="true" name="lbl_dzed007" posX="93" posY="0" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzed007" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="72" gridHeight="1" gridWidth="2" hidden="true" name="lbl_dzed008" noEntry="true" posX="95" posY="0" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzed008" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="74" gridHeight="1" gridWidth="2" hidden="true" name="lbl_dzed009" noEntry="true" posX="97" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzed009" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="78" gridHeight="1" gridWidth="2" hidden="true" name="lbl_dzed010" noEntry="true" posX="99" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzed010" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="66" gridHeight="1" gridWidth="2" hidden="true" name="lbl_dzed002_orig" posX="101" posY="0" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzed002_orig" widget="Edit"/>
+                </Table>
+              </VBox>
+            </Page>
+            <Page action="" name="page_PageIndex" text="page_PageIndex">
+              <VBox gridHeight="29" gridWidth="83" name="VBox4" posX="0" posY="0">
+                <Table doubleClick="modify" gridHeight="27" gridWidth="83" name="tbl_Index" posX="0" posY="1" totalRows="20" unhidableColumns="true" unsortableColumns="true">
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" defaultValue="+" fieldId="51" gridHeight="1" gridWidth="1" name="RecordType_Index" noEntry="true" posX="0" posY="0" sqlTabName="" tabIndex="-1" table_alias_name="" title="" unhidable="true" unmovable="true" unsizable="true" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="56" gridHeight="1" gridWidth="2" hidden="true" name="lbl_dzec001" posX="1" posY="0" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzec001" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" case="lower" colName="" fieldId="52" gridHeight="1" gridWidth="10" name="lbl_dzec002" notNull="true" posX="3" posY="0" required="true" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzec002" verify="false" widget="Edit"/>
+                  <ComboBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" case="upper" colName="" fieldId="53" gridHeight="1" gridWidth="10" items="" name="lbl_dzec003" posX="13" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzec003" widget="ComboBox"/>
+                  <ButtonEdit action="controlp" aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" case="lower" colName="" fieldId="54" gridHeight="1" gridWidth="30" image="16/openwindow.png" name="lbl_dzec004" posX="23" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzec004" widget="ButtonEdit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="60" gridHeight="1" gridWidth="2" hidden="true" name="lbl_dzec005" posX="53" posY="0" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzec005" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="71" gridHeight="1" gridWidth="2" hidden="true" name="lbl_dzec006" noEntry="true" posX="55" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzec006" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="75" gridHeight="1" gridWidth="2" hidden="true" name="lbl_dzec007" noEntry="true" posX="57" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzec007" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="79" gridHeight="1" gridWidth="2" hidden="true" name="lbl_dzec008" noEntry="true" posX="59" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzec008" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="102" gridHeight="1" gridWidth="2" hidden="true" name="lbl_dzecstus" noEntry="true" posX="61" posY="0" scroll="true" sqlTabName="" tabIndex="106" table_alias_name="" title="lbl_dzecstus" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="67" gridHeight="1" gridWidth="2" hidden="true" name="lbl_dzec002_orig" noEntry="true" posX="63" posY="0" scroll="true" sqlTabName="" tabIndex="-1" table_alias_name="" title="lbl_dzec002_orig" widget="Edit"/>
+                </Table>
+              </VBox>
+            </Page>
+            <Page action="" name="page_PagePrivilege" text="page_PagePrivilege">
+              <VBox gridHeight="27" gridWidth="96" name="vbox8" posX="0" posY="0">
+                <Table doubleClick="modify_grant" gridHeight="25" gridWidth="96" name="table_Privilege" posX="0" posY="1" totalRows="20" unhidableColumns="true" unsortableColumns="true">
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="83" gridHeight="1" gridWidth="1" name="RecordType_Privilege" noEntry="true" posX="0" posY="0" scroll="true" sqlTabName="" tabIndex="85" table_alias_name="" title="" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="84" gridHeight="1" gridWidth="5" hidden="true" name="lbl_dzen001" noEntry="true" posX="1" posY="0" scroll="true" sqlTabName="" tabIndex="86" table_alias_name="" title="lbl_dzen001" widget="Edit"/>
+                  <ComboBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="85" gridHeight="1" gridWidth="8" items="" justify="left" name="lbl_dzen002" notNull="false" posX="6" posY="0" scroll="true" sqlTabName="" tabIndex="87" table_alias_name="" title="lbl_dzen002" unsizable="true" widget="ComboBox"/>
+                  <ComboBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="86" gridHeight="1" gridWidth="8" items="" justify="left" name="lbl_dzen003" notNull="false" posX="14" posY="0" scroll="true" sqlTabName="" tabIndex="88" table_alias_name="" title="lbl_dzen003" unsizable="true" widget="ComboBox"/>
+                  <CheckBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" defaultValue="N" fieldId="87" gridHeight="1" gridWidth="5" name="lbl_dzen004" notNull="true" posX="22" posY="0" sqlTabName="" tabIndex="89" table_alias_name="" text="" title="lbl_dzen004" valueChecked="Y" valueUnchecked="N" widget="CheckBox"/>
+                  <CheckBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" defaultValue="N" fieldId="88" gridHeight="1" gridWidth="5" name="lbl_dzen005" notNull="true" posX="27" posY="0" sqlTabName="" tabIndex="90" table_alias_name="" text="" title="lbl_dzen005" valueChecked="Y" valueUnchecked="N" widget="CheckBox"/>
+                  <CheckBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" defaultValue="N" fieldId="89" gridHeight="1" gridWidth="5" name="lbl_dzen006" notNull="true" posX="32" posY="0" sqlTabName="" tabIndex="91" table_alias_name="" text="" title="lbl_dzen006" valueChecked="Y" valueUnchecked="N" widget="CheckBox"/>
+                  <CheckBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" defaultValue="N" fieldId="90" gridHeight="1" gridWidth="5" name="lbl_dzen007" notNull="true" posX="37" posY="0" sqlTabName="" tabIndex="92" table_alias_name="" text="" title="lbl_dzen007" valueChecked="Y" valueUnchecked="N" widget="CheckBox"/>
+                  <CheckBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" defaultValue="N" fieldId="91" gridHeight="1" gridWidth="5" hidden="true" name="lbl_dzen008" notNull="true" posX="42" posY="0" sqlTabName="" tabIndex="93" table_alias_name="" text="" title="lbl_dzen008" valueChecked="Y" valueUnchecked="N" widget="CheckBox"/>
+                  <CheckBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" defaultValue="N" fieldId="92" gridHeight="1" gridWidth="5" hidden="true" name="lbl_dzen009" notNull="true" posX="47" posY="0" sqlTabName="" tabIndex="94" table_alias_name="" text="" title="lbl_dzen009" valueChecked="Y" valueUnchecked="N" widget="CheckBox"/>
+                  <CheckBox aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" defaultValue="N" fieldId="93" gridHeight="1" gridWidth="5" hidden="true" name="lbl_dzen010" notNull="true" posX="52" posY="0" sqlTabName="" tabIndex="95" table_alias_name="" text="" title="lbl_dzen010" valueChecked="Y" valueUnchecked="N" widget="CheckBox"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="94" gridHeight="1" gridWidth="4" hidden="true" name="lbl_dzen011" posX="57" posY="0" scroll="true" sqlTabName="" tabIndex="96" table_alias_name="" title="lbl_dzen011" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="95" gridHeight="1" gridWidth="4" hidden="true" name="lbl_dzen012" posX="61" posY="0" scroll="true" sqlTabName="" tabIndex="97" table_alias_name="" title="lbl_dzen012" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="97" gridHeight="1" gridWidth="4" hidden="true" name="lbl_dzen013" posX="65" posY="0" scroll="true" sqlTabName="" tabIndex="99" table_alias_name="" title="lbl_dzen013" widget="Edit"/>
+                  <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" fieldId="96" gridHeight="1" gridWidth="4" hidden="true" name="lbl_dzen002_orig" noEntry="true" posX="69" posY="0" scroll="true" sqlTabName="" tabIndex="98" table_alias_name="" title="lbl_dzen002_orig" widget="Edit"/>
+                </Table>
+              </VBox>
+            </Page>
+          </Folder>
+        </VBox>
+      </HBox>
+    </VBox>
+  </Form>
+  <DiagramLayout>
+    <![CDATA[AAAAAgAAAEwAewBiADQAMABjAGMAYwBmADkALQBkADgAZQA1AC0ANAAyAGIANwAtAGIAZQBhAGUALQAxAGUAYgBmAGYAZQAyADYAYgBjAGEAZgB9QGlAAAAAAABANgAAAAAAAD+w5WBBiTdPAQAAAEwAewBiADQANAAwADUAMwBlAGYALQA2ADAANQAxAC0ANAA0ADMAMQAtADgAMwA5ADMALQA5AGEAYgBhAGYANAAyADcAZABjADMAOAB9QHkwAAAAAABAMAAAAAAAAD+x64UeuFHvAQAAAEwAewA1ADgANQA0AGUAYQBjADQALQA2AGYAMgBkAC0ANAAyAGYANgAtADgAZQAzAGUALQBiADcANwA3AGYAMQA1AGUANgBiADIAYwB9wGbgAAAAAABAMwAAAAAAAD+ok3S8an7/AQAAAEwAewA1ADMAYgBlADUAZAAxAGEALQA2ADYAMwAwAC0ANABiAGMAZgAtAGIAMABjADgALQBkADEAYwAwAGIANQBiAGEAZgBhAGQANwB9wG5gAAAAAABAd0AAAAAAAD+qHKwIMSbvAQAAAEwAewAyADAAZQA3ADAAYgAyAGYALQBlADgAZQAyAC0ANAA5AGUANQAtAGEAOQBhADYALQA5ADQAZAA5AGUAYgBlAGEANgA1AGMAMAB9QIGIAAAAAABAQwAAAAAAAD+wYk3S8an/AQAAAEwAewA0ADUAMgBhADYAMAA2AGYALQA0AGEANQBiAC0ANAAwADIAZgAtAGEANwBjADcALQAzADQAZgA0ADgAZQBhADkAYwA0ADcAMAB9QIOYAAAAAABAYGAAAAAAAD+yLQ5WBBiXAQAAAEwAewAzADMANgA5ADIAYgBjAGUALQBjADYAYgA5AC0ANAA0ADEANAAtAGEANQAzADEALQAyADUANwBjADYANQAwADEAMwBhAGYAMQB9QDAAAAAAAABAIAAAAAAAAD+xqfvnbItHAQAAAEwAewA5ADEAYQA5AGMAYwA4ADcALQAyAGQANABhAC0ANAAyAGIAMwAtAGEAOAA2ADAALQBmAGYAZgAwAGUANQAwADUANwA4AGYAMwB9QC4AAAAAAABAZUAAAAAAAD+xaHKwIMSfAQ==]]>
+  </DiagramLayout>
+</ManagedForm>

@@ -1,0 +1,16 @@
+mv sadzp090.4fd ../4fd
+
+chmod 666 ../4fd/sadzp090.4fd
+
+cd $ADZ/4fd
+
+r.f sadzp090
+
+cd $ADZ/4gl
+
+r.c sadzp090
+r.c adzp090
+
+r.l adz
+
+r.l adzp090

@@ -1,0 +1,47 @@
+
+SCHEMA ds
+
+PUBLIC TYPE T_ARGUMENTS RECORD
+              a_args1   VARCHAR(30)
+            END RECORD
+
+PUBLIC TYPE T_TABLE_LIST RECORD 
+              RECORDTYPE   VARCHAR(1), 
+              TABLE_NAME   VARCHAR(100),
+              TABLE_DESC   VARCHAR(100),
+              MODULE_NAME  VARCHAR(20),
+              ALTER_RESULT VARCHAR(1),
+              CHECKOUT_BY  VARCHAR(1024)
+            END RECORD
+           
+TYPE T_SEARCH_CONTENTS RECORD
+       sc_contents  VARCHAR(1024),
+       sc_sql       VARCHAR(4096)
+     END RECORD
+
+PUBLIC TYPE T_DZEE_T RECORD
+              DZEE001 LIKE DZEE_T.DZEE001,
+              DZEE002 LIKE DZEE_T.DZEE002,
+              DZEE003 LIKE DZEE_T.DZEE003,
+              DZEE004 LIKE DZEE_T.DZEE004,
+              DZEE005 LIKE DZEE_T.DZEE005,
+              DZEE006 LIKE DZEE_T.DZEE006,
+              DZEE007 LIKE DZEE_T.DZEE007,
+              DZEE008 LIKE DZEE_T.DZEE008,
+              DZEE009 LIKE DZEE_T.DZEE009,
+              DZEE010 LIKE DZEE_T.DZEE010,
+              DZEE011 LIKE DZEE_T.DZEE011,
+              DZEE013 LIKE DZEE_T.DZEE013
+            END RECORD  
+            
+PUBLIC TYPE T_DZEZ_T RECORD
+              DZEZ001 LIKE DZEZ_T.DZEZ001,
+              DZEZ002 LIKE DZEZ_T.DZEZ002,
+              DZEZ003 LIKE DZEZ_T.DZEZ003,
+              DZEZ004 LIKE DZEZ_T.DZEZ004,
+              DZEZ005 LIKE DZEZ_T.DZEZ005,
+              DZEZ006 LIKE DZEZ_T.DZEZ006,
+              DZEZ007 LIKE DZEZ_T.DZEZ007,
+              DZEZ008 LIKE DZEZ_T.DZEZ008
+            END RECORD  
+     

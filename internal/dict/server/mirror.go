@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -32,10 +33,11 @@ type mirrorJob struct {
 
 // mirrorEnv 单个环境的镜像现状。
 type mirrorEnv struct {
-	Name  string `json:"name"`
-	Zone  string `json:"zone"`
-	Path  string `json:"path"`
-	Ready bool   `json:"ready"` // 本地已有完整基线(增量前提)
+	Name   string `json:"name"`
+	Zone   string `json:"zone"`
+	Path   string `json:"path"`
+	Exists bool   `json:"exists"` // 目录存在（哪怕没拉完）——「清理」按它决定能不能点
+	Ready  bool   `json:"ready"`  // 本地已有完整基线(增量前提)
 }
 
 type mirrorResp struct {
@@ -55,12 +57,18 @@ func (s *Server) hMirrorGet(w http.ResponseWriter, r *http.Request) {
 		for i := range hosts.SSHs {
 			e := &hosts.SSHs[i]
 			envDir := e.MirrorPath(dir)
-			resp.Envs = append(resp.Envs, mirrorEnv{
+			row := mirrorEnv{
 				Name:  e.Name,
 				Zone:  e.Zone,
 				Path:  envDir,
 				Ready: host.MirrorReadyDir(envDir),
-			})
+			}
+			if envDir != "" {
+				if st, err := os.Stat(envDir); err == nil && st.IsDir() {
+					row.Exists = true
+				}
+			}
+			resp.Envs = append(resp.Envs, row)
 		}
 	}
 	resp.Job = s.mirrorSnapshot()

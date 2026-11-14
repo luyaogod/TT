@@ -1,0 +1,34 @@
+#!/bin/ksh
+
+if [ "$1" = "" ] ; then
+   searchitem='*.4gl.cov'
+else
+   searchitem='*'${1}'*'.4gl.cov
+fi
+
+cd $TOP
+find . -name ${searchitem} > $TEMPDIR/awcut.txt
+scale=3; export scale
+
+files=`cat $TEMPDIR/awcut.txt `
+for d in $files
+do
+    dirid=`echo $d |cut -c 1-13 `
+    fileid=`echo $d | awk -F "/" '{print $NF}'`
+
+    cd $dirid
+    nouseline=`grep '  -: ' ${fileid} | wc -l`
+    notestline=`grep ' =====: ' ${fileid} | wc -l`
+    totalline=`cat ${fileid} | wc -l`
+    cmdline=$(echo "($totalline - $nouseline) " | bc -l)
+    testline=$(echo "($totalline - $nouseline - $notestline) " | bc -l)
+
+    # 計算兩個數的平均值
+    covratio=$(echo "($testline / $cmdline) * 100 " | bc -l)
+    echo --------${fileid}---------
+    echo 總行數: ${totalline} 無用行數: ${nouseline}  指令行數: $cmdline
+    echo 未測試: ${notestline}  已測試: $testline
+    echo 測試覆蓋率: ${covratio} 
+
+    cd $TOP
+done

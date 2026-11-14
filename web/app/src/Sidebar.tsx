@@ -102,7 +102,7 @@ export function Sidebar({
     })
   }, [envs, byEnv, query])
 
-  const rowBase = 'group flex h-8 w-full items-center gap-2 rounded-[8px] pr-2 text-left text-[13px] transition-colors'
+  const rowBase = 'group flex h-8 w-full items-center gap-2 rounded-ui pr-2 text-left text-[13px] transition-colors'
   const rowIdle = 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'
   const rowOn = 'bg-accent text-foreground'
 
@@ -111,13 +111,16 @@ export function Sidebar({
   const total = sessions.length
 
   return (
-    <aside className="flex w-[272px] shrink-0 flex-col overflow-hidden bg-card">
+    // 与主区之间那道 1px 分割线:颜色取 --border,与调试台面板间的 sash(.col-resizer)同一个口径。
+    // 画在侧栏**自身**的右边而不是另起一个 <div>:收起侧栏时线跟着消失,不会留一道悬空的边。
+    // 亮色下侧栏是 bg-card(#fff)、主区是 bg-background(#f8f8f8),只差一档白、不画线就是一整片白。
+    <aside className="flex w-[272px] shrink-0 flex-col overflow-hidden border-r border-border bg-card">
       {/* 品牌行:与 DSH 的「deepseek HARNESS」同构 —— 字标 + 一个白底小徽章 + 收起按钮 */}
       <div className="flex h-14 shrink-0 items-center gap-2 px-3.5">
         <span className="text-[16px] font-semibold tracking-tight text-foreground">TT</span>
         <span className="rounded-[3px] bg-foreground px-1 py-px text-[9px] font-semibold leading-[1.4] text-background">T100</span>
         <button onClick={onCollapse} title="收起左侧目录"
-          className="ml-auto flex h-7 w-7 items-center justify-center rounded-[7px] text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground">
+          className="ml-auto flex h-7 w-7 items-center justify-center rounded-ui text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground">
           <PanelLeftClose className="h-4 w-4" />
         </button>
       </div>
@@ -126,7 +129,7 @@ export function Sidebar({
       <div className="px-3">
         <button onClick={onNewSession} disabled={envs.length === 0}
           title={envs.length === 0 ? '先在设置里配一个环境' : '在环境页的「创建会话」里新建一条会话'}
-          className="flex h-9 w-full items-center justify-center gap-1.5 rounded-[10px] border border-border bg-secondary/70 text-[13px] text-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-40">
+          className="flex h-9 w-full items-center justify-center gap-1.5 rounded-ui border border-border bg-secondary/70 text-[13px] text-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-40">
           <Plus className="h-4 w-4" />
           新会话
         </button>
@@ -145,7 +148,7 @@ export function Sidebar({
 
       {filterOpen && (
         <div className="px-3 pb-1">
-          <div className="flex h-7 items-center gap-1 rounded-[7px] border border-border bg-background px-2">
+          <div className="flex h-7 items-center gap-1 rounded-ui border border-border bg-background px-2">
             <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             <input autoFocus value={q} onChange={(e) => setQ(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Escape') { setQ(''); setFilterOpen(false) } }}
@@ -166,7 +169,7 @@ export function Sidebar({
             <div className="text-red-600 dark:text-red-400">读取环境清单失败</div>
             <div className="break-all text-muted-foreground">{envsErr}</div>
             <button onClick={onRefreshEnvs}
-              className="rounded-[7px] border border-border px-2 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground">
+              className="rounded-ui border border-border px-2 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground">
               重试
             </button>
           </div>
@@ -176,7 +179,7 @@ export function Sidebar({
           <div className="space-y-2 p-2 text-xs text-muted-foreground">
             <div>还没有环境。</div>
             <button onClick={onAddEnv}
-              className="rounded-[7px] border border-border px-2 py-1 text-foreground hover:bg-accent">
+              className="rounded-ui border border-border px-2 py-1 text-foreground hover:bg-accent">
               去设置 → 站点管理里添加
             </button>
           </div>
@@ -193,7 +196,7 @@ export function Sidebar({
                   <button
                     title={open ? '收起该环境的会话' : '展开该环境的会话'}
                     onClick={() => setToggled((c) => ({ ...c, [env.name]: !open }))}
-                    className="flex h-6 w-5 shrink-0 items-center justify-center rounded-[5px] text-muted-foreground hover:text-foreground">
+                    className="flex h-6 w-5 shrink-0 items-center justify-center rounded-ui text-muted-foreground hover:text-foreground">
                     <ChevronRight className={cn('h-3.5 w-3.5 transition-transform', open && 'rotate-90')} />
                   </button>
                   <button onClick={() => onSelectEnv(env.name)} title={env.host || env.name}
@@ -230,7 +233,7 @@ export function Sidebar({
                       <button
                         onClick={(e) => { e.stopPropagation(); onCloseSession(s) }}
                         title="结束会话（断开连接并收掉它）"
-                        className="absolute right-1.5 top-1/2 hidden h-6 w-6 -translate-y-1/2 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground group-hover:flex">
+                        className="absolute right-1.5 top-1/2 hidden h-6 w-6 -translate-y-1/2 items-center justify-center rounded-ui text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground group-hover:flex">
                         <CircleX className="h-3.5 w-3.5" />
                       </button>
                     </div>
@@ -263,7 +266,7 @@ function SidebarIcon({ icon: Icon, label, onClick, active }: {
 }) {
   return (
     <button title={label} onClick={onClick}
-      className={cn('flex h-6 w-6 items-center justify-center rounded-[6px] transition-colors',
+      className={cn('flex h-6 w-6 items-center justify-center rounded-ui transition-colors',
         active ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground')}>
       <Icon className="h-3.5 w-3.5" />
     </button>

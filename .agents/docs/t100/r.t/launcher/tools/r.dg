@@ -1,0 +1,61 @@
+######
+# Debug
+######
+
+# Prompt how to work
+if [ "$1" = "" ] ; then
+   echo "Usage: r.dg program_name"
+   exit 1
+# If has no correspond execute binary
+elif [ ! -s ../42r/${1}.42r ] ; then
+   echo "\033[7m${1}\033[m error happens, check if:"
+   echo "  1) Do you specify the right program name ?"
+   echo "  2) File size is zero ?\n"
+   exit 1
+fi
+
+PW=`pwd`
+mod=`pwd|awk -F/ '{print $NF}'`
+
+# Setting source file path, and run the application in debug mode
+#FGLDEBPATH=$FGLDIR/demo/Tools/fgldeb;export FGLDEBPATH
+FGLDEBPATH=$UTL/3rd/fgldeb;export FGLDEBPATH
+FGLLDPATH=$FGLDEBPATH:$FGLDIR/lib:../42m:$FGLLDPATH;export FGLLDPATH
+DBPATH=$DBPATH:$FGLDEBPATH;export DBPATH
+FGLRESOURCEPATH=$FGLDEBPATH;export FGLRESOURCEPATH
+FGLSOURCEPATH=../42m:$COM/lib/42m:$COM/sub/42m:$COM/qry/42m;export FGLSOURCEPATH
+#add by hj
+FGLRESOURCEPATH=$TEMPDIR/fgldeb
+if [ ! -s $FGLRESOURCEPATH ] ; then
+   mkdir $FGLRESOURCEPATH
+fi
+cp $FGLDEBPATH/fgldeb.4?? $FGLRESOURCEPATH
+cp $FGLDEBPATH/*.42f $FGLRESOURCEPATH
+if [ -s ../42s/zh_TW/${1}.42s ] ; then
+   cp -f ../42s/zh_TW/${1}.42s $FGLRESOURCEPATH/.
+   chmod 777 $FGLRESOURCEPATH/${1}.42s
+fi
+FGLRUN=${FGLRUN:=fglrun};export FGLRUN
+cd $FGLRESOURCEPATH
+
+i=2
+
+cf1=`echo $1|cut -c1-3`
+if [ ${cf1} = 'adz' ]
+  then
+    cmd="$FGLRUN $FGLDEBPATH/fgldeb $PW/../42r/${1}.42r BBDL512840855a "
+  else
+    cmd="$FGLRUN $FGLDEBPATH/fgldeb $PW/../42r/${1}.42r BBDL512840855a 2 12345 'N' ${1} "
+fi
+
+while [ $i -le $# ]
+do
+ eval arg=\${$i}
+ cmd="${cmd} '${arg}'"
+ i=`expr $i + 1`
+done
+
+echo $cmd
+eval $cmd
+
+cd $PW

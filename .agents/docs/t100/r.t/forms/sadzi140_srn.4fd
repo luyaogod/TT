@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ManagedForm fileVersion="23200" gstVersion="2320b" name="ManagedForm" uid="{3b7f9f06-ef10-443a-8bbe-3caf15fd3215}">
+  <AGSettings/>
+  <Record additionalTables="" joinLeft="" joinOperator="" joinRight="" name="sr_SerialNumber" order="" uid="{03923f3e-bca7-40d9-b052-906b79c01c01}" where="">
+    <RecordField colName="" fieldIdRef="1" name="cbox_SerialBegin" sqlTabName="" table_alias_name="" uid="{72bf361b-c109-4a4a-9a8c-d7da2b7a7c81}"/>
+    <RecordField colName="gzta030" fieldIdRef="5" fieldType="NON_DATABASE" name="cbox_SerialEnd" sqlTabName="gzta_t" sqlType="VARCHAR" table_alias_name="" uid="{23d37711-d762-44c1-9807-9e90604ed207}"/>
+  </Record>
+  <Form gridHeight="12" gridWidth="44" name="sadzi140_srn" text="sadzi140_srn" windowStyle="withoutToolBar">
+    <VBox gridHeight="7" gridWidth="25" name="VBox1" posX="2" posY="1">
+      <Grid gridHeight="3" gridWidth="25" name="Grid1" posX="0" posY="1">
+        <Label gridHeight="1" gridWidth="10" name="lbl_SerialBegin" posX="1" posY="1" text="lbl_SerialBegin"/>
+        <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="" columnCount="" fieldId="1" gridHeight="1" gridWidth="13" name="cbox_SerialBegin" posX="12" posY="1" rowCount="" sqlTabName="" stepX="" stepY="" tabIndex="1" table_alias_name="" title="ComboBox1" widget="Edit"/>
+        <Label gridHeight="1" gridWidth="10" name="lbl_SerialEnd" posX="1" posY="2" text="lbl_SerialEnd"/>
+        <Edit aggregateColName="" aggregateName="" aggregateTableAliasName="" aggregateTableName="" colName="gzta030" columnCount="" fieldId="5" fieldType="NON_DATABASE" gridHeight="1" gridWidth="13" length="1" name="cbox_SerialEnd" notNull="true" posX="12" posY="2" rowCount="" sqlTabName="gzta_t" sqlType="VARCHAR" stepX="" stepY="" tabIndex="4" table_alias_name="" title="ComboBox1" widget="Edit"/>
+      </Grid>
+      <Grid gridHeight="2" gridWidth="25" name="Grid2" posX="0" posY="4">
+        <Image gridHeight="1" gridWidth="2" name="image2" posX="1" posY="0" stretch="x" style="noBorder"/>
+        <Button gridHeight="1" gridWidth="10" name="btn_OK" posX="4" posY="0" tabIndex="3" text="btn_OK"/>
+        <Button gridHeight="1" gridWidth="10" name="btn_Cancel" posX="15" posY="0" tabIndex="2" text="btn_Cancel"/>
+      </Grid>
+    </VBox>
+  </Form>
+  <DiagramLayout>
+    <![CDATA[AAAAAgAAAEwAewA3ADIAYgBmADMANgAxAGIALQBjADEAMAA5AC0ANABhADQAYQAtADkAYQA4AGMALQBkADcAZABhADIAYgA3AGEANwBjADgAMQB9QCQAAAAAAABAQoAAAAAAAD+Yk3S8an7+AQAAAEwAewAwADMAOQAyADMAZgAzAGUALQBiAGMAYQA3AC0ANAAwAGQAOQAtAGIAMAA1ADIALQA5ADAANgBiADcAOQBjADAAMQBjADAAMQB9wHIAAAAAAADAUEAAAAAAAD+crAgxJul+AQAAAEwAewAyADMAZAAzADcANwAxADEALQBkADcANgAyAC0ANAA0AGMAMQAtADkAOAAwADcALQA5AGUAOQAwADYAMAA0AGUAZAAyADAANwB9QCQAAAAAAABATYAAAAAAAAAAAAAAAAAAAQ==]]>
+  </DiagramLayout>
+</ManagedForm>
