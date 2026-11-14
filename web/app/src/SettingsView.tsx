@@ -1814,7 +1814,7 @@ export function SettingsView() {
                                 </span>
                                 <button
                                   type="button"
-                                  className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+                                  className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-ui text-muted-foreground hover:bg-accent hover:text-foreground"
                                   title={`选择「${e.name}」的库目录`}
                                   onClick={() => {
                                     const idx = sshs.findIndex((x) => sshName(x) === e.name)
@@ -1964,7 +1964,7 @@ export function SettingsView() {
                                   }} />
                                 <button
                                   type="button"
-                                  className="mr-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
+                                  className="mr-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-ui text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
                                   title="选择文件夹"
                                   aria-label="选择文件夹"
                                   disabled={sshIndex < 0}

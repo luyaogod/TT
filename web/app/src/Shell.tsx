@@ -36,7 +36,7 @@ export function IconBtn({ icon: Icon, label, onClick, active, disabled }: {
 }) {
   return (
     <button title={label} onClick={onClick} disabled={disabled}
-      className={cn('flex h-7 w-7 items-center justify-center rounded-[7px] transition-colors',
+      className={cn('flex h-7 w-7 items-center justify-center rounded-ui transition-colors',
         active ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
         'disabled:pointer-events-none disabled:opacity-35')}>
       <Icon className="h-4 w-4" />

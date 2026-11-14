@@ -116,7 +116,7 @@ function CreateSessionPane({ env, count, onCreate }: {
           建完自动跳到它的 Debug 页。
         </p>
 
-        <div className="mt-5 space-y-4 rounded-[12px] border border-border bg-card p-4">
+        <div className="mt-5 space-y-4 rounded-ui border border-border bg-card p-4">
           <label className="block">
             <span className="mb-1.5 block text-xs text-muted-foreground">会话名称</span>
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={placeholder}
@@ -180,13 +180,13 @@ function CreateSessionPane({ env, count, onCreate }: {
             ENT 决定这次连哪个企业；作业编号填了，建完就直接起作业，留空只建空闲会话。
           </p>
 
-          <div className="flex items-start gap-2 rounded-[8px] border border-border bg-muted/30 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+          <div className="flex items-start gap-2 rounded-ui border border-border bg-muted/30 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
             <Bug className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-70" />
             <span>建出来的是<b className="font-medium text-foreground">调试会话</b>：填了作业编号就直接起作业、停在入口，可以下断点、单步、看变量。</span>
           </div>
 
           {err && (
-            <div className="rounded-[8px] border border-red-500/30 bg-red-500/10 px-3 py-2 text-[11px] leading-relaxed text-red-600 dark:text-red-400">
+            <div className="rounded-ui border border-red-500/30 bg-red-500/10 px-3 py-2 text-[11px] leading-relaxed text-red-600 dark:text-red-400">
               {err}
             </div>
           )}

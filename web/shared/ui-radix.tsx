@@ -55,7 +55,7 @@ export function SelectContent({ className, children, position = 'popper', ...pro
         position={position}
         sideOffset={4}
         className={cn(
-          'relative z-50 max-h-[var(--radix-select-content-available-height)] min-w-28 overflow-y-auto overflow-x-hidden border border-border bg-popover text-popover-foreground shadow-md',
+          'relative z-50 max-h-[var(--radix-select-content-available-height)] min-w-28 overflow-y-auto overflow-x-hidden rounded-ui border border-border bg-popover text-popover-foreground shadow-md',
           position === 'popper' && 'w-full min-w-[var(--radix-select-trigger-width)]',
           className,
         )}
@@ -89,6 +89,8 @@ export function SelectItem({ className, children, ...props }:
 }
 
 // ---- Popover(shadcn 规范,Radix 实现):弹层底色/边框走 popover 语义 token ----
+// 圆角与按钮/输入框同值(--radius-ui → 8px)。弹层经 Portal 挂在 body 上,不在
+// .dsh-shell 的作用域里,所以这一档由 app/src/index.css 写在 :root 上,别在这里写死 px。
 export function Popover(props: React.ComponentProps<typeof PopoverPrimitive.Root>) {
   return <PopoverPrimitive.Root {...props} />
 }
@@ -104,7 +106,7 @@ export function PopoverContent({ className, align = 'end', sideOffset = 4, ...pr
       <PopoverPrimitive.Content
         align={align}
         sideOffset={sideOffset}
-        className={cn('z-50 border border-border bg-popover p-0 text-popover-foreground shadow-md outline-none', className)}
+        className={cn('z-50 rounded-ui border border-border bg-popover p-0 text-popover-foreground shadow-md outline-none', className)}
         {...props}
       />
     </PopoverPrimitive.Portal>
@@ -350,6 +352,8 @@ export function DatePicker({ value, onChange, className, title, placeholder = '�
 }
 
 // ---- AlertDialog(shadcn 规范,Radix 实现):二次确认弹窗(不用浏览器原生 confirm) ----
+// 圆角同样取 --radius-ui:弹窗是同一套控件的一块底板,不是第二种圆角。
+// (这里原来**没有圆角类**,computed 是 0px —— 方角弹窗浮在圆角按钮上面,一眼就不对。)
 export function AlertDialog(props: React.ComponentProps<typeof AlertDialogPrimitive.Root>) {
   return <AlertDialogPrimitive.Root {...props} />
 }
@@ -361,7 +365,7 @@ export function AlertDialogContent({ className, children, onEscapeKeyDown, ...pr
       <AlertDialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50" />
       <AlertDialogPrimitive.Content
         className={cn(
-          'fixed top-1/2 left-1/2 z-50 flex w-full max-w-sm -translate-x-1/2 -translate-y-1/2 flex-col gap-2 border border-border bg-card p-4 text-xs text-card-foreground shadow-lg outline-none',
+          'fixed top-1/2 left-1/2 z-50 flex w-full max-w-sm -translate-x-1/2 -translate-y-1/2 flex-col gap-2 rounded-ui border border-border bg-card p-4 text-xs text-card-foreground shadow-lg outline-none',
           className,
         )}
         // Esc **不关**：AlertDialog 的语义是"用户必须做一次选择"（与下面 Dialog 那条注释
@@ -433,7 +437,7 @@ export function DialogContent({ className, children, ...props }:
       <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50" />
       <DialogPrimitive.Content
         className={cn(
-          'fixed top-1/2 left-1/2 z-50 flex max-h-[80vh] w-full max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col gap-2 border border-border bg-card p-4 text-xs text-card-foreground shadow-lg outline-none',
+          'fixed top-1/2 left-1/2 z-50 flex max-h-[80vh] w-full max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col gap-2 rounded-ui border border-border bg-card p-4 text-xs text-card-foreground shadow-lg outline-none',
           className,
         )}
         {...props}
