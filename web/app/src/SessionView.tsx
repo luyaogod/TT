@@ -47,7 +47,7 @@ export function SessionView({ session, tab, onTab, onOpenEnv, leading }: {
       <ViewHeader title={session.name} meta={meta} leading={leading}
         actions={
           <button onClick={onOpenEnv} title={`打开环境「${session.env}」`}
-            className="flex h-7 items-center gap-1 rounded-[7px] border border-border px-2 text-[12px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+            className="flex h-7 items-center gap-1 rounded-ui border border-border px-2 text-[12px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
             <FolderOpen className="h-3.5 w-3.5" />
             {session.env}
           </button>

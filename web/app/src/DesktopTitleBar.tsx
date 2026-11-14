@@ -30,7 +30,7 @@ function MenuItem({ entry, close }: { entry: Extract<Entry, { kind: 'item' }>; c
     <button
       role="menuitem"
       onClick={() => { close(); entry.run() }}
-      className="flex w-full items-center gap-6 rounded-[5px] px-2.5 py-1.5 text-left text-[12px] text-foreground transition-colors hover:bg-accent"
+      className="flex w-full items-center gap-6 rounded-ui px-2.5 py-1.5 text-left text-[12px] text-foreground transition-colors hover:bg-accent"
     >
       <span className="flex-1 whitespace-nowrap">{entry.label}</span>
       {entry.hint && <span className="text-[11px] text-muted-foreground">{entry.hint}</span>}
@@ -46,14 +46,14 @@ function Menu({ label, entries }: { label: string; entries: Entry[] }) {
         <button
           style={NO_DRAG}
           className={cn(
-            'rounded-[5px] px-2 py-1 text-[12px] transition-colors',
+            'rounded-ui px-2 py-1 text-[12px] transition-colors',
             open ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/70 hover:text-foreground',
           )}
         >
           {label}
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" sideOffset={6} className="min-w-[196px] rounded-[8px] border-border bg-popover p-1 shadow-lg">
+      <PopoverContent align="start" sideOffset={6} className="min-w-[196px] border-border bg-popover p-1 shadow-lg">
         {entries.map((e, i) =>
           e.kind === 'sep'
             ? <div key={`sep-${i}`} className="my-1 h-px bg-border" />
