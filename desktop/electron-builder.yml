@@ -6,7 +6,7 @@ directories:
   output: release
   buildResources: build
 
-# 壳自己（asar 里只有这四样）：主进程、启动页/欢迎页、preload、package.json。
+# 壳自己（asar 里只有这几样）：主进程、启动页、preload、package.json。
 # 载荷（tt.exe / tzs / designer / skills）在 extraResources 里，**不进 asar** ——
 # spawn 需要真实路径。
 files:
