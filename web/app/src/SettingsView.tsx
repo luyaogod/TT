@@ -1463,12 +1463,12 @@ export function SettingsView() {
                           <Field label="IP 主机" required>
                             <Input className={input} value={cur.host} onChange={(e) => patchSsh(selSsh, { host: e.target.value })} />
                           </Field>
-                          <Field label="端口">
+                          <Field label="端口" required>
                             {/* min/max 让浏览器先挡一道最明显的手误；真正的权威仍是服务端的 validateHosts */}
                             <Input className={input} type="number" min={1} max={65535} value={cur.port || ''}
                               onChange={(e) => patchSsh(selSsh, { port: Number(e.target.value) || 22 })} />
                           </Field>
-                          <Field label="登录区域">
+                          <Field label="登录区域" required>
                             <Input className={input} value={cur.zone} placeholder="31开发/35测试/36正式/39PATCH/t出货"
                               onChange={(e) => patchSsh(selSsh, { zone: e.target.value })} />
                           </Field>
@@ -1532,7 +1532,7 @@ export function SettingsView() {
                               <Input className={input} value={curDb.host} placeholder="客户端与服务器侧均可达"
                                 onChange={(e) => patchDb(selSsh, { host: e.target.value })} />
                             </Field>
-                            <Field label="端口">
+                            <Field label="端口" required>
                               <Input className={input} type="number" min={0} max={65535} value={curDb.port || ''}
                                 placeholder={curDb.type === 'kingbase' ? '54321' : '1521'}
                                 onChange={(e) => patchDb(selSsh, { port: Number(e.target.value) || 0 })} />
