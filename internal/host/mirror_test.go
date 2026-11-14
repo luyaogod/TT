@@ -216,31 +216,52 @@ func TestPruneBackupFiles(t *testing.T) {
 	}
 }
 
-// 服务器 marker / 归档必须是**按 profile 分开**的。
+// 服务器归档路径：临时目录 + 按 profile 分开 + 每次唯一 + 不碰 $TOP。
 //
-// 否则：先用 source 拉一次，服务器 mark 被 touch 到最新；再按 interface 拉时
-// `find -newer <marker>` 把 42f/42s 全当老文件排除 → 打包 0 个文件、还报"无变更"。
-// 用户看到的是成功，实际一个文件都没拿到 —— 这是最难查的那种"静默空转"。
-func TestMirrorBaseIsPerProfile(t *testing.T) {
-	const top = "/u1/topprod"
-	src := mirrorBase(top, "主机109", MirrorSource)
-	ifc := mirrorBase(top, "主机109", MirrorInterface)
-	if src == ifc {
-		t.Fatalf("两个 profile 的 marker 路径不能相同: %s", src)
+// 四件事任一漏掉都会出事：
+//   - 落在 $TOP → ERP 目录被写脏，且要求登录账号对 $TOP 可写；
+//   - 不分 profile → 同一环境两种 profile 互相覆盖；
+//   - 不唯一 → 两台机器同时拉，一台正在下载的归档被另一台重写；
+//   - 尾斜杠不归一 → 路径里出现 "//"，清理脚本与 SFTP 对不上。
+func TestMirrorTempBase(t *testing.T) {
+	a := mirrorTempBase("/tmp", "主机109", MirrorSource, "aaaaaaaa")
+	b := mirrorTempBase("/tmp", "主机109", MirrorInterface, "aaaaaaaa")
+	c := mirrorTempBase("/tmp", "主机109", MirrorSource, "bbbbbbbb")
+	if a == b || a == c {
+		t.Fatalf("路径必须按 profile 与 nonce 区分: %s / %s / %s", a, b, c)
 	}
-	if !strings.HasPrefix(src, top+"/.tdict-mirror-") || !strings.HasSuffix(src, "-source") {
-		t.Errorf("source marker 路径形状不对: %s", src)
+	if !strings.HasPrefix(a, "/tmp/.tt-mirror-") || !strings.HasSuffix(a, "-source-aaaaaaaa") {
+		t.Errorf("路径形状不对: %s", a)
 	}
-	if !strings.HasSuffix(ifc, "-interface") {
-		t.Errorf("interface marker 路径形状不对: %s", ifc)
+	if strings.Contains(a, "topprod") || strings.Contains(a, "/u1/") {
+		t.Errorf("归档不该落在 $TOP: %s", a)
 	}
-	// 空 profile 按 source 处理（与 ParseMirrorProfile 的约定一致）
-	if got := mirrorBase(top, "主机109", ""); got != src {
+	if got := mirrorTempBase("/tmp/", "主机109", MirrorSource, "aaaaaaaa"); got != a {
+		t.Errorf("尾斜杠应归一, got %s", got)
+	}
+	if got := mirrorTempBase("/tmp", "主机109", "", "aaaaaaaa"); got != a {
 		t.Errorf("空 profile 应等同 source, got %s", got)
 	}
-	// 环境名不同 → 路径不同（避免同服务器多环境互相覆盖）
-	if mirrorBase(top, "正式环境", MirrorSource) == src {
-		t.Error("不同环境应得到不同的 marker 路径")
+	if mirrorTempBase("/tmp", "正式环境", MirrorSource, "aaaaaaaa") == a {
+		t.Error("不同环境应得到不同路径")
+	}
+	if got := mirrorTempBase("/u2/tmpx", "主机109", MirrorSource, "aaaaaaaa"); !strings.HasPrefix(got, "/u2/tmpx/") {
+		t.Errorf("自定义临时目录没生效: %s", got)
+	}
+}
+
+// nonce 必须是每次拉取都变的 8 位十六进制。
+func TestMirrorNonceIsRandom(t *testing.T) {
+	x := mirrorNonce()
+	y := mirrorNonce()
+	if len(x) != 8 || len(y) != 8 {
+		t.Fatalf("nonce 长度应为 8: %q %q", x, y)
+	}
+	if x == y {
+		t.Fatalf("两次 nonce 相同: %q", x)
+	}
+	if strings.ContainsAny(x, "/ \t") {
+		t.Fatalf("nonce 不该含路径/空白字符: %q", x)
 	}
 }
 

@@ -3,7 +3,7 @@
 // 三件事的边界：
 //
 //	ls/cat/head/tail/grep/find/stat/wc/du/get   在线看文件（纯 SFTP，服务器上不起进程）
-//	mirror dir|path|pull                       离线镜像（子集 + 增量，原 tt dict mirror）
+//	mirror dir|path|pull                       离线镜像（子集 + 全量，原 tt dict mirror）
 //
 // 只读不是靠“少给几个命令”，而是靠结构：
 //   - 本包只调用 host.FS 的读原语，没有 Create/Remove/Rename/Mkdir/Chmod；
@@ -65,7 +65,7 @@ func Register(root *cobra.Command) {
   tt file wc    [-l] <文件...>                   行/词/字节
   tt file du    [-s] [--human] [<路径>]                   占用大小（按文件大小累计，1K 块）
   tt file get   <路径> [-o <本地|->]             下载一个文件（默认同名落当前目录）
-  tt file mirror dir|path|pull                   离线镜像（子集 + 增量）
+  tt file mirror dir|path|pull                   离线镜像（子集 + 全量）
 
 范围与保证：
   只读 $TOP 之内；不跟随符号链接（--follow 可开，仍限 $TOP 内）；

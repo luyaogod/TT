@@ -162,7 +162,7 @@ export interface HostsView {
   listen: string // 监听地址在顶层(合并前它藏在 debug.listen 里)
   debug: HostsDebug
   query: { source?: string }
-  mirror: { dir?: string }
+  mirror: { dir?: string; tmpDir?: string }
   // dict 本地字典库根目录；空 = 缺省 <数据目录>/dict
   dict: { dir?: string }
   sync: { target?: string }
@@ -196,7 +196,7 @@ export interface HostsPatch {
   listen?: string
   debug?: HostsDebug
   query?: { source?: string }
-  mirror?: { dir?: string }
+  mirror?: { dir?: string; tmpDir?: string }
   dict?: { dir?: string }
   sync?: { target?: string }
   tdev?: { workspaceSuffix?: string; defaultOut?: string }
@@ -308,8 +308,7 @@ export interface MirrorEnv {
 export interface MirrorJob {
   running: boolean
   env: string
-  full: boolean
-  phase: string // connect|probe|pack|download|done|error
+  phase: string // connect|probe|pack|download|done|error|cancelled
   message: string
   bytes: number
   total: number // 下载阶段为归档总字节;0=未知(pack 阶段)
@@ -565,8 +564,9 @@ export const api = {
   // 字典类动作(源码镜像拉取、字典同步)。合并前它们在 /dict/api/* 下 —— 那是字典页
   // 私有 API;字典页并进设置页之后升到共享层,设置页因此不必跨子系统调用。
   mirror: () => req<MirrorResp>('/api/mirror'),
-  mirrorPull: (env: string, full: boolean) =>
-    req<{ ok: boolean }>('/api/mirror/pull', { method: 'POST', body: JSON.stringify({ env, full }) }),
+  // 全量拉取：服务端只有这一种模式，不再传 full。
+  mirrorPull: (env: string) =>
+    req<{ ok: boolean }>('/api/mirror/pull', { method: 'POST', body: JSON.stringify({ env }) }),
   // 中途取消:ok=false 表示当时没有任务在跑(用户在轮询间隙多点了一次,不算错误)
   mirrorStop: () => req<{ ok: boolean; error?: string }>('/api/mirror/stop', { method: 'POST' }),
   // 「清理」:删掉该环境在本机那份数据(不可撤销)。服务端会拒绝共用目录/根目录/任务在跑,

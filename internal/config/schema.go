@@ -296,6 +296,9 @@ type MirrorSettings struct {
 	// 清空这个输入框会让 sec 里没有 dir 键，而 putSection 会把旧值补回来 ——
 	// 用户看到的就是"清了保存，还是原样"。
 	Dir string `json:"dir"`
+	// TmpDir 服务器侧临时目录（归档先落这里再下载）。空 = 服务器上的 ${TMPDIR:-/tmp}。
+	// 用法：/tmp 分区太小、或想落到数据盘时指一个绝对路径。
+	TmpDir string `json:"tmpDir"`
 }
 
 // DictSettings 本地字典库（SQLite）的根目录（绝对路径）。
