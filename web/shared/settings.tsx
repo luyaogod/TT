@@ -110,13 +110,24 @@ export function SettingRow({ id, label, description, control, className }: {
   )
 }
 
-/** 表单字段:标签在上、控件在下。与 SettingRow 同一套字级与间距,只是不带说明行。 */
-export function Field({ label, children, className }: {
-  label: React.ReactNode; children: React.ReactNode; className?: string
+/**
+ * 表单字段:标签在上、控件在下。与 SettingRow 同一套字级与间距,只是不带说明行。
+ *
+ * required 只负责**标出来**（左侧一颗红色 `*`），不做校验也不拦提交：
+ * 这些表单是"边填边存"的，拦提交等于把用户刚填的东西锁在页面上；
+ * 真正拒收的位置在服务端（如 internal/web 的 validateHosts）。
+ * 屏幕阅读器读的是 `必填` 两个字（星号对它们只是噪音，故 aria-hidden）。
+ */
+export function Field({ label, children, className, required }: {
+  label: React.ReactNode; children: React.ReactNode; className?: string; required?: boolean
 }) {
   return (
     <label className={cn('block', className)}>
-      <span className="block text-xs text-foreground">{label}</span>
+      <span className="block text-xs text-foreground">
+        {required && <span aria-hidden="true" className="mr-1 text-destructive">*</span>}
+        {label}
+        {required && <span className="sr-only">（必填）</span>}
+      </span>
       <span className="mt-1.5 block">{children}</span>
     </label>
   )
