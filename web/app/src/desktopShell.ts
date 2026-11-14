@@ -14,7 +14,6 @@ export interface DesktopShellApi {
   openDataDir: () => void
   reload: () => void
   resetZoom: () => void
-  toggleFullscreen: () => void
   checkUpdate: () => void
   openReleases: () => void
   about: () => void

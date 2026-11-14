@@ -74,10 +74,11 @@ export function DesktopTitleBar() {
     { kind: 'sep' },
     { kind: 'item', label: '退出', run: () => shell.quit() },
   ]
+  // 菜单里**没有全屏**：F11 是调试台的「步入」（see App.tsx 的调试快捷键），
+  // 留着这一项等于把同一个键解释成两件事，而且桌面版真的很少需要全屏。
   const viewMenu: Entry[] = [
     { kind: 'item', label: '重新加载', hint: 'F5', run: () => shell.reload() },
     { kind: 'item', label: '实际大小', hint: 'Ctrl+0', run: () => shell.resetZoom() },
-    { kind: 'item', label: '全屏', hint: 'F11', run: () => shell.toggleFullscreen() },
   ]
   const helpMenu: Entry[] = [
     { kind: 'item', label: '检查更新', run: () => shell.checkUpdate() },

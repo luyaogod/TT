@@ -21,7 +21,6 @@ contextBridge.exposeInMainWorld('ttDesktopShell', {
   openDataDir: () => send('open-data-dir'),
   reload: () => send('reload'),
   resetZoom: () => send('reset-zoom'),
-  toggleFullscreen: () => send('toggle-fullscreen'),
   checkUpdate: () => send('check-update'),
   openReleases: () => send('open-releases'),
   about: () => send('about'),
