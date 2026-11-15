@@ -2,7 +2,7 @@
 //
 //	tt install skills [--to <dir>|auto] [--agent <名字>] [--force] [--dry-run] [--strict]
 //	                                           把官方技能 + 登记的第三方技能复制到目标目录
-//	tt install path   [--dry-run]              把 exe 所在目录追加到**用户** PATH(HKCU，不需要管理员)
+//	tt install path   [--remove] [--dry-run]   把 exe 所在目录加入/移出**用户** PATH(HKCU，不需要管理员)
 //
 // 合并前 TDebug / TDev / TDictCli 各有一份同形实现，注释里写着"命令形态与另外两个一致
 // （改动请三边同步）"。合并后只有这一份。
@@ -55,7 +55,7 @@ func newInstallCmd() *cobra.Command {
 
   tt install skills [--to <dir>|auto] [--agent <名字>] [--force] [--dry-run] [--strict]
                                              把官方技能 + 登记的第三方技能复制到目标目录
-  tt install path   [--dry-run]              把 exe 所在目录追加到用户 PATH(HKCU)`,
+  tt install path   [--remove] [--dry-run]   把 exe 所在目录加入/移出用户 PATH(HKCU)`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("请指定子命令: skills 或 path\n\n%s", cmd.UsageString())
@@ -350,16 +350,22 @@ func isDir(p string) bool {
 
 func newInstallPathCmd() *cobra.Command {
 	var dryRun bool
+	var remove bool
 	cmd := &cobra.Command{
 		Use:   "path",
-		Short: "把 exe 所在目录加入用户 PATH（HKCU，不需要管理员）",
-		Long: `把 tt.exe 所在目录追加到**用户** PATH（HKCU\Environment\Path）。
+		Short: "把 exe 所在目录加入/移出用户 PATH（HKCU，不需要管理员）",
+		Long: `把 tt.exe 所在目录追加到**用户** PATH（HKCU\Environment\Path），或用 --remove 移除。
 
 只动当前用户的注册表项，不需要管理员，绝不碰系统 PATH。已有该项时幂等
 （不重复追加、不重排顺序，原有的 %USERPROFILE% 之类可展开变量原样保留）。
-与 Web 设置页「设置 → 加入 PATH」是同一份实现。`,
+与 Web 设置页「设置 → 加入 PATH」是同一份实现。
+
+--remove 是安装包卸载时用的那一步：把安装目录从用户 PATH 里摘掉（不存在则什么都不做）。
+装的路径与摘的路径都取自**当前这个 exe**，所以只在"从安装目录里运行"时才有意义。`,
 		Example: `  tt install path
-  tt install path --dry-run`,
+  tt install path --dry-run
+  tt install path --remove
+  tt install path --remove --dry-run`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			st, next, changed, err := pathinstall.Preview()
@@ -372,6 +378,10 @@ func newInstallPathCmd() *cobra.Command {
 				}
 				fmt.Printf("%s\n手动命令: %s\n", st.Note, st.Manual)
 				return nil
+			}
+
+			if remove {
+				return runInstallPathRemove(dryRun)
 			}
 
 			if dryRun {
@@ -410,5 +420,56 @@ func newInstallPathCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "只打印将要写入的内容，不碰注册表")
+	cmd.Flags().BoolVar(&remove, "remove", false, "把 exe 所在目录从用户 PATH 里移除（安装包卸载时用）")
 	return cmd
+}
+
+// runInstallPathRemove 执行 `tt install path --remove`。
+//
+// 单独成函数是因为它和"加入"共享同一套输出约定（文本 / JSON / --dry-run），但走的是
+// pathinstall.PreviewRemove 与 Remove 这条路径 —— 从用户 PATH 里把当前 exe 所在目录摘掉。
+func runInstallPathRemove(dryRun bool) error {
+	st, next, changed, err := pathinstall.PreviewRemove()
+	if err != nil {
+		return err
+	}
+	if !st.Supported {
+		if common.IsJSON() {
+			return common.PrintJSON(st)
+		}
+		fmt.Printf("%s\n手动命令: %s\n", st.Note, st.Manual)
+		return nil
+	}
+	if dryRun {
+		if common.IsJSON() {
+			return common.PrintJSON(map[string]any{"ok": true, "dryRun": true, "remove": true,
+				"exeDir": st.ExeDir, "changed": changed, "old": st.UserPath, "new": next})
+		}
+		fmt.Println("(--dry-run，未写注册表)")
+		fmt.Printf("  exe 目录: %s\n", st.ExeDir)
+		if changed {
+			fmt.Printf("  现在(原值): %s\n", st.UserPath)
+			fmt.Printf("  将要写入  : %s\n", next)
+		} else {
+			fmt.Println("  用户 PATH 里没有该目录，无需改动")
+		}
+		return nil
+	}
+	if !changed {
+		if common.IsJSON() {
+			return common.PrintJSON(map[string]any{"ok": true, "changed": false, "remove": true,
+				"exeDir": st.ExeDir, "userPath": st.UserPath})
+		}
+		fmt.Printf("用户 PATH 里没有 %s，无需改动\n", st.ExeDir)
+		return nil
+	}
+	if _, err := pathinstall.Remove(); err != nil {
+		return err
+	}
+	if common.IsJSON() {
+		return common.PrintJSON(map[string]any{"ok": true, "changed": true, "remove": true,
+			"exeDir": st.ExeDir, "userPath": next})
+	}
+	fmt.Printf("已把 %s 从用户 PATH 里移除\n", st.ExeDir)
+	return nil
 }

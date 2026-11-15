@@ -49,7 +49,7 @@ Thumbs.db
 /.claude/launch.json
 
 # 桌面壳(Electron)：依赖、暂存的载荷、打包产物都不入库
-#   payload/ 是 build_desktop.bat 从 dist\tt-portable 拷出来的（含 50MB 的 tt.exe），
+#   payload/ 是 build_desktop.bat 从 .tmp-build\tt-portable 拷出来的（含 50MB 的 tt.exe），
 #   release/ 是 electron-builder 的输出目录（最终制品再拷进 dist\）。
 /desktop/node_modules/
 /desktop/payload/

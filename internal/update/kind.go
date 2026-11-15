@@ -16,15 +16,18 @@ import (
 type Kind int
 
 const (
-	// KindOther 认不出来的布局：没有便携标记、也不在 MSI 的安装目录里。
+	// KindOther 认不出来的布局：没有便携标记、也不在安装版的安装目录里。
 	// 只允许 check。**不许**给它"随便解压一个便携包"的待遇：那会在用户的目录里
 	// 凭空多出一棵 tt-portable/ 树。
 	KindOther Kind = iota
 	// KindPortable 便携包：exe 同目录有 config.PortableMark，整包解压即升级。
 	KindPortable
-	// KindMSI 安装器装的：exe 在 %LOCALAPPDATA%\Programs\TT（见 installer/tt.wxs
-	// 的 INSTALLFOLDER），升级交给 msiexec（per-user，不需要管理员）。
-	KindMSI
+	// KindSetup 安装版：exe 在 %LOCALAPPDATA%\Programs\TT（见 installer/tt-cli.iss
+	// 的 DefaultDirName），升级交给 Inno Setup 安装包的静默安装（per-user，不需要管理员）。
+	//
+	// 这个目录也是旧 MSI 的安装目录：旧 MSI 用户装上 0.6.0 之后 exe 自然落在这里，
+	// 于是直接归入安装版这一类，不需要为历史用户单独留一条判定。
+	KindSetup
 	// KindDesktop 随 TT Desktop（Electron 桌面版）安装的：exe 在
 	// <安装目录>\resources\tt\，同目录有 config.DesktopMark。
 	//
@@ -38,7 +41,7 @@ const (
 // 改了不该让已经落盘的升级计划失效（那是跨进程契约）。
 const (
 	TokenPortable = "portable"
-	TokenMSI      = "msi"
+	TokenSetup    = "setup"
 	TokenDesktop  = "desktop"
 )
 
@@ -46,8 +49,8 @@ func (k Kind) String() string {
 	switch k {
 	case KindPortable:
 		return "便携包"
-	case KindMSI:
-		return "MSI 安装"
+	case KindSetup:
+		return "安装版"
 	case KindDesktop:
 		return "桌面版"
 	default:
@@ -60,8 +63,8 @@ func (k Kind) Token() string {
 	switch k {
 	case KindPortable:
 		return TokenPortable
-	case KindMSI:
-		return TokenMSI
+	case KindSetup:
+		return TokenSetup
 	case KindDesktop:
 		return TokenDesktop
 	default:
@@ -79,8 +82,8 @@ func DetectKind(exePath string) Kind {
 	if _, err := os.Stat(filepath.Join(dir, config.DesktopMark)); err == nil {
 		return KindDesktop
 	}
-	if installDir := msiInstallDir(); installDir != "" && samePath(dir, installDir) {
-		return KindMSI
+	if installDir := setupInstallDir(); installDir != "" && samePath(dir, installDir) {
+		return KindSetup
 	}
 	return KindOther
 }
@@ -100,21 +103,22 @@ func InstallRefusal(k Kind, exePath, version string) string {
 	}
 	if version == "" {
 		return "这份 tt 没有版本号（本地 go build 的产物）：源码态由 `make build` 更新，" +
-			"要装发行版请从 " + RepoPage + "/releases 取 MSI 或便携包"
+			"要装发行版请从 " + RepoPage + "/releases 取安装版或便携包"
 	}
 	switch k {
-	case KindPortable, KindMSI:
+	case KindPortable, KindSetup:
 		return ""
 	default:
-		return fmt.Sprintf("认不出 %s 的安装布局：既没有 %s 标记、也不在 MSI 的安装目录里。"+
-			"要自装请用发行版——MSI 装到 %s，便携包解压后目录里会带 %s 标记",
-			filepath.Dir(exePath), config.PortableMark, msiInstallDir(), config.PortableMark)
+		return fmt.Sprintf("认不出 %s 的安装布局：既没有便携标记、也不在安装版的安装目录里。"+
+			"要自装请用发行版——安装版装到 %s，便携包解压后目录里会带 %s 标记",
+			filepath.Dir(exePath), setupInstallDir(), config.PortableMark)
 	}
 }
 
-// msiInstallDir MSI 的安装目录：%LOCALAPPDATA%\Programs\TT。取不到环境变量时返回空串
-// （判不出 MSI，退回 KindOther，不会误判成别的东西）。
-func msiInstallDir() string {
+// setupInstallDir 安装版的安装目录：%LOCALAPPDATA%\Programs\TT（installer/tt-cli.iss 的
+// DefaultDirName）。取不到环境变量时返回空串（判不出安装版，退回 KindOther，不会误判成
+// 别的东西）。
+func setupInstallDir() string {
 	base := os.Getenv("LOCALAPPDATA")
 	if base == "" {
 		return ""

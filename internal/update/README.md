@@ -4,8 +4,8 @@
 更新器进程。
 
 **在链条的哪一环**：它不碰 ERP，只碰 tt 自己。上游是 GitHub Releases（`luyaogod/TT`），
-下游是三种安装形态的文件替换；命令层（`internal/cli/update.go`）只做参数解析、输出与
-确认，业务都在这里。
+下游是三种安装形态（便携包、Inno 安装版、桌面版）的文件替换；命令层
+（`internal/cli/update.go`）只做参数解析、输出与确认，业务都在这里。
 
 ## 做什么 / 不做什么
 
@@ -14,8 +14,9 @@
 - **查**。读发布元数据（tag、发布时间、资产的 sha256 摘要），与手上这份版本比较。
 - **下**。流式下载 + 边下边算 sha256 + 摘要不符就删；已存在且摘要对得上就跳过（幂等）。
 - **验**。便携包先解到旁边、跑一遍载荷里的 `tt.exe version`，自报版本必须等于目标版本；
-  MSI 靠摘要 + 装完再跑一遍装上去的那个 exe 验版本。
-- **换**。便携包就地覆盖（保留包外文件），MSI 交给 `msiexec /qb`。**由另一个进程做**。
+  安装版靠摘要 + 装完再跑一遍装上去的那个 exe 验版本。
+- **换**。便携包就地覆盖（保留包外文件），安装版交给 Inno Setup 的 Setup.exe 静默安装
+  （`/VERYSILENT /SUPPRESSMSGBOXES /NORESTART`）。**由另一个进程做**。
 - **收口**。记状态与日志；把 agent 目录里的技能树刷成与二进制同版（见 `skills.go`）。
 
 不做（边界比职责更值得写）：
@@ -27,17 +28,46 @@
 - **不合并版本号的两个来源**。二进制自报的版本来自构建注入（根 `VERSION` 文件，严格
   `MAJOR.MINOR.PATCH`），发布 tag 允许带预发布后缀；两者用同一个解析器，因为比较它们
   时必须知道后缀的存在（`0.3.0-rc1` 比 `0.3.0` 旧）。
-- 不管 tt 之外的软件：引擎 exe 与设计器 dll 随包走，更新单位是整包 / MSI。
+- 不管 tt 之外的软件：引擎 exe 与设计器 dll 随包走，更新单位是整包 / 安装版。
+
+## 4 个发布资产与"挑哪一个"
+
+0.6.0 起放弃 MSI，安装版统一改用 Inno Setup。**一次发布固定 4 个资产（x64），文件名是
+发布契约的一部分**：安装脚本按这套名字出包，更新器按同一套名字回挑，任何一边改了都会在
+`PickAssetFor` 那里对不上。
+
+| 形态 | 文件 |
+|---|---|
+| CLI 安装版 | `TT-<ver>-x64-Setup.exe` |
+| CLI 便携版 | `tt-<ver>-x64-portable.zip` |
+| 桌面安装版 | `TT-Desktop-<ver>-x64-Setup.exe` |
+| 桌面便携版 | `TT-Desktop-<ver>-x64.zip` |
+
+只按扩展名挑已经不够用了：发布里有 2 个 `.zip`、2 个 `.exe`，旧的"多个同类就报错"必然
+命中（CLI 与桌面版都在里面）。所以判据是**形态 + 本机架构**（`release.go` 的
+`PickAssetFor`）：
+
+- 架构名由 `ArchName(runtime.GOARCH)` 给出：`amd64` → `x64`。这一版只发布 x64；
+  `arm64` 没有对应资产，结果就是"0 个命中"的明确报错，而不是误装 x64。
+- `KindSetup`：名字以 `-Setup.exe` 结尾（忽略大小写）、含 `-<arch>-`、且**不含**
+  `-desktop` → CLI 安装包。
+- `KindPortable`：名字以 `-portable.zip` 结尾、含 `-<arch>-` → CLI 便携包。
+- `KindDesktop` / `KindOther`：不从发布里取资产（桌面版随 TT Desktop 整体升级）。
+- 0 个或多个命中都报错，信息里列出候选资产名并写明"这台机器是 `<arch>`"。
+  宁可失败也不猜：装错形态的包比不装更难收拾。
 
 ## 独有机制与不变量
 
 **自替换必须由另一个进程完成。** Windows 上运行中的 exe 不能替换自己，而安装目录里还有
 `.tzs` 引擎守护进程与设计器 dll 锁着文件。所以 `tt update` 把自己**复制到 `%TEMP%`**
 再 `winproc.SpawnDetached` 拉起它（`apply.go` 的 `Handoff`），前台随即退出；更新器等前台
-退出、停掉记在计划里的那些 pid、再动手。
+退出、停掉记在计划里的那些 pid、再动手。安装版那边这一步同样需要：Inno 安装器要覆盖的
+就是前台那份 tt.exe，替换由安装器自己完成，per-user 安装（`installer/tt-cli.iss` 的
+DefaultDirName 是 `%LOCALAPPDATA%\Programs\TT`）所以不需要管理员权限、也不弹 UAC。
 
 **计划是跨进程契约。** `.tt-update.json`（状态）、`update/plan.json`（计划）、
 `.tt-update.log`（日志）三份文件的字段名改动要同时想清楚 `tt update log` 与排障。
+安装形态的记号是 `plan.json` 里的 `kind` 字段：`portable` / `setup` / `desktop`。
 
 **落点分两处**（见 `internal/config/README.md` 的缓存清单）：
 
@@ -66,7 +96,7 @@ go test ./internal/update -count=1 -v
 tt update check                      # 只看结论：退出码 10 = 有新版，0 = 已最新
 ```
 
-② 期望结果：`go test` 全绿（27 条）；`tt update check --format table` 打出
+② 期望结果：`go test` 全绿；`tt update check --format table` 打出
 当前版本 / 形态 / 更新源 / 最新版本四行，退出码按上表。真装一次的可重放判据在便携形态上：
 造一个带 `.portable` 的旧版目录，跑 `tt update --yes`，等 `.tt-update.json` 的 `phase`
 变成 `done`，再断言目录里的 `tt.exe version` 等于目标版本、`config.json` 的用户内容还在。
@@ -76,8 +106,8 @@ tt update check                      # 只看结论：退出码 10 = 有新版�
 发布"（`stagePortable` 与 `Apply` 的装后校验）；换完之后 `config.json` 与包外文件仍在
 （`zipx.go` 的 `keepLocal` 与 `copyTree`）；失败时旧 `tt.exe` 回得来（`applyPortable`）。
 
-④ 故意不覆盖什么：**MSI 形态的真机替换没有单测**（要一次真装，见 `tt update log` 的
-`msiexec` 退出码），这是结构上难测而不是留给别的层；`winproc` 的杀进程/探测语义由它自己
+④ 故意不覆盖什么：**安装版的真机替换没有单测**（要一次真装，见 `tt update log` 里安装
+程序的退出码），这是结构上难测而不是留给别的层；`winproc` 的杀进程/探测语义由它自己
 的包负责；HTTP 层只用 `httptest` 假服务，真联网只由 `make update-live-check` 覆盖。
 
 ## 细节去哪

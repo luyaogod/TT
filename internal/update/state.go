@@ -33,7 +33,7 @@ type State struct {
 	Phase      Phase     `json:"phase"`
 	From       string    `json:"from,omitempty"`     // 升级前的版本
 	Target     string    `json:"target,omitempty"`   // 目标版本
-	Kind       string    `json:"kind,omitempty"`     // 安装形态（便携包 / MSI 安装）
+	Kind       string    `json:"kind,omitempty"`     // 安装形态（便携包 / 安装版）
 	Artifact   string    `json:"artifact,omitempty"` // 下载到的制品
 	LogPath    string    `json:"logPath,omitempty"`
 	Error      string    `json:"error,omitempty"`

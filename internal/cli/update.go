@@ -9,7 +9,7 @@ package cli
 //     没给 `--yes` 就拒绝，而不是猜。
 //   - **不对源码态动手**。`make build` 出的仓库根 tt.exe 只允许查，装会被拒（exit 4）。
 //   - **只在显式命令里联网**。`tt serve` 与日常命令都不查；`tt version` 只读缓存。
-//   - 引擎与设计器 dll 随包走，不单独升 —— 更新单位是整包/MSI。
+//   - 引擎与设计器 dll 随包走，不单独升 —— 更新单位是整包/安装版。
 //
 // 退出码（这条线自己的一张表，与 tt dev / tt dict 各不相干，见根帮助的退出码表）：
 //
@@ -79,7 +79,7 @@ func newUpdateCmd() *cobra.Command {
 
   三种安装形态各自怎么装：
     便携包（exe 同目录有 .portable）  下载 zip，解到旁边校验后**就地覆盖**目录
-    MSI 安装（%LOCALAPPDATA%\Programs\TT）  下载 MSI，交给 msiexec /qb
+    安装版（%LOCALAPPDATA%\Programs\TT）  下载 Setup.exe，静默安装
     认不出的布局 / 源码态（make build）    只允许查，装会被拒（退出码 4）
 
   凭什么信得过：
@@ -586,7 +586,7 @@ func emit(cmd *cobra.Command, data any) error {
 //
 // 两个条件都要有：“每 10%”是为了不会因为一条卡住的连接而长时间不说话，
 // “每 10 秒”是为了在慢线路上不会因为 1% 走了很久而反复打同一行（真机跑 22 MB 的
-// MSI 时，只有百分比条件会打出一串 69%）。
+// 安装包时，只有百分比条件会打出一串 69%）。
 func progressTo(w io.Writer, name string) func(got, total int64) {
 	var lastAt time.Time
 	lastPct := -1
@@ -613,7 +613,7 @@ func progressTo(w io.Writer, name string) func(got, total int64) {
 // usageErr / applyErr / netErr 三个出口把这条线的退出码钉在一处：
 // 用法错 2、出网失败 5、落地动作失败 5（"环境与 IO"那一档）。
 //
-// 这三者的错误码分得比退出码细：`UPDATE_NETWORK` 只给出网，覆盖不进去 / msiexec 失败
+// 这三者的错误码分得比退出码细：`UPDATE_NETWORK` 只给出网，覆盖不进去 / 安装程序失败
 // 这类是 `UPDATE_APPLY` —— 两者退出码都是 5，但 agent 靠码分支时不能混。
 func usageErr(msg, hint string) error {
 	return &output.Error{Code: output.CodeUpdateUsage, Exit: 2, Message: msg, Hint: hint}

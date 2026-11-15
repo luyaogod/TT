@@ -50,7 +50,7 @@ const (
 	CodeUpdateRefused  = "UPDATE_REFUSED"  // 这份 tt 不让自装（源码态、认不出的布局）
 	CodeUpdateChecksum = "UPDATE_CHECKSUM" // 摘要/制品自报版本校验不过
 	CodeUpdateNetwork  = "UPDATE_NETWORK"  // 出网失败（代理、限流、超时）
-	CodeUpdateApply    = "UPDATE_APPLY"    // 落地动作失败（覆盖不进去、msiexec 失败、计划读不出）
+	CodeUpdateApply    = "UPDATE_APPLY"    // 落地动作失败（覆盖不进去、安装程序失败、计划读不出）
 
 	// tt file 那条线（只读服务器文件）。本机落盘失败与远端读取失败分开，
 	// 免得把「磁盘满了」报成「服务器连不上」。

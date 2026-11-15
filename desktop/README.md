@@ -7,7 +7,7 @@
 ```
 desktop/
 ├─ package.json          私有包；version 与仓库 VERSION 同步（make version-check 管）
-├─ electron-builder.yml  appId / productName / 用户级 NSIS / extraResources
+├─ electron-builder.yml  appId / productName / 应用目录（--dir）/ extraResources
 ├─ .npmrc                npm 镜像（electron 运行时另由 ELECTRON_MIRROR 指，见下）
 ├─ build/icon.ico        窗口与安装包图标（沿用 installer/icon.ico）
 ├─ src/main.js           生命周期、单实例、窗口、标题栏按钮配色、外链、日志、IPC
@@ -60,14 +60,18 @@ npm run dev
 ## 打包
 
 ```bash
-make desktop-dist   # = build_desktop.bat：复用便携包载荷 → 依赖 → 检查 → electron-builder
+make desktop-dist   # = build_desktop.bat：便携载荷 → 依赖 → 检查 → electron-builder --dir → Inno Setup
 ```
 
-产物落在仓库 `dist\`：`TT-Desktop-<版本>-x64-Setup.exe`（用户级安装，不需要管理员）与
-`TT-Desktop-<版本>-x64.zip`。载荷来自 `dist\tt-portable`，但**去掉** `config.json` 与
-`.portable`、**加上** `.desktop` —— 桌面版的配置必须落在 `%APPDATA%\tt`，与 CLI 共用。
+产物落在仓库 `dist\`：`TT-Desktop-<版本>-x64-Setup.exe`（Inno Setup，用户级安装，
+不需要管理员）与 `TT-Desktop-<版本>-x64.zip`（免安装）。载荷来自
+`.tmp-build\tt-portable`，但**去掉** `config.json` 与 `.portable`、**加上** `.desktop`
+—— 桌面版的配置必须落在 `%APPDATA%\tt`，与 CLI 共用。
 
-镜像：`electron` 运行时与 electron-builder 的 NSIS 二进制默认从 GitHub 取，
+安装器统一 Inno Setup（`installer\tt-desktop.iss`）；electron-builder 只出 `--dir` 的应用目录，
+NSIS 不再参与。免安装 zip 由 `tools/zip -flat` 打，解开就是应用目录。
+
+镜像：`electron` 运行时与 electron-builder 的辅助二进制默认从 GitHub 取，
 `build_desktop.bat` 里用 `ELECTRON_MIRROR` / `ELECTRON_BUILDER_BINARIES_MIRROR` 指到 npmmirror；
 换网络环境改那两行即可。
 

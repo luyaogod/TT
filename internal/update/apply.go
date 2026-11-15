@@ -22,13 +22,13 @@ import (
 // 为什么非要把活儿交给另一个进程：Windows 上运行中的 exe 不能替换自己。前台进程能做的
 // 最有用的一件事，就是把自己复制到临时目录、把这份 plan 交出去、然后退出。
 type Plan struct {
-	Kind     string `json:"kind"`     // KindPortable / KindMSI 的 String()
+	Kind     string `json:"kind"`     // KindPortable / KindSetup 的 String()
 	From     string `json:"from"`     // 升级前版本
 	Target   string `json:"target"`   // 目标版本
 	Dir      string `json:"dir"`      // 便携包：要就地覆盖的目录
 	ExePath  string `json:"exePath"`  // 替换完成后该在哪跑新版（校验用）
 	Stage    string `json:"stage"`    // 便携包：已解好的载荷根（copyTree 的 src）
-	Artifact string `json:"artifact"` // MSI：下载好的 .msi
+	Artifact string `json:"artifact"` // 安装版：下载好的 Setup.exe
 	Digest   string `json:"digest"`   // 制品 sha256（留档，排障时能对回发布）
 	DataDir  string `json:"dataDir"`
 	WaitPID  int    `json:"waitPid"` // 前台进程；更新器等它退出再动手
@@ -126,7 +126,7 @@ func Handoff(p *Plan) (int, error) {
 // 的地方。
 func Apply(ctx context.Context, p *Plan, log func(string, ...any)) error {
 	st := &State{Phase: PhaseApplying, From: p.From, Target: p.Target, Kind: p.Kind, StartedAt: time.Now()}
-	if p.Kind == TokenMSI {
+	if p.Kind == TokenSetup {
 		st.Artifact = p.Artifact
 	} else {
 		st.Artifact = p.Stage
@@ -157,8 +157,8 @@ func Apply(ctx context.Context, p *Plan, log func(string, ...any)) error {
 	switch p.Kind {
 	case TokenPortable:
 		applyErr = applyPortable(p, log)
-	case TokenMSI:
-		applyErr = applyMSI(ctx, p, log)
+	case TokenSetup:
+		applyErr = applySetup(ctx, p, log)
 	case TokenDesktop:
 		// 正常情况下走不到：InstallRefusal 在"查"那一步就把桌面版挡掉了。
 		// 留这个分支是因为升级计划是**跨进程落盘**的（update.Plan），
@@ -236,35 +236,43 @@ func applyPortable(p *Plan, log func(string, ...any)) error {
 // BackupDir 旧 tt.exe 的备份目录（便携包目录下的隐藏子目录，跟着包走）。
 func (p *Plan) BackupDir() string { return filepath.Join(p.Dir, ".tt-update-prev") }
 
-// applyMSI 把新的 MSI 交给 msiexec。
+// applySetup 用 Inno Setup 的静默参数跑下载好的 Setup.exe。
 //
-// per-user 安装（见 installer/tt.wxs）所以不需要管理员权限，也不该弹 UAC；
-// `/qb` 给最简进度界面而不是 `/qn` —— 升级是几分钟的事，全静默时用户看不到任何东西，
-// 只能等。退出码 0 成功 / 3010 成功但需重启 / 1641 成功且已安排重启。
-func applyMSI(ctx context.Context, p *Plan, log func(string, ...any)) error {
+// 安装版是 per-user 安装（`installer/tt-cli.iss` 的 DefaultDirName 是
+// %LOCALAPPDATA%\Programs\TT），所以不需要管理员权限，也不该弹 UAC；替换旧文件由
+// Inno 安装器自己完成（它会等要覆盖的 tt.exe 不再被占用 —— 前台进程已退出、后台服务
+// 与引擎守护进程已停，见 Apply 的顺序）。
+//
+// `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART`：全静默、不弹任何框、不擅自重启机器。
+// Inno 的退出码只有 0 是成功；非 0 一律失败，并把退出码带进错误里（排障时那是最先要
+// 看的数字）。
+func applySetup(ctx context.Context, p *Plan, log func(string, ...any)) error {
 	if runtime.GOOS != "windows" {
-		return errors.New("MSI 安装形态只在 Windows 上可用")
+		return errors.New("安装版只在 Windows 上可用")
 	}
 	if p.Artifact == "" {
-		return errors.New("MSI 升级计划缺少安装包路径")
+		return errors.New("安装版升级计划缺少安装包路径")
 	}
-	msiexec := filepath.Join(os.Getenv("SystemRoot"), "System32", "msiexec.exe")
-	if _, err := os.Stat(msiexec); err != nil {
-		msiexec = "msiexec.exe" // 交给 PATH 解析，报错时至少信息是清楚的
-	}
-	log("运行 %s /i %s /qb /norestart", msiexec, p.Artifact)
+	const args = "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART"
+	log("运行 %s %s", p.Artifact, args)
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, msiexec, "/i", p.Artifact, "/qb", "/norestart")
+	cmd := exec.CommandContext(ctx, p.Artifact, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART")
 	out, err := cmd.CombinedOutput()
-	code := cmd.ProcessState.ExitCode()
+	code := -1
+	if cmd.ProcessState != nil {
+		code = cmd.ProcessState.ExitCode()
+	}
 	if len(out) > 0 {
-		log("msiexec 输出: %s", strings.TrimSpace(string(out)))
+		log("安装程序输出: %s", strings.TrimSpace(string(out)))
 	}
-	if err != nil && code != 3010 && code != 1641 {
-		return fmt.Errorf("msiexec 失败（退出码 %d）: %w", code, err)
+	if err != nil {
+		return fmt.Errorf("安装程序失败（退出码 %d）: %w", code, err)
 	}
-	log("msiexec 退出码 %d", code)
+	if code != 0 {
+		return fmt.Errorf("安装程序失败（退出码 %d）", code)
+	}
+	log("安装程序退出码 %d", code)
 	return nil
 }
 
