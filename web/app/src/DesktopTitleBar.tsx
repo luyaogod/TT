@@ -8,7 +8,12 @@
 // 才能保住 Windows 11 的最大化贴靠与高 DPI 下的正确绘制。
 //
 // 浏览器版没有 window.ttDesktopShell，这个组件直接不渲染。
+//
+// 这一条栏还负责「收起/展开左侧目录」这唯一一个入口：它钉在窗口最左上角，侧栏收起与否
+// 都在同一个位置（不像从前那样"展开时按钮在侧栏里、收起后跑到主面板标题行上"）。
+// 侧栏与主面板因此都不再管侧栏的收展，那个状态只归外壳（App.tsx 的 collapsed）。
 import { useState, type CSSProperties } from 'react'
+import { PanelLeft } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '../../shared/ui-radix'
 import { desktopShell } from './desktopShell'
 import { cn } from '../../shared/utils'
@@ -64,7 +69,11 @@ function Menu({ label, entries }: { label: string; entries: Entry[] }) {
   )
 }
 
-export function DesktopTitleBar() {
+export function DesktopTitleBar({ collapsed, onToggleSidebar }: {
+  /** 左侧目录是否已收起（只用于按钮的提示文案，状态本身在外壳里）。 */
+  collapsed: boolean
+  onToggleSidebar: () => void
+}) {
   const shell = desktopShell()
   if (!shell) return null
 
@@ -94,6 +103,20 @@ export function DesktopTitleBar() {
     >
       {/* 不放假品牌块：窗口按钮右边那三颗系统的已经说明"这是什么应用"，
           再挂一个 TT 字标只是把界面又缩小一寸。拖拽区靠右边的空白（整条都是 drag）。 */}
+      {/* 收起/展开左侧目录：整窗唯一的入口，钉在最左上（DSH 同款位置）。
+          用 panel-left 而不是 panel-left-close：它是"切换"，收起与展开是同一个动作的两种结果，
+          按钮本身不该换图标 —— 换了就等于说"这是两件事"。 */}
+      <button
+        type="button"
+        style={NO_DRAG}
+        onClick={onToggleSidebar}
+        title={collapsed ? '展开左侧目录' : '收起左侧目录'}
+        aria-label={collapsed ? '展开左侧目录' : '收起左侧目录'}
+        aria-pressed={!collapsed}
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-ui text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
+      >
+        <PanelLeft className="h-4 w-4" />
+      </button>
       <Menu label="文件" entries={fileMenu} />
       <Menu label="视图" entries={viewMenu} />
       <Menu label="帮助" entries={helpMenu} />

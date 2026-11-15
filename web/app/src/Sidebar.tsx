@@ -2,7 +2,7 @@
 //
 // 环境来自真实配置(`/api/hosts` 的 `sshs`),会话来自 `store.sessions` —— 那里面每一条都是
 // **服务端真实的会话句柄**(`POST /api/sessions/new` 建出来的,见 store.createSession)。
-// 形状按 DSH 的工作站:顶部品牌 + 「新会话」、中间一棵树、底部设置。
+// 形状按 DSH 的工作站:顶部品牌、中间一棵树、底部设置。
 //
 // 会话行的形状(用户 2026-10-18 定的):
 //   · 左边一个**状态圆点**(灰=空闲 / 蓝=登录中 / 绿=运行 / 橙=停站 / 红=已退出),
@@ -11,10 +11,14 @@
 //   · 悬停时右侧换成「结束会话」按钮(点击**不**进会话页,只收掉它)。
 //
 // 交互:点会话名进会话页;小箭头只负责展开/收起(改名/删除留到后面,别在壳子里塞半套 CRUD)。
+//
+// 收侧栏按钮**不常驻这里**:桌面版把它挪到窗口标题栏的最左上(见 DesktopTitleBar),侧栏
+// 收起后它还在原处。浏览器版没有那一条栏,收起入口只能留在品牌行 —— 所以这里收的是
+// 可选的 onCollapse:传了才画按钮,不传就只留品牌。
 import { useEffect, useMemo, useState } from 'react'
 import {
   ChevronRight, CircleX, Folder, FolderOpen, FolderPlus, PanelLeftClose,
-  Plus, Puzzle, RefreshCw, Search, Settings, X,
+  Puzzle, RefreshCw, Search, Settings, X,
 } from 'lucide-react'
 import { cn } from '../../shared/utils'
 import type { Route } from './routing'
@@ -35,11 +39,11 @@ export interface SidebarProps {
   onSelectSession: (s: SessionItem) => void
   onSelectPlugin: (route: string) => void
   onCloseSession: (s: SessionItem) => void
-  onNewSession: () => void
   onSettings: () => void
   onRefreshEnvs: () => void
   onAddEnv: () => void
-  onCollapse: () => void
+  /** 收起侧栏；桌面版这个按钮在标题栏上，所以这里可能不传（见文件头）。 */
+  onCollapse?: () => void
 }
 
 /** 会话类型的短名(左树与会话页共用这一份口径)。 */
@@ -66,7 +70,7 @@ function stateOf(states: Record<string, string>, id: string) {
 
 export function Sidebar({
   envs, envsLoaded, envsErr, sessions, states, route, plugins,
-  onSelectEnv, onSelectSession, onSelectPlugin, onCloseSession, onNewSession, onSettings, onRefreshEnvs, onAddEnv, onCollapse,
+  onSelectEnv, onSelectSession, onSelectPlugin, onCloseSession, onSettings, onRefreshEnvs, onAddEnv, onCollapse,
 }: SidebarProps) {
   // 展开状态:按环境名记住**用户显式开/关过**的选择。
   // 没选过时:有会话才默认展开 —— 一个会话都没有的环境展开着只剩一行「还没有会话」,
@@ -122,24 +126,17 @@ export function Sidebar({
     // 画在侧栏**自身**的右边而不是另起一个 <div>:收起侧栏时线跟着消失,不会留一道悬空的边。
     // 亮色下侧栏是 bg-card(#fff)、主区是 bg-background(#f8f8f8),只差一档白、不画线就是一整片白。
     <aside className="flex w-[272px] shrink-0 flex-col overflow-hidden border-r border-border bg-card">
-      {/* 品牌行:与 DSH 的「deepseek HARNESS」同构 —— 字标 + 一个白底小徽章 + 收起按钮 */}
+      {/* 品牌行:与 DSH 的「deepseek HARNESS」同构 —— 字标 + 一个白底小徽章。
+          收起按钮只在浏览器版出现（桌面版在标题栏上，见文件头与 DesktopTitleBar）。 */}
       <div className="flex h-14 shrink-0 items-center gap-2 px-3.5">
         <span className="text-[16px] font-semibold tracking-tight text-foreground">TT</span>
         <span className="rounded-[3px] bg-foreground px-1 py-px text-[9px] font-semibold leading-[1.4] text-background">T100</span>
-        <button onClick={onCollapse} title="收起左侧目录"
-          className="ml-auto flex h-7 w-7 items-center justify-center rounded-ui text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground">
-          <PanelLeftClose className="h-4 w-4" />
-        </button>
-      </div>
-
-      {/* 新会话:与环境页的「创建会话」Tab 是同一个动作,这里只是给它一个常驻入口 */}
-      <div className="px-3">
-        <button onClick={onNewSession} disabled={envs.length === 0}
-          title={envs.length === 0 ? '先在设置里配一个环境' : '在环境页的「创建会话」里新建一条会话'}
-          className="flex h-9 w-full items-center justify-center gap-1.5 rounded-ui border border-border bg-secondary/70 text-[13px] text-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-40">
-          <Plus className="h-4 w-4" />
-          新会话
-        </button>
+        {onCollapse && (
+          <button onClick={onCollapse} title="收起左侧目录"
+            className="ml-auto flex h-7 w-7 items-center justify-center rounded-ui text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground">
+            <PanelLeftClose className="h-4 w-4" />
+          </button>
+        )}
       </div>
 
       {/* 区块标题:环境 + 三个小动作(搜索 / 刷新 / 去设置里加环境) */}
