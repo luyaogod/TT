@@ -95,6 +95,41 @@ func SpawnDetached(exe string, args []string, logPath string, extraEnv ...string
 	return cmd.Process.Pid, nil
 }
 
+// ExecutablePath 取 pid **现在**跑的那个可执行文件的路径；拿不到（进程已退出、
+// 没权限、不是 Windows）返回空串。
+//
+// 为什么需要它：pid 会被复用。停一个后台子进程之前，光确认「这个 pid 还活着」不够 ——
+// 插件 system 记录的是**可执行文件**（路径 + 摘要），这里取当前 pid 的镜像路径去比对，
+// 判据是"路径/摘要对不上 = pid 被复用了 = 不要动它"（见 internal/plugin 的 shouldKill）。
+//
+// 用 QueryFullProcessImageNameW 而不是读 PEB：后者要求 PROCESS_VM_READ（更高权限），
+// 而查询镜像路径只需要 PROCESS_QUERY_LIMITED_INFORMATION —— 与 Alive 同一个门槛，
+// 于是"能不能判活"与"能不能核对身份"不会出现两套权限要求。
+func ExecutablePath(pid int) string {
+	if pid <= 0 {
+		return ""
+	}
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	if err != nil {
+		return ""
+	}
+	defer windows.CloseHandle(h)
+	buf := make([]uint16, windows.MAX_PATH)
+	size := uint32(len(buf))
+	if err := windows.QueryFullProcessImageName(h, 0, &buf[0], &size); err != nil {
+		// 路径比 MAX_PATH 长时，QueryFullProcessImageName 会回填所需长度（含结尾 NUL）。
+		// size 没变 = 不是"缓冲区不够"，别再拿同样的长度试一次。
+		if size <= uint32(len(buf)) {
+			return ""
+		}
+		buf = make([]uint16, size)
+		if err := windows.QueryFullProcessImageName(h, 0, &buf[0], &size); err != nil {
+			return ""
+		}
+	}
+	return windows.UTF16ToString(buf[:size])
+}
+
 // Alive 判断 pid 是否存活。用于快速失败，**不用于身份判断**：pid 会被复用，
 // 而且「进程活着」不等于「它在监听」。
 func Alive(pid int) bool {

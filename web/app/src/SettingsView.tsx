@@ -46,6 +46,7 @@ import {
 } from '../../shared/ui-radix'
 import { Card, Field, InfoRow, SectionTitle, SettingRow } from '../../shared/settings'
 import { DirPicker } from './DirPicker'
+import { PluginsSettings } from './PluginsSettings'
 import { SkillsView } from './SkillsView'
 import { useToast } from './toast'
 import { useStore, type ThemeMode } from './store'
@@ -1371,7 +1372,7 @@ export function SettingsView() {
       <div className={cn('min-h-0 flex-1 px-1', section === 'sites' ? 'overflow-hidden' : 'overflow-auto')}>
         <div className={cn('mx-auto p-4', section === 'sites'
           ? 'flex h-full min-h-0 max-w-5xl flex-col gap-3'
-          : section === 'skills' ? 'max-w-5xl space-y-3' : 'max-w-3xl space-y-3')}>
+          : section === 'skills' || section === 'plugins' ? 'max-w-5xl space-y-3' : 'max-w-3xl space-y-3')}>
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-sm font-medium text-foreground">
               {SETTINGS_SECTIONS.find((s) => s.key === section)?.label}
@@ -2070,6 +2071,7 @@ export function SettingsView() {
           )}
 
           {/* ============ 技能 ============ */}
+          {section === 'plugins' && <PluginsSettings />}
           {section === 'skills' && <SkillsView />}
 
           {/* ============ 应用设置 ============ */}

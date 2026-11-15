@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"tt/internal/fetch"
+	"tt/internal/winproc"
 )
 
 // UpdateRuntime 升级/回滚期间对**运行态**的操作。
@@ -280,8 +281,12 @@ func (m *Manager) ensureServiceIdle(rec *Record) error {
 	if err != nil || st == nil {
 		return nil
 	}
-	if st.State != "running" || st.PID <= 0 || !st.Alive() {
-		return nil // 遗留的运行状态：诊断项（tt plugin doctor）会指出来，不该挡住升级
+	if st.State != "running" || st.PID <= 0 {
+		return nil // 已经收工的状态：不是"正在跑"，不该挡住升级
+	}
+	// PID 存活不够：复用的 PID 会把"别人的进程"当成插件服务，从而永远拒绝升级（P3-14）。
+	if reason := st.StaleReason(winproc.Alive(st.PID), processIdentity(st.PID)); reason != "" {
+		return nil // 遗留/复用的运行状态：诊断项（tt plugin doctor）会指出来，不该挡住升级
 	}
 	return fmt.Errorf("插件 %s 的常驻服务正由另一个 tt 进程（tt serve）运行（pid=%d）：命令行升级会留下"+
 		"「页面新、服务旧」的混用状态。先 tt serve --stop 再升级，升级完重新启动 tt serve", rec.ID, st.PID)

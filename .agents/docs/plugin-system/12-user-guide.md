@@ -37,6 +37,8 @@ tt plugin grant  com.example.myplugin --allow db.connect --env prod   # 只改�
 - 清单里声明的 `permissions` 只是诉求；不给 `--env` 就没有任何环境可用 —— 这是有意的默认。
 - `tt plugin enable` 之后：CLI 命名空间出现在 `tt --help`，页面出现在菜单，技能进入分发
   期望态；有常驻服务的插件，服务由 `tt serve` 拉起（命令行自己不起长命进程）。
+- 同样的动作也可以在 **设置 → 插件管理** 里做：勾选能力与环境后启用、停用、自检、看日志；
+  两侧写的是同一份注册表，不另存一套状态。
 
 ## 3. 停用与卸载
 

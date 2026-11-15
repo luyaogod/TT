@@ -1,6 +1,8 @@
 package plugin
 
 import (
+	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"tt/internal/config"
 	"tt/internal/connsvc"
@@ -226,6 +229,96 @@ func TestUIHandlerSwitchesWithActiveVersion(t *testing.T) {
 	res := do(h, "GET", "/plugins/com.example.ui/ui/", "127.0.0.1:5000")
 	if res.Code != 200 || !strings.Contains(res.Body.String(), "新版本页面") {
 		t.Fatalf("该从新版本目录取页面，得 %d（%s）", res.Code, res.Body.String())
+	}
+}
+
+// TestUIHandlerEndToEndHostAPIAndOwnService 参考插件「页面 + 常驻服务」的端到端链路（P5-17）：
+//
+//	安装 → 启用（授权 profiles.list + prod）→ supervisor 起服务 →
+//	(a) 页面经桥 /plugins/{id}/hostrpc/tt.host.v1.ProfilesService/List 拿到**已授权环境**；
+//	(b) 页面经 /plugins/{id}/rpc/echo 打到插件**自己的服务**。
+//
+// 边界：这里用 httptest 直接调 WebHandler，**没有真浏览器**。所以它验的是"页面那条
+// HTTP 路径 + 服务端身份/授权"是真的，不验 iframe 的 sandbox/消息桥（那部分由
+// web/app/scripts/plugins.test.mjs 的纯 Node 用例覆盖）。两者合起来才是完整链路。
+func TestUIHandlerEndToEndHostAPIAndOwnService(t *testing.T) {
+	m, s := newManager(t)
+	pkg := buildReferencePlugin(t)
+	rec := installRef(t, m, pkg)
+	if _, err := m.Enable(rec.ID, Grants{Capabilities: []string{"profiles.list"}, Envs: []string{"prod"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfgPath := s.Locations().ConfigPath
+	if err := config.SaveHosts(cfgPath, config.Hosts{SSHs: []config.NamedSsh{
+		{Name: "prod", SSHConfig: config.SSHConfig{Host: "10.0.0.1", Port: 22, User: "u"}},
+		{Name: "test", SSHConfig: config.SSHConfig{Host: "10.0.0.2", Port: 22, User: "u"}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	tokens := hostrpc.NewTokenStore()
+	conn := connsvc.New(connsvc.Options{ConfigPath: cfgPath, Authorizer: RegistryAuthorizer{Store: s}})
+	sup := NewSupervisor(s, tokens, conn, "", "test")
+	sup.Logf = t.Logf
+	sup.StartTimeout = 10 * time.Second
+	sup.HealthTimeout = 10 * time.Second
+	sup.StopGrace = 2 * time.Second
+	t.Cleanup(sup.StopAll)
+	if _, err := sup.Start(context.Background(), rec); err != nil {
+		t.Fatalf("起插件服务失败: %v", err)
+	}
+
+	// 真的 Host API（与 tt serve 同构：同一份 connsvc + 同一张令牌表）。
+	api := httptest.NewServer(hostrpc.NewHandler(hostrpc.Deps{
+		Service: conn, Auth: hostrpc.NewTokenAuthenticator(tokens),
+	}))
+	t.Cleanup(api.Close)
+
+	h := NewWebHandler(s, sup.Endpoint)
+	h.HostAPIURL = api.URL + hostrpc.Prefix
+	h.Tokens = tokens
+	handler := h.Handler()
+
+	// 页面本身能取到（活跃版本目录里的参考插件页面）。
+	page := do(handler, "GET", "/plugins/"+rec.ID+"/ui/", "127.0.0.1:5000")
+	if page.Code != 200 || !strings.Contains(page.Body.String(), "参考插件页面") {
+		t.Fatalf("插件页面没取到: %d（%s）", page.Code, page.Body.String())
+	}
+
+	// (a) 经桥调 Host API：只返回该插件**获授权**的环境。
+	req := httptest.NewRequest("POST",
+		"/plugins/"+rec.ID+"/hostrpc/tt.host.v1.ProfilesService/List", strings.NewReader("{}"))
+	req.RemoteAddr = "127.0.0.1:5000"
+	req.Header.Set("Content-Type", "application/json")
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req)
+	if rec2.Code != 200 {
+		t.Fatalf("桥接调 Host API 失败: %d（%s）", rec2.Code, rec2.Body.String())
+	}
+	var list struct {
+		Profiles []struct {
+			Env string `json:"env"`
+		} `json:"profiles"`
+	}
+	if err := json.Unmarshal(rec2.Body.Bytes(), &list); err != nil {
+		t.Fatalf("Host API 响应不是预期 JSON: %v（%s）", err, rec2.Body.String())
+	}
+	var envs []string
+	for _, p := range list.Profiles {
+		envs = append(envs, p.Env)
+	}
+	if len(envs) != 1 || envs[0] != "prod" {
+		t.Fatalf("插件页面只该看到已授权的 prod，得 %v", envs)
+	}
+	// 桥用完即撤销：令牌表里只剩服务实例自己那一个。
+	if tokens.Count() != 1 {
+		t.Errorf("桥接后该只剩服务实例令牌，得 %d", tokens.Count())
+	}
+
+	// (b) 经 /rpc/ 打到插件自己的服务（参考插件 /echo 回自己的标识）。
+	rpc := do(handler, "POST", "/plugins/"+rec.ID+"/rpc/echo", "127.0.0.1:5000")
+	if rpc.Code != 200 || !strings.Contains(rpc.Body.String(), `"plugin":"refplugin"`) {
+		t.Fatalf("插件自身服务没有回答: %d（%s）", rpc.Code, rpc.Body.String())
 	}
 }
 

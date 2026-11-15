@@ -11,7 +11,19 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-import { isPluginRoute, parseRoute, routeHash, routeView } from '../src/routing'
+import { isPluginRoute, isSettingsSection, parseRoute, routeHash, routeView, SETTINGS_SECTIONS } from '../src/routing'
+import {
+  CAPABILITY_LABELS,
+  capabilityLabel,
+  contributionLabels,
+  doctorSummary,
+  grantsPayload,
+  logsSummary,
+  needsEnvSelection,
+  pluginStatus,
+  sortIssues,
+  ungrantedPermissions,
+} from '../src/pluginAdmin'
 import {
   DENIED_ADMIN_PATHS,
   isDeniedAdminPath,
@@ -387,4 +399,71 @@ function makeBridge(transport = {}) {
   console.log('OK 15) iframe sandbox 只有 allow-scripts')
 }
 
-console.log('\n全部通过：插件路由 / 菜单 / 拒绝清单 / 消息桥共 15 组判定')
+// ---------------------------------------------------------------------------
+// 16) 设置页「插件管理」：分区接线 + 管理视图的纯逻辑
+// ---------------------------------------------------------------------------
+{
+  // 分区必须同时在类型（isSettingsSection）、左树清单与 SettingsView 的渲染里。
+  assert.equal(parseRoute('#settings/plugins').section, 'plugins', '#settings/plugins 必须落插件管理')
+  assert.equal(isSettingsSection('plugins'), true)
+  assert.equal(routeHash({ kind: 'settings' }, 'plugins'), '#settings/plugins')
+  const section = SETTINGS_SECTIONS.find((s) => s.key === 'plugins')
+  assert.equal(section?.label, '插件管理')
+  const settingsSrc = readFileSync(new URL('../src/SettingsView.tsx', import.meta.url), 'utf8')
+  assert.ok(settingsSrc.includes("from './PluginsSettings'"), 'SettingsView 必须 import PluginsSettings')
+  assert.ok(settingsSrc.includes("section === 'plugins' && <PluginsSettings />"), 'plugins 分区必须渲染 PluginsSettings')
+
+  // 状态徽标：degraded 优先；启用但没运行态 = 已启用；停用 = 未启用。
+  assert.deepEqual(pluginStatus({ id: 'p', version: '1', enabled: true, state: 'degraded' }),
+    { label: '降级', tone: 'red' })
+  assert.deepEqual(pluginStatus({ id: 'p', version: '1', enabled: true, state: 'running' }),
+    { label: '运行中', tone: 'green' })
+  assert.deepEqual(pluginStatus({ id: 'p', version: '1', enabled: true }),
+    { label: '已启用', tone: 'green' })
+  assert.deepEqual(pluginStatus({ id: 'p', version: '1', enabled: false, state: 'running' }),
+    { label: '未启用', tone: 'gray' })
+
+  // 贡献面：四类各一条；没有贡献时给一句说明而不是空白。
+  assert.deepEqual(contributionLabels({
+    id: 'com.example.demo', version: '1', enabled: true,
+    namespace: 'demo', hasService: true, route: 'demo', skillDirs: ['skills/a', 'skills/b'],
+  }), ['CLI tt demo', '常驻服务', '页面 #plugin/demo', '技能 × 2'])
+  assert.deepEqual(contributionLabels({ id: 'p', version: '1', enabled: true }), ['（无贡献）'])
+
+  // 声明 ≠ 授权：只把没授予的列出来（启用面板默认勾选的就是这些）。
+  assert.deepEqual(ungrantedPermissions({
+    id: 'p', version: '1', enabled: false,
+    permissions: ['profiles.list', 'db.connect'], capabilities: ['profiles.list'],
+  }), ['db.connect'])
+  assert.deepEqual(ungrantedPermissions({
+    id: 'p', version: '1', enabled: false, permissions: ['profiles.list'], capabilities: ['profiles.list'],
+  }), [])
+
+  // 授权选择：去重 + 排序；没有能力时环境必须被丢掉（后端会拒"只给环境"）。
+  assert.equal(needsEnvSelection([]), false)
+  assert.equal(needsEnvSelection(['profiles.list']), true)
+  assert.deepEqual(grantsPayload(['db.connect', 'profiles.list', 'db.connect'], ['prod', 'test', 'prod']),
+    { capabilities: ['db.connect', 'profiles.list'], envs: ['prod', 'test'] })
+  assert.deepEqual(grantsPayload([], ['prod']), { capabilities: [], envs: [] })
+  assert.deepEqual(grantsPayload([' profiles.list '], ['']), { capabilities: ['profiles.list'], envs: [] })
+
+  // 能力标签：认识的给功能名，不认识的原样露出后端标识。
+  assert.equal(capabilityLabel('profiles.list'), CAPABILITY_LABELS['profiles.list'])
+  assert.equal(capabilityLabel('future.capability'), 'future.capability')
+
+  // 自检结论：error 排前面（同级保持后端顺序），数量说人话。
+  assert.deepEqual(sortIssues([
+    { severity: 'warning', code: 'W1', message: 'w' },
+    { severity: 'error', code: 'E1', message: 'e' },
+    { severity: 'warning', code: 'W2', message: 'w2' },
+  ]).map((i) => i.code), ['E1', 'W1', 'W2'])
+  assert.equal(doctorSummary(0), '没有发现问题')
+  assert.equal(doctorSummary(3), '3 个问题')
+
+  // 日志行数：截断时必须说出来。
+  assert.equal(logsSummary({ count: 42 }), '42 行')
+  assert.ok(logsSummary({ count: 500, truncated: true }).includes('截断'))
+  console.log('OK 16) 设置页插件管理：分区接线、状态/贡献/授权/自检/日志的纯逻辑')
+}
+
+console.log('\n全部通过：插件路由 / 菜单 / 拒绝清单 / 消息桥 / 设置页管理共 16 组判定')

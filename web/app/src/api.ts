@@ -274,6 +274,53 @@ export interface UpdateState {
   last?: UpdateLast
 }
 
+// ---- 插件管理（/api/plugins*）----
+//
+// 与外壳菜单用的 PluginSummary（./plugins）**分开**：那一份只关心"有没有页面"，
+// 这一份是设置页的管理视图 —— 贡献、声明权限、已授权能力/环境、运行态、LastError 全要。
+// 字段名与 internal/plugin 的 Summary 一一对应；后端加字段不需要改这里（结构上多余字段
+// 会被忽略），删字段才会在这里被看见。
+export interface PluginAdminSummary {
+  id: string
+  name?: string
+  version: string
+  previousVersion?: string
+  enabled: boolean
+  namespace?: string
+  cliSummary?: string
+  route?: string
+  routeTitle?: string
+  hasService?: boolean
+  skillDirs?: string[]
+  permissions?: string[]
+  capabilities?: string[]
+  envs?: string[]
+  lastError?: string
+  /** 运行态：有 supervisor 的进程才给（running / stopped / degraded） */
+  state?: string
+  addr?: string
+  pid?: number
+  restarts?: number
+}
+export interface PluginsAdminReply { ok: boolean; count?: number; plugins: PluginAdminSummary[] }
+
+/** 自检的一条问题。severity = error | warning；code 是稳定标识，message/hint 给人看。 */
+export interface PluginDoctorIssue { severity: string; code: string; message: string; hint?: string }
+export interface PluginDoctorReply { ok: boolean; count: number; issues: PluginDoctorIssue[] }
+
+/** GET /api/plugins/{id}/logs：只读最新一次运行的日志。truncated = tail 超过上限被截。 */
+export interface PluginLogsReply {
+  ok: boolean
+  id: string
+  file?: string
+  count: number
+  lines: string[]
+  truncated?: boolean
+}
+
+export interface PluginEnableReply { ok: boolean; id: string; enabled: boolean; capabilities: string[]; envs: string[] }
+export interface PluginDisableReply { ok: boolean; id: string; enabled: boolean }
+
 // GET /api/config/status:配置里那些路径型取值的派生状态
 export interface ConfigStatus {
   ok: boolean
@@ -395,8 +442,10 @@ export interface Event {
  * 点了没反应、也没有任何提示，用户看到的就是"前端结束不了会话"）。
  * 超时不是"猜服务端错了"，而是把"没回来"变成一个**能说出口的事实**。
  */
-async function req<T>(url: string, opts?: RequestInit & { timeoutMs?: number }): Promise<T> {
-  const { timeoutMs, ...init } = opts || {}
+async function req<T>(url: string, opts?: RequestInit & { timeoutMs?: number; allowNotOK?: boolean }): Promise<T> {
+  // allowNotOK：有些端点的 ok=false 是**业务结论**而不是请求失败（插件自检"发现问题"
+  // 就是 ok:false）。它们仍要 HTTP 200 才算成功，所以只放开 data.ok 这一条判据。
+  const { timeoutMs, allowNotOK, ...init } = opts || {}
   let timer: ReturnType<typeof setTimeout> | undefined
   let ac: AbortController | undefined
   if (timeoutMs && timeoutMs > 0) {
@@ -410,7 +459,7 @@ async function req<T>(url: string, opts?: RequestInit & { timeoutMs?: number }):
       headers: { 'Content-Type': 'application/json', ...(init.headers || {}) },
     })
     const data = await r.json().catch(() => ({}))
-    if (!r.ok || data.ok === false) throw new Error(data.error || `HTTP ${r.status}`)
+    if (!r.ok || (data.ok === false && !allowNotOK)) throw new Error(data.error || `HTTP ${r.status}`)
     return data as T
   } catch (e: any) {
     if (ac?.signal.aborted) {
@@ -508,6 +557,21 @@ export const api = {
   // 插件前端贡献的摘要(顶层管理端点,不是 /debug/api)。只读元数据:
   // 主 SPA 用它决定菜单与 iframe 地址,**不**加载第三方代码。
   plugins: () => req<PluginsReply>('/api/plugins'),
+  // 设置页「插件管理」：同一份 GET /api/plugins，但读的是管理视图的全部字段
+  // （贡献/权限/授权/运行态/LastError）。启停与自检都走 Core 管理面的既有端点。
+  pluginsAdmin: () => req<PluginsAdminReply>('/api/plugins'),
+  pluginEnable: (id: string, grants: { capabilities: string[]; envs: string[] }) =>
+    req<PluginEnableReply>(`/api/plugins/${encodeURIComponent(id)}/enable`, {
+      method: 'POST', body: JSON.stringify(grants),
+    }),
+  pluginDisable: (id: string) =>
+    req<PluginDisableReply>(`/api/plugins/${encodeURIComponent(id)}/disable`, { method: 'POST' }),
+  // 自检的 ok=false 表示"有问题"，不是请求失败 —— 必须 allowNotOK，否则"查出问题"
+  // 会被 req 抛成一次失败，页面就只剩一个空的自检面板。
+  pluginDoctor: (id: string) =>
+    req<PluginDoctorReply>(`/api/plugins/${encodeURIComponent(id)}/doctor`, { allowNotOK: true }),
+  pluginLogs: (id: string, tail = 500) =>
+    req<PluginLogsReply>(`/api/plugins/${encodeURIComponent(id)}/logs?tail=${encodeURIComponent(String(tail))}`),
   // 环境清单:读共享端点。合并前这里调 /api/settings(旧 debug 节的 sshs),
   // 现在 hosts 节是唯一数据源,整个界面看到的是同一份环境。
   settings: () => req<HostsView>('/api/hosts'),

@@ -23,7 +23,7 @@
 |---|---|
 | 环境页 | 创建会话 / 接口日志 |
 | 会话页 | Debug |
-| 设置页 | 站点管理 / 数据字典 / DEBUG / 技能 / 应用设置（`routing.ts` 的 `SETTINGS_SECTIONS`） |
+| 设置页 | 站点管理 / 数据字典 / 插件管理 / 技能 / DEBUG / 应用设置（`routing.ts` 的 `SETTINGS_SECTIONS`） |
 
 环境页的「接口日志」是**已有画面原样搬进来的**（`WsLogView`）。
 「创建会话」是**真动作**：填 ENT + 作业编号 → `POST /api/sessions/new` 建一条空闲会话 →
@@ -168,12 +168,13 @@ source，不靠 origin 字符串（`pluginProtocol.ts` 顶部有完整说明）�
 |---|---|
 | 外壳与布局 | `App.tsx`、`main.tsx`、`Shell.tsx`、`Sidebar.tsx`、`EnvView.tsx`、`SessionView.tsx`、`DebugWorkbench.tsx`、`ErrorBoundary.tsx`、`StatusBar.tsx` |
 | 调试区 | `Toolbar.tsx`、`DebugHeader.tsx`、`SourceView.tsx` |
-| 视图 | `SettingsView.tsx`、`WsLogView.tsx` |
+| 视图 | `SettingsView.tsx`、`PluginsSettings.tsx`、`WsLogView.tsx` |
 | 面板 | `Panels.tsx`、`OutlinePanel.tsx`、`VarTreeUi.tsx` |
 | 编辑器 | `monacoSetup.ts`、`PayloadEditor.tsx` |
 | 4GL 语言工具 | `fglTokens.ts`、`fgloutline.ts`、`fglparse.ts`、`fglPath.ts`、`fglHover.tsx` |
 | 数据与状态 | `api.ts`、`store.ts`、`routing.ts`、`clipboard.ts` |
 | 插件页面 | `PluginView.tsx`、`plugins.ts`（描述符/菜单/拒绝清单）、`pluginBridge.ts`（消息桥）、`pluginProtocol.ts`（v1 协议类型） |
+| 插件管理 | `PluginsSettings.tsx`（设置页分区：列表/授权启停/自检/日志）、`pluginAdmin.ts`（管理视图的纯逻辑） |
 | 样式 | `index.css`（调试视图专属样式 + 外壳的 DSH 配色作用域；主题与基元在共享层） |
 
 `SessionPanel.tsx` 是旧外壳的会话栏（连环境 / 重启 / 结束），新外壳没有挂它：

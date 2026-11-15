@@ -10,6 +10,7 @@ import (
 
 	"tt/internal/config"
 	"tt/internal/connsvc"
+	"tt/internal/winproc"
 )
 
 // Hooks 让后续阶段（Supervisor / 前端资源 / skills 部署）挂到启用/停用/卸载上。
@@ -631,10 +632,11 @@ func (m *Manager) doctorService(rec *Record, man *Manifest, add func(sev, code, 
 		}
 		return nil
 	}
-	if !st.Alive() {
+	// 进程活着不够：PID 会被复用，那可能是别人的进程（P3-14）。
+	if reason := st.StaleReason(winproc.Alive(st.PID), processIdentity(st.PID)); reason != "" {
 		add("warning", "SERVICE_STALE_STATE",
-			fmt.Sprintf("%s 的状态文件说服务在跑（pid=%d），但那个进程已经不在了", rec.ID, st.PID),
-			"重启 tt serve（它会重写运行状态）")
+			fmt.Sprintf("%s 的运行状态已经失效：%s", rec.ID, reason),
+			"重启 tt serve（起服务前会清掉陈旧状态），或删掉 "+filepath.Join(m.Store.RunDir(rec.ID), "instance.json"))
 		return nil
 	}
 	if st.Version != "" && st.Version != rec.ActiveVersion {

@@ -59,7 +59,10 @@ type Instance struct {
 	StartedAt  time.Time `json:"startedAt"`
 	State      string    `json:"state"` // running | degraded | stopped
 	LogPath    string    `json:"logPath"`
-	// ExeDigest 可执行文件摘要：停止前核对身份用（PID 会被复用）。
+	// ExePath 启动时那个服务入口的**绝对路径**：停止前核对身份的第一判据
+	// （PID 会被复用；路径比摘要便宜，也能在摘要算不出来时仍然可判）。
+	ExePath string `json:"exePath,omitempty"`
+	// ExeDigest 可执行文件摘要：与 ExePath 一起核对身份（路径可能被同名的另一份覆盖）。
 	ExeDigest string `json:"exeDigest,omitempty"`
 	Restarts  int    `json:"restarts"`
 
@@ -94,6 +97,12 @@ type Supervisor struct {
 	MaxRestarts   int
 	// ExtraEnv 追加到服务进程环境之后（测试用来打开夹具的可控故障开关）。
 	ExtraEnv []string
+	// ExecutablePath 取某个 PID 现在的镜像路径（测试缝；nil = winproc.ExecutablePath）。
+	//
+	// 为什么要留缝：身份核对是"路径/摘要对不上就不杀"，而"PID 被复用"没法在测试里
+	// 真造出来（得让系统刚好把同一个 PID 分给另一个程序）。把取路径这一步换成可控的，
+	// 决策本身仍然测真的 shouldKill。
+	ExecutablePath func(pid int) string
 
 	mu        sync.Mutex
 	instances map[string]*Instance
@@ -177,6 +186,15 @@ func (s *Supervisor) Start(ctx context.Context, rec *Record) (*Instance, error) 
 		return inst, nil
 	}
 	s.mu.Unlock()
+
+	// 起新实例之前先清掉**陈旧**的运行状态（P3-14）：上一轮 tt serve 可能崩溃了，
+	// 留下的 instance.json 会让诊断（以及命令行升级的前置检查）以为服务还在跑。
+	// 只清"进程不在 / PID 已被复用"的那些 —— 仍然有效的状态一个字节都不动。
+	if old, reason, rerr := s.ReconcileInstanceState(rec); rerr != nil {
+		s.logf("核对插件运行状态失败 id=%s: %v", rec.ID, rerr)
+	} else if old != nil && reason != "" {
+		s.logf("已清掉陈旧的插件运行状态 id=%s pid=%d：%s", rec.ID, old.PID, reason)
+	}
 
 	inst, err := s.startOnce(ctx, rec, 0)
 	if err != nil {
@@ -278,8 +296,8 @@ func (s *Supervisor) startOnce(ctx context.Context, rec *Record, attempt int) (*
 
 	inst := &Instance{
 		PluginID: rec.ID, Version: rec.ActiveVersion, InstanceID: instanceID,
-		ExeDigest: digest,
-		PID:       cmd.Process.Pid, HealthPath: healthPath, StartedAt: s.now(),
+		ExePath: exe, ExeDigest: digest,
+		PID: cmd.Process.Pid, HealthPath: healthPath, StartedAt: s.now(),
 		State: "running", LogPath: logPath, token: token, cmd: cmd, stdin: stdin,
 		logFile: logFile, Restarts: attempt,
 	}
@@ -438,16 +456,31 @@ func (s *Supervisor) Stop(pluginID string) error {
 		return nil
 	}
 	s.stopProcess(inst)
+	// 不论 stopProcess 走哪条分支（自己退了 / 被结束 / **身份不符而没动**），
+	// 这条实例记录都不再代表"正在跑"——写 stopped，别让下一轮诊断把它当成活实例。
+	inst.State = "stopped"
 	s.writeInstanceState(inst)
-	s.logf("插件服务已停止 id=%s pid=%d", pluginID, inst.PID)
+	s.logf("插件服务已停止 id=%s pid=%d（身份不符时只撤销令牌，不动该进程）", pluginID, inst.PID)
 	return nil
 }
 
-// stopProcess 优雅收工 → 宽限期 → 结束进程树。
+// stopProcess 身份核对 → 优雅收工 → 宽限期 → 结束进程树。
+//
+// 为什么第一步不是关 stdin/POST /shutdown，而是核对身份（P3-14）：PID 会被复用。
+// 宽限期里我们起的那个进程可能已经退了，系统把同一个 PID 分给了别的程序；这时
+// 一次 POST /shutdown 或 taskkill 就落到**别人的进程**上（端口、令牌都不是那个人的）。
+// 所以任何停止动作之前都先确认"这个 PID 现在还是我们记录的可执行文件"。
 func (s *Supervisor) stopProcess(inst *Instance) {
 	if inst == nil || inst.cmd == nil || inst.cmd.Process == nil {
 		return
 	}
+	if !s.sameInstance(inst) {
+		s.logf("插件服务 PID 已被复用，按不杀处理 id=%s pid=%d（记录 %s，现在 %s）",
+			inst.PluginID, inst.PID, inst.ExePath, s.executablePathOf(inst.PID))
+		s.revokeToken(inst.token)
+		return
+	}
+
 	// 1) 请它自己退：关 stdin（约定：服务监听 stdin EOF）+ POST /shutdown。
 	if inst.stdin != nil {
 		_ = inst.stdin.Close()
@@ -461,14 +494,98 @@ func (s *Supervisor) stopProcess(inst *Instance) {
 			s.revokeToken(inst.token)
 			return
 		}
+		// 宽限期内我们那个退了、PID 被别人接走：立刻停手，别等宽限期过完再误杀。
+		if !s.sameInstance(inst) {
+			s.logf("插件服务在停止过程中 PID 被复用，按不杀处理 id=%s pid=%d", inst.PluginID, inst.PID)
+			s.revokeToken(inst.token)
+			return
+		}
 		time.Sleep(50 * time.Millisecond)
 	}
 
-	// 3) 还没走：结束整棵树（孙进程会继续占端口，只杀直接子进程不够）。
+	// 3) 最后一刻再核一次：宽限期与这里之间同样可能发生"它退了 + PID 被复用"。
+	if !s.sameInstance(inst) {
+		s.logf("插件服务结束前 PID 被复用，按不杀处理 id=%s pid=%d", inst.PluginID, inst.PID)
+		s.revokeToken(inst.token)
+		return
+	}
+	// 4) 还没走：结束整棵树（孙进程会继续占端口，只杀直接子进程不够）。
 	if err := winproc.KillTree(inst.PID); err != nil {
 		s.logf("结束插件服务进程树失败 id=%s pid=%d: %v", inst.PluginID, inst.PID, err)
 	}
 	s.revokeToken(inst.token)
+}
+
+// exeIdentity 一个进程的可执行身份：镜像路径 + 文件摘要。
+//
+// 两个都要，是因为它们能挡住不同的复用方式：路径挡住"PID 被另一个程序拿走"；
+// 摘要挡住"路径还在、文件已经被换成另一份"（升级/手工替换）。
+type exeIdentity struct {
+	Path   string
+	Digest string
+}
+
+// shouldKill 停止/结束前的**纯决策**：这个 PID 现在还是我们记录的那个实例吗？
+//
+// 返回 false = 什么都不要动（PID 被复用）。判据：
+//   - 两边都有路径时必须一致（Windows 路径不区分大小写，用 EqualFold）；
+//   - 两边都有摘要时必须一致；
+//   - 只有一边有证据时按有证据的那边判：对不上就算复用；
+//   - 什么证据都没有（非 Windows / 打不开进程）→ 放行。这里不能"因噎废食"：
+//     调用方已经确认进程活着，拿不到身份不是"有罪"，否则会漏杀自己刚起的子进程。
+func shouldKill(recorded, current exeIdentity) bool {
+	if recorded.Path != "" && current.Path != "" && !sameExePath(recorded.Path, current.Path) {
+		return false
+	}
+	if recorded.Digest != "" && current.Digest != "" && !strings.EqualFold(recorded.Digest, current.Digest) {
+		return false
+	}
+	return true
+}
+
+// sameExePath 两个镜像路径是否指同一个文件（大小写不敏感，清理过分隔符）。
+func sameExePath(a, b string) bool {
+	return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
+}
+
+// identity 实例记录的可执行身份。
+func (i *Instance) identity() exeIdentity {
+	return exeIdentity{Path: i.ExePath, Digest: i.ExeDigest}
+}
+
+// identityAtPath 由镜像路径算身份；空路径 = 空身份（摘要算不出来就只留路径）。
+func identityAtPath(path string) exeIdentity {
+	if path == "" {
+		return exeIdentity{}
+	}
+	id := exeIdentity{Path: path}
+	if sum, err := fileSHA256(path); err == nil {
+		id.Digest = sum
+	}
+	return id
+}
+
+// processIdentity 取 PID 现在的可执行身份（生产路径）。
+func processIdentity(pid int) exeIdentity {
+	return identityAtPath(winproc.ExecutablePath(pid))
+}
+
+// executablePathOf 取 PID 现在的镜像路径（日志/诊断用）。
+func (s *Supervisor) executablePathOf(pid int) string {
+	if s.ExecutablePath != nil {
+		return s.ExecutablePath(pid)
+	}
+	return winproc.ExecutablePath(pid)
+}
+
+// currentIdentity 取 PID 现在的可执行身份（走测试缝）。
+func (s *Supervisor) currentIdentity(pid int) exeIdentity {
+	return identityAtPath(s.executablePathOf(pid))
+}
+
+// sameInstance 记录的实例与 PID 现在的身份是否对得上。
+func (s *Supervisor) sameInstance(inst *Instance) bool {
+	return shouldKill(inst.identity(), s.currentIdentity(inst.PID))
 }
 
 // requestShutdown 尽力请求优雅停止；插件不支持就算了（宽限期后照样收）。
@@ -589,18 +706,83 @@ type InstanceState struct {
 	StartedAt  time.Time `json:"startedAt"`
 	Restarts   int       `json:"restarts,omitempty"`
 	LogPath    string    `json:"logPath,omitempty"`
+	ExePath    string    `json:"exePath,omitempty"`
 	ExeDigest  string    `json:"exeDigest,omitempty"`
 }
 
 // Alive 状态文件说的那个进程还在不在。
 //
-// 只作诊断判据：PID 会被复用，真正决定"能不能动它"的仍是实例 ID + 可执行文件摘要
-// （supervisor 在自己的进程里核对）。这里回答的是"要不要把这个状态当成遗留物"。
+// 只作**快速判据**：PID 会被复用，"活着"不等于"还是那一轮那个程序"。
+// 要判"这份状态还算不算数"请用 StaleReason（它同时看可执行身份）。
 func (i *InstanceState) Alive() bool {
 	if i == nil || i.PID <= 0 {
 		return false
 	}
 	return winproc.Alive(i.PID)
+}
+
+// StaleReason 这份运行状态是否已经不能代表"现在还在跑的那个实例"；空串 = 仍然成立。
+//
+// alive 由调用方给（判进程存活要碰系统，不属于纯决策）；current 是该 PID **现在**的
+// 可执行身份。判据与停止前的 shouldKill 同源：对不上就是"PID 被复用"。
+//
+// 为什么需要它：tt serve 崩溃后留下的 instance.json 会让诊断（以及命令行升级的前置
+// 检查）以为服务还在跑；只有"进程在 + 可执行身份对得上"才算数。
+func (i *InstanceState) StaleReason(alive bool, current exeIdentity) string {
+	if i == nil || i.PID <= 0 {
+		return "状态文件没有有效的 PID"
+	}
+	if !alive {
+		return fmt.Sprintf("PID %d 已经不在了", i.PID)
+	}
+	recorded := exeIdentity{Path: i.ExePath, Digest: i.ExeDigest}
+	if !shouldKill(recorded, current) {
+		return fmt.Sprintf("PID %d 现在指向另一个可执行文件（PID 被复用了）", i.PID)
+	}
+	return ""
+}
+
+// ClearInstanceState 删掉 run/<id>/instance.json（陈旧状态的清理）；不存在不算错。
+func (s *Store) ClearInstanceState(id string) error {
+	dir := s.RunDir(id)
+	if dir == "" {
+		return nil
+	}
+	err := os.Remove(filepath.Join(dir, "instance.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+
+// ReconcileInstanceState 核对并清理 run/<id>/instance.json（P3-14）。
+//
+// 返回：
+//   - (nil, "", nil)：没有状态文件，或读不出来（读失败由 err 报告）；
+//   - (st, "", nil)：状态仍然有效，一个字节都没动；
+//   - (st, reason, nil)：状态是陈旧的，**已经删掉**，reason 说明为什么。
+//
+// 只在 supervisor 要起新实例之前调用：此刻"上一轮是谁在跑"已经无关紧要，
+// 留着陈旧状态只会误导诊断与升级前置检查。
+func (s *Supervisor) ReconcileInstanceState(rec *Record) (*InstanceState, string, error) {
+	if s.Store == nil || rec == nil {
+		return nil, "", nil
+	}
+	st, err := s.Store.ReadInstanceState(rec.ID)
+	if err != nil {
+		return nil, "", err
+	}
+	if st == nil {
+		return nil, "", nil
+	}
+	reason := st.StaleReason(winproc.Alive(st.PID), s.currentIdentity(st.PID))
+	if reason == "" {
+		return st, "", nil
+	}
+	if cerr := s.Store.ClearInstanceState(rec.ID); cerr != nil {
+		return st, reason, fmt.Errorf("删除陈旧运行状态失败: %w", cerr)
+	}
+	return st, reason, nil
 }
 
 // ReadInstanceState 读 run/<id>/instance.json；文件不存在返回 (nil, nil)。

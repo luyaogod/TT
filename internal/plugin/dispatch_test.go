@@ -3,6 +3,7 @@ package plugin
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"os"
@@ -126,7 +127,6 @@ func parseRefOutput(t *testing.T, out string) map[string]any {
 // TestDispatchForwardsArgsAndExitCode 参数原样、退出码原样。
 func TestDispatchForwardsArgsAndExitCode(t *testing.T) {
 	m, s := newManager(t)
-	buildReferencePlugin(t) // 只为保证夹具可编译（下面复用同一份安装）
 	pkg := buildReferencePlugin(t)
 	rec := installRef(t, m, pkg)
 	if _, err := m.Enable(rec.ID, Grants{}); err != nil {
@@ -181,6 +181,73 @@ func TestDispatchEchoesStdinAndStdout(t *testing.T) {
 	// stdout 里先是 stdin 的内容，最后一行才是参数 JSON。
 	if !strings.Contains(out.String(), "逐字节原样\n第二行\n") {
 		t.Fatalf("stdin 没有原样回显: %q", out.String())
+	}
+}
+
+// TestDispatchForwardsLargeStdinAndStdout 1 MiB 级的 stdin/stdout 原样透传（P3-08）。
+//
+// 为什么单独一条：小数据走通只证明"接上了管子"，证明不了**没人截断、没人死锁**。
+// 真实现场（插件吐一份大报表/收一份大报文）的失败方式恰好是这两种：
+//   - 截断：中间某段用了固定大小的缓冲或 Scanner 默认上限；
+//   - 死锁：一边写满管道另一边还没开始读（父进程先写 stdin 再读 stdout 就会这样）。
+//
+// 判据用**逐字节摘要**而不是长度：长度一样但内容错了同样不算"原样转发"。
+// 数据用可复现的模式而不是全零：全零会让"只写了一半 + 补零"这类错误看不出来。
+func TestDispatchForwardsLargeStdinAndStdout(t *testing.T) {
+	const size = 1<<20 + 4093 // 1 MiB 出头，且不是整块大小（边界更容易暴露截断）
+	big := make([]byte, size)
+	for i := range big {
+		big[i] = byte(i*131 + i/7)
+	}
+	want := sha256.Sum256(big)
+
+	m, s := newManager(t)
+	pkg := buildReferencePlugin(t)
+	rec := installRef(t, m, pkg)
+	if _, err := m.Enable(rec.ID, Grants{}); err != nil {
+		t.Fatal(err)
+	}
+	d := refDispatcher(t, s, hostrpc.NewTokenStore())
+	var out bytes.Buffer
+	d.Stdout = &out
+	d.Stdin = bytes.NewReader(big)
+
+	// 死锁时的失败形态是"这条用例永远不返回"——给它一个上限，让失败变成可读的超时，
+	// 而不是等 go test 的包级超时把整个包的其它用例一起拖死。
+	type result struct {
+		res DispatchResult
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		res, err := d.Run(context.Background(), rec, "", "", []string{"--echo-stdin"})
+		done <- result{res, err}
+	}()
+	var got result
+	select {
+	case got = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("1 MiB 级 stdin/stdout 转发超时（管道读写在某处死锁了）")
+	}
+	if got.err != nil {
+		t.Fatalf("转发失败: %v", got.err)
+	}
+	if got.res.ExitCode != 0 {
+		t.Fatalf("退出码 = %d", got.res.ExitCode)
+	}
+	// stdout = stdin 原样回显 + 最后一行参数 JSON。
+	if out.Len() <= size {
+		t.Fatalf("stdout 只有 %d 字节，连回显的 %d 字节都不够（被截断）", out.Len(), size)
+	}
+	if sum := sha256.Sum256(out.Bytes()[:size]); sum != want {
+		t.Fatalf("回显的 %d 字节与输入摘要不符（内容被改过或只转发了一部分）", size)
+	}
+	// 尾部 JSON 必须完整：它说明插件是正常跑完写出来的，而不是被中途掐掉。
+	// 这里不能用 parseRefOutput（它按"最后一行"切，而回显内容是二进制、自己就带换行）；
+	// 直接看"回显长度之后那一段"是不是完整的参数 JSON。
+	tail := out.Bytes()[size:]
+	if !bytes.HasPrefix(tail, []byte(`{"args":[]`)) {
+		t.Fatalf("回显之后没有完整的参数 JSON（尾部 %q）", tail[:min(len(tail), 120)])
 	}
 }
 
