@@ -581,7 +581,7 @@ func (m *Manager) pruneVersions(id string, keep ...string) []string {
 			continue
 		}
 		if dir := m.Store.VersionDir(id, iv.Version); dir != "" {
-			if err := os.RemoveAll(dir); err != nil {
+			if err := removeAllRetry(dir); err != nil {
 				continue
 			}
 		}

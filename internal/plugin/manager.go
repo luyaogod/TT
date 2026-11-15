@@ -325,7 +325,7 @@ func (m *Manager) Uninstall(id string, opt UninstallOptions) error {
 		if dir == "" {
 			continue
 		}
-		if err := os.RemoveAll(dir); err != nil {
+		if err := removeAllRetry(dir); err != nil {
 			return fmt.Errorf("删除版本 %s 失败: %w", iv.Version, err)
 		}
 		removedVersions = append(removedVersions, iv.Version)
@@ -342,7 +342,7 @@ func (m *Manager) Uninstall(id string, opt UninstallOptions) error {
 	}
 	if opt.PurgeData {
 		if dir := m.Store.DataDir(id); dir != "" {
-			if err := os.RemoveAll(dir); err != nil {
+			if err := removeAllRetry(dir); err != nil {
 				return fmt.Errorf("删除插件数据失败: %w", err)
 			}
 		}
