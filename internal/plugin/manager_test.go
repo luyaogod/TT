@@ -321,8 +321,11 @@ func TestDoctorFindsProblems(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(issues) != 0 {
-		t.Fatalf("健康插件不该有问题: %+v", issues)
+	// v1 清单/权限字段会给迁移提示（warning）；"健康"指没有 error。
+	for _, is := range issues {
+		if is.Severity == "error" {
+			t.Fatalf("健康插件不该有 error: %+v", issues)
+		}
 	}
 
 	if err := os.RemoveAll(s.VersionDir("com.example.demo", "0.1.0")); err != nil {

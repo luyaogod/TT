@@ -521,6 +521,16 @@ func (m *Manager) doctorOne(reg *Registry, rec *Record) []Issue {
 		return out
 	}
 
+	// v1 清单/权限字段的迁移提示：v2 仍能读 v1，但要让人知道该往哪迁。
+	if man.SchemaVersion < 2 {
+		add("warning", "MANIFEST_V1", fmt.Sprintf("%s 仍是 v1 清单（legacy 页面/权限语义）", rec.ID),
+			"迁移到 schemaVersion 2：用 contributions.ui 的槽位页面；见 docs/plugin-system/11-plugin-author-guide.md")
+	}
+	if len(man.Permissions) > 0 {
+		add("warning", "PERMISSIONS_IGNORED", fmt.Sprintf("%s 的清单声明了 permissions（v2 启用即信任，字段被忽略）", rec.ID),
+			"从 plugin.json 删除 permissions（保留不会报错，但会让人误以为还需要授权）")
+	}
+
 	// Host API 兼容性单列一条：它是最常见、也最容易被笼统的"清单不合法"盖住的原因
 	// （TT 升了大版本之后老插件就是这条）。
 	if merr := ValidateHostAPIRange(man.HostAPI); merr != nil {
