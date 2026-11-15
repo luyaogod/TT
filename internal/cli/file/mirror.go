@@ -20,9 +20,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"tt/internal/cli/common"
-	"tt/internal/config"
-	"tt/internal/host"
+	"github.com/luyaogod/TT/internal/cli/common"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/host"
 )
 
 // NewMirrorCmd 构造 mirror 子树（file 组与 dict 的隐藏转发各持一棵，

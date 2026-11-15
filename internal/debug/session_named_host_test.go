@@ -38,8 +38,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"tt/internal/host"
-	"tt/internal/target"
+	"github.com/luyaogod/TT/internal/host"
+	"github.com/luyaogod/TT/internal/target"
 )
 
 // ---------------------------------------------------------------------------

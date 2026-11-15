@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"tt/internal/host"
+	"github.com/luyaogod/TT/internal/host"
 )
 
 type wcCount struct {

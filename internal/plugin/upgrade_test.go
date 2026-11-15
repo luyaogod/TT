@@ -21,8 +21,8 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"tt/internal/connsvc"
-	"tt/internal/hostrpc"
+	"github.com/luyaogod/TT/internal/connsvc"
+	"github.com/luyaogod/TT/internal/hostrpc"
 )
 
 //---- 夹具 ----

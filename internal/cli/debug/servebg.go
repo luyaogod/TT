@@ -32,9 +32,9 @@ import (
 	"strings"
 	"time"
 
-	"tt/internal/cli/common"
-	"tt/internal/config"
-	"tt/internal/debug"
+	"github.com/luyaogod/TT/internal/cli/common"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/debug"
 )
 
 const (

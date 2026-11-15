@@ -8,12 +8,12 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/dev/fence"
-	"tt/internal/dev/model"
-	"tt/internal/dev/pkgfile"
-	"tt/internal/dev/tapfile"
-	"tt/internal/dev/verify"
-	"tt/internal/testkit"
+	"github.com/luyaogod/TT/internal/dev/fence"
+	"github.com/luyaogod/TT/internal/dev/model"
+	"github.com/luyaogod/TT/internal/dev/pkgfile"
+	"github.com/luyaogod/TT/internal/dev/tapfile"
+	"github.com/luyaogod/TT/internal/dev/verify"
+	"github.com/luyaogod/TT/internal/testkit"
 )
 
 // requireDeep 把「对全部真实包」的深度回归设为**显式开关**。

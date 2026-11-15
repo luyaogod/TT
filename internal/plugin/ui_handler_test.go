@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"tt/internal/config"
-	"tt/internal/connsvc"
-	"tt/internal/hostrpc"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/connsvc"
+	"github.com/luyaogod/TT/internal/hostrpc"
 )
 
 // uiFixture 装一个带页面（可选带服务）的插件并启用，返回 handler。

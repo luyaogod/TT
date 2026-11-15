@@ -18,9 +18,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"tt/internal/cli/dev/common"
-	"tt/internal/cli/dev/tzc"
-	"tt/internal/cli/dev/tzs"
+	"github.com/luyaogod/TT/internal/cli/dev/common"
+	"github.com/luyaogod/TT/internal/cli/dev/tzc"
+	"github.com/luyaogod/TT/internal/cli/dev/tzs"
 )
 
 // Group 是 tt dev 命令组。

@@ -20,7 +20,7 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/cli/dev/common"
+	"github.com/luyaogod/TT/internal/cli/dev/common"
 )
 
 // formcheckBlockAnchor 是这段用法块的锚：**子命令**那一行（不是退出码散文里提到的那次）。

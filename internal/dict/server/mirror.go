@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"tt/internal/config"
-	"tt/internal/host"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/host"
 )
 
 // mirrorJob 一次(或最近一次)源码镜像拉取的状态;前端据它画进度条。

@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"tt/internal/config"
-	"tt/internal/dbconfig"
-	"tt/internal/erpdb"
-	"tt/internal/host"
-	"tt/internal/sshtun"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/pkg/dbconfig"
+	"github.com/luyaogod/TT/pkg/erpdb"
+	"github.com/luyaogod/TT/internal/host"
+	"github.com/luyaogod/TT/internal/sshtun"
 )
 
 // TestDB 测一次数据库连通性：解析配置 → （按需）建隧道 → 建连 → 取版本 → 关闭。

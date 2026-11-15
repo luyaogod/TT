@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"tt/internal/config"
-	"tt/internal/connsvc"
-	"tt/internal/hostrpc"
-	"tt/internal/testkit"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/connsvc"
+	"github.com/luyaogod/TT/internal/hostrpc"
+	"github.com/luyaogod/TT/internal/testkit"
 )
 
 // ---- 参考插件夹具 ----

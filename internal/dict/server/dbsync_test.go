@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"tt/internal/config"
+	"github.com/luyaogod/TT/internal/config"
 )
 
 // GET /api/dbsync:库目录 + 各环境自己的 .db（按环境分文件，互不覆盖）。

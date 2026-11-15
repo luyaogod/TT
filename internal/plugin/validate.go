@@ -11,7 +11,7 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 
-	"tt/internal/connsvc"
+	"github.com/luyaogod/TT/internal/connsvc"
 )
 
 // 形状规则。故意都收紧：这些值会直接变成目录名、命令行命名空间与前端路由。

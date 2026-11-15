@@ -322,7 +322,7 @@ const file_tt_host_v1_dbsession_proto_rawDesc = "" +
 	"\rrows_affected\x18\x01 \x01(\x03R\frowsAffected2\x8b\x01\n" +
 	"\x10DBSessionService\x12<\n" +
 	"\x05Query\x12\x18.tt.host.v1.QueryRequest\x1a\x19.tt.host.v1.QueryResponse\x129\n" +
-	"\x04Exec\x12\x17.tt.host.v1.ExecRequest\x1a\x18.tt.host.v1.ExecResponseB\x1fZ\x1dtt/internal/gen/hostv1;hostv1b\x06proto3"
+	"\x04Exec\x12\x17.tt.host.v1.ExecRequest\x1a\x18.tt.host.v1.ExecResponseB3Z1github.com/luyaogod/TT/internal/gen/hostv1;hostv1b\x06proto3"
 
 var (
 	file_tt_host_v1_dbsession_proto_rawDescOnce sync.Once

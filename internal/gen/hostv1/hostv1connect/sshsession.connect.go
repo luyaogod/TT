@@ -12,9 +12,9 @@ import (
 	connect "connectrpc.com/connect"
 	context "context"
 	errors "errors"
+	hostv1 "github.com/luyaogod/TT/internal/gen/hostv1"
 	http "net/http"
 	strings "strings"
-	hostv1 "tt/internal/gen/hostv1"
 )
 
 // This is a compile-time assertion to ensure that this generated file and the connect package are

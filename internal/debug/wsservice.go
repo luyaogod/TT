@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"tt/internal/host"
+	"github.com/luyaogod/TT/internal/host"
 )
 
 const (

@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"tt/internal/testkit"
+	"github.com/luyaogod/TT/internal/testkit"
 
-	"tt/internal/dev/testutil"
+	"github.com/luyaogod/TT/internal/dev/testutil"
 )
 
 // TestDefaultWorkspaceDir 钉住 -o 省略时的默认目录推导规则。

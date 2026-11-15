@@ -14,11 +14,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"tt/internal/cli/common"
-	"tt/internal/form42f"
-	"tt/internal/output"
-	"tt/internal/screen"
-	"tt/internal/str42s"
+	"github.com/luyaogod/TT/internal/cli/common"
+	"github.com/luyaogod/TT/internal/form42f"
+	"github.com/luyaogod/TT/internal/output"
+	"github.com/luyaogod/TT/internal/screen"
+	"github.com/luyaogod/TT/internal/str42s"
 )
 
 type flags struct {

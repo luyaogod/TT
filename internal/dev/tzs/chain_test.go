@@ -28,7 +28,7 @@ import (
 	"testing"
 	"time"
 
-	"tt/internal/testenv"
+	"github.com/luyaogod/TT/internal/testenv"
 )
 
 // chainTargetName 是这一条链的靶包。选它是因为它是文档里每个例子都用的那张表单

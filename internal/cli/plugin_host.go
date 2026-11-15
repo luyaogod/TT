@@ -10,9 +10,9 @@ import (
 	"context"
 	"fmt"
 
-	"tt/internal/connsvc"
-	"tt/internal/hostrpc"
-	"tt/internal/plugin"
+	"github.com/luyaogod/TT/internal/connsvc"
+	"github.com/luyaogod/TT/internal/hostrpc"
+	"github.com/luyaogod/TT/internal/plugin"
 )
 
 // servePluginHooks 把插件状态变更接到 supervisor / 令牌表 / 连接服务上。

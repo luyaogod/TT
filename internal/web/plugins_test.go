@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/config"
-	"tt/internal/plugin"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/plugin"
 )
 
 // 插件管理 API：/api/plugins*。

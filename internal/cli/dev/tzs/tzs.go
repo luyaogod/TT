@@ -24,9 +24,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"tt/internal/cli/dev/common"
-	"tt/internal/dev/model"
-	"tt/internal/dev/pkgfile"
+	"github.com/luyaogod/TT/internal/cli/dev/common"
+	"github.com/luyaogod/TT/internal/dev/model"
+	"github.com/luyaogod/TT/internal/dev/pkgfile"
 )
 
 // Usage 是 tzs 线命令面说明的导出别名（父包 register.go 的 tzs 叶命令 Long 用它）；

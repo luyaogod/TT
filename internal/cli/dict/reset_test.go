@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/cli/common"
-	"tt/internal/dbconfig"
-	"tt/internal/testkit"
+	"github.com/luyaogod/TT/internal/cli/common"
+	"github.com/luyaogod/TT/pkg/dbconfig"
+	"github.com/luyaogod/TT/internal/testkit"
 )
 
 // 本包是**单例**：约 35 个包级 var（各命令的 flag 值、数据源落脚点、镜像配置……）

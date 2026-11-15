@@ -7,9 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"tt/internal/cli/common"
-	"tt/internal/host"
-	"tt/internal/output"
+	"github.com/luyaogod/TT/internal/cli/common"
+	"github.com/luyaogod/TT/internal/host"
+	"github.com/luyaogod/TT/internal/output"
 )
 
 // ls 一条记录（--json 用）。

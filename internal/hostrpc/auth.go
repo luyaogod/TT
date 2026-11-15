@@ -15,8 +15,8 @@ import (
 
 	"connectrpc.com/connect"
 
-	"tt/internal/connsvc"
-	"tt/internal/gen/hostv1"
+	"github.com/luyaogod/TT/internal/connsvc"
+	"github.com/luyaogod/TT/internal/gen/hostv1"
 )
 
 // codeUnauthenticated / codeForbidden 是 Host API 自己的稳定码（不是 connsvc 的）。

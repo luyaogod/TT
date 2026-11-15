@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/testkit"
+	"github.com/luyaogod/TT/internal/testkit"
 )
 
 /* ============================================================================

@@ -26,7 +26,7 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/target"
+	"github.com/luyaogod/TT/internal/target"
 )
 
 // TestCharTargetFlagPlacement 见文件头。

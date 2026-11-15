@@ -14,8 +14,8 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/host"
-	"tt/internal/target"
+	"github.com/luyaogod/TT/internal/host"
+	"github.com/luyaogod/TT/internal/target"
 )
 
 // TestRequireExplicitEntRejectsSilentFallback：谁都没说 → **必须拒绝**，且码是 USAGE。

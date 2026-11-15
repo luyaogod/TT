@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"tt/internal/config"
-	"tt/internal/dict/dbsync"
-	"tt/internal/host"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/dict/dbsync"
+	"github.com/luyaogod/TT/internal/host"
 )
 
 // dbSyncJob 一次(或最近一次)数据同步任务的状态;前端据它画进度。

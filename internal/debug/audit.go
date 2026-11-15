@@ -33,7 +33,7 @@ import (
 	"strings"
 	"time"
 
-	"tt/internal/target"
+	"github.com/luyaogod/TT/internal/target"
 )
 
 // auditDir / auditFile 审计行的落点：<DataDir>/audit/sessions.jsonl。

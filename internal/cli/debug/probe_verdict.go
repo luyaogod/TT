@@ -25,7 +25,7 @@ import (
 	"fmt"
 	"strings"
 
-	"tt/internal/debug"
+	"github.com/luyaogod/TT/internal/debug"
 )
 
 const (

@@ -36,13 +36,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"tt/internal/cli/common"
-	"tt/internal/cli/debug"
-	"tt/internal/config"
-	"tt/internal/dev/tzs"
-	"tt/internal/output"
-	"tt/internal/update"
-	"tt/internal/winproc"
+	"github.com/luyaogod/TT/internal/cli/common"
+	"github.com/luyaogod/TT/internal/cli/debug"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/dev/tzs"
+	"github.com/luyaogod/TT/internal/output"
+	"github.com/luyaogod/TT/internal/update"
+	"github.com/luyaogod/TT/internal/winproc"
 )
 
 // exitUpdateAvailable "有可用更新"。它不是失败，见上面那段说明。

@@ -17,9 +17,9 @@ import (
 	"testing"
 	"time"
 
-	"tt/internal/connsvc"
-	"tt/internal/hostrpc"
-	"tt/internal/winproc"
+	"github.com/luyaogod/TT/internal/connsvc"
+	"github.com/luyaogod/TT/internal/hostrpc"
+	"github.com/luyaogod/TT/internal/winproc"
 )
 
 // TestShouldKillIdentity 纯决策：什么情况下允许结束这个 PID。

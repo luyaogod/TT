@@ -9,9 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"tt/internal/config"
-	"tt/internal/output"
-	"tt/internal/testkit"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/output"
+	"github.com/luyaogod/TT/internal/testkit"
 )
 
 // 本包是**叶子包**（三个命令组共享的 CLI 上下文），所以它自己的状态就是全局状态：

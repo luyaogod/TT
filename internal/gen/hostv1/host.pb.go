@@ -113,7 +113,7 @@ const file_tt_host_v1_host_proto_rawDesc = "" +
 	"\x17GetCapabilitiesResponse\x12<\n" +
 	"\fcapabilities\x18\x01 \x01(\v2\x18.tt.host.v1.CapabilitiesR\fcapabilities2i\n" +
 	"\vHostService\x12Z\n" +
-	"\x0fGetCapabilities\x12\".tt.host.v1.GetCapabilitiesRequest\x1a#.tt.host.v1.GetCapabilitiesResponseB\x1fZ\x1dtt/internal/gen/hostv1;hostv1b\x06proto3"
+	"\x0fGetCapabilities\x12\".tt.host.v1.GetCapabilitiesRequest\x1a#.tt.host.v1.GetCapabilitiesResponseB3Z1github.com/luyaogod/TT/internal/gen/hostv1;hostv1b\x06proto3"
 
 var (
 	file_tt_host_v1_host_proto_rawDescOnce sync.Once

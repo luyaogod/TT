@@ -6,7 +6,7 @@ import (
 	"sort"
 	"testing"
 
-	"tt/internal/dev/testutil"
+	"github.com/luyaogod/TT/internal/dev/testutil"
 )
 
 // mini_corpus_test.go —— 跑在**仓库自带**的那份最小语料上的三条回归。

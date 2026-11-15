@@ -8,11 +8,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"tt/internal/connsvc"
-	"tt/internal/dbconfig"
-	"tt/internal/erpdb"
-	"tt/internal/host"
-	"tt/internal/sshtun"
+	"github.com/luyaogod/TT/internal/connsvc"
+	"github.com/luyaogod/TT/pkg/dbconfig"
+	"github.com/luyaogod/TT/pkg/erpdb"
+	"github.com/luyaogod/TT/internal/host"
+	"github.com/luyaogod/TT/internal/sshtun"
 )
 
 // 三个"动作"端点：POST /api/dbprobe、POST /api/dbaccverify、POST /api/conntest。

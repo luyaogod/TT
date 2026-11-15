@@ -18,7 +18,7 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/dev/tzs"
+	"github.com/luyaogod/TT/internal/dev/tzs"
 )
 
 func TestJsonFailureIsExactlyOneFrame(t *testing.T) {

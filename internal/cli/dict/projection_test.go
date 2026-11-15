@@ -6,8 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"tt/internal/dict/db"
-	"tt/internal/output"
+	"github.com/luyaogod/TT/internal/dict/db"
+	"github.com/luyaogod/TT/internal/output"
 )
 
 func sampleTable() *db.TableDict {

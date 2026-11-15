@@ -18,8 +18,8 @@ import (
 	"strings"
 	"time"
 
-	"tt/internal/config"
-	"tt/internal/host"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/host"
 )
 
 const runtimeTTL = 30 * time.Minute

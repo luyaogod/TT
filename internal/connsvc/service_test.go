@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"tt/internal/config"
-	"tt/internal/dbconfig"
-	"tt/internal/erpdb"
-	"tt/internal/host"
-	"tt/internal/sshtun"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/pkg/dbconfig"
+	"github.com/luyaogod/TT/pkg/erpdb"
+	"github.com/luyaogod/TT/internal/host"
+	"github.com/luyaogod/TT/internal/sshtun"
 )
 
 // ---- 测试夹具 ----

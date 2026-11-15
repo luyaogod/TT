@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"tt/internal/testkit"
+	"github.com/luyaogod/TT/internal/testkit"
 )
 
 //---------------------------------------------------------------------------

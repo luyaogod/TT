@@ -20,8 +20,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"tt/internal/connsvc"
-	"tt/internal/hostrpc"
+	"github.com/luyaogod/TT/internal/connsvc"
+	"github.com/luyaogod/TT/internal/hostrpc"
 )
 
 // PluginPrefix 插件子资源的固定前缀。

@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"tt/internal/cli/common"
-	"tt/internal/config"
+	"github.com/luyaogod/TT/internal/cli/common"
+	"github.com/luyaogod/TT/internal/config"
 )
 
 // configGetRaw --raw：config get 不过滤口令（与 config show 的 --raw 同义）。

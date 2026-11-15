@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/dbconfig"
-	"tt/internal/host"
+	"github.com/luyaogod/TT/pkg/dbconfig"
+	"github.com/luyaogod/TT/internal/host"
 )
 
 func testWSCfg(zone, service string) *Config {

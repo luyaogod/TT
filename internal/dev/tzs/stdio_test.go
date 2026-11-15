@@ -36,7 +36,7 @@ import (
 	"testing"
 	"time"
 
-	"tt/internal/testenv"
+	"github.com/luyaogod/TT/internal/testenv"
 )
 
 // stdioSession 是一个 `tzs-server --stdio` 进程。

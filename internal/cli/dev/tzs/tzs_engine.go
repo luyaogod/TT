@@ -33,9 +33,9 @@ import (
 	"sync"
 	"time"
 
-	"tt/internal/cli/dev/common"
-	"tt/internal/config"
-	"tt/internal/dev/tzs"
+	"github.com/luyaogod/TT/internal/cli/dev/common"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/dev/tzs"
 )
 
 // tzsSettings 读配置里的 tzs 节（读不到就是零值：配置缺失绝不让命令失败）。

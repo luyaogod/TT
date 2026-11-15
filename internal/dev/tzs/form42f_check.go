@@ -51,7 +51,7 @@ import (
 	"strconv"
 	"strings"
 
-	"tt/internal/form42f"
+	"github.com/luyaogod/TT/internal/form42f"
 )
 
 // ── 差异分组 ───────────────────────────────────────────────────────────────

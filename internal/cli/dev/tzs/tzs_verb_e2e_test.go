@@ -22,8 +22,8 @@ import (
 	"testing"
 	"time"
 
-	"tt/internal/dev/tzs"
-	"tt/internal/testenv"
+	"github.com/luyaogod/TT/internal/dev/tzs"
+	"github.com/luyaogod/TT/internal/testenv"
 )
 
 func requireRealManifest(t *testing.T) *tzs.Manifest {

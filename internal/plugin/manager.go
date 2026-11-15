@@ -8,9 +8,9 @@ import (
 	"sort"
 	"strings"
 
-	"tt/internal/config"
-	"tt/internal/connsvc"
-	"tt/internal/winproc"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/connsvc"
+	"github.com/luyaogod/TT/internal/winproc"
 )
 
 // Hooks 让后续阶段（Supervisor / 前端资源 / skills 部署）挂到启用/停用/卸载上。

@@ -25,7 +25,8 @@ import (
 	"strings"
 	"time"
 
-	"tt/internal/config"
+	"github.com/luyaogod/TT/pkg/atomicwrite"
+	"github.com/luyaogod/TT/pkg/cachedir"
 )
 
 const (
@@ -96,9 +97,9 @@ func EnvSeg(envName, sshHost, zone string) string {
 }
 
 // Path 快照路径;dataDir 为空返回空串(调用方据此跳过落盘)。
-// 子目录名经 config.CacheDir 校验 —— 名字不在缓存清单里会得到空串。
+// 子目录名经 pkg/cachedir 校验 —— 名字不在缓存清单里会得到空串。
 func Path(dataDir, seg string) string {
-	sub := config.CacheDir(dataDir, dirName)
+	sub := cachedir.Dir(dataDir, dirName)
 	if sub == "" {
 		return ""
 	}
@@ -135,7 +136,7 @@ func Write(path string, s *Snapshot) error {
 	if err != nil {
 		return err
 	}
-	return config.AtomicWrite(path, b)
+	return atomicwrite.Write(path, b)
 }
 
 // PathSafeSeg 把任意字符串压成单个安全的路径段。

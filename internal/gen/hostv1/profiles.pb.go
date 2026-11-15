@@ -115,7 +115,7 @@ const file_tt_host_v1_profiles_proto_rawDesc = "" +
 	"\fListResponse\x12/\n" +
 	"\bprofiles\x18\x01 \x03(\v2\x13.tt.host.v1.ProfileR\bprofiles2L\n" +
 	"\x0fProfilesService\x129\n" +
-	"\x04List\x12\x17.tt.host.v1.ListRequest\x1a\x18.tt.host.v1.ListResponseB\x1fZ\x1dtt/internal/gen/hostv1;hostv1b\x06proto3"
+	"\x04List\x12\x17.tt.host.v1.ListRequest\x1a\x18.tt.host.v1.ListResponseB3Z1github.com/luyaogod/TT/internal/gen/hostv1;hostv1b\x06proto3"
 
 var (
 	file_tt_host_v1_profiles_proto_rawDescOnce sync.Once

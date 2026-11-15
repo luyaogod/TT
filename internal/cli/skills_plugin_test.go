@@ -14,11 +14,11 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/cli/common"
-	"tt/internal/config"
-	"tt/internal/plugin"
-	"tt/internal/skill"
-	"tt/internal/testkit"
+	"github.com/luyaogod/TT/internal/cli/common"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/plugin"
+	"github.com/luyaogod/TT/internal/skill"
+	"github.com/luyaogod/TT/internal/testkit"
 )
 
 // writePluginPackage 造一个只贡献技能的插件包：每个技能目录一份合规 SKILL.md。

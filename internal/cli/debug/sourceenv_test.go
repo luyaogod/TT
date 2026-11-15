@@ -3,7 +3,7 @@ package debug
 import (
 	"testing"
 
-	"tt/internal/cli/common"
+	"github.com/luyaogod/TT/internal/cli/common"
 )
 
 // TestWithoutGlobalEnv 钉住台账 D27 的判据：

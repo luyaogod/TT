@@ -26,7 +26,7 @@ import (
 	"sync"
 	"time"
 
-	"tt/internal/config"
+	"github.com/luyaogod/TT/internal/config"
 )
 
 // Server 字典侧配置服务:config.json 读写 + REST 接口 + 后台任务状态。

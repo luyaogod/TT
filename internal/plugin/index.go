@@ -19,7 +19,7 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 
-	"tt/internal/fetch"
+	"github.com/luyaogod/TT/internal/fetch"
 )
 
 // IndexSchemaVersion 发布索引的结构版本。更高的主版本一律拒绝（不猜字段含义）。

@@ -16,7 +16,7 @@ import (
 	"errors"
 	"fmt"
 
-	"tt/internal/dbconfig"
+	"github.com/luyaogod/TT/pkg/dbconfig"
 )
 
 // SessionOptions 打开连接时的策略选择。

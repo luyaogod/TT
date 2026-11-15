@@ -11,15 +11,15 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"tt/internal/cli/common"
-	debugcli "tt/internal/cli/debug"
-	"tt/internal/config"
-	"tt/internal/connsvc"
-	"tt/internal/debug"
-	dictserver "tt/internal/dict/server"
-	"tt/internal/hostrpc"
-	"tt/internal/plugin"
-	"tt/internal/web"
+	"github.com/luyaogod/TT/internal/cli/common"
+	debugcli "github.com/luyaogod/TT/internal/cli/debug"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/connsvc"
+	"github.com/luyaogod/TT/internal/debug"
+	dictserver "github.com/luyaogod/TT/internal/dict/server"
+	"github.com/luyaogod/TT/internal/hostrpc"
+	"github.com/luyaogod/TT/internal/plugin"
+	"github.com/luyaogod/TT/internal/web"
 )
 
 // connReloader 把「配置被改写了」翻译成「连接服务的旧会话全部作废」。

@@ -16,13 +16,13 @@ import (
 
 	"connectrpc.com/connect"
 
-	"tt/internal/config"
-	"tt/internal/connsvc"
-	"tt/internal/dbconfig"
-	"tt/internal/erpdb"
-	"tt/internal/gen/hostv1"
-	"tt/internal/gen/hostv1/hostv1connect"
-	"tt/internal/hostrpc"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/connsvc"
+	"github.com/luyaogod/TT/pkg/dbconfig"
+	"github.com/luyaogod/TT/pkg/erpdb"
+	"github.com/luyaogod/TT/internal/gen/hostv1"
+	"github.com/luyaogod/TT/internal/gen/hostv1/hostv1connect"
+	"github.com/luyaogod/TT/internal/hostrpc"
 )
 
 // pingSession erpdb.Session 的替身：只回答取版本。

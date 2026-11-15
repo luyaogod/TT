@@ -1,6 +1,6 @@
 package plugin
 
-import "tt/internal/connsvc"
+import "github.com/luyaogod/TT/internal/connsvc"
 
 // RegistryAuthorizer 用插件注册表做授权来源（connsvc.Authorizer 的实现）。
 //

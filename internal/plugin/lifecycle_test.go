@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	"tt/internal/hostrpc"
+	"github.com/luyaogod/TT/internal/hostrpc"
 )
 
 // localFileURL 把一个本机路径变成 fetch 认识的 file:// 地址（空格等会被转义）。

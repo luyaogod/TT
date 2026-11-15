@@ -526,7 +526,7 @@ const file_tt_host_v1_common_proto_rawDesc = "" +
 	"\bConnKind\x12\x19\n" +
 	"\x15CONN_KIND_UNSPECIFIED\x10\x00\x12\x10\n" +
 	"\fCONN_KIND_DB\x10\x01\x12\x11\n" +
-	"\rCONN_KIND_SSH\x10\x02B\x1fZ\x1dtt/internal/gen/hostv1;hostv1b\x06proto3"
+	"\rCONN_KIND_SSH\x10\x02B3Z1github.com/luyaogod/TT/internal/gen/hostv1;hostv1b\x06proto3"
 
 var (
 	file_tt_host_v1_common_proto_rawDescOnce sync.Once

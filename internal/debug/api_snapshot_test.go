@@ -22,7 +22,7 @@ import (
 	"net/http"
 	"testing"
 
-	"tt/internal/target"
+	"github.com/luyaogod/TT/internal/target"
 )
 
 // snapshotBaseKeys 是**新增身份七键之前**快照的恒定键集（21 个），逐字摘自本次改动前的

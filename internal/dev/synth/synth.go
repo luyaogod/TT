@@ -21,11 +21,11 @@ import (
 	"strconv"
 	"strings"
 
-	"tt/internal/dev/fgl"
-	"tt/internal/dev/model"
-	"tt/internal/dev/pkgfile"
-	"tt/internal/dev/tapfile"
-	"tt/internal/dev/tglfile"
+	"github.com/luyaogod/TT/internal/dev/fgl"
+	"github.com/luyaogod/TT/internal/dev/model"
+	"github.com/luyaogod/TT/internal/dev/pkgfile"
+	"github.com/luyaogod/TT/internal/dev/tapfile"
+	"github.com/luyaogod/TT/internal/dev/tglfile"
 )
 
 // ExitCodeError 让 CLI 把错误映射为退出码。

@@ -30,8 +30,8 @@ import (
 
 	"connectrpc.com/connect"
 
-	"tt/internal/gen/hostv1"
-	"tt/internal/gen/hostv1/hostv1connect"
+	"github.com/luyaogod/TT/internal/gen/hostv1"
+	"github.com/luyaogod/TT/internal/gen/hostv1/hostv1connect"
 )
 
 func main() {

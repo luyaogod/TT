@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"tt/internal/config"
+	"github.com/luyaogod/TT/internal/config"
 )
 
 // newStore 造一个落在临时数据目录里的 Store。

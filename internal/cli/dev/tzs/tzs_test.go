@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/dev/testutil"
-	"tt/internal/testkit"
+	"github.com/luyaogod/TT/internal/dev/testutil"
+	"github.com/luyaogod/TT/internal/testkit"
 )
 
 // formPkg 造一个合成的表单包（.tzs）：纯文本 + 二进制各一，用于验证「纯解压逐字节一致」。

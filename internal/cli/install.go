@@ -27,11 +27,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"tt/internal/cli/common"
-	"tt/internal/config"
-	"tt/internal/pathinstall"
-	"tt/internal/skill"
-	"tt/internal/update"
+	"github.com/luyaogod/TT/internal/cli/common"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/pathinstall"
+	"github.com/luyaogod/TT/internal/skill"
+	"github.com/luyaogod/TT/internal/update"
 )
 
 const skillsDirName = "skills"

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/testkit"
+	"github.com/luyaogod/TT/internal/testkit"
 )
 
 // engine_probe_test.go —— 盯住 engine/test/ 下那些探测程序**不许再依赖作者本机的东西**。

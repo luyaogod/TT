@@ -22,9 +22,9 @@ import (
 	"sync"
 	"testing"
 
-	"tt/internal/cli/common"
-	"tt/internal/debug"
-	"tt/internal/testkit"
+	"github.com/luyaogod/TT/internal/cli/common"
+	"github.com/luyaogod/TT/internal/debug"
+	"github.com/luyaogod/TT/internal/testkit"
 )
 
 // bpStub 是本文件的"假通道"：一个只认断点面那几条路径的 HTTP 桩，

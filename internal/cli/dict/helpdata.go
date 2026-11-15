@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"tt/internal/cli/common"
-	"tt/internal/config"
-	"tt/internal/dict/dbsync"
+	"github.com/luyaogod/TT/internal/cli/common"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/dict/dbsync"
 
 	"github.com/spf13/cobra"
 )

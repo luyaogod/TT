@@ -13,10 +13,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"tt/internal/cli/common"
-	"tt/internal/config"
-	"tt/internal/output"
-	"tt/internal/plugin"
+	"github.com/luyaogod/TT/internal/cli/common"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/output"
+	"github.com/luyaogod/TT/internal/plugin"
 )
 
 // presetConfigFromArgs 在 cobra 解析之前把 `--config` 落到 TT_CONFIG。

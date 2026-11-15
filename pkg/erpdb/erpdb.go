@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"tt/internal/dbconfig"
-	"tt/internal/safesql"
+	"github.com/luyaogod/TT/pkg/dbconfig"
+	"github.com/luyaogod/TT/pkg/safesql"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"

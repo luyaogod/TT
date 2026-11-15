@@ -27,7 +27,7 @@ import (
 	"testing"
 	"time"
 
-	"tt/internal/testenv"
+	"github.com/luyaogod/TT/internal/testenv"
 )
 
 // closeIfOpen 把某个包在当前工作区守护进程里的会话关掉（没有就什么都不做）。

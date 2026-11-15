@@ -18,7 +18,7 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/testkit"
+	"github.com/luyaogod/TT/internal/testkit"
 )
 
 // 与 internal/dev/tzs 的合成夹具同形（两份各自内联：命令层的测试不该依赖另一个包的内联常量）。

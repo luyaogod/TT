@@ -22,8 +22,8 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"tt/internal/config"
-	"tt/internal/plugin"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/plugin"
 )
 
 // brokenPluginServer 造一个"装了、启用了、但版本目录已经被弄坏"的插件，

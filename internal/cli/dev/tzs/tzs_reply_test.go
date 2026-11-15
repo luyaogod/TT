@@ -18,7 +18,7 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/dev/tzs"
+	"github.com/luyaogod/TT/internal/dev/tzs"
 )
 
 // capture 把 stdout/stderr 换成同一根管道，返回 fn 期间的输出（两股合在一起）。

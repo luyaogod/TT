@@ -18,8 +18,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"tt/internal/config"
-	"tt/internal/entdir"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/pkg/entdir"
 )
 
 // Move 一份要搬的落点（文件或整个目录）。

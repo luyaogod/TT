@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"tt/internal/config"
+	"github.com/luyaogod/TT/internal/config"
 )
 
 // RegistrySchemaVersion 注册表结构版本。更高的主版本一律拒绝读（不猜测字段含义）。

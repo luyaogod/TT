@@ -30,8 +30,8 @@ import (
 	"strings"
 	"time"
 
-	"tt/internal/config"
-	"tt/internal/winproc"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/winproc"
 )
 
 // 就绪握手与轮询的常数（理由见文件注释）。

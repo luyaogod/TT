@@ -3,8 +3,8 @@ package fence
 import (
 	"testing"
 
-	"tt/internal/dev/fgl"
-	"tt/internal/dev/model"
+	"github.com/luyaogod/TT/internal/dev/fgl"
+	"github.com/luyaogod/TT/internal/dev/model"
 )
 
 // spanTextIn 取区间原文（越界或空区间给 ""）。

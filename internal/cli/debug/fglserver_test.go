@@ -18,7 +18,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"tt/internal/cli/common"
+	"github.com/luyaogod/TT/internal/cli/common"
 )
 
 // newWireCmd 造一个只挂 --fglserver 的命令:覆盖语义靠 Flags().Changed 判定,

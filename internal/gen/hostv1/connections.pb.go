@@ -633,7 +633,7 @@ const file_tt_host_v1_connections_proto_rawDesc = "" +
 	"\aTestSSH\x12\x1a.tt.host.v1.TestSSHRequest\x1a\x1b.tt.host.v1.TestSSHResponse\x12?\n" +
 	"\x06OpenDB\x12\x19.tt.host.v1.OpenDBRequest\x1a\x1a.tt.host.v1.OpenDBResponse\x12B\n" +
 	"\aOpenSSH\x12\x1a.tt.host.v1.OpenSSHRequest\x1a\x1b.tt.host.v1.OpenSSHResponse\x12<\n" +
-	"\x05Close\x12\x18.tt.host.v1.CloseRequest\x1a\x19.tt.host.v1.CloseResponseB\x1fZ\x1dtt/internal/gen/hostv1;hostv1b\x06proto3"
+	"\x05Close\x12\x18.tt.host.v1.CloseRequest\x1a\x19.tt.host.v1.CloseResponseB3Z1github.com/luyaogod/TT/internal/gen/hostv1;hostv1b\x06proto3"
 
 var (
 	file_tt_host_v1_connections_proto_rawDescOnce sync.Once

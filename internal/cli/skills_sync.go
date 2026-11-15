@@ -21,10 +21,10 @@ import (
 	"sort"
 	"strings"
 
-	"tt/internal/cli/common"
-	"tt/internal/config"
-	"tt/internal/plugin"
-	"tt/internal/skill"
+	"github.com/luyaogod/TT/internal/cli/common"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/plugin"
+	"github.com/luyaogod/TT/internal/skill"
 )
 
 // errNoOfficialSkills 官方技能树不在（源码构建、或这个包没带 skills/）。

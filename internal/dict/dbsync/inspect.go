@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"tt/internal/dict/db"
+	"github.com/luyaogod/TT/internal/dict/db"
 )
 
 // FamilyStatus 本地库里某个数据族的覆盖情况。

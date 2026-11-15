@@ -22,7 +22,7 @@ import (
 	"regexp"
 	"strings"
 
-	"tt/internal/config"
+	"github.com/luyaogod/TT/internal/config"
 )
 
 // reIdentitySuffix 匹配设计器给包名加的客制/标准身份后缀，如 capt110(c).tzc 的 "(c)"。

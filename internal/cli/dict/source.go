@@ -22,12 +22,12 @@ import (
 	"strings"
 	"time"
 
-	"tt/internal/cli/common"
-	"tt/internal/config"
-	"tt/internal/dbconfig"
-	"tt/internal/dict/db"
-	"tt/internal/dict/live"
-	"tt/internal/output"
+	"github.com/luyaogod/TT/internal/cli/common"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/pkg/dbconfig"
+	"github.com/luyaogod/TT/internal/dict/db"
+	"github.com/luyaogod/TT/internal/dict/live"
+	"github.com/luyaogod/TT/internal/output"
 )
 
 var (

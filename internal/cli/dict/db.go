@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 
-	"tt/internal/cli/common"
-	"tt/internal/config"
-	"tt/internal/dbconfig"
-	"tt/internal/host"
+	"github.com/luyaogod/TT/internal/cli/common"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/pkg/dbconfig"
+	"github.com/luyaogod/TT/internal/host"
 
 	"github.com/spf13/cobra"
 )

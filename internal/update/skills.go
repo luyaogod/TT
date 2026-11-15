@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"tt/internal/config"
+	"github.com/luyaogod/TT/internal/config"
 )
 
 // 技能一致性：`tt install skills` 把 mkdir 之外的技能树复制到 agent 会读的目录里，

@@ -22,17 +22,17 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"tt/internal/cli/at"
-	"tt/internal/cli/common"
-	"tt/internal/cli/db"
-	"tt/internal/cli/debug"
-	"tt/internal/cli/dev"
-	"tt/internal/cli/dict"
-	"tt/internal/cli/file"
-	"tt/internal/cli/interfacecmd"
-	"tt/internal/cli/outline"
-	"tt/internal/cli/session"
-	"tt/internal/output"
+	"github.com/luyaogod/TT/internal/cli/at"
+	"github.com/luyaogod/TT/internal/cli/common"
+	"github.com/luyaogod/TT/internal/cli/db"
+	"github.com/luyaogod/TT/internal/cli/debug"
+	"github.com/luyaogod/TT/internal/cli/dev"
+	"github.com/luyaogod/TT/internal/cli/dict"
+	"github.com/luyaogod/TT/internal/cli/file"
+	"github.com/luyaogod/TT/internal/cli/interfacecmd"
+	"github.com/luyaogod/TT/internal/cli/outline"
+	"github.com/luyaogod/TT/internal/cli/session"
+	"github.com/luyaogod/TT/internal/output"
 )
 
 // rootCmd is the base command.

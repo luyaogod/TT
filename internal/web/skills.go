@@ -15,8 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"tt/internal/config"
-	"tt/internal/skill"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/skill"
 )
 
 // officialSkillsDirFn 是官方技能目录：<exe 目录>\skills，与命令行走同一个落点。
