@@ -535,7 +535,7 @@ export function WsLogView() {
         {!collapsed && (
           <div className="space-y-2 px-3 pb-2">
             <div className={QBE_ROW}>
-              <QueryCell label="企业编号" title="这次操作的企业语境（结果回显、重放 TOPENT）；日志表为环境共享">
+              <QueryCell label="企业编号" title="选择本次操作的企业">
                 <div className="flex items-center gap-1">
                   <Select value={ent ? String(ent) : undefined} onValueChange={(v) => setEnt(Number(v) || 0)}>
                     <SelectTrigger className="h-8 w-full text-[13px]" aria-label="企业编号">
@@ -568,11 +568,11 @@ export function WsLogView() {
             </div>
 
             <div className={QBE_ROW}>
-              <QueryCell label="发起端" title="wsfa013；支持 * ? 通配；回车查询">
+              <QueryCell label="发起端" title="支持 * ? 通配；回车查询">
                 <Input value={draft.origin} onChange={(e) => setDraft((d) => ({ ...d, origin: e.target.value }))}
                   onKeyDown={onEnter} placeholder="如 OA" className="h-8 text-[13px]" />
               </QueryCell>
-              <QueryCell label="服务端" title="wsfa018；支持 * ? 通配；回车查询">
+              <QueryCell label="服务端" title="支持 * ? 通配；回车查询">
                 <Input value={draft.server} onChange={(e) => setDraft((d) => ({ ...d, server: e.target.value }))}
                   onKeyDown={onEnter} placeholder="如 T100" className="h-8 text-[13px]" />
               </QueryCell>
@@ -580,7 +580,7 @@ export function WsLogView() {
             </div>
 
             <div className={QBE_ROW}>
-              <QueryCell label="起始时间" title="wsfa003 的下界；清空 = 不限">
+              <QueryCell label="起始时间" title="清空 = 不限">
                 <DatePicker value={from} onChange={setFrom} title="起始日期" className="h-8 w-full" />
               </QueryCell>
               <LookupField label="服务名称" value={draft.service}
@@ -588,16 +588,16 @@ export function WsLogView() {
                 onKeyDown={onEnter}
                 onOpen={() => setPickerOpen(true)}
                 placeholder="支持 * ? 通配，或点右侧选择"
-                title="wsfa001；支持 * ? 通配；多选以 | 分隔；点右侧打开服务编号查询"
+                title="支持 * ? 通配；多选以 | 分隔；点右侧打开服务编号查询"
                 buttonTitle="选择服务名称" />
               <div className="hidden xl:block" />
             </div>
 
             <div className={QBE_ROW}>
-              <QueryCell label="结束时间" title="wsfa004 的上界；清空 = 不限">
+              <QueryCell label="结束时间" title="清空 = 不限">
                 <DatePicker value={to} onChange={setTo} title="结束日期" className="h-8 w-full" />
               </QueryCell>
-              <QueryCell label="处理结果" title="wsfa006；SCC 239">
+              <QueryCell label="处理结果" title="按执行结果过滤">
                 <Select value={draft.result || 'all'}
                   onValueChange={(v) => setDraft((d) => ({ ...d, result: v === 'all' ? '' : v }))}>
                   <SelectTrigger className="h-8 w-full text-[13px]" aria-label="处理结果">
