@@ -1482,7 +1482,7 @@ var debugWSServicesCmd = &cobra.Command{
 过滤值不带通配符时按"包含"匹配;带 * ? 时按通配匹配。
 
 示例:
-  tt debug wsservices --env 109prd --page-size 5
+  tt debug wsservices --env 109prd --page-size 10
   tt debug wsservices --env 109prd --spec wssp*
   tt debug wsservices --env 109prd --api easy.query
 `,
