@@ -22,13 +22,13 @@ func writePluginFixture(t *testing.T) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "src")
 	writeTestFile(t, filepath.Join(dir, "plugin.json"), `{
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "com.example.demo",
   "version": "0.1.0",
   "hostApi": ">=1.0.0 <2.0.0",
+  "tt": ">=0.7.0 <1.0.0",
   "name": "演示插件",
-  "contributions": {"cli": {"namespace": "demo", "entry": "bin/demo.exe", "summary": "演示"}},
-  "permissions": ["profiles.list", "db.connect"]
+  "contributions": {"cli": {"namespace": "demo", "entry": "bin/demo.exe", "summary": "演示"}}
 }`)
 	writeTestFile(t, filepath.Join(dir, "bin", "demo.exe"), "x")
 	return dir

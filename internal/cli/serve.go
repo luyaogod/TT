@@ -227,7 +227,6 @@ func newServeCmd() *cobra.Command {
 			// 插件页面资源与私有 RPC 代理（/plugins/*）。
 			// Host API 桥的目标地址按请求自己的 Host 拼（回环），不需要等监听端口确定。
 			pluginUI := plugin.NewWebHandler(pluginStore, sup.Endpoint)
-			pluginUI.Tokens = tokenStore
 			// 技能期望态重算与命令行共用一份实现（skills_sync.go）：设置页里点启用/停用/
 			// 卸载，效果必须和 `tt plugin enable/disable/uninstall` 完全一样。
 			pluginMgr.SkillsSync = syncPluginSkills

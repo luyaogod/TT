@@ -2,7 +2,6 @@ package plugin
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -268,15 +267,7 @@ func TestUIHandlerEndToEndHostAPIAndOwnService(t *testing.T) {
 		t.Fatalf("起插件服务失败: %v", err)
 	}
 
-	// 真的 Host API（与 tt serve 同构：同一份 connsvc + 同一张令牌表）。
-	api := httptest.NewServer(hostrpc.NewHandler(hostrpc.Deps{
-		Service: conn, Auth: hostrpc.NewTokenAuthenticator(tokens),
-	}))
-	t.Cleanup(api.Close)
-
 	h := NewWebHandler(s, sup.Endpoint)
-	h.HostAPIURL = api.URL + hostrpc.Prefix
-	h.Tokens = tokens
 	handler := h.Handler()
 
 	// 页面本身能取到（活跃版本目录里的参考插件页面）。
@@ -285,98 +276,10 @@ func TestUIHandlerEndToEndHostAPIAndOwnService(t *testing.T) {
 		t.Fatalf("插件页面没取到: %d（%s）", page.Code, page.Body.String())
 	}
 
-	// (a) 经桥调 Host API：v2 启用即信任，返回配置里的全部环境。
-	req := httptest.NewRequest("POST",
-		"/plugins/"+rec.ID+"/hostrpc/tt.host.v1.ProfilesService/List", strings.NewReader("{}"))
-	req.RemoteAddr = "127.0.0.1:5000"
-	req.Header.Set("Content-Type", "application/json")
-	rec2 := httptest.NewRecorder()
-	handler.ServeHTTP(rec2, req)
-	if rec2.Code != 200 {
-		t.Fatalf("桥接调 Host API 失败: %d（%s）", rec2.Code, rec2.Body.String())
-	}
-	var list struct {
-		Profiles []struct {
-			Env string `json:"env"`
-		} `json:"profiles"`
-	}
-	if err := json.Unmarshal(rec2.Body.Bytes(), &list); err != nil {
-		t.Fatalf("Host API 响应不是预期 JSON: %v（%s）", err, rec2.Body.String())
-	}
-	var envs []string
-	for _, p := range list.Profiles {
-		envs = append(envs, p.Env)
-	}
-	got := map[string]bool{}
-	for _, e := range envs {
-		got[e] = true
-	}
-	if len(envs) != 2 || !got["prod"] || !got["test"] {
-		t.Fatalf("插件页面该看到全部环境（prod/test），得 %v", envs)
-	}
-	// 桥用完即撤销：令牌表里只剩服务实例自己那一个。
-	if tokens.Count() != 1 {
-		t.Errorf("桥接后该只剩服务实例令牌，得 %d", tokens.Count())
-	}
-
 	// (b) 经 /rpc/ 打到插件自己的服务（参考插件 /echo 回自己的标识）。
 	rpc := do(handler, "POST", "/plugins/"+rec.ID+"/rpc/echo", "127.0.0.1:5000")
 	if rpc.Code != 200 || !strings.Contains(rpc.Body.String(), `"plugin":"refplugin"`) {
 		t.Fatalf("插件自身服务没有回答: %d（%s）", rpc.Code, rpc.Body.String())
-	}
-}
-
-// TestUIHandlerHostBridgeMintsIdentityForThePlugin 页面经桥调 Host API：桥按插件身份
-// 签发一次性令牌，页面自己拿不到令牌。
-func TestUIHandlerHostBridgeMintsIdentityForThePlugin(t *testing.T) {
-	m, s := newManager(t)
-	src := t.TempDir()
-	writeFile(t, filepath.Join(src, ManifestFileName), `{
-  "schemaVersion": 1, "id": "com.example.ui", "version": "0.1.0",
-  "hostApi": ">=1.0.0 <2.0.0",
-  "contributions": {"frontend": {"route": "ui", "title": "UI", "entry": "ui/index.html"}},
-  "permissions": ["profiles.list"]
-}`)
-	writeFile(t, filepath.Join(src, "ui", "index.html"), "page")
-	rec, err := m.Install(InstallOptions{Source: src})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := m.Enable(rec.ID, Grants{Capabilities: []string{"profiles.list"}, Envs: []string{"prod"}}); err != nil {
-		t.Fatal(err)
-	}
-
-	// 一个真的 Host API（与 serve 里同构：同一份 connsvc + 令牌表）。
-	tokens := hostrpc.NewTokenStore()
-	cfgPath := filepath.Join(t.TempDir(), "config.json")
-	if err := config.SaveHosts(cfgPath, config.Hosts{SSHs: []config.NamedSsh{
-		{Name: "prod", SSHConfig: config.SSHConfig{Host: "10.0.0.1", Port: 22, User: "u"}},
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	svc := connsvc.New(connsvc.Options{ConfigPath: cfgPath, Authorizer: RegistryAuthorizer{Store: s}})
-	api := httptest.NewServer(hostrpc.NewHandler(hostrpc.Deps{Service: svc, Auth: hostrpc.NewTokenAuthenticator(tokens)}))
-	defer api.Close()
-
-	h := NewWebHandler(s, nil)
-	h.HostAPIURL = api.URL + hostrpc.Prefix
-	h.Tokens = tokens
-	handler := h.Handler()
-
-	req := httptest.NewRequest("POST", "/plugins/com.example.ui/hostrpc/tt.host.v1.ProfilesService/List", strings.NewReader("{}"))
-	req.RemoteAddr = "127.0.0.1:5000"
-	req.Header.Set("Content-Type", "application/json")
-	rec2 := httptest.NewRecorder()
-	handler.ServeHTTP(rec2, req)
-	if rec2.Code != 200 {
-		t.Fatalf("桥接调用失败: %d（%s）", rec2.Code, rec2.Body.String())
-	}
-	if !strings.Contains(rec2.Body.String(), "\"prod\"") {
-		t.Fatalf("该拿到已授权环境: %s", rec2.Body.String())
-	}
-	// 一次性令牌用完即撤销。
-	if tokens.Count() != 0 {
-		t.Errorf("桥接后令牌该撤销，剩 %d", tokens.Count())
 	}
 }
 
