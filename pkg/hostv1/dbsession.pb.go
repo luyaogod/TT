@@ -900,7 +900,7 @@ const file_tt_host_v1_dbsession_proto_rawDesc = "" +
 	"\x06TxExec\x12\x19.tt.host.v1.TxExecRequest\x1a\x1a.tt.host.v1.TxExecResponse\x12E\n" +
 	"\bCommitTx\x12\x1b.tt.host.v1.CommitTxRequest\x1a\x1c.tt.host.v1.CommitTxResponse\x12K\n" +
 	"\n" +
-	"RollbackTx\x12\x1d.tt.host.v1.RollbackTxRequest\x1a\x1e.tt.host.v1.RollbackTxResponseB3Z1github.com/luyaogod/TT/internal/gen/hostv1;hostv1b\x06proto3"
+	"RollbackTx\x12\x1d.tt.host.v1.RollbackTxRequest\x1a\x1e.tt.host.v1.RollbackTxResponseB*Z(github.com/luyaogod/TT/pkg/hostv1;hostv1b\x06proto3"
 
 var (
 	file_tt_host_v1_dbsession_proto_rawDescOnce sync.Once

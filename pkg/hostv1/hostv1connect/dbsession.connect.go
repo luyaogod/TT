@@ -16,7 +16,7 @@ import (
 	connect "connectrpc.com/connect"
 	context "context"
 	errors "errors"
-	hostv1 "github.com/luyaogod/TT/internal/gen/hostv1"
+	hostv1 "github.com/luyaogod/TT/pkg/hostv1"
 	http "net/http"
 	strings "strings"
 )

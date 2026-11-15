@@ -6,7 +6,7 @@ syntax = "proto3";
 
 package tt.host.v1;
 
-option go_package = "github.com/luyaogod/TT/internal/gen/hostv1;hostv1";
+option go_package = "github.com/luyaogod/TT/pkg/hostv1;hostv1";
 
 // ErrorInfo 稳定的错误详情。插件不得解析 message（它是给人看的），只判 code。
 message ErrorInfo {

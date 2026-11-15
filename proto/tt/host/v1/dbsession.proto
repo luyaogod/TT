@@ -9,7 +9,7 @@ syntax = "proto3";
 
 package tt.host.v1;
 
-option go_package = "github.com/luyaogod/TT/internal/gen/hostv1;hostv1";
+option go_package = "github.com/luyaogod/TT/pkg/hostv1;hostv1";
 
 message QueryRequest {
   string handle = 1;

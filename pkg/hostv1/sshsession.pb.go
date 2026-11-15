@@ -165,7 +165,7 @@ const file_tt_host_v1_sshsession_proto_rawDesc = "" +
 	"\texit_code\x18\x02 \x01(\x05R\bexitCode\x12\x1b\n" +
 	"\ttimed_out\x18\x03 \x01(\bR\btimedOut2T\n" +
 	"\x11SSHSessionService\x12?\n" +
-	"\x04Exec\x12\x1a.tt.host.v1.SSHExecRequest\x1a\x1b.tt.host.v1.SSHExecResponseB3Z1github.com/luyaogod/TT/internal/gen/hostv1;hostv1b\x06proto3"
+	"\x04Exec\x12\x1a.tt.host.v1.SSHExecRequest\x1a\x1b.tt.host.v1.SSHExecResponseB*Z(github.com/luyaogod/TT/pkg/hostv1;hostv1b\x06proto3"
 
 var (
 	file_tt_host_v1_sshsession_proto_rawDescOnce sync.Once

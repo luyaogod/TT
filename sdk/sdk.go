@@ -22,7 +22,6 @@ package sdk
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"time"
 )
 
@@ -34,17 +33,7 @@ type Plugin interface {
 	Stop(ctx Context) error
 }
 
-// Run 启动插件并阻塞到 TT 要求退出。
-//
-// 运行时（连接 TT 核心、注入 Context）随 P2「资源服务」落地；在此之前调用会
-// 返回明确的错误，而不是让插件以为自己在正常工作。
-func Run(p Plugin) {
-	if p == nil {
-		fmt.Println("sdk: 插件实现为空")
-		return
-	}
-	fmt.Println("sdk: 插件运行时尚未接入（见 tt-plugin-v2 P2）")
-}
+// Run 启动插件并阻塞到 TT 要求退出（实现见 run.go）。
 
 // Context 宿主注入给插件的一切。插件按需取用；取不到的服务返回 nil。
 type Context interface {
