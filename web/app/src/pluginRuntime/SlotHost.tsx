@@ -61,3 +61,31 @@ export function SlotHost({
     </>
   )
 }
+/** 有内容才渲染（用于状态栏/导航这类"有就占位、没有就消失"的槽位）。 */
+export function SlotHostIfAny({ slot }: { slot: string }) {
+  const entries = useSlot(slot)
+  if (entries.length === 0) return null
+  return <SlotHost slot={slot} />
+}
+
+/** 设置页的分区槽位：每条注册渲染成一张带标题的卡片。 */
+export function PluginSettingsSections() {
+  const entries = useSlot('settings.section')
+  if (entries.length === 0) return null
+  return (
+    <>
+      {entries.map((entry) => {
+        const Comp = entry.component
+        return (
+          <section key={`${entry.pluginId}:${entry.id ?? entry.title ?? ''}`}
+            className="rounded-ui border border-border bg-card p-3">
+            <div className="mb-2 text-[13px] font-medium text-foreground">{entry.title || entry.pluginId}</div>
+            <SlotBoundary label={`settings.section:${entry.pluginId}`}>
+              <Comp />
+            </SlotBoundary>
+          </section>
+        )
+      })}
+    </>
+  )
+}

@@ -47,6 +47,7 @@ import {
 import { Card, Field, InfoRow, SectionTitle, SettingRow } from '../../shared/settings'
 import { DirPicker } from './DirPicker'
 import { PluginsSettings } from './PluginsSettings'
+import { PluginSettingsSections } from './pluginRuntime/SlotHost'
 import { SkillsView } from './SkillsView'
 import { useToast } from './toast'
 import { useStore, type ThemeMode } from './store'
@@ -2126,6 +2127,8 @@ export function SettingsView() {
                 {/* 「默认环境」一行已删:没有默认环境了(环境一律 --env 点名)。 */}
                 <InfoRow label="环境数" value={String(cfg.sshs?.length ?? 0)} />
               </Card>
+
+              <PluginSettingsSections />
 
               <Card id="card-app-update" title="更新"
                 description="检查并安装 tt 的新版本。">

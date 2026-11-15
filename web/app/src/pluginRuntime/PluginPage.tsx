@@ -3,12 +3,12 @@
 // 与 PluginFrame（legacy iframe）的分界：插件清单里有 contributions.ui 的 page
 // 条目就走这里；否则仍走旧 iframe。两者共用外壳的标题栏与错误呈现。
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect } from 'react'
 import { AlertTriangle, RotateCcw } from 'lucide-react'
 import { IconBtn, Meta, ViewHeader } from '../Shell'
 import { pluginPageEntry, pluginUIAssetURL, type PluginDescriptor } from '../plugins'
-import { activatePlugin, loadPluginClient } from './load'
-import { clearPlugin, useSlot } from './registry'
+import { ensurePluginActivated, reloadPlugin, usePluginActivation } from './boot'
+import { useSlot } from './registry'
 import { SlotHost } from './SlotHost'
 
 type Status = 'loading' | 'ready' | 'error'
@@ -19,41 +19,20 @@ export function PluginPage({ plugin, leading }: {
 }) {
   const page = pluginPageEntry(plugin)
   const url = page ? pluginUIAssetURL(plugin.id, page.entry) : null
-  const [status, setStatus] = useState<Status>('loading')
-  const [error, setError] = useState('')
-  const [reloadKey, setReloadKey] = useState(0)
-  const disposeRef = useRef<(() => void) | null>(null)
+  const act = usePluginActivation(plugin.id)
   const pageEntries = useSlot('page').filter(
     (e) => e.pluginId === plugin.id && (!e.route || e.route === plugin.route),
   )
 
   useEffect(() => {
-    let disposed = false
-    setStatus('loading')
-    setError('')
-    clearPlugin(plugin.id)
-    ;(async () => {
-      try {
-        if (!url) throw new Error('插件没有可加载的页面模块')
-        const mod = await loadPluginClient(url)
-        if (disposed) return
-        disposeRef.current = activatePlugin(plugin.id, plugin.version, mod)
-        if (!disposed) setStatus('ready')
-      } catch (e) {
-        if (disposed) return
-        setError(e instanceof Error ? e.message : String(e))
-        setStatus('error')
-      }
-    })()
-    return () => {
-      disposed = true
-      disposeRef.current?.()
-      disposeRef.current = null
-      clearPlugin(plugin.id)
-    }
-  }, [plugin.id, plugin.version, url, reloadKey])
+    void ensurePluginActivated(plugin)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plugin.id, plugin.version, url])
 
-  const reload = () => setReloadKey((n) => n + 1)
+  const status: Status = act?.error ? 'error' : (act?.loading || !act ? 'loading' : 'ready')
+  const error = act?.error ?? ''
+
+  const reload = () => { void reloadPlugin(plugin) }
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
@@ -71,7 +50,12 @@ export function PluginPage({ plugin, leading }: {
             )}
           </>
         )}
-        actions={<IconBtn icon={RotateCcw} label="重新加载插件页面" onClick={reload} />}
+        actions={(
+          <>
+            <SlotHost slot="header.actions" filter={(e) => e.pluginId === plugin.id} />
+            <IconBtn icon={RotateCcw} label="重新加载插件页面" onClick={reload} />
+          </>
+        )}
       />
 
       {status === 'error' && (

@@ -24,6 +24,7 @@ import { cn } from '../../shared/utils'
 import type { Route } from './routing'
 import type { EnvBrief, SessionItem } from './store'
 import { pluginMenuItems, type PluginDescriptor } from './plugins'
+import { SlotHostIfAny } from './pluginRuntime/SlotHost'
 
 export interface SidebarProps {
   envs: EnvBrief[]
@@ -271,6 +272,7 @@ export function Sidebar({
               </button>
             )
           })}
+          <SlotHostIfAny slot="nav" />
         </div>
       )}
 
