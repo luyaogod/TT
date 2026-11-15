@@ -252,3 +252,74 @@ func TestKbCmdForcesUTF8ClientEncoding(t *testing.T) {
 		t.Errorf("KbCmd 是单命令，不该含 export 或分号：\n%s", cmd)
 	}
 }
+
+// TestZoneTNSName 钉住「旧式菜单码 → TNS 别名」这张退回表。
+//
+// 它只在服务器上探不到 TWO_TASK 时才会用到。失败模式很糟：猜错一个别名不是
+// "多给点信息"，而是静默连到另一个库 —— 症状是"查不到数据"，不是报错。
+// 所以对不上一律返回空串，由调用方把字段留空让用户手填。
+//
+// 改动前的 default 返回 t35prd（36、36k、1、2、3、4 全落到它），
+// 老站点菜单码 1/2/3/4 会被整片指到 t35prd 的库 —— 这组用例就是挡这个回归。
+func TestZoneTNSName(t *testing.T) {
+	cases := []struct {
+		zone string
+		want string
+	}{
+		{"1", "topprd"},
+		{"2", "toptst"},
+		{"3", "topstd"},
+		{"4", "toppth"},
+		// 表外一律空：不猜。
+		{"", ""},
+		{"31", ""},
+		{"35", ""},
+		{"36", ""},
+		{"39", ""},
+		{"t", ""},
+		{"36k", ""},
+		{"11", ""},
+		{" 1", ""},
+		{"1 ", ""},
+	}
+	for _, c := range cases {
+		if got := ZoneTNSName(c.zone); got != c.want {
+			t.Errorf("ZoneTNSName(%q) = %q, want %q", c.zone, got, c.want)
+		}
+	}
+}
+
+// TestDBEnvProbeScriptNoLineStartsSemicolon 钉住探测脚本的**分隔符**。
+//
+// 历史 bug：sqlplusFind 是多行脚本且以换行结尾，拼成 `…; %s; echo …` 时那个分号
+// 落在行首，bash 报 `syntax error near unexpected token ';'`，于是
+// `echo TNSADM=… / echo TWOTASK=…` 从来没执行过 —— TWO_TASK 恒为空，
+// ProbeDBConfig 里"读服务器真实 TWO_TASK"的分支成了死代码，TNS 别名只能靠
+// ZoneTNSName 的猜测值兜着。这类错误不会让探针报错（前面几行输出还在），
+// 只会静默地少一行，所以要用结构断言挡，而不是等它再次出现。
+func TestDBEnvProbeScriptNoLineStartsSemicolon(t *testing.T) {
+	script := dbEnvProbeScript("source /u3/pub/bin/chenv 35 >/dev/null 2>&1")
+
+	for i, ln := range strings.Split(script, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(ln), ";") {
+			t.Fatalf("第 %d 行以分号开头，bash 会语法错误，后面的 echo 不会执行：%q", i+1, ln)
+		}
+	}
+	// 四个回显必须都在脚本里，且各占一行（顺序也要对：ORA/SQLP 先，TNSADM/TWOTASK 后）。
+	want := []string{"echo ORA=$OH", "echo SQLP=$SQLP", "echo TNSADM=$TNS_ADMIN", "echo TWOTASK=$TWO_TASK"}
+	last := -1
+	for _, w := range want {
+		idx := strings.Index(script, w)
+		if idx < 0 {
+			t.Fatalf("脚本缺少 %q", w)
+		}
+		if idx < last {
+			t.Errorf("回显顺序不对：%q 应排在前面那条之后", w)
+		}
+		last = idx
+	}
+	// chenv 片段必须在最前面（后面全都依赖它导出的 ORACLE_HOME/PATH）。
+	if !strings.HasPrefix(script, "source /u3/pub/bin/chenv 35") {
+		t.Errorf("chenv 片段应在脚本开头：%q", script[:min(len(script), 60)])
+	}
+}
