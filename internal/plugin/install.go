@@ -102,23 +102,9 @@ func (m *Manager) Install(opt InstallOptions) (*Record, error) {
 		return nil, fmt.Errorf("插件 %s 的版本 %s 已安装：确要重装加 --replace", man.ID, man.Version)
 	}
 
-	target := m.Store.VersionDir(man.ID, man.Version)
-	if target == "" {
-		return nil, fmt.Errorf("插件 ID/版本不能用作目录名: %q / %q", man.ID, man.Version)
-	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return nil, fmt.Errorf("创建版本父目录失败: %w", err)
-	}
-	if _, err := os.Stat(target); err == nil {
-		// 只有 Replace 才走到这里；旧目录先挪开，避免"删一半"的中间态。
-		aside := target + fmt.Sprintf(".old-%s", m.Store.now().Format("20060102-150405"))
-		if err := os.Rename(target, aside); err != nil {
-			return nil, fmt.Errorf("移走旧版本目录失败: %w", err)
-		}
-		defer os.RemoveAll(aside)
-	}
-	if err := os.Rename(root, target); err != nil {
-		return nil, fmt.Errorf("移入版本目录失败: %w", err)
+	target, err := m.placeVersion(man, root)
+	if err != nil {
+		return nil, err
 	}
 
 	rec, err := m.registerInstalled(man, target, source, opt.Replace)
@@ -181,6 +167,53 @@ func removeVersion(in []InstalledVersion, v string) []InstalledVersion {
 		}
 	}
 	return out
+}
+
+// placeVersion 把已解包校验过的暂存目录**原子**移进版本目录，返回落点。
+//
+// 安装与升级共用这一段：升级同样是"新版本目录先完整出现，再谈切换"，不允许"删一半"
+// 或"写到一半"的中间态出现在 installed/<id>/<version> 这个不可变目录里。
+func (m *Manager) placeVersion(man *Manifest, root string) (string, error) {
+	target := m.Store.VersionDir(man.ID, man.Version)
+	if target == "" {
+		return "", fmt.Errorf("插件 ID/版本不能用作目录名: %q / %q", man.ID, man.Version)
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return "", fmt.Errorf("创建版本父目录失败: %w", err)
+	}
+	if _, err := os.Stat(target); err == nil {
+		// 只有 Replace / 重装跌到已存在的目录才走到这里；旧目录先挪开，避免"删一半"的中间态。
+		aside := target + fmt.Sprintf(".old-%s", m.Store.now().Format("20060102-150405"))
+		if err := os.Rename(target, aside); err != nil {
+			return "", fmt.Errorf("移走旧版本目录失败: %w", err)
+		}
+		defer os.RemoveAll(aside)
+	}
+	if err := os.Rename(root, target); err != nil {
+		return "", fmt.Errorf("移入版本目录失败: %w", err)
+	}
+	return target, nil
+}
+
+// addVersionInactive 把已落盘的新版本登记进注册表，但**不改**活跃版本。
+//
+// 升级的关键一步：新版本先"存在但未激活"，这样切换前的任何失败（下载、解包、校验、
+// 停服务失败）都不会改变用户正在用的那个版本。
+func (m *Manager) addVersionInactive(man *Manifest, source Source) error {
+	return m.Store.WithLock(func(reg *Registry) error {
+		rec := reg.Find(man.ID)
+		if rec == nil {
+			return fmt.Errorf("插件 %s 不在注册表里（不能只登记一个版本）", man.ID)
+		}
+		if rec.HasVersion(man.Version) {
+			return nil
+		}
+		rec.Versions = append(rec.Versions, InstalledVersion{
+			Version: man.Version, InstalledAt: m.Store.Stamp(), Source: source,
+		})
+		rec.UpdatedAt = m.Store.Stamp()
+		return nil
+	})
 }
 
 // newStageDir 在插件缓存目录里建一个唯一暂存目录。

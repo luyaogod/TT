@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"tt/internal/plugin"
@@ -86,6 +87,9 @@ func (s *Server) pluginManagerOf(w http.ResponseWriter) (*plugin.Manager, bool) 
 }
 
 // hPluginsList 列出插件（默认全部，含未启用）。
+//
+// 附带运行态（state/addr/pid/restarts）是**增量**字段：没有 supervisor 的进程
+// （纯 CLI）不填，前端照旧只读它认识的那些字段。
 func (s *Server) hPluginsList(w http.ResponseWriter, r *http.Request) {
 	if !requireLocalManagement(w, r) {
 		return
@@ -109,7 +113,66 @@ func (s *Server) hPluginsList(w http.ResponseWriter, r *http.Request) {
 		}
 		list = filtered
 	}
+	if s.opt.PluginStatuses != nil {
+		byID := map[string]plugin.Status{}
+		for _, st := range s.opt.PluginStatuses() {
+			byID[st.PluginID] = st
+		}
+		for i := range list {
+			if st, has := byID[list[i].ID]; has {
+				list[i].State = st.State
+				list[i].Addr = st.Addr
+				list[i].PID = st.PID
+				list[i].Restarts = st.Restarts
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(list), "plugins": list})
+}
+
+// pluginLogsMaxTail 一次最多回多少行（超出只回最新的这么多行，并标记 truncated）。
+const pluginLogsMaxTail = 5000
+
+// hPluginLogs 读一个插件最新一次运行的日志（只读；P6-07）。
+//
+// 为什么挂在管理面而不是插件资源面：日志里可能有客户环境名、路径、错误细节，
+// 它是**管理视图**，普通插件令牌够不到这里（与 /api/plugins 的其它端点同一扇门）。
+func (s *Server) hPluginLogs(w http.ResponseWriter, r *http.Request) {
+	if !requireLocalManagement(w, r) {
+		return
+	}
+	m, ok := s.pluginManagerOf(w)
+	if !ok {
+		return
+	}
+	id := r.PathValue("id")
+	// 先确认插件存在：不存在给 404，而不是"没有日志"（后者会让人以为插件装上了）。
+	if _, err := m.Info(id); err != nil {
+		writePluginErr(w, err)
+		return
+	}
+	tail := plugin.DefaultLogTail
+	if raw := strings.TrimSpace(r.URL.Query().Get("tail")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 {
+			writeErr(w, http.StatusBadRequest, errors.New("tail 必须是正整数"))
+			return
+		}
+		tail = n
+	}
+	truncated := false
+	if tail > pluginLogsMaxTail {
+		tail, truncated = pluginLogsMaxTail, true
+	}
+	file, lines, err := m.Store.TailLog(id, tail)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "id": id, "file": file, "count": len(lines),
+		"lines": lines, "truncated": truncated,
+	})
 }
 
 // hPluginInfo 一个插件的详情（清单 + 授权 + 落点）。

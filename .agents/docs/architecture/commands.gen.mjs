@@ -647,6 +647,88 @@ MAIN
       },
     ],
   },
+  {
+    id: 'plugin',
+    title: '插件 plugin',
+    note: '安装只解包注册、不执行插件代码；启用才接线，升级/回滚有健康检查兜底。Host API 在 /hostrpc/（ConnectRPC v1），插件拿不到明文口令。',
+    cmds: [
+      {
+        cmd: 'tt plugin install <目录|zip> [--replace]', why: '装一个插件包（只解包注册，不启用）', mode: R, tip: '包根要有 plugin.json；命名空间撞内置命令时安装即失败。装完用 enable 授权。',
+        human: `已安装 com.example.demo 0.1.0（未启用）
+  程序目录 …\\plugins\\installed\\com.example.demo\\0.1.0
+  下一步   tt plugin enable com.example.demo --allow <能力> [--env <环境>]`,
+        json: `{"ok":true,"id":"com.example.demo","version":"0.1.0","enabled":false,"contributions":{"cli":{"namespace":"demo","entry":"bin/demo.bin","summary":"演示"},"frontend":{"route":"demo","title":"演示页面","entry":"ui/index.html"},"skills":["skills/demo-skill"]},"versionDir":"…\\plugins\\installed\\com.example.demo\\0.1.0"}`,
+      },
+      {
+        cmd: 'tt plugin enable <id> --allow <能力> [--env <环境>]', why: '启用并授权（能力 + 环境）', mode: R, tip: '只给能力不给环境 = 它一个环境都用不了。这是有意的默认。',
+        human: `已启用 com.example.demo
+  能力 profiles.list`,
+        json: `{"ok":true,"id":"com.example.demo","enabled":true,"capabilities":["profiles.list"],"envs":[]}`,
+      },
+      {
+        cmd: 'tt plugin list [--all] [--brief]', why: '列已装插件与启停状态', mode: R, tip: '--brief 只给 id 与启停（制表符分隔），脚本用。',
+        human: `插件 1 个
+  com.example.demo                 0.1.0  启用中        cli:demo ui:demo skills×1`,
+        json: `{"count":1,"ok":true,"plugins":[{"id":"com.example.demo","name":"演示插件","version":"0.1.0","enabled":true,"namespace":"demo","route":"demo","hasService":false,"skillDirs":["skills/demo-skill"],"permissions":["profiles.list","db.connect"],"capabilities":["profiles.list"]}]}`,
+      },
+      {
+        cmd: 'tt plugin info <id>', why: '看清单、版本、授权与落点', mode: R, tip: 'previousVersion 是回滚的落点；数据目录与程序目录分开，升级不动数据。',
+        human: `com.example.demo  演示插件
+  版本     0.1.0（已装 1 个版本）
+  状态     启用中
+  贡献     cli:demo ui:demo skills×1
+  声明权限 profiles.list、db.connect
+  已授权   能力 profiles.list；环境 （无）
+  程序目录 …\\plugins\\installed\\com.example.demo\\0.1.0
+  数据目录 …\\plugins\\data\\com.example.demo`,
+        json: `{"ok":true,"plugin":{"id":"com.example.demo","version":"0.1.0","enabled":true,"versions":[{"version":"0.1.0","installedAt":"2026-01-01T10:00:00+08:00","source":{"kind":"dir","ref":"D:\\\\tmp\\\\src"}}],"grants":{"capabilities":["profiles.list"]},"paths":{"versionDir":"…","dataDir":"…","runDir":"…","logsDir":"…"}}}`,
+      },
+      {
+        cmd: 'tt plugin grant <id> --allow … --env …', why: '改授权（不改变启用状态）', mode: R, tip: '--allow / --env 是整体替换，不是追加。',
+        human: `授权已更新 com.example.demo
+  能力 db.connect
+  环境 prod`,
+        json: `{"ok":true,"id":"com.example.demo","enabled":true,"capabilities":["db.connect"],"envs":["prod"]}`,
+      },
+      {
+        cmd: 'tt plugin update [--index <url>] [--id <插件>] [--to <版本>] [--dry-run]', why: '手动升级（读索引 → 下载校验 → 未激活安装 → 原子切换）', mode: R, tip: '不自动：没有后台检查、没有自动下载。失败自动回滚；成功后只留当前与上一个版本。',
+        human: `com.example.demo  0.1.0 → 0.2.0  （--dry-run，什么都没写）
+  · 将下载 …\\demo-0.2.0.zip（803 B，sha256 69bce5aa8b23…）
+  · 将解包校验后装成未激活版本 0.2.0，再停服务、原子切换 0.1.0 → 0.2.0、起服务并健康检查、重算技能
+  · 成功后清理旧版本，只保留 0.2.0 与 0.1.0`,
+        json: `{"count":1,"dryRun":true,"ok":true,"results":[{"id":"com.example.demo","from":"0.1.0","to":"0.2.0","dryRun":true,"updated":false,"notes":["将下载 https://plugins.example.com/demo-0.2.0.zip（803 B，sha256 69bce5aa8b23…）","…"]}]}`,
+      },
+      {
+        cmd: 'tt plugin rollback <id> [--dry-run]', why: '切回上一个版本（同一套安全动作）', mode: R, tip: '回滚本身失败会把活跃版本切回原处并报清原因；持久数据不动。',
+        human: `com.example.demo  0.2.0 → 0.1.0  已回滚
+  · 活跃版本 0.2.0 → 0.1.0（0.2.0 的程序留在本机，可再次切换）`,
+        json: `{"ok":true,"result":{"id":"com.example.demo","from":"0.2.0","to":"0.1.0","updated":true,"notes":["活跃版本 0.2.0 → 0.1.0（0.2.0 的程序留在本机，可再次切换）"]}}`,
+      },
+      {
+        cmd: 'tt plugin logs <id> [--tail N]', why: '看最新一次运行的日志（默认最后 50 行）', mode: R, tip: '只读 logs/<id>/ 里最新的那个文件：把整个目录拼起来会把十分钟前的崩溃混进刚才那行错误。',
+        human: `# …\\plugins\\logs\\com.example.demo\\service-20260101-101500.log
+插件服务已启动 id=com.example.demo version=0.1.0 addr=127.0.0.1:53412
+GET /healthz 200`,
+        json: `{"ok":true,"id":"com.example.demo","file":"…\\service-20260101-101500.log","count":2,"lines":["插件服务已启动 id=com.example.demo version=0.1.0 addr=127.0.0.1:53412","GET /healthz 200"]}`,
+      },
+      {
+        cmd: 'tt plugin doctor [id]', why: '自检清单/兼容/页面/服务/技能', mode: R, tip: '只看本地事实：不启动插件、不连网。有问题退出码 1，清单照样打印。',
+        human: `[warning] PERMISSION_NOT_GRANTED: com.example.demo 声明了 db.connect 但未授予
+  → 用 tt plugin grant --allow db.connect
+错误: 发现 1 个插件问题（见上方清单）`,
+        json: `{"count":1,"issues":[{"severity":"warning","code":"PERMISSION_NOT_GRANTED","message":"com.example.demo 声明了 db.connect 但未授予","hint":"用 tt plugin grant --allow db.connect"}],"ok":false}`,
+      },
+      {
+        cmd: 'tt plugin disable <id> / uninstall <id> [--purge-data --yes]', why: '停用（保留程序与数据）/ 卸载（默认保留数据）', mode: S, tip: '卸载先要求已停用；删数据是单独的一次明确动作。',
+        human: `已停用 com.example.demo
+  能力 profiles.list
+  环境 prod
+
+已卸载 com.example.demo`,
+        json: `{"ok":true,"id":"com.example.demo","enabled":false}`,
+      },
+    ],
+  },
 ]
 
 // ---------- 渲染 ----------

@@ -53,6 +53,13 @@ type Manager struct {
 
 	// ConfigPath 供缺省 Envs 实现读配置用。
 	ConfigPath string
+
+	// Runtime 升级/回滚期间对常驻服务与实例凭证的操作；nil = 本进程没有运行态。
+	//
+	// 为什么不放进 Hooks：Hooks 是"状态变了之后顺手做点什么"（可失败、可空实现），
+	// 而升级里的"停服务再起服务"是**流程的一步**：它失败就该中止这次升级，不能当成
+	// 事后清理。两者语义不同，所以分开注入（见 upgrade.go）。
+	Runtime UpdateRuntime
 }
 
 // NewManager 构造管理面。
@@ -483,15 +490,23 @@ func (m *Manager) Doctor(id string) ([]Issue, error) {
 }
 
 // doctorOne 单个插件的检查项。
+//
+// 覆盖面（P6-07）：清单与 Host API 兼容、UI 入口、技能来源与同名冲突、服务运行态与
+// run/<id>/instance.json 是否一致、多出来的旧版本。**只读本地事实**：不启动插件、不连网。
 func (m *Manager) doctorOne(reg *Registry, rec *Record) []Issue {
 	var out []Issue
 	add := func(sev, code, msg, hint string) {
 		out = append(out, Issue{Severity: sev, Code: code, Message: msg, Hint: hint})
 	}
 
-	dir := m.Store.ActiveDir(rec)
 	if rec.ActiveVersion == "" {
 		add("error", "NO_ACTIVE_VERSION", fmt.Sprintf("%s 没有活跃版本", rec.ID), "重新安装该插件")
+		return out
+	}
+	dir := m.Store.ActiveDir(rec)
+	if dir == "" {
+		add("error", "NO_ACTIVE_VERSION", fmt.Sprintf("%s 的活跃版本不能用作目录名: %q", rec.ID, rec.ActiveVersion),
+			"卸载后重新安装")
 		return out
 	}
 	if _, err := os.Stat(dir); err != nil {
@@ -504,15 +519,38 @@ func (m *Manager) doctorOne(reg *Registry, rec *Record) []Issue {
 		add("error", "MANIFEST_BROKEN", fmt.Sprintf("%s 的清单读不出来: %v", rec.ID, merr), "重新安装该插件")
 		return out
 	}
+
+	// Host API 兼容性单列一条：它是最常见、也最容易被笼统的"清单不合法"盖住的原因
+	// （TT 升了大版本之后老插件就是这条）。
+	if merr := ValidateHostAPIRange(man.HostAPI); merr != nil {
+		add("error", "HOSTAPI_INCOMPATIBLE", fmt.Sprintf("%s 的 hostApi %q 不是合法范围: %v", rec.ID, man.HostAPI, merr),
+			"重新安装该插件")
+	} else if ok, herr := HostAPISatisfies(man.HostAPI, m.hostAPIVersion()); herr != nil || !ok {
+		add("error", "HOSTAPI_INCOMPATIBLE", fmt.Sprintf("%s 要求 hostApi %q，当前 TT 的 Host API 是 %s",
+			rec.ID, man.HostAPI, m.hostAPIVersion()),
+			"升级该插件（tt plugin update），或等插件作者发布兼容版本")
+	}
+
 	if verr := ValidateManifest(man, dir, ValidateOptions{
 		HostAPIVersion:     m.hostAPIVersion(),
 		ReservedNamespaces: m.ReservedNamespaces,
 		OtherNamespaces:    reg.NamespacesInUse(rec.ID),
 		OtherRoutes:        reg.RoutesInUse(rec.ID),
 	}); verr != nil {
-		add("error", "MANIFEST_INVALID", fmt.Sprintf("%s 的清单不再合法: %v", rec.ID, verr),
-			"重新安装；若是 TT 升级导致的 hostApi 不兼容，升级或卸载该插件")
+		// hostApi 已经单列一条：从这条里剔掉，别把同一件事报两次。但它不该顺带把
+		// 其它问题（命名空间、入口路径、技能目录）一起藏起来。
+		if rest := nonHostAPIProblems(verr); len(rest) > 0 {
+			add("error", "MANIFEST_INVALID", fmt.Sprintf("%s 的清单不再合法: %s", rec.ID, strings.Join(rest, "；")),
+				"重新安装该插件")
+		}
 	}
+
+	// UI 入口：路径在清单里合法，不代表文件还在（版本目录是可读可改的普通目录）。
+	if ferr := checkUIEntry(man, dir); ferr != nil {
+		add("error", "UI_ENTRY_MISSING", fmt.Sprintf("%s 的页面入口不可用: %v", rec.ID, ferr),
+			"重新安装该插件（版本目录里的文件被删改过）")
+	}
+
 	if gerr := m.validateGrants(rec.Grants, man); gerr != nil {
 		add("warning", "GRANTS_INVALID", fmt.Sprintf("%s 的授权不再有效: %v", rec.ID, gerr),
 			"用 tt plugin grant 重新授权")
@@ -521,15 +559,30 @@ func (m *Manager) doctorOne(reg *Registry, rec *Record) []Issue {
 		add("warning", "LAST_ERROR", fmt.Sprintf("%s 启用期间有过错误: %s", rec.ID, rec.LastError),
 			"tt plugin disable 后重试，或 tt plugin logs 看细节")
 	}
-	if man.Contributions.Service != nil {
-		if rec.Enabled {
-			runDir := m.Store.RunDir(rec.ID)
-			if _, err := os.Stat(filepath.Join(runDir, "instance.json")); err != nil {
-				add("warning", "SERVICE_NOT_RUNNING", fmt.Sprintf("%s 声明了常驻服务，但没有运行中的实例状态", rec.ID),
-					"重启 tt serve 或 tt plugin disable/enable 重试")
-			}
+
+	out = append(out, m.doctorService(rec, man, add)...)
+	out = append(out, m.doctorSkills(reg, rec, man, dir, add)...)
+	// 旧版本：保留"当前 + 上一个"是策略，多出来的就是该清的。
+	keep := map[string]bool{rec.ActiveVersion: true}
+	if rec.PreviousVersion != "" {
+		keep[rec.PreviousVersion] = true
+	}
+	var extras []string
+	for _, iv := range rec.Versions {
+		if !keep[iv.Version] {
+			extras = append(extras, iv.Version)
 		}
 	}
+	if len(extras) > 0 {
+		add("warning", "STALE_VERSION", fmt.Sprintf("%s 还有 %d 个不再需要的旧版本: %s",
+			rec.ID, len(extras), strings.Join(extras, "、")),
+			"下次 tt plugin update 会顺手清理（升级只保留当前与上一个版本）")
+	}
+	if rec.PreviousVersion != "" && !rec.HasVersion(rec.PreviousVersion) {
+		add("warning", "PREVIOUS_VERSION_MISSING", fmt.Sprintf("%s 记录的上一个版本 %s 已不在本机",
+			rec.ID, rec.PreviousVersion), "tt plugin rollback 会因此失败；升级时会重新记上一个版本")
+	}
+
 	// 未被任何贡献使用的权限只是提示（清单可以预留）。
 	for _, p := range rec.Permissions {
 		if !rec.Grants.Has(p) && rec.Enabled {
@@ -538,6 +591,100 @@ func (m *Manager) doctorOne(reg *Registry, rec *Record) []Issue {
 		}
 	}
 	return out
+}
+
+// nonHostAPIProblems 从清单校验错误里剔除 hostApi 相关的问题（doctor 单独报过）。
+func nonHostAPIProblems(err error) []string {
+	var ve *ValidationError
+	if errors.As(err, &ve) {
+		out := make([]string, 0, len(ve.Problems))
+		for _, p := range ve.Problems {
+			if strings.Contains(p, "hostApi") || strings.Contains(p, "Host API") {
+				continue
+			}
+			out = append(out, p)
+		}
+		return out
+	}
+	return []string{err.Error()}
+}
+
+// doctorService 服务运行态 vs run/<id>/instance.json 是否一致。//
+// 三种不一致都要能说出来：声明了服务却没在跑、状态文件说在跑但进程没了（残留）、
+// 在跑的实例是**上一个版本**（升级没收拾干净 —— 这正是"页面新、服务旧"的现场）。
+func (m *Manager) doctorService(rec *Record, man *Manifest, add func(sev, code, msg, hint string)) []Issue {
+	if man.Contributions.Service == nil {
+		return nil
+	}
+	st, err := m.Store.ReadInstanceState(rec.ID)
+	if err != nil {
+		add("warning", "SERVICE_STATE_BROKEN",
+			fmt.Sprintf("%s 的运行状态文件读不出来: %v", rec.ID, err),
+			"删掉 "+filepath.Join(m.Store.RunDir(rec.ID), "instance.json")+" 后重启 tt serve")
+		return nil
+	}
+	if st == nil || st.State != "running" {
+		if rec.Enabled {
+			add("warning", "SERVICE_NOT_RUNNING",
+				fmt.Sprintf("%s 声明了常驻服务，但没有运行中的实例状态", rec.ID),
+				"重启 tt serve 或 tt plugin disable/enable 重试")
+		}
+		return nil
+	}
+	if !st.Alive() {
+		add("warning", "SERVICE_STALE_STATE",
+			fmt.Sprintf("%s 的状态文件说服务在跑（pid=%d），但那个进程已经不在了", rec.ID, st.PID),
+			"重启 tt serve（它会重写运行状态）")
+		return nil
+	}
+	if st.Version != "" && st.Version != rec.ActiveVersion {
+		add("error", "SERVICE_VERSION_STALE",
+			fmt.Sprintf("%s 运行中的服务是版本 %s，活跃版本是 %s（页面/CLI 与服务会串版）",
+				rec.ID, st.Version, rec.ActiveVersion),
+			"先 tt serve --stop，再 tt plugin update "+rec.ID+"（或 disable/enable）")
+	}
+	if st.PluginID != "" && st.PluginID != rec.ID {
+		add("warning", "SERVICE_STATE_MISMATCH",
+			fmt.Sprintf("%s 的运行状态文件记的是插件 %s（目录被移动/覆盖过）", rec.ID, st.PluginID),
+			"删掉该 instance.json 后重启 tt serve")
+	}
+	return nil
+}
+
+// doctorSkills 技能来源是否存在、是否与别的插件同名冲突。
+//
+// 冲突只看插件之间：与官方 skills 的先后顺序由 internal/skill 的"官方优先"规则决定，
+// 本包不复制那套判断（见 docs 05/11）。
+func (m *Manager) doctorSkills(reg *Registry, rec *Record, man *Manifest, dir string, add func(sev, code, msg, hint string)) []Issue {
+	dirs, err := man.SkillDirs()
+	if err != nil {
+		add("error", "SKILLS_SOURCE_MISSING", fmt.Sprintf("%s 的技能目录不可用: %v", rec.ID, err),
+			"重新安装该插件")
+		return nil
+	}
+	for _, rel := range dirs {
+		full := filepath.Join(dir, filepath.FromSlash(rel))
+		if _, serr := os.Stat(filepath.Join(full, "SKILL.md")); serr != nil {
+			add("error", "SKILLS_SOURCE_MISSING",
+				fmt.Sprintf("%s 声明的技能 %q 缺少 SKILL.md（分发出去会是一份坏技能）", rec.ID, rel),
+				"重新安装该插件")
+		}
+		// 同名 = 同一个技能目录名。插件之间撞名时谁生效取决于登记顺序，必须让人看见。
+		name := filepath.Base(filepath.FromSlash(rel))
+		for _, other := range reg.Plugins {
+			if other.ID == rec.ID {
+				continue
+			}
+			for _, od := range other.Contributions.Skills {
+				if strings.EqualFold(filepath.Base(filepath.FromSlash(od)), name) {
+					add("warning", "SKILLS_CONFLICT",
+						fmt.Sprintf("%s 的技能 %q 与插件 %s 同名", rec.ID, name, other.ID),
+						"两者只会有一份生效（先登记优先）：改名或只留一个")
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // FindByNamespace 按 CLI 命名空间找已启用的记录（CLI 转发用）。

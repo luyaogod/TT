@@ -574,6 +574,55 @@ func (s *Supervisor) writeInstanceState(inst *Instance) {
 	}
 }
 
+// InstanceState run/<id>/instance.json 的内容（supervisor 写，诊断/升级读）。
+//
+// 单独一个结构体而不是复用 Instance：Instance 带 cmd/token 这些内存态，
+// 而这份文件是对外可读的事实（"上一轮是谁在跑"），字段要显式。
+type InstanceState struct {
+	PluginID   string    `json:"pluginId"`
+	Version    string    `json:"version"`
+	InstanceID string    `json:"instanceId"`
+	PID        int       `json:"pid"`
+	Addr       string    `json:"addr"`
+	HealthPath string    `json:"healthPath,omitempty"`
+	State      string    `json:"state"`
+	StartedAt  time.Time `json:"startedAt"`
+	Restarts   int       `json:"restarts,omitempty"`
+	LogPath    string    `json:"logPath,omitempty"`
+	ExeDigest  string    `json:"exeDigest,omitempty"`
+}
+
+// Alive 状态文件说的那个进程还在不在。
+//
+// 只作诊断判据：PID 会被复用，真正决定"能不能动它"的仍是实例 ID + 可执行文件摘要
+// （supervisor 在自己的进程里核对）。这里回答的是"要不要把这个状态当成遗留物"。
+func (i *InstanceState) Alive() bool {
+	if i == nil || i.PID <= 0 {
+		return false
+	}
+	return winproc.Alive(i.PID)
+}
+
+// ReadInstanceState 读 run/<id>/instance.json；文件不存在返回 (nil, nil)。
+func (s *Store) ReadInstanceState(id string) (*InstanceState, error) {
+	dir := s.RunDir(id)
+	if dir == "" {
+		return nil, nil
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "instance.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var st InstanceState
+	if err := json.Unmarshal(b, &st); err != nil {
+		return nil, fmt.Errorf("运行状态文件不是合法 JSON: %w", err)
+	}
+	return &st, nil
+}
+
 // issueToken 签发实例令牌。
 func (s *Supervisor) issueToken(caller connsvc.Caller) string {
 	if s.Tokens == nil {

@@ -90,3 +90,34 @@ func startEnabledServices(m *plugin.Manager, sup *plugin.Supervisor, logf func(s
 		}
 	}
 }
+
+// serveUpdateRuntime 升级/回滚期间对运行态的操作（只有 serve 进程有这一套）。
+//
+// 为什么 CLI 里没有：常驻服务必须是长命进程的子进程。`tt plugin update` 是一次性进程，
+// 它既停不掉 serve 手里的子进程，也不该"起一个随命令退出就死的服务"。所以 CLI 走
+// Manager.ensureServiceIdle 那条路（先确认没有别人的服务在跑），serve 走这一条。
+type serveUpdateRuntime struct {
+	sup    *plugin.Supervisor
+	tokens *hostrpc.TokenStore
+	conn   *connsvc.Service
+}
+
+// StopService 停服务（不存在时什么也不做）。
+func (r serveUpdateRuntime) StopService(id string) error { return r.sup.Stop(id) }
+
+// StartService 起服务并等健康检查通过。
+func (r serveUpdateRuntime) StartService(rec *plugin.Record) error {
+	if rec == nil || rec.Contributions.Service == nil {
+		return nil
+	}
+	if _, err := r.sup.Start(context.Background(), rec); err != nil {
+		return fmt.Errorf("服务启动失败: %w", err)
+	}
+	return nil
+}
+
+// InvalidateInstances 撤旧实例令牌 + 关它的会话（P6-05：新旧版本不能共用凭证）。
+func (r serveUpdateRuntime) InvalidateInstances(id string) {
+	r.tokens.RevokePlugin(id)
+	r.conn.CloseForPlugin(id)
+}

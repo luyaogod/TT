@@ -79,12 +79,17 @@ type InstalledVersion struct {
 // 这里存的是**静态元数据 + 状态**：程序在版本目录里，数据在 data 目录里，
 // 运行态不落这里（run 目录）。CLI 帮助与前端菜单只读这份记录，不启动插件。
 type Record struct {
-	ID            string             `json:"id"`
-	Name          string             `json:"name,omitempty"`
-	ActiveVersion string             `json:"activeVersion"`
-	Versions      []InstalledVersion `json:"versions"`
-	Enabled       bool               `json:"enabled"`
-	Source        Source             `json:"source"`
+	ID            string `json:"id"`
+	Name          string `json:"name,omitempty"`
+	ActiveVersion string `json:"activeVersion"`
+	// PreviousVersion 上一次切换前的活跃版本（`tt plugin rollback` 的落点）。
+	//
+	// 只有"成功切换过版本"的插件才有值；清理策略保证它的程序目录还在（保留当前 + 上一个）。
+	// 回滚之后清空：再指着一个刚被证明不可用的版本只会误导人。
+	PreviousVersion string             `json:"previousVersion,omitempty"`
+	Versions        []InstalledVersion `json:"versions"`
+	Enabled         bool               `json:"enabled"`
+	Source          Source             `json:"source"`
 	// Contributions 生效版本的静态贡献元数据（根帮助/菜单用）。
 	Contributions Contributions `json:"contributions"`
 	// Permissions 清单声明的权限（≠ 已授予）。
@@ -417,31 +422,40 @@ func (s *Store) EnsureDirs() error {
 
 // Summary 一条用于展示/帮助的记录投影（CLI 帮助与 Web 菜单都读它）。
 type Summary struct {
-	ID           string   `json:"id"`
-	Name         string   `json:"name,omitempty"`
-	Version      string   `json:"version"`
-	Enabled      bool     `json:"enabled"`
-	Namespace    string   `json:"namespace,omitempty"`
-	CLISummary   string   `json:"cliSummary,omitempty"`
-	Route        string   `json:"route,omitempty"`
-	RouteTitle   string   `json:"routeTitle,omitempty"`
-	HasService   bool     `json:"hasService"`
-	SkillDirs    []string `json:"skillDirs,omitempty"`
-	Permissions  []string `json:"permissions,omitempty"`
-	Capabilities []string `json:"capabilities,omitempty"`
-	Envs         []string `json:"envs,omitempty"`
-	LastError    string   `json:"lastError,omitempty"`
+	ID              string   `json:"id"`
+	Name            string   `json:"name,omitempty"`
+	Version         string   `json:"version"`
+	PreviousVersion string   `json:"previousVersion,omitempty"`
+	Enabled         bool     `json:"enabled"`
+	Namespace       string   `json:"namespace,omitempty"`
+	CLISummary      string   `json:"cliSummary,omitempty"`
+	Route           string   `json:"route,omitempty"`
+	RouteTitle      string   `json:"routeTitle,omitempty"`
+	HasService      bool     `json:"hasService"`
+	SkillDirs       []string `json:"skillDirs,omitempty"`
+	Permissions     []string `json:"permissions,omitempty"`
+	Capabilities    []string `json:"capabilities,omitempty"`
+	Envs            []string `json:"envs,omitempty"`
+	LastError       string   `json:"lastError,omitempty"`
+
+	// 运行态：只有 Web 管理面在 supervisor 存在时才填（见 internal/web/plugins.go）。
+	// CLI 不填 —— `tt plugin list` 不该为了一行状态去碰 run 目录和进程表。
+	State    string `json:"state,omitempty"`
+	Addr     string `json:"addr,omitempty"`
+	PID      int    `json:"pid,omitempty"`
+	Restarts int    `json:"restarts,omitempty"`
 }
 
 // Summarize 把记录压成展示投影。
 func Summarize(rec *Record) Summary {
 	s := Summary{
 		ID: rec.ID, Name: rec.Name, Version: rec.ActiveVersion, Enabled: rec.Enabled,
-		Permissions:  append([]string(nil), rec.Permissions...),
-		Capabilities: append([]string(nil), rec.Grants.Capabilities...),
-		Envs:         append([]string(nil), rec.Grants.Envs...),
-		LastError:    rec.LastError,
-		HasService:   rec.Contributions.Service != nil,
+		PreviousVersion: rec.PreviousVersion,
+		Permissions:     append([]string(nil), rec.Permissions...),
+		Capabilities:    append([]string(nil), rec.Grants.Capabilities...),
+		Envs:            append([]string(nil), rec.Grants.Envs...),
+		LastError:       rec.LastError,
+		HasService:      rec.Contributions.Service != nil,
 	}
 	if c := rec.Contributions.CLI; c != nil {
 		s.Namespace, s.CLISummary = c.Namespace, c.Summary

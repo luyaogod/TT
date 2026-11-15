@@ -1,8 +1,8 @@
 # TT 插件系统契约
 
-本目录定义第三方插件与 TT 之间的边界。契约先于实现：Host API v1 已在 `proto/tt/host/v1/` 落地；插件运行时（manifest、registry、installer、supervisor、token 签发、CLI 分发、前端页面）尚未实现。
-
-当前 `/hostrpc/` 已挂载，但没有任何有效插件 token，所有请求返回 401。本目录描述实现必须满足的规则，不是“已经可用”的承诺。
+本目录定义第三方插件与 TT 之间的边界。契约先于实现：Host API v1 在 `proto/tt/host/v1/`，
+运行时（manifest、registry、installer、supervisor、token 签发、CLI 分发、前端页面、
+skills 一体化、升级回滚）均已落地，入口是 `tt plugin …`。
 
 ## TT 管什么，不管什么
 
@@ -29,13 +29,28 @@
 | [07-namespaces.md](07-namespaces.md) | 内置命令、旧别名、保留名、冲突规则 |
 | [08-fixtures.md](08-fixtures.md) | 参考插件夹具布局与变体（设计） |
 | [09-ssh-hostkey.md](09-ssh-hostkey.md) | 当前 SSH 主机密钥行为与兼容约束 |
+| [10-first-party-migration.md](10-first-party-migration.md) | 第一方迁移清单（已迁 / 下一批候选 / 明确不迁） |
+| [11-plugin-author-guide.md](11-plugin-author-guide.md) | **插件作者指南**：清单、Host API、CLI、服务协议、桥、skills、发布 |
+| [12-user-guide.md](12-user-guide.md) | **用户指南**：安装、授权、启停、升级、回滚、卸载、日志、自检、信任提示 |
+| [13-release-index.md](13-release-index.md) | 插件发布索引 v1：形状、资产键、选版本规则、https 策略 |
 
 ## 已实现
 
-Host API proto 与生成物（`tt.host.v1`）、ConnectRPC `/hostrpc/`、Bearer 认证、能力探测、环境脱敏列表、连接测试/开关、DB 查询/执行、SSH 一次性执行、`ErrorInfo` 错误详情。
+- Host API proto 与生成物（`tt.host.v1`）、ConnectRPC `/hostrpc/`、Bearer 认证、能力探测、
+  环境脱敏列表、连接测试/开关、DB 查询/执行、SSH 一次性执行、`ErrorInfo` 错误详情。
+- 清单（严格 JSON）与校验、注册表（原子写 + 备份恢复 + 锁）、安全安装、启停、授权、卸载。
+- 一次性 CLI 转发（参数/标准流/退出码原样）、常驻服务 supervisor（就绪行 + `/healthz` +
+  有界重启 + 进程树终止）、每实例令牌、Host API 授权。
+- 插件页面（`/plugins/{id}/ui/`）、消息桥（iframe + nonce）、插件私有 RPC 代理、
+  Host API 桥。
+- 技能一体化：来源、冲突、五平台分发、升级/卸载重算、assets 指针刷新。
+- 手动升级与回滚（发布索引 + 下载校验 + 未激活安装 + 原子切换 + 健康检查 + 自动回滚 +
+  保留当前与上一个版本）、`tt plugin doctor/logs` 与只读 Web 日志端点。
 
-## 尚未实现
+## 尚未实现 / 不在本项目
 
-插件 manifest/registry/installer、CLI 分发、supervisor、插件实例 token、前端插件页面与 bridge、技能集成、插件升级/回滚。详见各篇的“尚未实现”。
-
-v1 不含：流式、事务、参数绑定、PTY、SFTP。
+- 自动更新、后台检查、插件市场：计划明确不做（`tt plugin update` 是手动命令）。
+- 插件间依赖解析、通用事件总线、任意 UI 注入点。
+- `dict/dbsync` 之外的更多第一方迁移：见 [10-first-party-migration.md](10-first-party-migration.md)
+  （`debug` / `dev` 明确不在本项目范围内）。
+- v1 不含：流式、事务、参数绑定、PTY、SFTP。

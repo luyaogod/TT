@@ -119,6 +119,12 @@ type Options struct {
 
 	// PluginMgr 插件管理面（/api/plugins*）。nil = 不注册管理端点。
 	PluginMgr *plugin.Manager
+
+	// PluginStatuses 插件运行态来源（通常是 supervisor.Statuses）；nil = 列表不带运行态。
+	//
+	// 用一个函数而不是 *plugin.Supervisor：本包只需要"读一批状态"，不该为了四个字段
+	// 把 supervisor 的启停能力也拉进来。
+	PluginStatuses func() []plugin.Status
 }
 
 // ConfigReloader 由持有配置内存态的子系统实现；本服务在配置写入成功后调用它。
@@ -215,6 +221,8 @@ func (s *Server) routes() {
 		m.HandleFunc("GET /api/plugins/{id}", s.hPluginInfo)
 		m.HandleFunc("POST /api/plugins/install", s.hPluginInstall)
 		m.HandleFunc("GET /api/plugins/{id}/doctor", s.hPluginDoctor)
+		// 只读日志视图（P6-07）：读 logs/<id>/ 里最新的那个文件。
+		m.HandleFunc("GET /api/plugins/{id}/logs", s.hPluginLogs)
 		m.HandleFunc("POST /api/plugins/{id}/enable", s.hPluginEnable)
 		m.HandleFunc("POST /api/plugins/{id}/disable", s.hPluginDisable)
 		m.HandleFunc("POST /api/plugins/{id}/uninstall", s.hPluginUninstall)

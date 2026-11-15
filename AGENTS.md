@@ -41,6 +41,7 @@ TT/
 │  │  ├─ outline/       tt outline 命令：.4gl → 函数/UI 块树
 │  │  └─ session/       tt session 命令组：建/列/看/改 ENT/结束/收掉/透传/起作业
 │  ├─ config/           统一配置层：位置解析、唯一写入口 Edit、原子写、打码、缓存清单
+│  ├─ connsvc/          进出库/SSH 的唯一连接服务：会话所有权、只读分裂、审计、Host API 的实现
 │  ├─ dbconfig/         配置里“库”那一节的连接模型
 │  ├─ debug/            调试子系统：会话管理、断点存档、源码镜像 srccache、执行日志、企业快照
 │  ├─ debugclient/      调试面 REST 唯一客户端（cli/debug 与 cli/session 共用；码/候选/信封）
@@ -67,10 +68,13 @@ TT/
 │  ├─ entdir/           企业目录（ENT→账号）快照、指纹、新鲜期（debug 与 dict 共用）
 │  ├─ envmove/          环境改名的落点迁移（字典库/快照/镜像）与失败回滚（CLI 与 Web 共用）
 │  ├─ erpdb/            客户端直连库封装（Oracle / 金仓，一个接口两个实现）
+│  ├─ fetch/            取字节的唯一原语：带重试的 GET/下载、大小与 SHA-256 校验（tt 自更新与插件更新共用）
 │  ├─ form42f/          .42f 编译表单解析：字段表 + 页面布局（纯函数，零 IO）
 │  ├─ host/             唯一 SSH/远程服务器能力层（连接、登录、服务器侧只读探测）
+│  ├─ hostrpc/          Host API 的 ConnectRPC handler：Bearer 实例令牌认证、Host/Origin 守卫、proto ↔ connsvc
 │  ├─ output/           唯一输出出口（紧凑 JSON / CSV / 表格）
 │  ├─ pathinstall/      用户 PATH（HKCU）增删，永不碰系统 PATH
+│  ├─ plugin/           插件运行时：严格清单、注册表（锁/备份）、安装与升级回滚、supervisor、CLI 转发、页面与 RPC 代理、skills 期望态
 │  ├─ safesql/          只读 SQL 文本层防线（远端查询入口用）
 │  ├─ screen/           .42f 布局 + .42s 标签 → 前端画面模型
 │  ├─ session/          会话身份规则（序号分配、世代号），不 import 调试线
@@ -109,10 +113,12 @@ TT/
 ├─ tools/               构建辅助 Go 工具
 │  ├─ zip/              跨平台确定性打包
 │  ├─ wixremovefolders/ MSI 卸载时补空目录清理
+│  ├─ refplugin/        参考插件（测试夹具）：同一个二进制既是 CLI 又是常驻服务，带可控故障开关
 │  └─ tzsmini/          从语料构建 tzs-mini 夹具
 ├─ testdata/            测试语料
 │  ├─ tzs-mini/         3.2MB 筛小标准件工作区
 │  ├─ fgl-fixtures/     FGL 解析/写回夹具
+│  ├─ plugins/          插件夹具：reference（可构建的最小示例）+ variants（故意装不上的三个变体）
 └─ skills/              对外技能手册（评测中执行者唯一能读的东西）
    ├─ tt-dev-tzc/       .tzc 代码包安全编辑
    ├─ tt-erp-architecture/  T100 整体架构与代码地图

@@ -24,8 +24,8 @@ import (
 func newPluginCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "plugin",
-		Short: "插件管理：安装 / 启停 / 授权 / 卸载 / 自检",
-		Long: `插件管理：安装 / 启停 / 授权 / 卸载 / 自检。
+		Short: "插件管理：安装 / 启停 / 授权 / 升级 / 回滚 / 日志 / 卸载 / 自检",
+		Long: `插件管理：安装 / 启停 / 授权 / 升级 / 回滚 / 日志 / 卸载 / 自检。
 
 插件包是一个 zip（或一个目录），根部要有 plugin.json。它最多贡献四类能力：
 CLI 命名空间（tt <namespace> …）、常驻服务、前端页面、skills。
@@ -34,7 +34,11 @@ CLI 命名空间（tt <namespace> …）、常驻服务、前端页面、skills�
 安装只解包与注册，**不执行**任何插件代码；启用（并给出授权）是另一步。
 CLI 命名空间与 TT 内置命令/其它已启用插件冲突时安装即失败。
 
-退出码：0 成功 / 2 包或参数不合法（含冲突）/ 3 没有这个插件 / 1 其它失败。`,
+升级是**手动**的：tt plugin update 现读发布索引、下载、校验、装成未激活版本，
+再停旧服务、原子切换、起新服务并健康检查；任何一步失败都退回原来的版本。
+tt plugin rollback 切回上一个版本。TT 不做后台检查、不自动下载。
+
+退出码：0 成功 / 2 包、参数或发布索引不合法 / 3 没有这个插件 / 1 其它失败。`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
@@ -48,6 +52,9 @@ CLI 命名空间与 TT 内置命令/其它已启用插件冲突时安装即失�
 		newPluginDisableCmd(),
 		newPluginUninstallCmd(),
 		newPluginGrantCmd(),
+		newPluginUpdateCmd(),
+		newPluginRollbackCmd(),
+		newPluginLogsCmd(),
 		newPluginDoctorCmd(),
 	)
 	return cmd
@@ -568,6 +575,187 @@ func newPluginDoctorCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+//---------------------------------------------------------------------------
+// update / rollback（手动升级，见 internal/plugin/upgrade.go）
+//---------------------------------------------------------------------------
+
+func newPluginUpdateCmd() *cobra.Command {
+	var indexURL, id, to string
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "update",
+		Short: "手动升级插件（读发布索引，切版本并做健康检查；失败自动回滚）",
+		Long: `手动升级插件：现读发布索引、下载校验、装成未激活版本，再停旧服务、原子切换、
+起新服务并健康检查、重算技能；任何一步失败都退回原来的版本。
+
+**不自动**：不做后台检查、不自动下载。什么时候升、升哪一版都由这一次命令决定。
+
+--index 显式给发布索引地址（https；也可以是本机路径或 file://，用于离线/共享盘）。
+不给时用该插件上次安装时记下的索引地址 —— TT 没有内置的插件市场地址。
+--id 只升一个（默认：全部已装插件）；--to 钉一个版本。
+--dry-run 只打印计划，一个字节都不写（不下载、不切版本）。
+
+升级成功后只保留"当前 + 上一个"两个程序版本，持久数据永远保留。
+tt serve 正在跑某个插件的常驻服务时，命令行升级会被拒（先 tt serve --stop），
+因为那时切换版本会留下「页面新、服务旧」的混用状态。`,
+		Example: `  tt plugin update --index https://plugins.example.com/index.json --dry-run
+  tt plugin update --id com.example.myplugin
+  tt plugin update --id com.example.myplugin --to 0.2.0`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			m, err := pluginManager()
+			if err != nil {
+				return err
+			}
+			results, err := m.Update(cmd.Context(), plugin.UpdateOptions{
+				IndexURL: indexURL, ID: id, To: to, DryRun: dryRun,
+			})
+			if err != nil {
+				if plugin.IsIndexError(err) {
+					return output.Errorf("PLUGIN_INDEX_INVALID", 2, "%v", err)
+				}
+				return output.Errorf("PLUGIN_UPDATE_FAILED", 1, "%v", err)
+			}
+			if common.IsJSON() {
+				if perr := common.PrintJSON(map[string]any{
+					"ok": !anyUpdateFailed(results), "dryRun": dryRun,
+					"count": len(results), "results": results,
+				}); perr != nil {
+					return perr
+				}
+			} else {
+				for _, res := range results {
+					printUpdateResult(res, "已升级")
+				}
+			}
+			if anyUpdateFailed(results) {
+				return output.Errorf("PLUGIN_UPDATE_FAILED", 1, "有插件没有升级成功（见上方每一条）")
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&indexURL, "index", "", "发布索引地址（https 或本机路径；默认用该插件上次的索引）")
+	cmd.Flags().StringVar(&id, "id", "", "只升这一个插件（默认全部已装插件）")
+	cmd.Flags().StringVar(&to, "to", "", "钉一个版本（必须出现在索引里且与当前 Host API 兼容）")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "只打印计划，不下载、不切版本")
+	return cmd
+}
+
+// anyUpdateFailed 这一批里有没有失败项。
+func anyUpdateFailed(results []plugin.UpdateResult) bool {
+	for _, r := range results {
+		if r.Error != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// printUpdateResult 一条升级/回滚结果的人读形态。done 是"已升级"/"已回滚"这类动词。
+func printUpdateResult(r plugin.UpdateResult, done string) {
+	switch {
+	case r.Error != "" && r.RolledBack:
+		fmt.Printf("%s  %s → %s  已回滚\n  %s\n", r.ID, shortVersion(r.From), shortVersion(r.From), r.Error)
+	case r.Error != "":
+		fmt.Printf("%s  未升级（仍是 %s）\n  %s\n", r.ID, shortVersion(r.From), r.Error)
+	case r.UpToDate:
+		fmt.Printf("%s  %s  已是最新（%s）\n", r.ID, shortVersion(r.From), r.Reason)
+	case r.DryRun:
+		fmt.Printf("%s  %s → %s  （--dry-run，什么都没写）\n", r.ID, shortVersion(r.From), shortVersion(r.To))
+	case r.Updated:
+		fmt.Printf("%s  %s → %s  %s\n", r.ID, shortVersion(r.From), shortVersion(r.To), done)
+	default:
+		fmt.Printf("%s  %s\n", r.ID, shortVersion(r.From))
+	}
+	for _, n := range r.Notes {
+		fmt.Printf("  · %s\n", n)
+	}
+}
+
+func newPluginRollbackCmd() *cobra.Command {
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "rollback <id>",
+		Short: "回滚到上一个版本（切回并重新起服务、重算技能）",
+		Long: `回滚到上一个版本。
+
+"上一个版本"是注册表记着的上次切换前那个版本（升级成功时写入）。回滚与升级走同一套
+安全动作：校验目标版本、停当前服务、撤实例凭证、原子切换、起服务并健康检查、重算技能。
+回滚本身失败时会把活跃版本切回原处并报清原因。
+
+只保留当前与上一个版本是策略，所以更早的版本已经不在了；回滚不会删掉你的持久数据。`,
+		Example: `  tt plugin rollback com.example.myplugin
+  tt plugin rollback com.example.myplugin --dry-run`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			m, err := pluginManager()
+			if err != nil {
+				return err
+			}
+			res, err := m.Rollback(args[0], plugin.RollbackOptions{DryRun: dryRun})
+			if err != nil {
+				return pluginErr(err)
+			}
+			if common.IsJSON() {
+				return common.PrintJSON(map[string]any{"ok": true, "result": res})
+			}
+			printUpdateResult(*res, "已回滚")
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "只说明会切到哪个版本，不改任何东西")
+	return cmd
+}
+
+//---------------------------------------------------------------------------
+// logs
+//---------------------------------------------------------------------------
+
+func newPluginLogsCmd() *cobra.Command {
+	var tail int
+	cmd := &cobra.Command{
+		Use:   "logs <id>",
+		Short: "看插件最新一次运行的日志（默认最后 50 行）",
+		Long: `看插件最新一次运行的日志。
+
+只读 logs/<id>/ 里**最新**的那个文件：一个插件长期运行会攒很多个日志文件，把整个目录
+拼起来会把十分钟前的崩溃混进刚才那行错误里。
+插件没起来过就没有日志 —— 那不是错误，输出会明确说"还没有日志"。`,
+		Example: `  tt plugin logs com.example.myplugin
+  tt plugin logs com.example.myplugin --tail 200 --json`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			m, err := pluginManager()
+			if err != nil {
+				return err
+			}
+			if _, ierr := m.Info(args[0]); ierr != nil {
+				return pluginErr(ierr)
+			}
+			file, lines, lerr := m.Store.TailLog(args[0], tail)
+			if lerr != nil {
+				return output.Errorf("PLUGIN_LOGS_FAILED", 1, "%v", lerr)
+			}
+			if common.IsJSON() {
+				return common.PrintJSON(map[string]any{
+					"ok": true, "id": args[0], "file": file, "count": len(lines), "lines": lines,
+				})
+			}
+			if file == "" {
+				fmt.Printf("%s 还没有日志（服务没启动过，或日志目录被清掉了）\n", args[0])
+				return nil
+			}
+			fmt.Printf("# %s\n", file)
+			for _, ln := range lines {
+				fmt.Println(ln)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().IntVar(&tail, "tail", plugin.DefaultLogTail, "只显示最后 N 行")
+	return cmd
 }
 
 // pluginLogDir 插件日志目录（logs 命令与排障共用）。

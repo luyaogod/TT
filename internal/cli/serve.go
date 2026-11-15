@@ -211,6 +211,8 @@ func newServeCmd() *cobra.Command {
 			sup := plugin.NewSupervisor(pluginStore, tokenStore, connSvc, "", Version)
 			sup.Logf = func(format string, a ...any) { auditLog.Printf(format, a...) }
 			pluginMgr.Hooks = servePluginHooks{sup: sup, tokens: tokenStore, conn: connSvc, logf: sup.Logf}
+			// 升级/回滚要真停真起服务并撤旧实例凭证 —— 这件事只有长命的 serve 进程做得成。
+			pluginMgr.Runtime = serveUpdateRuntime{sup: sup, tokens: tokenStore, conn: connSvc}
 
 			// 插件页面资源与私有 RPC 代理（/plugins/*）。
 			// Host API 桥的目标地址按请求自己的 Host 拼（回环），不需要等监听端口确定。
@@ -249,6 +251,9 @@ func newServeCmd() *cobra.Command {
 					// 插件管理（安装/启停/授权/自检）。只碰元数据与载荷，不启动插件代码。
 					PluginMgr: pluginMgr,
 					PluginUI:  pluginUI.Handler(),
+					// 列表里附带运行态（state/addr/pid/restarts）。CLI 的 list 不带：
+					// 一条 list 不该为了一行状态去碰进程表。
+					PluginStatuses: sup.Statuses,
 					// 配置写入后让持有内存态的子系统重新加载，否则它们内存里还是旧环境，
 					// 表现是"改了没生效"。连接服务还要把旧会话全部作废 —— 旧会话连着的是
 					// **旧目标**，而调用方看到的仍是同一个环境名。
