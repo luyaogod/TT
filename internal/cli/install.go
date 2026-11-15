@@ -117,7 +117,7 @@ clone 下来的工作副本，要装的是它的内容，不是它的历史。�
 --agent 接受的名字：` + agentSkillNames() + `
 
 --to auto 的探测顺序：.agents/skills 优先（读它的 agent 最多），其次 .dsh/skills、
-.codebuddy/skills、.claude/skills、.codex/skills；当前目录一个都没有就新建 .agents/skills。
+.workbuddy/skills、.claude/skills、.codex/skills；当前目录一个都没有就新建 .agents/skills。
 
 **要一次装到多个平台，用 tt skills deploy**（本次新增的管理面：平台表、清单、覆盖）。
 

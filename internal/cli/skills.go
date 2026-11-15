@@ -37,7 +37,7 @@ func newSkillsCmd() *cobra.Command {
 
   agents      .agents/skills           跨客户端公约数
   dsh         .dsh/skills              DeepSeek Harness
-  workbuddy   .codebuddy/skills        WorkBuddy
+  workbuddy   .workbuddy/skills       WorkBuddy（用户级 ~/.workbuddy/skills）
   claude      .claude/skills           Claude Code
   codex       .codex/skills            Codex
 

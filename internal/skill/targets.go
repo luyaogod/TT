@@ -24,7 +24,10 @@ type Target struct {
 // 路径依据：
 //   - `.agents/skills` 是 Agent Skills 的跨客户端公约数；DeepSeek Harness 也读它（rank 200）。
 //   - DeepSeek Harness 的项目级目录是 `.dsh/skills`（rank 100，优先于 `.agents`）。
-//   - WorkBuddy 读工作目录下的 `.codebuddy/skills`（官方「项目」文档）。
+//   - WorkBuddy 读工作目录下的 `.workbuddy/skills`（用户级是 `~/.workbuddy/skills`）。
+//     注意不是 `.codebuddy`：那是旧 CodeBuddy 品牌目录，WorkBuddy 构建时已把
+//     `.codebuddy` 整体替换成 `.workbuddy`；本机 WorkBuddy 的技能缓存 watch 目录也是
+//     `~/.workbuddy/skills`。
 //   - Claude Code 读 `.claude/skills`。
 //   - Codex 读 repo-scoped `.codex/skills`。
 //
@@ -34,8 +37,8 @@ var Targets = []Target{
 		Who: "跨客户端公约数"},
 	{ID: "dsh", Name: "DeepSeek Harness", Root: ".dsh", Dir: ".dsh/skills",
 		Aliases: []string{"deepseek", "deepseek-harness"}, Who: "DeepSeek Harness 项目技能目录"},
-	{ID: "workbuddy", Name: "WorkBuddy", Root: ".codebuddy", Dir: ".codebuddy/skills",
-		Aliases: []string{"wb", "work-buddy"}, Who: "WorkBuddy 项目技能目录"},
+	{ID: "workbuddy", Name: "WorkBuddy", Root: ".workbuddy", Dir: ".workbuddy/skills",
+		Aliases: []string{"wb", "work-buddy"}, Who: "WorkBuddy 项目技能目录（用户级 ~/.workbuddy/skills）"},
 	{ID: "claude", Name: "Claude Code", Root: ".claude", Dir: ".claude/skills",
 		Aliases: []string{"claude-code"}, Who: "Claude Code 项目技能目录"},
 	{ID: "codex", Name: "Codex", Root: ".codex", Dir: ".codex/skills",
