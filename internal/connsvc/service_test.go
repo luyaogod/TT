@@ -124,6 +124,9 @@ type fakeSSH struct {
 	closed   bool
 	lastCmd  string
 	lastWait time.Duration
+	fileData []byte
+	putPath  string
+	putData  []byte
 }
 
 func (f *fakeSSH) Output(cmd string, timeout time.Duration) (string, error) {
@@ -141,6 +144,25 @@ func (f *fakeSSH) OutputContext(ctx context.Context, cmd string, timeout time.Du
 	}
 	return f.output, f.err
 }
+func (f *fakeSSH) GetFile(_ string, maxBytes int64) ([]byte, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if maxBytes > 0 && int64(len(f.fileData)) > maxBytes {
+		return nil, host.ErrFileTooLarge
+	}
+	return f.fileData, nil
+}
+
+func (f *fakeSSH) PutFile(path string, data []byte) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.putPath = path
+	f.putData = append([]byte(nil), data...)
+	return nil
+}
+
 func (f *fakeSSH) Close() error { f.closed = true; return nil }
 
 // newTestService 造一个带假依赖的服务。
@@ -166,7 +188,7 @@ func TestCapabilitiesOnlyListWhatIsDelivered(t *testing.T) {
 	}
 	want := map[string]bool{
 		FeatureDBQuery: true, FeatureDBExec: true, FeatureSSHExec: true, FeatureDBReadOnlySession: true,
-		FeatureDBBatch: true, FeatureProfileEnts: true, FeatureDBOpenByEnt: true,
+		FeatureDBBatch: true, FeatureProfileEnts: true, FeatureDBOpenByEnt: true, FeatureSSHFiles: true,
 	}
 	for _, f := range c.Features {
 		if !want[f] {
@@ -707,5 +729,33 @@ func TestSSHTestUsesInjectedTestSSH(t *testing.T) {
 	}
 	if s.SessionCount() != 0 {
 		t.Error("测试不该留下会话")
+	}
+}
+
+// TestSSHFileGetPut 远端文件读写与大小上限。
+func TestSSHFileGetPut(t *testing.T) {
+	f := &fakeSSH{fileData: []byte("img-bytes")}
+	s := newTestService(t, Options{DialSSH: func(config.SSHConfig) (SSHConn, error) { return f, nil }})
+	h, err := s.OpenSSH(context.Background(), BuiltinCaller(), "prod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, gerr := s.SSHGetFile(context.Background(), BuiltinCaller(), h, "/u1/res/img/ui/boss.png")
+	if gerr != nil || string(data) != "img-bytes" {
+		t.Fatalf("读取失败: %q %v", data, gerr)
+	}
+	if perr := s.SSHPutFile(context.Background(), BuiltinCaller(), h, "/u1/res/img/ui/new.png", []byte("new")); perr != nil {
+		t.Fatalf("写入失败: %v", perr)
+	}
+	if f.putPath != "/u1/res/img/ui/new.png" || string(f.putData) != "new" {
+		t.Fatalf("写入参数不对: %q %q", f.putPath, f.putData)
+	}
+	// 超过上限：写入直接拒绝；读取由 host 层判大小。
+	if perr := s.SSHPutFile(context.Background(), BuiltinCaller(), h, "/x", make([]byte, MaxFileBytes+1)); !IsCode(perr, CodeSSHFileFailed) {
+		t.Fatalf("超限写入该报 SSH_FILE_FAILED，得 %v", perr)
+	}
+	f.fileData = make([]byte, MaxFileBytes+1)
+	if _, gerr := s.SSHGetFile(context.Background(), BuiltinCaller(), h, "/big"); !IsCode(gerr, CodeSSHFileFailed) {
+		t.Fatalf("超限读取该报 SSH_FILE_FAILED，得 %v", gerr)
 	}
 }

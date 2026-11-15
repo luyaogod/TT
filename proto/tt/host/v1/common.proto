@@ -60,6 +60,8 @@ enum Feature {
   FEATURE_PROFILE_ENTS = 6;
   // FEATURE_DB_OPEN_BY_ENT 支持 OpenDB(ent=…) 按企业解析账号。
   FEATURE_DB_OPEN_BY_ENT = 7;
+  // FEATURE_SSH_FILES SSH 远端文件读写（SSHSessionService.GetFile/PutFile）。
+  FEATURE_SSH_FILES = 8;
 }
 
 // ConnKind 连接种类。

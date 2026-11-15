@@ -57,6 +57,8 @@ const (
 	FeatureProfileEnts = "profile.ents"
 	// FeatureDBOpenByEnt 支持按企业编号打开会话（Connections.OpenDB.ent）。
 	FeatureDBOpenByEnt = "db.open_by_ent"
+	// FeatureSSHFiles SSH 远端文件读写（SSHSessionService.GetFile/PutFile）。
+	FeatureSSHFiles = "ssh.files"
 )
 
 // CallerKind 调用方种类。内置调用方与第三方插件的权限来源不同，但走同一套会话规则。
@@ -220,6 +222,9 @@ type Tunnel interface {
 type SSHConn interface {
 	Output(cmd string, timeout time.Duration) (string, error)
 	OutputContext(ctx context.Context, cmd string, timeout time.Duration) (string, error)
+	// GetFile / PutFile 远端文件读写（插件搬运资源文件用）。
+	GetFile(remote string, maxBytes int64) ([]byte, error)
+	PutFile(remote string, data []byte) error
 	Close() error
 }
 
@@ -233,6 +238,8 @@ const (
 	DefaultQueryTimeout = 60 * time.Second
 	// DefaultSSHTimeout 单次 SSH 命令缺省超时。
 	DefaultSSHTimeout = 60 * time.Second
+	// MaxFileBytes 单次远端文件读写的硬上限（16 MB）。
+	MaxFileBytes = 16 << 20
 	// MaxSSHTimeout SSH 命令超时硬上限。
 	MaxSSHTimeout = 10 * time.Minute
 )
@@ -351,14 +358,14 @@ func (s *Service) Capabilities() Capabilities {
 		TTVersion:      s.opt.TTVersion,
 		Features: []string{
 			FeatureDBQuery, FeatureDBExec, FeatureSSHExec, FeatureDBReadOnlySession,
-			FeatureDBBatch, FeatureProfileEnts, FeatureDBOpenByEnt,
+			FeatureDBBatch, FeatureProfileEnts, FeatureDBOpenByEnt, FeatureSSHFiles,
 		},
 		Services: []ServiceCapability{
 			{Name: "HostService", Methods: []string{"GetCapabilities"}},
 			{Name: "ProfilesService", Methods: []string{"List"}},
 			{Name: "ConnectionsService", Methods: []string{"TestDB", "TestSSH", "OpenDB", "OpenSSH", "Close"}},
 			{Name: "DBSessionService", Methods: []string{"Query", "Exec", "Batch"}},
-			{Name: "SSHSessionService", Methods: []string{"Exec"}},
+			{Name: "SSHSessionService", Methods: []string{"Exec", "GetFile", "PutFile"}},
 		},
 	}
 }

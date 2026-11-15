@@ -52,6 +52,8 @@ const (
 	CodeExecFailed = "DB_EXEC_FAILED"
 	// CodeSSHExecFailed SSH 命令执行失败（非零退出码也是它，输出里带远端输出）。
 	CodeSSHExecFailed = "SSH_EXEC_FAILED"
+	// CodeSSHFileFailed SSH 远端文件读写失败（含超过大小上限）。
+	CodeSSHFileFailed = "SSH_FILE_FAILED"
 	// CodeTimeout 超时（ctx 到期）。
 	CodeTimeout = "TIMEOUT"
 	// CodeAccountUnknown 指定的账号不在该环境的账号清单里。

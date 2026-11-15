@@ -12,9 +12,9 @@ import (
 	"connectrpc.com/connect"
 
 	"github.com/luyaogod/TT/internal/connsvc"
+	"github.com/luyaogod/TT/pkg/erpdb"
 	"github.com/luyaogod/TT/pkg/hostv1"
 	"github.com/luyaogod/TT/pkg/hostv1/hostv1connect"
-	"github.com/luyaogod/TT/pkg/erpdb"
 )
 
 // Deps 挂载 Host API 所需的依赖。
@@ -350,6 +350,8 @@ func featureProto(s string) hostv1.Feature {
 		return hostv1.Feature_FEATURE_PROFILE_ENTS
 	case connsvc.FeatureDBOpenByEnt:
 		return hostv1.Feature_FEATURE_DB_OPEN_BY_ENT
+	case connsvc.FeatureSSHFiles:
+		return hostv1.Feature_FEATURE_SSH_FILES
 	default:
 		return hostv1.Feature_FEATURE_UNSPECIFIED
 	}
@@ -440,4 +442,29 @@ func writeGuardError(w http.ResponseWriter, e *connect.Error) {
 func jsonEscape(s string) string {
 	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\r", `\r`, "\t", `\t`)
 	return r.Replace(s)
+}
+
+// GetFile 读远端文件。
+func (s *sshSessionServer) GetFile(ctx context.Context, req *connect.Request[hostv1.GetFileRequest]) (*connect.Response[hostv1.GetFileResponse], error) {
+	caller, err := mustCaller(ctx)
+	if err != nil {
+		return nil, err
+	}
+	data, cerr := s.svc.SSHGetFile(ctx, caller, req.Msg.GetHandle(), req.Msg.GetPath())
+	if cerr != nil {
+		return nil, rpcError(cerr)
+	}
+	return connect.NewResponse(&hostv1.GetFileResponse{Data: data}), nil
+}
+
+// PutFile 写远端文件。
+func (s *sshSessionServer) PutFile(ctx context.Context, req *connect.Request[hostv1.PutFileRequest]) (*connect.Response[hostv1.PutFileResponse], error) {
+	caller, err := mustCaller(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if cerr := s.svc.SSHPutFile(ctx, caller, req.Msg.GetHandle(), req.Msg.GetPath(), req.Msg.GetData()); cerr != nil {
+		return nil, rpcError(cerr)
+	}
+	return connect.NewResponse(&hostv1.PutFileResponse{}), nil
 }

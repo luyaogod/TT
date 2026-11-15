@@ -47,6 +47,8 @@ const (
 	Feature_FEATURE_PROFILE_ENTS Feature = 6
 	// FEATURE_DB_OPEN_BY_ENT 支持 OpenDB(ent=…) 按企业解析账号。
 	Feature_FEATURE_DB_OPEN_BY_ENT Feature = 7
+	// FEATURE_SSH_FILES SSH 远端文件读写（SSHSessionService.GetFile/PutFile）。
+	Feature_FEATURE_SSH_FILES Feature = 8
 )
 
 // Enum value maps for Feature.
@@ -60,6 +62,7 @@ var (
 		5: "FEATURE_DB_BATCH",
 		6: "FEATURE_PROFILE_ENTS",
 		7: "FEATURE_DB_OPEN_BY_ENT",
+		8: "FEATURE_SSH_FILES",
 	}
 	Feature_value = map[string]int32{
 		"FEATURE_UNSPECIFIED":         0,
@@ -70,6 +73,7 @@ var (
 		"FEATURE_DB_BATCH":            5,
 		"FEATURE_PROFILE_ENTS":        6,
 		"FEATURE_DB_OPEN_BY_ENT":      7,
+		"FEATURE_SSH_FILES":           8,
 	}
 )
 
@@ -607,7 +611,7 @@ const file_tt_host_v1_common_proto_rawDesc = "" +
 	"\n" +
 	"db_via_ssh\x18\v \x01(\bR\bdbViaSsh\x12&\n" +
 	"\x0fdb_readonly_sql\x18\f \x01(\bR\rdbReadonlySql\x12#\n" +
-	"\x04ents\x18\r \x03(\v2\x0f.tt.host.v1.EntR\x04ents*\xd0\x01\n" +
+	"\x04ents\x18\r \x03(\v2\x0f.tt.host.v1.EntR\x04ents*\xe7\x01\n" +
 	"\aFeature\x12\x17\n" +
 	"\x13FEATURE_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10FEATURE_DB_QUERY\x10\x01\x12\x13\n" +
@@ -616,7 +620,8 @@ const file_tt_host_v1_common_proto_rawDesc = "" +
 	"\x1bFEATURE_DB_READONLY_SESSION\x10\x04\x12\x14\n" +
 	"\x10FEATURE_DB_BATCH\x10\x05\x12\x18\n" +
 	"\x14FEATURE_PROFILE_ENTS\x10\x06\x12\x1a\n" +
-	"\x16FEATURE_DB_OPEN_BY_ENT\x10\a*J\n" +
+	"\x16FEATURE_DB_OPEN_BY_ENT\x10\a\x12\x15\n" +
+	"\x11FEATURE_SSH_FILES\x10\b*J\n" +
 	"\bConnKind\x12\x19\n" +
 	"\x15CONN_KIND_UNSPECIFIED\x10\x00\x12\x10\n" +
 	"\fCONN_KIND_DB\x10\x01\x12\x11\n" +

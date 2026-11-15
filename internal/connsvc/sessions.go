@@ -602,3 +602,53 @@ func withDefaultTimeout(ctx context.Context, d time.Duration) (context.Context, 
 	}
 	return context.WithTimeout(ctx, d)
 }
+
+// SSHGetFile 读一个远端文件（只读能力）。超过 MaxFileBytes 直接拒绝。
+func (s *Service) SSHGetFile(ctx context.Context, caller Caller, handle, remote string) ([]byte, *Error) {
+	sess, lerr := s.lookup(caller, handle, KindSSH)
+	if lerr != nil {
+		return nil, lerr
+	}
+	if strings.TrimSpace(remote) == "" || strings.ContainsRune(remote, 0) {
+		return nil, errf(CodeSSHFileFailed, sess.env, "远端路径为空或不合法")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, errf(CodeTimeout, sess.env, "读取远端文件超时")
+	}
+	data, err := sess.ssh.GetFile(remote, MaxFileBytes)
+	if err != nil {
+		code := CodeSSHFileFailed
+		if errors.Is(err, host.ErrFileTooLarge) {
+			code = CodeSSHFileFailed
+		}
+		e := &Error{Code: code, Env: sess.env, Stage: StageExec, Message: err.Error(), Cause: err}
+		s.emit(Event{Action: "ssh.get", Caller: caller, Env: sess.env, Kind: KindSSH, OK: false, Code: code})
+		return nil, e
+	}
+	s.emit(Event{Action: "ssh.get", Caller: caller, Env: sess.env, Kind: KindSSH, OK: true})
+	return data, nil
+}
+
+// SSHPutFile 写一个远端文件（插件搬运资源用）。超过 MaxFileBytes 拒绝。
+func (s *Service) SSHPutFile(ctx context.Context, caller Caller, handle, remote string, data []byte) *Error {
+	sess, lerr := s.lookup(caller, handle, KindSSH)
+	if lerr != nil {
+		return lerr
+	}
+	if strings.TrimSpace(remote) == "" || strings.ContainsRune(remote, 0) {
+		return errf(CodeSSHFileFailed, sess.env, "远端路径为空或不合法")
+	}
+	if len(data) > MaxFileBytes {
+		return errf(CodeSSHFileFailed, sess.env, "文件超过上限（%d 字节）", MaxFileBytes)
+	}
+	if err := ctx.Err(); err != nil {
+		return errf(CodeTimeout, sess.env, "写入远端文件超时")
+	}
+	if err := sess.ssh.PutFile(remote, data); err != nil {
+		e := &Error{Code: CodeSSHFileFailed, Env: sess.env, Stage: StageExec, Message: err.Error(), Cause: err}
+		s.emit(Event{Action: "ssh.put", Caller: caller, Env: sess.env, Kind: KindSSH, OK: false, Code: e.Code})
+		return e
+	}
+	s.emit(Event{Action: "ssh.put", Caller: caller, Env: sess.env, Kind: KindSSH, OK: true})
+	return nil
+}

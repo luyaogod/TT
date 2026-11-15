@@ -186,12 +186,33 @@ func (s *sshSession) Exec(ctx context.Context, command string, timeout time.Dura
 	}, nil
 }
 
-func (s *sshSession) Put(context.Context, string, string) error {
-	return errUnimplemented("SFTP 上传")
+func (s *sshSession) Put(ctx context.Context, localPath, remotePath string) error {
+	data, err := os.ReadFile(localPath)
+	if err != nil {
+		return &Error{Code: CodeInvalidArgument, Message: "读取本地文件失败: " + err.Error()}
+	}
+	_, err = s.cli.ssh.PutFile(ctx, connect.NewRequest(&hostv1.PutFileRequest{
+		Handle: s.handle, Path: remotePath, Data: data,
+	}))
+	return mapErr(err)
 }
 
-func (s *sshSession) Get(context.Context, string, string) error {
-	return errUnimplemented("SFTP 下载")
+func (s *sshSession) Get(ctx context.Context, remotePath, localPath string) error {
+	resp, err := s.cli.ssh.GetFile(ctx, connect.NewRequest(&hostv1.GetFileRequest{
+		Handle: s.handle, Path: remotePath,
+	}))
+	if err != nil {
+		return mapErr(err)
+	}
+	if dir := filepath.Dir(localPath); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return &Error{Code: CodeInternal, Message: "创建本地目录失败: " + err.Error()}
+		}
+	}
+	if err := os.WriteFile(localPath, resp.Msg.GetData(), 0o644); err != nil {
+		return &Error{Code: CodeInternal, Message: "写入本地文件失败: " + err.Error()}
+	}
+	return nil
 }
 
 func (s *sshSession) Close() error {

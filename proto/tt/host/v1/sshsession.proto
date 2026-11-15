@@ -1,6 +1,7 @@
-// SSH 会话数据面：一次性非交互命令执行。
+// SSH 会话数据面：一次性非交互命令执行 + 远端文件读写。
 //
-// 首版不提供 PTY、SFTP 与通用远程文件能力 —— 那些是后续独立扩展，不塞进这里。
+// 首版不提供 PTY。文件读写是给插件搬运资源文件（例如节点图片）用的，
+// 单次有大小上限（connsvc.MaxFileBytes）。
 syntax = "proto3";
 
 package tt.host.v1;
@@ -23,6 +24,27 @@ message SSHExecResponse {
   bool timed_out = 3;
 }
 
+// GetFileRequest 读一个远端文件。
+message GetFileRequest {
+  string handle = 1;
+  string path = 2;
+}
+
+message GetFileResponse {
+  bytes data = 1;
+}
+
+// PutFileRequest 写一个远端文件（父目录不存在时由 Host 创建）。
+message PutFileRequest {
+  string handle = 1;
+  string path = 2;
+  bytes data = 3;
+}
+
+message PutFileResponse {}
+
 service SSHSessionService {
   rpc Exec(SSHExecRequest) returns (SSHExecResponse);
+  rpc GetFile(GetFileRequest) returns (GetFileResponse);
+  rpc PutFile(PutFileRequest) returns (PutFileResponse);
 }

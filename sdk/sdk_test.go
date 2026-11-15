@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -34,6 +36,12 @@ func fakeHost(t *testing.T, gotAuth *string) *httptest.Server {
 	})
 	mux.HandleFunc("/hostrpc/tt.host.v1.DBSessionService/Batch", func(w http.ResponseWriter, r *http.Request) {
 		jsonReply(w, `{"rowsAffected":"2","failedIndex":-1}`)
+	})
+	mux.HandleFunc("/hostrpc/tt.host.v1.SSHSessionService/GetFile", func(w http.ResponseWriter, r *http.Request) {
+		jsonReply(w, `{"data":"aGk="}`)
+	})
+	mux.HandleFunc("/hostrpc/tt.host.v1.SSHSessionService/PutFile", func(w http.ResponseWriter, r *http.Request) {
+		jsonReply(w, `{}`)
 	})
 	return httptest.NewServer(mux)
 }
@@ -107,14 +115,28 @@ func TestFSDataDir(t *testing.T) {
 	}
 }
 
-// TestSSHUnimplementedSFTP SFTP 还没接入时给 UNIMPLEMENTED，不静默成功。
-func TestSSHUnimplementedSFTP(t *testing.T) {
-	c := newContext(context.Background(), "http://127.0.0.1:1", "tok", "p", "0.1.0", "")
+// TestSSHFileRoundTrip 远端文件读写走 Host API（字节 base64 由 protojson 处理）。
+func TestSSHFileRoundTrip(t *testing.T) {
+	var auth string
+	srv := fakeHost(t, &auth)
+	defer srv.Close()
+	c := newContext(context.Background(), srv.URL+"/hostrpc", "tok", "p", "0.1.0", t.TempDir())
 	s := &sshSession{cli: c.cli, handle: "h"}
-	if err := s.Put(context.Background(), "a", "b"); CodeOf(err) != CodeUnimplemented {
-		t.Fatalf("Put 该报 UNIMPLEMENTED，得 %v", err)
+
+	local := filepath.Join(t.TempDir(), "a.png")
+	if err := s.Get(context.Background(), "/remote/a.png", local); err != nil {
+		t.Fatal(err)
 	}
-	if err := s.Get(context.Background(), "a", "b"); CodeOf(err) != CodeUnimplemented {
-		t.Fatalf("Get 该报 UNIMPLEMENTED，得 %v", err)
+	got, err := os.ReadFile(local)
+	if err != nil || string(got) != "hi" {
+		t.Fatalf("读回 = %q %v", got, err)
+	}
+
+	src := filepath.Join(t.TempDir(), "b.png")
+	if err := os.WriteFile(src, []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Put(context.Background(), src, "/remote/b.png"); err != nil {
+		t.Fatal(err)
 	}
 }
