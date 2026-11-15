@@ -1340,7 +1340,7 @@ func printTopentContext(snap map[string]any) {
 var debugWslogsCmd = &cobra.Command{
 	SilenceUsage: true, // 报错多为运行期(状态/SSH/库),不是用法问题:别打一大段 usage 误导
 	Use:          "wslogs",
-	Short:        "获取接口日志列表(wssp/awsp 报文流水)",
+	Short:        "查询服务信息(接口调用记录 wsfa_t)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if wsShow != "" {
 			return showWSLog(wsShow, IsJSON(), wsSaveReq)
@@ -1651,7 +1651,7 @@ func dbgSQLTopentForRun() int {
 var debugWsdebugCmd = &cobra.Command{
 	SilenceUsage: true, // 报错多为运行期(状态/SSH/库),不是用法问题:别打一大段 usage 误导
 	Use:          "wsdebug <rowid>",
-	Short:        "按接口日志的报文参数启动重放调试,等到入口停站",
+	Short:        "按服务信息里的报文参数启动重放调试,等到入口停站",
 	Long: `取出该日志的请求/响应报文,解析出作业与启动参数,自动重放该次调用并停在入口。
 rowid 从 tt debug wslogs 输出中取。
 
