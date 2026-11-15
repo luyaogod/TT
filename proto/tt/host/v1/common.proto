@@ -62,6 +62,8 @@ enum Feature {
   FEATURE_DB_OPEN_BY_ENT = 7;
   // FEATURE_SSH_FILES SSH 远端文件读写（SSHSessionService.GetFile/PutFile）。
   FEATURE_SSH_FILES = 8;
+  // FEATURE_EVENTS 宿主事件轮询（EventsService.Poll）。
+  FEATURE_EVENTS = 9;
 }
 
 // ConnKind 连接种类。

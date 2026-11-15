@@ -21,6 +21,7 @@ type hostClient struct {
 	conns    hostv1connect.ConnectionsServiceClient
 	db       hostv1connect.DBSessionServiceClient
 	ssh      hostv1connect.SSHSessionServiceClient
+	events   hostv1connect.EventsServiceClient
 }
 
 func newHostClient(baseURL, token string) *hostClient {
@@ -43,6 +44,7 @@ func newHostClient(baseURL, token string) *hostClient {
 		conns:    hostv1connect.NewConnectionsServiceClient(hc, baseURL, opts...),
 		db:       hostv1connect.NewDBSessionServiceClient(hc, baseURL, opts...),
 		ssh:      hostv1connect.NewSSHSessionServiceClient(hc, baseURL, opts...),
+		events:   hostv1connect.NewEventsServiceClient(hc, baseURL, opts...),
 	}
 }
 

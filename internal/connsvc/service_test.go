@@ -188,7 +188,7 @@ func TestCapabilitiesOnlyListWhatIsDelivered(t *testing.T) {
 	}
 	want := map[string]bool{
 		FeatureDBQuery: true, FeatureDBExec: true, FeatureSSHExec: true, FeatureDBReadOnlySession: true,
-		FeatureDBBatch: true, FeatureProfileEnts: true, FeatureDBOpenByEnt: true, FeatureSSHFiles: true,
+		FeatureDBBatch: true, FeatureProfileEnts: true, FeatureDBOpenByEnt: true, FeatureSSHFiles: true, FeatureEvents: true,
 	}
 	for _, f := range c.Features {
 		if !want[f] {

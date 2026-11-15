@@ -29,11 +29,13 @@ type contextImpl struct {
 	version string
 	dataDir string
 	jobs    *jobService
+	events  *eventService
 }
 
 func newContext(ctx context.Context, baseURL, token, id, version, dataDir string) *contextImpl {
 	c := &contextImpl{ctx: ctx, cli: newHostClient(baseURL, token), id: id, version: version, dataDir: dataDir}
 	c.jobs = &jobService{c: c, runs: map[string]*jobRun{}}
+	c.events = &eventService{c: c, handlers: map[string][]func(json.RawMessage){}}
 	return c
 }
 
@@ -51,9 +53,11 @@ func (c *contextImpl) Log() Logger           { return &logger{id: c.id} }
 // Jobs 是进程内实现（任务属于插件自己的业务，不需要过 Host API）。
 func (c *contextImpl) Jobs() JobService { return c.jobs }
 
-// Commands / Events 还没接入：返回 nil，插件必须判空后再用。
+// Events 轮询 Host API 的事件环（配置变更/插件重载）。
+func (c *contextImpl) Events() EventService { return c.events }
+
+// Commands 还没接入：返回 nil，插件必须判空后再用。
 func (c *contextImpl) Commands() CommandService { return nil }
-func (c *contextImpl) Events() EventService     { return nil }
 
 func errUnimplemented(what string) error {
 	return &Error{Code: CodeUnimplemented, Message: what + "尚未接入"}
@@ -342,3 +346,58 @@ func (r *jobReporter) Progress(percent int, message string) {
 }
 
 func (r *jobReporter) Log(message string) { r.c.Log().Info("job %s %s", r.id, message) }
+
+// ---- 事件 ----
+
+// eventService 首次订阅时启动一个轮询 goroutine（2s 间隔，失败不退出）。
+type eventService struct {
+	c        *contextImpl
+	mu       sync.Mutex
+	handlers map[string][]func(json.RawMessage)
+	started  bool
+}
+
+func (s *eventService) On(name string, handler func(payload json.RawMessage)) {
+	if handler == nil || name == "" {
+		return
+	}
+	s.mu.Lock()
+	s.handlers[name] = append(s.handlers[name], handler)
+	first := !s.started
+	s.started = true
+	s.mu.Unlock()
+	if first {
+		go s.loop()
+	}
+}
+
+func (s *eventService) loop() {
+	var after int64 // 0 = 从当前最新开始
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.c.ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		resp, err := s.c.cli.events.Poll(s.c.ctx, connect.NewRequest(&hostv1.PollEventsRequest{AfterId: after}))
+		if err != nil {
+			continue
+		}
+		for _, ev := range resp.Msg.GetEvents() {
+			after = ev.GetId()
+			s.dispatch(ev.GetName(), ev.GetPayload())
+		}
+	}
+}
+
+func (s *eventService) dispatch(name string, payload json.RawMessage) {
+	s.mu.Lock()
+	handlers := append([]func(json.RawMessage){}, s.handlers[name]...)
+	handlers = append(handlers, s.handlers["*"]...)
+	s.mu.Unlock()
+	for _, h := range handlers {
+		h(payload)
+	}
+}

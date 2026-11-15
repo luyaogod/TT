@@ -2,6 +2,7 @@ package sdk
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -43,6 +44,9 @@ func fakeHost(t *testing.T, gotAuth *string) *httptest.Server {
 	})
 	mux.HandleFunc("/hostrpc/tt.host.v1.SSHSessionService/PutFile", func(w http.ResponseWriter, r *http.Request) {
 		jsonReply(w, `{}`)
+	})
+	mux.HandleFunc("/hostrpc/tt.host.v1.EventsService/Poll", func(w http.ResponseWriter, r *http.Request) {
+		jsonReply(w, `{"events":[{"id":"7","name":"env.changed","time":"2026-11-16T03:00:00Z","payload":"e30="}]}`)
 	})
 	return httptest.NewServer(mux)
 }
@@ -141,6 +145,7 @@ func TestSSHFileRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
 // TestJobsRunReportsProgress ctx.jobs 进程内任务：立即返回 id，fn 异步执行。
 func TestJobsRunReportsProgress(t *testing.T) {
 	c := newContext(context.Background(), "http://127.0.0.1:1", "tok", "p", "0.1.0", t.TempDir())
@@ -162,5 +167,23 @@ func TestJobsRunReportsProgress(t *testing.T) {
 	case <-done:
 	case <-time.After(3 * time.Second):
 		t.Fatal("任务没有执行")
+	}
+}
+
+// TestEventsPollDispatches ctx.events 轮询到事件后按名字回调。
+func TestEventsPollDispatches(t *testing.T) {
+	var auth string
+	srv := fakeHost(t, &auth)
+	defer srv.Close()
+	c := newContext(context.Background(), srv.URL+"/hostrpc", "tok", "p", "0.1.0", t.TempDir())
+	ch := make(chan string, 1)
+	c.Events().On("env.changed", func(payload json.RawMessage) { ch <- string(payload) })
+	select {
+	case got := <-ch:
+		if got != "{}" {
+			t.Fatalf("payload = %q", got)
+		}
+	case <-time.After(6 * time.Second):
+		t.Fatal("没有收到事件")
 	}
 }

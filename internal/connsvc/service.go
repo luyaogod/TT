@@ -59,6 +59,8 @@ const (
 	FeatureDBOpenByEnt = "db.open_by_ent"
 	// FeatureSSHFiles SSH 远端文件读写（SSHSessionService.GetFile/PutFile）。
 	FeatureSSHFiles = "ssh.files"
+	// FeatureEvents 宿主事件轮询（EventsService.Poll）。
+	FeatureEvents = "events.poll"
 )
 
 // CallerKind 调用方种类。内置调用方与第三方插件的权限来源不同，但走同一套会话规则。
@@ -360,7 +362,7 @@ func (s *Service) Capabilities() Capabilities {
 		TTVersion:      s.opt.TTVersion,
 		Features: []string{
 			FeatureDBQuery, FeatureDBExec, FeatureSSHExec, FeatureDBReadOnlySession,
-			FeatureDBBatch, FeatureProfileEnts, FeatureDBOpenByEnt, FeatureSSHFiles,
+			FeatureDBBatch, FeatureProfileEnts, FeatureDBOpenByEnt, FeatureSSHFiles, FeatureEvents,
 		},
 		Services: []ServiceCapability{
 			{Name: "HostService", Methods: []string{"GetCapabilities"}},
@@ -368,6 +370,7 @@ func (s *Service) Capabilities() Capabilities {
 			{Name: "ConnectionsService", Methods: []string{"TestDB", "TestSSH", "OpenDB", "OpenSSH", "Close"}},
 			{Name: "DBSessionService", Methods: []string{"Query", "Exec", "Batch"}},
 			{Name: "SSHSessionService", Methods: []string{"Exec", "GetFile", "PutFile"}},
+			{Name: "EventsService", Methods: []string{"Poll"}},
 		},
 	}
 }

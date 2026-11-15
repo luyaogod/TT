@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/luyaogod/TT/internal/connsvc"
 	"github.com/luyaogod/TT/internal/debug"
 	dictserver "github.com/luyaogod/TT/internal/dict/server"
+	"github.com/luyaogod/TT/internal/eventbus"
 	"github.com/luyaogod/TT/internal/hostrpc"
 	"github.com/luyaogod/TT/internal/plugin"
 	"github.com/luyaogod/TT/internal/web"
@@ -211,10 +213,13 @@ func newServeCmd() *cobra.Command {
 				},
 			})
 			tokenStore := hostrpc.NewTokenStore()
+			events := eventbus.New(200)
 			hostRPCHandler := hostrpc.NewHandler(hostrpc.Deps{
 				Service: connSvc,
 				Auth:    hostrpc.NewTokenAuthenticator(tokenStore),
+				Events:  events,
 			})
+			events.Publish("plugin.reload", map[string]any{"reason": "serve.start"})
 
 			// supervisor 的 Host API 地址要等服务真正监听后才确定（端口可能被顺延），
 			// 所以先建出来、listen 之后再填 HostAPIURL 并拉起已启用的服务。
@@ -266,7 +271,7 @@ func newServeCmd() *cobra.Command {
 					// 配置写入后让持有内存态的子系统重新加载，否则它们内存里还是旧环境，
 					// 表现是"改了没生效"。连接服务还要把旧会话全部作废 —— 旧会话连着的是
 					// **旧目标**，而调用方看到的仍是同一个环境名。
-					Reloaders: []web.ConfigReloader{debugSrv, connReloader{svc: connSvc}},
+					Reloaders: []web.ConfigReloader{debugSrv, connReloader{svc: connSvc}, eventReloader{bus: events}},
 					Shutdown:  stopWeb,
 					// 统一层配置状态仍按旧的单文件口径显示；设置页已改用 /api/dbsync 的库目录。
 					SyncDefaultTarget: syncDefault,
@@ -340,4 +345,12 @@ func splitHostPort(addr string) (host, port string, err error) {
 	}
 	host = strings.Trim(addr[:i], "[]")
 	return host, addr[i+1:], nil
+}
+
+// eventReloader 配置保存后把 env.changed 放进事件环（插件据此刷新自己的缓存）。
+type eventReloader struct{ bus *eventbus.Bus }
+
+func (r eventReloader) ReloadConfig() error {
+	r.bus.Publish("env.changed", map[string]any{"at": time.Now().Format(time.RFC3339)})
+	return nil
 }

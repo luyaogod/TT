@@ -12,6 +12,7 @@ import (
 	"connectrpc.com/connect"
 
 	"github.com/luyaogod/TT/internal/connsvc"
+	"github.com/luyaogod/TT/internal/eventbus"
 	"github.com/luyaogod/TT/pkg/erpdb"
 	"github.com/luyaogod/TT/pkg/hostv1"
 	"github.com/luyaogod/TT/pkg/hostv1/hostv1connect"
@@ -23,6 +24,8 @@ type Deps struct {
 	Service *connsvc.Service
 	// Auth 认证器；nil = 一律拒绝（宁可不给入口，也不开一个匿名可用的连接 API）。
 	Auth Authenticator
+	// Events 宿主事件环；nil = 事件接口返回空表。
+	Events *eventbus.Bus
 }
 
 // Prefix Host API 的固定挂载前缀。handler 自己认这个前缀，所以挂载方只需
@@ -44,6 +47,7 @@ func NewHandler(deps Deps) http.Handler {
 	inner.Handle(hostv1connect.NewConnectionsServiceHandler(&connectionsServer{svc: deps.Service}, opts...))
 	inner.Handle(hostv1connect.NewDBSessionServiceHandler(&dbSessionServer{svc: deps.Service}, opts...))
 	inner.Handle(hostv1connect.NewSSHSessionServiceHandler(&sshSessionServer{svc: deps.Service}, opts...))
+	inner.Handle(hostv1connect.NewEventsServiceHandler(&eventsServer{bus: deps.Events}, opts...))
 
 	mux := http.NewServeMux()
 	mux.Handle(Prefix+"/", http.StripPrefix(Prefix, inner))
@@ -352,6 +356,8 @@ func featureProto(s string) hostv1.Feature {
 		return hostv1.Feature_FEATURE_DB_OPEN_BY_ENT
 	case connsvc.FeatureSSHFiles:
 		return hostv1.Feature_FEATURE_SSH_FILES
+	case connsvc.FeatureEvents:
+		return hostv1.Feature_FEATURE_EVENTS
 	default:
 		return hostv1.Feature_FEATURE_UNSPECIFIED
 	}
@@ -467,4 +473,28 @@ func (s *sshSessionServer) PutFile(ctx context.Context, req *connect.Request[hos
 		return nil, rpcError(cerr)
 	}
 	return connect.NewResponse(&hostv1.PutFileResponse{}), nil
+}
+
+// eventsServer EventsService：按 after_id 增量轮询。
+type eventsServer struct {
+	bus *eventbus.Bus
+}
+
+func (s *eventsServer) Poll(_ context.Context, req *connect.Request[hostv1.PollEventsRequest]) (*connect.Response[hostv1.PollEventsResponse], error) {
+	if s.bus == nil {
+		return connect.NewResponse(&hostv1.PollEventsResponse{}), nil
+	}
+	after := req.Msg.GetAfterId()
+	if after == 0 {
+		// 0 = 从当前最新开始，不重放历史（订阅者只关心之后发生的事）。
+		after = s.bus.Latest()
+	}
+	events := s.bus.Since(after)
+	out := make([]*hostv1.HostEvent, 0, len(events))
+	for _, ev := range events {
+		out = append(out, &hostv1.HostEvent{
+			Id: ev.ID, Name: ev.Name, Time: ev.Time.Format(time.RFC3339Nano), Payload: ev.Payload,
+		})
+	}
+	return connect.NewResponse(&hostv1.PollEventsResponse{Events: out}), nil
 }
