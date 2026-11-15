@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/testkit"
+	"github.com/luyaogod/TT/internal/testkit"
 )
 
 var reHex16 = regexp.MustCompile(`^[0-9a-f]{16}$`)

@@ -12,8 +12,8 @@ import (
 	"fmt"
 	"strings"
 
-	"tt/internal/form42f"
-	"tt/internal/str42s"
+	"github.com/luyaogod/TT/internal/form42f"
+	"github.com/luyaogod/TT/internal/str42s"
 )
 
 // PageView 是一页及其页面级标签。

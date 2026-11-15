@@ -13,6 +13,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/luyaogod/TT/internal/connsvc"
+	"github.com/luyaogod/TT/internal/hostrpc"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -21,8 +23,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"tt/internal/connsvc"
-	"tt/internal/hostrpc"
 )
 
 //---- 夹具 ----

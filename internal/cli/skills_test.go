@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/cli/common"
-	"tt/internal/skill"
-	"tt/internal/testkit"
+	"github.com/luyaogod/TT/internal/cli/common"
+	"github.com/luyaogod/TT/internal/skill"
+	"github.com/luyaogod/TT/internal/testkit"
 )
 
 func withSkillSource(t *testing.T, names ...string) string {

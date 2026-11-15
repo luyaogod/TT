@@ -18,9 +18,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"tt/internal/cli/common"
-	"tt/internal/output"
-	"tt/internal/skill"
+	"github.com/luyaogod/TT/internal/cli/common"
+	"github.com/luyaogod/TT/internal/output"
+	"github.com/luyaogod/TT/internal/skill"
 )
 
 func newSkillsCmd() *cobra.Command {

@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"tt/internal/dev/model"
-	"tt/internal/dev/pkgfile"
-	"tt/internal/dev/testutil"
+	"github.com/luyaogod/TT/internal/dev/model"
+	"github.com/luyaogod/TT/internal/dev/pkgfile"
+	"github.com/luyaogod/TT/internal/dev/testutil"
 )
 
 // buildWorkspace 造一个最小可用工作区（只为本文件的测试服务）。

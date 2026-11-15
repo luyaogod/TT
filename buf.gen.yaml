@@ -1,13 +1,13 @@
 # 代码生成配置：Go 用 protoc-gen-go + protoc-gen-connect-go（两个插件由 make proto-tools 装）。
 #
-# 生成物入库（internal/gen），并由 make proto-check 保证"改了 proto 没重生成"会当场失败。
+# 生成物入库（pkg/hostv1），并由 make proto-check 保证"改了 proto 没重生成"会当场失败。
 version: v2
 managed:
   enabled: false
 plugins:
   - local: protoc-gen-go
-    out: internal/gen
-    opt: module=tt/internal/gen
+    out: pkg
+    opt: module=github.com/luyaogod/TT/pkg
   - local: protoc-gen-connect-go
-    out: internal/gen
-    opt: module=tt/internal/gen
+    out: pkg
+    opt: module=github.com/luyaogod/TT/pkg

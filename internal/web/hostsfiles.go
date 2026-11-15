@@ -11,7 +11,7 @@ import (
 	"time"
 	"unicode"
 
-	"tt/internal/config"
+	"github.com/luyaogod/TT/internal/config"
 )
 
 // ── 站点的导出 / 导入 ──

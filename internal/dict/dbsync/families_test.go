@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"tt/internal/dict/db"
+	"github.com/luyaogod/TT/internal/dict/db"
 )
 
 // TestDictTablesDerivedFromFamilies 同步清单由数据族展平而来:不重不漏。

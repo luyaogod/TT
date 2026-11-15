@@ -7,7 +7,7 @@ package dict
 // 留一个版本的缓冲，下一版删除。
 
 import (
-	"tt/internal/cli/file"
+	"github.com/luyaogod/TT/internal/cli/file"
 )
 
 func init() {

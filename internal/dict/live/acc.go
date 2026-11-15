@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"tt/internal/dict/db"
+	"github.com/luyaogod/TT/internal/dict/db"
 )
 
 // QueryACCMeta 远程实现。SQL 与本地 SQLite 版本同源；值经 QuoteLit 内联。

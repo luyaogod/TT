@@ -13,9 +13,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"tt/internal/cli/common"
-	"tt/internal/debugclient"
-	"tt/internal/output"
+	"github.com/luyaogod/TT/internal/cli/common"
+	"github.com/luyaogod/TT/internal/debugclient"
+	"github.com/luyaogod/TT/internal/output"
 )
 
 var (

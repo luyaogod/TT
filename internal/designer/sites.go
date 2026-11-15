@@ -41,7 +41,7 @@ import (
 	"strings"
 
 	"golang.org/x/crypto/pbkdf2"
-	"tt/internal/config"
+	"github.com/luyaogod/TT/internal/config"
 )
 
 // 加解密参数(来自 SiteFileHelper.cs,见包注释)

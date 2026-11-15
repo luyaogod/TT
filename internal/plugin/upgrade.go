@@ -23,8 +23,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"tt/internal/fetch"
-	"tt/internal/winproc"
+	"github.com/luyaogod/TT/internal/fetch"
+	"github.com/luyaogod/TT/internal/winproc"
 )
 
 // UpdateRuntime 升级/回滚期间对**运行态**的操作。

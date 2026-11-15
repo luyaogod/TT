@@ -11,9 +11,11 @@ import (
 
 	"connectrpc.com/connect"
 
-	"tt/internal/connsvc"
-	"tt/internal/gen/hostv1"
-	"tt/internal/gen/hostv1/hostv1connect"
+	"github.com/luyaogod/TT/internal/connsvc"
+	"github.com/luyaogod/TT/internal/eventbus"
+	"github.com/luyaogod/TT/pkg/erpdb"
+	"github.com/luyaogod/TT/pkg/hostv1"
+	"github.com/luyaogod/TT/pkg/hostv1/hostv1connect"
 )
 
 // Deps 挂载 Host API 所需的依赖。
@@ -22,6 +24,8 @@ type Deps struct {
 	Service *connsvc.Service
 	// Auth 认证器；nil = 一律拒绝（宁可不给入口，也不开一个匿名可用的连接 API）。
 	Auth Authenticator
+	// Events 宿主事件环；nil = 事件接口返回空表。
+	Events *eventbus.Bus
 }
 
 // Prefix Host API 的固定挂载前缀。handler 自己认这个前缀，所以挂载方只需
@@ -43,6 +47,7 @@ func NewHandler(deps Deps) http.Handler {
 	inner.Handle(hostv1connect.NewConnectionsServiceHandler(&connectionsServer{svc: deps.Service}, opts...))
 	inner.Handle(hostv1connect.NewDBSessionServiceHandler(&dbSessionServer{svc: deps.Service}, opts...))
 	inner.Handle(hostv1connect.NewSSHSessionServiceHandler(&sshSessionServer{svc: deps.Service}, opts...))
+	inner.Handle(hostv1connect.NewEventsServiceHandler(&eventsServer{bus: deps.Events}, opts...))
 
 	mux := http.NewServeMux()
 	mux.Handle(Prefix+"/", http.StripPrefix(Prefix, inner))
@@ -177,11 +182,22 @@ func (c *connectionsServer) OpenDB(ctx context.Context, req *connect.Request[hos
 	if err != nil {
 		return nil, err
 	}
-	handle, res, cerr := c.svc.OpenDB(ctx, caller, req.Msg.GetEnv(), req.Msg.GetAccount(), req.Msg.GetReadOnly())
+	handle, res, cerr := c.openDB(ctx, caller, req)
 	if cerr != nil {
 		return nil, rpcError(cerr)
 	}
-	return connect.NewResponse(&hostv1.OpenDBResponse{Handle: handle, ReadOnly: res.ReadOnly, DbType: res.DBType}), nil
+	return connect.NewResponse(&hostv1.OpenDBResponse{
+		Handle: handle, ReadOnly: res.ReadOnly, DbType: res.DBType,
+		Account: res.Account, Ent: int32(res.Ent),
+	}), nil
+}
+
+// openDB 按请求里的 ent/account 选择开库方式（ent 优先）。
+func (c *connectionsServer) openDB(ctx context.Context, caller connsvc.Caller, req *connect.Request[hostv1.OpenDBRequest]) (string, connsvc.OpenDBResult, *connsvc.Error) {
+	if req.Msg.GetEnt() > 0 {
+		return c.svc.OpenDBWithEnt(ctx, caller, req.Msg.GetEnv(), req.Msg.GetAccount(), req.Msg.GetReadOnly(), int(req.Msg.GetEnt()))
+	}
+	return c.svc.OpenDB(ctx, caller, req.Msg.GetEnv(), req.Msg.GetAccount(), req.Msg.GetReadOnly())
 }
 
 // OpenSSH 打开 SSH 会话。
@@ -220,7 +236,7 @@ func (d *dbSessionServer) Query(ctx context.Context, req *connect.Request[hostv1
 	if err != nil {
 		return nil, err
 	}
-	res, cerr := d.svc.DBQuery(ctx, caller, req.Msg.GetHandle(), req.Msg.GetSql(), int(req.Msg.GetMaxRows()))
+	res, cerr := d.query(ctx, caller, req)
 	if cerr != nil {
 		return nil, rpcError(cerr)
 	}
@@ -237,11 +253,63 @@ func (d *dbSessionServer) Exec(ctx context.Context, req *connect.Request[hostv1.
 	if err != nil {
 		return nil, err
 	}
-	n, cerr := d.svc.DBExec(ctx, caller, req.Msg.GetHandle(), req.Msg.GetSql())
+	n, cerr := d.exec(ctx, caller, req)
 	if cerr != nil {
 		return nil, rpcError(cerr)
 	}
 	return connect.NewResponse(&hostv1.ExecResponse{RowsAffected: n}), nil
+}
+
+// query / exec 按是否带参数选择调用路径（空参数走老接口，保持替身兼容）。
+func (d *dbSessionServer) query(ctx context.Context, caller connsvc.Caller, req *connect.Request[hostv1.QueryRequest]) (*connsvc.QueryResult, *connsvc.Error) {
+	if len(req.Msg.GetParams()) > 0 {
+		return d.svc.DBQueryArgs(ctx, caller, req.Msg.GetHandle(), req.Msg.GetSql(), req.Msg.GetParams(), int(req.Msg.GetMaxRows()))
+	}
+	return d.svc.DBQuery(ctx, caller, req.Msg.GetHandle(), req.Msg.GetSql(), int(req.Msg.GetMaxRows()))
+}
+
+func (d *dbSessionServer) exec(ctx context.Context, caller connsvc.Caller, req *connect.Request[hostv1.ExecRequest]) (int64, *connsvc.Error) {
+	if len(req.Msg.GetParams()) > 0 {
+		return d.svc.DBExecArgs(ctx, caller, req.Msg.GetHandle(), req.Msg.GetSql(), req.Msg.GetParams())
+	}
+	return d.svc.DBExec(ctx, caller, req.Msg.GetHandle(), req.Msg.GetSql())
+}
+
+// ---- 批量与事务 ----
+//
+// Batch 已接入；显式事务（BeginTx/TxExec/Commit/Rollback）随下一阶段实现，
+// 未注册 FEATURE_DB_TX 前插件不该调用；真调了得到 Unimplemented。
+
+func (d *dbSessionServer) Batch(ctx context.Context, req *connect.Request[hostv1.BatchRequest]) (*connect.Response[hostv1.BatchResponse], error) {
+	caller, err := mustCaller(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stmts := make([]erpdb.Stmt, 0, len(req.Msg.GetStatements()))
+	for _, st := range req.Msg.GetStatements() {
+		stmts = append(stmts, erpdb.Stmt{SQL: st.GetSql(), Params: st.GetParams()})
+	}
+	n, failed, cerr := d.svc.DBBatch(ctx, caller, req.Msg.GetHandle(), stmts, req.Msg.GetAtomic())
+	if cerr != nil {
+		return nil, rpcError(cerr)
+	}
+	return connect.NewResponse(&hostv1.BatchResponse{RowsAffected: n, FailedIndex: int32(failed)}), nil
+}
+
+func (d *dbSessionServer) BeginTx(_ context.Context, _ *connect.Request[hostv1.BeginTxRequest]) (*connect.Response[hostv1.BeginTxResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("显式事务尚未接入"))
+}
+
+func (d *dbSessionServer) TxExec(_ context.Context, _ *connect.Request[hostv1.TxExecRequest]) (*connect.Response[hostv1.TxExecResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("显式事务尚未接入"))
+}
+
+func (d *dbSessionServer) CommitTx(_ context.Context, _ *connect.Request[hostv1.CommitTxRequest]) (*connect.Response[hostv1.CommitTxResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("显式事务尚未接入"))
+}
+
+func (d *dbSessionServer) RollbackTx(_ context.Context, _ *connect.Request[hostv1.RollbackTxRequest]) (*connect.Response[hostv1.RollbackTxResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("显式事务尚未接入"))
 }
 
 // sshSessionServer SSHSessionService。
@@ -280,6 +348,16 @@ func featureProto(s string) hostv1.Feature {
 		return hostv1.Feature_FEATURE_SSH_EXEC
 	case connsvc.FeatureDBReadOnlySession:
 		return hostv1.Feature_FEATURE_DB_READONLY_SESSION
+	case connsvc.FeatureDBBatch:
+		return hostv1.Feature_FEATURE_DB_BATCH
+	case connsvc.FeatureProfileEnts:
+		return hostv1.Feature_FEATURE_PROFILE_ENTS
+	case connsvc.FeatureDBOpenByEnt:
+		return hostv1.Feature_FEATURE_DB_OPEN_BY_ENT
+	case connsvc.FeatureSSHFiles:
+		return hostv1.Feature_FEATURE_SSH_FILES
+	case connsvc.FeatureEvents:
+		return hostv1.Feature_FEATURE_EVENTS
 	default:
 		return hostv1.Feature_FEATURE_UNSPECIFIED
 	}
@@ -287,7 +365,7 @@ func featureProto(s string) hostv1.Feature {
 
 // profileProto 内部脱敏元数据 → proto。
 func profileProto(p connsvc.Profile) *hostv1.Profile {
-	return &hostv1.Profile{
+	out := &hostv1.Profile{
 		Env:           p.Env,
 		Zone:          p.Zone,
 		HasDb:         p.HasDB,
@@ -301,6 +379,14 @@ func profileProto(p connsvc.Profile) *hostv1.Profile {
 		DbViaSsh:      p.DBViaSSH,
 		DbReadonlySql: p.DBReadonlySQL,
 	}
+	for _, e := range p.Ents {
+		out.Ents = append(out.Ents, &hostv1.Ent{
+			Ent:         int32(e.Ent),
+			Account:     e.Account,
+			Placeholder: e.Placeholder,
+		})
+	}
+	return out
 }
 
 // ---- Host / Origin 守卫 ----
@@ -362,4 +448,53 @@ func writeGuardError(w http.ResponseWriter, e *connect.Error) {
 func jsonEscape(s string) string {
 	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\r", `\r`, "\t", `\t`)
 	return r.Replace(s)
+}
+
+// GetFile 读远端文件。
+func (s *sshSessionServer) GetFile(ctx context.Context, req *connect.Request[hostv1.GetFileRequest]) (*connect.Response[hostv1.GetFileResponse], error) {
+	caller, err := mustCaller(ctx)
+	if err != nil {
+		return nil, err
+	}
+	data, cerr := s.svc.SSHGetFile(ctx, caller, req.Msg.GetHandle(), req.Msg.GetPath())
+	if cerr != nil {
+		return nil, rpcError(cerr)
+	}
+	return connect.NewResponse(&hostv1.GetFileResponse{Data: data}), nil
+}
+
+// PutFile 写远端文件。
+func (s *sshSessionServer) PutFile(ctx context.Context, req *connect.Request[hostv1.PutFileRequest]) (*connect.Response[hostv1.PutFileResponse], error) {
+	caller, err := mustCaller(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if cerr := s.svc.SSHPutFile(ctx, caller, req.Msg.GetHandle(), req.Msg.GetPath(), req.Msg.GetData()); cerr != nil {
+		return nil, rpcError(cerr)
+	}
+	return connect.NewResponse(&hostv1.PutFileResponse{}), nil
+}
+
+// eventsServer EventsService：按 after_id 增量轮询。
+type eventsServer struct {
+	bus *eventbus.Bus
+}
+
+func (s *eventsServer) Poll(_ context.Context, req *connect.Request[hostv1.PollRequest]) (*connect.Response[hostv1.PollResponse], error) {
+	if s.bus == nil {
+		return connect.NewResponse(&hostv1.PollResponse{}), nil
+	}
+	after := req.Msg.GetAfterId()
+	if after == 0 {
+		// 0 = 从当前最新开始，不重放历史（订阅者只关心之后发生的事）。
+		after = s.bus.Latest()
+	}
+	events := s.bus.Since(after)
+	out := make([]*hostv1.HostEvent, 0, len(events))
+	for _, ev := range events {
+		out = append(out, &hostv1.HostEvent{
+			Id: ev.ID, Name: ev.Name, Time: ev.Time.Format(time.RFC3339Nano), Payload: ev.Payload,
+		})
+	}
+	return connect.NewResponse(&hostv1.PollResponse{Events: out}), nil
 }

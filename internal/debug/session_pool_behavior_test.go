@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/target"
+	"github.com/luyaogod/TT/internal/target"
 )
 
 // sameTarget 的两条**还没被钉住**的语义。

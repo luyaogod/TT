@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"tt/internal/dev/model"
-	"tt/internal/dev/pkgfile"
+	"github.com/luyaogod/TT/internal/dev/model"
+	"github.com/luyaogod/TT/internal/dev/pkgfile"
 )
 
 //---------------------------------------------------------------------------

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/dict/db"
+	"github.com/luyaogod/TT/internal/dict/db"
 )
 
 // 建索引这件事有两种静默失败，两种都必须被看见：

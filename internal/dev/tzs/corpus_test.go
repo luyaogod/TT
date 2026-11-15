@@ -65,8 +65,8 @@ import (
 	"testing"
 	"time"
 
-	"tt/internal/dev/testutil"
-	"tt/internal/testenv"
+	"github.com/luyaogod/TT/internal/dev/testutil"
+	"github.com/luyaogod/TT/internal/testenv"
 )
 
 const (

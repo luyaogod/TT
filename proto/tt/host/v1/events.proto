@@ -1,0 +1,30 @@
+// 宿主事件：插件按 after_id 增量轮询。首版只有配置变更/插件重载两类，
+// 事件本身不带凭据与 SQL 文本。
+syntax = "proto3";
+
+package tt.host.v1;
+
+option go_package = "github.com/luyaogod/TT/pkg/hostv1;hostv1";
+
+message HostEvent {
+  int64 id = 1;
+  // name 事件名：env.changed / plugin.reload / …
+  string name = 2;
+  // time RFC3339Nano。
+  string time = 3;
+  // payload 事件负载（JSON）。
+  bytes payload = 4;
+}
+
+message PollRequest {
+  // after_id 只返回 id 大于它的事件；0 = 从当前最新开始（不重放历史）。
+  int64 after_id = 1;
+}
+
+message PollResponse {
+  repeated HostEvent events = 1;
+}
+
+service EventsService {
+  rpc Poll(PollRequest) returns (PollResponse);
+}

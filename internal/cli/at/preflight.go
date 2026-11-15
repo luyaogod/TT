@@ -11,7 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"tt/internal/cli/common"
+	"github.com/luyaogod/TT/internal/cli/common"
 )
 
 // ListTarget 判断这次要不要走 --at-list；要的话返回目标命令。

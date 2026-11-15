@@ -18,9 +18,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"tt/internal/config"
-	"tt/internal/update"
-	"tt/internal/winproc"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/update"
+	"github.com/luyaogod/TT/internal/winproc"
 )
 
 // hUpdateGet 返回更新相关的全部状态：当前版本、形态、上一次检查结论、上一次升级结果、

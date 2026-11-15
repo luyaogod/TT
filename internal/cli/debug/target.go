@@ -37,8 +37,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"tt/internal/output"
-	"tt/internal/target"
+	"github.com/luyaogod/TT/internal/output"
+	"github.com/luyaogod/TT/internal/target"
 )
 
 var (

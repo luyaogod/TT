@@ -13,8 +13,8 @@
 package host
 
 import (
-	"tt/internal/config"
-	"tt/internal/dbconfig"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/pkg/dbconfig"
 )
 
 // 环境模型的别名。定义在 internal/config/schema.go。

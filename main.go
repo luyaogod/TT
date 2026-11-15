@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"tt/internal/cli"
+	"github.com/luyaogod/TT/internal/cli"
 )
 
 // webDist 前端构建产物（web/dist）。

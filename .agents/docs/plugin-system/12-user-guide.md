@@ -8,7 +8,7 @@
 不提供沙箱：插件是普通本机进程，能读你能读的文件、能连你能连的网络。只装你信任的来源；
 不确定就先在测试环境试。
 
-页面隔离（iframe + 消息桥）保护的是**页面**，不是进程。
+页面隔离（iframe + 消息桥）保护的是**页面**，不是进程。v2 起同页插件页面用插件自己的 RPC/服务，宿主不再替 iframe 代调 Host API。
 
 ## 1. 安装
 
@@ -24,20 +24,19 @@ tt plugin install ./myplugin.zip --replace  # 同 ID 同版本已存在时重装
 同 ID 同版本已装会拒绝（`--replace` 才重装）；插件正在启用中不允许覆盖安装。
 命名空间撞内置命令或别的已启用插件时，安装即失败。
 
-## 2. 授权与启用
+## 2. 启用（v2：启用即信任）
 
 ```bash
-tt plugin enable com.example.myplugin --allow profiles.list
-tt plugin enable com.example.myplugin --allow db.connect,ssh.connect --env prod --env test
-tt plugin grant  com.example.myplugin --allow db.connect --env prod   # 只改授权
+tt plugin enable com.example.myplugin
 ```
 
-- `--allow` 是**能力**：`profiles.list`（读环境清单）、`db.connect`、`ssh.connect`。
-- `--env` 是**环境**：只能对点名的环境建立连接。环境必须已在配置里存在（拼错会报错）。
-- 清单里声明的 `permissions` 只是诉求；不给 `--env` 就没有任何环境可用 —— 这是有意的默认。
+- v2 起**没有逐项能力/环境授权**：启用后的插件可以使用 Host API 的全部能力与配置里的
+  全部环境。`--allow` / `--env` 仍被接受但忽略（兼容旧脚本）。
+- 信任边界是"安装并启用"：只装你信任的来源；不确定就先在测试环境试。
+- 清单里的 `permissions` 字段已废弃（v2 清单声明它会被拒绝）。
 - `tt plugin enable` 之后：CLI 命名空间出现在 `tt --help`，页面出现在菜单，技能进入分发
   期望态；有常驻服务的插件，服务由 `tt serve` 拉起（命令行自己不起长命进程）。
-- 同样的动作也可以在 **设置 → 插件管理** 里做：勾选能力与环境后启用、停用、自检、看日志；
+- 同样的动作也可以在 **设置 → 插件管理** 里做：启用、停用、自检、看日志；
   两侧写的是同一份注册表，不另存一套状态。
 
 ## 3. 停用与卸载

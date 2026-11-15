@@ -18,11 +18,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"tt/internal/cli/common"
-	"tt/internal/dbconfig"
-	"tt/internal/debug"
-	"tt/internal/output"
-	"tt/internal/safesql"
+	"github.com/luyaogod/TT/internal/cli/common"
+	"github.com/luyaogod/TT/internal/debug"
+	"github.com/luyaogod/TT/internal/output"
+	"github.com/luyaogod/TT/pkg/dbconfig"
+	"github.com/luyaogod/TT/pkg/safesql"
 )
 
 // `tt db sql` 的三条执行路线（--route）。

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/testkit"
-	"tt/internal/update"
+	"github.com/luyaogod/TT/internal/testkit"
+	"github.com/luyaogod/TT/internal/update"
 )
 
 // mkSkills 在 dir 下建一个技能源树：每个技能一个目录 + SKILL.md。

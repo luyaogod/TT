@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/config"
-	"tt/internal/plugin"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/plugin"
 )
 
 // writeWebPluginPackage 造一个只贡献技能的插件包。

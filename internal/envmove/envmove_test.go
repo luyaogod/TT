@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"tt/internal/config"
-	"tt/internal/entdir"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/pkg/entdir"
 )
 
 // writeConfigRaw 写一份最小配置（body 里的 hosts/query 由调用方给）。

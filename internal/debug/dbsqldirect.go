@@ -19,9 +19,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"tt/internal/dbconfig"
-	"tt/internal/dict/live"
-	"tt/internal/safesql"
+	"github.com/luyaogod/TT/pkg/dbconfig"
+	"github.com/luyaogod/TT/internal/dict/live"
+	"github.com/luyaogod/TT/pkg/safesql"
 )
 
 // DirectUnreachableError 直连**建不起来**：网络不通、SSH 隧道起不来、登录被拒。

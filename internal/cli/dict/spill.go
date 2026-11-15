@@ -12,8 +12,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"tt/internal/cli/common"
-	"tt/internal/output"
+	"github.com/luyaogod/TT/internal/cli/common"
+	"github.com/luyaogod/TT/internal/output"
 )
 
 // tt dict spill —— 读「结果被截断时落盘的那一份完整结果」。

@@ -12,7 +12,7 @@ import (
 	"regexp"
 	"time"
 
-	"tt/internal/config"
+	"github.com/luyaogod/TT/internal/config"
 )
 
 // StoredBP 持久化的断点

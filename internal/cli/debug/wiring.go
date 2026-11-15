@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"os"
 
-	"tt/internal/debug"
+	"github.com/luyaogod/TT/internal/debug"
 )
 
 // gdcLocal 探"本机有没有 GDC 在听"（7400/6400 连得上就算）。

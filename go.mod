@@ -1,4 +1,4 @@
-module tt
+module github.com/luyaogod/TT
 
 go 1.26.5
 

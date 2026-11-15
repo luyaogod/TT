@@ -77,7 +77,7 @@ rem GOARCH is scoped to this one command: `go run ./tools/zip` below must run as
 rem a host binary, and a stale GOARCH would make it un-runnable.
 set "GOARCH=amd64"
 set "CGO_ENABLED=0"
-call go build -trimpath -ldflags "-X tt/internal/cli.Version=%VERSION%" -o "%STAGE%\tt.exe" .
+call go build -trimpath -ldflags "-X github.com/luyaogod/TT/internal/cli.Version=%VERSION%" -o "%STAGE%\tt.exe" .
 if errorlevel 1 (
     set "GOARCH="
     set "CGO_ENABLED="

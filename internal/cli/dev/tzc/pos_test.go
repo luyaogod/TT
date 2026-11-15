@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/dev/model"
-	"tt/internal/dev/testutil"
-	"tt/internal/testkit"
+	"github.com/luyaogod/TT/internal/dev/model"
+	"github.com/luyaogod/TT/internal/dev/testutil"
+	"github.com/luyaogod/TT/internal/testkit"
 )
 
 // stdout 捕获搬去了 internal/testkit.CaptureStdout（连同它的 64 KB 边界判据

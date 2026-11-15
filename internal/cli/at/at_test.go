@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"tt/internal/cli/common"
+	"github.com/luyaogod/TT/internal/cli/common"
 )
 
 func TestParse(t *testing.T) {

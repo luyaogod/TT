@@ -32,8 +32,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"tt/internal/dev/model"
-	"tt/internal/dev/pkgfile"
+	"github.com/luyaogod/TT/internal/dev/model"
+	"github.com/luyaogod/TT/internal/dev/pkgfile"
 )
 
 // 工作区固定文件名 / 目录名（设计指南 §3）。

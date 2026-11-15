@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/testkit"
+	"github.com/luyaogod/TT/internal/testkit"
 )
 
 // corpusTaps 返回语料里所有 .tap 条目的字节（按包名排序，稳定）。

@@ -27,13 +27,13 @@ import (
 	"sync"
 	"time"
 
-	"tt/internal/config"
-	"tt/internal/connsvc"
-	"tt/internal/dbconfig"
-	"tt/internal/designer"
-	"tt/internal/envmove"
-	"tt/internal/host"
-	"tt/internal/plugin"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/connsvc"
+	"github.com/luyaogod/TT/pkg/dbconfig"
+	"github.com/luyaogod/TT/internal/designer"
+	"github.com/luyaogod/TT/internal/envmove"
+	"github.com/luyaogod/TT/internal/host"
+	"github.com/luyaogod/TT/internal/plugin"
 )
 
 // DefaultListen 是 serve 未显式配置监听地址时的默认地址。

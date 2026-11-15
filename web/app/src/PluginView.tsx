@@ -12,7 +12,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { AlertTriangle, RotateCcw } from 'lucide-react'
 import { IconBtn, Meta, ViewHeader } from './Shell'
-import { pluginUIPath, resolvePluginPage, type PluginDescriptor, type PluginPageErrorReason } from './plugins'
+import { pluginPageEntry, pluginUIPath, resolvePluginPage, type PluginDescriptor, type PluginPageErrorReason } from './plugins'
+import { PluginPage } from './pluginRuntime/PluginPage'
 import { PluginBridge, createFetchTransport } from './pluginBridge'
 import type { BridgeErrorBody } from './pluginProtocol'
 
@@ -69,6 +70,10 @@ export function PluginView({
         onRetry={onRetry}
       />
     )
+  }
+  // v2：清单里有 page 槽位贡献 → 同页渲染；否则走 legacy iframe。
+  if (pluginPageEntry(resolution.plugin)) {
+    return <PluginPage plugin={resolution.plugin} leading={leading} />
   }
   return <PluginFrame plugin={resolution.plugin} route={route} leading={leading} />
 }

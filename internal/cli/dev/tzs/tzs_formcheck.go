@@ -23,9 +23,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"tt/internal/cli/dev/common"
-	"tt/internal/dev/tzs"
-	"tt/internal/form42f"
+	"github.com/luyaogod/TT/internal/cli/dev/common"
+	"github.com/luyaogod/TT/internal/dev/tzs"
+	"github.com/luyaogod/TT/internal/form42f"
 )
 
 // tzsFormCheckUsage 是这个动词的帮助（`tt dev tzs formcheck --help`）。

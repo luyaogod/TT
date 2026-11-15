@@ -21,8 +21,8 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/cli/common"
-	"tt/internal/testkit"
+	"github.com/luyaogod/TT/internal/cli/common"
+	"github.com/luyaogod/TT/internal/testkit"
 )
 
 // probe 报出的服务器与区域必须是**点名的那个环境**里的那一份(而不是零值)。

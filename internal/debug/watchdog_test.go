@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"tt/internal/host"
+	"github.com/luyaogod/TT/internal/host"
 )
 
 // 停站看门狗的默认值。配置里没写这个键时取 DefaultWatchdogSeconds ——

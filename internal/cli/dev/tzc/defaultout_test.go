@@ -1,13 +1,13 @@
 package tzc
 
 import (
+	"github.com/luyaogod/TT/internal/testkit"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"tt/internal/testkit"
 
-	"tt/internal/dev/testutil"
+	"github.com/luyaogod/TT/internal/dev/testutil"
 )
 
 // TestDefaultWorkspaceDir 钉住 -o 省略时的默认目录推导规则。

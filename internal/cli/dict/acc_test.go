@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/dict/db"
+	"github.com/luyaogod/TT/internal/dict/db"
 )
 
 func sampleACCMeta() *db.ACCMeta {

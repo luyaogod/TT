@@ -17,6 +17,8 @@ import { EnvView } from './EnvView'
 import { SessionView } from './SessionView'
 import { SettingsView } from './SettingsView'
 import { PluginView } from './PluginView'
+import { ensureAllPlugins } from './pluginRuntime/boot'
+import { SlotHostIfAny } from './pluginRuntime/SlotHost'
 import { IconBtn, Pane } from './Shell'
 import { Dialog, DialogContent, DialogTitle } from '../../shared/ui-radix'
 import { api } from './api'
@@ -105,6 +107,11 @@ export function App() {
   const [plugins, setPlugins] = useState<PluginDescriptor[]>([])
   const [pluginsLoaded, setPluginsLoaded] = useState(false)
   const [pluginsErr, setPluginsErr] = useState('')
+
+  // 启动时激活全部已启用插件的前端模块，让 nav/statusbar/settings/overlay 也能注册。
+  useEffect(() => {
+    if (pluginsLoaded) void ensureAllPlugins(plugins)
+  }, [pluginsLoaded, plugins])
   const loadPlugins = useCallback(() => {
     setPluginsErr('')
     api.plugins()
@@ -464,6 +471,10 @@ export function App() {
           </div>
         </DialogContent>
       </Dialog>
+      {/* 全局状态栏槽位：有注册才出现 */}
+      <SlotHostIfAny slot="statusbar" />
+      {/* 浮层槽位：组件自己负责 fixed 定位与层级 */}
+      <SlotHostIfAny slot="overlay" />
     </div>
   )
 }

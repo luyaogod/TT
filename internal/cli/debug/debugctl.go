@@ -15,11 +15,11 @@ import (
 	"strings"
 	"time"
 
-	"tt/internal/cli/common"
-	cdb "tt/internal/cli/db"
-	"tt/internal/debug"
-	"tt/internal/debugclient"
-	"tt/internal/target"
+	"github.com/luyaogod/TT/internal/cli/common"
+	cdb "github.com/luyaogod/TT/internal/cli/db"
+	"github.com/luyaogod/TT/internal/debug"
+	"github.com/luyaogod/TT/internal/debugclient"
+	"github.com/luyaogod/TT/internal/target"
 
 	"github.com/spf13/cobra"
 )

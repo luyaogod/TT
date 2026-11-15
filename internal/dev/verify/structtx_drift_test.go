@@ -5,13 +5,13 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/dev/fence"
-	"tt/internal/dev/fgl"
-	"tt/internal/dev/model"
-	"tt/internal/dev/pkgfile"
-	"tt/internal/dev/synth"
-	"tt/internal/dev/tapfile"
-	"tt/internal/dev/testutil"
+	"github.com/luyaogod/TT/internal/dev/fence"
+	"github.com/luyaogod/TT/internal/dev/fgl"
+	"github.com/luyaogod/TT/internal/dev/model"
+	"github.com/luyaogod/TT/internal/dev/pkgfile"
+	"github.com/luyaogod/TT/internal/dev/synth"
+	"github.com/luyaogod/TT/internal/dev/tapfile"
+	"github.com/luyaogod/TT/internal/dev/testutil"
 )
 
 // driftFixture 造一个**老工作区**：围栏里没有 fn/desc 字段，且 regions.json 的

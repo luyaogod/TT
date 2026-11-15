@@ -9,7 +9,7 @@ syntax = "proto3";
 
 package tt.host.v1;
 
-option go_package = "tt/internal/gen/hostv1;hostv1";
+option go_package = "github.com/luyaogod/TT/pkg/hostv1;hostv1";
 
 message TestDBRequest {
   string env = 1;
@@ -53,6 +53,9 @@ message OpenDBRequest {
   bool read_only = 2;
   // account 可选账号名（限制在该环境账号清单内）；空 = 客户端直连惯例。
   string account = 3;
+  // ent 企业编号：>0 时按企业目录（gzou_t）解析出该企业该用的账号，
+  // 与 account 互斥（同时给以 ent 为准）。0 = 不按企业解析。
+  int32 ent = 4;
 }
 
 message OpenDBResponse {
@@ -61,6 +64,10 @@ message OpenDBResponse {
   bool read_only = 2;
   // db_type 实际连接类型。
   string db_type = 3;
+  // account 实际使用的账号名（脱敏：只有名字，没有口令）。
+  string account = 4;
+  // ent 实际按企业解析时的企业编号；0 = 未按企业解析。
+  int32 ent = 5;
 }
 
 message OpenSSHRequest {

@@ -13,10 +13,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"tt/internal/cli/common"
-	"tt/internal/config"
-	"tt/internal/output"
-	"tt/internal/plugin"
+	"github.com/luyaogod/TT/internal/audit"
+	"github.com/luyaogod/TT/internal/cli/common"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/connsvc"
+	"github.com/luyaogod/TT/internal/output"
+	"github.com/luyaogod/TT/internal/plugin"
 )
 
 // presetConfigFromArgs 在 cobra 解析之前把 `--config` 落到 TT_CONFIG。
@@ -128,10 +130,25 @@ func newPluginNamespaceCmd(id string, c *plugin.CLIContribution) *cobra.Command 
 				return output.Errorf("PLUGIN_DISABLED", 3,
 					"插件 %s 未启用（tt plugin list --all 看状态；tt plugin enable %s 启用）", id, id)
 			}
+			auditW, aerr := audit.Open(audit.DefaultPath(m.ConfigPath))
+			if aerr == nil {
+				defer auditW.Close()
+			}
+			connSvc := connsvc.New(connsvc.Options{
+				ConfigPath: m.ConfigPath,
+				TTVersion:  Version,
+				Authorizer: plugin.RegistryAuthorizer{Store: m.Store},
+				Audit: func(ev connsvc.Event) {
+					if auditW != nil {
+						auditW.Log(ev)
+					}
+				},
+			})
 			d := &plugin.Dispatcher{
 				Store:      m.Store,
 				Authorizer: plugin.RegistryAuthorizer{Store: m.Store},
 				TTVersion:  Version,
+				ConnSvc:    connSvc,
 			}
 			res, err := d.Run(cmd.Context(), rec, envName, ent, rest)
 			if err != nil {

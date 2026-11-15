@@ -41,7 +41,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"tt/internal/target"
+	"github.com/luyaogod/TT/internal/target"
 )
 
 // ---------------------------------------------------------------------------

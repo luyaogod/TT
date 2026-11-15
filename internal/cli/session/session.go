@@ -21,10 +21,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"tt/internal/cli/common"
-	"tt/internal/config"
-	"tt/internal/debugclient"
-	"tt/internal/output"
+	"github.com/luyaogod/TT/internal/cli/common"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/debugclient"
+	"github.com/luyaogod/TT/internal/output"
 )
 
 // group 是 `tt session` 的命令组。

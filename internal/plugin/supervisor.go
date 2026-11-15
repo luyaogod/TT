@@ -16,9 +16,9 @@ import (
 	"sync"
 	"time"
 
-	"tt/internal/connsvc"
-	"tt/internal/hostrpc"
-	"tt/internal/winproc"
+	"github.com/luyaogod/TT/internal/connsvc"
+	"github.com/luyaogod/TT/internal/hostrpc"
+	"github.com/luyaogod/TT/internal/winproc"
 )
 
 // 插件常驻服务的生命周期契约（TT 侧）：

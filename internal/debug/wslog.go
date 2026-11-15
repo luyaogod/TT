@@ -20,8 +20,8 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"tt/internal/dbconfig"
-	"tt/internal/host"
+	"github.com/luyaogod/TT/pkg/dbconfig"
+	"github.com/luyaogod/TT/internal/host"
 
 	"github.com/pkg/sftp"
 )

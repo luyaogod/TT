@@ -19,11 +19,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"tt/internal/cli/common"
-	"tt/internal/config"
-	"tt/internal/dbconfig"
-	"tt/internal/debug"
-	"tt/internal/output"
+	"github.com/luyaogod/TT/internal/cli/common"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/debug"
+	"github.com/luyaogod/TT/internal/output"
+	"github.com/luyaogod/TT/pkg/dbconfig"
 )
 
 type envEntsView struct {

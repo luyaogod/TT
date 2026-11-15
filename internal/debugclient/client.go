@@ -31,8 +31,8 @@ import (
 	"strings"
 	"time"
 
-	"tt/internal/config"
-	"tt/internal/target"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/target"
 )
 
 // State 是后台服务写的状态文件（`<数据目录>/.tt-serve.json`）里本包关心的部分。

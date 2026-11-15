@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"tt/internal/cli/common"
-	"tt/internal/entdir"
-	"tt/internal/target"
+	"github.com/luyaogod/TT/internal/cli/common"
+	"github.com/luyaogod/TT/internal/target"
+	"github.com/luyaogod/TT/pkg/entdir"
 )
 
 // 环境名解析:子命令上的 --env 优先,其次根命令的持久 --env,再没有就是空(用当前环境)。

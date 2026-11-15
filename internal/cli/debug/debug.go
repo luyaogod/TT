@@ -12,9 +12,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"tt/internal/cli/common"
-	cdb "tt/internal/cli/db"
-	"tt/internal/debug"
+	"github.com/luyaogod/TT/internal/cli/common"
+	cdb "github.com/luyaogod/TT/internal/cli/db"
+	"github.com/luyaogod/TT/internal/debug"
 )
 
 var (

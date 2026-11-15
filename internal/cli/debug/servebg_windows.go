@@ -8,7 +8,7 @@ package debug
 // 和 HTTP、和 serve 的语义都无关，两处各留一份就是「清掉重复」那条纪律要清的东西。
 // spawnDetached 的 TT_SERVE_LOG 注入由 winproc 自己完成，行为与抽走前逐字一致。
 
-import "tt/internal/winproc"
+import "github.com/luyaogod/TT/internal/winproc"
 
 func spawnDetached(exe string, args []string, logPath string) (int, error) {
 	return winproc.SpawnDetached(exe, args, logPath)

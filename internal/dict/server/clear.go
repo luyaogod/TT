@@ -22,7 +22,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"tt/internal/config"
+	"github.com/luyaogod/TT/internal/config"
 )
 
 // hDBSyncClear 删掉某环境的本地字典库。

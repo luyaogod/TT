@@ -9,9 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"tt/internal/cli/common"
-	"tt/internal/config"
-	"tt/internal/envmove"
+	"github.com/luyaogod/TT/internal/cli/common"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/envmove"
 )
 
 // newEnvCmd 是统一的环境管理命令组。

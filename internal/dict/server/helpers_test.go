@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"tt/internal/config"
+	"github.com/luyaogod/TT/internal/config"
 )
 
 // writeTempConfig 在临时目录写一份 config.json,返回其路径。

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"tt/internal/fetch"
+	"github.com/luyaogod/TT/internal/fetch"
 )
 
 // TimeoutAPI 一次 API 调用（取发布信息）的时限。

@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"tt/internal/dict/db"
+	"github.com/luyaogod/TT/internal/dict/db"
 )
 
 // dzed_t 的列名在 Oracle 侧是大写（DZED001…），而建索引时查的是小写。

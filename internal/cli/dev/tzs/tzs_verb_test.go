@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"tt/internal/cli/dev/common"
-	"tt/internal/dev/tzs"
-	"tt/internal/testkit"
+	"github.com/luyaogod/TT/internal/cli/dev/common"
+	"github.com/luyaogod/TT/internal/dev/tzs"
+	"github.com/luyaogod/TT/internal/testkit"
 )
 
 // verbFixtureManifest 是给 lookupVerb / verbExample 用的小夹具。

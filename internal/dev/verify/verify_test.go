@@ -5,11 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/dev/fence"
-	"tt/internal/dev/model"
-	"tt/internal/dev/pkgfile"
-	"tt/internal/dev/synth"
-	"tt/internal/dev/testutil"
+	"github.com/luyaogod/TT/internal/dev/fence"
+	"github.com/luyaogod/TT/internal/dev/model"
+	"github.com/luyaogod/TT/internal/dev/pkgfile"
+	"github.com/luyaogod/TT/internal/dev/synth"
+	"github.com/luyaogod/TT/internal/dev/testutil"
 )
 
 // 本包是三道闸门（gate1 字节恒等 + 授权 / gate2 不变量 I1–I15 / gate3 装载模拟）。

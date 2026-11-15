@@ -12,8 +12,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"tt/internal/dict/db"
-	"tt/internal/output"
+	"github.com/luyaogod/TT/internal/dict/db"
+	"github.com/luyaogod/TT/internal/output"
 )
 
 // ACC（应用分类码）不是一张字典表，而是一个由 gzaa/gzac/gzad 描述、

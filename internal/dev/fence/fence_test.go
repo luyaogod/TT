@@ -5,11 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/dev/model"
-	"tt/internal/dev/pkgfile"
-	"tt/internal/dev/synth"
-	"tt/internal/dev/testutil"
-	"tt/internal/testkit"
+	"github.com/luyaogod/TT/internal/dev/model"
+	"github.com/luyaogod/TT/internal/dev/pkgfile"
+	"github.com/luyaogod/TT/internal/dev/synth"
+	"github.com/luyaogod/TT/internal/dev/testutil"
+	"github.com/luyaogod/TT/internal/testkit"
 )
 
 // asBase 把 Render 的产物包装成 Parse 需要的基线 Document。

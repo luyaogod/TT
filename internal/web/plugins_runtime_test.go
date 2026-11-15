@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"tt/internal/plugin"
+	"github.com/luyaogod/TT/internal/plugin"
 )
 
 // TestPluginListCarriesRuntimeStatus 列表里附带 supervisor 状态（state/addr/pid/restarts）。

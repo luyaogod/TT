@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/cli/dev/common"
+	"github.com/luyaogod/TT/internal/cli/dev/common"
 )
 
 // TestDevCobraRouting 钉住 cobra 树这一层的**路由与退出码契约**。

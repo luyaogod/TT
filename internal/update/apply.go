@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"tt/internal/config"
-	"tt/internal/winproc"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/winproc"
 )
 
 // Plan 一次升级的全部输入。它由前台命令写好、交给脱离的更新器进程读 —— 所以是**跨进程

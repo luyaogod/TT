@@ -3,6 +3,12 @@
 面向"要写一个 TT 插件"的人。契约的**理由**在 [01](01-permissions.md)–[09](09-ssh-hostkey.md)，
 本文只讲"怎么写才能装上、跑起来、升级不炸"。
 
+> **v2 提示**：新插件用 `schemaVersion: 2`；同页 UI 走 `contributions.ui` 的槽位
+> （`nav / page / header.actions / settings.section / statusbar / overlay`），不再需要
+> `frontend` 与 iframe。`tt plugin new` 生成骨架、`tt plugin pack` 打包并写回 `tt` 下限、
+> `tt plugin inspect` 查看包内容；v2 不再有 `permissions` 能力授权（启用即信任）。
+> 下文的 `schemaVersion: 1` / `frontend` 示例是 legacy 参考。
+
 先读三篇再动手：[03-trust-model.md](03-trust-model.md)（进程信任边界）、
 [05-cli-and-errors.md](05-cli-and-errors.md)（转发与退出码）、
 [01-permissions.md](01-permissions.md)（能力与环境）。

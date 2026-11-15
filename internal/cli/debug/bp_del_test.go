@@ -18,8 +18,8 @@ import (
 	"sync"
 	"testing"
 
-	"tt/internal/cli/common"
-	"tt/internal/testkit"
+	"github.com/luyaogod/TT/internal/cli/common"
+	"github.com/luyaogod/TT/internal/testkit"
 )
 
 // bpDelStub 是有状态的假服务：DELETE 真的会改自己的断点表，GET 回当前表。

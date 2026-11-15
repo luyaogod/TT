@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"tt/internal/config"
+	"github.com/luyaogod/TT/internal/config"
 )
 
 // ---------- 版本模型 ----------

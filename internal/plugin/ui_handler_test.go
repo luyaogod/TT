@@ -2,7 +2,6 @@ package plugin
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"tt/internal/config"
-	"tt/internal/connsvc"
-	"tt/internal/hostrpc"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/connsvc"
+	"github.com/luyaogod/TT/internal/hostrpc"
 )
 
 // uiFixture 装一个带页面（可选带服务）的插件并启用，返回 handler。
@@ -268,51 +267,13 @@ func TestUIHandlerEndToEndHostAPIAndOwnService(t *testing.T) {
 		t.Fatalf("起插件服务失败: %v", err)
 	}
 
-	// 真的 Host API（与 tt serve 同构：同一份 connsvc + 同一张令牌表）。
-	api := httptest.NewServer(hostrpc.NewHandler(hostrpc.Deps{
-		Service: conn, Auth: hostrpc.NewTokenAuthenticator(tokens),
-	}))
-	t.Cleanup(api.Close)
-
 	h := NewWebHandler(s, sup.Endpoint)
-	h.HostAPIURL = api.URL + hostrpc.Prefix
-	h.Tokens = tokens
 	handler := h.Handler()
 
 	// 页面本身能取到（活跃版本目录里的参考插件页面）。
 	page := do(handler, "GET", "/plugins/"+rec.ID+"/ui/", "127.0.0.1:5000")
 	if page.Code != 200 || !strings.Contains(page.Body.String(), "参考插件页面") {
 		t.Fatalf("插件页面没取到: %d（%s）", page.Code, page.Body.String())
-	}
-
-	// (a) 经桥调 Host API：只返回该插件**获授权**的环境。
-	req := httptest.NewRequest("POST",
-		"/plugins/"+rec.ID+"/hostrpc/tt.host.v1.ProfilesService/List", strings.NewReader("{}"))
-	req.RemoteAddr = "127.0.0.1:5000"
-	req.Header.Set("Content-Type", "application/json")
-	rec2 := httptest.NewRecorder()
-	handler.ServeHTTP(rec2, req)
-	if rec2.Code != 200 {
-		t.Fatalf("桥接调 Host API 失败: %d（%s）", rec2.Code, rec2.Body.String())
-	}
-	var list struct {
-		Profiles []struct {
-			Env string `json:"env"`
-		} `json:"profiles"`
-	}
-	if err := json.Unmarshal(rec2.Body.Bytes(), &list); err != nil {
-		t.Fatalf("Host API 响应不是预期 JSON: %v（%s）", err, rec2.Body.String())
-	}
-	var envs []string
-	for _, p := range list.Profiles {
-		envs = append(envs, p.Env)
-	}
-	if len(envs) != 1 || envs[0] != "prod" {
-		t.Fatalf("插件页面只该看到已授权的 prod，得 %v", envs)
-	}
-	// 桥用完即撤销：令牌表里只剩服务实例自己那一个。
-	if tokens.Count() != 1 {
-		t.Errorf("桥接后该只剩服务实例令牌，得 %d", tokens.Count())
 	}
 
 	// (b) 经 /rpc/ 打到插件自己的服务（参考插件 /echo 回自己的标识）。
@@ -322,56 +283,49 @@ func TestUIHandlerEndToEndHostAPIAndOwnService(t *testing.T) {
 	}
 }
 
-// TestUIHandlerHostBridgeMintsIdentityForThePlugin 页面经桥调 Host API：桥按插件身份
-// 签发一次性令牌，页面自己拿不到令牌。
-func TestUIHandlerHostBridgeMintsIdentityForThePlugin(t *testing.T) {
+// TestUIHandlerServesV2ClientModule v2 清单只声明 ui（没有 legacy frontend）时，
+// 仍能从活跃版本目录取到浏览器模块，并且 Summary 带上 ui 投影。
+func TestUIHandlerServesV2ClientModule(t *testing.T) {
 	m, s := newManager(t)
 	src := t.TempDir()
-	writeFile(t, filepath.Join(src, ManifestFileName), `{
-  "schemaVersion": 1, "id": "com.example.ui", "version": "0.1.0",
-  "hostApi": ">=1.0.0 <2.0.0",
-  "contributions": {"frontend": {"route": "ui", "title": "UI", "entry": "ui/index.html"}},
-  "permissions": ["profiles.list"]
-}`)
-	writeFile(t, filepath.Join(src, "ui", "index.html"), "page")
+	manifest := `{
+  "schemaVersion": 2, "id": "com.example.v2", "version": "0.1.0",
+  "hostApi": ">=1.0.0 <2.0.0", "tt": ">=0.7.0 <0.8.0",
+  "contributions": {
+    "ui": [
+      {"slot": "nav", "id": "v2", "title": "V2 插件", "order": 10},
+      {"slot": "page", "route": "v2", "title": "V2 插件", "entry": "client.js"}
+    ]
+  }
+}`
+	writeFile(t, filepath.Join(src, ManifestFileName), manifest)
+	writeFile(t, filepath.Join(src, "client.js"),
+		"export function register(ctx){ ctx.slot('"+"page"+"', {route:'v2', component: () => null}) }")
 	rec, err := m.Install(InstallOptions{Source: src})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.Enable(rec.ID, Grants{Capabilities: []string{"profiles.list"}, Envs: []string{"prod"}}); err != nil {
+	if _, err := m.Enable(rec.ID, Grants{}); err != nil {
 		t.Fatal(err)
 	}
 
-	// 一个真的 Host API（与 serve 里同构：同一份 connsvc + 令牌表）。
-	tokens := hostrpc.NewTokenStore()
-	cfgPath := filepath.Join(t.TempDir(), "config.json")
-	if err := config.SaveHosts(cfgPath, config.Hosts{SSHs: []config.NamedSsh{
-		{Name: "prod", SSHConfig: config.SSHConfig{Host: "10.0.0.1", Port: 22, User: "u"}},
-	}}); err != nil {
-		t.Fatal(err)
+	sum := Summarize(rec)
+	if len(sum.UI) != 2 {
+		t.Fatalf("Summary.UI 条数 = %d，期望 2", len(sum.UI))
 	}
-	svc := connsvc.New(connsvc.Options{ConfigPath: cfgPath, Authorizer: RegistryAuthorizer{Store: s}})
-	api := httptest.NewServer(hostrpc.NewHandler(hostrpc.Deps{Service: svc, Auth: hostrpc.NewTokenAuthenticator(tokens)}))
-	defer api.Close()
+	if sum.Route != "v2" || sum.RouteTitle != "V2 插件" {
+		t.Errorf("page 贡献应回填 route/routeTitle，得 %q/%q", sum.Route, sum.RouteTitle)
+	}
 
-	h := NewWebHandler(s, nil)
-	h.HostAPIURL = api.URL + hostrpc.Prefix
-	h.Tokens = tokens
-	handler := h.Handler()
-
-	req := httptest.NewRequest("POST", "/plugins/com.example.ui/hostrpc/tt.host.v1.ProfilesService/List", strings.NewReader("{}"))
-	req.RemoteAddr = "127.0.0.1:5000"
-	req.Header.Set("Content-Type", "application/json")
-	rec2 := httptest.NewRecorder()
-	handler.ServeHTTP(rec2, req)
-	if rec2.Code != 200 {
-		t.Fatalf("桥接调用失败: %d（%s）", rec2.Code, rec2.Body.String())
+	h := NewWebHandler(s, nil).Handler()
+	res := do(h, "GET", "/plugins/com.example.v2/ui/client.js", "127.0.0.1:5000")
+	if res.Code != 200 {
+		t.Fatalf("status = %d（%s）", res.Code, res.Body.String())
 	}
-	if !strings.Contains(rec2.Body.String(), "\"prod\"") {
-		t.Fatalf("该拿到已授权环境: %s", rec2.Body.String())
+	if !strings.Contains(res.Body.String(), "register") {
+		t.Fatalf("没读到模块内容: %s", res.Body.String())
 	}
-	// 一次性令牌用完即撤销。
-	if tokens.Count() != 0 {
-		t.Errorf("桥接后令牌该撤销，剩 %d", tokens.Count())
+	if ct := res.Header().Get("Content-Type"); !strings.Contains(ct, "javascript") {
+		t.Errorf("Content-Type = %q，期望 javascript", ct)
 	}
 }

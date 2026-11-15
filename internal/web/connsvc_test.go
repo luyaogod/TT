@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"tt/internal/connsvc"
+	"github.com/luyaogod/TT/internal/connsvc"
 )
 
 // testConnSvc 造一个注入了假外部依赖的**进程内连接服务**。

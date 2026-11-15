@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/dev/model"
-	"tt/internal/dev/tapfile"
+	"github.com/luyaogod/TT/internal/dev/model"
+	"github.com/luyaogod/TT/internal/dev/tapfile"
 )
 
 // 本包的 README 说"正确性由端到端用例证明" —— 那些用例（改名事务、新增点、删除授权）

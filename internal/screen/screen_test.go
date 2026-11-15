@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/form42f"
-	"tt/internal/str42s"
+	"github.com/luyaogod/TT/internal/form42f"
+	"github.com/luyaogod/TT/internal/str42s"
 )
 
 func table(pairs [][2]string) *str42s.Table {

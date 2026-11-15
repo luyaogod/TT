@@ -15,9 +15,9 @@ import (
 	"strings"
 	"time"
 
-	"tt/internal/connsvc"
-	"tt/internal/hostrpc"
-	"tt/internal/winproc"
+	"github.com/luyaogod/TT/internal/connsvc"
+	"github.com/luyaogod/TT/internal/hostrpc"
+	"github.com/luyaogod/TT/internal/winproc"
 )
 
 // Dispatching 说明第三方 CLI 的模型：

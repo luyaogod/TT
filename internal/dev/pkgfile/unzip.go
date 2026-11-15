@@ -20,7 +20,7 @@ import (
 	"sort"
 	"strings"
 
-	"tt/internal/dev/model"
+	"github.com/luyaogod/TT/internal/dev/model"
 )
 
 // ExtractedFile 是解压出来的一个文件。

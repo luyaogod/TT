@@ -17,8 +17,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"tt/internal/config"
-	"tt/internal/skill"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/skill"
 )
 
 // matrixSkill 是矩阵里的一行。不可用的第三方技能也占一行（显示原因），

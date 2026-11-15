@@ -8,18 +8,21 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/spf13/cobra"
 
-	"tt/internal/cli/common"
-	debugcli "tt/internal/cli/debug"
-	"tt/internal/config"
-	"tt/internal/connsvc"
-	"tt/internal/debug"
-	dictserver "tt/internal/dict/server"
-	"tt/internal/hostrpc"
-	"tt/internal/plugin"
-	"tt/internal/web"
+	"github.com/luyaogod/TT/internal/audit"
+	"github.com/luyaogod/TT/internal/cli/common"
+	debugcli "github.com/luyaogod/TT/internal/cli/debug"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/connsvc"
+	"github.com/luyaogod/TT/internal/debug"
+	dictserver "github.com/luyaogod/TT/internal/dict/server"
+	"github.com/luyaogod/TT/internal/eventbus"
+	"github.com/luyaogod/TT/internal/hostrpc"
+	"github.com/luyaogod/TT/internal/plugin"
+	"github.com/luyaogod/TT/internal/web"
 )
 
 // connReloader 把「配置被改写了」翻译成「连接服务的旧会话全部作废」。
@@ -187,24 +190,36 @@ func newServeCmd() *cobra.Command {
 			pluginMgr.HostAPIVersion = connsvc.HostAPIVersion
 
 			auditLog := log.New(os.Stderr, "[connsvc] ", 0)
+			auditW, aerr := audit.Open(audit.DefaultPath(path))
+			if aerr != nil {
+				auditLog.Printf("打开审计日志失败: %v", aerr)
+			} else {
+				defer auditW.Close()
+			}
 			connSvc := connsvc.New(connsvc.Options{
 				ConfigPath: path,
 				TTVersion:  Version,
 				// 授权来源 = 插件注册表：每次判定现读，撤权立即生效（不需要重启）。
 				Authorizer: plugin.RegistryAuthorizer{Store: pluginStore},
 				Audit: func(ev connsvc.Event) {
+					if auditW != nil {
+						auditW.Log(ev)
+					}
 					if ev.OK {
-						return // 成功路径不刷日志：一次页面点三下会淹掉真正的错误
+						return // 成功路径不刷 stderr：一次页面点三下会淹掉真正的错误
 					}
 					auditLog.Printf("action=%s caller=%s env=%s kind=%s code=%s ms=%d",
 						ev.Action, ev.Caller, ev.Env, ev.Kind, ev.Code, ev.DurationMS)
 				},
 			})
 			tokenStore := hostrpc.NewTokenStore()
+			events := eventbus.New(200)
 			hostRPCHandler := hostrpc.NewHandler(hostrpc.Deps{
 				Service: connSvc,
 				Auth:    hostrpc.NewTokenAuthenticator(tokenStore),
+				Events:  events,
 			})
+			events.Publish("plugin.reload", map[string]any{"reason": "serve.start"})
 
 			// supervisor 的 Host API 地址要等服务真正监听后才确定（端口可能被顺延），
 			// 所以先建出来、listen 之后再填 HostAPIURL 并拉起已启用的服务。
@@ -217,7 +232,6 @@ func newServeCmd() *cobra.Command {
 			// 插件页面资源与私有 RPC 代理（/plugins/*）。
 			// Host API 桥的目标地址按请求自己的 Host 拼（回环），不需要等监听端口确定。
 			pluginUI := plugin.NewWebHandler(pluginStore, sup.Endpoint)
-			pluginUI.Tokens = tokenStore
 			// 技能期望态重算与命令行共用一份实现（skills_sync.go）：设置页里点启用/停用/
 			// 卸载，效果必须和 `tt plugin enable/disable/uninstall` 完全一样。
 			pluginMgr.SkillsSync = syncPluginSkills
@@ -257,7 +271,7 @@ func newServeCmd() *cobra.Command {
 					// 配置写入后让持有内存态的子系统重新加载，否则它们内存里还是旧环境，
 					// 表现是"改了没生效"。连接服务还要把旧会话全部作废 —— 旧会话连着的是
 					// **旧目标**，而调用方看到的仍是同一个环境名。
-					Reloaders: []web.ConfigReloader{debugSrv, connReloader{svc: connSvc}},
+					Reloaders: []web.ConfigReloader{debugSrv, connReloader{svc: connSvc}, eventReloader{bus: events}},
 					Shutdown:  stopWeb,
 					// 统一层配置状态仍按旧的单文件口径显示；设置页已改用 /api/dbsync 的库目录。
 					SyncDefaultTarget: syncDefault,
@@ -331,4 +345,12 @@ func splitHostPort(addr string) (host, port string, err error) {
 	}
 	host = strings.Trim(addr[:i], "[]")
 	return host, addr[i+1:], nil
+}
+
+// eventReloader 配置保存后把 env.changed 放进事件环（插件据此刷新自己的缓存）。
+type eventReloader struct{ bus *eventbus.Bus }
+
+func (r eventReloader) ReloadConfig() error {
+	r.bus.Publish("env.changed", map[string]any{"at": time.Now().Format(time.RFC3339)})
+	return nil
 }

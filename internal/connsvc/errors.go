@@ -52,10 +52,20 @@ const (
 	CodeExecFailed = "DB_EXEC_FAILED"
 	// CodeSSHExecFailed SSH 命令执行失败（非零退出码也是它，输出里带远端输出）。
 	CodeSSHExecFailed = "SSH_EXEC_FAILED"
+	// CodeSSHFileFailed SSH 远端文件读写失败（含超过大小上限）。
+	CodeSSHFileFailed = "SSH_FILE_FAILED"
 	// CodeTimeout 超时（ctx 到期）。
 	CodeTimeout = "TIMEOUT"
 	// CodeAccountUnknown 指定的账号不在该环境的账号清单里。
 	CodeAccountUnknown = "DB_ACCOUNT_UNKNOWN"
+	// CodeEntUnknown 企业编号不在该环境的启用清单里（没同步 ENT 或编号写错）。
+	CodeEntUnknown = "DB_ENT_UNKNOWN"
+	// CodeEntNoAccount 企业存在但 gzou_t 里没有配可用账号。
+	CodeEntNoAccount = "DB_ENT_NO_ACCOUNT"
+	// CodeBatchFailed 批量执行失败（消息里带失败语句下标）。
+	CodeBatchFailed = "DB_BATCH_FAILED"
+	// CodeUnsupported 会话/驱动不支持请求的能力（如参数绑定、批量）。
+	CodeUnsupported = "UNSUPPORTED"
 	// CodeClosed 服务已关闭（进程正在退出）。
 	CodeClosed = "SERVICE_CLOSED"
 )

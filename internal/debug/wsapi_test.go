@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/dbconfig"
-	"tt/internal/host"
+	"github.com/luyaogod/TT/pkg/dbconfig"
+	"github.com/luyaogod/TT/internal/host"
 )
 
 // wsTestServerWithEnv 起一个不拨真机的调试服务，并给它一个具名环境（可带 DB service）。

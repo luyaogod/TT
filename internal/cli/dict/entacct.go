@@ -18,10 +18,10 @@ import (
 	"strings"
 	"time"
 
-	"tt/internal/config"
-	"tt/internal/dbconfig"
-	"tt/internal/dict/live"
-	"tt/internal/entdir"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/dict/live"
+	"github.com/luyaogod/TT/pkg/dbconfig"
+	"github.com/luyaogod/TT/pkg/entdir"
 )
 
 // entLookupTimeout 解析企业账号那一次额外连接的上限(见 fetchEntMappings)。

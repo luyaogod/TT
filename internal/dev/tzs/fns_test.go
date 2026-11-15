@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"tt/internal/testenv"
+	"github.com/luyaogod/TT/internal/testenv"
 )
 
 // fns_test.go —— 引擎**函数面**的覆盖关卡。

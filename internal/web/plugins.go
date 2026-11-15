@@ -18,7 +18,7 @@ import (
 	"strconv"
 	"strings"
 
-	"tt/internal/plugin"
+	"github.com/luyaogod/TT/internal/plugin"
 )
 
 // requireLocalManagement 给插件管理端点加一道"本机 + 本机来源"门。

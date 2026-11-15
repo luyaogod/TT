@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/cli/common"
-	"tt/internal/debug"
+	"github.com/luyaogod/TT/internal/cli/common"
+	"github.com/luyaogod/TT/internal/debug"
 )
 
 func testResult() *debug.DBQueryResult {

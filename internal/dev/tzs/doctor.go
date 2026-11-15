@@ -21,8 +21,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"tt/internal/testenv"
-	"tt/internal/winproc"
+	"github.com/luyaogod/TT/internal/testenv"
+	"github.com/luyaogod/TT/internal/winproc"
 )
 
 // 自检条目的三个等级。

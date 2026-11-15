@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/winproc"
+	"github.com/luyaogod/TT/internal/winproc"
 )
 
 // TestWorkspaceRefusedWhenUnset 是四条纪律里的第二条：**工作区绝不留缺省**。

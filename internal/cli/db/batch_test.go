@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/cli/common"
-	"tt/internal/debug"
-	"tt/internal/output"
+	"github.com/luyaogod/TT/internal/cli/common"
+	"github.com/luyaogod/TT/internal/debug"
+	"github.com/luyaogod/TT/internal/output"
 )
 
 type fakeQuerier struct {

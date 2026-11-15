@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"tt/internal/connsvc"
-	"tt/internal/dbconfig"
-	"tt/internal/dict/db"
-	"tt/internal/erpdb"
+	"github.com/luyaogod/TT/internal/connsvc"
+	"github.com/luyaogod/TT/pkg/dbconfig"
+	"github.com/luyaogod/TT/internal/dict/db"
+	"github.com/luyaogod/TT/pkg/erpdb"
 )
 
 // Family 一个数据族:一族 = 一个查询命令所需的一组字典表。

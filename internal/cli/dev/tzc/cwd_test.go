@@ -1,12 +1,12 @@
 package tzc
 
 import (
+	"github.com/luyaogod/TT/internal/testkit"
 	"path/filepath"
 	"strings"
 	"testing"
-	"tt/internal/testkit"
 
-	"tt/internal/dev/testutil"
+	"github.com/luyaogod/TT/internal/dev/testutil"
 )
 
 // exportWS 在 dir 下导出一个临时工作区并返回其路径（供 cd 相关的测试用）。

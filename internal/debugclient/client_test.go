@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"tt/internal/target"
+	"github.com/luyaogod/TT/internal/target"
 )
 
 // TestFailureKeepsCodeCandidatesAndHint：失败信封的三个关键部分都要留住。

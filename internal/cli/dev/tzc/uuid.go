@@ -16,7 +16,7 @@ import (
 	"fmt"
 	"os"
 
-	"tt/internal/cli/dev/common"
+	"github.com/luyaogod/TT/internal/cli/dev/common"
 )
 
 // newModUUID 生成 16 位小写十六进制（8 字节随机数）。

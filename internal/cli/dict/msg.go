@@ -21,8 +21,8 @@ import (
 	"fmt"
 	"strings"
 
-	"tt/internal/dict/db"
-	"tt/internal/output"
+	"github.com/luyaogod/TT/internal/dict/db"
+	"github.com/luyaogod/TT/internal/output"
 
 	"github.com/spf13/cobra"
 )

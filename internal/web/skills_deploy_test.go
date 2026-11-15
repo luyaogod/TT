@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"tt/internal/skill"
+	"github.com/luyaogod/TT/internal/skill"
 )
 
 func TestSkillsOverviewMatrix(t *testing.T) {

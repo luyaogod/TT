@@ -36,7 +36,7 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/form42f"
+	"github.com/luyaogod/TT/internal/form42f"
 )
 
 // ── 合成夹具（内联；遵循 internal/form42f/form42f_test.go 的先例 的先例，B14）───────────────

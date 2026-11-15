@@ -8,7 +8,7 @@ import (
 	"os"
 	"testing"
 
-	"tt/internal/testkit"
+	"github.com/luyaogod/TT/internal/testkit"
 )
 
 //---------------------------------------------------------------------------

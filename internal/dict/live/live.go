@@ -12,9 +12,9 @@ package live
 import (
 	"context"
 
-	"tt/internal/connsvc"
-	"tt/internal/dbconfig"
-	"tt/internal/erpdb"
+	"github.com/luyaogod/TT/internal/connsvc"
+	"github.com/luyaogod/TT/pkg/dbconfig"
+	"github.com/luyaogod/TT/pkg/erpdb"
 )
 
 // Live 一个远程数据源:底层连接器 + 由 Core 连接服务给出的释放函数(含 SSH 隧道)。

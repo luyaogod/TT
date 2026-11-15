@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/config"
-	"tt/internal/connsvc"
-	"tt/internal/host"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/internal/connsvc"
+	"github.com/luyaogod/TT/internal/host"
 )
 
 // 「SSH 测试连接」的对内契约:参数校验、端口缺省、成功信封、失败信封。

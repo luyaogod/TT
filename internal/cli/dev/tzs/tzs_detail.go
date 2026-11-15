@@ -18,8 +18,8 @@ import (
 	"sort"
 	"strings"
 
-	"tt/internal/cli/dev/common"
-	"tt/internal/dev/tzs"
+	"github.com/luyaogod/TT/internal/cli/dev/common"
+	"github.com/luyaogod/TT/internal/dev/tzs"
 )
 
 // detailOrder 是"键 → 中文标签"的**排版表**，也是输出顺序。

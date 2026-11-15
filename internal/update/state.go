@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"tt/internal/config"
+	"github.com/luyaogod/TT/internal/config"
 )
 
 // 升级状态机的取值。前台进程与脱离的更新器进程都读写同一份状态，所以阶段名是契约：

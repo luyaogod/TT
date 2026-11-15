@@ -39,7 +39,7 @@ import (
 	"strings"
 	"testing"
 
-	"tt/internal/form42f"
+	"github.com/luyaogod/TT/internal/form42f"
 )
 
 const (

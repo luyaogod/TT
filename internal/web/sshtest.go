@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"tt/internal/connsvc"
-	"tt/internal/host"
+	"github.com/luyaogod/TT/internal/connsvc"
+	"github.com/luyaogod/TT/internal/host"
 )
 
 // sshTestReq 「SSH 服务器」页签的「测试连接」:用表单里的连接参数真登录一次。

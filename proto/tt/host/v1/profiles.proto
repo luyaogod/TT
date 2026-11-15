@@ -7,7 +7,7 @@ import "tt/host/v1/common.proto";
 
 package tt.host.v1;
 
-option go_package = "tt/internal/gen/hostv1;hostv1";
+option go_package = "github.com/luyaogod/TT/pkg/hostv1;hostv1";
 
 message ListRequest {}
 

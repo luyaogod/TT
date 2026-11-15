@@ -18,11 +18,11 @@ import (
 
 	"github.com/coder/websocket"
 
-	"tt/internal/config"
-	"tt/internal/dbconfig"
-	"tt/internal/host"
-	"tt/internal/output"
-	"tt/internal/target"
+	"github.com/luyaogod/TT/internal/config"
+	"github.com/luyaogod/TT/pkg/dbconfig"
+	"github.com/luyaogod/TT/internal/host"
+	"github.com/luyaogod/TT/internal/output"
+	"github.com/luyaogod/TT/internal/target"
 )
 
 // Server 本地调试服务:REST + WebSocket + Web 前端

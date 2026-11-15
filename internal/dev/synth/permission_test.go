@@ -3,7 +3,7 @@ package synth
 import (
 	"testing"
 
-	"tt/internal/dev/model"
+	"github.com/luyaogod/TT/internal/dev/model"
 )
 
 // envC / envS 是两套典型的包级上下文（对应真实语料 root 属性）。
