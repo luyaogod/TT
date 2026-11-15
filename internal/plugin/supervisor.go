@@ -271,9 +271,15 @@ func (s *Supervisor) startOnce(ctx context.Context, rec *Record, attempt int) (*
 		return nil, fmt.Errorf("启动插件服务失败: %w", err)
 	}
 
+	digest := ""
+	if sum, derr := fileSHA256(exe); derr == nil {
+		digest = sum
+	}
+
 	inst := &Instance{
 		PluginID: rec.ID, Version: rec.ActiveVersion, InstanceID: instanceID,
-		PID: cmd.Process.Pid, HealthPath: healthPath, StartedAt: s.now(),
+		ExeDigest: digest,
+		PID:       cmd.Process.Pid, HealthPath: healthPath, StartedAt: s.now(),
 		State: "running", LogPath: logPath, token: token, cmd: cmd, stdin: stdin,
 		logFile: logFile, Restarts: attempt,
 	}

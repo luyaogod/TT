@@ -12,11 +12,69 @@ package web
 
 import (
 	"errors"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"tt/internal/plugin"
 )
+
+// requireLocalManagement 给插件管理端点加一道"本机 + 本机来源"门。
+//
+// 为什么 /api/ 的整体安全姿态没变，这里却要单独加：既有 /api/* 是本机信任（浏览器与
+// 脚本都在本机），但插件管理是**安装并启用可执行代码**的动作 —— 一个恶意网页向
+// 127.0.0.1 发 POST 就能做到这件事，代价太高。所以这里额外要求：
+//   - 远端地址必须是回环；
+//   - Origin 若存在必须是本机（跨站表单/脚本一律拒）。
+//
+// 它挡不住"同用户的本机进程" —— 那是文档里写明的信任边界（插件本来就是本机可执行
+// 代码，进程之间没有沙箱）。
+func requireLocalManagement(w http.ResponseWriter, r *http.Request) bool {
+	if !remoteIsLoopback(r.RemoteAddr) {
+		writeErr(w, http.StatusForbidden, errors.New("插件管理只接受本机请求"))
+		return false
+	}
+	if o := strings.TrimSpace(r.Header.Get("Origin")); o != "" {
+		u, err := url.Parse(o)
+		if err != nil || !hostIsLoopbackName(u.Host) {
+			writeErr(w, http.StatusForbidden, errors.New("插件管理拒绝跨站来源（Origin 不是本机）"))
+			return false
+		}
+	}
+	return true
+}
+
+// remoteIsLoopback RemoteAddr 是否是回环地址。
+func remoteIsLoopback(remoteAddr string) bool {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		host = strings.Trim(remoteAddr, "[]")
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// hostIsLoopbackName host[:port] 是否本机名或回环地址。
+func hostIsLoopbackName(hostport string) bool {
+	if hostport == "" {
+		return false
+	}
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	} else {
+		host = strings.Trim(hostport, "[]")
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
 
 // pluginManagerOf 返回管理面；未装配时 503（而不是 404：让人知道是"没接上"）。
 func (s *Server) pluginManagerOf(w http.ResponseWriter) (*plugin.Manager, bool) {
@@ -29,6 +87,9 @@ func (s *Server) pluginManagerOf(w http.ResponseWriter) (*plugin.Manager, bool) 
 
 // hPluginsList 列出插件（默认全部，含未启用）。
 func (s *Server) hPluginsList(w http.ResponseWriter, r *http.Request) {
+	if !requireLocalManagement(w, r) {
+		return
+	}
 	m, ok := s.pluginManagerOf(w)
 	if !ok {
 		return
@@ -53,6 +114,9 @@ func (s *Server) hPluginsList(w http.ResponseWriter, r *http.Request) {
 
 // hPluginInfo 一个插件的详情（清单 + 授权 + 落点）。
 func (s *Server) hPluginInfo(w http.ResponseWriter, r *http.Request) {
+	if !requireLocalManagement(w, r) {
+		return
+	}
 	m, ok := s.pluginManagerOf(w)
 	if !ok {
 		return
@@ -73,6 +137,9 @@ type pluginInstallReq struct {
 
 // hPluginInstall 安装一个本地插件包（目录或 zip）。
 func (s *Server) hPluginInstall(w http.ResponseWriter, r *http.Request) {
+	if !requireLocalManagement(w, r) {
+		return
+	}
 	m, ok := s.pluginManagerOf(w)
 	if !ok {
 		return
@@ -106,6 +173,9 @@ type pluginGrantsReq struct {
 
 // hPluginEnable 启用并授权。
 func (s *Server) hPluginEnable(w http.ResponseWriter, r *http.Request) {
+	if !requireLocalManagement(w, r) {
+		return
+	}
 	m, ok := s.pluginManagerOf(w)
 	if !ok {
 		return
@@ -128,6 +198,9 @@ func (s *Server) hPluginEnable(w http.ResponseWriter, r *http.Request) {
 
 // hPluginDisable 停用。
 func (s *Server) hPluginDisable(w http.ResponseWriter, r *http.Request) {
+	if !requireLocalManagement(w, r) {
+		return
+	}
 	m, ok := s.pluginManagerOf(w)
 	if !ok {
 		return
@@ -142,6 +215,9 @@ func (s *Server) hPluginDisable(w http.ResponseWriter, r *http.Request) {
 
 // hPluginUninstall 卸载；purgeData 必须显式给，且必须是 POST 体里的字段。
 func (s *Server) hPluginUninstall(w http.ResponseWriter, r *http.Request) {
+	if !requireLocalManagement(w, r) {
+		return
+	}
 	m, ok := s.pluginManagerOf(w)
 	if !ok {
 		return
@@ -163,6 +239,9 @@ func (s *Server) hPluginUninstall(w http.ResponseWriter, r *http.Request) {
 
 // hPluginDoctor 自检（不启动插件、不连网）。
 func (s *Server) hPluginDoctor(w http.ResponseWriter, r *http.Request) {
+	if !requireLocalManagement(w, r) {
+		return
+	}
 	m, ok := s.pluginManagerOf(w)
 	if !ok {
 		return
