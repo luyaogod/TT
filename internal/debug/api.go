@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -246,6 +247,9 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/sessions/{id}/source", s.hSource)
 	mux.HandleFunc("GET /api/source-preview", s.hSourcePreview)
 	mux.HandleFunc("GET /api/wslogs", s.hWSLogs)
+	mux.HandleFunc("GET /api/wslogs/services", s.hWSServices)
+	mux.HandleFunc("GET /api/wslogs/meta", s.hWSMeta)
+	mux.HandleFunc("POST /api/wslogs/test", s.hWSTest)
 	mux.HandleFunc("GET /api/ents", s.hEnts)
 	mux.HandleFunc("POST /api/ents/sync", s.hEntsSync)
 	mux.HandleFunc("POST /api/dbsql", s.hDBSQL)
@@ -2014,12 +2018,17 @@ func (s *Server) hSource(w http.ResponseWriter, r *http.Request) {
 
 // ---------- 接口日志(wsfa_t) ----------
 
-// 服务测试端点（`POST /api/wstest` → `hWSTest` → `WSTest`）**本批已取消**：
-// 仓库主人定性它不是标准接口、是临时测试工具，所以从产品里去掉（不是给它加闸门）。
-// 它从前不过模式闸门、不过 `safesql`、对**任意 URL** 发 POST，还往服务器写临时文件
-// —— 是那次只读审计里"最严重的单点只靠纪律"。整个实现文件 `wstest.go` 与只测它的
-// `wstest_test.go` 一并删掉；`wsURLPrefix`（`/api/status` 的 `wsPrefix` 用它）搬到了
-// `wsurl.go`。契约与计划里的相关条目已标「已取消」。
+// 服务测试端点（历史 `/api/wstest`）在 f264ccc 整批删除过：当时它不过模式闸门、
+// 不过 `safesql`、对**任意 URL** 发 POST，还往服务器写临时文件。
+//
+// 本批以 `POST /api/wslogs/test` 重新引入「集成服务检测」，把当时的缺口补上：
+//   - 环境/方法/URL/报文大小全部在拨号之前校验；未知环境 404，不静默回落；
+//   - URL 只接受 http(s)，用单引号转义后作为 curl 的单个参数；
+//   - 请求体走 stdin（`--data-binary @-`），不落服务器临时文件；
+//   - 限时/限量、禁重定向、禁 `Expect: 100-continue`；
+//   - 不写 `wsfa_t`（日志由 T100 框架在真实调用时自己写）；
+//   - 非 200 的正文保留（原生丢弃，看不到 Proxy error 的细节）。
+// 服务名称开窗的 `GET /api/wslogs/services` 与元信息 `GET /api/wslogs/meta` 同批加入。
 
 // dialSSH 是那五个"要连服务器"的端点统一走的门（拨当前生效环境）。
 //
@@ -2242,6 +2251,116 @@ func (s *Server) hWSLogContent(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{"ok": true, "item": item, "content": content,
 		"acct": wslogAcctFor(s.wslogTopent(nil))})
+}
+
+// wsEnvCfgStrict 取请求点名的环境；空 → 400，找不到 → 404。
+//
+// 新端点（services/meta/test）**不沿用** wslogCfg 的"找不到就静默回落当前环境"：
+// 那是老列表接口的兼容行为，新接口若也回落，"换了个环境却查到上一家的数据"会很难发现。
+func (s *Server) wsEnvCfgStrict(w http.ResponseWriter, raw string) (*Config, bool) {
+	name := strings.TrimSpace(raw)
+	if name == "" {
+		fail(w, 400, fmt.Errorf("需要 env：要操作哪个环境"))
+		return nil, false
+	}
+	c := s.envCfgFor(name)
+	if c == nil {
+		fail(w, 404, fmt.Errorf("环境 %q 不存在（设置 → 站点管理 里可看全部）", name))
+		return nil, false
+	}
+	return c, true
+}
+
+// hWSServices GET /api/wslogs/services?env=&spec=&name=&api=&page=&pageSize=
+// 服务名称开窗的数据源（gzja_t/gzjal_t + gzjc_t/gzjcl_t，口径见 wsservice.go）。
+func (s *Server) hWSServices(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	cfg, ok := s.wsEnvCfgStrict(w, q.Get("env"))
+	if !ok {
+		return
+	}
+	page, _ := strconv.Atoi(q.Get("page"))
+	size, _ := strconv.Atoi(q.Get("pageSize"))
+	if size < wsServicePageMin || size > wsServicePageMax {
+		size = wsServicePageSize
+	}
+	if page < 1 {
+		page = 1
+	}
+	conn, err := s.dialSSHWith(cfg)
+	if err != nil {
+		fail(w, 500, fmt.Errorf("SSH 连接失败: %w", err))
+		return
+	}
+	defer conn.Close()
+	dbc, err := resolveDBRun(conn, cfg)
+	if err != nil {
+		fail(w, 500, err)
+		return
+	}
+	items, total, hasMore, err := listWSServices(conn, dbc, WSServiceFilter{
+		Spec: q.Get("spec"), Name: q.Get("name"), API: q.Get("api"),
+		Page: page, PageSize: size,
+	})
+	if err != nil {
+		fail(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"ok": true, "env": cfg.EnvName(), "items": items, "total": total,
+		"page": page, "pageSize": size, "hasMore": hasMore,
+		"acct": wsServiceAcct(), "dialect": dbc.conn.Type,
+	})
+}
+
+// hWSMeta GET /api/wslogs/meta?env= —— 集成服务检测的下拉项与默认地址。
+// 不需要拨 SSH：默认地址只由配置（host/zone/db service）推导。
+func (s *Server) hWSMeta(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	cfg, ok := s.wsEnvCfgStrict(w, q.Get("env"))
+	if !ok {
+		return
+	}
+	reply := struct {
+		OK bool `json:"ok"`
+		WSTestMeta
+	}{OK: true, WSTestMeta: wsTestMetaFor(cfg, cfg.EnvName())}
+	writeJSON(w, 200, reply)
+}
+
+// hWSTest POST /api/wslogs/test {env,method,url?,request,timeoutSec?} —— 发一次检测请求。
+//
+// 校验（env/method/url/请求大小）全部在拨号之前；执行走 wstest.go 的服务器 curl。
+// 传输失败也回 200：{result.transportError} 是这次检测的答案，不是 HTTP 请求失败。
+func (s *Server) hWSTest(w http.ResponseWriter, r *http.Request) {
+	var req WSTestRequest
+	if !readBody(w, r, &req) {
+		return
+	}
+	cfg, ok := s.wsEnvCfgStrict(w, req.Env)
+	if !ok {
+		return
+	}
+	method, target, timeoutSec, err := resolveWSTest(cfg, req)
+	if err != nil {
+		fail(w, 400, err)
+		return
+	}
+	conn, err := s.dialSSHWith(cfg)
+	if err != nil {
+		fail(w, 500, fmt.Errorf("SSH 连接失败: %w", err))
+		return
+	}
+	defer conn.Close()
+	res := WSTest(conn, method, target, req.Request, timeoutSec)
+	warn := ""
+	if u, e := url.Parse(target); e == nil && !strings.EqualFold(u.Hostname(), cfg.SSH.Host) {
+		warn = "地址不在本环境服务器上，请求仍从该环境服务器发出"
+	}
+	writeJSON(w, 200, map[string]any{
+		"ok": true, "env": cfg.EnvName(), "url": target, "endpoint": method.Endpoint,
+		"warn": warn, "result": res,
+	})
 }
 
 // hWSLogDebug POST /api/wslogs/debug {rowid, request?, session?, name?} → 用该日志的报文重放调试。

@@ -5,14 +5,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Bug, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, ChevronUp, Copy, Fingerprint, RefreshCw, Undo2, X } from 'lucide-react'
 import { useStore } from './store'
-import { Button, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../shared/ui'
+import { Button, Input, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../shared/ui'
 import { Checkbox, DatePicker, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../shared/ui-radix'
 import type { WSLogItem } from './api'
 import { PayloadEditor } from './PayloadEditor'
 import { copyText } from './clipboard'
 import { useToast } from './toast'
+import { LookupField } from './LookupField'
+import { ServiceNamePicker } from './ServiceNamePicker'
+import { cn } from '../../shared/utils'
 
-// 每个环境各记一份"这一页的输入"（查询条件/日期/企业/是否已查询）。
+// 每个环境各记一份"这一页的输入"（查询条件/日期/企业/是否已查询/条件区是否收起）。
 // 与 store 里的 wsLogsByEnv（结果）配套：结果 + 输入都按环境分开，切回来才是原样。
 type WsLogViewState = {
   draft: { service: string; job: string; result: string; origin: string; server: string }
@@ -22,8 +25,30 @@ type WsLogViewState = {
   to: string
   ent: number
   queried: boolean
+  collapsed: boolean
 }
 const wsLogViewStateByEnv = new Map<string, WsLogViewState>()
+
+// 处理结果 = SCC 239（原生 `cl_set_combo_scc('l_result','239')`）。
+// 值是 wsfa006：000 正常 / 200 有错误信息 / 100 无法执行；空 = 不过滤。
+const RESULT_OPTIONS: { value: string; label: string }[] = [
+  { value: '000', label: '000 执行正常' },
+  { value: '200', label: '200 执行后有错误信息' },
+  { value: '100', label: '100 Service 无法执行' },
+]
+
+// 条件区的单格：label 左、控件右。四行三列的每一格都用它，标签宽度才对齐。
+function QueryCell({ label, title, children, className }: {
+  label: string; title?: string; children: ReactNode; className?: string
+}) {
+  return (
+    <div className={cn('flex min-w-0 items-center gap-1.5', className)} title={title}>
+      <span className="w-20 shrink-0 text-xs text-muted-foreground">{label}</span>
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  )
+}
+
 
 // 列表列定义:完整模式(未选中)与紧凑模式(详情展开,只留状态/服务)共用同一套渲染。
 // 每个列都给出排序键,表头点击即排序。注意:排序只作用于**当前页**——分页在后端做,
@@ -132,36 +157,9 @@ const MIN_LIST_W = 280
 const MIN_DETAIL_W = 300
 const MIN_DETAIL_ABS = 240
 
-// 工具条查询输入框(四个条件共用外观;服务名称放通配,给宽一点)
-// rounded-ui:全站唯一那一档圆角,见 tokens.css 的圆角口径
-const QUERY_INPUT = 'h-7 w-52 rounded-ui border border-border bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus:border-border focus:outline-none'
-const QUERY_INPUT_SM = 'h-7 w-36 rounded-ui border border-border bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus:border-border focus:outline-none'
-
-// 一个查询条件 = **字段名(左) + 输入框(右)**,两件东西分开。
-//
-// 早先这里把字段名塞进 placeholder(「服务端(如 T100)」),于是"说明"与"能打字的地方"挤在
-// 同一个框里 —— 分不清哪里是标签、哪里是输入(2026-10-15 用户指出)。
-// 现在 placeholder 只说"能填什么"(例子/通配说明),完整语义(字段号、匹配方式)在 title 上。
-//
-// 定义在模块级、不是组件内部:内部定义会让 React 每次渲染都当成新组件而重挂,
-// 输入一个字就丢焦点。
-function QueryField({ label, title, placeholder, value, onChange, onKeyDown, wide }: {
-  label: string; title: string; placeholder: string; value: string
-  onChange: (v: string) => void; onKeyDown: (e: React.KeyboardEvent) => void; wide?: boolean
-}) {
-  return (
-    <div className="flex items-center gap-1.5" title={title}>
-      <span className="shrink-0 text-xs text-muted-foreground">{label}</span>
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={onKeyDown}
-        placeholder={placeholder}
-        className={wide ? QUERY_INPUT : QUERY_INPUT_SM}
-      />
-    </div>
-  )
-}
+// 四行三列的行容器：宽屏三列（第三列只有查询按钮），中屏两列，窄屏单列。
+// 每行一个 grid，行内才对齐；这样不用把 8 个格子硬塞进一个 auto-placement 网格。
+const QBE_ROW = 'grid items-center gap-x-6 gap-y-2 grid-cols-1 md:grid-cols-2 xl:grid-cols-[minmax(0,22rem)_minmax(0,26rem)_auto]'
 
 export function WsLogView() {
   const toast = useToast()
@@ -220,16 +218,20 @@ export function WsLogView() {
   // 只有人点过「查询」之后,日期这类后续动作才会自己再发查询;
   // 首屏不发 —— "打开这一页就往人家的库上拨一次 SSH"不是看日志该有的副作用。
   const [queried, setQueried] = useState(false)
+  // 条件区收起/展开（T100 的 qbehidden）；按环境记。
+  const [collapsed, setCollapsed] = useState(false)
+  // 服务名称开窗
+  const [pickerOpen, setPickerOpen] = useState(false)
 
   // 切环境:**各存一份**,切走再切回原样还在(与多会话同一条原则)。
   // 结果那半份在 store(wsLogsByEnv,见 setActiveEnv),这半份是这一页自己的输入:
-  // 查询条件/日期/企业/是否已查询 —— 都按环境记在模块级 map 里。
+  // 查询条件/日期/企业/是否已查询/条件区是否收起 —— 都按环境记在模块级 map 里。
   //
   // 为什么不能共用:环境页 keep-alive,甲环境的企业编号在乙环境未必存在,
   // 甲环境的"已查询"状态套到乙环境上就会出现"空列表却没有查询按钮提示"这类怪相。
   const envRef = useRef(activeEnv)
-  const viewStateRef = useRef<WsLogViewState>({ draft, applied, onlyFail, from, to, ent, queried })
-  viewStateRef.current = { draft, applied, onlyFail, from, to, ent, queried }
+  const viewStateRef = useRef<WsLogViewState>({ draft, applied, onlyFail, from, to, ent, queried, collapsed })
+  viewStateRef.current = { draft, applied, onlyFail, from, to, ent, queried, collapsed }
   const suppressRequeryRef = useRef(false)
   useEffect(() => {
     if (envRef.current === activeEnv) return
@@ -241,11 +243,12 @@ export function WsLogView() {
     if (saved) {
       setDraft(saved.draft); setApplied(saved.applied); setOnlyFail(saved.onlyFail)
       setFrom(saved.from); setTo(saved.to); setEnt(saved.ent); setQueried(saved.queried)
+      setCollapsed(!!saved.collapsed)
     } else {
       const d = today()
       const blank = { service: '', job: '', result: '', origin: '', server: '' }
       setDraft(blank); setApplied(blank); setOnlyFail(false)
-      setFrom(d); setTo(d); setEnt(0); setQueried(false)
+      setFrom(d); setTo(d); setEnt(0); setQueried(false); setCollapsed(false)
     }
     // 还原这一轮里 from/to 的变化不算"用户改日期",放掉抑制标记给下一次用。
     window.setTimeout(() => { suppressRequeryRef.current = false }, 0)
@@ -288,6 +291,19 @@ export function WsLogView() {
     void loadWsLogs({ ...appliedRef.current, onlyFail: onlyFailRef.current, page: p, startFrom: from, endTo: to, ent: entRef.current })
   }
   const onEnter = (e: React.KeyboardEvent) => { if (e.key === 'Enter') doLoad(1) }
+  // 条件清除（T100 的 qbeclear）：只清条件，不自动查；日期清空 = 不限时间。
+  // from/to 清空会触发"日期改了重查"的 effect —— 这里显式抑制一次，否则清除动作
+  // 会顺手发一次空条件查询（与"不自动查"矛盾，且白拨一次 SSH）。
+  const clearAll = () => {
+    const blank = { service: '', job: '', result: '', origin: '', server: '' }
+    suppressRequeryRef.current = true
+    setDraft(blank)
+    setApplied(blank)
+    setOnlyFail(false)
+    setFrom('')
+    setTo('')
+    window.setTimeout(() => { suppressRequeryRef.current = false }, 0)
+  }
 
   // 一条都没有时给个台阶:默认查的是"今天",而有的环境(如测试区)最近一条日志是一个多月前的
   // (实测 2026-10-23:测试区 wsfa_t 只到 2026-08-05),用户看到空列表只会以为"日志坏了"。
@@ -486,106 +502,22 @@ export function WsLogView() {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {/* 工具条分两行(条件多,挤一行看不清):
-            第一行 = 企业编号(下拉) + 查询 + 五个查询条件(服务名称/作业编号/服务端/发起端/处理结果);
-            第二行 = 时间范围 + 仅失败 + 条数/翻页(右对齐)。
-          每个条件都是「字段名 + 输入框」两件东西(见 QueryField),不是把字段名写进输入框里。
-          下缘分割线与列表连成整体;窄了各自内部换行(flex-wrap)。
-          两行之间留出间距(pt/pb),否则输入框与日期行贴在一起显得挤。 */}
+      {/* 条件区：四行三列（对齐 T100 awsq990 的 QBE）。
+            行 1：企业编号 | （空） | 查询
+            行 2：发起端   | 服务端
+            行 3：起始时间 | 服务名称（开窗）
+            行 4：结束时间 | 处理结果（下拉）
+          宽屏三列、中屏两列、窄屏单列；作业编号与仅失败放在下方次要行。
+          收起后只留这一行（T100 的 qbehidden）。 */}
       <div className="shrink-0 border-b border-border">
-        <div className="flex flex-wrap items-center gap-2 px-2 pt-2 pb-1.5">
-          {/* 企业编号:清单来自 gzou_t(固定用系统账号 ds 查),下拉里带上 gzou003 的账号。
-              选完点「查询」才发请求 —— 不依赖会话,也不在开页时自己拂一次 SSH。 */}
-          <div className="flex items-center gap-1.5"
-            title="要查哪个企业的日志">
-            <span className="shrink-0 text-xs text-muted-foreground">企业编号</span>
-            <Select value={ent ? String(ent) : undefined} onValueChange={(v) => setEnt(Number(v) || 0)}>
-              <SelectTrigger className="h-7 w-40 text-xs" aria-label="企业编号">
-                <SelectValue placeholder={entsView?.loading ? '读取中…' : (entsView?.err ? '读不到企业清单' : '选择企业')} />
-              </SelectTrigger>
-              <SelectContent>
-                {(entsView?.items || []).map((e) => (
-                  <SelectItem key={e.ent} value={String(e.ent)}>
-                    {e.ent}{e.account && e.account !== '-' ? ` · ${e.account}` : ' · 未配账号'}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <button onClick={() => void loadEnts(activeEnv, true)} disabled={!activeEnv || entsView?.loading}
-              title="重新读取企业清单"
-              className="rounded-ui p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40">
-              <RefreshCw className={`h-3.5 w-3.5 ${entsView?.loading ? 'animate-spin' : ''}`} />
-            </button>
-          </div>
-          <Button size="sm" onClick={() => doLoad(1)} disabled={loading || !ent} title="按当前条件查询（回车同效）">
-            {loading ? '查询中…' : '查询'}
-          </Button>
-          <QueryField
-            label="服务名称" wide
-            value={draft.service}
-            onChange={(v) => setDraft((d) => ({ ...d, service: v }))}
-            onKeyDown={onEnter}
-            placeholder="支持 * ? 通配"
-            title="服务名称：支持 * ? 通配，如 icd.erp.wo*；回车查询"
-          />
-          <QueryField
-            label="作业编号"
-            value={draft.job}
-            onChange={(v) => setDraft((d) => ({ ...d, job: v }))}
-            onKeyDown={onEnter}
-            placeholder="如 wssp01131"
-            title="作业编号：支持 * ? 通配，如 wssp01131 / wssp*；回车查询"
-          />
-          <QueryField
-            label="服务端"
-            value={draft.server}
-            onChange={(v) => setDraft((d) => ({ ...d, server: v }))}
-            onKeyDown={onEnter}
-            placeholder="如 T100"
-            title="服务端：如 T100；回车查询"
-          />
-          <QueryField
-            label="发起端"
-            value={draft.origin}
-            onChange={(v) => setDraft((d) => ({ ...d, origin: v }))}
-            onKeyDown={onEnter}
-            placeholder="如 OA"
-            title="发起端：如 OA / Athena；回车查询"
-          />
-          <QueryField
-            label="处理结果"
-            value={draft.result}
-            onChange={(v) => setDraft((d) => ({ ...d, result: v }))}
-            onKeyDown={onEnter}
-            placeholder="如 000"
-            title="处理结果：如 000 成功 / 100 失败；回车查询"
-          />
-          {/* 这里原先有一个单独的「刷新」图标（= 按当前条件重查）。
-              现在左边已经有一个写明的「查询」按钮，同一动作留两个入口只会让人猜
-              它们是不是一回事 —— 而且它还经常换行单占一行。 */}
-        </div>
-        <div className="flex flex-wrap items-center gap-2 px-2 pt-1.5 pb-2">
-          <div className="flex items-center gap-1 text-xs text-muted-foreground">
-            起始时间
-            <DatePicker value={from} onChange={setFrom} title="起始日期" />
-            ~
-            结束时间
-            <DatePicker value={to} onChange={setTo} title="结束日期" />
-          </div>
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Checkbox id="wslog-onlyfail" checked={onlyFail}
-              onCheckedChange={(v) => {
-                // 立即生效:显式传新值查询。原先靠 setTimeout(doLoad) 复用闭包里的旧 onlyFail,
-                // 首次勾选实际发的是旧值(勾上了但结果没变),这里一并修掉。
-                // 条件只取**已提交**的那份:输入框里的草稿要等回车才算数(见 loadPage 的说明)。
-                const on = v === true
-                setOnlyFail(on)
-                void loadWsLogs({ ...appliedRef.current, onlyFail: on, page: 1, startFrom: from, endTo: to, ent: entRef.current })
-              }} />
-            <label htmlFor="wslog-onlyfail" className="cursor-pointer select-none">仅失败</label>
-          </div>
-          {sessionBusy && <span className="text-xs text-amber-600/80 dark:text-amber-500/80">调试会话忙碌中:重放将自动结束当前调试</span>}
-          {/* 分页 */}
+        <div className="flex items-center gap-2 px-3 pt-1.5 pb-1">
+          <button onClick={() => setCollapsed((v) => !v)}
+            title={collapsed ? '展开查询条件' : '收起查询条件'}
+            className="inline-flex items-center gap-1 rounded-ui px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+            {collapsed ? '展开条件' : '收起条件'}
+            {collapsed ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
+          </button>
+          {sessionBusy && <span className="text-[11px] text-amber-600/80 dark:text-amber-500/80">调试会话忙碌中:重放将自动结束当前调试</span>}
           <div className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
             <span>{wsLogs.length} 条</span>
             <button onClick={() => loadPage(page - 1)} disabled={loading || page <= 1} title="上一页"
@@ -599,6 +531,109 @@ export function WsLogView() {
             </button>
           </div>
         </div>
+
+        {!collapsed && (
+          <div className="space-y-2 px-3 pb-2">
+            <div className={QBE_ROW}>
+              <QueryCell label="企业编号" title="这次操作的企业语境（结果回显、重放 TOPENT）；日志表为环境共享">
+                <div className="flex items-center gap-1">
+                  <Select value={ent ? String(ent) : undefined} onValueChange={(v) => setEnt(Number(v) || 0)}>
+                    <SelectTrigger className="h-8 w-full text-[13px]" aria-label="企业编号">
+                      <SelectValue placeholder={entsView?.loading ? '读取中…' : (entsView?.err ? '读不到企业清单' : '选择企业')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(entsView?.items || []).map((e) => (
+                        <SelectItem key={e.ent} value={String(e.ent)}>
+                          {e.ent}{e.account && e.account !== '-' ? ` · ${e.account}` : ' · 未配账号'}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <button onClick={() => void loadEnts(activeEnv, true)} disabled={!activeEnv || entsView?.loading}
+                    title="重新读取企业清单"
+                    className="shrink-0 rounded-ui p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40">
+                    <RefreshCw className={`h-3.5 w-3.5 ${entsView?.loading ? 'animate-spin' : ''}`} />
+                  </button>
+                </div>
+              </QueryCell>
+              <div className="hidden xl:block" />
+              <div className="flex items-center gap-2">
+                <Button size="sm" onClick={() => doLoad(1)} disabled={loading || !ent} title="按当前条件查询（回车同效）">
+                  {loading ? '查询中…' : '查询'}
+                </Button>
+                <Button size="sm" variant="outline" onClick={clearAll} disabled={loading} title="清除所有条件（不自动查询）">
+                  清除
+                </Button>
+              </div>
+            </div>
+
+            <div className={QBE_ROW}>
+              <QueryCell label="发起端" title="wsfa013；支持 * ? 通配；回车查询">
+                <Input value={draft.origin} onChange={(e) => setDraft((d) => ({ ...d, origin: e.target.value }))}
+                  onKeyDown={onEnter} placeholder="如 OA" className="h-8 text-[13px]" />
+              </QueryCell>
+              <QueryCell label="服务端" title="wsfa018；支持 * ? 通配；回车查询">
+                <Input value={draft.server} onChange={(e) => setDraft((d) => ({ ...d, server: e.target.value }))}
+                  onKeyDown={onEnter} placeholder="如 T100" className="h-8 text-[13px]" />
+              </QueryCell>
+              <div className="hidden xl:block" />
+            </div>
+
+            <div className={QBE_ROW}>
+              <QueryCell label="起始时间" title="wsfa003 的下界；清空 = 不限">
+                <DatePicker value={from} onChange={setFrom} title="起始日期" className="h-8 w-full" />
+              </QueryCell>
+              <LookupField label="服务名称" value={draft.service}
+                onChange={(v) => setDraft((d) => ({ ...d, service: v }))}
+                onKeyDown={onEnter}
+                onOpen={() => setPickerOpen(true)}
+                placeholder="支持 * ? 通配，或点右侧选择"
+                title="wsfa001；支持 * ? 通配；多选以 | 分隔；点右侧打开服务编号查询"
+                buttonTitle="选择服务名称" />
+              <div className="hidden xl:block" />
+            </div>
+
+            <div className={QBE_ROW}>
+              <QueryCell label="结束时间" title="wsfa004 的上界；清空 = 不限">
+                <DatePicker value={to} onChange={setTo} title="结束日期" className="h-8 w-full" />
+              </QueryCell>
+              <QueryCell label="处理结果" title="wsfa006；SCC 239">
+                <Select value={draft.result || 'all'}
+                  onValueChange={(v) => setDraft((d) => ({ ...d, result: v === 'all' ? '' : v }))}>
+                  <SelectTrigger className="h-8 w-full text-[13px]" aria-label="处理结果">
+                    <SelectValue placeholder="全部" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">全部</SelectItem>
+                    {RESULT_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </QueryCell>
+              <div className="hidden xl:block" />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+              <label className="flex items-center gap-1.5">
+                作业编号
+                <Input value={draft.job} onChange={(e) => setDraft((d) => ({ ...d, job: e.target.value }))}
+                  onKeyDown={onEnter} placeholder="如 wssp01131（支持 * ?）" className="h-7 w-44 text-xs" />
+              </label>
+              <label className="flex items-center gap-1.5">
+                <Checkbox id="wslog-onlyfail" checked={onlyFail}
+                  onCheckedChange={(v) => {
+                    // 立即生效:显式传新值查询。条件只取**已提交**的那份:
+                    // 输入框里的草稿要等回车才算数(见 loadPage 的说明)。
+                    const on = v === true
+                    setOnlyFail(on)
+                    void loadWsLogs({ ...appliedRef.current, onlyFail: on, page: 1, startFrom: from, endTo: to, ent: entRef.current })
+                  }} />
+                <span className="cursor-pointer select-none">仅失败</span>
+              </label>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 查询失败:错误留在界面上（有上一次结果时也不许只发一条会消失的 toast ——
@@ -679,8 +714,8 @@ export function WsLogView() {
               // 第一档是"还没查过":接口日志不再跟着会话自动拉,要人选企业后点「查询」。
               !queried ? (
                 <div className="flex flex-col items-center gap-1.5 p-6 text-center text-xs text-muted-foreground">
-                  <span className="text-sm text-foreground">选企业编号，点「查询」</span>
-                  <span>不需要先建会话，选企业编号就能查。</span>
+                  <span className="text-sm text-foreground">选好条件，点「查询」</span>
+                  <span>不需要先建会话；企业编号默认选第一个，可改。</span>
                   {entsView?.err && (
                     <span className="max-w-2xl whitespace-pre-wrap text-red-600 dark:text-red-400">
                       企业清单读取失败：{entsView.err}
@@ -810,6 +845,14 @@ export function WsLogView() {
           </>
         )}
       </div>
+
+      <ServiceNamePicker
+        open={pickerOpen}
+        env={activeEnv || ''}
+        value={draft.service}
+        onPick={(v) => setDraft((d) => ({ ...d, service: v }))}
+        onClose={() => setPickerOpen(false)}
+      />
     </div>
   )
 }

@@ -466,4 +466,19 @@ function makeBridge(transport = {}) {
   console.log('OK 16) 设置页插件管理：分区接线、状态/贡献/授权/自检/日志的纯逻辑')
 }
 
-console.log('\n全部通过：插件路由 / 菜单 / 拒绝清单 / 消息桥 / 设置页管理共 16 组判定')
+// ---------------------------------------------------------------------------
+// 17) 环境页 Tab：wslogs 旧键保留（服务信息查询）、wstest 新增（集成服务检测）
+// ---------------------------------------------------------------------------
+{
+  assert.deepEqual(parseRoute('#env/109prd/wslogs'), { kind: 'env', env: '109prd', tab: 'wslogs' })
+  assert.deepEqual(parseRoute('#env/109prd/wstest'), { kind: 'env', env: '109prd', tab: 'wstest' })
+  // 缺 tab / 未知 tab 都回落 create（不猜）
+  assert.deepEqual(parseRoute('#env/109prd'), { kind: 'env', env: '109prd', tab: 'create' })
+  assert.deepEqual(parseRoute('#env/109prd/nope'), { kind: 'env', env: '109prd', tab: 'create' })
+  assert.equal(routeView({ kind: 'env', env: 'x', tab: 'wstest' }), 'wstest')
+  assert.equal(routeView({ kind: 'env', env: 'x', tab: 'wslogs' }), 'wslogs')
+  assert.equal(routeHash({ kind: 'env', env: '109prd', tab: 'wstest' }, 'sites'), '#env/109prd/wstest')
+  console.log('OK 17) 环境页 Tab：wslogs 旧键保留、wstest 新增')
+}
+
+console.log('\n全部通过：插件路由 / 菜单 / 拒绝清单 / 消息桥 / 设置页管理 / 环境页 Tab 共 17 组判定')

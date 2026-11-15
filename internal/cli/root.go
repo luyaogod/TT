@@ -50,7 +50,7 @@ config.json、同一个本地 Web 服务（tt serve）。
   tt dict …      数据字典：表/字段/校验/开窗/消息/参数/程序与作业
   tt db …        数据库：连通性测试（ping / probe）与只读 SQL（sql）
   tt file …      服务器文件：ls/find/grep/head/cat 只读浏览 + 离线镜像（source/interface）
-  tt debug …     作业调试：起会话、停站现场、断点、步进、接口日志重放
+  tt debug …     作业调试：起会话、停站现场、断点、步进、服务信息查询与按报文重放
   tt session …   会话：建 / 列 / 看 / 改 ENT / 结束 / 收掉
   tt dev tzc …   .tzc 代码包：export 渲染围栏工作区，apply 走三道闸门写回
   tt dev tzs …   .tzs 表单包：export 只读解压；读写表单走引擎的具名动词

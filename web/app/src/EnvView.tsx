@@ -12,10 +12,12 @@ import type { SessionDraft, EnvBrief, SessionItem } from './store'
 import type { EnvTab } from './routing'
 import { Pane, TabStrip, ViewHeader, Meta, type TabItem } from './Shell'
 import { WsLogView } from './WsLogView'
+import { WsTestView } from './WsTestView'
 
 const ENV_TABS: TabItem<EnvTab>[] = [
   { key: 'create', label: '创建会话', hint: '在这个环境下面新建一条会话' },
-  { key: 'wslogs', label: '接口日志', hint: '看这个环境的接口调用报文' },
+  { key: 'wslogs', label: '服务信息查询', hint: '查这个环境的集成服务调用记录' },
+  { key: 'wstest', label: '集成服务检测', hint: '向集成接口发一次请求，看返回' },
 ]
 
 export function EnvView({ env, tab, sessions, onTab, onCreate, leading }: {
@@ -45,7 +47,8 @@ export function EnvView({ env, tab, sessions, onTab, onCreate, leading }: {
         <Pane show={tab === 'create'} label="创建会话">
           <CreateSessionPane env={env} count={sessions.length} onCreate={onCreate} />
         </Pane>
-        <Pane show={tab === 'wslogs'} label="接口日志"><WsLogView /></Pane>
+        <Pane show={tab === 'wslogs'} label="服务信息查询"><WsLogView /></Pane>
+        <Pane show={tab === 'wstest'} label="集成服务检测"><WsTestView /></Pane>
       </div>
     </div>
   )

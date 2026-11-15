@@ -128,21 +128,74 @@ var reQBEValue = regexp.MustCompile(`^[0-9: -]{0,19}$`)
 // 其余字符(空格/中文等)一律放行,避免过严导致"填了却静默查不到"。
 var reWSLogEq = regexp.MustCompile(`^[^']{1,40}$`)
 
+// reWSLogServicePart 服务名/作业编号的单段白名单（`|` 多选时逐段校验）。
+var reWSLogServicePart = regexp.MustCompile(`^[A-Za-z0-9._*?]{1,60}$`)
+
+// wslogServiceCond 拼 wsfa001 条件：
+//   - 单值：LIKE（`*`→`%`、`?`→`_`），与既有行为一致；
+//   - `|` 多值：逐段校验后 OR 成一组，供「服务编号查询」多选回传使用
+//     （T100 的 CONSTRUCT 用 `|` 生成 `in (...)`，这里等价表达）。
+func wslogServiceCond(raw string) string {
+	parts := strings.Split(raw, "|")
+	if len(parts) > 50 { // 防止把一整段超长 IN 列表塞进 SQL
+		return " AND 1=0"
+	}
+	var ors []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if !reWSLogServicePart.MatchString(p) {
+			return " AND 1=0"
+		}
+		pat := strings.ReplaceAll(strings.ReplaceAll(strings.ToUpper(p), "*", "%"), "?", "_")
+		ors = append(ors, fmt.Sprintf("UPPER(wsfa001) LIKE '%s'", strings.ReplaceAll(pat, "'", "''")))
+	}
+	switch len(ors) {
+	case 0:
+		return " AND 1=0"
+	case 1:
+		return " AND " + ors[0]
+	default:
+		return " AND (" + strings.Join(ors, " OR ") + ")"
+	}
+}
+
+// wslogLikeValue 把带 `*`/`?` 的用户值翻成 LIKE 模式（仅用于发起端/服务端这类
+// 原本等值的字段）。返回 ok=false 表示值里有不能安全内联的字符。
+func wslogLikeValue(raw string) (string, bool) {
+	v := strings.TrimSpace(raw)
+	if v == "" {
+		return "", true
+	}
+	if strings.ContainsAny(v, "'\\") || strings.ContainsFunc(v, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+		return "", false
+	}
+	var b strings.Builder
+	for _, r := range v {
+		switch r {
+		case '%':
+			b.WriteString(`\%`)
+		case '_':
+			b.WriteString(`\_`)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	pat := strings.ReplaceAll(strings.ReplaceAll(b.String(), "*", "%"), "?", "_")
+	return pat, true
+}
+
 // wslogWhere 拼 WHERE 子句(纯函数,便于单测)。
 // 条件全部为 AND,顺序固定;时间格式非法才返回 error(与既有接口行为一致)。
 func wslogWhere(f WSLogFilter) (string, error) {
 	// 基线:原生页固定排除的噪声服务(SSO 记录占满整页,见类型注释)
 	wc := "1=1 AND wsfa001 != 'docno.storage'"
 	if f.Service != "" {
-		// 服务名(如 icd.erp.wo.out.query.get)支持 * ? 通配;其余字符白名单校验。
-		// 这是原生 `wsfa001 = '值'` / `in (…)` 的超集:填精确值(不带通配符)时结果一致。
-		patOK := regexp.MustCompile(`^[A-Za-z0-9._*?]{1,60}$`)
-		if !patOK.MatchString(f.Service) {
-			wc += " AND 1=0"
-		} else {
-			pat := strings.ReplaceAll(strings.ReplaceAll(strings.ToUpper(f.Service), "*", "%"), "?", "_")
-			wc += fmt.Sprintf(" AND UPPER(wsfa001) LIKE '%s'", strings.ReplaceAll(pat, "'", "''"))
-		}
+		// 服务名(如 icd.erp.wo.out.query.get)支持 * ? 通配;`|` 多选是
+		// 「服务编号查询」开窗回传值的表达方式。其余字符白名单校验。
+		wc += wslogServiceCond(f.Service)
 	}
 	if f.Job != "" {
 		// 作业编号(wsfa012,如 wssp01131):与 service 同款通配。
@@ -158,11 +211,22 @@ func wslogWhere(f WSLogFilter) (string, error) {
 	}
 	// 四个等值条件:处理结果 / 发起端 / 服务端 / 服务程序序号(原生 `and wsfa006 = '…'` 等)
 	// wsfa002 是数字列,内联成 '861637' 由数据库隐式转换,与其它等值条件同一个白名单。
+	// 发起端/服务端带 * ? 时改走 LIKE（T100 的模糊查询意图）；不带通配符仍是等值，
+	// 这样既有调用与测试的结果不变。
 	for _, eq := range []struct{ val, col string }{
 		{f.Result, "wsfa006"}, {f.Origin, "wsfa013"}, {f.Server, "wsfa018"}, {f.PID, "wsfa002"},
 	} {
 		v := strings.TrimSpace(eq.val)
 		if v == "" {
+			continue
+		}
+		if (eq.col == "wsfa013" || eq.col == "wsfa018") && strings.ContainsAny(v, "*?") {
+			pat, ok := wslogLikeValue(v)
+			if !ok {
+				wc += " AND 1=0"
+				continue
+			}
+			wc += fmt.Sprintf(" AND UPPER(%s) LIKE UPPER('%s') ESCAPE '\\'", eq.col, strings.ReplaceAll(pat, "'", "''"))
 			continue
 		}
 		if !reWSLogEq.MatchString(v) {

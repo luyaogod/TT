@@ -24,11 +24,15 @@
 
 | 目标 | Tab |
 |---|---|
-| 环境页 | 创建会话 / 接口日志 |
+| 环境页 | 创建会话 / 服务信息查询 / 集成服务检测 |
 | 会话页 | Debug |
 | 设置页 | 站点管理 / 数据字典 / 技能管理 / 插件管理 / DEBUG / 应用设置（`routing.ts` 的 `SETTINGS_SECTIONS`） |
 
-环境页的「接口日志」是**已有画面原样搬进来的**（`WsLogView`）。
+环境页的「服务信息查询」是**已有画面原样搬进来的**（`WsLogView`），条件区按 T100 awsq990
+的 QBE 排成四行三列（企业编号/发起端/起始时间/结束时间 + 服务端/服务名称/处理结果 + 查询）；
+服务名称是开窗（`ServiceNamePicker`），处理结果是 SCC 239 下拉。
+「集成服务检测」是 `WsTestView`：接口方式 → 集成方式 URL → 测试 → 结果小表 + Request/Response。
+它复用 `LookupField`（开窗字段）与 `QueryTableDialog`/`FilterTable`（顶部过滤 + 表格弹窗）。
 「创建会话」是**真动作**：填 ENT + 作业编号 → `POST /api/sessions/new` 建一条空闲会话 →
 等它登录完（loading→idle）→ 跳到它的 Debug 页。会话页只有 Debug 一屏
 （`DebugWorkbench.tsx`，从旧外壳原样拆出来），区别只是它不再自带左侧会话栏。
@@ -59,7 +63,7 @@ terminal（下方面板）、bug-play（调试面板）、list-tree（大纲，�
 ## 路由：哈希
 
 ```
-#env/<环境名>/<Tab>             环境页 create / wslogs
+#env/<环境名>/<Tab>             环境页 create / wslogs / wstest
 #session/<会话 ID>/<Tab>         会话页 debug
 #settings/<分区>
 #plugin/<route>                 插件贡献的完整页面（第三方 iframe）
@@ -171,7 +175,8 @@ source，不靠 origin 字符串（`pluginProtocol.ts` 顶部有完整说明）�
 |---|---|
 | 外壳与布局 | `App.tsx`、`main.tsx`、`Shell.tsx`、`Sidebar.tsx`、`EnvView.tsx`、`SessionView.tsx`、`DebugWorkbench.tsx`、`ErrorBoundary.tsx`、`StatusBar.tsx` |
 | 调试区 | `Toolbar.tsx`、`DebugHeader.tsx`、`SourceView.tsx` |
-| 视图 | `SettingsView.tsx`、`PluginsSettings.tsx`、`WsLogView.tsx` |
+| 视图 | `SettingsView.tsx`、`PluginsSettings.tsx`、`WsLogView.tsx`、`WsTestView.tsx` |
+| 查询控件 | `LookupField.tsx`（开窗字段/按钮）、`QueryTableDialog.tsx`（`FilterTable` + 弹窗）、`ServiceNamePicker.tsx`（服务编号查询） |
 | 面板 | `Panels.tsx`、`OutlinePanel.tsx`、`VarTreeUi.tsx` |
 | 编辑器 | `monacoSetup.ts`、`PayloadEditor.tsx` |
 | 4GL 语言工具 | `fglTokens.ts`、`fgloutline.ts`、`fglparse.ts`、`fglPath.ts`、`fglHover.tsx` |

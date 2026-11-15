@@ -67,6 +67,18 @@ var (
 	wsSaveReq      string   // wslogs --show --save-request:把请求原文另存一份(改完再 --request-file)
 	wsDebugSet     []string // wsdebug --set k=v:改一个入参再重放(可重复)
 	wsDebugReqFile string   // wsdebug --request-file:整份替换入参报文
+
+	// 集成服务检测 / 服务注册表（新）
+	wsTestMethod  string // wstest --method:1/3/4/5
+	wsTestURL     string // wstest --url:空=按环境生成
+	wsTestReq     string // wstest --request:直接给请求体
+	wsTestReqFile string // wstest --request-file:从文件读请求体
+	wsTestTimeout int    // wstest --timeout:秒
+	wsSvcSpec     string // wsservices --spec:服务规格编号
+	wsSvcName     string // wsservices --name:服务名称
+	wsSvcAPI      string // wsservices --api:API服务名称
+	wsSvcPage     int    // wsservices --page
+	wsSvcPageSize int    // wsservices --page-size
 )
 
 // dbgAPIBase 返回调试 API 的根地址(含挂载前缀)。
@@ -1384,6 +1396,144 @@ var debugWslogsCmd = &cobra.Command{
 	},
 }
 
+// debugWSTestCmd 集成服务检测（复刻 awsq990 page_1 的「测试」）。
+var debugWSTestCmd = &cobra.Command{
+	SilenceUsage: true,
+	Use:          "wstest",
+	Short:        "向集成接口发一次检测请求(复刻 awsq990 集成服务检测)",
+	Long: `按 T100 awsq990 的口径,从**该环境的服务器**向集成接口发一次 POST,打印 HTTP code /
+运行结果 / 耗时 / 响应正文。
+
+默认地址由接口方式与环境生成(ZONE=topprd 走 /ws<ZONE>,其余区走 /w<ZONE>);
+给了 --url 就用给的地址。请求体可用 --request 直接给,或 --request-file 读文件。
+
+示例:
+  tt debug wstest --env 109prd --method 3 --request-file req.json
+  tt debug wstest --env 109prd --method 1 --request '<request>...</request>'
+  tt debug wstest --env 109prd --method 3 --url http://h/wt35prd/ws/r/awsp920 --request '{}'
+
+接口方式: 1=Web Service(SOAP) 3=Restful 4=OpenApi Restful 5=OpenApi Web Service(SOAP)。
+检测本身不写 wsfa_t;真实调用产生的日志由 T100 框架自己写。`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		env := strings.TrimSpace(dbgTargetEnv())
+		if env == "" {
+			return fmt.Errorf("需要 --env <环境>:检测请求从该环境的服务器发出")
+		}
+		req := wsTestReq
+		if wsTestReqFile != "" {
+			if req != "" {
+				return fmt.Errorf("--request 与 --request-file 二选一")
+			}
+			b, err := os.ReadFile(wsTestReqFile)
+			if err != nil {
+				return fmt.Errorf("读取请求文件失败: %s: %w", wsTestReqFile, err)
+			}
+			req = string(b)
+		}
+		body := map[string]any{"env": env, "method": wsTestMethod, "request": req, "timeoutSec": wsTestTimeout}
+		if strings.TrimSpace(wsTestURL) != "" {
+			body["url"] = wsTestURL
+		}
+		data, err := dbgAPI("POST", "/api/wslogs/test", body)
+		if err != nil {
+			return err
+		}
+		if IsJSON() {
+			fmt.Println(string(data))
+			return nil
+		}
+		var r struct {
+			URL      string             `json:"url"`
+			Endpoint string             `json:"endpoint"`
+			Warn     string             `json:"warn"`
+			Result   debug.WSTestResult `json:"result"`
+		}
+		if err := json.Unmarshal(data, &r); err != nil {
+			return err
+		}
+		fmt.Printf("%s  %s\n", r.Result.At, r.URL)
+		if r.Result.TransportError != "" {
+			fmt.Printf("检测未完成: %s\n", r.Result.TransportError)
+			return nil
+		}
+		fmt.Printf("HTTP %d %s  (%.3fs)\n", r.Result.HTTPCode, r.Result.StatusText, r.Result.DurationSec)
+		if r.Result.HTTPCode != 200 {
+			fmt.Printf("HTTPS Error (%d) %s\n", r.Result.HTTPCode, r.Result.StatusText)
+		}
+		if r.Result.Truncated {
+			fmt.Println("(响应超过 2MB,已截断)")
+		}
+		if r.Result.Body != "" {
+			fmt.Println(r.Result.Body)
+		}
+		if r.Warn != "" {
+			fmt.Printf("注意: %s\n", r.Warn)
+		}
+		return nil
+	},
+}
+
+// debugWSServicesCmd 服务注册表查询（服务名称开窗的数据源）。
+var debugWSServicesCmd = &cobra.Command{
+	SilenceUsage: true,
+	Use:          "wsservices",
+	Short:        "查询集成服务注册表(服务名称开窗的数据源)",
+	Long: `列出 gzja_t/gzjc_t 里的服务注册数据,三列: 服务规格编号 / 服务名称 / API服务名称。
+过滤值不带通配符时按"包含"匹配;带 * ? 时按通配匹配。
+
+示例:
+  tt debug wsservices --env 109prd --page-size 5
+  tt debug wsservices --env 109prd --spec wssp*
+  tt debug wsservices --env 109prd --api easy.query
+`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		env := strings.TrimSpace(dbgTargetEnv())
+		if env == "" {
+			return fmt.Errorf("需要 --env <环境>:要查哪个环境的服务注册表")
+		}
+		q := url.Values{}
+		q.Set("env", env)
+		q.Set("page", strconv.Itoa(wsSvcPage))
+		q.Set("pageSize", strconv.Itoa(wsSvcPageSize))
+		if wsSvcSpec != "" {
+			q.Set("spec", wsSvcSpec)
+		}
+		if wsSvcName != "" {
+			q.Set("name", wsSvcName)
+		}
+		if wsSvcAPI != "" {
+			q.Set("api", wsSvcAPI)
+		}
+		data, err := dbgAPI("GET", "/api/wslogs/services?"+q.Encode(), nil)
+		if err != nil {
+			return err
+		}
+		if IsJSON() {
+			fmt.Println(string(data))
+			return nil
+		}
+		var r struct {
+			Items []struct {
+				Spec string `json:"spec"`
+				Name string `json:"name"`
+				API  string `json:"apiName"`
+			} `json:"items"`
+			Total int `json:"total"`
+		}
+		if err := json.Unmarshal(data, &r); err != nil {
+			return err
+		}
+		fmt.Printf("共 %d 条(本页 %d 条)\n", r.Total, len(r.Items))
+		for _, it := range r.Items {
+			fmt.Printf("%-18s  %-40s  %s\n", it.Spec, it.Name, it.API)
+		}
+		if len(r.Items) == 0 {
+			fmt.Println("无匹配服务(条件太窄,或该环境没有注册数据)")
+		}
+		return nil
+	},
+}
+
 // showWSLog 打印单条日志的详情与请求/响应报文;reqSave 非空时把请求原文另存一份。
 func showWSLog(rowid string, asJSON bool, reqSave string) error {
 	data, err := dbgAPI("GET", wslogContentURL(rowid), nil)
@@ -1670,6 +1820,18 @@ func init() {
 	debugWslogsCmd.Flags().StringVar(&wsShow, "show", "", "只看这一条:按 rowid 打印详情与请求/响应报文(不看列表)")
 	debugWslogsCmd.Flags().StringVar(&wsSaveReq, "save-request", "", "配合 --show:把请求原文存成文件(报文是 XML 时改入参只能走这条路)")
 
+	// 集成服务检测 / 服务注册表
+	debugWSTestCmd.Flags().StringVar(&wsTestMethod, "method", "3", "接口方式:1=Web Service(SOAP) 3=Restful 4=OpenApi Restful 5=OpenApi Web Service(SOAP)")
+	debugWSTestCmd.Flags().StringVar(&wsTestURL, "url", "", "集成方式(URL);空=按环境生成(awsp900/920/930/940)")
+	debugWSTestCmd.Flags().StringVar(&wsTestReq, "request", "", "请求体原文(与 --request-file 二选一)")
+	debugWSTestCmd.Flags().StringVar(&wsTestReqFile, "request-file", "", "从本地文件读请求体")
+	debugWSTestCmd.Flags().IntVar(&wsTestTimeout, "timeout", 60, "请求超时秒数(1..120)")
+	debugWSServicesCmd.Flags().StringVar(&wsSvcSpec, "spec", "", "服务规格编号(如 wssp*;不带通配符按包含匹配)")
+	debugWSServicesCmd.Flags().StringVar(&wsSvcName, "name", "", "服务名称(如 查询;不带通配符按包含匹配)")
+	debugWSServicesCmd.Flags().StringVar(&wsSvcAPI, "api", "", "API服务名称(如 easy.query;不带通配符按包含匹配)")
+	debugWSServicesCmd.Flags().IntVar(&wsSvcPage, "page", 1, "页码")
+	debugWSServicesCmd.Flags().IntVar(&wsSvcPageSize, "page-size", 200, "每页条数(10..500)")
+
 	// 会话寻址的两个新标志（契约 1. 的命令角色表 / C3.1 / C3.5 / C2.5）。
 	//
 	// `--session` 只挂**会话级操作命令**：status / sql / wslogs / wsdebug **不挂**
@@ -1680,6 +1842,6 @@ func init() {
 	dbgRegisterSessionFlag(debugStartCmd, debugExecCmd, debugQuitCmd, debugWhyCmd,
 		debugWaitCmd, debugModeCmd)
 	dbgRegisterNameFlag(debugStartCmd, debugWsdebugCmd)
-	addClientURLFlag(debugStartCmd, debugExecCmd, debugStatusCmd, debugQuitCmd, debugWslogsCmd, debugSQLCmd, debugWsdebugCmd, debugWhyCmd, debugWaitCmd, debugModeCmd)
-	Group.AddCommand(debugStartCmd, debugExecCmd, debugStatusCmd, debugQuitCmd, debugWslogsCmd, debugSQLCmd, debugWsdebugCmd, debugWhyCmd, debugWaitCmd, debugModeCmd)
+	addClientURLFlag(debugStartCmd, debugExecCmd, debugStatusCmd, debugQuitCmd, debugWslogsCmd, debugSQLCmd, debugWsdebugCmd, debugWhyCmd, debugWaitCmd, debugModeCmd, debugWSServicesCmd)
+	Group.AddCommand(debugStartCmd, debugExecCmd, debugStatusCmd, debugQuitCmd, debugWslogsCmd, debugSQLCmd, debugWsdebugCmd, debugWhyCmd, debugWaitCmd, debugModeCmd, debugWSTestCmd, debugWSServicesCmd)
 }
