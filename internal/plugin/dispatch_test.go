@@ -433,26 +433,24 @@ func TestSupervisorStartTimeout(t *testing.T) {
 
 // ---- 授权 ----
 
-// TestRegistryAuthorizerUsesGrants 授权只看注册表里的 grants 与启用状态。
-func TestRegistryAuthorizerUsesGrants(t *testing.T) {
+// TestRegistryAuthorizerTrustsEnabledPlugins v2：启用即信任（不再逐项能力/环境授权），
+// 但未启用/未知插件仍然拒绝。
+func TestRegistryAuthorizerTrustsEnabledPlugins(t *testing.T) {
 	m, s := newManager(t)
 	pkg := buildReferencePlugin(t)
 	rec := installRef(t, m, pkg)
-	if _, err := m.Enable(rec.ID, Grants{Capabilities: []string{"profiles.list"}, Envs: []string{"prod"}}); err != nil {
+	if _, err := m.Enable(rec.ID, Grants{}); err != nil {
 		t.Fatal(err)
 	}
 	a := RegistryAuthorizer{Store: s}
 	caller := connsvc.Caller{Kind: connsvc.CallerCLIPlugin, PluginID: rec.ID, InstanceID: "i"}
 
-	if !a.Permitted(caller, connsvc.CapProfilesList) {
-		t.Error("已授权的能力该放行")
-	}
-	if a.Permitted(caller, connsvc.CapDBConnect) {
-		t.Error("没授权的能力该拒绝")
+	if !a.Permitted(caller, connsvc.CapProfilesList) || !a.Permitted(caller, connsvc.CapDBConnect) {
+		t.Error("启用后所有能力都该放行")
 	}
 	envs, all := a.AllowedEnvs(caller, connsvc.CapProfilesList)
-	if all || len(envs) != 1 || envs[0] != "prod" {
-		t.Errorf("环境授权不对: %v all=%v", envs, all)
+	if !all || len(envs) != 0 {
+		t.Errorf("启用后该返回全部环境, 得 %v all=%v", envs, all)
 	}
 	// 内置调用方不受插件授权限制。
 	if !a.Permitted(connsvc.BuiltinCaller(), connsvc.CapDBConnect) {

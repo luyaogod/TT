@@ -285,7 +285,7 @@ func TestUIHandlerEndToEndHostAPIAndOwnService(t *testing.T) {
 		t.Fatalf("插件页面没取到: %d（%s）", page.Code, page.Body.String())
 	}
 
-	// (a) 经桥调 Host API：只返回该插件**获授权**的环境。
+	// (a) 经桥调 Host API：v2 启用即信任，返回配置里的全部环境。
 	req := httptest.NewRequest("POST",
 		"/plugins/"+rec.ID+"/hostrpc/tt.host.v1.ProfilesService/List", strings.NewReader("{}"))
 	req.RemoteAddr = "127.0.0.1:5000"
@@ -307,8 +307,12 @@ func TestUIHandlerEndToEndHostAPIAndOwnService(t *testing.T) {
 	for _, p := range list.Profiles {
 		envs = append(envs, p.Env)
 	}
-	if len(envs) != 1 || envs[0] != "prod" {
-		t.Fatalf("插件页面只该看到已授权的 prod，得 %v", envs)
+	got := map[string]bool{}
+	for _, e := range envs {
+		got[e] = true
+	}
+	if len(envs) != 2 || !got["prod"] || !got["test"] {
+		t.Fatalf("插件页面该看到全部环境（prod/test），得 %v", envs)
 	}
 	// 桥用完即撤销：令牌表里只剩服务实例自己那一个。
 	if tokens.Count() != 1 {

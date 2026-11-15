@@ -4,35 +4,33 @@ import "github.com/luyaogod/TT/internal/connsvc"
 
 // RegistryAuthorizer 用插件注册表做授权来源（connsvc.Authorizer 的实现）。
 //
-// 每次判定都现读注册表，而不是缓存：授权是安全决定，而"改了授权要重启才生效"
-// 正是这类系统最容易被忽略的坑（用户撤了权、插件还在用）。注册表很小（几十 KB），
-// 一次 RPC 读一次文件的代价远小于"撤权没生效"。
+// v2 起采用"安装并启用即信任"：插件一旦被启用，就可以使用 Host API 的全部能力
+// 与配置里的全部环境。理由见计划 —— TT 提供资源与工具，插件在自己的进程里本来
+// 就能读配置、连数据库；逐项授权只会制造"能装不能跑"的假安全感，而权限边界由
+// 操作系统与用户对插件的信任决定，不由清单字段决定。
+//
+// 仍然保留的判定是**生命周期**：未启用/未安装的插件不能调用 Host API。
 type RegistryAuthorizer struct {
 	Store *Store
 }
 
-// Permitted 调用方是否持有某能力。
-func (a RegistryAuthorizer) Permitted(caller connsvc.Caller, capability connsvc.Capability) bool {
+// Permitted 已启用的插件放行全部能力；内置调用方始终放行。
+func (a RegistryAuthorizer) Permitted(caller connsvc.Caller, _ connsvc.Capability) bool {
 	if caller.IsBuiltin() {
-		return true // 第一方模块不受插件授权限制
+		return true
 	}
-	rec := a.enabled(caller.PluginID)
-	if rec == nil {
-		return false
-	}
-	return rec.Grants.Has(string(capability))
+	return a.enabled(caller.PluginID) != nil
 }
 
-// AllowedEnvs 调用方在某能力下被授权的环境。
-func (a RegistryAuthorizer) AllowedEnvs(caller connsvc.Caller, capability connsvc.Capability) ([]string, bool) {
+// AllowedEnvs 已启用的插件可用全部环境（nil, true）。
+func (a RegistryAuthorizer) AllowedEnvs(caller connsvc.Caller, _ connsvc.Capability) ([]string, bool) {
 	if caller.IsBuiltin() {
 		return nil, true
 	}
-	rec := a.enabled(caller.PluginID)
-	if rec == nil || !rec.Grants.Has(string(capability)) {
+	if a.enabled(caller.PluginID) == nil {
 		return nil, false
 	}
-	return rec.Grants.Envs, false
+	return nil, true
 }
 
 // enabled 取已启用的记录；读失败/未启用/不存在都返回 nil（一律拒绝）。
@@ -42,7 +40,7 @@ func (a RegistryAuthorizer) enabled(pluginID string) *Record {
 	}
 	reg, err := a.Store.Load()
 	if err != nil {
-		// 注册表读不出来时**拒绝**而不是放行：授权判定失败必须 fail-closed。
+		// 注册表读不出来时**拒绝**而不是放行：启停状态判定失败必须 fail-closed。
 		return nil
 	}
 	rec := reg.Find(pluginID)

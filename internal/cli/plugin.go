@@ -344,36 +344,30 @@ func newPluginEnableCmd() *cobra.Command {
 	var allow, envs []string
 	cmd := &cobra.Command{
 		Use:   "enable <id>",
-		Short: "启用插件并授权（能力 + 环境）",
-		Long: `启用插件并授权（能力 + 环境）。
+		Short: "启用插件（安装并启用即信任）",
+		Long: `启用插件。v2 起**不再逐项授权**：启用后的插件可以使用 Host API 的全部能力
+与配置里的全部环境。
 
-能力（--allow，逗号或重复给）：profiles.list / db.connect / ssh.connect。
-环境（--env，逗号或重复给）：只对这些环境开放连接；环境必须已在配置里存在。
-
-清单里声明的权限只是"诉求"，不授予任何东西；这里给的才是授权。
-声明了连接能力却不给 --env 时插件拿不到任何环境 —— 这是有意的默认：
-环境授权是逐环境的决定，不该因为"装了个插件"就自动放开。`,
-		Example: `  tt plugin enable com.example.myplugin --allow profiles.list
-  tt plugin enable com.example.myplugin --allow db.connect,ssh.connect --env prod --env test`,
-		Args: cobra.ExactArgs(1),
+--allow / --env 仍然接受（兼容旧脚本），但会被忽略；权限边界由操作系统与你对
+插件的信任决定，而不是清单字段。`,
+		Example: `  tt plugin enable com.example.myplugin`,
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			m, err := pluginManager()
 			if err != nil {
 				return err
 			}
-			grants, err := parseGrants(allow, envs)
-			if err != nil {
-				return err
-			}
-			rec, err := m.Enable(args[0], grants)
+			_ = allow
+			_ = envs
+			rec, err := m.Enable(args[0], plugin.Grants{})
 			if err != nil {
 				return pluginErr(err)
 			}
 			return reportPluginState(rec, m, "已启用")
 		},
 	}
-	cmd.Flags().StringSliceVar(&allow, "allow", nil, "授予的能力，逗号分隔或重复给（profiles.list/db.connect/ssh.connect）")
-	cmd.Flags().StringSliceVar(&envs, "env", nil, "授权的环境名，逗号分隔或重复给")
+	cmd.Flags().StringSliceVar(&allow, "allow", nil, "已废弃：v2 启用即信任，此参数被忽略")
+	cmd.Flags().StringSliceVar(&envs, "env", nil, "已废弃：v2 启用即信任，此参数被忽略")
 	return cmd
 }
 
