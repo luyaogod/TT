@@ -49,6 +49,11 @@ type CLIContribution struct {
 // ServiceContribution 可选常驻服务。
 type ServiceContribution struct {
 	Entry string `json:"entry"`
+	// Args 启动服务时传给入口的参数（缺省为空）。
+	//
+	// 为什么需要：插件常把 CLI 与常驻服务装在同一个可执行文件里，用子命令区分
+	// （`myplugin service`）。没有这个字段就只能靠环境变量约定，而那是隐式契约。
+	Args []string `json:"args,omitempty"`
 	// HealthPath 健康检查路径，缺省 /healthz。
 	HealthPath string `json:"healthPath,omitempty"`
 }

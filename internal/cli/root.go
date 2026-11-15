@@ -153,6 +153,12 @@ func Execute(web fs.FS) {
 	// Unix 写法（find -name/-type/-maxdepth）在 pflag 里是非法缩写，先归一化。
 	os.Args = file.NormalizeFindArgs(os.Args)
 
+	// 已启用插件的 CLI 命名空间：只读注册表里的静态元数据挂上去，不启动插件。
+	// 必须在 --at-list 预扫描之前：命名空间也要能被 root.Find 找到。
+	// --config 要先落到 TT_CONFIG —— 这时 cobra 还没解析任何 flag。
+	presetConfigFromArgs()
+	attachPluginNamespaces()
+
 	// --at-list：cobra 解析之前就处理掉（ValidateArgs 比 pre-run 早，
 	// 而 tt debug start --at-list 本来就不带作业名）。
 	if cmd, ok := at.ListTarget(rootCmd, os.Args[1:]); ok {

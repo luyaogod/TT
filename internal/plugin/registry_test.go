@@ -34,6 +34,38 @@ func TestLoadMissingRegistryIsEmpty(t *testing.T) {
 	}
 }
 
+// TestStoreWorksUnderChinesePath 数据目录含中文时注册表与版本目录都要正常。
+//
+// 为什么单列一条：插件 ID/版本会变成目录名，落点和 config 数据目录拼在一起；
+// 中文路径在 Windows 上是常态（用户目录叫"我的项目"这种事很常见），
+// 而"能按 ID 找到版本目录"是安装/启用的基础，一旦拼错就是"装完了找不到"。
+func TestStoreWorksUnderChinesePath(t *testing.T) {
+	base := filepath.Join(t.TempDir(), "我的项目", "数据目录")
+	if err := os.MkdirAll(base, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := NewStore(config.LocationsAt(filepath.Join(base, "config.json")))
+	reg := &Registry{SchemaVersion: RegistrySchemaVersion}
+	reg.Put(&Record{ID: "com.example.中文", ActiveVersion: "0.1.0"})
+	if err := s.Save(reg); err != nil {
+		t.Fatalf("中文路径下写注册表失败: %v", err)
+	}
+	got, err := s.Load()
+	if err != nil {
+		t.Fatalf("中文路径下读注册表失败: %v", err)
+	}
+	if got.Find("com.example.中文") == nil {
+		t.Fatal("中文 ID 没读到")
+	}
+	dir := s.VersionDir("com.example.中文", "0.1.0")
+	if dir == "" || !strings.Contains(dir, "我的项目") {
+		t.Fatalf("版本目录派生不对: %q", dir)
+	}
+	if err := s.EnsureDirs(); err != nil {
+		t.Fatalf("中文路径下建目录失败: %v", err)
+	}
+}
+
 // TestSaveLoadRoundTripAndBackup 写读一致，且第二次写会留 .bak。
 func TestSaveLoadRoundTripAndBackup(t *testing.T) {
 	s := newStore(t)

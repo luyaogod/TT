@@ -368,8 +368,8 @@ func (m *Manager) validateGrants(g Grants, man *Manifest) error {
 			}
 		}
 	}
-	if len(g.Envs) > 0 && !g.Has(string(connsvc.CapDBConnect)) && !g.Has(string(connsvc.CapSSHConnect)) {
-		ps.addf("授予了环境但没有授予任何连接能力（db.connect / ssh.connect）：环境授权不会单独生效")
+	if len(g.Envs) > 0 && len(g.Capabilities) == 0 {
+		ps.addf("授予了环境但没有任何能力（profiles.list / db.connect / ssh.connect）：环境授权不会单独生效")
 	}
 	// 声明了却没授予的能力只是提示，不当错误：用户可以先启用、后授权。
 	_ = man

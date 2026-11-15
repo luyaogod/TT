@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "com.example.refplugin",
+  "version": "0.1.0",
+  "hostApi": ">=1.0.0 <2.0.0",
+  "name": "参考插件",
+  "description": "测试夹具：同一个二进制既当 CLI 又当常驻服务",
+  "contributions": {
+    "cli": {"namespace": "refplugin", "entry": "bin/refplugin.exe", "summary": "参考插件（测试夹具）"},
+    "service": {"entry": "bin/refplugin.exe", "args": ["service"], "healthPath": "/healthz"},
+    "frontend": {"route": "refplugin", "title": "参考插件", "entry": "ui/index.html"},
+    "skills": ["skills/ref-skill"]
+  },
+  "permissions": ["profiles.list", "db.connect", "ssh.connect"]
+}

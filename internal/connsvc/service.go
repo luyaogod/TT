@@ -515,6 +515,29 @@ func (s *Service) CloseForPlugin(pluginID string) int {
 	return len(victims)
 }
 
+// CloseForInstance 关闭某插件**某一个实例**的会话。
+//
+// 一次性 CLI 退出时只该收拾自己开的会话：同一插件的常驻服务可能正在跑，
+// 把它的连接一起关掉等于把另一个进程的工作打断。
+func (s *Service) CloseForInstance(pluginID, instanceID string) int {
+	if pluginID == "" || instanceID == "" {
+		return 0
+	}
+	s.mu.Lock()
+	var victims []*session
+	for id, sess := range s.sessions {
+		if sess.caller.PluginID == pluginID && sess.caller.InstanceID == instanceID && !sess.caller.IsBuiltin() {
+			victims = append(victims, sess)
+			delete(s.sessions, id)
+		}
+	}
+	s.mu.Unlock()
+	for _, sess := range victims {
+		s.closeSessionLocked(sess)
+	}
+	return len(victims)
+}
+
 // SessionCount 当前存活会话数（诊断用）。
 func (s *Service) SessionCount() int {
 	s.mu.Lock()

@@ -180,10 +180,18 @@ func newServeCmd() *cobra.Command {
 			// 令牌表先只由 supervisor 签发（阶段 3 接入）；在此之前 /hostrpc/ 已挂载但
 			// **没有任何有效令牌** —— 未认证请求一律 401，不会开出一个匿名可用的连接面。
 			// 审计落在服务日志里（不含 SQL 文本/命令内容/秘密）。
+			// ---- 插件注册表 / 管理面 / supervisor ----
+			pluginStore := plugin.NewStore(config.LocationsAt(path))
+			pluginMgr := plugin.NewManager(pluginStore, reservedNamespaces())
+			pluginMgr.ConfigPath = path
+			pluginMgr.HostAPIVersion = connsvc.HostAPIVersion
+
 			auditLog := log.New(os.Stderr, "[connsvc] ", 0)
 			connSvc := connsvc.New(connsvc.Options{
 				ConfigPath: path,
 				TTVersion:  Version,
+				// 授权来源 = 插件注册表：每次判定现读，撤权立即生效（不需要重启）。
+				Authorizer: plugin.RegistryAuthorizer{Store: pluginStore},
 				Audit: func(ev connsvc.Event) {
 					if ev.OK {
 						return // 成功路径不刷日志：一次页面点三下会淹掉真正的错误
@@ -198,12 +206,11 @@ func newServeCmd() *cobra.Command {
 				Auth:    hostrpc.NewTokenAuthenticator(tokenStore),
 			})
 
-			// 插件管理面：设置页的插件分区与 /api/plugins* 用它。
-			// 与 CLI 是同一份注册表（同一把锁），两边同时操作不会互相覆盖。
-			pluginStore := plugin.NewStore(config.LocationsAt(path))
-			pluginMgr := plugin.NewManager(pluginStore, reservedNamespaces())
-			pluginMgr.ConfigPath = path
-			pluginMgr.HostAPIVersion = connsvc.HostAPIVersion
+			// supervisor 的 Host API 地址要等服务真正监听后才确定（端口可能被顺延），
+			// 所以先建出来、listen 之后再填 HostAPIURL 并拉起已启用的服务。
+			sup := plugin.NewSupervisor(pluginStore, tokenStore, connSvc, "", Version)
+			sup.Logf = func(format string, a ...any) { auditLog.Printf(format, a...) }
+			pluginMgr.Hooks = servePluginHooks{sup: sup, tokens: tokenStore, conn: connSvc, logf: sup.Logf}
 
 			err = debugcli.RunForeground(path, debugcli.ServeSpec{
 				Prefix:           "TT",
@@ -251,9 +258,18 @@ func newServeCmd() *cobra.Command {
 					return err
 				}
 				// 状态文件里的地址要给客户端点，所以通配监听(0.0.0.0/[::])换成本机地址。
-				onReady(displayAddr(used))
+				shown := displayAddr(used)
+				onReady(shown)
+
+				// Host API 地址此刻才确定（端口可能被顺延）。插件服务从这里拿到它。
+				sup.HostAPIURL = "http://" + shown + hostrpc.Prefix
+				startEnabledServices(pluginMgr, sup, sup.Logf)
 
 				<-ctx.Done()
+
+				// 收尾顺序：先停插件服务（它们可能正用着连接），再关连接服务的全部会话。
+				sup.StopAll()
+				connSvc.CloseAll()
 				return nil
 			})
 
