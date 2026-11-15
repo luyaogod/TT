@@ -24,15 +24,16 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"tt/internal/config"
+	"tt/internal/connsvc"
 	"tt/internal/dbconfig"
 	"tt/internal/designer"
 	"tt/internal/envmove"
-	"tt/internal/erpdb"
 	"tt/internal/host"
-	"tt/internal/sshtun"
+	"tt/internal/plugin"
 )
 
 // DefaultListen 是 serve 未显式配置监听地址时的默认地址。
@@ -101,16 +102,29 @@ type Options struct {
 	ProbeDB func(host.DBProbeReq) (*host.DBProbeOut, error)
 	// VerifyAcc POST /api/dbaccverify。nil = host.VerifyDBAcct。
 	VerifyAcc func(host.DBAccVerifyReq) error
-	// OpenDB POST /api/conntest。nil = erpdb.Open。
+
+	// ConnSvc 进程内连接服务（Host API 的唯一实现）。
 	//
-	// 与前两个不同：它的返回值 `erpdb.Connector` 是**接口**，所以注入一个假 Connector
-	// 能测到 hConnTest 的**快乐路径** —— 那是这三个端点里唯一一条能测全的。
-	OpenDB func(context.Context, dbconfig.Connection) (erpdb.Connector, error)
-	// SSHTest POST /api/sshtest。nil = host.TestSSH。
+	// 设置页的「测试连接」（/api/conntest、/api/sshtest）走它，与第三方插件的
+	// ConnectRPC 调用是**同一份实现** —— 不存在"页面测一条路、插件连另一条"。
+	// nil = 按本 Options 的 ConfigPath 懒建一个（只放行内置调用方）。
+	ConnSvc *connsvc.Service
+
+	// HostRPC Host API 的 http.Handler（由 internal/hostrpc 装配，已含认证与守卫）。
+	// nil = 不挂载 /hostrpc/（未装插件的进程不该多开一个 RPC 面）。
+	HostRPC http.Handler
+
+	// PluginUI 插件静态资源与私有 RPC 代理（/plugins/）。nil = 不挂载。
+	PluginUI http.Handler
+
+	// PluginMgr 插件管理面（/api/plugins*）。nil = 不注册管理端点。
+	PluginMgr *plugin.Manager
+
+	// PluginStatuses 插件运行态来源（通常是 supervisor.Statuses）；nil = 列表不带运行态。
 	//
-	// 真实现要真的登一台 SSH,默认档测试进不去;注入假实现就能把
-	// 「端口缺省补 22 / 主机名回填 / 失败信封」这几条对外契约钉住。
-	SSHTest func(host.SSHConfig) (*host.SSHTestOut, error)
+	// 用一个函数而不是 *plugin.Supervisor：本包只需要"读一批状态"，不该为了四个字段
+	// 把 supervisor 的启停能力也拉进来。
+	PluginStatuses func() []plugin.Status
 }
 
 // ConfigReloader 由持有配置内存态的子系统实现；本服务在配置写入成功后调用它。
@@ -125,6 +139,10 @@ type Server struct {
 	opt  Options
 	mux  *http.ServeMux
 	once bool
+
+	// connOnce/connSvcInst 懒建的连接服务（Options.ConnSvc 为空时用）。
+	connOnce    sync.Once
+	connSvcInst *connsvc.Service
 }
 
 // New 装配路由。返回的 Server 可直接交给 http.Server 使用。
@@ -195,6 +213,21 @@ func (s *Server) routes() {
 		m.HandleFunc("POST /api/shutdown", s.hShutdown)
 	}
 
+	// ---- 插件管理面（Core 管理面；插件令牌够不到这里） ----
+	//
+	// 只增注册，不改既有 /api/ 的行为：更具体的具名路由优先于字典子系统的 /api/ 前缀。
+	if s.opt.PluginMgr != nil {
+		m.HandleFunc("GET /api/plugins", s.hPluginsList)
+		m.HandleFunc("GET /api/plugins/{id}", s.hPluginInfo)
+		m.HandleFunc("POST /api/plugins/install", s.hPluginInstall)
+		m.HandleFunc("GET /api/plugins/{id}/doctor", s.hPluginDoctor)
+		// 只读日志视图（P6-07）：读 logs/<id>/ 里最新的那个文件。
+		m.HandleFunc("GET /api/plugins/{id}/logs", s.hPluginLogs)
+		m.HandleFunc("POST /api/plugins/{id}/enable", s.hPluginEnable)
+		m.HandleFunc("POST /api/plugins/{id}/disable", s.hPluginDisable)
+		m.HandleFunc("POST /api/plugins/{id}/uninstall", s.hPluginUninstall)
+	}
+
 	// ---- 调试子系统：挂在 /debug/api/（它自己的页面在 /debug/） ----
 	if s.opt.Debug != nil {
 		m.Handle("/debug/api/", http.StripPrefix("/debug", s.opt.Debug))
@@ -210,6 +243,23 @@ func (s *Server) routes() {
 	// 上面那些更具体的具名路由优先于这条前缀模式，不会被它遮住。
 	if s.opt.Dict != nil {
 		m.Handle("/api/", s.opt.Dict)
+	}
+
+	// ---- Host API（ConnectRPC）：独立前缀，不参与 /api/ 的 catch-all ----
+	//
+	// 为什么要独立前缀：字典子系统的 /api/ 前缀是一个 catch-all（未命中就 404 JSON），
+	// 把 RPC 塞在它下面会让"未命中"与"路由错误"混在一起。这里是一个独立子树，
+	// 由 internal/hostrpc 自带认证与 Host/Origin 守卫（不是匿名的本机面）。
+	if s.opt.HostRPC != nil {
+		m.Handle("/hostrpc/", s.opt.HostRPC)
+	}
+
+	// ---- 插件前端资源与私有 RPC 代理 ----
+	//
+	// /plugins/{id}/ui/… 与 /plugins/{id}/rpc/… 由插件子系统自己解析（活跃版本目录、
+	// 代理目标），本层只做挂载点：不缓存旧版本路径、不理解插件业务 Schema。
+	if s.opt.PluginUI != nil {
+		m.Handle("/plugins/", s.opt.PluginUI)
 	}
 
 	// ---- 页面（只剩调试工作台一套 SPA） ----
@@ -824,11 +874,19 @@ func (s *Server) verifyAcc(req host.DBAccVerifyReq) error {
 	return host.VerifyDBAcct(req)
 }
 
-func (s *Server) openDB(ctx context.Context, c dbconfig.Connection) (erpdb.Connector, error) {
-	if s.opt.OpenDB != nil {
-		return s.opt.OpenDB(ctx, c)
+// connSvc 取连接服务：注入了就用注入的，否则按本服务的配置路径懒建一个。
+//
+// 懒建只在测试与"没装插件的单体"里发生；serve 会把同一个实例同时交给
+// 设置页与 /hostrpc/，那是它俩"同服务、双接入"的地方。
+func (s *Server) connSvc() *connsvc.Service {
+	if s.opt.ConnSvc != nil {
+		return s.opt.ConnSvc
 	}
-	return erpdb.Open(ctx, c)
+	s.connOnce.Do(func() {
+		path, _ := s.configPath(true)
+		s.connSvcInst = connsvc.New(connsvc.Options{ConfigPath: path})
+	})
+	return s.connSvcInst
 }
 
 // hDBAccVerify 逐账号在服务器侧验证。
@@ -851,63 +909,54 @@ type connTestReq struct {
 }
 
 // hConnTest 从本机直连数据库，验证「环境 → 库」这条链路真的通。
-// 服务器侧可达而客户端不可达时，连接里配的 viaSsh 隧道由调用方先建好再测。
+//
+// 实现在 connsvc（与 Host API 的 ConnectionsService.TestDB 同一份）：
+// 服务器侧可达而客户端不可达时，连接里配的 viaSsh 隧道由它先建好再测 ——
+// 测的链路与实际查询走的是同一条。
+//
+// 响应形状保持不变（ok/stage/error/via/type/serverVersion/address）：
+// 设置页与既有前端按这些字段渲染，改形状等于改对外契约。
 func (s *Server) hConnTest(w http.ResponseWriter, r *http.Request) {
 	var req connTestReq
 	if err := decodeBody(r, &req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	c := req.Connection
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 
-	// viaSsh：客户端不可达 DB 时，真实查询（dict live）走 SSH 隧道再连。
-	// 测试若只直连，就会出现「测试一直超时、实际查询却正常」——测的不是同一条链路。
-	// 这里复用 sshtun：起隧道 → host/port 换成 127.0.0.1:本地转发端口 → 再连。
+	c := req.Connection
+	res := s.connSvc().TestDBConn(ctx, c)
 	via := "direct"
 	if c.ViaSSH != nil {
-		remoteHost, remotePort := c.ViaSSH.EffectiveRemote(c.Host, c.Port)
-		tun, err := sshtun.Dial(sshtun.Options{
-			Host:       c.ViaSSH.Host,
-			Port:       c.ViaSSH.Port,
-			User:       c.ViaSSH.User,
-			Password:   c.ViaSSH.Password,
-			RemoteHost: remoteHost,
-			RemotePort: remotePort,
-			LocalPort:  c.ViaSSH.BindPort,
-		})
-		if err != nil {
-			writeJSON(w, http.StatusOK, map[string]any{
-				"ok": false, "stage": "tunnel", "error": err.Error(), "via": "tunnel",
-			})
-			return
-		}
-		defer tun.Close()
-		c.Host = "127.0.0.1"
-		c.Port = tun.LocalPort
 		via = "tunnel"
 	}
-
-	conn, err := s.openDB(ctx, c)
-	if err != nil {
+	if !res.OK {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"ok": false, "stage": "connect", "error": err.Error(), "via": via,
-		})
-		return
-	}
-	defer conn.Close()
-
-	ver, err := conn.ServerVersion(ctx)
-	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"ok": false, "stage": "version", "error": err.Error(), "via": via,
+			"ok": false, "stage": legacyDBStage(res.Stage), "error": res.Message, "via": via,
 		})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok": true, "type": conn.Type(), "serverVersion": ver, "address": c.Address(), "via": via,
+		"ok": true, "type": res.DBType, "serverVersion": res.ServerVersion,
+		"address": res.Address, "via": via,
 	})
+}
+
+// legacyDBStage 把连接服务的阶段名映射成这个端点**历史上**用的取值。
+//
+// 旧前端的 stage 只有 tunnel/connect/version 三个，其中 version 指的是
+// "连上了但取库版本失败"。映射放在这一层：connsvc 用自己的阶段名（ping 等），
+// REST 契约留在 REST 契约里，两边改名互不牵连。
+func legacyDBStage(stage string) string {
+	switch stage {
+	case connsvc.StageTunnel:
+		return "tunnel"
+	case connsvc.StagePing:
+		return "version"
+	default:
+		return "connect"
+	}
 }
 
 // hConfigMeta 给设置页展示"配置在哪、什么结构"用。

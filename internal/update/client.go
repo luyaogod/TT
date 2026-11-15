@@ -2,16 +2,15 @@ package update
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
+
+	"tt/internal/fetch"
 )
 
 // TimeoutAPI 一次 API 调用（取发布信息）的时限。
@@ -182,124 +181,29 @@ func retryableStatus(code int) bool { return code >= 500 || code == http.StatusT
 
 // Download 把资产下到 dest，并校验 sha256 与发布方给的摘要一致。
 //
-// 两条纪律：
-//   - dest 已存在且摘要对得上 → 直接返回（下载是幂等的，`--dry-run` 之后重跑不必再下）。
-//   - 先写 dest.part 再改名（与仓库其它落盘同一个语义），校验失败删掉半成品。
+// 实现已抽到 internal/fetch（P2-08）：下载/重试/校验/失败不留半成品是**字节级**原语，
+// 插件更新用的是同一份。这里保留本包的方法，只把"TT 自更新的策略"留在本包：
+// 摘要必须来自发布方（Asset.HexDigest）、超时、UA、以及"出口是哪条代理"这句提示。
 //
 // wantHex 为空表示这次没有可比对的摘要 —— 调用方不该走到这里（Asset.HexDigest 就是门槛）。
 func (c *Client) Download(ctx context.Context, a Asset, dest, wantHex string, progress func(got, total int64)) error {
-	if wantHex == "" {
-		return fmt.Errorf("资产 %s 没有 sha256 摘要：没有可校验的东西，拒绝下载", a.Name)
-	}
-	if got, err := fileSHA256(dest); err == nil && got == wantHex {
-		return nil
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, timeoutDownload)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.URL, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("User-Agent", c.Agent)
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return fmt.Errorf("下载 %s 失败（%s）: %w", a.Name, c.Where(), err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return statusError(a.URL, resp)
-	}
-
-	part := dest + ".part"
-	f, err := os.Create(part)
-	if err != nil {
-		return fmt.Errorf("建临时文件 %s 失败: %w", part, err)
-	}
-	defer os.Remove(part) // 成功时目标已改名，这个删除是无操作
-
-	h := sha256.New()
-	total := a.Size
-	if total <= 0 {
-		total = resp.ContentLength
-	}
-	got := int64(0)
-	buf := make([]byte, 256<<10)
-	for {
-		n, rerr := resp.Body.Read(buf)
-		if n > 0 {
-			if _, werr := f.Write(buf[:n]); werr != nil {
-				f.Close()
-				return fmt.Errorf("写 %s 失败: %w", part, werr)
-			}
-			h.Write(buf[:n])
-			got += int64(n)
-			if progress != nil {
-				progress(got, total)
-			}
-		}
-		if rerr == io.EOF {
-			break
-		}
-		if rerr != nil {
-			f.Close()
-			return fmt.Errorf("下载 %s 中断于 %s: %w", a.Name, humanBytes(got), rerr)
-		}
-	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		return fmt.Errorf("刷 %s 失败: %w", part, err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("关 %s 失败: %w", part, err)
-	}
-
-	if gotHex := hex.EncodeToString(h.Sum(nil)); gotHex != wantHex {
-		return fmt.Errorf("下载的 %s 校验不通过：发布方声明 sha256 %s，实际 %s（文件已删）", a.Name, wantHex, gotHex)
-	}
-	if err := os.Rename(part, dest); err != nil {
-		return fmt.Errorf("把 %s 改名为 %s 失败: %w", part, dest, err)
-	}
-	return nil
+	return fetch.Download(ctx, c.HTTP, fetch.Request{
+		URL: a.URL, Name: a.Name, Dest: dest,
+		SHA256: wantHex, Size: a.Size,
+		Agent: c.Agent, Via: c.Where(),
+		Timeout:  timeoutDownload,
+		Progress: progress,
+	})
 }
 
-// fileSHA256 算一个已存在文件的 sha256；文件不存在时返回错误。
-func fileSHA256(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
+// fileSHA256 算一个已存在文件的 sha256（同包内复用共用原语）。
+func fileSHA256(path string) (string, error) { return fetch.SHA256File(path) }
 
 // sleepCtx 可被取消的等待（重试之间的退避）。
-func sleepCtx(ctx context.Context, d time.Duration) error {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-t.C:
-		return nil
-	}
-}
+func sleepCtx(ctx context.Context, d time.Duration) error { return fetch.SleepCtx(ctx, d) }
 
 // humanBytes 人读的大小，用在进度与失败信息里。
-func humanBytes(n int64) string {
-	switch {
-	case n >= 1<<20:
-		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
-	case n >= 1<<10:
-		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
-	default:
-		return fmt.Sprintf("%d B", n)
-	}
-}
+func humanBytes(n int64) string { return fetch.HumanBytes(n) }
 
 // HumanBytes 供命令层复用（同一个数字只声明一次）。
-func HumanBytes(n int64) string { return humanBytes(n) }
+func HumanBytes(n int64) string { return fetch.HumanBytes(n) }

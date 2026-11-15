@@ -1,0 +1,20 @@
+// Profiles 服务：只返回**当前插件获授权**的环境脱敏元数据。
+//
+// 未授权环境既不出现在结果里，也不在错误里泄露名字 —— 插件不该靠错误信息枚举环境。
+syntax = "proto3";
+
+import "tt/host/v1/common.proto";
+
+package tt.host.v1;
+
+option go_package = "tt/internal/gen/hostv1;hostv1";
+
+message ListRequest {}
+
+message ListResponse {
+  repeated Profile profiles = 1;
+}
+
+service ProfilesService {
+  rpc List(ListRequest) returns (ListResponse);
+}

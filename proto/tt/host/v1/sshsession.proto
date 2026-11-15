@@ -1,0 +1,28 @@
+// SSH 会话数据面：一次性非交互命令执行。
+//
+// 首版不提供 PTY、SFTP 与通用远程文件能力 —— 那些是后续独立扩展，不塞进这里。
+syntax = "proto3";
+
+package tt.host.v1;
+
+option go_package = "tt/internal/gen/hostv1;hostv1";
+
+message SSHExecRequest {
+  string handle = 1;
+  string command = 2;
+  // timeout_ms 执行超时；0 = 由 Host 的默认上限决定。超时即关闭通道（远端进程收 HUP）。
+  int32 timeout_ms = 3;
+}
+
+message SSHExecResponse {
+  // output 合并后的 stdout+stderr。
+  string output = 1;
+  // exit_code 远端命令退出码；因超时未能取到时为 -1。
+  int32 exit_code = 2;
+  // timed_out 是否因超时被终止。
+  bool timed_out = 3;
+}
+
+service SSHSessionService {
+  rpc Exec(SSHExecRequest) returns (SSHExecResponse);
+}

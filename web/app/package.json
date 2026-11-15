@@ -1,7 +1,7 @@
 {
   "name": "app",
   "private": true,
-  "version": "0.5.4",
+  "version": "0.6.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,7 +11,8 @@
     "check:tokens": "esbuild scripts/fgltokens.test.mjs --bundle --format=esm --platform=node --external:monaco-editor/* --outfile=scripts/.tmp-tokens.mjs && node scripts/.tmp-tokens.mjs",
     "check:outline": "esbuild scripts/fgloutline.fixtures.mjs --bundle --format=esm --platform=node --outfile=scripts/.tmp-outline.mjs && node scripts/.tmp-outline.mjs",
     "check:store": "esbuild scripts/store.test.mjs --bundle --format=esm --platform=node --outfile=scripts/.tmp-store.mjs && node scripts/.tmp-store.mjs",
-    "check:progress": "esbuild scripts/progress.test.mjs --bundle --format=esm --platform=node --outfile=scripts/.tmp-progress.mjs && node scripts/.tmp-progress.mjs"
+    "check:progress": "esbuild scripts/progress.test.mjs --bundle --format=esm --platform=node --outfile=scripts/.tmp-progress.mjs && node scripts/.tmp-progress.mjs",
+    "check:plugins": "esbuild scripts/plugins.test.mjs --bundle --format=esm --platform=node --outfile=scripts/.tmp-plugins.mjs && node scripts/.tmp-plugins.mjs"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",

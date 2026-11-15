@@ -1,0 +1,87 @@
+// Host API 的公共类型。
+//
+// 这里是**唯一**的公共契约来源：第三方插件只依赖 proto/tt/host/v1 与生成的客户端，
+// 不依赖 tt 的任何 internal/* Go 包。字段只增不改：删字段必须提升主版本并保留编号。
+syntax = "proto3";
+
+package tt.host.v1;
+
+option go_package = "tt/internal/gen/hostv1;hostv1";
+
+// ErrorInfo 稳定的错误详情。插件不得解析 message（它是给人看的），只判 code。
+message ErrorInfo {
+  // code 稳定错误码（如 ENV_NOT_AUTHORIZED / PERMISSION_DENIED / SESSION_CLOSED）。
+  // 已发布的 code 不重命名；新增能力只新增 code。
+  string code = 1;
+  // message 人读说明，允许变化。
+  string message = 2;
+  // hint 下一步怎么办（如"用 tt plugin enable --env 授权"）。
+  string hint = 3;
+  // env 出错的环节名（若与本错误相关）。
+  string env = 4;
+}
+
+// Capabilities 本 Host 实例的能力清单。
+//
+// 插件**必须**以此为准，不得假定某个方法存在：未列出的方法即未交付。
+message Capabilities {
+  // host_api_version 语义化版本（MAJOR.MINOR.PATCH）。插件清单的 hostApi 范围按它判。
+  string host_api_version = 1;
+  // features 已启用的能力开关，见 Feature 枚举。
+  repeated Feature features = 2;
+  // services 已挂载的服务与方法全集。
+  repeated ServiceCapability services = 3;
+  // tt_version tt 自身的版本号（信息性，不参与兼容判断）。
+  string tt_version = 4;
+}
+
+// ServiceCapability 一个已挂载服务及方法。
+message ServiceCapability {
+  string name = 1;
+  repeated string methods = 2;
+}
+
+// Feature* 是 Capabilities.features 的取值。
+//
+// 只声明**真的能用**的能力：某个能力没实现时，对应方法也不注册（而不是注册了却报错）。
+enum Feature {
+  FEATURE_UNSPECIFIED = 0;
+  // FEATURE_DB_QUERY 通用数据库查询（DBSession.Query）。
+  FEATURE_DB_QUERY = 1;
+  // FEATURE_DB_EXEC 通用数据库执行（DBSession.Exec）；与内置 tt db sql 的只读防线无关。
+  FEATURE_DB_EXEC = 2;
+  // FEATURE_SSH_EXEC 一次性 SSH 命令执行（SSHSession.Exec）。
+  FEATURE_SSH_EXEC = 3;
+  // FEATURE_DB_READONLY_SESSION 支持 OpenDB(read_only=true) 建立库侧只读会话。
+  FEATURE_DB_READONLY_SESSION = 4;
+}
+
+// ConnKind 连接种类。
+enum ConnKind {
+  CONN_KIND_UNSPECIFIED = 0;
+  CONN_KIND_DB = 1;
+  CONN_KIND_SSH = 2;
+}
+
+// Profile 一个环境的**脱敏**元数据。
+//
+// 默认不返回任何口令、私钥或完整配置；账号只给名字。
+message Profile {
+  string env = 1;
+  string zone = 2;
+  bool has_db = 3;
+  // db_type "oracle" | "kingbase"；has_db=false 时为空。
+  string db_type = 4;
+  // db_address 展示用 host:port/service（不含凭据）。
+  string db_address = 5;
+  // db_accounts 账号名清单（绝不含密码）。
+  repeated string db_accounts = 6;
+  bool has_ssh = 7;
+  string ssh_host = 8;
+  int32 ssh_port = 9;
+  string ssh_user = 10;
+  // db_via_ssh 该环境的数据库连接是否经 SSH 隧道。
+  bool db_via_ssh = 11;
+  // db_readonly_sql 该环境内置只读 SQL 开关的状态（信息性；不影响插件通用会话）。
+  bool db_readonly_sql = 12;
+}

@@ -49,6 +49,13 @@ func Alive(pid int) bool {
 	return syscall.Kill(pid, 0) == nil
 }
 
+// ExecutablePath 在非 Windows 上恒返回空串：本包的进程身份核对只覆盖 Windows。
+//
+// 这不是"忘了实现"：调用方（internal/plugin 的停止前核对）把空身份当成"拿不到反证"，
+// 于是行为退回改动前的"按 pid 收工"——非 Windows 上没有任何一处依赖这个值，
+// 硬加一条 /proc 实现只会多一条没有用例覆盖的平台分支。
+func ExecutablePath(pid int) string { return "" }
+
 // Kill 结束指定进程。语义与 Windows 版一致：进程已经不在了算成功（收尾要的是
 // "它别再挡路"），真的杀不掉才报错。
 func Kill(pid int) error {

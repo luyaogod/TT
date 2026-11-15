@@ -31,6 +31,9 @@ export default defineConfig(() => {
         '/debug/api': { target, ws: true },
         // 共用接口：原样转发
         '/api': { target, ws: true },
+        // 插件页面与受控 RPC 代理（后端按活跃版本目录提供 /plugins/<id>/ui/）。
+        // 页面本身在 iframe 里，开发时也必须能从后端取到，否则只能看到空 iframe。
+        '/plugins': { target, ws: true },
       },
     },
   }

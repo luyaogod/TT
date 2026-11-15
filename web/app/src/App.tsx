@@ -7,7 +7,7 @@
 //
 // 路由是本文件唯一管 URL 的地方:状态在 `route`,片段由 `routeHash` 生成;浏览器后退/粘链接
 // 走 `parseRoute` 回到同一个目标。两边都要做,否则"界面在这一页、地址栏还是上一页"。
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { PanelLeft, RotateCcw, WifiOff, X } from 'lucide-react'
 import { connectWS, useStore, type SessionDraft, type SessionItem } from './store'
 import { Sidebar } from './Sidebar'
@@ -15,10 +15,12 @@ import { DesktopTitleBar } from './DesktopTitleBar'
 import { EnvView } from './EnvView'
 import { SessionView } from './SessionView'
 import { SettingsView } from './SettingsView'
+import { PluginView } from './PluginView'
 import { IconBtn, Pane } from './Shell'
 import { Dialog, DialogContent, DialogTitle } from '../../shared/ui-radix'
 import { api } from './api'
 import { parseRoute, routeHash, routeView, type EnvTab, type Route, type SessionTab } from './routing'
+import { normalizePlugins, type PluginDescriptor } from './plugins'
 import { ErrorBoundary } from './ErrorBoundary'
 
 // 浏览器标签页标题反馈:停站时标题闪烁(仅后台),运行/启动改前缀。
@@ -97,6 +99,22 @@ export function App() {
 
   const settingsSection = useStore((s) => s.settingsSection)
 
+  // 插件前端贡献的运行时清单。主 SPA 只拿摘要，不 import 任何第三方代码；
+  // 这份清单只决定“菜单里有哪些入口、#plugin/<route> 对应哪个 iframe”。
+  const [plugins, setPlugins] = useState<PluginDescriptor[]>([])
+  const [pluginsLoaded, setPluginsLoaded] = useState(false)
+  const [pluginsErr, setPluginsErr] = useState('')
+  const loadPlugins = useCallback(() => {
+    setPluginsErr('')
+    api.plugins()
+      .then((r) => { setPlugins(normalizePlugins(r)); setPluginsLoaded(true) })
+      .catch((e) => {
+        // 读不到清单不耽误宿主其它页面；只有进插件路由时才把它摆成错误页。
+        setPluginsErr(e?.message || String(e))
+        setPluginsLoaded(true)
+      })
+  }, [])
+
 
   const backendDead = useStore((s) => s.backendDead)
   const wsConnected = useStore((s) => s.wsConnected)
@@ -120,7 +138,10 @@ export function App() {
   // 关掉就落到第一个环境的「创建会话」(一个环境都没有时只能留在设置里)。
   const lastMainRef = useRef<Route | null>(null)
   useEffect(() => {
-    if (route.kind === 'env' || route.kind === 'session') lastMainRef.current = route
+    // 插件页也是“真正的主路由”：打开设置弹窗时它要留在遮罩后面，关掉设置回原页。
+    if (route.kind === 'env' || route.kind === 'session' || route.kind === 'plugin' || route.kind === 'plugin-error') {
+      lastMainRef.current = route
+    }
   }, [route])
   // 主面板该显示哪一屏:设置打开时**不换屏**,继续显示上一次的主路由,只是上面多一层弹窗。
   // 冷启动直接开 `#settings` 时没有上一屏 —— 那就用默认落点(第一个环境的创建页)当背景,
@@ -136,11 +157,13 @@ export function App() {
     const st = useStore.getState()
     if (r.kind === 'settings' && r.section) st.setSettingsSection(r.section)
     void loadEnvs()
+    void loadPlugins()
     const close = connectWS()
     void api.status().catch(() => {})
     void st.adoptExisting()
     // 环境清单只在设置页改得动;窗口回到前台时补一次,省得让用户刷新整页。
-    const onFocus = () => void useStore.getState().loadEnvs()
+    // 插件清单同理:安装/启停通常在命令行完成,回到窗口时重读一次就能看到变化。
+    const onFocus = () => { void useStore.getState().loadEnvs(); void loadPlugins() }
     window.addEventListener('focus', onFocus)
 
     // 调试快捷键:F5 继续 / F10 步过 / F11 步入 / Shift+F11 步出
@@ -242,6 +265,9 @@ export function App() {
     }
     // 还没选到目标(首次打开、环境清单在读):先把地址栏留着,别写一个 `#` 上去。
     if (route.kind === 'home') return
+    // 语法错误的插件路由不规范化:`#plugin/demo/extra` 被改写成 `#plugin/demo` 后,
+    // 刷新就从“错误页”变成“另一个页面”,等于把错误藏掉。
+    if (route.kind === 'plugin-error') return
     const want = routeHash(route, settingsSection)
     if (window.location.hash !== want) window.history.replaceState(null, '', want)
   }, [route, settingsSection])
@@ -264,6 +290,8 @@ export function App() {
   const openEnv = (name: string) => setRoute({ kind: 'env', env: name, tab: 'create' })
   // 会话页只有一屏：Debug。
   const openSession = (s: SessionItem) => setRoute({ kind: 'session', id: s.id, tab: 'debug' })
+  // 插件菜单只带 route；id/标题由 PluginView 再按当前注册表解析（菜单与页面同一份事实）。
+  const openPlugin = (route: string) => setRoute({ kind: 'plugin', route })
   const goSettings = () => setRoute({ kind: 'settings' })
   // 关闭设置弹窗:回到打开它之前那一屏(内存里那份主路由);冷启动直接开 `#settings`
   // 时没有上一屏,就落到第一个环境的创建页 —— 一个环境都没有时无处可去(默认落点会
@@ -325,8 +353,9 @@ export function App() {
           <ErrorBoundary what="左侧目录">
             <Sidebar
               envs={envs} envsLoaded={envsLoaded} envsErr={envsErr} sessions={sessions}
-              states={sessionStates} route={route}
+              states={sessionStates} route={route} plugins={plugins}
               onSelectEnv={openEnv} onSelectSession={openSession}
+              onSelectPlugin={openPlugin}
               // 失败已经在 store 里 toast 过,这里只吞掉 Promise 的拒绝(不吞掉状态变化)
               onCloseSession={(s) => { void closeSession(s.id).catch(() => {}) }}
               onNewSession={newSession} onSettings={goSettings}
@@ -366,6 +395,22 @@ export function App() {
                 />
               </ErrorBoundary>
             </Pane>
+          )}
+
+          {/* 插件页：不做 keep-alive。切走就卸载 iframe 并销毁消息桥 ——
+              第三方代码不该在后台继续跑，也不该留着一条已没人读的消息通道。 */}
+          {(mainRoute.kind === 'plugin' || mainRoute.kind === 'plugin-error') && (
+            <ErrorBoundary what="插件页面">
+              <PluginView
+                route={mainRoute.route}
+                malformed={mainRoute.kind === 'plugin-error'}
+                plugins={plugins}
+                loaded={pluginsLoaded}
+                loadError={pluginsErr}
+                onRetry={loadPlugins}
+                leading={leading}
+              />
+            </ErrorBoundary>
           )}
 
           {/* 首屏兜底:环境清单还在读,或一个环境都没有(随后会跳设置弹窗) */}

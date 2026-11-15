@@ -1,7 +1,7 @@
 {
   "name": "tt-desktop",
   "productName": "TT Desktop",
-  "version": "0.5.4",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "description": "TT Desktop — T100 人机协同调试的桌面版（双击即用的 tt 外壳）",

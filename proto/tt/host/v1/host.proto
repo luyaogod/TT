@@ -1,0 +1,18 @@
+// Host 服务：能力探测。插件启动后第一件事是调它，再决定用哪些方法。
+syntax = "proto3";
+
+import "tt/host/v1/common.proto";
+
+package tt.host.v1;
+
+option go_package = "tt/internal/gen/hostv1;hostv1";
+
+message GetCapabilitiesRequest {}
+
+message GetCapabilitiesResponse {
+  Capabilities capabilities = 1;
+}
+
+service HostService {
+  rpc GetCapabilities(GetCapabilitiesRequest) returns (GetCapabilitiesResponse);
+}

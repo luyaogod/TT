@@ -38,6 +38,9 @@ func doJSON(t *testing.T, s *Server, method, target string, body any) (*httptest
 		}
 	}
 	req := httptest.NewRequest(method, target, &buf)
+	// 与真实请求一致：服务在 127.0.0.1 上，RemoteAddr 是回环地址。
+	// （插件管理端点会校验这一点，其它端点不看它。）
+	req.RemoteAddr = "127.0.0.1:54321"
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 

@@ -24,31 +24,29 @@ type Connector interface {
 	Close()
 }
 
-// Open creates a connector for the given connection config by type.
+// Open 打开一条**内置只读语义**的连接（文本层 + 库侧双防线）。
+//
+// 这是历史入口，等价于 `OpenSession(ctx, c, SessionOptions{ReadOnly: true})`；
+// 需要普通（可写）会话的调用方用 OpenSession 并显式写 ReadOnly:false —— 见 session.go。
 func Open(ctx context.Context, c dbconfig.Connection) (Connector, error) {
-	// 客户端直连凭据 = 账号列表首项(直连与 TOPENT 无关)
-	if err := c.FillDialCred(); err != nil {
-		return nil, err
-	}
-	switch c.Type {
-	case "kingbase":
-		return OpenKingbase(ctx, c)
-	case "oracle":
-		return OpenOracle(ctx, c)
-	default:
-		return nil, fmt.Errorf("未知的连接类型 \"%s\"", c.Type)
-	}
+	return OpenSession(ctx, c, SessionOptions{ReadOnly: true})
 }
 
 // KingbaseConnector connects to a Kingbase (人大金仓) server via the PostgreSQL wire protocol.
 type KingbaseConnector struct {
-	addr string
-	typ  string
-	pool *pgxpool.Pool
+	addr     string
+	typ      string
+	pool     *pgxpool.Pool
+	readOnly bool
 }
 
-// OpenKingbase connects to the given Kingbase server and verifies the connection.
+// OpenKingbase 打开内置只读语义的金仓连接（历史入口，等价 openKingbase(…, true)）。
 func OpenKingbase(ctx context.Context, c dbconfig.Connection) (Connector, error) {
+	return openKingbase(ctx, c, true)
+}
+
+// openKingbase connects to the given Kingbase server and verifies the connection.
+func openKingbase(ctx context.Context, c dbconfig.Connection, readOnly bool) (Session, error) {
 	poolCfg, err := pgxpool.ParseConfig(kingbaseDSN(c))
 	if err != nil {
 		return nil, fmt.Errorf("解析 Kingbase 连接配置失败: %w", err)
@@ -80,7 +78,9 @@ func OpenKingbase(ctx context.Context, c dbconfig.Connection) (Connector, error)
 	if poolCfg.ConnConfig.RuntimeParams == nil { // ParseConfig 走 DSN 合成时会给空 map，这里只是别赌它
 		poolCfg.ConnConfig.RuntimeParams = map[string]string{}
 	}
-	poolCfg.ConnConfig.RuntimeParams["default_transaction_read_only"] = "on"
+	if readOnly {
+		poolCfg.ConnConfig.RuntimeParams["default_transaction_read_only"] = "on"
+	}
 
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
@@ -94,7 +94,7 @@ func OpenKingbase(ctx context.Context, c dbconfig.Connection) (Connector, error)
 		return nil, fmt.Errorf("连接 Kingbase 失败 (%s): %w", c.Address(), err)
 	}
 
-	return &KingbaseConnector{addr: c.Address(), typ: c.Type, pool: pool}, nil
+	return &KingbaseConnector{addr: c.Address(), typ: c.Type, pool: pool, readOnly: readOnly}, nil
 }
 
 func kingbaseDSN(c dbconfig.Connection) string {
@@ -122,8 +122,12 @@ func (k *KingbaseConnector) ServerVersion(ctx context.Context) (string, error) {
 // （`checkReadOnlyStatement`）：库侧的会话级只读是兜底，它拦不住"把只读自己关掉"
 // 的那一句 —— 见那两个函数的注释。
 func (k *KingbaseConnector) Query(ctx context.Context, sql string) ([]string, [][]string, error) {
-	if err := checkReadOnlyStatement(sql); err != nil {
-		return nil, nil, err
+	// 只在只读会话上过文本层：普通会话是插件通用路径，语句语义不归 TT 审查
+	// （边界是数据库账号权限），对它套一层"看起来像写就拒绝"的检查等于两套语义互相冒充。
+	if k.readOnly {
+		if err := checkReadOnlyStatement(sql); err != nil {
+			return nil, nil, err
+		}
 	}
 	return k.queryReadOnly(ctx, sql)
 }

@@ -80,6 +80,31 @@ tt skills remove --agent claude --yes
 `<根>/.agents/.tt-manifest.json`（项目级或用户目录各一份）。设置页「技能 → 分发」是同一份
 实现的图形面。
 
+## 插件（plugins）
+
+TT 支持第三方插件：一个 zip 可以贡献 CLI 命名空间（`tt <namespace> …`）、常驻服务、
+独立页面和 skills，并通过 Host API 复用 TT 已经配好的数据库/SSH 连接（插件拿不到
+明文口令，能用哪些环境由你逐个授权）。
+
+```bash
+tt plugin install ./myplugin.zip     # 只解包注册，不执行插件代码
+tt plugin enable  com.example.myplugin --allow profiles.list,db.connect --env prod
+tt plugin list --all                 # 版本、启停、贡献面
+tt plugin doctor                     # 清单/兼容/页面/服务/技能 自检
+tt plugin logs com.example.myplugin  # 最新一次运行的日志
+tt plugin update --index <发布索引> --dry-run   # 手动升级（不自动）：先看计划
+tt plugin rollback com.example.myplugin         # 切回上一个版本
+tt plugin disable com.example.myplugin
+```
+
+- **装插件 = 运行别人的本机程序**，TT 不做沙箱；只装可信来源。
+- 升级是手动的：TT 不后台检查、不自动下载。升级失败会自动回滚到原来的版本。
+- Host API 独立挂在 `/hostrpc/`（ConnectRPC v1），与设置页的连接测试是同一份实现。
+
+作者与用户文档：[插件作者指南](.agents/docs/plugin-system/11-plugin-author-guide.md)、
+[用户指南](.agents/docs/plugin-system/12-user-guide.md)、
+[发布索引格式](.agents/docs/plugin-system/13-release-index.md)。
+
 ## TT SKILL HUB
 
 如果需要贡献skill，请遵循下面的格式，将你的skill仓库连接、摘要和描述通过PR的形式推送到本文档本章节

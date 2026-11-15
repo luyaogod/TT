@@ -14,11 +14,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   ChevronRight, CircleX, Folder, FolderOpen, FolderPlus, PanelLeftClose,
-  Plus, RefreshCw, Search, Settings, X,
+  Plus, Puzzle, RefreshCw, Search, Settings, X,
 } from 'lucide-react'
 import { cn } from '../../shared/utils'
 import type { Route } from './routing'
 import type { EnvBrief, SessionItem } from './store'
+import { pluginMenuItems, type PluginDescriptor } from './plugins'
 
 export interface SidebarProps {
   envs: EnvBrief[]
@@ -28,8 +29,11 @@ export interface SidebarProps {
   /** 会话 id → 服务端状态(`idle` / `loading` / `running` / `stopped` / `exit`)。 */
   states: Record<string, string>
   route: Route
+  /** 插件前端贡献清单；菜单只列已启用的，顺序由 pluginMenuItems 固定。 */
+  plugins: PluginDescriptor[]
   onSelectEnv: (env: string) => void
   onSelectSession: (s: SessionItem) => void
+  onSelectPlugin: (route: string) => void
   onCloseSession: (s: SessionItem) => void
   onNewSession: () => void
   onSettings: () => void
@@ -61,8 +65,8 @@ function stateOf(states: Record<string, string>, id: string) {
 }
 
 export function Sidebar({
-  envs, envsLoaded, envsErr, sessions, states, route,
-  onSelectEnv, onSelectSession, onCloseSession, onNewSession, onSettings, onRefreshEnvs, onAddEnv, onCollapse,
+  envs, envsLoaded, envsErr, sessions, states, route, plugins,
+  onSelectEnv, onSelectSession, onSelectPlugin, onCloseSession, onNewSession, onSettings, onRefreshEnvs, onAddEnv, onCollapse,
 }: SidebarProps) {
   // 展开状态:按环境名记住**用户显式开/关过**的选择。
   // 没选过时:有会话才默认展开 —— 一个会话都没有的环境展开着只剩一行「还没有会话」,
@@ -70,6 +74,9 @@ export function Sidebar({
   const [toggled, setToggled] = useState<Record<string, boolean>>({})
   const [filterOpen, setFilterOpen] = useState(false)
   const [q, setQ] = useState('')
+
+  // 菜单顺序只有一处口径（pluginMenuItems）：已启用 + 按标题稳定排序。
+  const pluginMenu = useMemo(() => pluginMenuItems(plugins), [plugins])
 
   // 从外部(深链接/刷新)落到某条会话时,它所在的环境必须展开 —— 否则树里看不到"当前在哪"。
   const routeSessionEnv = route.kind === 'session' ? sessions.find((s) => s.id === route.id)?.env : undefined
@@ -248,6 +255,27 @@ export function Sidebar({
           })
         )}
       </div>
+
+      {/* 插件页入口:只列已启用、确有页面贡献的插件。顺序稳定(按标题),
+          与主面板的 #plugin/<route> 使用同一份注册表 —— 菜单里有,页面就解析得到。 */}
+      {pluginMenu.length > 0 && (
+        <div className="max-h-[40%] shrink-0 overflow-y-auto border-t border-border/60 px-2 py-2">
+          <div className="px-1.5 pb-1 text-[12px] text-muted-foreground">插件</div>
+          {pluginMenu.map((p) => {
+            const on = route.kind === 'plugin' && route.route === p.route
+            return (
+              <button key={p.id} onClick={() => onSelectPlugin(p.route)} title={p.title}
+                className={cn(rowBase, 'px-2', on ? rowOn : rowIdle)}>
+                <Puzzle className="h-4 w-4 shrink-0" />
+                <span className="min-w-0 flex-1 truncate">{p.title}</span>
+                {p.healthy === false && (
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" title="插件服务不健康" />
+                )}
+              </button>
+            )
+          })}
+        </div>
+      )}
 
       {/* 底部:设置(与 DSH 一样钉在左下角) */}
       <div className="shrink-0 border-t border-border/60 p-2">

@@ -3,6 +3,7 @@ package host
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -205,6 +206,21 @@ func redactCmd(cmd string) string {
 
 // Close 关闭连接
 func (c *SSHConn) Close() error { return c.cli.Close() }
+
+// ExitStatus 取远端命令的退出码；拿不到（不是退出错误 / 连接层失败）时返回 -1。
+//
+// 为什么要暴露这个函数：命令"跑完但返回非零"是一次**正常结果**，与"连不上/通道断了"
+// 是两回事。调用方要能把 exit code 如实带回（Host API 的 SSHSession.Exec 就这么用）。
+//
+// 判据是**接口**而不是具体类型（`golang.org/x/crypto/ssh` 的 *ssh.ExitError 满足它）：
+// 这样调用方与测试都不必 import 那个包，也不必伪造一个私有字段塞不进去的结构体。
+func ExitStatus(err error) int {
+	var ec interface{ ExitStatus() int }
+	if errors.As(err, &ec) {
+		return ec.ExitStatus()
+	}
+	return -1
+}
 
 // Cfg 返回本连接的目标配置(供外部判断连接归属)
 func (c *SSHConn) Cfg() SSHConfig { return c.cfg }

@@ -55,7 +55,10 @@ func (s *Server) hSkillsGet(w http.ResponseWriter, r *http.Request) {
 
 	out := map[string]any{"ok": true, "config": cfgPath}
 
-	var officialNames []string
+	var (
+		officialNames []string
+		officialDir   string
+	)
 	if dir, derr := officialSkillsDirFn(); derr != nil {
 		out["officialError"] = derr.Error()
 	} else if infos, _, ierr := skill.InspectOfficial(dir); ierr != nil {
@@ -63,7 +66,9 @@ func (s *Server) hSkillsGet(w http.ResponseWriter, r *http.Request) {
 		// 作为一条状态带出去，第三方那一栏照常工作。
 		out["officialError"] = ierr.Error()
 		out["officialDir"] = dir
+		officialDir = dir
 	} else {
+		officialDir = dir
 		official := make([]skill.Info, 0, len(infos))
 		for _, info := range infos {
 			officialNames = append(officialNames, info.Name)
@@ -89,6 +94,19 @@ func (s *Server) hSkillsGet(w http.ResponseWriter, r *http.Request) {
 		rows = append(rows, row)
 	}
 	out["externals"] = rows
+
+	// 插件技能与计划告警：与「分发」页、命令行同一个计划（P4-05）。
+	// 插件只读（启停归插件管理面），所以单独一栏，不与可增删的第三方混在一起。
+	out["plugins"] = s.pluginSkillRows()
+	warnings := []skill.Warning{}
+	if officialDir != "" {
+		if plan, pre, perr := s.skillsPlan(officialDir, paths); perr == nil {
+			warnings = plan.Warnings
+		} else {
+			warnings = append(warnings, pre...)
+		}
+	}
+	out["warnings"] = warnings
 
 	writeJSON(w, http.StatusOK, out)
 }

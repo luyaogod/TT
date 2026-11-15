@@ -8,16 +8,22 @@ import (
 	"strings"
 )
 
-// Origin 说明一个技能是从哪儿来的。两套来源彻底分开：
+// Origin 说明一个技能是从哪儿来的。三套来源彻底分开：
 //
 //   - 官方：<exe 目录>\skills。它是发版包的一部分，走专用路径，不参与第三方登记表的
 //     校验与告警 —— 它坏了是包坏了，不是用户配错了。
 //   - 第三方：用户在设置页登记的任意路径，一行一个技能目录。
+//   - 插件：已启用插件在**活跃版本目录**里贡献的技能目录（相对路径，见
+//     plugin.Contributions.Skills）。它随插件的启停而出现/消失，不写进任何登记表。
+//
+// 优先级（同一名字谁赢）就是这个顺序：官方 > 用户登记的第三方 > 插件。理由写在一处
+// 也只用一处 —— internal/skill 的 BuildPlanWithPluginSkills。
 type Origin string
 
 const (
 	OriginOfficial Origin = "official"
 	OriginExternal Origin = "external"
+	OriginPlugin   Origin = "plugin"
 )
 
 // State 是一条登记（或一个技能目录）的判定结果。
@@ -34,13 +40,14 @@ const (
 )
 
 // Info 是一个技能目录的判定结果。官方的 Info.State 恒为 ok（官方不合规是硬错误，
-// 见 InspectOfficial）。第三方的为什么不是 ok，看 Why。
+// 见 InspectOfficial）。第三方/插件的为什么不是 ok，看 Why。
 type Info struct {
 	Origin      Origin `json:"origin"`
 	Name        string `json:"name"`        // 磁盘上读到的 name；读不到为空
 	Description string `json:"description"` // 读不到为空（设置页只读展示用）
 	Dir         string `json:"dir"`         // 绝对路径
-	Index       int    `json:"index"`       // 第三方登记的序号（1 起）；官方为 0
+	Index       int    `json:"index"`       // 第三方登记的序号（1 起）；官方与插件为 0
+	Plugin      string `json:"plugin,omitempty"`
 	State       State  `json:"state"`
 	Why         string `json:"why,omitempty"`
 }
@@ -154,6 +161,43 @@ func InspectExternal(paths []string, officialNames []string) []Info {
 		out = append(out, info)
 	}
 	return out
+}
+
+// InspectPlugin 判定一条插件贡献的技能目录。
+//
+// 规则与第三方**完全一致**（P4-04：不另写一套）：目录要在、里有 SKILL.md、
+// frontmatter 可解析、name 等于目录名、description 非空且不超长。assets/ 不在这里判
+// —— 那是安装时的指针改写（见 assets.go），空目录也算"没有资源"。
+//
+// 与第三方的差别只有两点，都在调用方：
+//   - 目录由插件声明（相对活跃版本目录），本函数只接绝对路径；
+//   - 撞名的对手是"已经排好的计划"，所以由 BuildPlanWithPluginSkills 判，不在这里判。
+func InspectPlugin(src Source) Info {
+	info := Info{Origin: OriginPlugin, Plugin: src.Plugin, Dir: src.Dir}
+	info.Name = filepath.Base(filepath.Clean(src.Dir))
+
+	st, serr := os.Stat(src.Dir)
+	if serr != nil || !st.IsDir() {
+		info.State, info.Why = StateMissing, "插件声明的技能目录不存在（版本目录可能被删，或这个版本里没有它）"
+		return info
+	}
+	b, rerr := os.ReadFile(filepath.Join(src.Dir, "SKILL.md"))
+	if rerr != nil {
+		info.State, info.Why = StateInvalid, "目录里没有 SKILL.md"
+		return info
+	}
+	meta, perr := ParseFrontmatter(b)
+	if perr != nil {
+		info.State, info.Why = StateInvalid, "SKILL.md: "+perr.Error()
+		return info
+	}
+	info.Description = meta.Description
+	if probs := ValidateMeta(info.Name, meta); len(probs) > 0 {
+		info.State, info.Why = StateInvalid, "SKILL.md: "+strings.Join(probs, "；")
+		return info
+	}
+	info.State = StateOK
+	return info
 }
 
 // HasAssets 判断一个技能目录下的根级 assets/ 是否有内容（至少一个文件）。

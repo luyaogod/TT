@@ -7,7 +7,7 @@ SHELL := sh
 .SHELLFLAGS := -c
 
 .DEFAULT_GOAL := all
-.PHONY: all help build test check-web web-build engine selftest doctor deep-tzc deep-tzs fns e2e skips version-check update-live-check package msi desktop-check desktop-dist
+.PHONY: all help build test check-web web-build engine selftest doctor deep-tzc deep-tzs fns e2e skips version-check update-live-check package msi desktop-check desktop-dist proto-tools proto-gen proto-lint proto-breaking proto-check
 
 all: build test
 
@@ -25,6 +25,45 @@ check-web: ## 前端三项检查：fgltokens / fgloutline / store
 
 web-build: ## 前端构建（含 tsc 类型检查；check:app 不做类型检查）
 	cd web && npm run build
+
+# ---------- Host API（proto/tt/host/v1） ----------
+#
+# 公共契约只有 proto/tt/host/v1 一处，生成物入库（internal/gen）。规矩：
+#   1) 改 .proto 必须重跑 proto-gen，proto-check 会拿 git diff 抓"改了没重生成"。
+#   2) Buf 的缓存目录固定到仓库内：某些受限环境（企业 EDR / 只读 %LOCALAPPDATA%）
+#      连 mkdir 都不许，buf 默认落到用户目录会当场失败。
+#   3) 插件（protoc-gen-go / protoc-gen-connect-go）必须由 proto-tools 装，别下 exe 包：
+#      下载来的可执行文件在某些终端防护策略下被禁止写盘，buf/protoc 会报
+#      "Access is denied" 而看不出原因。
+BUF_CACHE_DIR := $(CURDIR)/.tools/buf-cache
+BUF_ENV := BUF_CACHE_DIR=$(BUF_CACHE_DIR)
+# 兼容基线 —— **已发布契约的快照**，不是 git 分支：
+#   - 用 git 分支没意义：本项目的 Host API 是新增的，main 上没有任何 .proto；
+#   - 快照 = `buf build` 出的 FileDescriptorSet（JSON，可 diff 可评审），随契约一起入库；
+#   - 只在**发布并有意扩充契约**（纯增量）后刷新基线：先发版，再
+#     `buf build -o proto/baseline/v1.json --as-file-descriptor-set`，
+#     这样下一个版本才拿"上一个已发布契约"作比较。
+BUF_BREAKING_AGAINST ?= proto/baseline/v1.json
+
+proto-tools: ## 装 Host API 的生成工具链（buf + 两个 protoc 插件，进 $(go env GOPATH)/bin）
+	go install github.com/bufbuild/buf/cmd/buf@v1.75.0
+	go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.7
+	go install connectrpc.com/connect/cmd/protoc-gen-connect-go@v1.19.1
+
+proto-gen: ## 由 .proto 生成 internal/gen（protoc-gen-go + protoc-gen-connect-go）
+	@command -v buf >/dev/null || { echo '缺 buf：先跑 make proto-tools（它把 buf 装进 $$(go env GOPATH)/bin，并确保该目录在 PATH 里）'; exit 1; }
+	$(BUF_ENV) buf generate
+
+proto-lint: ## buf lint（STANDARD，只有 buf.yaml 里写明的豁免）
+	@command -v buf >/dev/null || { echo '缺 buf：先跑 make proto-tools'; exit 1; }
+	$(BUF_ENV) buf lint
+
+proto-breaking: ## buf breaking：对照已发布的契约快照（BUF_BREAKING_AGAINST 可覆盖）
+	@command -v buf >/dev/null || { echo '缺 buf：先跑 make proto-tools'; exit 1; }
+	$(BUF_ENV) buf breaking --against '$(BUF_BREAKING_AGAINST)'
+
+proto-check: proto-lint proto-gen ## lint + 重生成 + 「生成物无 diff」闸门（改 .proto 忘了重生成会在这里红）
+	@git diff --quiet -- internal/gen || { echo 'internal/gen 与 .proto 不一致：跑 make proto-gen 并把生成物一起提交'; git --no-pager diff --stat -- internal/gen; exit 1; }
 
 engine: ## 只在真的改了 engine/ 时才跑！重编会孤儿化在跑的守护进程
 	cd engine && ./build.sh

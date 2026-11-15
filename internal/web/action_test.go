@@ -8,37 +8,42 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"tt/internal/connsvc"
 	"tt/internal/dbconfig"
 	"tt/internal/erpdb"
 	"tt/internal/host"
+	"tt/internal/sshtun"
 )
 
 // 三个"动作"端点：POST /api/dbprobe、POST /api/dbaccverify、POST /api/conntest。
 //
 // 它们都要连服务器/连库，所以默认档的测试进不去 —— 而这三条路径上的**错误分支**
 // （HTTP 码、信封形状、stage 取值）恰恰是对外契约，改了没有任何东西会响。
-// Options 上那三个函数字段就是为这个开的（nil = 真实现，生产行为一字不差）。
 //
-// 其中 **conntest 是唯一能测到快乐路径的**：它的下游 `erpdb.Open` 返回的是
-// `erpdb.Connector` **接口**，所以可以注入一个假实现。
+// conntest 现在走 connsvc（与第三方插件的 ConnectRPC 是同一份实现），
+// 所以这里注入的是连接服务最底层的那次"打开会话"，而不是整个 Connector：
+// 隧道改写、阶段归类、关闭收口这些都在被测范围内。
 
-// fakeConnector 是 erpdb.Connector 的假实现。只实现测试要的那几条，
+// fakeSession 是 erpdb.Session 的假实现。只实现测试要的那几条，
 // 其余返回零值 —— 这里不假装能验"库怎么答"，只验我们的信封。
-type fakeConnector struct {
-	typ    string
-	ver    string
-	verErr error
-	closed bool
+type fakeSession struct {
+	typ      string
+	ver      string
+	verErr   error
+	readOnly bool
+	closed   bool
 }
 
-func (f *fakeConnector) Type() string { return f.typ }
-func (f *fakeConnector) ServerVersion(context.Context) (string, error) {
+func (f *fakeSession) Type() string { return f.typ }
+func (f *fakeSession) ServerVersion(context.Context) (string, error) {
 	return f.ver, f.verErr
 }
-func (f *fakeConnector) Query(context.Context, string) ([]string, [][]string, error) {
+func (f *fakeSession) Query(context.Context, string) ([]string, [][]string, error) {
 	return nil, nil, nil
 }
-func (f *fakeConnector) Close() { f.closed = true }
+func (f *fakeSession) Exec(context.Context, string) (int64, error) { return 0, nil }
+func (f *fakeSession) ReadOnly() bool                              { return f.readOnly }
+func (f *fakeSession) Close()                                      { f.closed = true }
 
 // actionServer 造一个注入了假外部依赖的服务。
 func actionServer(t *testing.T, opt Options) *Server {
@@ -62,7 +67,12 @@ func TestActionEndpointsRejectMalformedBody(t *testing.T) {
 	s := actionServer(t, Options{
 		ProbeDB:   func(host.DBProbeReq) (*host.DBProbeOut, error) { called = true; return nil, nil },
 		VerifyAcc: func(host.DBAccVerifyReq) error { called = true; return nil },
-		OpenDB:    func(context.Context, dbconfig.Connection) (erpdb.Connector, error) { called = true; return nil, nil },
+		ConnSvc: testConnSvc(t, connsvc.Options{
+			OpenDB: func(context.Context, dbconfig.Connection, erpdb.SessionOptions) (erpdb.Session, error) {
+				called = true
+				return nil, nil
+			},
+		}),
 	})
 	for _, path := range []string{"/api/dbprobe", "/api/dbaccverify", "/api/conntest"} {
 		t.Run(path, func(t *testing.T) {
@@ -151,9 +161,11 @@ func TestConnTestFailuresAreResultsNotHTTPErrors(t *testing.T) {
 	t.Run("连不上：stage=connect", func(t *testing.T) {
 		boom := errors.New("连不上：测试用")
 		s := actionServer(t, Options{
-			OpenDB: func(context.Context, dbconfig.Connection) (erpdb.Connector, error) {
-				return nil, boom
-			},
+			ConnSvc: testConnSvc(t, connsvc.Options{
+				OpenDB: func(context.Context, dbconfig.Connection, erpdb.SessionOptions) (erpdb.Session, error) {
+					return nil, boom
+				},
+			}),
 		})
 		rec, got := doJSON(t, s, "POST", "/api/conntest", map[string]any{})
 		if rec.Code != 200 {
@@ -169,11 +181,13 @@ func TestConnTestFailuresAreResultsNotHTTPErrors(t *testing.T) {
 
 	t.Run("连上了但版本查不出：stage=version", func(t *testing.T) {
 		boom := errors.New("版本查不出：测试用")
-		fc := &fakeConnector{typ: "oracle", verErr: boom}
+		fc := &fakeSession{typ: "oracle", verErr: boom}
 		s := actionServer(t, Options{
-			OpenDB: func(context.Context, dbconfig.Connection) (erpdb.Connector, error) {
-				return fc, nil
-			},
+			ConnSvc: testConnSvc(t, connsvc.Options{
+				OpenDB: func(context.Context, dbconfig.Connection, erpdb.SessionOptions) (erpdb.Session, error) {
+					return fc, nil
+				},
+			}),
 		})
 		rec, got := doJSON(t, s, "POST", "/api/conntest", map[string]any{})
 		if rec.Code != 200 {
@@ -190,13 +204,15 @@ func TestConnTestFailuresAreResultsNotHTTPErrors(t *testing.T) {
 }
 
 // TestConnTestSuccessIsTheOnlyHappyPathInThisFile 这三个端点里唯一能测全的一条：
-// 假 Connector 走完 Open → ServerVersion → Close。
+// 假 Session 走完 Open → ServerVersion → Close。
 func TestConnTestSuccessIsTheOnlyHappyPathInThisFile(t *testing.T) {
-	fc := &fakeConnector{typ: "oracle", ver: "Oracle Database 11g"}
+	fc := &fakeSession{typ: "oracle", ver: "Oracle Database 11g"}
 	s := actionServer(t, Options{
-		OpenDB: func(context.Context, dbconfig.Connection) (erpdb.Connector, error) {
-			return fc, nil
-		},
+		ConnSvc: testConnSvc(t, connsvc.Options{
+			OpenDB: func(context.Context, dbconfig.Connection, erpdb.SessionOptions) (erpdb.Session, error) {
+				return fc, nil
+			},
+		}),
 	})
 	rec, got := doJSON(t, s, "POST", "/api/conntest", map[string]any{
 		"connection": map[string]any{"type": "oracle", "host": "db1", "service": "t35prd"},
@@ -210,12 +226,49 @@ func TestConnTestSuccessIsTheOnlyHappyPathInThisFile(t *testing.T) {
 	if got["type"] != "oracle" || got["serverVersion"] != "Oracle Database 11g" {
 		t.Errorf("该把类型与版本带回来，得 %v", got)
 	}
-	// address 由**请求里的连接**算（不是从 Connector 读的），所以它能如实反映"连的是哪儿"。
+	// address 由**连接服务算**（隧道改写之后的实际地址），所以它能如实反映"连的是哪儿"。
 	if got["address"] != "db1:1521/t35prd" {
-		t.Errorf("address 该由请求里的连接算出，得 %v", got["address"])
+		t.Errorf("address 该反映实际连接地址，得 %v", got["address"])
 	}
 	if !fc.closed {
 		t.Error("成功路径必须把连接关掉（否则一次页面点一下就漏一条连接）")
+	}
+}
+
+// TestConnTestUsesTunnelWhenConfigured 配了 viaSsh 时，测试必须经隧道同一条链路。
+//
+// 这是"测试走的链路 = 实际查询走的链路"那条要求的守卫：隧道建立之后驱动连的是
+// 127.0.0.1:<本地端口>，而 address 也要如实反映这一点。
+func TestConnTestUsesTunnelWhenConfigured(t *testing.T) {
+	var gotConn dbconfig.Connection
+	s := actionServer(t, Options{
+		ConnSvc: testConnSvc(t, connsvc.Options{
+			DialTunnel: func(o sshtun.Options) (connsvc.Tunnel, error) {
+				return &fakeTunnel{port: 45678}, nil
+			},
+			OpenDB: func(_ context.Context, c dbconfig.Connection, _ erpdb.SessionOptions) (erpdb.Session, error) {
+				gotConn = c
+				return &fakeSession{typ: "oracle", ver: "v"}, nil
+			},
+		}),
+	})
+	rec, got := doJSON(t, s, "POST", "/api/conntest", map[string]any{
+		"connection": map[string]any{
+			"type": "oracle", "host": "db1", "port": 1521, "service": "t35prd",
+			"viaSsh": map[string]any{"host": "jump", "port": 22, "user": "u", "password": "p"},
+		},
+	})
+	if rec.Code != 200 || got["ok"] != true {
+		t.Fatalf("该成功，得 %d %v", rec.Code, got)
+	}
+	if gotConn.Host != "127.0.0.1" || gotConn.Port != 45678 {
+		t.Fatalf("连接该被改写到隧道本地端口，得 %s:%d", gotConn.Host, gotConn.Port)
+	}
+	if got["via"] != "tunnel" {
+		t.Errorf("via 该是 tunnel，得 %v", got["via"])
+	}
+	if got["address"] != "127.0.0.1:45678/t35prd" {
+		t.Errorf("address 该是隧道本地地址，得 %v", got["address"])
 	}
 }
 
@@ -225,9 +278,9 @@ func TestConnTestSuccessIsTheOnlyHappyPathInThisFile(t *testing.T) {
 // 是"连不上"，正是真实现会报的错）。它守的是"nil 回落"这个约定本身 ——
 // 少了回落，所有没注入的调用点会直接空指针崩。
 func TestActionEndpointsUseTheRealImplWhenNotInjected(t *testing.T) {
-	s := actionServer(t, Options{}) // 三个字段全 nil
+	s := actionServer(t, Options{}) // 全 nil
 
-	// conntest 用空连接：真 erpdb.Open 会因类型/主机缺失而失败，落到 stage=connect。
+	// conntest 用空连接：真 erpdb 会因没配账号而失败，落到 stage=connect。
 	rec, got := doJSON(t, s, "POST", "/api/conntest", map[string]any{})
 	if rec.Code != 200 {
 		t.Fatalf("该是 200（失败是结果），得 %d。若这里是 502/500，说明 nil 回落坏了",

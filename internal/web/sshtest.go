@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"tt/internal/connsvc"
 	"tt/internal/host"
 )
 
@@ -56,21 +57,37 @@ func (s *Server) hSSHTest(w http.ResponseWriter, r *http.Request) {
 
 	cfg := host.SSHConfig{Host: req.Host, Port: req.Port, User: req.User, Password: req.Password}
 	start := time.Now()
-	out, err := s.testSSH(cfg)
-	if err != nil {
-		writeErr(w, http.StatusBadGateway, fmt.Errorf("SSH 连接失败: %w", err))
+	res := s.connSvc().TestSSHConn(cfg)
+	if !res.OK {
+		writeErr(w, http.StatusBadGateway, fmt.Errorf("SSH 连接失败: %s", res.Message))
 		return
 	}
 	writeJSON(w, http.StatusOK, sshTestResp{
-		OK: true, Address: cfg.Addr(), Hostname: out.Hostname, Note: out.Note,
+		OK: true, Address: cfg.Addr(), Hostname: bannerOrEmpty(res.Banner), Note: noteOf(res.Banner),
 		ElapsedMs: time.Since(start).Milliseconds(),
 	})
 }
 
-// testSSH 走注入的实现;没注入就用真的(与 probeDB/verifyAcc 同一手法)。
-func (s *Server) testSSH(cfg host.SSHConfig) (*host.SSHTestOut, error) {
-	if s.opt.SSHTest != nil {
-		return s.opt.SSHTest(cfg)
+// bannerOrEmpty / noteOf 把连接服务的 Banner 拆回这个端点的两个字段。
+//
+// connsvc 的 Banner 语义是"能拿到主机名就给主机名，拿不到就给说明"；
+// 这个端点的历史形状是 hostname + note 两个字段，前端按它们分别显示，
+// 所以这里按同一条规则拆开（而不是把说明塞进 hostname 里）。
+func bannerOrEmpty(banner string) string {
+	if strings.HasPrefix(banner, "已登录") {
+		return ""
 	}
-	return host.TestSSH(cfg)
+	return banner
+}
+
+func noteOf(banner string) string {
+	if strings.HasPrefix(banner, "已登录") {
+		return banner
+	}
+	return ""
+}
+
+// testSSH 走连接服务（与 Host API 的 ConnectionsService.TestSSH 同一份实现）。
+func (s *Server) testSSH(cfg host.SSHConfig) *connsvc.TestSSHResult {
+	return s.connSvc().TestSSHConn(cfg)
 }

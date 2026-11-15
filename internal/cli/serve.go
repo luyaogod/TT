@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,10 +14,26 @@ import (
 	"tt/internal/cli/common"
 	debugcli "tt/internal/cli/debug"
 	"tt/internal/config"
+	"tt/internal/connsvc"
 	"tt/internal/debug"
 	dictserver "tt/internal/dict/server"
+	"tt/internal/hostrpc"
+	"tt/internal/plugin"
 	"tt/internal/web"
 )
+
+// connReloader 把「配置被改写了」翻译成「连接服务的旧会话全部作废」。
+//
+// 为什么直接作废而不是热替换配置：会话是**已建立**的连接，它连着的目标在配置改写前
+// 就定了。环境名没变、库却换了以后，旧会话继续返回旧库的数据 —— 那正是
+// "查错了地方却看起来正常"。作废之后调用方重开一个会话就落到新配置上。
+type connReloader struct{ svc *connsvc.Service }
+
+// ReloadConfig 实现 web.ConfigReloader。幂等且并发安全（connsvc 自己加锁）。
+func (c connReloader) ReloadConfig() error {
+	c.svc.Reload()
+	return nil
+}
 
 // newServeCmd 是统一的本地 Web 服务。
 //
@@ -154,6 +171,57 @@ func newServeCmd() *cobra.Command {
 			syncDefault := config.LocationsAt(path).SyncTarget("", "")
 			dictSrv := dictserver.New(path)
 
+			// ---- 连接服务与 Host API ----
+			//
+			// 一个 connsvc 实例同时交给：设置页的"测试连接"（进程内直接调用）、
+			// Host API 的 ConnectRPC handlers（进程外插件）。这就是"同服务、双接入"：
+			// 不存在第一方走一套、插件走另一套连接逻辑。
+			//
+			// 令牌表先只由 supervisor 签发（阶段 3 接入）；在此之前 /hostrpc/ 已挂载但
+			// **没有任何有效令牌** —— 未认证请求一律 401，不会开出一个匿名可用的连接面。
+			// 审计落在服务日志里（不含 SQL 文本/命令内容/秘密）。
+			// ---- 插件注册表 / 管理面 / supervisor ----
+			pluginStore := plugin.NewStore(config.LocationsAt(path))
+			pluginMgr := plugin.NewManager(pluginStore, reservedNamespaces())
+			pluginMgr.ConfigPath = path
+			pluginMgr.HostAPIVersion = connsvc.HostAPIVersion
+
+			auditLog := log.New(os.Stderr, "[connsvc] ", 0)
+			connSvc := connsvc.New(connsvc.Options{
+				ConfigPath: path,
+				TTVersion:  Version,
+				// 授权来源 = 插件注册表：每次判定现读，撤权立即生效（不需要重启）。
+				Authorizer: plugin.RegistryAuthorizer{Store: pluginStore},
+				Audit: func(ev connsvc.Event) {
+					if ev.OK {
+						return // 成功路径不刷日志：一次页面点三下会淹掉真正的错误
+					}
+					auditLog.Printf("action=%s caller=%s env=%s kind=%s code=%s ms=%d",
+						ev.Action, ev.Caller, ev.Env, ev.Kind, ev.Code, ev.DurationMS)
+				},
+			})
+			tokenStore := hostrpc.NewTokenStore()
+			hostRPCHandler := hostrpc.NewHandler(hostrpc.Deps{
+				Service: connSvc,
+				Auth:    hostrpc.NewTokenAuthenticator(tokenStore),
+			})
+
+			// supervisor 的 Host API 地址要等服务真正监听后才确定（端口可能被顺延），
+			// 所以先建出来、listen 之后再填 HostAPIURL 并拉起已启用的服务。
+			sup := plugin.NewSupervisor(pluginStore, tokenStore, connSvc, "", Version)
+			sup.Logf = func(format string, a ...any) { auditLog.Printf(format, a...) }
+			pluginMgr.Hooks = servePluginHooks{sup: sup, tokens: tokenStore, conn: connSvc, logf: sup.Logf}
+			// 升级/回滚要真停真起服务并撤旧实例凭证 —— 这件事只有长命的 serve 进程做得成。
+			pluginMgr.Runtime = serveUpdateRuntime{sup: sup, tokens: tokenStore, conn: connSvc}
+
+			// 插件页面资源与私有 RPC 代理（/plugins/*）。
+			// Host API 桥的目标地址按请求自己的 Host 拼（回环），不需要等监听端口确定。
+			pluginUI := plugin.NewWebHandler(pluginStore, sup.Endpoint)
+			pluginUI.Tokens = tokenStore
+			// 技能期望态重算与命令行共用一份实现（skills_sync.go）：设置页里点启用/停用/
+			// 卸载，效果必须和 `tt plugin enable/disable/uninstall` 完全一样。
+			pluginMgr.SkillsSync = syncPluginSkills
+
 			err = debugcli.RunForeground(path, debugcli.ServeSpec{
 				Prefix:           "TT",
 				StopHint:         "tt serve --stop",
@@ -177,9 +245,19 @@ func newServeCmd() *cobra.Command {
 					BareVersion: Version,
 					Debug:       debugSrv.Handler(),
 					Dict:        dictSrv.Handler(),
-					// 配置写入后让持有内存态的调试服务重新加载，否则它内存里还是旧环境，
-					// 表现是"改了没生效"。
-					Reloaders: []web.ConfigReloader{debugSrv},
+					// 设置页的"测试连接"与插件 Host API 用同一个连接服务实例。
+					ConnSvc: connSvc,
+					HostRPC: hostRPCHandler,
+					// 插件管理（安装/启停/授权/自检）。只碰元数据与载荷，不启动插件代码。
+					PluginMgr: pluginMgr,
+					PluginUI:  pluginUI.Handler(),
+					// 列表里附带运行态（state/addr/pid/restarts）。CLI 的 list 不带：
+					// 一条 list 不该为了一行状态去碰进程表。
+					PluginStatuses: sup.Statuses,
+					// 配置写入后让持有内存态的子系统重新加载，否则它们内存里还是旧环境，
+					// 表现是"改了没生效"。连接服务还要把旧会话全部作废 —— 旧会话连着的是
+					// **旧目标**，而调用方看到的仍是同一个环境名。
+					Reloaders: []web.ConfigReloader{debugSrv, connReloader{svc: connSvc}},
 					Shutdown:  stopWeb,
 					// 统一层配置状态仍按旧的单文件口径显示；设置页已改用 /api/dbsync 的库目录。
 					SyncDefaultTarget: syncDefault,
@@ -194,9 +272,18 @@ func newServeCmd() *cobra.Command {
 					return err
 				}
 				// 状态文件里的地址要给客户端点，所以通配监听(0.0.0.0/[::])换成本机地址。
-				onReady(displayAddr(used))
+				shown := displayAddr(used)
+				onReady(shown)
+
+				// Host API 地址此刻才确定（端口可能被顺延）。插件服务从这里拿到它。
+				sup.HostAPIURL = "http://" + shown + hostrpc.Prefix
+				startEnabledServices(pluginMgr, sup, sup.Logf)
 
 				<-ctx.Done()
+
+				// 收尾顺序：先停插件服务（它们可能正用着连接），再关连接服务的全部会话。
+				sup.StopAll()
+				connSvc.CloseAll()
 				return nil
 			})
 
