@@ -59,10 +59,10 @@
 `targets.go` / `manifest.go` / `deploy.go` 是「装到哪儿」的管理面，供 `tt skills` 与设置页
 「技能 → 分发」共用。
 
-- **平台表**（`targets.go`）：`.agents/skills`、`.dsh/skills`、`.codebuddy/skills`、
+- **平台表**（`targets.go`）：`.agents/skills`、`.dsh/skills`、`.workbuddy/skills`、
   `.claude/skills`、`.codex/skills`。目录相对**根目录**；加平台只加一行，前端与 CLI 自动跟随。
 - **两个范围**：默认根是项目目录；`--global` / 设置页「全局」把根换成用户目录。相对目录不变，
-  所以 Claude 的全局落点就是 `~/.claude/skills`。
+  所以 WorkBuddy 的全局落点就是 `~/.workbuddy/skills`，项目级是 `<项目>/.workbuddy/skills`。
 - **清单**（`<根>/.agents/.tt-manifest.json`）：只记 `{平台: [技能名]}`。不记版本、
   哈希、时间 —— 本功能不做版本检测，同步就是覆盖。清单只用于“这些目录是 TT 装的，
   取消勾选时可以删”。项目与全局各有一份。

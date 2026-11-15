@@ -10,7 +10,7 @@ func TestTargetsTable(t *testing.T) {
 	want := []struct{ id, dir string }{
 		{"agents", ".agents/skills"},
 		{"dsh", ".dsh/skills"},
-		{"workbuddy", ".codebuddy/skills"},
+		{"workbuddy", ".workbuddy/skills"},
 		{"claude", ".claude/skills"},
 		{"codex", ".codex/skills"},
 	}
@@ -21,6 +21,24 @@ func TestTargetsTable(t *testing.T) {
 		if Targets[i].ID != w.id || Targets[i].Dir != w.dir {
 			t.Errorf("第 %d 个 = %s/%s, want %s/%s", i, Targets[i].ID, Targets[i].Dir, w.id, w.dir)
 		}
+	}
+}
+
+// WorkBuddy 的技能目录是 .workbuddy（不是旧 CodeBuddy 品牌目录 .codebuddy）；
+// 项目级与用户级共用同一条相对目录，根不同而已。
+func TestWorkBuddyPaths(t *testing.T) {
+	wb, ok := TargetByID("workbuddy")
+	if !ok {
+		t.Fatal("平台表里没有 workbuddy")
+	}
+	if wb.Root != ".workbuddy" || wb.Dir != ".workbuddy/skills" {
+		t.Fatalf("WorkBuddy 路径 = root %q / dir %q, want .workbuddy / .workbuddy/skills", wb.Root, wb.Dir)
+	}
+	if got := wb.AbsDir(filepath.Join("C:", "proj")); got != filepath.Join("C:", "proj", ".workbuddy", "skills") {
+		t.Errorf("项目级 = %s", got)
+	}
+	if got := wb.AbsDir(filepath.Join("C:", "Users", "u")); got != filepath.Join("C:", "Users", "u", ".workbuddy", "skills") {
+		t.Errorf("用户级 = %s", got)
 	}
 }
 

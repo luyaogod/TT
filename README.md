@@ -74,9 +74,9 @@ tt skills deploy --agent claude --agent codex
 tt skills remove --agent claude --yes
 ```
 
-平台目录（相对根目录）：`.agents/skills`、`.dsh/skills`、`.codebuddy/skills`、
+平台目录（相对根目录）：`.agents/skills`、`.dsh/skills`、`.workbuddy/skills`、
 `.claude/skills`、`.codex/skills`。默认根是当前项目；`--global` 或设置页「全局」把根换成
-用户目录（`~/.agents/skills` 等）。同步是**覆盖更新**，不做版本检测；清单在
+用户目录（`~/.workbuddy/skills`、`~/.claude/skills` 等）。同步是**覆盖更新**，不做版本检测；清单在
 `<根>/.agents/.tt-manifest.json`（项目级或用户目录各一份）。设置页「技能 → 分发」是同一份
 实现的图形面。
 
