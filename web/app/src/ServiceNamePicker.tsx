@@ -2,13 +2,21 @@
 //
 // 三列：服务规格编号 / 服务名称 / API服务名称；多选，回传 API服务名称（gzja004），
 // 以 `|` 串联 —— 与 T100 的 g_qryparam.return3 一致。双击某行 = 只选该行并确认。
-import { useCallback, useEffect, useMemo, useState } from 'react'
+//
+// 勾选按**行**（服务规格编号）算，不按 API 名称：wssp00002 与 wssp00002_wf 的 API 名称
+// 相同，但它们是两行；点哪行只勾哪行。回传时再把重复 API 名去重（字段最终只认服务名）。
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { QueryTableDialog, type ColumnSpec, type FilterSpec } from './QueryTableDialog'
 import { api, type WSServiceItem } from './api'
 
 const PAGE_SIZE = 200
 const MAX_SELECT = 200
 const EMPTY: Record<string, string> = {}
+// 行 key 的分隔符：API 名里不会出现 U+0001，用它把「API名 + 规格编号」拼成唯一的行标识。
+const ROW_SEP = '\u0001'
+const rowKeyOf = (r: WSServiceItem) => `${r.apiName || r.spec}${ROW_SEP}${r.spec}`
+const syntheticKeyOf = (api: string) => `${api}${ROW_SEP}`
+const apiOfKey = (key: string) => key.split(ROW_SEP)[0]
 
 const FILTERS: FilterSpec[] = [
   { key: 'spec', label: '服务规格编号', placeholder: '如 wssp*', width: 'w-32' },
@@ -44,11 +52,13 @@ export function ServiceNamePicker({ open, env, value, onPick, onClose }: {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  // 当前值里还没在当前页找到对应行的 API 名：用合成 key 先占位，确认时原样带回。
+  const carriedRef = useRef<Set<string>>(new Set())
 
   // 打开时把当前值拆成已选项；第一个值预填「API服务名称」过滤框。
   const initial = useMemo(() => {
     if (!open) return EMPTY
-    const cur = value.split('|').map((s) => s.trim()).filter(Boolean)
+    const cur = [...new Set(value.split('|').map((s) => s.trim()).filter(Boolean))]
     return { api: cur[0] || '' }
   }, [open, value])
 
@@ -60,6 +70,25 @@ export function ServiceNamePicker({ open, env, value, onPick, onClose }: {
       setRows(r.items)
       setTotal(r.total)
       setPage(r.page)
+      // 当前值里每个 API 只映射到**第一行**（同名服务有 _wf 两行时，不要两行都勾上）。
+      const mapped = new Map<string, string>()
+      for (const it of r.items) {
+        const api = it.apiName || it.spec
+        if (carriedRef.current.has(api)) {
+          mapped.set(api, rowKeyOf(it))
+          carriedRef.current.delete(api)
+        }
+      }
+      if (mapped.size) {
+        setSelected((prev) => {
+          const next = new Set(prev)
+          for (const [api, key] of mapped) {
+            next.delete(syntheticKeyOf(api))
+            next.add(key)
+          }
+          return next
+        })
+      }
     } catch (e: any) {
       setError(e?.message || String(e))
       setRows([])
@@ -71,8 +100,9 @@ export function ServiceNamePicker({ open, env, value, onPick, onClose }: {
 
   useEffect(() => {
     if (!open) return
-    const cur = value.split('|').map((s) => s.trim()).filter(Boolean)
-    setSelected(new Set(cur))
+    const cur = [...new Set(value.split('|').map((s) => s.trim()).filter(Boolean))]
+    carriedRef.current = new Set(cur)
+    setSelected(new Set(cur.map(syntheticKeyOf)))
     setPage(1)
     void load(initial, 1)
     // value 只在打开那一刻取一次；打开期间用户选择会直接关闭弹窗。
@@ -87,7 +117,10 @@ export function ServiceNamePicker({ open, env, value, onPick, onClose }: {
   })
 
   const confirm = () => {
-    onPick([...selected].join('|'))
+    // 勾选是行级的；字段只要 API 名，所以按 API 去重后再拼接。
+    const apis = new Set<string>()
+    for (const key of selected) apis.add(apiOfKey(key))
+    onPick([...apis].join('|'))
     onClose()
   }
 
@@ -98,7 +131,7 @@ export function ServiceNamePicker({ open, env, value, onPick, onClose }: {
       filters={FILTERS}
       columns={COLUMNS}
       rows={rows}
-      rowKey={(r) => r.apiName || r.spec}
+      rowKey={rowKeyOf}
       loading={loading}
       error={error}
       total={total}
@@ -108,7 +141,7 @@ export function ServiceNamePicker({ open, env, value, onPick, onClose }: {
       selected={selected}
       onToggle={toggle}
       onQuery={(values, p) => void load({ spec: values.spec, name: values.name, api: values.api }, p)}
-      onOpenRow={(key) => { onPick(key); onClose() }}
+      onOpenRow={(key) => { onPick(apiOfKey(key)); onClose() }}
       onConfirm={confirm}
       onClose={onClose}
       confirmText="选择"
