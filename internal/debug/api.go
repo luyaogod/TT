@@ -518,7 +518,7 @@ func (s *Server) hStatus(w http.ResponseWriter, r *http.Request) {
 		"server":   "tdebug-debug",
 		"ssh":      s.cfg.SSH.Host,
 		"zone":     s.cfg.Zone,
-		"zoneName": host.ZoneTNSName(s.cfg.Zone), // 区域代码 → T100 服务别名(如 36→t35prd)
+		"zoneName": host.ZoneTNSName(s.cfg.Zone), // 旧式菜单码 → T100 服务别名(如 1→topprd);对不上为空
 		// wsPrefix:服务区前缀（出貨區 topprd 是 `/ws`，其余区是 `/w`）—— 前端拼占位符地址用。
 		// 这条规则只有后端一份实现（`wsURLPrefix`，见 wsurl.go），前端要抄就得抄对：
 		// 两边不一致时界面上的占位符地址是错的（实测 zone=t 时前端给 /wtopprd、后端给 /wstopprd）。

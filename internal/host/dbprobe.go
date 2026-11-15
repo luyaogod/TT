@@ -20,20 +20,29 @@ var (
 	reTNSField = regexp.MustCompile(`(HOST|PORT|SERVICE_NAME)\s*=\s*([^)\s]+)`)
 )
 
-// ZoneTNSName 区域代码 → 数据库 TNS 别名推导(31→t35dev,35→t35tst,36→t35prd,
-// 39→t35pth,t→topprd)。仅「从服务器获取」辅助探测用——运行时连接一律显式 host/port/service。
+// ZoneTNSName 区域代码 → 数据库 TNS 别名推导。
+//
+// 只用于「从服务器获取」在**拿不到真实环境**（chenv 未加载 / TWO_TASK 为空）时的退回值；
+// 运行时连接一律使用显式 host/port/service。
+//
+// 表里只收**旧式登录菜单**的码（见老 profile.st 的菜单：1/2/3/4 =
+// topprd/toptst/topstd/toppth）。**没有 default 分支**：对不上就返回空串，
+// 由调用方把字段留空让用户手填。
+//
+// 为什么不留兜底猜测：猜错一个别名不是"多给点信息"，而是静默连到另一个库 ——
+// 症状是"查不到数据"而不是报错，比字段空着难查得多。
 func ZoneTNSName(zone string) string {
 	switch zone {
-	case "31":
-		return "t35dev"
-	case "35":
-		return "t35tst"
-	case "39":
-		return "t35pth"
-	case "t":
+	case "1":
 		return "topprd"
+	case "2":
+		return "toptst"
+	case "3":
+		return "topstd"
+	case "4":
+		return "toppth"
 	default:
-		return "t35prd"
+		return ""
 	}
 }
 
@@ -97,7 +106,20 @@ echo ORA=$OH
 echo SQLP=$SQLP
 `
 
-// probeDBEnv 在服务器上探测 ORACLE_HOME / sqlplus / TWO_TASK(chenv zone 后)。
+// dbEnvProbeScript 拼「加载区域环境 → 找 sqlplus → 回显」的脚本。
+//
+// 分隔符一律用**换行**，不能拼分号：sqlplusFind 是多行脚本且以换行结尾，
+// 用 `…; %s; echo …` 拼时那个分号会落在行首，bash 直接报
+// `syntax error near unexpected token ';'` —— 两个 echo 从此不会执行。
+// 这个 bug 曾长期存在：TWO_TASK 恒为空，ProbeDBConfig 里「读服务器真实 TWO_TASK」
+// 的分支是死代码，TNS 别名一直靠 ZoneTNSName 的猜测兜着（2026-11 实测发现并修正）。
+//
+// 抽成纯函数是为了能单测分隔符，见 TestDBEnvProbeScriptNoLineStartsSemicolon。
+func dbEnvProbeScript(cenv string) string {
+	return cenv + "\n" + sqlplusFind + "\necho TNSADM=$TNS_ADMIN\necho TWOTASK=$TWO_TASK"
+}
+
+// ProbeDBEnv 在服务器上探测 ORACLE_HOME / sqlplus / TWO_TASK(chenv zone 后)。
 // 找不到 Oracle 客户端才算失败 —— 只认 chenv 是否加载过环境,会让
 // "/u3/pub/bin/chenv 不存在,但 /u2/oracle 下有客户端"的机器直接退化成裸 sqlplus。
 func ProbeDBEnv(conn *SSHConn, zone string) (map[string]string, error) {
@@ -105,7 +127,7 @@ func ProbeDBEnv(conn *SSHConn, zone string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	cmd := bashLC(fmt.Sprintf(`%s; %s; echo TNSADM=$TNS_ADMIN; echo TWOTASK=$TWO_TASK`, cenv, sqlplusFind))
+	cmd := bashLC(dbEnvProbeScript(cenv))
 	out, err := conn.Output(cmd, 40*time.Second)
 	if err != nil && out == "" {
 		return nil, fmt.Errorf("探测数据库环境失败: %w", err)
@@ -307,7 +329,7 @@ type DBProbeOut struct {
 	TwoTask    string `json:"twoTask,omitempty"`
 	Host       string `json:"host,omitempty"` // oracle tnsnames 解析出的实际库地址
 	Service    string `json:"service,omitempty"`
-	Note       string `json:"note,omitempty"` // 未获取到时的说明
+	Note       string `json:"note,omitempty"` // 未获取到时的说明(oracle 路径不再产生:拿不到就留空)
 }
 
 // ProbeDBConfig 登录服务器自动获取数据库连接要素(「从服务器获取」辅助,只读)。
@@ -342,20 +364,24 @@ func ProbeDBConfig(req DBProbeReq) (*DBProbeOut, error) {
 	if zone == "" {
 		zone = "36"
 	}
-	tns := ZoneTNSName(zone)
 	env, err := ProbeDBEnv(conn, zone)
 	if err != nil {
-		out.TNS = tns // chenv 拿不到也给出按区域推导的 TNS
-		out.Note = err.Error()
+		// 探不到真实环境：退回按区域码推导的别名。推导表里没有这个码就留空。
+		// 「从服务器获取」是**辅助回填**，拿不到不是错误 —— 字段空着由用户手填。
+		out.TNS = ZoneTNSName(zone)
 		return out, nil
-	}
-	out.TNS = env["TWOTASK"]
-	if out.TNS == "" {
-		out.TNS = tns
 	}
 	out.Sqlplus = env["SQLP"]
 	out.OracleHome = env["ORA"]
 	out.TwoTask = env["TWOTASK"]
+	out.TNS = env["TWOTASK"]
+	if out.TNS == "" {
+		out.TNS = ZoneTNSName(zone)
+	}
+	if out.TNS == "" {
+		// 服务器没给 TWO_TASK，退回表也对不上：不猜、不报错，字段留空。
+		return out, nil
+	}
 	if h, p, s, e := ParseTNS(conn, env["ORA"], out.TNS); e == nil {
 		out.Host, out.Service = h, s
 		out.Port, _ = strconv.Atoi(p)
