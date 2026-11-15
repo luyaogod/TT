@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 )
@@ -138,5 +139,28 @@ func TestSSHFileRoundTrip(t *testing.T) {
 	}
 	if err := s.Put(context.Background(), src, "/remote/b.png"); err != nil {
 		t.Fatal(err)
+	}
+}
+// TestJobsRunReportsProgress ctx.jobs 进程内任务：立即返回 id，fn 异步执行。
+func TestJobsRunReportsProgress(t *testing.T) {
+	c := newContext(context.Background(), "http://127.0.0.1:1", "tok", "p", "0.1.0", t.TempDir())
+	js := c.Jobs()
+	if js == nil {
+		t.Fatal("Jobs() 不该是 nil")
+	}
+	done := make(chan struct{})
+	id, err := js.Run(context.Background(), "demo", func(ctx context.Context, r Reporter) error {
+		r.Progress(50, "halfway")
+		r.Log("step")
+		close(done)
+		return nil
+	})
+	if err != nil || id == "" {
+		t.Fatalf("Run = %q, %v", id, err)
+	}
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("任务没有执行")
 	}
 }

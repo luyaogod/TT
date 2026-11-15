@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"connectrpc.com/connect"
@@ -26,10 +28,13 @@ type contextImpl struct {
 	id      string
 	version string
 	dataDir string
+	jobs    *jobService
 }
 
 func newContext(ctx context.Context, baseURL, token, id, version, dataDir string) *contextImpl {
-	return &contextImpl{ctx: ctx, cli: newHostClient(baseURL, token), id: id, version: version, dataDir: dataDir}
+	c := &contextImpl{ctx: ctx, cli: newHostClient(baseURL, token), id: id, version: version, dataDir: dataDir}
+	c.jobs = &jobService{c: c, runs: map[string]*jobRun{}}
+	return c
 }
 
 func (c *contextImpl) Context() context.Context { return c.ctx }
@@ -43,8 +48,10 @@ func (c *contextImpl) SSH() SSHService       { return &sshService{c: c} }
 func (c *contextImpl) FS() FSService         { return &fsService{c: c} }
 func (c *contextImpl) Log() Logger           { return &logger{id: c.id} }
 
-// Jobs / Commands / Events 还没接入：返回 nil，插件必须判空后再用。
-func (c *contextImpl) Jobs() JobService         { return nil }
+// Jobs 是进程内实现（任务属于插件自己的业务，不需要过 Host API）。
+func (c *contextImpl) Jobs() JobService { return c.jobs }
+
+// Commands / Events 还没接入：返回 nil，插件必须判空后再用。
 func (c *contextImpl) Commands() CommandService { return nil }
 func (c *contextImpl) Events() EventService     { return nil }
 
@@ -257,3 +264,81 @@ func (l *logger) Error(format string, args ...any) { l.log("ERROR", format, args
 func (l *logger) log(level, format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "[%s] %s %s\n", l.id, level, fmt.Sprintf(format, args...))
 }
+
+// ---- 任务 ----
+
+type jobRun struct {
+	mu      sync.Mutex
+	percent int
+	message string
+	err     error
+	done    bool
+}
+
+func (j *jobRun) set(p int, msg string) {
+	j.mu.Lock()
+	j.percent, j.message = p, msg
+	j.mu.Unlock()
+}
+
+func (j *jobRun) finish(err error) {
+	j.mu.Lock()
+	j.err, j.done = err, true
+	j.mu.Unlock()
+}
+
+// jobService 进程内任务：进度与日志直接走插件日志，取消靠 context。
+type jobService struct {
+	c    *contextImpl
+	mu   sync.Mutex
+	seq  int64
+	runs map[string]*jobRun
+}
+
+// Run 起一个后台任务，立即返回任务 id；fn 在独立 goroutine 里执行。
+func (s *jobService) Run(parent context.Context, name string, fn func(context.Context, Reporter) error) (string, error) {
+	if fn == nil {
+		return "", &Error{Code: CodeInvalidArgument, Message: "任务函数为空"}
+	}
+	if parent == nil {
+		parent = s.c.ctx
+	}
+	id := fmt.Sprintf("job-%d", atomic.AddInt64(&s.seq, 1))
+	jr := &jobRun{}
+	s.mu.Lock()
+	s.runs[id] = jr
+	s.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(parent)
+	s.c.Log().Info("job %s 开始: %s", id, name)
+	go func() {
+		defer cancel()
+		err := fn(ctx, &jobReporter{c: s.c, id: id, jr: jr})
+		jr.finish(err)
+		if err != nil {
+			s.c.Log().Error("job %s 失败: %v", id, err)
+			return
+		}
+		s.c.Log().Info("job %s 完成", id)
+	}()
+	return id, nil
+}
+
+type jobReporter struct {
+	c  *contextImpl
+	id string
+	jr *jobRun
+}
+
+func (r *jobReporter) Progress(percent int, message string) {
+	if percent < 0 {
+		percent = 0
+	}
+	if percent > 100 {
+		percent = 100
+	}
+	r.jr.set(percent, message)
+	r.c.Log().Info("job %s %d%% %s", r.id, percent, message)
+}
+
+func (r *jobReporter) Log(message string) { r.c.Log().Info("job %s %s", r.id, message) }
