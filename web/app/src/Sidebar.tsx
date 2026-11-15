@@ -140,6 +140,26 @@ export function Sidebar({
         )}
       </div>
 
+      {/* 插件页入口：直接放在品牌行下方（不单独分组、不画分隔线）。 */}
+      {pluginMenu.length > 0 && (
+        <div className="max-h-[40%] shrink-0 overflow-y-auto px-2 pb-1">
+          {pluginMenu.map((p) => {
+            const on = route.kind === 'plugin' && route.route === p.route
+            return (
+              <button key={p.id} onClick={() => onSelectPlugin(p.route)} title={p.title}
+                className={cn(rowBase, 'px-2', on ? rowOn : rowIdle)}>
+                <Puzzle className="h-4 w-4 shrink-0" />
+                <span className="min-w-0 flex-1 truncate">{p.title}</span>
+                {p.healthy === false && (
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" title="插件服务不健康" />
+                )}
+              </button>
+            )
+          })}
+          <SlotHostIfAny slot="nav" />
+        </div>
+      )}
+
       {/* 区块标题:环境 + 三个小动作(搜索 / 刷新 / 去设置里加环境) */}
       <div className="mt-3 flex h-8 shrink-0 items-center gap-0.5 px-3.5">
         <span className="flex-1 text-[12px] text-muted-foreground">
@@ -253,28 +273,6 @@ export function Sidebar({
           })
         )}
       </div>
-
-      {/* 插件页入口:只列已启用、确有页面贡献的插件。顺序稳定(按标题),
-          与主面板的 #plugin/<route> 使用同一份注册表 —— 菜单里有,页面就解析得到。 */}
-      {pluginMenu.length > 0 && (
-        <div className="max-h-[40%] shrink-0 overflow-y-auto border-t border-border/60 px-2 py-2">
-          <div className="px-1.5 pb-1 text-[12px] text-muted-foreground">插件</div>
-          {pluginMenu.map((p) => {
-            const on = route.kind === 'plugin' && route.route === p.route
-            return (
-              <button key={p.id} onClick={() => onSelectPlugin(p.route)} title={p.title}
-                className={cn(rowBase, 'px-2', on ? rowOn : rowIdle)}>
-                <Puzzle className="h-4 w-4 shrink-0" />
-                <span className="min-w-0 flex-1 truncate">{p.title}</span>
-                {p.healthy === false && (
-                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" title="插件服务不健康" />
-                )}
-              </button>
-            )
-          })}
-          <SlotHostIfAny slot="nav" />
-        </div>
-      )}
 
       {/* 底部:设置(与 DSH 一样钉在左下角) */}
       <div className="shrink-0 border-t border-border/60 p-2">
