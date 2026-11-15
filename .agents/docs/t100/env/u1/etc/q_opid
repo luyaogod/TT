@@ -1,0 +1,47 @@
+#!/bin/ksh
+
+echo ""
+echo "Input Oracle's Server_Process_OS_ID : "
+ read ans
+echo ""
+
+ex - <<%%
+a
+select
+     -- s.sid
+     --, s.action, s.MODULE
+     --, p.spid "Server Process ID"
+       s.PROCESS "Client Process ID"
+     --, s.OSUSER
+     --, s.MACHINE "Client Machine", s.terminal, s.program
+     --,s.*
+     --,p.*
+from v\$process p, v\$session s
+where s.paddr = p.addr
+and spid = $ans
+/
+.
+w! /tmp/q.sql
+%%
+
+sqlplus du/du@$ORACLE_SID < /tmp/q.sql > /tmp/q.tmp
+
+n=`cat -n /tmp/q.tmp|grep 'Client Process ID'|awk '{print $1}'`
+ed - /tmp/q.tmp <<%%
+1,$n d
+1,1 d
+2,$ d
+w
+q
+%%
+
+pid=`tail -n 1 /tmp/q.tmp`
+echo ""
+
+echo ""
+cat /proc/$pid/cmdline
+echo ""
+ps -ef|grep $pid|grep -v grep
+echo ""
+rm -rf /tmp/q.sql
+rm -rf /tmp/q.tmp

@@ -1,0 +1,28 @@
+#!/bin/ksh 
+if [ $# -ne 1 ];
+   then 
+   echo "Use : appq [sql file]"
+   echo "Ex  : appq q_module  "
+   echo "------------------------------------------------------------------"
+   cat $TOP/utl/bin/appqs/readme.txt
+   exit
+fi 
+if [ "$1" == "-v" ]; then
+   echo "appq 版本為: 1.2.01 func(s):32"
+   exit 0
+fi
+
+cd /tmp
+outfile=`echo $1 |cut -d'.' -f1`'.out'
+if test -f $outfile
+   then
+   rm $outfile
+fi
+sqlplus du/du@$ORACLE_SID < $TOP/utl/bin/appqs/$1.sql > /tmp/out.tmp
+ed - $TEMPDIR/out.tmp <<%%
+1,12 d
+w
+q
+%%
+cd -
+cat  /tmp/out.tmp 

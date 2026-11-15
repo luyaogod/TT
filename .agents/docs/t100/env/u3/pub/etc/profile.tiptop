@@ -1,0 +1,95 @@
+if [ "$1" = "" ]
+   then
+echo ""
+#echo "Please Select (1)正式區:topprd (2)測試區:toptst (3)標準區:topstd (4)Patch:toppth *)Exit [1]:"
+echo -e "IC行業  v3.1.06(oracle|  v3.1.06(kingbase)                         "
+echo "-------------------------------------------------"
+echo -e " 開發區   (31) t35dev |                        "
+echo -e " 測試區   (35) t35tst |                        "
+echo -e " 正式區   (36) t35prd | 正式區 (36k) k35prd   "
+echo -e " PATCH區  (39) t35pth |                        "
+echo -e " 出貨區   (t)  topprd |                        "
+echo "-------------------------------------------------"
+echo ""
+echo -e " (*)Exit :\c"
+
+echo ""
+
+read ans
+
+else
+  ans="$1"
+  case $ans in
+  31) echo ""
+     echo -e "(31)t35dev:"""
+     echo ""
+  ;;
+  35) echo ""
+     echo -e "(35)t35tst:"""
+     echo ""
+  ;;
+  36) echo ""
+     echo -e "(36)t35prd:"""
+     echo ""
+  ;;
+  39) echo ""
+     echo -e "(39)t35pth:"""
+     echo ""
+  ;;
+  t) echo ""
+     echo -e "(1)topprd:"""
+     echo ""
+  ;;
+  36k) echo ""
+     echo -e "(36k)k35prd:"""
+     echo ""
+  ;;
+  esac
+fi
+# for telnet only
+EDITOR=vi;export EDITOR                         #SQLPlus Editor
+stty erase                                    #SQLPlus 倒退鍵
+FGLSERVER=`who -m | cut -d'(' -f2 | cut -d')' -f1`;export FGLSERVER  #GDC Client IP
+
+case $ans in
+  31)
+     ZONE=t35dev;export ZONE
+     ;;
+  35)
+     ZONE=t35tst;export ZONE
+     ;;
+  36)
+     ZONE=t35prd;export ZONE
+     ;;
+  39)
+     ZONE=t35pth;export ZONE
+     ;;
+  t)
+     ZONE=topprd;export ZONE
+     ;;
+  36k)
+     ZONE=k35prd;export ZONE
+     ;;
+  *) exit
+     ;;
+esac
+
+. /u3/pub/etc/chenv
+. /u3/pub/etc/topenv
+
+PATH=/u3/bin:$PATH
+today=` date +"%a" `
+
+readonly DGENV 2>/dev/null
+readonly CUST 2>/dev/null
+readonly TOPCHKOUT 2>/dev/null
+
+echo "DGENV    = "$DGENV
+echo "CUST     = "$CUST
+echo "TOPIND   = "$TOPIND
+echo "TOPENT   = "$TOPENT
+echo "TOPALM   = "$TOPALM
+echo "TOPCHKOUT= "$TOPCHKOUT
+echo ""
+fglWrt -a info user|grep Users
+echo ""

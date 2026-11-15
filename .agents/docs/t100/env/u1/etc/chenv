@@ -1,0 +1,35 @@
+if [ "$LOGNAME" = "topstd" ] 
+then                                
+     DGENV=s;export DGENV
+     CUST=DIGIWIN;export CUST
+else
+     DGENV=c;export DGENV
+     CUST=CUST;export CUST
+fi
+ORG=CUST;export ORG
+
+case $ZONE in
+  topprd)
+     TOPCHKOUT=Y;export TOPCHKOUT
+     TOPALM=N;export TOPALM
+     ;;
+  t35prd)
+     TOPCHKOUT=Y;export TOPCHKOUT
+     TOPALM=N;export TOPALM
+     ;;
+  t35dev)
+     TOPCHKOUT=Y;export TOPCHKOUT
+     TOPALM=N;export TOPALM
+     ;;
+  t35tst)
+     TOPCHKOUT=Y;export TOPCHKOUT
+     TOPALM=N;export TOPALM
+     ;;
+   t35pth)
+     TOPCHKOUT=Y;export TOPCHKOUT
+     TOPALM=N;export TOPALM
+     ;; 
+  *) exit
+     ;;
+esac
+TOPIND=sd;export TOPIND

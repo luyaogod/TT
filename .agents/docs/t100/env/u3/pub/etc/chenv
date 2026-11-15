@@ -1,0 +1,53 @@
+#if [ "$LOGNAME" = "topstd" ] 
+#then                                
+#     DGENV=s;export DGENV
+#     CUST=DIGIWIN;export CUST
+#else
+#     DGENV=c;export DGENV
+#     CUST=BM3590;export CUST
+#fi
+ORG=TOP109IND;export ORG
+
+case $ZONE in
+  topprd)
+     TOPCHKOUT=Y;export TOPCHKOUT
+     TOPALM=N;export TOPALM
+     ;;
+  t35prd)
+     TOPCHKOUT=N;export TOPCHKOUT
+     TOPALM=N;export TOPALM
+     ;;
+  t35dev)
+     TOPCHKOUT=Y;export TOPCHKOUT
+     TOPALM=Y;export TOPALM
+     ;;
+  t35tst)
+     TOPCHKOUT=N;export TOPCHKOUT
+     TOPALM=N;export TOPALM
+     ;;
+  t35pth)
+     TOPCHKOUT=N;export TOPCHKOUT
+     TOPALM=N;export TOPALM
+     ;;
+  k35prd)
+     TOPCHKOUT=N;export TOPCHKOUT
+     TOPALM=N;export TOPALM
+     KINGBASE_HOST=172.16.1.109;export KINGBASE_HOST
+     KINGBASE_PORT=54325;export KINGBASE_PORT
+     ;;
+  *) exit
+     ;;
+esac
+
+if [ "$ZONE" = "topprd" ]
+then
+     TOPIND=sd;export TOPIND
+     CUST=TOP109IND;export CUST
+     DGENV=c;export DGENV
+else
+     TOPIND=wf;export TOPIND
+     CUST=DIGIWIN;export CUST
+     DGENV=s;export DGENV
+fi
+cd $TOP
+

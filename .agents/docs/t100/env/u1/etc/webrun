@@ -1,0 +1,107 @@
+#!/bin/ksh
+
+#FGLSQLDEBUG=9;export FGLSQLDEBUG
+#T100DEBUG=9;export T100DEBUG
+#FGLWSDEBUG=3;export FGLWSDEBUG
+ORACLE_BASE=/u2/oracle;export ORACLE_BASE
+ORACLE_HOME=/u2/oracle/product/19.0.0/dbhome_1;export ORACLE_HOME
+#LANG=en_US.utf8;export LANG
+T100NANAWEB=Y;export T100NANAWEB
+
+# reset environment
+PATH=/usr/lib64/qt-3.3/bin:/usr/local/bin:/bin:/usr/bin:/usr/local/sbin:/usr/sbin:/sbin;export PATH
+
+PATH=$ORACLE_HOME/bin:$PATH;export PATH
+PATH=/u3/pub/bin:$PATH;export PATH
+
+TOP_BASE=/u1;export TOP_BASE                    
+TOPLINK=Development;export TOPLINK		#設計器識別環境用
+DGENV=s;export DGENV				#產品設計與執行識別環境用
+CUST=T100DEMO3;export CUST
+SQLPATH=/u3/pub/bin:$SQLPATH;export SQLPATH 	#SQLPlus Script路徑
+. /u3/pub/etc/chenv
+. /u3/pub/etc/topenv
+
+#export LANG=zh_TW.utf8;
+#export LC_MESSAGES=en_US.utf8;
+prog=$1   #程式代號
+shift     #將程式代號排除在參數外
+
+#20160906 Add by joeychou
+#if [ "$prog" == "azzi000" -a `$TOPKEY/flc.sh` == "1" ] ;then
+#       prog='adzi444'
+#fi
+#echo 'if'
+#if [ "$prog" != "azzi000" ]
+# then
+    FGLPROFILE=$FGLDIR/etc/fglprofile.cpu:$FGLPROFILE;export FGLPROFILE
+    FGLLICENSE=$FGLDIR/etc/fgllicense.cpu;export FGLLICENSE
+#fi
+
+#log="$LOG/webrun_`date +%Y%m%d`.log"
+#log="$LOGDIR/webrun_`date +%Y%m%d`.log"
+
+case $GUIMODE in
+GWS)
+   log="$LOGDIR/webrun_`date +%Y%m%d`_$prog.log"
+;;
+*)
+   log="$LOGDIR/webrun_`date +%Y%m%d`.log"
+;;
+esac
+
+case $prog in
+awsp900)
+   export T100DEBUG=9;
+   cmd="$FGLRUN $AWSi/awsp900.42r"
+   TEMPDIR=/ut/$ZONE/tmp;export TEMPDIR
+   LOGDIR=/ut/$ZONE/log;export LOGDIR
+
+;;
+awsp910)
+   cmd="$FGLRUN $AWSi/awsp910.42r"
+   TEMPDIR=/ut/$ZONE/tmp;export TEMPDIR
+   LOGDIR=/ut/$ZONE/log;export LOGDIR
+
+;;
+#add for v1.1.12 2017/09/27
+awsp920)
+   cmd="$FGLRUN $AWSi/awsp920.42r"
+   TEMPDIR=/ut/$ZONE/tmp;export TEMPDIR
+   LOGDIR=/ut/$ZONE/log;export LOGDIR
+
+;;
+#add(E)
+#240318-00007#9--s
+awsp930)
+   cmd="$FGLRUN $AWSi/awsp930.42r"
+   TEMPDIR=/ut/$ZONE/tmp;export TEMPDIR
+   LOGDIR=/ut/$ZONE/log;export LOGDIR
+;;
+awsp940)
+   cmd="$FGLRUN $AWSi/awsp940.42r"
+   TEMPDIR=/ut/$ZONE/tmp;export TEMPDIR
+   LOGDIR=/ut/$ZONE/log;export LOGDIR
+;;
+#240318-00007#9--e
+awsp950)
+   cmd="$FGLRUN $AWSi/awsp950.42r"
+   TEMPDIR=/ut/$ZONE/tmp;export TEMPDIR
+   LOGDIR=/ut/$ZONE/log;export LOGDIR
+
+;;
+
+*)
+   cmd="$FGLRUN $AZZi/azzp000.42r"
+;;
+esac
+
+#lic="/u1/genero/t10fglgws/bin/fglWrt -a see"
+#$prog >> $log 2>&1
+#$lic >> $log 2>&1
+#cmd="$FGLRUN $AZZi/azzp000.42r"
+fglWrt -a info license
+fglWrt -a info license >>$log 2>&1
+$cmd $prog "$@" >>$log 2>&1         #傳入程式代號及剩餘的參數
+stus=$?
+exit $stus

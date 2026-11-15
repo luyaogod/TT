@@ -1,0 +1,7 @@
+option,zone,TOP,TOPCHKOUT,TOPALM,TOPIND,DGENV,CUST,ORG,TOPENT,FGLPROFILE,ORACLE_SID,TWO_TASK,TEMPDIR,LOGDIR,FGLASIP
+31,t35dev,/u1/t35dev,Y,Y,wf,s,DIGIWIN,TOP109IND,99,/u3/pub/etc/fglprofile.t35dev,t35dev,t35dev,/ut/t35dev/tmp,/ut/t35dev/log,http://172.16.1.109/t35dev
+35,t35tst,/u1/t35tst,N,N,wf,s,DIGIWIN,TOP109IND,99,/u3/pub/etc/fglprofile.t35tst,t35tst,t35tst,/ut/t35tst/tmp,/ut/t35tst/log,http://172.16.1.109/t35tst
+36,t35prd,/u1/t35prd,N,N,wf,s,DIGIWIN,TOP109IND,99,/u3/pub/etc/fglprofile.t35prd,t35prd,t35prd,/ut/t35prd/tmp,/ut/t35prd/log,http://172.16.1.109/t35prd
+39,t35pth,/u1/t35pth,N,N,wf,s,DIGIWIN,TOP109IND,99,/u3/pub/etc/fglprofile.t35pth,t35pth,t35pth,/ut/t35pth/tmp,/ut/t35pth/log,http://172.16.1.109/t35pth
+t,topprd,/u1/topprd,Y,N,sd,c,TOP109IND,TOP109IND,99,/u3/pub/etc/fglprofile.topprd,topprd,topprd,/ut/topprd/tmp,/ut/topprd/log,http://172.16.1.109/topprd
+36k,(子壳直接退出，无任何变量),(未设置),(未设置),(未设置),(未设置),(未设置),(未设置),(未设置),(未设置),(未设置),(未设置),(未设置),(未设置),(未设置),(未设置)
