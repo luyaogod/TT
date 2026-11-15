@@ -21,7 +21,7 @@
 | 人机协同 | `mode` | 切换纯人工 / 协作模式 |
 | 环境 | `env` / `topent` / `ents` | 列环境与切换、看与设企业编号、看当前环境有哪些企业及各自账号 |
 | 库 | `sql` / `db` | 只读 SQL、库连接与账号映射探查 |
-| 报文 | `wslogs` / `wsdebug` | 接口日志检索、按报文重放调试 |
+| 报文 | `wslogs` / `wsdebug` / `wstest` / `wsservices` | 服务信息查询、按报文重放、集成服务检测、服务注册表查询 |
 | 自检 | `probe` | 协议驱动器自检（登录 → 启动 → 下断点 → 步进 → 求值） |
 
 **用法、参数与典型流程见** [`skills/tt-debug/SKILL.md`](../../../skills/tt-debug/SKILL.md)；

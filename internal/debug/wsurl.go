@@ -1,14 +1,12 @@
 package debug
 
-// 服务测试（`/api/wstest`）本批已**从产品里取消**（仓库主人定性：它不是标准接口，
-// 是临时测试工具 —— 所以是去掉端点，不是给它补闸门）。整个 `wstest.go` 连同
-// `WSDefaultURLFor` / `WSTest` / `soapEnvelope` / `stripWSDLSuffix` / `wsEndpoints` 一起删了。
+// 集成服务检测的 URL 规则与 `/api/status` 的 `wsPrefix` 共用这一份实现。
 //
-// **`wsURLPrefix` 必须留下**：它不是那条端点的私有件 —— `/api/status` 的 `wsPrefix`
-// 字段（前端拼占位符地址用）就是它，与 `/api/wstest` 在不在无关。
-// 单独抽到本文件，是为了让"这条规则只剩这一份实现"这件事在删掉 wstest.go 之后
-// 仍然看得见（它的注释是从原文件逐字搬过来的，出处仍然准确）。
-// 于是现在只有 `/api/status` 一处调用方。
+// 历史：`/api/wstest`（`WSTest`/`WSDefaultURLFor`/`soapEnvelope`/`stripWSDLSuffix`/
+// `wsEndpoints`）曾在 f264ccc 整批删除；本批以 `/api/wslogs/test` 重新引入，
+// 但补上了当时的缺口：URL/方法/报文全部先校验、请求体走 stdin 不落临时文件、
+// 不写 `wsfa_t`、把"非 200 的正文"保留下来（原生会丢弃）。
+// `wsURLPrefix` 仍是唯一实现：`/api/status` 的 `wsPrefix` 与检测默认地址都用它。
 
 // wsURLPrefix 是服务地址的前缀：出貨區(topprd)走 `/ws`，其余区走 `/w`。
 //

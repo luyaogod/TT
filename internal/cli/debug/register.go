@@ -15,7 +15,7 @@ var Group = &cobra.Command{
 	Use:   "debug",
 	Short: "TDebug - T100 作业调试器",
 	Long: `通过 SSH 在 T100 服务器上驱动 fglrun -d 的 (fgldb) 文本调试协议，
-提供本地 Web 调试界面（源码/断点/调用栈/变量/接口日志）与命令行控制端
+提供本地 Web 调试界面（源码/断点/调用栈/变量/服务信息查询）与命令行控制端
 （tt debug start/exec/…），实现"人操作 GDC 界面 + AI 借助命令行检查分析"的
 人机协同调试。
 

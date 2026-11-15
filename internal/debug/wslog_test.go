@@ -31,6 +31,24 @@ func TestWSLogWhere(t *testing.T) {
 			want: []string{"UPPER(wsfa001) LIKE 'WSSP90_'"},
 		},
 		{
+			// 「服务编号查询」开窗多选回传 a|b：逐段 LIKE 后 OR 成一组。
+			name: "服务名:多选 | 生成 OR 组",
+			f:    WSLogFilter{Service: "easy.query|t100.oapi.*"},
+			want: []string{"(UPPER(wsfa001) LIKE 'EASY.QUERY' OR UPPER(wsfa001) LIKE 'T100.OAPI.%')"},
+		},
+		{
+			name: "服务名:多选里的空段被跳过",
+			f:    WSLogFilter{Service: "|easy.query||"},
+			want: []string{"UPPER(wsfa001) LIKE 'EASY.QUERY'"},
+			not:  []string{"OR"},
+		},
+		{
+			name: "服务名:多选里任一段非法 → 空集",
+			f:    WSLogFilter{Service: "easy.query|a'; DROP"},
+			want: []string{"AND 1=0"},
+			not:  []string{"DROP"},
+		},
+		{
 			name: "服务名:非法字符退化为空集(不报错)",
 			f:    WSLogFilter{Service: "a'; DROP"},
 			want: []string{"AND 1=0"},
@@ -56,6 +74,23 @@ func TestWSLogWhere(t *testing.T) {
 			name: "等值条件:前后空白被剔除",
 			f:    WSLogFilter{Result: "  000  "},
 			want: []string{"wsfa006 = '000'"},
+		},
+		{
+			// T100 的发起端/服务端会做模糊补 *；TT 只在用户自己写 * ? 时走 LIKE，
+			// 不写通配符时仍是等值 —— 既有调用与测试结果不变。
+			name: "发起端/服务端:带 * ? 时走 LIKE",
+			f:    WSLogFilter{Origin: "OA*", Server: "T100?"},
+			want: []string{
+				`UPPER(wsfa013) LIKE UPPER('OA%') ESCAPE '\'`,
+				`UPPER(wsfa018) LIKE UPPER('T100_') ESCAPE '\'`,
+			},
+			not: []string{"wsfa013 = 'OA*'"},
+		},
+		{
+			name: "发起端:不带通配符仍是等值",
+			f:    WSLogFilter{Origin: "OA"},
+			want: []string{"wsfa013 = 'OA'"},
+			not:  []string{"LIKE UPPER('OA')"},
 		},
 		{
 			// 界面「服务程序」列就是 wsfa002。用它 + 服务名可精确定位某一次调用,

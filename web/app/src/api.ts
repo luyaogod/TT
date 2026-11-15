@@ -82,6 +82,70 @@ export interface EntsReply {
   ttlSeconds: number
   notes?: string[]
 }
+// 服务注册表（服务名称开窗）：一行三列，apiName 是回传值（gzja004）。
+export interface WSServiceItem {
+  spec: string    // 服务规格编号 gzja001
+  name: string    // 服务名称 gzjal003
+  apiName: string // API服务名称 gzja004
+}
+export interface WSServicesReply {
+  ok: boolean
+  env: string
+  items: WSServiceItem[]
+  total: number
+  page: number
+  pageSize: number
+  hasMore: boolean
+  dialect?: string
+}
+
+// 集成服务检测：接口方式与默认地址（GET /api/wslogs/meta）。
+export interface WSTestMethodMeta {
+  id: string
+  label: string
+  endpoint: string
+  soap: boolean
+  defaultUrl: string
+}
+export interface WSTestMetaReply {
+  ok: boolean
+  env: string
+  host: string
+  zone: string
+  zoneName: string
+  zoneSource: string
+  methods: WSTestMethodMeta[]
+  limits: { requestBytes: number; responseBytes: number; timeoutSec: number }
+}
+
+// 一次检测的结果。transportError 非空 = 没拿到 HTTP 响应（连接失败/超时/无 curl）。
+export interface WSTestResult {
+  at: string
+  httpCode: number
+  statusText: string
+  durationSec: number
+  body: string
+  transportError?: string
+  truncated?: boolean
+  requestBytes: number
+  responseBytes: number
+}
+export interface WSTestReply {
+  ok: boolean
+  env: string
+  url: string
+  endpoint: string
+  warn?: string
+  result: WSTestResult
+}
+export interface WSTestQuery {
+  env: string
+  method: string
+  url?: string
+  request: string
+  timeoutSec?: number
+}
+
 // 接口日志查询条件(对齐 T100 原生页 awsq990 的 QBE):
 // startFrom = wsfa003(起始时间)下界,endTo = wsfa004(结束时间)上界;
 // result/origin/server 为等值过滤(wsfa006/wsfa013/wsfa018)
@@ -744,6 +808,23 @@ export const api = {
   },
   wsLogContent: (rowid: string, env?: string) =>
     req<{ item: WSLogItem; content: WSLogContent }>(`${API_BASE}/wslogs/content?rowid=${encodeURIComponent(rowid)}${env ? `&env=${encodeURIComponent(env)}` : ''}`),
+  // 服务名称开窗：服务注册表（gzja_t/gzjc_t，ds 账号）。
+  wsServices: (q: { env: string; spec?: string; name?: string; api?: string; page?: number; pageSize?: number }) => {
+    const p = new URLSearchParams()
+    p.set('env', q.env)
+    for (const k of ['spec', 'name', 'api'] as const) {
+      const s = (q[k] || '').trim()
+      if (s) p.set(k, s)
+    }
+    p.set('page', String(q.page ?? 1))
+    p.set('pageSize', String(q.pageSize ?? 200))
+    return req<WSServicesReply>(`${API_BASE}/wslogs/services?${p.toString()}`)
+  },
+  // 集成服务检测：元信息（接口方式 + 默认地址）与一次执行。
+  wsTestMeta: (env: string) =>
+    req<WSTestMetaReply>(`${API_BASE}/wslogs/meta?env=${encodeURIComponent(env)}`),
+  wsTest: (q: WSTestQuery) =>
+    req<WSTestReply>(`${API_BASE}/wslogs/test`, { method: 'POST', body: JSON.stringify(q) }),
   // 企业目录(ENT → 数据库账号):与 tt debug 的「企业→账号」同一条规则、同一张 gzou_t
   // (固定用系统账号 ds 读),两边的缓存与快照也是同一份(后端的 entdir)。
   // 接口日志页与「创建会话」的 ENT 下拉都用它 —— **不需要一条活会话**。
