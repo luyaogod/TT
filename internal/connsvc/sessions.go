@@ -429,7 +429,7 @@ func (s *Service) DBBatch(ctx context.Context, caller Caller, handle string, stm
 	if !ok {
 		return 0, -1, errf(CodeUnsupported, sess.env, "该会话不支持批量执行")
 	}
-	bctx, cancel := withDefaultTimeout(ctx, DefaultQueryTimeout)
+	bctx, cancel := withDefaultTimeout(ctx, DefaultBatchTimeout)
 	defer cancel()
 	start := s.opt.Now()
 	n, failed, err := adv.ExecBatch(bctx, stmts, atomic)

@@ -236,6 +236,8 @@ const (
 	MaxMaxRows = 50000
 	// DefaultQueryTimeout 单次查询缺省超时。
 	DefaultQueryTimeout = 60 * time.Second
+	// DefaultBatchTimeout 批量写入缺省超时：一次导入可能几千条语句，按单查询的 60 秒会误杀。
+	DefaultBatchTimeout = 5 * time.Minute
 	// DefaultSSHTimeout 单次 SSH 命令缺省超时。
 	DefaultSSHTimeout = 60 * time.Second
 	// MaxFileBytes 单次远端文件读写的硬上限（16 MB）。
