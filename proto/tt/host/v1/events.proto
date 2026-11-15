@@ -16,15 +16,15 @@ message HostEvent {
   bytes payload = 4;
 }
 
-message PollEventsRequest {
+message PollRequest {
   // after_id 只返回 id 大于它的事件；0 = 从当前最新开始（不重放历史）。
   int64 after_id = 1;
 }
 
-message PollEventsResponse {
+message PollResponse {
   repeated HostEvent events = 1;
 }
 
 service EventsService {
-  rpc Poll(PollEventsRequest) returns (PollEventsResponse);
+  rpc Poll(PollRequest) returns (PollResponse);
 }

@@ -42,7 +42,7 @@ const (
 
 // EventsServiceClient is a client for the tt.host.v1.EventsService service.
 type EventsServiceClient interface {
-	Poll(context.Context, *connect.Request[hostv1.PollEventsRequest]) (*connect.Response[hostv1.PollEventsResponse], error)
+	Poll(context.Context, *connect.Request[hostv1.PollRequest]) (*connect.Response[hostv1.PollResponse], error)
 }
 
 // NewEventsServiceClient constructs a client for the tt.host.v1.EventsService service. By default,
@@ -56,7 +56,7 @@ func NewEventsServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 	baseURL = strings.TrimRight(baseURL, "/")
 	eventsServiceMethods := hostv1.File_tt_host_v1_events_proto.Services().ByName("EventsService").Methods()
 	return &eventsServiceClient{
-		poll: connect.NewClient[hostv1.PollEventsRequest, hostv1.PollEventsResponse](
+		poll: connect.NewClient[hostv1.PollRequest, hostv1.PollResponse](
 			httpClient,
 			baseURL+EventsServicePollProcedure,
 			connect.WithSchema(eventsServiceMethods.ByName("Poll")),
@@ -67,17 +67,17 @@ func NewEventsServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 
 // eventsServiceClient implements EventsServiceClient.
 type eventsServiceClient struct {
-	poll *connect.Client[hostv1.PollEventsRequest, hostv1.PollEventsResponse]
+	poll *connect.Client[hostv1.PollRequest, hostv1.PollResponse]
 }
 
 // Poll calls tt.host.v1.EventsService.Poll.
-func (c *eventsServiceClient) Poll(ctx context.Context, req *connect.Request[hostv1.PollEventsRequest]) (*connect.Response[hostv1.PollEventsResponse], error) {
+func (c *eventsServiceClient) Poll(ctx context.Context, req *connect.Request[hostv1.PollRequest]) (*connect.Response[hostv1.PollResponse], error) {
 	return c.poll.CallUnary(ctx, req)
 }
 
 // EventsServiceHandler is an implementation of the tt.host.v1.EventsService service.
 type EventsServiceHandler interface {
-	Poll(context.Context, *connect.Request[hostv1.PollEventsRequest]) (*connect.Response[hostv1.PollEventsResponse], error)
+	Poll(context.Context, *connect.Request[hostv1.PollRequest]) (*connect.Response[hostv1.PollResponse], error)
 }
 
 // NewEventsServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -106,6 +106,6 @@ func NewEventsServiceHandler(svc EventsServiceHandler, opts ...connect.HandlerOp
 // UnimplementedEventsServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedEventsServiceHandler struct{}
 
-func (UnimplementedEventsServiceHandler) Poll(context.Context, *connect.Request[hostv1.PollEventsRequest]) (*connect.Response[hostv1.PollEventsResponse], error) {
+func (UnimplementedEventsServiceHandler) Poll(context.Context, *connect.Request[hostv1.PollRequest]) (*connect.Response[hostv1.PollResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("tt.host.v1.EventsService.Poll is not implemented"))
 }

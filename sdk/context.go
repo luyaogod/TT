@@ -383,7 +383,7 @@ func (s *eventService) loop() {
 			return
 		case <-ticker.C:
 		}
-		resp, err := s.c.cli.events.Poll(s.c.ctx, connect.NewRequest(&hostv1.PollEventsRequest{AfterId: after}))
+		resp, err := s.c.cli.events.Poll(s.c.ctx, connect.NewRequest(&hostv1.PollRequest{AfterId: after}))
 		if err != nil {
 			continue
 		}

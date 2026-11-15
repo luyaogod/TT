@@ -480,9 +480,9 @@ type eventsServer struct {
 	bus *eventbus.Bus
 }
 
-func (s *eventsServer) Poll(_ context.Context, req *connect.Request[hostv1.PollEventsRequest]) (*connect.Response[hostv1.PollEventsResponse], error) {
+func (s *eventsServer) Poll(_ context.Context, req *connect.Request[hostv1.PollRequest]) (*connect.Response[hostv1.PollResponse], error) {
 	if s.bus == nil {
-		return connect.NewResponse(&hostv1.PollEventsResponse{}), nil
+		return connect.NewResponse(&hostv1.PollResponse{}), nil
 	}
 	after := req.Msg.GetAfterId()
 	if after == 0 {
@@ -496,5 +496,5 @@ func (s *eventsServer) Poll(_ context.Context, req *connect.Request[hostv1.PollE
 			Id: ev.ID, Name: ev.Name, Time: ev.Time.Format(time.RFC3339Nano), Payload: ev.Payload,
 		})
 	}
-	return connect.NewResponse(&hostv1.PollEventsResponse{Events: out}), nil
+	return connect.NewResponse(&hostv1.PollResponse{Events: out}), nil
 }

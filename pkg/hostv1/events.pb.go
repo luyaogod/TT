@@ -95,7 +95,7 @@ func (x *HostEvent) GetPayload() []byte {
 	return nil
 }
 
-type PollEventsRequest struct {
+type PollRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// after_id 只返回 id 大于它的事件；0 = 从当前最新开始（不重放历史）。
 	AfterId       int64 `protobuf:"varint,1,opt,name=after_id,json=afterId,proto3" json:"after_id,omitempty"`
@@ -103,20 +103,20 @@ type PollEventsRequest struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *PollEventsRequest) Reset() {
-	*x = PollEventsRequest{}
+func (x *PollRequest) Reset() {
+	*x = PollRequest{}
 	mi := &file_tt_host_v1_events_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *PollEventsRequest) String() string {
+func (x *PollRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*PollEventsRequest) ProtoMessage() {}
+func (*PollRequest) ProtoMessage() {}
 
-func (x *PollEventsRequest) ProtoReflect() protoreflect.Message {
+func (x *PollRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_tt_host_v1_events_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -128,39 +128,39 @@ func (x *PollEventsRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use PollEventsRequest.ProtoReflect.Descriptor instead.
-func (*PollEventsRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use PollRequest.ProtoReflect.Descriptor instead.
+func (*PollRequest) Descriptor() ([]byte, []int) {
 	return file_tt_host_v1_events_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *PollEventsRequest) GetAfterId() int64 {
+func (x *PollRequest) GetAfterId() int64 {
 	if x != nil {
 		return x.AfterId
 	}
 	return 0
 }
 
-type PollEventsResponse struct {
+type PollResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Events        []*HostEvent           `protobuf:"bytes,1,rep,name=events,proto3" json:"events,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *PollEventsResponse) Reset() {
-	*x = PollEventsResponse{}
+func (x *PollResponse) Reset() {
+	*x = PollResponse{}
 	mi := &file_tt_host_v1_events_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *PollEventsResponse) String() string {
+func (x *PollResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*PollEventsResponse) ProtoMessage() {}
+func (*PollResponse) ProtoMessage() {}
 
-func (x *PollEventsResponse) ProtoReflect() protoreflect.Message {
+func (x *PollResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_tt_host_v1_events_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -172,12 +172,12 @@ func (x *PollEventsResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use PollEventsResponse.ProtoReflect.Descriptor instead.
-func (*PollEventsResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use PollResponse.ProtoReflect.Descriptor instead.
+func (*PollResponse) Descriptor() ([]byte, []int) {
 	return file_tt_host_v1_events_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *PollEventsResponse) GetEvents() []*HostEvent {
+func (x *PollResponse) GetEvents() []*HostEvent {
 	if x != nil {
 		return x.Events
 	}
@@ -194,13 +194,13 @@ const file_tt_host_v1_events_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
 	"\x04time\x18\x03 \x01(\tR\x04time\x12\x18\n" +
-	"\apayload\x18\x04 \x01(\fR\apayload\".\n" +
-	"\x11PollEventsRequest\x12\x19\n" +
-	"\bafter_id\x18\x01 \x01(\x03R\aafterId\"C\n" +
-	"\x12PollEventsResponse\x12-\n" +
-	"\x06events\x18\x01 \x03(\v2\x15.tt.host.v1.HostEventR\x06events2V\n" +
-	"\rEventsService\x12E\n" +
-	"\x04Poll\x12\x1d.tt.host.v1.PollEventsRequest\x1a\x1e.tt.host.v1.PollEventsResponseB*Z(github.com/luyaogod/TT/pkg/hostv1;hostv1b\x06proto3"
+	"\apayload\x18\x04 \x01(\fR\apayload\"(\n" +
+	"\vPollRequest\x12\x19\n" +
+	"\bafter_id\x18\x01 \x01(\x03R\aafterId\"=\n" +
+	"\fPollResponse\x12-\n" +
+	"\x06events\x18\x01 \x03(\v2\x15.tt.host.v1.HostEventR\x06events2J\n" +
+	"\rEventsService\x129\n" +
+	"\x04Poll\x12\x17.tt.host.v1.PollRequest\x1a\x18.tt.host.v1.PollResponseB*Z(github.com/luyaogod/TT/pkg/hostv1;hostv1b\x06proto3"
 
 var (
 	file_tt_host_v1_events_proto_rawDescOnce sync.Once
@@ -216,14 +216,14 @@ func file_tt_host_v1_events_proto_rawDescGZIP() []byte {
 
 var file_tt_host_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_tt_host_v1_events_proto_goTypes = []any{
-	(*HostEvent)(nil),          // 0: tt.host.v1.HostEvent
-	(*PollEventsRequest)(nil),  // 1: tt.host.v1.PollEventsRequest
-	(*PollEventsResponse)(nil), // 2: tt.host.v1.PollEventsResponse
+	(*HostEvent)(nil),    // 0: tt.host.v1.HostEvent
+	(*PollRequest)(nil),  // 1: tt.host.v1.PollRequest
+	(*PollResponse)(nil), // 2: tt.host.v1.PollResponse
 }
 var file_tt_host_v1_events_proto_depIdxs = []int32{
-	0, // 0: tt.host.v1.PollEventsResponse.events:type_name -> tt.host.v1.HostEvent
-	1, // 1: tt.host.v1.EventsService.Poll:input_type -> tt.host.v1.PollEventsRequest
-	2, // 2: tt.host.v1.EventsService.Poll:output_type -> tt.host.v1.PollEventsResponse
+	0, // 0: tt.host.v1.PollResponse.events:type_name -> tt.host.v1.HostEvent
+	1, // 1: tt.host.v1.EventsService.Poll:input_type -> tt.host.v1.PollRequest
+	2, // 2: tt.host.v1.EventsService.Poll:output_type -> tt.host.v1.PollResponse
 	2, // [2:3] is the sub-list for method output_type
 	1, // [1:2] is the sub-list for method input_type
 	1, // [1:1] is the sub-list for extension type_name
