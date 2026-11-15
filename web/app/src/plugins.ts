@@ -86,17 +86,22 @@ export function isPluginID(v: string): boolean {
   return v.length > 0 && v.length <= 190 && PLUGIN_ID_RE.test(v)
 }
 
-/** 一条摘要 → 描述符；没有页面贡献或 id/route 不合法的条目直接丢弃（不猜）。 */
+/** 一条摘要 → 描述符；id 必须合法；有 page 时 route 必须合法，只有 nav 等槽位时允许无 route。 */
 function toDescriptor(raw: PluginSummary): PluginDescriptor | null {
   if (!raw || typeof raw !== 'object') return null
   const id = typeof raw.id === 'string' ? raw.id.trim() : ''
   const route = typeof raw.route === 'string' ? raw.route.trim() : ''
-  if (!isPluginID(id) || !isPluginRoute(route)) return null
+  if (!isPluginID(id)) return null
+  // 没有 page 的插件（只贡献 nav/statusbar…）没有 route；有 page 时 route 必须合法。
+  const uiAll = normalizeUIEntries(raw.ui)
+  const hasPage = uiAll.some((u) => u.slot === 'page')
+  if (hasPage && !isPluginRoute(route)) return null
+  if (!hasPage && route !== '' && !isPluginRoute(route)) return null
   const name = typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : id
   const title = (typeof raw.routeTitle === 'string' && raw.routeTitle.trim()) || name || route
   const version = typeof raw.version === 'string' ? raw.version : ''
   const enabled = raw.enabled === true
-  const ui = normalizeUIEntries(raw.ui)
+  const ui = uiAll
   // 健康：后端给了布尔就用；没给但有 lastError，按“明确不健康”处理（错误是事实）。
   const healthy = typeof raw.healthy === 'boolean' ? raw.healthy : (raw.lastError ? false : undefined)
   return {
@@ -178,10 +183,10 @@ function compareDescriptors(a: PluginDescriptor, b: PluginDescriptor): number {
   return 0
 }
 
-/** 外壳菜单条目：只含已启用、且有合法页面 id 的插件，顺序稳定。 */
+/** 外壳菜单条目：只含已启用、且确有 page 贡献的插件，顺序稳定。 */
 export function pluginMenuItems(plugins: PluginDescriptor[]): PluginDescriptor[] {
   return plugins
-    .filter((p) => p.enabled && isPluginID(p.id))
+    .filter((p) => p.enabled && isPluginID(p.id) && p.ui.some((u) => u.slot === 'page'))
     .slice()
     .sort(compareDescriptors)
 }
