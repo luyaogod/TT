@@ -200,7 +200,77 @@ func TestValidateManifestCollectsAllProblems(t *testing.T) {
 		t.Fatalf("该是 ValidationError，得 %v", err)
 	}
 	joined := strings.Join(ve.Problems, "\n")
-	for _, want := range []string{"schemaVersion", "id", "version", "hostApi", "serve", "未知权限", "重复声明"} {
+	for _, want := range []string{"schemaVersion", "id", "version", "hostApi", "serve", "permissions 已废弃"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("问题清单缺 %q:\n%s", want, joined)
+		}
+	}
+}
+
+// TestValidateManifestV1PermissionsStillChecked v1 清单仍按旧规则校验权限名。
+func TestValidateManifestV1PermissionsStillChecked(t *testing.T) {
+	dir := t.TempDir()
+	m := &Manifest{
+		SchemaVersion: 1,
+		ID:            "com.example.p",
+		Version:       "0.1.0",
+		HostAPI:       ">=1.0.0 <2.0.0",
+		Contributions: Contributions{
+			CLI: &CLIContribution{Namespace: "demo", Entry: "tool.exe"},
+		},
+		Permissions: []string{"nope", "db.connect", "db.connect"},
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tool.exe"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := ValidateManifest(m, dir, ValidateOptions{HostAPIVersion: "1.0.0"})
+	ve, ok := err.(*ValidationError)
+	if !ok {
+		t.Fatalf("该是 ValidationError，得 %v", err)
+	}
+	joined := strings.Join(ve.Problems, "\n")
+	for _, want := range []string{"未知权限", "重复声明"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("问题清单缺 %q:\n%s", want, joined)
+		}
+	}
+}
+
+// TestValidateManifestUISlots v2 的 ui 贡献：槽位名、page 的 route、entry 必须校验。
+func TestValidateManifestUISlots(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "client.js"), []byte("export function register() {}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	base := func(ui []UIContribution) *Manifest {
+		return &Manifest{
+			SchemaVersion: 2,
+			ID:            "com.example.p",
+			Version:       "0.1.0",
+			HostAPI:       ">=1.0.0 <2.0.0",
+			TT:            ">=0.7.0 <0.8.0",
+			Contributions: Contributions{UI: ui},
+		}
+	}
+	good := base([]UIContribution{
+		{Slot: "nav", ID: "demo", Title: "Demo", Order: 10},
+		{Slot: "page", Route: "demo", Title: "Demo", Entry: "client.js"},
+	})
+	if err := ValidateManifest(good, dir, ValidateOptions{HostAPIVersion: "1.0.0", TTVersion: "0.7.0"}); err != nil {
+		t.Fatalf("合规 ui 清单该通过: %v", err)
+	}
+	bad := base([]UIContribution{
+		{Slot: "toolbar.magic", ID: "x"},
+		{Slot: "page", Title: "无路由", Entry: "client.js"},
+		{Slot: "nav", ID: "no-title"},
+	})
+	err := ValidateManifest(bad, dir, ValidateOptions{HostAPIVersion: "1.0.0", TTVersion: "0.7.0"})
+	ve, ok := err.(*ValidationError)
+	if !ok {
+		t.Fatalf("该是 ValidationError，得 %v", err)
+	}
+	joined := strings.Join(ve.Problems, "\n")
+	for _, want := range []string{"不是受支持的槽位", "route", "title"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("问题清单缺 %q:\n%s", want, joined)
 		}

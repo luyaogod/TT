@@ -15,27 +15,73 @@ import (
 // ManifestFileName 插件包根部的清单文件名。首版只用严格 JSON —— 不引入 YAML 依赖。
 const ManifestFileName = "plugin.json"
 
-// ManifestSchemaVersion 当前清单结构版本。更高主版本一律拒绝（不是"尽力解析"）。
-const ManifestSchemaVersion = 1
+// ManifestSchemaVersion 当前清单结构版本。
+const ManifestSchemaVersion = 2
+
+// ManifestSchemaVersionMin 仍能读取的最低清单版本。v1 没有 ui/tt/config 字段，
+// 也不允许 permissions，加载后按 legacy 处理。
+const ManifestSchemaVersionMin = 1
 
 // Manifest 插件清单。字段与 .agents/docs/plugin-system/ 的契约文档一致。
 type Manifest struct {
-	SchemaVersion int           `json:"schemaVersion"`
-	ID            string        `json:"id"`
-	Version       string        `json:"version"`
-	HostAPI       string        `json:"hostApi"`
-	Name          string        `json:"name,omitempty"`
-	Description   string        `json:"description,omitempty"`
-	Contributions Contributions `json:"contributions"`
-	Permissions   []string      `json:"permissions,omitempty"`
+	SchemaVersion int    `json:"schemaVersion"`
+	ID            string `json:"id"`
+	Version       string `json:"version"`
+	HostAPI       string `json:"hostApi"`
+	// TT 插件兼容的 TT 应用版本范围（如 ">=0.7.0 <0.8.0"）。为空表示不限制。
+	//
+	// 它约束的是**运行时**能力（新 RPC 方法/新服务），由 tt plugin pack 依据编译时
+	// SDK 版本自动写入；hostApi 约束的是 Host API 协议版本，两者不要混用。
+	TT          string `json:"tt,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+	// Config 插件配置的 JSON Schema（可选）。宿主在设置页据此渲染/校验。
+	Config        json.RawMessage `json:"config,omitempty"`
+	Contributions Contributions   `json:"contributions"`
+	// Permissions 已废弃：只保留解析以兼容 v1 清单，v2 清单声明它会被拒绝。
+	Permissions []string `json:"permissions,omitempty"`
 }
 
-// Contributions 一个插件包可以贡献的能力。四类互相独立：可以只声明其中一类。
+// Contributions 一个插件包可以贡献的能力。各类互相独立：可以只声明其中一类。
 type Contributions struct {
 	CLI      *CLIContribution      `json:"cli,omitempty"`
 	Service  *ServiceContribution  `json:"service,omitempty"`
-	Frontend *FrontendContribution `json:"frontend,omitempty"`
+	UI       []UIContribution      `json:"ui,omitempty"`
+	Frontend *FrontendContribution `json:"frontend,omitempty"` // legacy：iframe 页面
 	Skills   []string              `json:"skills,omitempty"`
+}
+
+// UIContribution 同页 UI 贡献：往宿主的一个命名槽位里放组件。
+//
+// 一个条目 = 一个槽位声明。page 需要 route；nav 需要 title；组件类槽位需要 entry。
+type UIContribution struct {
+	// Slot 宿主定义的槽位名（见 KnownUISlots）。
+	Slot string `json:"slot"`
+	// ID 槽位内的稳定标识（nav 菜单项、设置分区等用它区分）。
+	ID string `json:"id,omitempty"`
+	// Route 前端路由（slot=page 必填）：#plugin/<route> 之外，页面自身也用它定位。
+	Route string `json:"route,omitempty"`
+	// Title 展示标题（nav/page/settings.section 必填）。
+	Title string `json:"title,omitempty"`
+	// Icon 图标（nav 用），包内相对路径。
+	Icon string `json:"icon,omitempty"`
+	// Order 同槽位内的排序权重，小的在前。
+	Order int `json:"order,omitempty"`
+	// Entry 浏览器 ESM 模块（包内相对路径）。同一个 client.js 可被多个槽位复用。
+	Entry string `json:"entry,omitempty"`
+}
+
+// KnownUISlots 宿主首版支持的槽位。新增槽位是契约变更，必须回写计划文档。
+var KnownUISlots = []string{"nav", "page", "header.actions", "settings.section", "statusbar", "overlay"}
+
+// IsKnownUISlot 判断槽位名是否受支持。
+func IsKnownUISlot(slot string) bool {
+	for _, s := range KnownUISlots {
+		if s == slot {
+			return true
+		}
+	}
+	return false
 }
 
 // CLIContribution 第三方 CLI：tt <namespace> … 转发到 entry。
@@ -206,8 +252,13 @@ func (m *Manifest) SkillDirs() ([]string, error) {
 	return out, nil
 }
 
-// HasContribution 是否有任何一类贡献（四类全无的包对 TT 没有意义）。
+// ResolveUIEntry 一个 UI 贡献的浏览器模块入口（相对版本目录）。
+func (m *Manifest) ResolveUIEntry(ui UIContribution) (string, error) {
+	return expandEntry(ui.Entry)
+}
+
+// HasContribution 是否有任何一类贡献（全无的包对 TT 没有意义）。
 func (m *Manifest) HasContribution() bool {
 	c := m.Contributions
-	return c.CLI != nil || c.Service != nil || c.Frontend != nil || len(c.Skills) > 0
+	return c.CLI != nil || c.Service != nil || len(c.UI) > 0 || c.Frontend != nil || len(c.Skills) > 0
 }

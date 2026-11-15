@@ -129,6 +129,33 @@ func HostAPISatisfies(rng, current string) (bool, error) {
 	return false, fmt.Errorf("插件要求 hostApi %q，当前 TT 的 Host API 是 %s", rng, current)
 }
 
+// ValidateTTRange 校验 tt（TT 应用版本）兼容范围写法。
+func ValidateTTRange(rng string) error {
+	if strings.TrimSpace(rng) == "" {
+		return fmt.Errorf("tt 不能为空字符串（不限制就别写这个字段）")
+	}
+	if _, err := semver.NewConstraint(rng); err != nil {
+		return fmt.Errorf("tt %q 不是合法的版本范围: %v", rng, err)
+	}
+	return nil
+}
+
+// TTSatisfies 判断当前 TT 版本是否落在插件声明的 tt 范围内。
+func TTSatisfies(rng, current string) (bool, error) {
+	c, err := semver.NewConstraint(rng)
+	if err != nil {
+		return false, fmt.Errorf("tt %q 不是合法的版本范围: %v", rng, err)
+	}
+	v, err := semver.StrictNewVersion(current)
+	if err != nil {
+		return false, fmt.Errorf("当前 TT 版本 %q 不是严格 SemVer: %v", current, err)
+	}
+	if c.Check(v) {
+		return true, nil
+	}
+	return false, fmt.Errorf("插件要求 tt %q，当前 TT 是 %s", rng, current)
+}
+
 // ValidatePermission 校验能力名。
 func ValidatePermission(p string) error {
 	if connsvc.ValidCapability(p) {
@@ -145,6 +172,8 @@ func ValidatePermission(p string) error {
 type ValidateOptions struct {
 	// HostAPIVersion 当前 TT 的 Host API 版本（来自 connsvc.HostAPIVersion）。
 	HostAPIVersion string
+	// TTVersion 当前 TT 应用版本。为空时只校验 tt 范围语法，不做范围判定。
+	TTVersion string
 	// ReservedNamespaces 已被占用的 CLI 顶层命令名（含内置命令、旧别名与 TT 保留名）。
 	ReservedNamespaces []string
 	// OtherNamespaces 其他**已启用**插件占用的命名空间（冲突检查）。
@@ -162,8 +191,8 @@ func ValidateManifest(m *Manifest, dir string, opt ValidateOptions) error {
 	}
 	var ps Problems
 
-	if m.SchemaVersion != ManifestSchemaVersion {
-		ps.addf("schemaVersion = %d，本版 TT 只支持 %d", m.SchemaVersion, ManifestSchemaVersion)
+	if m.SchemaVersion < ManifestSchemaVersionMin || m.SchemaVersion > ManifestSchemaVersion {
+		ps.addf("schemaVersion = %d，本版 TT 支持 %d..%d", m.SchemaVersion, ManifestSchemaVersionMin, ManifestSchemaVersion)
 	}
 	if err := ValidateID(m.ID); err != nil {
 		ps.addf("%v", err)
@@ -180,21 +209,42 @@ func ValidateManifest(m *Manifest, dir string, opt ValidateOptions) error {
 			ps.addf("插件要求 hostApi %q，当前 TT 的 Host API 是 %s", m.HostAPI, opt.HostAPIVersion)
 		}
 	}
+	// tt 是**应用版本**范围（运行时能力），可以为空（不限制）；有值时语法必须合法，
+	// 当前 TT 版本可用时还要真正判一次。
+	if strings.TrimSpace(m.TT) != "" {
+		if err := ValidateTTRange(m.TT); err != nil {
+			ps.addf("%v", err)
+		} else if opt.TTVersion != "" {
+			if ok, err := TTSatisfies(m.TT, opt.TTVersion); err != nil || !ok {
+				if err != nil {
+					ps.addf("%v", err)
+				} else {
+					ps.addf("插件要求 tt %q，当前 TT 是 %s", m.TT, opt.TTVersion)
+				}
+			}
+		}
+	}
 	if !m.HasContribution() {
-		ps.addf("没有任何贡献（cli/service/frontend/skills 至少要有一类）")
+		ps.addf("没有任何贡献（cli/service/ui/frontend/skills 至少要有一类）")
 	}
 
-	// 权限名 + 去重。
-	seenPerm := map[string]bool{}
-	for _, p := range m.Permissions {
-		if err := ValidatePermission(p); err != nil {
-			ps.addf("%v", err)
-			continue
+	// 权限：v1 清单继续校验；v2 起权限已废弃，声明即拒绝（给迁移提示）。
+	if len(m.Permissions) > 0 {
+		if m.SchemaVersion >= 2 {
+			ps.addf("permissions 已废弃：v2 清单不再声明权限，请删除（插件不再需要能力授权）")
+		} else {
+			seenPerm := map[string]bool{}
+			for _, p := range m.Permissions {
+				if err := ValidatePermission(p); err != nil {
+					ps.addf("%v", err)
+					continue
+				}
+				if seenPerm[p] {
+					ps.addf("权限 %q 重复声明", p)
+				}
+				seenPerm[p] = true
+			}
 		}
-		if seenPerm[p] {
-			ps.addf("权限 %q 重复声明", p)
-		}
-		seenPerm[p] = true
 	}
 
 	// CLI 贡献。
@@ -231,6 +281,56 @@ func ValidateManifest(m *Manifest, dir string, opt ValidateOptions) error {
 			ps.addf("frontend.title 不能为空")
 		}
 		checkEntry(&ps, dir, "frontend.entry", fe.Entry, m)
+	}
+
+	// 同页 UI 贡献。
+	seenUI := map[string]bool{}
+	for i, ui := range m.Contributions.UI {
+		field := fmt.Sprintf("ui[%d]", i)
+		slot := strings.TrimSpace(ui.Slot)
+		if !IsKnownUISlot(slot) {
+			ps.addf("%s.slot %q 不是受支持的槽位（可用: %s）", field, ui.Slot, strings.Join(KnownUISlots, " / "))
+			continue
+		}
+		key := slot + "|" + ui.ID
+		if seenUI[key] {
+			ps.addf("%s: 槽位 %s 里重复声明了 id %q", field, slot, ui.ID)
+		}
+		seenUI[key] = true
+		if ui.Order < 0 {
+			ps.addf("%s.order 不能为负数", field)
+		}
+		if strings.TrimSpace(ui.Icon) != "" {
+			if _, err := normalizeRelPath(ui.Icon); err != nil {
+				ps.addf("%s.icon: %v", field, err)
+			}
+		}
+		switch slot {
+		case "nav", "settings.section":
+			if strings.TrimSpace(ui.ID) == "" {
+				ps.addf("%s.id 不能为空（%s 用它区分条目）", field, slot)
+			}
+			if strings.TrimSpace(ui.Title) == "" {
+				ps.addf("%s.title 不能为空", field)
+			}
+		case "page":
+			if strings.TrimSpace(ui.Title) == "" {
+				ps.addf("%s.title 不能为空", field)
+			}
+			if err := ValidateRoute(ui.Route); err != nil {
+				ps.addf("%s: %v", field, err)
+			} else if isReserved(ui.Route, opt.OtherRoutes) {
+				ps.addf("%s.route %q 已被其他已启用插件占用", field, ui.Route)
+			}
+		}
+		// 页面与所有组件槽位都必须有浏览器模块入口。
+		if slot == "page" || slot == "header.actions" || slot == "statusbar" || slot == "overlay" {
+			if strings.TrimSpace(ui.Entry) == "" {
+				ps.addf("%s.entry 不能为空（%s 需要浏览器模块）", field, slot)
+			} else {
+				checkEntry(&ps, dir, field+".entry", ui.Entry, m)
+			}
+		}
 	}
 
 	// 技能目录：必须存在且是一份合规技能（有 SKILL.md）。
