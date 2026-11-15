@@ -12,15 +12,15 @@ package live
 import (
 	"context"
 
+	"tt/internal/connsvc"
 	"tt/internal/dbconfig"
 	"tt/internal/erpdb"
-	"tt/internal/sshtun"
 )
 
-// Live 一个远程数据源:底层连接器 + 可选 SSH 隧道(Close 一并释放)。
+// Live 一个远程数据源:底层连接器 + 由 Core 连接服务给出的释放函数(含 SSH 隧道)。
 type Live struct {
-	conn erpdb.Connector
-	tun  *sshtun.Tunnel
+	conn    erpdb.Connector
+	release func()
 }
 
 // Dialect 返回底层连接方言("kingbase"|"oracle")。
@@ -31,44 +31,19 @@ func (l *Live) Connector() erpdb.Connector { return l.conn }
 
 // Close 释放连接;若开了 SSH 隧道一并关闭。
 func (l *Live) Close() {
-	if l.conn != nil {
-		l.conn.Close()
-	}
-	if l.tun != nil {
-		l.tun.Close()
+	if l.release != nil {
+		l.release()
 	}
 }
 
 // Open 按连接配置建立远程数据源。若配置了 viaSsh,先起 SSH 隧道再连本地转发端口。
+//
+// 隧道编排与 erpdb 的只读语义都在 connsvc.OpenBuiltin 一处(与 dbsync、设置页的
+// 测试连接同一条链路),所以"测试通了、直查不通"这种分叉不会从本包长出来。
 func Open(ctx context.Context, c dbconfig.Connection) (*Live, error) {
-	effective := c
-	if c.ViaSSH != nil {
-		remoteHost, remotePort := c.ViaSSH.EffectiveRemote(c.Host, c.Port)
-		t, err := sshtun.Dial(sshtun.Options{
-			Host:       c.ViaSSH.Host,
-			Port:       c.ViaSSH.Port,
-			User:       c.ViaSSH.User,
-			Password:   c.ViaSSH.Password,
-			RemoteHost: remoteHost,
-			RemotePort: remotePort,
-			LocalPort:  c.ViaSSH.BindPort,
-		})
-		if err != nil {
-			return nil, err
-		}
-		// 连接器连本地转发端口(host 固定 127.0.0.1;oracle 保持 service 不变)
-		effective.Host = "127.0.0.1"
-		effective.Port = t.LocalPort
-		conn, err := erpdb.Open(ctx, effective)
-		if err != nil {
-			t.Close()
-			return nil, err
-		}
-		return &Live{conn: conn, tun: t}, nil
-	}
-	conn, err := erpdb.Open(ctx, effective)
+	conn, release, err := connsvc.OpenBuiltin(ctx, c)
 	if err != nil {
 		return nil, err
 	}
-	return &Live{conn: conn}, nil
+	return &Live{conn: conn, release: release}, nil
 }

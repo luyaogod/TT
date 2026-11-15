@@ -1,0 +1,26 @@
+# Host API 的 Buf 模块定义。公共契约只有 proto/tt/host/v1 一处。
+#
+# 版本化规则见 .agents/plan/tt-plugin-system-plan.md 的 ADR-03/ADR-11：
+#   - 包名固定 tt.host.v1；主版本不兼容时才出现 tt.host.v2（与 v1 并存，不原地改）
+#   - 次版本只增不改：删字段/改语义必须提升主版本并在旧版本保留编号
+version: v2
+modules:
+  - path: proto
+lint:
+  use:
+    - STANDARD
+  except:
+    # 本文件对每个服务分文件组织，服务名自带用途（HostService/ProfilesService…），
+    # 不再额外套一层目录层级。
+    - PACKAGE_DIRECTORY_MATCH
+  ignore_only:
+    # sshsession 的 Exec 与 dbsession 的 Exec 同名，而同一 proto 包内消息名必须唯一：
+    # 这里用 SSHExecRequest/SSHExecResponse。只放开这一个文件的命名规则，不做全局豁免。
+    # 注意路径相对**仓库根**（workspace），不是相对 modules[].path。
+    RPC_REQUEST_STANDARD_NAME:
+      - proto/tt/host/v1/sshsession.proto
+    RPC_RESPONSE_STANDARD_NAME:
+      - proto/tt/host/v1/sshsession.proto
+breaking:
+  use:
+    - FILE

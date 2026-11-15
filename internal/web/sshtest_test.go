@@ -5,13 +5,17 @@ import (
 	"strings"
 	"testing"
 
+	"tt/internal/config"
+	"tt/internal/connsvc"
 	"tt/internal/host"
 )
 
 // 「SSH 测试连接」的对内契约:参数校验、端口缺省、成功信封、失败信封。
 //
 // 真实现要真登一台 SSH,所以默认档只能测注入的假实现 —— 与 dbprobe/dbaccverify
-// 同一取舍(见 Options 里那几个函数字段的注释):能钉住的是**对外形状**。
+// 同一取舍:能钉住的是**对外形状**。注入点现在在连接服务里（与 Host API 的
+// ConnectionsService.TestSSH 同一份实现），所以这里连"端口缺省成 22"这类
+// 之前由 web 层负责的判断也一并覆盖到了真实路径上。
 
 func TestSSHTestRejectsEmptyHostAndUser(t *testing.T) {
 	s := New(Options{Version: "test"})
@@ -43,10 +47,12 @@ func TestSSHTestOKDefaultsPortAndTakesHostname(t *testing.T) {
 	var got host.SSHConfig
 	s := New(Options{
 		Version: "test",
-		SSHTest: func(cfg host.SSHConfig) (*host.SSHTestOut, error) {
-			got = cfg
-			return &host.SSHTestOut{Hostname: "t100dev"}, nil
-		},
+		ConnSvc: testConnSvc(t, connsvc.Options{
+			TestSSH: func(cfg config.SSHConfig) (*host.SSHTestOut, error) {
+				got = cfg
+				return &host.SSHTestOut{Hostname: "t100dev"}, nil
+			},
+		}),
 	})
 	rec, body := doJSON(t, s, "POST", "/api/sshtest", map[string]any{
 		"host": " 10.0.0.1 ", "port": 0, "user": " u ", "password": "pw",
@@ -73,9 +79,11 @@ func TestSSHTestOKDefaultsPortAndTakesHostname(t *testing.T) {
 func TestSSHTestKeepsNoteWhenHostnameUnavailable(t *testing.T) {
 	s := New(Options{
 		Version: "test",
-		SSHTest: func(cfg host.SSHConfig) (*host.SSHTestOut, error) {
-			return &host.SSHTestOut{Note: "已登录，但读取主机名失败: x"}, nil
-		},
+		ConnSvc: testConnSvc(t, connsvc.Options{
+			TestSSH: func(cfg config.SSHConfig) (*host.SSHTestOut, error) {
+				return &host.SSHTestOut{Note: "已登录，但读取主机名失败: x"}, nil
+			},
+		}),
 	})
 	rec, body := doJSON(t, s, "POST", "/api/sshtest", map[string]any{
 		"host": "10.0.0.1", "port": 2222, "user": "u", "password": "pw",
@@ -98,9 +106,11 @@ func TestSSHTestKeepsNoteWhenHostnameUnavailable(t *testing.T) {
 func TestSSHTestWrapsDialError(t *testing.T) {
 	s := New(Options{
 		Version: "test",
-		SSHTest: func(cfg host.SSHConfig) (*host.SSHTestOut, error) {
-			return nil, fmt.Errorf("dial tcp 10.0.0.1:22: i/o timeout")
-		},
+		ConnSvc: testConnSvc(t, connsvc.Options{
+			TestSSH: func(cfg config.SSHConfig) (*host.SSHTestOut, error) {
+				return nil, fmt.Errorf("dial tcp 10.0.0.1:22: i/o timeout")
+			},
+		}),
 	})
 	rec, body := doJSON(t, s, "POST", "/api/sshtest", map[string]any{
 		"host": "10.0.0.1", "port": 22, "user": "u", "password": "pw",

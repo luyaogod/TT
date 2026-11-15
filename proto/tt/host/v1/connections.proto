@@ -1,0 +1,86 @@
+// Connections 服务：连接测试与会话开关。
+//
+// **TT 管什么**：哪个插件能用哪个环境、连接何时建立与关闭、会话归谁所有。
+// **TT 不管什么**：插件用连接做什么业务。数据库账号自身权限、SSH 服务端权限照常生效。
+//
+// 句柄（handle）是不透明字符串，绑定插件 ID、实例 ID、环境与连接类型；
+// 拿别人的句柄操作一律报 SESSION_NOT_FOUND（不区分"不存在"和"不属于你"，避免枚举）。
+syntax = "proto3";
+
+package tt.host.v1;
+
+option go_package = "tt/internal/gen/hostv1;hostv1";
+
+message TestDBRequest {
+  string env = 1;
+  // account 可选：用该环境的哪个账号测；空 = 该环境客户端直连惯例（账号清单首项）。
+  string account = 2;
+}
+
+message TestDBResponse {
+  bool ok = 1;
+  // server_version 库侧 SELECT version() 的横幅（成功时）。
+  string server_version = 2;
+  // address 实际连到的地址（经隧道时是 127.0.0.1:<本地端口>）。
+  string address = 3;
+  // stage 失败阶段：resolve_config / tunnel / connect / ping。
+  string stage = 4;
+  string message = 5;
+  int64 duration_ms = 6;
+}
+
+message TestSSHRequest {
+  string env = 1;
+}
+
+message TestSSHResponse {
+  bool ok = 1;
+  // banner SSH server banner（成功时可取）。
+  string banner = 2;
+  // stage 失败阶段：resolve_config / connect。
+  string stage = 3;
+  string message = 4;
+  int64 duration_ms = 5;
+}
+
+message OpenDBRequest {
+  // env 环境名（必须显式给，无默认环境）。
+  string env = 1;
+  // read_only 是否建立库侧只读会话。
+  //
+  // 这是**插件自己的选择**：内置 tt db sql 的只读文本层+库侧只读双防线不适用于本会话，
+  // 也不会因为本方法存在而改变。read_only=false 时插件仍然只能用自己账号的库权限。
+  bool read_only = 2;
+  // account 可选账号名（限制在该环境账号清单内）；空 = 客户端直连惯例。
+  string account = 3;
+}
+
+message OpenDBResponse {
+  string handle = 1;
+  // read_only 实际生效的只读状态（capabilities 不支持只读会话时为 false）。
+  bool read_only = 2;
+  // db_type 实际连接类型。
+  string db_type = 3;
+}
+
+message OpenSSHRequest {
+  string env = 1;
+}
+
+message OpenSSHResponse {
+  string handle = 1;
+}
+
+message CloseRequest {
+  string handle = 1;
+}
+
+message CloseResponse {}
+
+service ConnectionsService {
+  rpc TestDB(TestDBRequest) returns (TestDBResponse);
+  rpc TestSSH(TestSSHRequest) returns (TestSSHResponse);
+  rpc OpenDB(OpenDBRequest) returns (OpenDBResponse);
+  rpc OpenSSH(OpenSSHRequest) returns (OpenSSHResponse);
+  rpc Close(CloseRequest) returns (CloseResponse);
+}

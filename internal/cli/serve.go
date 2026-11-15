@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,10 +14,25 @@ import (
 	"tt/internal/cli/common"
 	debugcli "tt/internal/cli/debug"
 	"tt/internal/config"
+	"tt/internal/connsvc"
 	"tt/internal/debug"
 	dictserver "tt/internal/dict/server"
+	"tt/internal/hostrpc"
 	"tt/internal/web"
 )
+
+// connReloader 把「配置被改写了」翻译成「连接服务的旧会话全部作废」。
+//
+// 为什么直接作废而不是热替换配置：会话是**已建立**的连接，它连着的目标在配置改写前
+// 就定了。环境名没变、库却换了以后，旧会话继续返回旧库的数据 —— 那正是
+// "查错了地方却看起来正常"。作废之后调用方重开一个会话就落到新配置上。
+type connReloader struct{ svc *connsvc.Service }
+
+// ReloadConfig 实现 web.ConfigReloader。幂等且并发安全（connsvc 自己加锁）。
+func (c connReloader) ReloadConfig() error {
+	c.svc.Reload()
+	return nil
+}
 
 // newServeCmd 是统一的本地 Web 服务。
 //
@@ -154,6 +170,33 @@ func newServeCmd() *cobra.Command {
 			syncDefault := config.LocationsAt(path).SyncTarget("", "")
 			dictSrv := dictserver.New(path)
 
+			// ---- 连接服务与 Host API ----
+			//
+			// 一个 connsvc 实例同时交给：设置页的"测试连接"（进程内直接调用）、
+			// Host API 的 ConnectRPC handlers（进程外插件）。这就是"同服务、双接入"：
+			// 不存在第一方走一套、插件走另一套连接逻辑。
+			//
+			// 令牌表先只由 supervisor 签发（阶段 3 接入）；在此之前 /hostrpc/ 已挂载但
+			// **没有任何有效令牌** —— 未认证请求一律 401，不会开出一个匿名可用的连接面。
+			// 审计落在服务日志里（不含 SQL 文本/命令内容/秘密）。
+			auditLog := log.New(os.Stderr, "[connsvc] ", 0)
+			connSvc := connsvc.New(connsvc.Options{
+				ConfigPath: path,
+				TTVersion:  Version,
+				Audit: func(ev connsvc.Event) {
+					if ev.OK {
+						return // 成功路径不刷日志：一次页面点三下会淹掉真正的错误
+					}
+					auditLog.Printf("action=%s caller=%s env=%s kind=%s code=%s ms=%d",
+						ev.Action, ev.Caller, ev.Env, ev.Kind, ev.Code, ev.DurationMS)
+				},
+			})
+			tokenStore := hostrpc.NewTokenStore()
+			hostRPCHandler := hostrpc.NewHandler(hostrpc.Deps{
+				Service: connSvc,
+				Auth:    hostrpc.NewTokenAuthenticator(tokenStore),
+			})
+
 			err = debugcli.RunForeground(path, debugcli.ServeSpec{
 				Prefix:           "TT",
 				StopHint:         "tt serve --stop",
@@ -177,9 +220,13 @@ func newServeCmd() *cobra.Command {
 					BareVersion: Version,
 					Debug:       debugSrv.Handler(),
 					Dict:        dictSrv.Handler(),
-					// 配置写入后让持有内存态的调试服务重新加载，否则它内存里还是旧环境，
-					// 表现是"改了没生效"。
-					Reloaders: []web.ConfigReloader{debugSrv},
+					// 设置页的"测试连接"与插件 Host API 用同一个连接服务实例。
+					ConnSvc: connSvc,
+					HostRPC: hostRPCHandler,
+					// 配置写入后让持有内存态的子系统重新加载，否则它们内存里还是旧环境，
+					// 表现是"改了没生效"。连接服务还要把旧会话全部作废 —— 旧会话连着的是
+					// **旧目标**，而调用方看到的仍是同一个环境名。
+					Reloaders: []web.ConfigReloader{debugSrv, connReloader{svc: connSvc}},
 					Shutdown:  stopWeb,
 					// 统一层配置状态仍按旧的单文件口径显示；设置页已改用 /api/dbsync 的库目录。
 					SyncDefaultTarget: syncDefault,

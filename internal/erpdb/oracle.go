@@ -20,14 +20,20 @@ import (
 
 // OracleConnector 用 go-ora(database/sql)连 Oracle,查询文本化返回。
 type OracleConnector struct {
-	addr string
-	typ  string
-	db   *sql.DB
+	addr     string
+	typ      string
+	db       *sql.DB
+	readOnly bool
 }
 
-// OpenOracle 连接 Oracle。统一显式模型:host/port/service(service 也接受 database 旧值);
-// service 为空时用 host 的 database 字段兜底。
+// OpenOracle 打开内置只读语义的 Oracle 连接（历史入口，等价 openOracle(…, true)）。
 func OpenOracle(ctx context.Context, c dbconfig.Connection) (*OracleConnector, error) {
+	return openOracle(ctx, c, true)
+}
+
+// openOracle 连接 Oracle。统一显式模型:host/port/service(service 也接受 database 旧值);
+// service 为空时用 host 的 database 字段兜底。
+func openOracle(ctx context.Context, c dbconfig.Connection, readOnly bool) (*OracleConnector, error) {
 	server, port, service := c.Host, c.Port, c.Svc()
 	if port == 0 {
 		port = 1521
@@ -46,7 +52,7 @@ func OpenOracle(ctx context.Context, c dbconfig.Connection) (*OracleConnector, e
 		db.Close()
 		return nil, fmt.Errorf("连接 Oracle 失败 (%s:%d/%s): %w", server, port, service, err)
 	}
-	return &OracleConnector{addr: c.Address(), typ: c.Type, db: db}, nil
+	return &OracleConnector{addr: c.Address(), typ: c.Type, db: db, readOnly: readOnly}, nil
 }
 
 func goOraDSN(host string, port int, service, user, password string) string {
@@ -86,10 +92,55 @@ func (o *OracleConnector) ServerVersion(ctx context.Context) (string, error) {
 // 直接 `return nil, errors.New("readonly transaction is not supported")`），
 // 所以只能自己发 `SET TRANSACTION READ ONLY`。
 func (o *OracleConnector) Query(ctx context.Context, sql string) ([]string, [][]string, error) {
-	if err := checkReadOnlyStatement(sql); err != nil {
+	// 文本层只在只读会话上：普通会话是插件通用路径，TT 不审查它的语句语义。
+	if o.readOnly {
+		if err := checkReadOnlyStatement(sql); err != nil {
+			return nil, nil, err
+		}
+		return o.queryReadOnly(ctx, sql)
+	}
+	return o.queryPlain(ctx, sql)
+}
+
+// queryPlain 普通（非只读）会话的查询体：不套只读事务，逐行文本化。
+//
+// 与 queryReadOnly 的差别只有"没有 SET TRANSACTION READ ONLY 那一层" ——
+// 这是**插件通用会话**的语义：TT 不承诺替你只读，边界是数据库账号权限。
+func (o *OracleConnector) queryPlain(ctx context.Context, sql string) ([]string, [][]string, error) {
+	rows, err := o.db.QueryContext(ctx, sql)
+	if err != nil {
+		return nil, nil, fmt.Errorf("query: %w", err)
+	}
+	defer rows.Close()
+	return scanRows(rows)
+}
+
+// scanRows 把 database/sql 结果集文本化成列名 + 行。
+func scanRows(rows *sql.Rows) ([]string, [][]string, error) {
+	cols, err := rows.Columns()
+	if err != nil {
 		return nil, nil, err
 	}
-	return o.queryReadOnly(ctx, sql)
+	var result [][]string
+	vals := make([]any, len(cols))
+	ptrs := make([]any, len(cols))
+	for rows.Next() {
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return nil, nil, err
+		}
+		row := make([]string, len(cols))
+		for i, v := range vals {
+			row[i] = scanString(v)
+		}
+		result = append(result, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	return cols, result, nil
 }
 
 // queryReadOnly 是**带库侧只读事务**的执行体（`Query` 与 `ServerVersion` 共用）。
@@ -132,31 +183,7 @@ func (o *OracleConnector) queryReadOnly(ctx context.Context, sql string) ([]stri
 		return nil, nil, fmt.Errorf("query: %w", err)
 	}
 	defer rows.Close()
-
-	cols, err := rows.Columns()
-	if err != nil {
-		return nil, nil, err
-	}
-	var result [][]string
-	vals := make([]any, len(cols))
-	ptrs := make([]any, len(cols))
-	for rows.Next() {
-		for i := range vals {
-			ptrs[i] = &vals[i]
-		}
-		if err := rows.Scan(ptrs...); err != nil {
-			return nil, nil, err
-		}
-		row := make([]string, len(cols))
-		for i, v := range vals {
-			row[i] = scanString(v)
-		}
-		result = append(result, row)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, nil, err
-	}
-	return cols, result, nil
+	return scanRows(rows)
 }
 
 // scanString 把 database/sql 扫到的任意值文本化(供 Oracle 走 interface 扫描)。

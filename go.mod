@@ -3,6 +3,7 @@ module tt
 go 1.26.5
 
 require (
+	connectrpc.com/connect v1.19.1
 	github.com/coder/websocket v1.8.15
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/pkg/sftp v1.13.11
@@ -11,6 +12,7 @@ require (
 	github.com/spf13/pflag v1.0.9
 	golang.org/x/crypto v0.55.0
 	golang.org/x/sys v0.47.0
+	google.golang.org/protobuf v1.36.9
 	modernc.org/sqlite v1.54.0
 )
 
