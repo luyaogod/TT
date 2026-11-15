@@ -37,7 +37,13 @@ web-build: ## 前端构建（含 tsc 类型检查；check:app 不做类型检查
 #      "Access is denied" 而看不出原因。
 BUF_CACHE_DIR := $(CURDIR)/.tools/buf-cache
 BUF_ENV := BUF_CACHE_DIR=$(BUF_CACHE_DIR)
-BUF_BREAKING_AGAINST ?= .git#branch=main
+# 兼容基线 —— **已发布契约的快照**，不是 git 分支：
+#   - 用 git 分支没意义：本项目的 Host API 是新增的，main 上没有任何 .proto；
+#   - 快照 = `buf build` 出的 FileDescriptorSet（JSON，可 diff 可评审），随契约一起入库；
+#   - 只在**发布并有意扩充契约**（纯增量）后刷新基线：先发版，再
+#     `buf build -o proto/baseline/v1.json --as-file-descriptor-set`，
+#     这样下一个版本才拿"上一个已发布契约"作比较。
+BUF_BREAKING_AGAINST ?= proto/baseline/v1.json
 
 proto-tools: ## 装 Host API 的生成工具链（buf + 两个 protoc 插件，进 $(go env GOPATH)/bin）
 	go install github.com/bufbuild/buf/cmd/buf@v1.75.0
@@ -52,7 +58,7 @@ proto-lint: ## buf lint（STANDARD，只有 buf.yaml 里写明的豁免）
 	@command -v buf >/dev/null || { echo '缺 buf：先跑 make proto-tools'; exit 1; }
 	$(BUF_ENV) buf lint
 
-proto-breaking: ## buf breaking：相对 main 分支检查公共契约兼容性（BUF_BREAKING_AGAINST 可覆盖）
+proto-breaking: ## buf breaking：对照已发布的契约快照（BUF_BREAKING_AGAINST 可覆盖）
 	@command -v buf >/dev/null || { echo '缺 buf：先跑 make proto-tools'; exit 1; }
 	$(BUF_ENV) buf breaking --against '$(BUF_BREAKING_AGAINST)'
 
