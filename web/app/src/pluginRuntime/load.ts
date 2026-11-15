@@ -4,6 +4,7 @@
 // /* @vite-ignore */ 的动态 import：插件代码**不进宿主 bundle**，运行时才取。
 
 import * as React from 'react'
+import { Checkbox } from '../../../shared/ui-radix'
 import { registerSlot } from './registry'
 import type { SlotRegistration } from './types'
 
@@ -14,6 +15,8 @@ export interface PluginUIContext {
   React: typeof React
   /** 注册一个槽位组件；页面卸载时宿主会清掉本插件的全部注册。 */
   slot: (slot: string, reg: SlotRegistration) => void
+  /** 宿主提供的 shadcn/Radix 组件（与宿主共用同一个 React 实例）。 */
+  ui: { Checkbox: typeof Checkbox }
   log: (...args: unknown[]) => void
 }
 
@@ -38,6 +41,7 @@ export function activatePlugin(pluginId: string, version: string, mod: PluginCli
     version,
     React,
     slot: (slot, reg) => { registerSlot(pluginId, slot, reg) },
+    ui: { Checkbox },
     log: (...args: unknown[]) => { console.log(`[plugin:${pluginId}]`, ...args) },
   }
   const ret = mod.register?.(context)
