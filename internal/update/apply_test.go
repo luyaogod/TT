@@ -197,6 +197,23 @@ func TestPlanRoundTrip(t *testing.T) {
 		len(got.SkillsTargets) != 1 || !got.RestartServe {
 		t.Errorf("计划没读全: %+v", got)
 	}
+	// 安装版的计划：制品是下载好的 Setup.exe，靠 kind 记号（"setup"）分流 —— 不靠文件名。
+	// 这是跨进程契约，改了会让已经落盘的旧计划读不出来。
+	setupPlan := &Plan{
+		Kind: TokenSetup, From: "0.2.1", Target: "0.2.2",
+		ExePath:  filepath.Join(dir, "tt.exe"),
+		Artifact: filepath.Join(dir, "TT-0.2.2-x64-Setup.exe"), DataDir: dir,
+	}
+	if err := SavePlan(dir, setupPlan); err != nil {
+		t.Fatalf("SavePlan(安装版): %v", err)
+	}
+	got, err = LoadPlan(PlanPath(dir))
+	if err != nil {
+		t.Fatalf("LoadPlan(安装版): %v", err)
+	}
+	if got.Kind != TokenSetup || got.Artifact != setupPlan.Artifact || got.Stage != "" {
+		t.Errorf("安装版计划没读全: %+v", got)
+	}
 	// 不完整的计划要当场报错，而不是让更新器跑到一半才发现没东西可装。
 	bad := filepath.Join(dir, "bad.json")
 	if err := os.WriteFile(bad, []byte(`{"kind":"portable"}`), 0o644); err != nil {

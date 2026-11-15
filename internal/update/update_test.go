@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -78,14 +79,23 @@ func TestParseVersionAndCompare(t *testing.T) {
 
 // ---------- 发布与资产 ----------
 
+// fakeReleaseJSON 一次"完整发布"：8 个发行资产（4 个 CLI + 4 个桌面）外加一个非制品。
+// 名字与大小写就是发布契约（见 release.go 的 PickAssetFor）：TT 桌面版的安装包也叫
+// -Setup.exe，靠 -desktop 区分；CLI 便携包与桌面便携包都叫 .zip，靠 -portable 区分。
 var fakeReleaseJSON = `{
   "tag_name": "v0.2.2",
   "prerelease": false,
   "published_at": "2026-10-07T08:59:16Z",
   "assets": [
     {"name":"t100-v0.1.0.xml","size":10,"digest":"sha256:` + strings.Repeat("a", 64) + `","browser_download_url":"https://example.invalid/a.xml"},
-    {"name":"TT-0.2.2-x64.msi","size":41297555,"digest":"sha256:` + strings.Repeat("b", 64) + `","browser_download_url":"https://example.invalid/a.msi"},
-    {"name":"tt-portable.zip","size":123,"digest":"sha256:` + strings.Repeat("c", 64) + `","browser_download_url":"https://example.invalid/a.zip"}
+    {"name":"TT-0.2.2-x64-Setup.exe","size":41297555,"digest":"sha256:` + strings.Repeat("b", 64) + `","browser_download_url":"https://example.invalid/x64-setup.exe"},
+    {"name":"TT-0.2.2-arm64-Setup.exe","size":40297555,"digest":"sha256:` + strings.Repeat("c", 64) + `","browser_download_url":"https://example.invalid/arm64-setup.exe"},
+    {"name":"tt-0.2.2-x64-portable.zip","size":123,"digest":"sha256:` + strings.Repeat("d", 64) + `","browser_download_url":"https://example.invalid/x64-portable.zip"},
+    {"name":"tt-0.2.2-arm64-portable.zip","size":124,"digest":"sha256:` + strings.Repeat("e", 64) + `","browser_download_url":"https://example.invalid/arm64-portable.zip"},
+    {"name":"TT-Desktop-0.2.2-x64-Setup.exe","size":61297555,"digest":"sha256:` + strings.Repeat("f", 64) + `","browser_download_url":"https://example.invalid/desktop-x64-setup.exe"},
+    {"name":"TT-Desktop-0.2.2-arm64-Setup.exe","size":60297555,"digest":"sha256:` + strings.Repeat("a", 64) + `","browser_download_url":"https://example.invalid/desktop-arm64-setup.exe"},
+    {"name":"TT-Desktop-0.2.2-x64.zip","size":223,"digest":"sha256:` + strings.Repeat("b", 64) + `","browser_download_url":"https://example.invalid/desktop-x64.zip"},
+    {"name":"TT-Desktop-0.2.2-arm64.zip","size":224,"digest":"sha256:` + strings.Repeat("c", 64) + `","browser_download_url":"https://example.invalid/desktop-arm64.zip"}
   ]
 }`
 
@@ -101,37 +111,103 @@ func TestParseReleaseAndPickAsset(t *testing.T) {
 	if rel.PublishedAt.IsZero() || rel.Prerelease {
 		t.Errorf("发布时间/预发布标记没读出来: %+v", rel)
 	}
+	if len(rel.Assets) != 9 {
+		t.Fatalf("该有 9 个资产（8 个发行资产 + 1 个非制品），得到 %d", len(rel.Assets))
+	}
 
-	msi, err := rel.AssetFor(KindMSI)
-	if err != nil || msi.Name != "TT-0.2.2-x64.msi" {
-		t.Errorf("AssetFor(MSI) = %v, %v", msi.Name, err)
+	// 8 个发行资产里，按形态 + 架构各挑各的。
+	cases := []struct {
+		kind Kind
+		arch string
+		want string
+	}{
+		{KindSetup, "x64", "TT-0.2.2-x64-Setup.exe"},
+		{KindSetup, "arm64", "TT-0.2.2-arm64-Setup.exe"},
+		{KindPortable, "x64", "tt-0.2.2-x64-portable.zip"},
+		{KindPortable, "arm64", "tt-0.2.2-arm64-portable.zip"},
 	}
-	zip, err := rel.AssetFor(KindPortable)
-	if err != nil || zip.Name != "tt-portable.zip" {
-		t.Errorf("AssetFor(便携包) = %v, %v", zip.Name, err)
+	for _, c := range cases {
+		got, err := PickAssetFor(rel.Assets, c.kind, c.arch)
+		if err != nil || got.Name != c.want {
+			t.Errorf("PickAssetFor(%s, %s) = %v, %v；想要 %s", c.kind, c.arch, got.Name, err, c.want)
+		}
+		// 桌面资产不许被误选：CLI 安装包的判据必须排掉 -desktop。
+		if strings.Contains(strings.ToLower(got.Name), "desktop") {
+			t.Errorf("PickAssetFor(%s, %s) 挑到了桌面版资产 %s", c.kind, c.arch, got.Name)
+		}
 	}
-	// 认不出的形态不许从发布里取资产（否则会给 KindOther 配一个"随便解压"的动作）。
+
+	// AssetFor 保留原来的调用形状（内部按 runtime.GOARCH 判架构）。
+	if arch, err := ArchName(runtime.GOARCH); err == nil {
+		got, err := rel.AssetFor(KindSetup)
+		if err != nil || got.Name != "TT-0.2.2-"+arch+"-Setup.exe" {
+			t.Errorf("AssetFor(安装版) = %v, %v；想要 TT-0.2.2-%s-Setup.exe", got.Name, err, arch)
+		}
+	}
+	// 认不出的形态与桌面版都不许从发布里取资产（否则会给 KindOther 配一个"随便解压"
+	// 的动作，或让桌面版吃到一份 CLI 载荷）。
 	if _, err := rel.AssetFor(KindOther); err == nil {
 		t.Error("AssetFor(KindOther) 该报错")
 	}
+	if _, err := PickAssetFor(rel.Assets, KindDesktop, "x64"); err == nil {
+		t.Error("桌面版不该从发布里取资产")
+	}
 
-	// 多个同类资产：宁可报错也不猜。
-	multi := strings.Replace(fakeReleaseJSON, `"name":"tt-portable.zip"`,
-		`"name":"tt-portable.zip"},{"name":"tt-portable-0.2.2.zip","size":9,"digest":"sha256:`+strings.Repeat("d", 64)+`","browser_download_url":"https://example.invalid/b.zip"`, 1)
-	rel2, err := ParseRelease([]byte(multi))
-	if err != nil {
-		t.Fatalf("造第二个 zip 资产时 JSON 坏了: %v", err)
+	// 多个命中：宁可报错也不猜，错误里要列出候选名与本机架构。
+	multi := []Asset{
+		{Name: "TT-0.2.1-x64-Setup.exe"},
+		{Name: "TT-0.2.2-x64-Setup.exe"},
 	}
-	if len(rel2.Assets) != 4 {
-		t.Fatalf("该有 4 个资产，得到 %d", len(rel2.Assets))
+	_, err = PickAssetFor(multi, KindSetup, "x64")
+	if err == nil {
+		t.Fatal("同类资产有两个时该报错")
 	}
-	if _, err := rel2.AssetFor(KindPortable); err == nil {
-		t.Error("同类资产有两个时该报错")
+	for _, want := range []string{"多个", "x64", "TT-0.2.1-x64-Setup.exe", "TT-0.2.2-x64-Setup.exe"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("多个命中的错误信息该含 %q: %v", want, err)
+		}
 	}
+
+	// 0 个命中：错误里要说出"这台机器是 <arch>"，并列出发布里到底有什么。
+	desktopOnly := []Asset{
+		{Name: "TT-Desktop-0.2.2-x64-Setup.exe"},
+		{Name: "TT-Desktop-0.2.2-x64.zip"},
+	}
+	_, err = PickAssetFor(desktopOnly, KindSetup, "x64")
+	if err == nil {
+		t.Fatal("只有桌面资产时该报错")
+	}
+	for _, want := range []string{"这台机器是 x64", "TT-Desktop-0.2.2-x64-Setup.exe"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("0 个命中的错误信息该含 %q: %v", want, err)
+		}
+	}
+	// 架构对不上也是 0 个命中：错误里必须点明本机架构，否则排障只能猜。
+	_, err = PickAssetFor([]Asset{{Name: "TT-0.2.2-x64-Setup.exe"}}, KindSetup, "arm64")
+	if err == nil || !strings.Contains(err.Error(), "arm64") {
+		t.Errorf("架构对不上时该报错并写明本机架构，得到 %v", err)
+	}
+
 	// 一个都没有。
 	rel3, _ := ParseRelease([]byte(`{"tag_name":"v1.0.0","assets":[]}`))
 	if _, err := rel3.AssetFor(KindPortable); err == nil {
 		t.Error("没有对应资产时该报错")
+	}
+}
+
+// ArchName 是"发布只出 x64 与 arm64"这条约束的唯一出口：其它架构当场报错，
+// 而不是拿空架构名去资产清单里碰运气。
+func TestArchName(t *testing.T) {
+	for goarch, want := range map[string]string{"amd64": "x64", "arm64": "arm64"} {
+		got, err := ArchName(goarch)
+		if err != nil || got != want {
+			t.Errorf("ArchName(%q) = %q, %v；想要 %q", goarch, got, err, want)
+		}
+	}
+	for _, bad := range []string{"386", "arm", "ppc64", ""} {
+		if got, err := ArchName(bad); err == nil {
+			t.Errorf("ArchName(%q) 该报错，得到 %q", bad, got)
+		}
 	}
 }
 
@@ -183,22 +259,36 @@ func TestDetectKindAndInstallRefusal(t *testing.T) {
 		t.Errorf("便携包该允许自装，却被拒: %s", why)
 	}
 
-	// MSI：exe 在 %LOCALAPPDATA%\Programs\TT。
+	// 安装版：exe 在 %LOCALAPPDATA%\Programs\TT（installer/tt-cli.iss 的 DefaultDirName，
+	// 也是旧 MSI 用过的目录 —— 旧 MSI 用户升级后自然落进这一类）。
 	local := filepath.Join(base, "Local")
-	msiDir := filepath.Join(local, "Programs", "TT")
-	if err := os.MkdirAll(msiDir, 0o755); err != nil {
+	setupDir := filepath.Join(local, "Programs", "TT")
+	if err := os.MkdirAll(setupDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("LOCALAPPDATA", local)
-	if got := DetectKind(filepath.Join(msiDir, "tt.exe")); got != KindMSI {
-		t.Errorf("MSI 安装目录里 DetectKind = %v，想要 KindMSI", got)
+	if got := DetectKind(filepath.Join(setupDir, "tt.exe")); got != KindSetup {
+		t.Errorf("安装版目录里 DetectKind = %v，想要 KindSetup", got)
 	}
 	// 大小写与结尾分隔符不该影响判定（Windows 路径大小写不敏感）。
-	if got := DetectKind(strings.ToUpper(filepath.Join(msiDir, "tt.exe"))); got != KindMSI {
-		t.Errorf("大写路径 DetectKind = %v，想要 KindMSI", got)
+	if got := DetectKind(strings.ToUpper(filepath.Join(setupDir, "tt.exe"))); got != KindSetup {
+		t.Errorf("大写路径 DetectKind = %v，想要 KindSetup", got)
 	}
-	if why := InstallRefusal(KindMSI, filepath.Join(msiDir, "tt.exe"), "0.2.1"); why != "" {
-		t.Errorf("MSI 该允许自装，却被拒: %s", why)
+	if why := InstallRefusal(KindSetup, filepath.Join(setupDir, "tt.exe"), "0.2.1"); why != "" {
+		t.Errorf("安装版该允许自装，却被拒: %s", why)
+	}
+	// 形态的名字与跨进程记号是两套东西，后者是计划文件的契约（见 kind.go）。
+	if got := KindSetup.String(); got != "安装版" {
+		t.Errorf("KindSetup.String() = %q，想要\"安装版\"", got)
+	}
+	if got := KindSetup.Token(); got != TokenSetup {
+		t.Errorf("KindSetup.Token() = %q，想要 TokenSetup(\"setup\")", got)
+	}
+	if TokenSetup != "setup" {
+		t.Errorf("TokenSetup = %q，跨进程记号必须是 \"setup\"", TokenSetup)
+	}
+	if KindPortable.Token() != "portable" || KindDesktop.Token() != "desktop" {
+		t.Error("便携包/桌面版的跨进程记号不该跟着改名而变")
 	}
 
 	// 桌面版：exe 在 <安装目录>\resources\tt，同目录有 .desktop。
@@ -236,10 +326,13 @@ func TestDetectKindAndInstallRefusal(t *testing.T) {
 		t.Errorf("认不出的布局该给出解释，得到 %q", why)
 	}
 
-	// 源码态（没有注入版本号）：先于布局判定，提示 make build。
+	// 源码态（没有注入版本号）：先于布局判定，提示 make build，并指向发行版的两种形态。
 	why = InstallRefusal(KindOther, filepath.Join(other, "tt.exe"), "")
 	if why == "" || !strings.Contains(why, "make build") {
 		t.Errorf("没有版本号时该指向 make build，得到 %q", why)
+	}
+	if !strings.Contains(why, "安装版或便携包") {
+		t.Errorf("源码态该指向安装版/便携包，得到 %q", why)
 	}
 }
 

@@ -26,6 +26,10 @@ func Preview() (Status, string, bool, error) {
 	return Get(), "", false, fmt.Errorf("当前系统不支持自动写入 PATH,请按提示手动添加")
 }
 
+func PreviewRemove() (Status, string, bool, error) {
+	return Get(), "", false, fmt.Errorf("当前系统不支持自动写入 PATH")
+}
+
 func Add() (Status, error) {
 	return Get(), fmt.Errorf("当前系统不支持自动写入 PATH,请按提示手动添加")
 }

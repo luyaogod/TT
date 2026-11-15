@@ -3,6 +3,7 @@ package update
 import (
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -84,41 +85,106 @@ func ParseReleases(b []byte) ([]*Release, error) {
 	return list, nil
 }
 
-// AssetFor 按安装形态挑出该下载哪个资产（见 PickAsset）。
+// AssetFor 按安装形态与本机架构挑出该下载哪个资产（见 PickAsset / PickAssetFor）。
 func (r *Release) AssetFor(k Kind) (Asset, error) { return PickAsset(r.Assets, k) }
 
-// PickAsset 按安装形态挑出该下载哪个资产。
-//
-// 名字里带版本号不是判据（今天的 zip 叫 `tt-portable.zip`、MSI 叫 `TT-0.2.1-x64.msi`，
-// 两种惯例并存），所以这里只按**扩展名**挑：MSI 一次只能装一个，便携包一次只能解一个
-// 。"下到的制品是不是这一次发布的"由摘要与制品自报版本回答，不看文件名。
+// PickAsset 按安装形态与 runtime.GOARCH 挑资产。不想依赖本机架构时用 PickAssetFor。
 func PickAsset(assets []Asset, k Kind) (Asset, error) {
-	var want string
+	arch, err := ArchName(runtime.GOARCH)
+	if err != nil {
+		return Asset{}, err
+	}
+	return PickAssetFor(assets, k, arch)
+}
+
+// ArchName 把 runtime.GOARCH 翻成发行资产名里的架构记号。
+//
+// 发布只出 x64 一种：其它架构不是"这次没找到资产"，而是这一版根本不支持它，所以在这里
+// 就报错误，而不是拿一个空架构名去资产清单里碰运气。arm64 的名字保留在映射里，是为了
+// 将来真要补 arm64 包时只改打包脚本、不改更新器。
+func ArchName(goarch string) (string, error) {
+	switch goarch {
+	case "amd64":
+		return "x64", nil
+	case "arm64":
+		return "arm64", nil
+	default:
+		return "", fmt.Errorf("发布只提供 x64，不支持本机的 %s", goarch)
+	}
+}
+
+// PickAssetFor 按安装形态与架构挑出该下载哪个资产（arch 取 ArchName 的产物）。
+//
+// **资产名是发布契约的一部分**：安装脚本按同一套名字出包，更新器按同一套名字回挑，
+// 两边任何一处改了都会在这里对不上。0.6.0 起一次发布固定 4 个资产（x64）：
+//
+//	CLI 安装版：  TT-<ver>-x64-Setup.exe
+//	CLI 便携版：  tt-<ver>-x64-portable.zip
+//	桌面安装版：  TT-Desktop-<ver>-x64-Setup.exe
+//	桌面便携版：  TT-Desktop-<ver>-x64.zip
+//
+// 只按扩展名挑已经不够用了：发布里有 2 个 .zip、2 个 .exe（CLI 与桌面版都在里面），
+// "多个同类就报错"必然命中。所以判据是**形态 + 架构**：`-Setup.exe` 且不含 `-desktop`
+// 才是 CLI 安装包，`-portable.zip` 且含 `-<arch>-` 才是 CLI 便携包。桌面版不从发布里
+// 取资产（它随 TT Desktop 整体升级）。名字大小写不敏感（大小写在契约里是固定的，但
+// 比较时不值得为此拒绝一份只错了大小写的包）。
+func PickAssetFor(assets []Asset, k Kind, arch string) (Asset, error) {
+	arch = strings.ToLower(arch)
+	match := func(name string) bool { return false }
 	switch k {
-	case KindMSI:
-		want = ".msi"
+	case KindSetup:
+		// CLI 安装包：TT-<ver>-<arch>-Setup.exe。桌面安装包也叫 -Setup.exe，所以必须
+		// 排掉带 -desktop 的那些。
+		match = func(name string) bool {
+			n := strings.ToLower(name)
+			return strings.HasSuffix(n, "-setup.exe") &&
+				strings.Contains(n, "-"+arch+"-") &&
+				!strings.Contains(n, "-desktop")
+		}
 	case KindPortable:
-		want = ".zip"
+		// CLI 便携包：tt-<ver>-<arch>-portable.zip。桌面便携包叫 .zip 但不带 -portable。
+		match = func(name string) bool {
+			n := strings.ToLower(name)
+			return strings.HasSuffix(n, "-portable.zip") && strings.Contains(n, "-"+arch+"-")
+		}
+	case KindDesktop:
+		return Asset{}, fmt.Errorf("桌面版不从发布里取资产：它随 TT Desktop 整体升级")
 	default:
 		return Asset{}, fmt.Errorf("安装形态 %s 不从发布里取资产", k)
 	}
+
 	var found []Asset
 	for _, a := range assets {
-		if strings.HasSuffix(strings.ToLower(a.Name), want) {
+		if match(a.Name) {
 			found = append(found, a)
 		}
 	}
-	switch len(found) {
-	case 0:
-		return Asset{}, fmt.Errorf("发布里没有 %s 资产", want)
-	case 1:
+	if len(found) == 1 {
 		return found[0], nil
-	default:
-		names := make([]string, 0, len(found))
-		for _, a := range found {
-			names = append(names, a.Name)
-		}
-		return Asset{}, fmt.Errorf("发布里有多个 %s 资产（%s）：不知道该装哪个",
-			want, strings.Join(names, " / "))
 	}
+	// 0 个：把发布里到底有什么列出来；多个：列出命中的那几个。两种都要带上本机架构，
+	// 否则排障时只能靠猜"是不是下错了架构的包"。
+	names := assetNames(assets)
+	if len(found) > 0 {
+		names = assetNames(found)
+	}
+	if len(names) == 0 {
+		names = []string{"（没有任何资产）"}
+	}
+	kind := k.String()
+	if len(found) > 1 {
+		return Asset{}, fmt.Errorf("发布里有多个匹配 %s（这台机器是 %s）的资产：%s；不知道该装哪个",
+			kind, arch, strings.Join(names, " / "))
+	}
+	return Asset{}, fmt.Errorf("发布里没有匹配 %s（这台机器是 %s）的资产；发布里有：%s",
+		kind, arch, strings.Join(names, " / "))
+}
+
+// assetNames 取资产名（报错用）。
+func assetNames(assets []Asset) []string {
+	names := make([]string, 0, len(assets))
+	for _, a := range assets {
+		names = append(names, a.Name)
+	}
+	return names
 }

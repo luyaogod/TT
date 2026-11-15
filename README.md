@@ -9,18 +9,22 @@ TT 是用于开发鼎捷数智旗下的大型ERP系统（T100）所构建的CLI�
 
 ## 安装
 
-参考 https://github.com/luyaogod/TT/releases
+参考 https://github.com/luyaogod/TT/releases —— 每个版本 4 个产物：**CLI / 桌面版** ×
+**安装版 / 便携版**（x64）。
 
 - 桌面版（推荐给不常用命令行的同学）
     - 下载 `TT-Desktop-<版本>-x64-Setup.exe`，双击安装，不需要管理员，装完双击「TT Desktop」即可
     - 第一次打开直接进工作台，在「设置」里连上 T100 环境就能开工（技能与命令行也在那里装）
     - 它和下面两种发行版共用同一份配置（`%APPDATA%\tt`），所以随时可以换来换去
-- 便携包
+- CLI 安装版
+    - 下载 `TT-<版本>-x64-Setup.exe`，双击安装：装到 `%LOCALAPPDATA%\Programs\TT`，
+      自动加入**用户** PATH，不需要管理员；卸载时会把 PATH 里那一项一起摘掉
+- CLI 便携版
+    - 下载 `tt-<版本>-x64-portable.zip`，解压到任意目录即用（配置留在包内，不写用户目录）
     ```powershell
     #手动将tt安装到用户PATH
     tt install path
     ```
-- MSI安装包
 
 ---
 
@@ -33,9 +37,13 @@ tt update log       # 上一次升级走到哪一步
 ```
 
 `tt update` 按你现在的安装形态装：便携包就地覆盖程序目录（`config.json` 与目录里
-你自己的文件不碰），MSI 安装交给 `msiexec`（用户级安装，不需要管理员）。升级全程
-需要能访问 GitHub；内网要经代理时用 `tt update --proxy http://host:port`，
-或把地址写进 `config.json` 的 `net.proxy`。
+你自己的文件不碰），安装版重新下载同一架构的 `Setup.exe` 静默安装（仍是用户级，不需要
+管理员）。升级全程需要能访问 GitHub；
+内网要经代理时用 `tt update --proxy http://host:port`，或把地址写进 `config.json` 的
+`net.proxy`。
+
+> 0.6.0 起安装版统一是 Inno Setup，不再发布 MSI。0.5.x 用 MSI 装过的机器可以直接装
+> 0.6.0 的安装版：安装器会先静默摘掉旧 MSI 的登记，再铺新文件，不会留下两条「应用和功能」。
 
 升级会把 agent 目录里的技能树一并刷成同版（`tt install skills` 装过哪些地方记在
 数据目录的 `.tt-skills.json`）。如果那一步没成，`tt version` 会提示你手动跑
@@ -112,7 +120,6 @@ tt plugin disable com.example.myplugin
 |name&link|abstract|description|
 |---|---|---|
 |[bdl-tutorial](https://github.com/luyaogod/bdl-tutorial.git)|BDL语法SKILL|当不理解T100项目中的`.4gl`文件里的BDL语法规范时，请激活此技能。|
-|[tt-erp-query](https://github.com/songyuliang1/tt-erp-query.git)|T100通用取数|当需要查 T100 任意表的结构、字段含义，或跑只读 SQL 批量取数时，请激活此技能。|
 
 ---
 

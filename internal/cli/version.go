@@ -13,7 +13,7 @@ import (
 	"tt/internal/update"
 )
 
-// Version 由打包脚本注入：build_portable.bat / build_msi.bat 读仓库根的 VERSION
+// Version 由打包脚本注入：build_portable.bat / build_cli_setup.bat 读仓库根的 VERSION
 // 文件，经 -ldflags "-X tt/internal/cli.Version=…" 传进来（VERSION 是版本号唯一的
 // 一处，web 的 package.json 由 `make version-check` 与它对齐）。
 // 本地 go build 时为空，此时用 Go 构建信息里的 VCS 修订回答"这份二进制对应哪次提交"。

@@ -5,8 +5,8 @@
 
 | 项 | 是什么 |
 |---|---|
-| `zip/` | 把便携包暂存目录打成 zip |
-| `wixremovefolders/` | 给安装包的文件清单补上"卸载时要删的目录" |
+| `zip/` | 把暂存目录打成 zip（`-flat` 打桌面版免安装包） |
+| `refplugin/` | 参考插件（测试夹具） |
 | `tzsmini/` | 重新生成 `testdata/tzs-mini/ws` 最小语料夹具（含 `manifest.txt`） |
 | `eval/` | 工具面评测装置（见它自己的 README） |
 
@@ -19,18 +19,21 @@
 路径分隔符固定用 `/`（zip 规范），不依赖平台。**没有降级回退**：打包失败就该让构建停下来，
 而不是悄悄换一个会把条目名写成反斜杠的降级实现（旧 PowerShell 回退正是这么干的）。
 
-## `wixremovefolders/`
+两种布局都由它出：
 
-安装包是**用户级**的（目录都落在用户配置目录下）。MSI 的校验要求这类目录必须登记进
-"卸载时删除"表，否则卸载后目录会原样留在磁盘上。而采集文件的工具只生成组件与文件、
-不生成这个登记，所以构建流水线里补这一道。
+```bash
+# CLI 便携包：条目顶层是暂存目录名（tt-portable-x64/…）
+go run ./tools/zip .tmp-build/tt-portable-x64 dist/tt-0.6.0-x64-portable.zip
 
-三条规则：目录自己有组件时往那个组件里挂一条；目录自己只有子目录时补一个只挂注册表键的
-组件专门负责删空目录；那种组件用"按 keypath 推 GUID"的写法，重打包装升级时不会被认成另一个组件。
-另有一条：文件做 KeyPath 的组件要改成 HKCU 注册表键做 KeyPath（用户级安装的判定语义）。
+# 桌面版免安装包：条目直接落在 zip 根（解开就是应用目录，和 electron-builder 的 zip 一致）
+go run ./tools/zip -flat desktop/release/win-unpacked dist/TT-Desktop-0.6.0-x64.zip
+```
 
-这四条 MSI 语义全部有单元测试钉着（[main_test.go](./wixremovefolders/main_test.go)，
-夹具模拟 heat 输出、逐条断言）—— 重写实现时丢了哪条，测试替你红。
+`-root <名字>` 可指定条目顶层目录名（缺省 = 暂存目录的 basename）。
+
+## `refplugin/`
+
+参考插件：同一个二进制既是 CLI 又是常驻服务，带可控故障开关，给插件系统的测试与文档当夹具。
 
 ## `tzsmini/`
 
@@ -40,14 +43,14 @@
 ## 判据
 
 ```bash
-go build ./...                                        # 三个工具随全仓编译把关
-go test ./tools/wixremovefolders/                     # 四条 MSI 语义逐条过
-go run ./tools/zip                                    # 打一次，检查包里确实有 skills/<名字>/SKILL.md
-build_msi.bat                                         # 走完整条打包链
+go build ./...                                        # 全部工具随全仓编译把关
+go run ./tools/zip -flat desktop/release/win-unpacked %TEMP%\tt-desktop-check.zip
 go run ./tools/tzsmini --src <真工作区> --out %TEMP%\tzsmini-check   # 对照 manifest 行数与内容
+make dist                                             # 走完整条打包链（4 个产物）
 ```
 
 ## 细节去哪
 
-- 安装包定义与用户级安装的理由 → [../installer/README.md](../installer/README.md)
+- CLI 安装包定义与用户级安装的理由 → [../installer/README.md](../installer/README.md)
+- 桌面版安装包定义 → [../desktop/installer/tt-desktop.iss](../desktop/installer/tt-desktop.iss)
 - 最小语料夹具本身 → [../testdata/tzs-mini/README.md](../testdata/tzs-mini/README.md)

@@ -9,10 +9,11 @@ TT/
 ├─ AGENTS.md            仓库说明（AI/协作者必读）
 ├─ Makefile             必跑命令的快捷方式（make = build + test；深档目标自带副本闸门）
 ├─ config.example.json  配置文件样例（字段说明入口之一）
-├─ VERSION              版本号唯一出处（三个打包脚本读它，make version-check 对照 web/desktop）
-├─ build_portable.bat   便携包构建：前端 + Go 二进制 + skills/ + 引擎 + 设计器
-├─ build_msi.bat        MSI 构建：复用便携载荷，生成 perUser 安装包
-├─ build_desktop.bat    桌面版构建：复用便携载荷 → Electron 壳 → 安装包 + 免安装 zip（`inno` 参数改用 Inno Setup 出安装包）
+├─ VERSION              版本号唯一出处（打包脚本读它，make version-check 对照 web/desktop）
+├─ build_portable.bat   便携包构建（x64）：前端 + Go 二进制 + skills/ + 引擎 + 设计器
+├─ build_cli_setup.bat  CLI 安装版构建（Inno Setup；复用便携载荷）
+├─ build_desktop.bat    桌面版构建（x64）：复用便携载荷 → Electron 壳 → 安装包 + 免安装 zip
+├─ build_dist.bat       一次出 4 个产物：CLI/桌面 × 安装/便携（x64）
 │
 ├─ .agents/             项目 Agent 技能与说明（不随发行包装到用户目录）
 │  ├─ docs/             协作者共享文档
@@ -97,10 +98,10 @@ TT/
 │
 ├─ desktop/             TT Desktop（Electron 壳）：只做窗口/单实例/收尾，业务全在 Go
 │  ├─ src/              main 进程、serve 契约（等就绪/判所有权/收尾）、启动页、preload
-│  ├─ installer/        Inno Setup 安装包定义（tt-desktop.iss）：NSIS 被安全软件拦时用它出 Setup.exe
+│  ├─ installer/        Inno Setup 安装包定义（tt-desktop.iss）
 │  ├─ scripts/          dev 启动器 + 语法闸门
 │  ├─ test/             node --test（纯 Node，不启 Electron）
-│  └─ payload/          打包时从 dist\tt-portable 拷入（不入库）
+│  └─ payload/          打包时从 .tmp-build\tt-portable 拷入（不入库）
 │
 ├─ engine/              .tzs 表单引擎（C#，csc.exe 单独构建，只在改 engine/ 时重编）
 │  ├─ src/              引擎 C# 源码（tzs-server）
@@ -109,10 +110,9 @@ TT/
 │  ├─ out/              构建产物 + 探测程序（不进发行包、不能落 dist/ 下）
 │  └─ test/             引擎测试
 │
-├─ installer/           MSI 安装包定义（WiX v3；perUser 装到 %LOCALAPPDATA%\Programs\TT）
+├─ installer/           Inno Setup 安装包定义（tt-cli.iss；中文文案 zh-CN-messages.iss 与桌面版共用）
 ├─ tools/               构建辅助 Go 工具
-│  ├─ zip/              跨平台确定性打包
-│  ├─ wixremovefolders/ MSI 卸载时补空目录清理
+│  ├─ zip/              跨平台确定性打包（-flat 用于桌面版免安装包）
 │  ├─ refplugin/        参考插件（测试夹具）：同一个二进制既是 CLI 又是常驻服务，带可控故障开关
 │  └─ tzsmini/          从语料构建 tzs-mini 夹具
 ├─ testdata/            测试语料

@@ -19,24 +19,13 @@ extraResources:
 
 asar: true
 
+# 只出 `--dir` 的应用目录：安装包由 Inno Setup 编译（见 installer/tt-desktop.iss），
+# 免安装 zip 由 tools/zip -flat 打。electron-builder 的 NSIS 目标已弃用 —— 它的
+# 安装器在本机跑不起来（终端安全拦 NSIS 运行时），而打包时必须先运行一次安装器。
 win:
   target:
-    - target: nsis
-      arch: [x64]
-    - target: zip
+    - target: dir
       arch: [x64]
   icon: build/icon.ico
-  artifactName: TT-Desktop-${version}-x64.${ext}
-
-nsis:
-  # 用户级安装（perMachine=false）：与 MSI 的策略一致 —— 不碰 Program Files，
-  # 全程不需要管理员。安装目录默认 %LOCALAPPDATA%\Programs\TT Desktop，
-  # 与 MSI 的 ...\Programs\TT 分开，两个产品不会互相覆盖。
-  oneClick: false
-  perMachine: false
-  allowToChangeInstallationDirectory: true
-  createDesktopShortcut: true
-  createStartMenuShortcut: true
-  shortcutName: TT Desktop
-  uninstallDisplayName: TT Desktop
-  artifactName: TT-Desktop-${version}-x64-Setup.${ext}
+  # 只用于 electron-builder 自己的临时产物；发布名由 build_desktop.bat 决定
+  artifactName: TT-Desktop-${version}-${arch}.${ext}

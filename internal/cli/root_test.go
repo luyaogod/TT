@@ -20,21 +20,21 @@ import (
 	"testing"
 )
 
-// TestBuildScriptsAreASCIIAndNotMixed 钉住两个 .bat 的两条硬约束。
+// TestBuildScriptsAreASCIIAndNotMixed 钉住打包脚本的 .bat 的两条硬约束。
 //
 // 为什么值得一条测试：cmd.exe 用 OEM 代码页解析 .bat 的**字节**，于是
 //
 //  1. 文件里不能有非 ASCII 字节。UTF-8 中文会被从半个字符处切开而把行拆坏 —— 脚本
-//     顶部的 `chcp 65001` 救不回来，因为出问题的行在它后面。这一条两个脚本的头部都写了。
-//  2. 行尾不能**混着来**。两个脚本今天的形态其实不一样：build_portable.bat 在仓库里
-//     是 LF（`git show HEAD:build_portable.bat` 里一个 CR 都没有），build_msi.bat 是
-//     CRLF。两种都能跑 —— 打包链一直在跑 —— 但“一部分行 LF、一部分行 CRLF”不是这两种
-//     中的任何一种：cmd 对 `if ( … )` 块与标签的解析会错位，而一次编辑器的部分重写
-//     （或一次 sed 只动了几行）就能造出这个状态，脚本本身看不出任何异样。
+//     顶部的 `chcp 65001` 救不回来，因为出问题的行在它后面。每个脚本的头部都写了这条。
+//  2. 行尾不能**混着来**。历史上 build_portable.bat 在仓库里是 LF，build_msi.bat 是
+//     CRLF（0.6.0 起 MSI 已删，整套打包脚本统一 LF）。两种都能跑 —— 打包链一直在跑 ——
+//     但“一部分行 LF、一部分行 CRLF”不是这两种中的任何一种：cmd 对 `if ( … )` 块与
+//     标签的解析会错位，而一次编辑器的部分重写（或一次 sed 只动了几行）就能造出这个
+//     状态，脚本本身看不出任何异样。
 //
 // 所以这里不强求统一成 CRLF（那是一次有意的规范化提交，不归这条测试管），只禁止混行。
 func TestBuildScriptsAreASCIIAndNotMixed(t *testing.T) {
-	for _, name := range []string{"build_portable.bat", "build_msi.bat", "build_desktop.bat"} {
+	for _, name := range []string{"build_portable.bat", "build_cli_setup.bat", "build_desktop.bat", "build_dist.bat"} {
 		p := filepath.Join("..", "..", name)
 		b, err := os.ReadFile(p)
 		if err != nil {
@@ -82,7 +82,7 @@ func TestVersionHasOneHome(t *testing.T) {
 		t.Errorf("VERSION 内容 %q 不是 MAJOR.MINOR.PATCH", v)
 	}
 	hardcoded := regexp.MustCompile(`(?m)^\s*set VERSION=[0-9]`)
-	for _, name := range []string{"build_portable.bat", "build_msi.bat", "build_desktop.bat"} {
+	for _, name := range []string{"build_portable.bat", "build_cli_setup.bat", "build_desktop.bat", "build_dist.bat"} {
 		src, err := os.ReadFile(filepath.Join("..", "..", name))
 		if err != nil {
 			t.Fatalf("读不到 %s：%v", name, err)

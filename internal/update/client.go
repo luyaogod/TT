@@ -16,7 +16,7 @@ import (
 // TimeoutAPI 一次 API 调用（取发布信息）的时限。
 const timeoutAPI = 60 * time.Second
 
-// timeoutDownload 一次资产下载的时限。40 MB 的 MSI 在慢线路上要几分钟，
+// timeoutDownload 一次资产下载的时限。40 MB 的安装包在慢线路上要几分钟，
 // 所以给得宽；真正防挂死的是"每读一块就推进"的流式写法，而不是这个数。
 const timeoutDownload = 30 * time.Minute
 

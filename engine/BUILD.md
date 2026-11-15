@@ -92,7 +92,7 @@ Go 客户端（`internal/dev/tzs/`）并且是**唯一**的对外入口。留两
 （Go 侧只跟 `tzs-server` 打交道）。所以是**不进包，不是删源**。
 
 `build_portable.bat` 把上面这些采到 `<stage>\tzs\`（`designer\` 来自 `engine\designer\`，`TZSDESIGNER`
-可覆盖），MSI 由 `heat.exe` 自动采集（不用改 `tt.wxs`）。
+可覆盖）；安装版与桌面版都只是复用这份载荷，不再有自己的文件清单。
 
 **`out/` 里还有十几个探测程序**（`Probe` / `Edit` / `AddField` / `RoundTrip` / `Test*` / `E2E`），
 **不要 xcopy 整个目录**——只显式采那三个。

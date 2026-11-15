@@ -51,6 +51,22 @@ func Preview() (Status, string, bool, error) {
 	return Get(), next, next != cur, nil
 }
 
+// PreviewRemove 计算「移除 exe 目录后」的 PATH 值,但不写注册表。
+// 返回当前状态、将要写入的值、以及是否会发生变化。供 `install path --remove --dry-run`
+// 与 Remove 共用。
+func PreviewRemove() (Status, string, bool, error) {
+	dir := filepath.Dir(exePath())
+	if dir == "" || dir == "." {
+		return Status{}, "", false, fmt.Errorf("无法定位可执行文件目录")
+	}
+	cur, err := readUserPath()
+	if err != nil {
+		return Status{}, "", false, err
+	}
+	next := joinPathList(pathListRemove(splitPathList(cur, pathSep), dir, true), pathSep)
+	return Get(), next, next != cur, nil
+}
+
 // Add 把可执行文件所在目录追加到用户 PATH(已存在则幂等)。
 func Add() (Status, error) {
 	st, next, changed, err := Preview()
@@ -69,18 +85,17 @@ func Add() (Status, error) {
 
 // Remove 从用户 PATH 移除可执行文件所在目录(不存在则幂等)。
 func Remove() (Status, error) {
-	dir := filepath.Dir(exePath())
-	cur, err := readUserPath()
+	st, next, changed, err := PreviewRemove()
 	if err != nil {
 		return Status{}, err
 	}
-	next := joinPathList(pathListRemove(splitPathList(cur, pathSep), dir, true), pathSep)
-	if next != cur {
-		if err := writeUserPath(next); err != nil {
-			return Status{}, err
-		}
-		broadcastEnvChange()
+	if !changed {
+		return st, nil
 	}
+	if err := writeUserPath(next); err != nil {
+		return Status{}, err
+	}
+	broadcastEnvChange()
 	return Get(), nil
 }
 

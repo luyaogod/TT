@@ -1,7 +1,12 @@
 @echo off
 chcp 65001 >nul
-rem Build the TT Windows portable package: frontend + exe + empty config + example
-rem + README + skills, zipped.
+rem Build the TT Windows portable package (x64): frontend + exe + empty config +
+rem example + README + skills, zipped.
+rem
+rem Usage: build_portable.bat [reuse]
+rem   reuse   keep an existing .tmp-build\tt-portable stage and only (re)pack the
+rem           zip -- build_dist.bat uses this so the frontend and the engine
+rem           payload are built once per release
 rem
 rem NOTE: this file must stay ASCII-only. cmd.exe parses .bat bytes in the OEM
 rem       codepage, so UTF-8 Chinese in a .bat breaks the parser (even after
@@ -17,12 +22,8 @@ rem       dictionary / schema / enterprise codes); users run `tt dict db sync`
 rem       after configuring an environment.
 rem NOTE: skills/ ships as a plain directory (not embedded in the binary) so
 rem       users can edit it; `tt install skills` copies it to the target dir.
-rem       After the merge there are six skills in there, installed together.
 setlocal
 cd /d "%~dp0"
-
-set STAGE=dist\tt-portable
-set GOPROXY=https://goproxy.cn,direct
 
 rem Release version: read from the repo-root VERSION file, the ONE place a version
 rem number is written. Injected into the binary via -ldflags (shown by `tt version`).
@@ -36,13 +37,19 @@ rem is LF-only, so it would reject a perfectly good version. A malformed version
 rem here would quietly become a bogus `tt version` string and a bogus asset name.
 powershell -NoProfile -Command "exit ([int]((Get-Content VERSION -Raw).Trim() -notmatch '^\d+\.\d+\.\d+$'))" || (echo BAD VERSION in VERSION file: %VERSION% -- expected MAJOR.MINOR.PATCH & exit /b 1)
 
-rem Only the portable stage is ours to rebuild. dist\ also holds other products
-rem (build_msi.bat keeps its staging and the
-rem MSI there), so never wipe dist\ as a whole.
+set REUSE=%~1
+set STAGE=.tmp-build\tt-portable
+set ZIPFILE=dist\tt-%VERSION%-x64-portable.zip
+if not exist "dist" mkdir "dist"
+
+if /i "%REUSE%"=="reuse" if exist "%STAGE%\tt.exe" goto :pack
+
+rem The stage is ours to rebuild. dist\ holds the release artifacts, so never
+rem wipe it as a whole.
 if exist "%STAGE%" rmdir /s /q "%STAGE%"
 mkdir "%STAGE%"
 
-echo [1/5] Building frontend (web/dist) ...
+echo [1/6] Building frontend (web/dist) ...
 pushd web
 if not exist node_modules (
     call npm install
@@ -62,17 +69,25 @@ popd
 rem main.go embeds web/dist, so the frontend must exist before go build.
 if not exist "web\dist\index.html" (echo MISSING web\dist\index.html & exit /b 1)
 
-echo [2/5] Building tt.exe (v%VERSION%) ...
+echo [2/6] Building tt.exe (v%VERSION%, x64) ...
 rem Built straight into the stage, never into the repo root: packaging must not
 rem leave a tt.exe behind. The exe has to sit next to skills/ (tt install skills
 rem reads <exe dir>\skills), and this stage gets skills/ in the next step.
+rem GOARCH is scoped to this one command: `go run ./tools/zip` below must run as
+rem a host binary, and a stale GOARCH would make it un-runnable.
+set "GOARCH=amd64"
+set "CGO_ENABLED=0"
 call go build -trimpath -ldflags "-X tt/internal/cli.Version=%VERSION%" -o "%STAGE%\tt.exe" .
 if errorlevel 1 (
+    set "GOARCH="
+    set "CGO_ENABLED="
     echo BUILD FAILED
     exit /b 1
 )
+set "GOARCH="
+set "CGO_ENABLED="
 
-echo [3/5] Staging EMPTY config.json / config.example.json / README.md / skills ...
+echo [3/6] Staging EMPTY config.json / config.example.json / README.md / skills ...
 copy /y config.empty.json "%STAGE%\config.json" >nul || (echo COPY empty config FAILED & exit /b 1)
 copy /y config.example.json "%STAGE%\" >nul || (echo COPY config.example.json FAILED & exit /b 1)
 copy /y README.md "%STAGE%\" >nul || (echo COPY README.md FAILED & exit /b 1)
@@ -82,7 +97,7 @@ rem Portable marker: the CLI keeps its config inside the package instead of
 rem writing to the user directory (see internal/config/paths.go, IsPortable).
 type nul > "%STAGE%\.portable"
 
-rem [3b/5] Staging the .tzs engine (C#). It is built SEPARATELY -- see engine\BUILD.md.
+rem [3b/6] Staging the .tzs engine (C#). It is built SEPARATELY -- see engine\BUILD.md.
 rem   Exactly three files, listed by name on purpose: engine\out\ also holds a dozen probe
 rem   programs (Probe / Edit / AddField / RoundTrip / Test* / E2E) that must NOT ship, so an
 rem   xcopy of the whole directory would put them all in the portable package.
@@ -105,7 +120,7 @@ for %%f in (tzs-server.exe TzsCli.dll TzsCli.Designer.dll) do (
     copy /y "%TZSENGINE%\%%f" "%STAGE%\tzs\" >nul || (echo COPY engine %%f FAILED & exit /b 1)
 )
 
-rem [3c/5] Staging the designer payload the engine boots from.
+rem [3c/6] Staging the designer payload the engine boots from.
 rem   The engine loads the designer's assemblies from <its own directory>\designer (see
 rem   engine\src\Designer\Bootstrap.cs), so the package carries them and a run depends on THIS
 rem   package's designer version instead of on whatever the machine happens to have installed.
@@ -129,19 +144,28 @@ if not exist "%STAGE%\tzs\designer" mkdir "%STAGE%\tzs\designer"
 xcopy /y /q "%TZSDESIGNER%\*.dll" "%STAGE%\tzs\designer\" >nul || (echo COPY designer FAILED & exit /b 1)
 echo     designer staged from %TZSDESIGNER%
 
-echo [4/5] Packing zip ...
-rem Recursive zip (includes the skills/ subtree); keeps the tt-portable/ top-level
+:pack
+echo [4/6] Packing portable zip ...
+rem Recursive zip (includes the skills/ subtree); keeps the stage's top-level
 rem directory inside the archive. Go tool (tools/zip) replaced the old python
 rem script (zip.py, removed 2026-10). NO fallback by design: a failed pack must
 rem stop the build, not degrade silently. The old PowerShell fallback
 rem (Compress-Archive) wrote backslash entry names, which breaks cross-platform
 rem unzip tools -- that was a quality downgrade, not a backup.
-go run ./tools/zip >nul
+go run ./tools/zip "%STAGE%" "%ZIPFILE%"
 if errorlevel 1 (
     echo ZIP FAILED
     exit /b 1
 )
 
-echo [5/5] Done: dist\tt-portable.zip
-dir /b dist
+echo [5/6] Verifying payload ...
+if not exist "%STAGE%\tt.exe" (echo MISSING staged tt.exe & exit /b 1)
+if not exist "%STAGE%\config.example.json" (echo MISSING staged config.example.json & exit /b 1)
+if not exist "%STAGE%\.portable" (echo MISSING .portable marker & exit /b 1)
+if not exist "%STAGE%\skills\tt-erp-debug\SKILL.md" (echo MISSING skills payload & exit /b 1)
+if not exist "%STAGE%\tzs\designer\SpecDesignerCommon.dll" (echo MISSING designer payload & exit /b 1)
+if not exist "%ZIPFILE%" (echo MISSING %ZIPFILE% & exit /b 1)
+
+echo [6/6] Done: %ZIPFILE%
 endlocal
+exit /b 0

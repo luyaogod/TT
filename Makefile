@@ -7,7 +7,7 @@ SHELL := sh
 .SHELLFLAGS := -c
 
 .DEFAULT_GOAL := all
-.PHONY: all help build test check-web web-build engine selftest doctor deep-tzc deep-tzs fns e2e skips version-check update-live-check package msi desktop-check desktop-dist proto-tools proto-gen proto-lint proto-breaking proto-check
+.PHONY: all help build test check-web web-build engine selftest doctor deep-tzc deep-tzs fns e2e skips version-check update-live-check package cli-setup desktop-check desktop-dist dist release clean proto-tools proto-gen proto-lint proto-breaking proto-check
 
 all: build test
 
@@ -107,14 +107,37 @@ update-live-check: ## tt update 的真联网自检（要能访问 GitHub；代�
 version-check: ## 版本号只有 VERSION 一个出处：对照 web 的两份 package.json、lock 与 desktop/package.json
 	@node -e 'const fs=require("fs");const want=fs.readFileSync("VERSION","utf8").trim();if(!/^[0-9]+\.[0-9]+\.[0-9]+$$/.test(want)){console.error("VERSION is not MAJOR.MINOR.PATCH: "+want);process.exit(1)}const lock=JSON.parse(fs.readFileSync("web/package-lock.json","utf8"));const rows=[["web/package.json",JSON.parse(fs.readFileSync("web/package.json","utf8")).version],["web/app/package.json",JSON.parse(fs.readFileSync("web/app/package.json","utf8")).version],["web/package-lock.json",lock.version],["web/package-lock.json packages[\"\"]",lock.packages[""].version],["desktop/package.json",JSON.parse(fs.readFileSync("desktop/package.json","utf8")).version]];const bad=rows.filter(r=>r[1]!==want);if(bad.length){console.error("version mismatch, VERSION = "+want+"\n  "+bad.map(r=>r[0]+" = "+r[1]).join("\n  "));process.exit(1)}console.log("version-check OK: "+want+" (VERSION is the single source)")'
 
-package: version-check ## 便携包 → dist/tt-portable/ 与 dist/tt-portable.zip
+# ---------- 发行产物 ----------
+#
+# 4 个产物 = 两个产品（CLI / 桌面）× 两种形态（安装 / 便携），x64：
+#   CLI 安装版   TT-<版本>-x64-Setup.exe          build_cli_setup.bat
+#   CLI 便携版   tt-<版本>-x64-portable.zip        build_portable.bat
+#   桌面安装版   TT-Desktop-<版本>-x64-Setup.exe  build_desktop.bat
+#   桌面便携版   TT-Desktop-<版本>-x64.zip         build_desktop.bat
+#
+# 安装版统一 Inno Setup（0.6.0 起放弃 MSI/WiX）：一条工具链出 CLI 与桌面两种安装包。
+# 载荷只构建一次 —— build_cli_setup.bat 与 build_desktop.bat 都复用 build_portable.bat
+# 的暂存目录（单独 make 某个目标时它们会自己先建载荷）。make dist 一次出全 4 个；
+# make release 先清历史产物再重建。
+package: version-check ## 便携包 x64 → dist/tt-<版本>-x64-portable.zip
 	MSYS2_ARG_CONV_EXCL="*" cmd.exe /c "build_portable.bat"
 
-msi: version-check ## MSI 安装包（需 WiX v3；复用便携包载荷）
-	MSYS2_ARG_CONV_EXCL="*" cmd.exe /c "build_msi.bat"
+cli-setup: version-check ## CLI 安装版 x64（Inno Setup）→ dist/TT-<版本>-x64-Setup.exe
+	MSYS2_ARG_CONV_EXCL="*" cmd.exe /c "build_cli_setup.bat"
 
 desktop-check: ## 桌面壳的语法闸门 + 单元测试（纯 Node，不启 Electron、不需要载荷）
 	cd desktop && npm test
 
-desktop-dist: version-check ## 桌面版产物（Electron；复用便携包载荷，需能下 electron 运行时）
+desktop-dist: version-check ## 桌面版 x64（Inno 安装包 + 免安装 zip；复用便携载荷）
 	MSYS2_ARG_CONV_EXCL="*" cmd.exe /c "build_desktop.bat"
+
+dist: version-check ## 一次出 4 个产物（CLI/桌面 × 安装/便携，x64）
+	MSYS2_ARG_CONV_EXCL="*" cmd.exe /c "build_dist.bat"
+
+clean: ## 清掉历史产物：dist/、.tmp-build/、桌面暂存与 electron 输出、仓库根 exe
+	rm -rf dist .tmp-build desktop/release desktop/payload
+	rm -f tt.exe tt-p6.exe refplugin.exe
+
+release: ## 从零重建全部 8 个产物（先 make clean，再 make dist）
+	$(MAKE) clean
+	$(MAKE) dist
