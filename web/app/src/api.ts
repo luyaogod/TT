@@ -164,7 +164,7 @@ export interface HostsView {
   listen: string // 监听地址在顶层(合并前它藏在 debug.listen 里)
   debug: HostsDebug
   query: { source?: string }
-  mirror: { dir?: string; tmpDir?: string }
+  mirror: { dir?: string }
   // dict 本地字典库根目录；空 = 缺省 <数据目录>/dict
   dict: { dir?: string }
   sync: { target?: string }
@@ -193,12 +193,14 @@ export interface DiscoveredEnv {
 
 // PUT /api/hosts 的请求体:只带要改的节,省略的节后端保持原样 ——
 // 设置页的各张卡片各改各的节时不会用陈旧快照把对方刚改好的节覆盖掉。
+// mirror 里**没有** tmpDir:服务器侧临时目录不在设置页里配,不写这个键就等于"保留旧值"
+// （服务端 putSection 的约定，见 internal/web/server.go）。
 export interface HostsPatch {
   hosts?: { sshs: HostsSsh[] }
   listen?: string
   debug?: HostsDebug
   query?: { source?: string }
-  mirror?: { dir?: string; tmpDir?: string }
+  mirror?: { dir?: string }
   dict?: { dir?: string }
   sync?: { target?: string }
   tdev?: { workspaceSuffix?: string; defaultOut?: string }

@@ -23,9 +23,10 @@ export type SettingsSectionKey = 'sites' | 'data-dict' | 'plugins' | 'skills' | 
 export const SETTINGS_SECTIONS: { key: SettingsSectionKey; label: string }[] = [
   { key: 'sites', label: '站点管理' },
   { key: 'data-dict', label: '数据字典' },
-  // 插件管理放在技能管理旁边：两者都是"装进来的东西"，但一个是程序+页面，一个是技能副本。
-  { key: 'plugins', label: '插件管理' },
+  // 技能管理在前、插件管理紧随其后（用户 2026-11-15 定的顺序，改这里一处就够）：
+  // 两者都是"外部装进来的东西"，但一个是技能副本、一个是程序+页面，先看用得上什么，再看装了什么。
   { key: 'skills', label: '技能管理' },
+  { key: 'plugins', label: '插件管理' },
   { key: 'debug', label: 'DEBUG' },
   { key: 'app', label: '应用设置' },
 ]

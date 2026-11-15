@@ -184,6 +184,34 @@ func TestHostsPut_KeepsFieldsTheFormDoesNotSend(t *testing.T) {
 	}
 }
 
+// 设置页里**没有**「服务器临时目录」（mirror.tmpDir）这一项了，于是保存请求里也不带它。
+// 这条钉住"缺席 ≠ 清空"：`MirrorSettings.TmpDir` 不带 omitempty 时，零值会被序列化出来
+// 交给 putSection，把用户手写在 config.json 里的落点静默抹成空 —— 同一类"保存一次就丢配置"
+// 的坑，只是这次丢的是刻意不摆在界面上的那个键。
+func TestHostsPut_KeepsHandEditedMirrorTmpDir(t *testing.T) {
+	seed := `{"schemaVersion":3,
+	  "hosts":{"sshs":[{"name":"甲","host":"h","port":22,"user":"u","password":"p","zone":"36"}]},
+	  "mirror":{"dir":"D:/mirror","tmpDir":"/u2/tmp"}}`
+	s, path := newTestServer(t, seed)
+
+	// 模拟配置页提交：只有「镜像根目录」这一格。
+	rec, _ := doJSON(t, s, http.MethodPut, "/api/hosts", map[string]any{
+		"mirror": map[string]any{"dir": "E:/mirror"},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT 失败 HTTP %d: %s", rec.Code, rec.Body.String())
+	}
+
+	root, _ := config.Open(path)
+	m, _ := root["mirror"].(map[string]any)
+	if m["dir"] != "E:/mirror" {
+		t.Errorf("表单提交的 mirror.dir 未生效: %v", m["dir"])
+	}
+	if m["tmpDir"] != "/u2/tmp" {
+		t.Errorf("界面不管的 mirror.tmpDir 被抹掉了（手配的落点静默丢失）: %v", m["tmpDir"])
+	}
+}
+
 // 设置页改名必须是一次迁移：按旧名落盘的字典库跟着走，query.source 一起改写。
 // 少了这一步，保存"成功"、查询却报「本地库不存在」——与数据不存在无法区分。
 func TestHostsPut_RenameMigratesPaths(t *testing.T) {

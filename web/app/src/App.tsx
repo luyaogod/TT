@@ -12,6 +12,7 @@ import { PanelLeft, RotateCcw, WifiOff, X } from 'lucide-react'
 import { connectWS, useStore, type SessionDraft, type SessionItem } from './store'
 import { Sidebar } from './Sidebar'
 import { DesktopTitleBar } from './DesktopTitleBar'
+import { desktopShell } from './desktopShell'
 import { EnvView } from './EnvView'
 import { SessionView } from './SessionView'
 import { SettingsView } from './SettingsView'
@@ -123,6 +124,11 @@ export function App() {
   const restart = useStore((s) => s.restart)
 
   // 侧栏收展:与旧外壳的 tt.sessionOpen 同一档持久化(纯界面状态)。
+  //
+  // 按钮只有一个家:桌面版在自绘标题栏的最左上(见 DesktopTitleBar),侧栏收起/展开都在原处;
+  // 浏览器版没有那条标题栏,所以沿用旧位置 —— 展开时按钮在侧栏品牌行、收起后借主面板标题行
+  // 把入口摆回来。两处都只是**渲染**这颗按钮,状态与写盘仍然只有这里一份。
+  const desktop = !!desktopShell()
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(SIDEBAR_KEY) === '1')
   const toggleCollapsed = () => setCollapsed((v) => {
     localStorage.setItem(SIDEBAR_KEY, v ? '0' : '1')
@@ -305,14 +311,6 @@ export function App() {
     useStore.getState().setSettingsSection('sites')
     setRoute({ kind: 'settings' })
   }
-  // 「新会话」= 回到所属环境的「创建会话」Tab(那儿才是真正填写名字/选类型的地方)。
-  const newSession = () => {
-    const target = mainRoute.kind === 'env' ? mainRoute.env
-      : mainRoute.kind === 'session' ? sessions.find((s) => s.id === mainRoute.id)?.env
-      : envs[0]?.name
-    if (!target) { goAddEnv(); return }
-    setRoute({ kind: 'env', env: target, tab: 'create' })
-  }
   const createUnder = async (envName: string, form: SessionDraft, onStep: (s: string) => void) => {
     // 建会话是**真**动作（建空闲会话 → 等登录 → 挂画面通道），失败原因由 store 抛上来，
     // 由环境页那张卡片原样显示；失败时**不跳走**（跳到一条没建成的会话上最误导）。
@@ -321,8 +319,9 @@ export function App() {
   }
 
   const banner = backendDead || (sessionId && !wsConnected ? '服务连接断开,自动重连中…' : '')
-  // 侧栏收起之后,展开入口跟着标题行走(否则用户没有地方把它叫回来)。
-  const leading = collapsed
+  // 浏览器版：侧栏收起后没有标题栏可借，展开入口跟着主面板标题行走（桌面版由标题栏那颗按钮
+  // 一直摆在最左上，主面板不需要再管侧栏的事）。
+  const leading = !desktop && collapsed
     ? <IconBtn icon={PanelLeft} label="展开左侧目录" onClick={toggleCollapsed} />
     : undefined
 
@@ -330,7 +329,7 @@ export function App() {
     <div className="dsh-shell flex h-screen flex-col overflow-hidden bg-background text-foreground">
       {/* 桌面版：原生标题栏与菜单收掉了，这一条自己画（浏览器版渲染 null）。
           必须是最外层 shell 的第一个子元素 —— 它要占掉窗口顶部那 36px。 */}
-      <DesktopTitleBar />
+      <DesktopTitleBar collapsed={collapsed} onToggleSidebar={toggleCollapsed} />
       {banner && (
         <div className="flex shrink-0 items-center gap-2 border-b border-red-500/20 bg-red-500/10 px-3 py-1.5 text-xs text-red-600 dark:text-red-400">
           <WifiOff className="h-3.5 w-3.5" />
@@ -358,9 +357,10 @@ export function App() {
               onSelectPlugin={openPlugin}
               // 失败已经在 store 里 toast 过,这里只吞掉 Promise 的拒绝(不吞掉状态变化)
               onCloseSession={(s) => { void closeSession(s.id).catch(() => {}) }}
-              onNewSession={newSession} onSettings={goSettings}
+              onSettings={goSettings}
               onRefreshEnvs={() => void loadEnvs()} onAddEnv={goAddEnv}
-              onCollapse={toggleCollapsed}
+              // 桌面版没有收起按钮可挂（它在标题栏上），传 undefined 让品牌行只留字标。
+              onCollapse={desktop ? undefined : toggleCollapsed}
             />
           </ErrorBoundary>
         )}

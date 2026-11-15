@@ -834,10 +834,10 @@ func mirrorTmpProbe(ctx context.Context, conn *SSHConn, want string) (serverTmp,
 	switch {
 	case strings.HasPrefix(line, "TDICT_MIRROR_TMPMISSING"):
 		dir := strings.TrimPrefix(line, "TDICT_MIRROR_TMPMISSING ")
-		return serverTmp{}, fmt.Errorf("服务器临时目录不存在: %s；请清理/创建它,或在设置里用 mirror.tmpDir 指定别的目录", dir)
+		return serverTmp{}, fmt.Errorf("服务器临时目录不存在: %s；请清理/创建它,或用 --tmp(配置项 mirror.tmpDir)指定别的目录", dir)
 	case strings.HasPrefix(line, "TDICT_MIRROR_TMPNOWRITE"):
 		dir := strings.TrimPrefix(line, "TDICT_MIRROR_TMPNOWRITE ")
-		return serverTmp{}, fmt.Errorf("服务器临时目录不可写: %s；可用 mirror.tmpDir 换一个落点", dir)
+		return serverTmp{}, fmt.Errorf("服务器临时目录不可写: %s；可用 --tmp(配置项 mirror.tmpDir)换一个落点", dir)
 	case strings.HasPrefix(line, "TDICT_MIRROR_TMP "):
 		rest := strings.TrimPrefix(line, "TDICT_MIRROR_TMP ")
 		parts := strings.SplitN(rest, " ", 2)
@@ -883,7 +883,7 @@ func mirrorCheckSpace(tmp serverTmp, est int64) error {
 	}
 	free := tmp.FreeKB << 10
 	if free > 0 && free < need {
-		return fmt.Errorf("服务器临时目录空间不足: %s 可用 %d MB,本次归档约需 %d MB；请清理该目录或用 mirror.tmpDir 换一个落点",
+		return fmt.Errorf("服务器临时目录空间不足: %s 可用 %d MB,本次归档约需 %d MB；请清理该目录或用 --tmp(配置项 mirror.tmpDir)换一个落点",
 			tmp.Dir, tmp.FreeKB/1024, need/(1<<20))
 	}
 	return nil

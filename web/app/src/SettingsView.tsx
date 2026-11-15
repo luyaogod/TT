@@ -109,8 +109,10 @@ interface DictForm {
   /** '' = 在线 | 'local:<环境>' = 该环境的本地 SQLite | 环境名 = 固定走该环境的在线库。 */
   querySource: string
   mirrorDir: string
-  // mirrorTmp 服务器侧临时目录（归档先落这里再下载）。空 = 服务器上的 ${TMPDIR:-/tmp}。
-  mirrorTmp: string
+  // 刻意没有 mirror.tmpDir（服务器侧临时目录）：它是"出问题时才需要换一个落点"的运维旋钮，
+  // 缺省 ${TMPDIR:-/tmp} 已经适用于所有正常环境，摆在这里只会让每台机器的人都得先判断一次。
+  // 真需要改的（/tmp 分区太小、要落到数据盘）手改 config.json 或用 `tt file mirror --tmp`。
+  // 因为这一页不再发这个键，服务端 putSection 会把已有值原样保留 —— 手配过的不会被保存抹掉。
   // dictDir 本地字典库根目录；空 = 缺省 <数据目录>/dict
   dictDir: string
   // 刻意没有 syncTarget:字典库按环境分文件,位置由服务端算;卡片里只读显示库目录。
@@ -425,7 +427,7 @@ export function SettingsView() {
   const [cfg, setCfg] = useState<HostsView | null>(null)
   const [sshs, setSshs] = useState<SshItem[]>([])
   const [dbg, setDbg] = useState<DebugForm>({ watchdogSeconds: 0 })
-  const [dict, setDict] = useState<DictForm>({ querySource: '', mirrorDir: '', mirrorTmp: '', dictDir: '' })
+  const [dict, setDict] = useState<DictForm>({ querySource: '', mirrorDir: '', dictDir: '' })
   const [listen, setListen] = useState('')
   // 派生状态(路径存不存在只有服务端算得出来)与配置元信息,以及 PATH 安装状态
   const [status, setStatus] = useState<ConfigStatus | null>(null)
@@ -497,7 +499,7 @@ export function SettingsView() {
       : k === 'debug' ? debugPatchOf(f.dbg)
         : k === 'listen' ? f.listen.trim()
           : k === 'query' ? { source: f.dict.querySource }
-            : k === 'mirror' ? { dir: f.dict.mirrorDir.trim(), tmpDir: f.dict.mirrorTmp.trim() }
+            : k === 'mirror' ? { dir: f.dict.mirrorDir.trim() }
                 : { dir: f.dict.dictDir.trim() })
   const sectionSnap = (k: ConfigKey): string => sectionSnapOf(k, formsRef.current)
   const dirtyRefAny = () => (Object.keys(dirtyRef.current) as ConfigKey[])
@@ -544,7 +546,6 @@ export function SettingsView() {
       setDict({
         querySource: c.query?.source === 'auto' ? '' : (c.query?.source || ''),
         mirrorDir: c.mirror?.dir || '',
-        mirrorTmp: c.mirror?.tmpDir || '',
         dictDir: c.dict?.dir || '',
       })
       setListen(c.listen || '')
@@ -636,7 +637,7 @@ export function SettingsView() {
     if (keys.includes('debug')) body.debug = debugPatchOf(forms.dbg)
     if (keys.includes('listen')) body.listen = forms.listen.trim()
     if (keys.includes('query')) body.query = { source: forms.dict.querySource }
-    if (keys.includes('mirror')) body.mirror = { dir: forms.dict.mirrorDir.trim(), tmpDir: forms.dict.mirrorTmp.trim() }
+    if (keys.includes('mirror')) body.mirror = { dir: forms.dict.mirrorDir.trim() }
     if (keys.includes('dict')) body.dict = { dir: forms.dict.dictDir.trim() }
 
     try {
@@ -1924,19 +1925,9 @@ export function SettingsView() {
                   control={<Input className={input} value={dict.mirrorDir} placeholder="如 D:\t100\mirror"
                     onChange={(e) => { setDict((s) => ({ ...s, mirrorDir: e.target.value })); markDirty('mirror') }} />}
                 />
-                {/* 归档先落在服务器临时目录再下载，结束（或取消/失败）就删。
-                    绝大多数人不用管；/tmp 分区太小或挂成 tmpfs 时才需要改这里。 */}
-                <SettingRow
-                  id="mirror.tmpDir"
-                  label="服务器临时目录"
-                  description={
-                    !dict.mirrorTmp.trim()
-                      ? '留空 = 服务器上的 ${TMPDIR:-/tmp}。归档只在下拉期间存在，任务结束/中断都会删除。'
-                      : '归档落在这个目录；空间不足会在打包前直接报错，不会压到一半。'
-                  }
-                  control={<Input className={input} value={dict.mirrorTmp} placeholder="如 /u2/tmp（留空用 /tmp）"
-                    onChange={(e) => { setDict((s) => ({ ...s, mirrorTmp: e.target.value })); markDirty('mirror') }} />}
-                />
+                {/* 服务器侧的归档落点（mirror.tmpDir）**不再出现在这里**：缺省 ${TMPDIR:-/tmp}
+                    对正常环境都成立，需要换落点的（/tmp 分区太小、要落到数据盘）手改 config.json
+                    或用 `tt file mirror pull --tmp`。少一个需要判断的输入，多一分"打开就能用"。 */}
                 {/* 一个环境一行:镜像本来就是**按环境**分开的(每个环境一个镜像目录、一份基线),
                     原先"先在下拉里挑一个环境、再点按钮"把这件事藏进了两步操作里 ——
                     看不出总共有几个环境、各自拉没拉过。改成表之后这些直接摊开。 */}

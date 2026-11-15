@@ -298,7 +298,12 @@ type MirrorSettings struct {
 	Dir string `json:"dir"`
 	// TmpDir 服务器侧临时目录（归档先落这里再下载）。空 = 服务器上的 ${TMPDIR:-/tmp}。
 	// 用法：/tmp 分区太小、或想落到数据盘时指一个绝对路径。
-	TmpDir string `json:"tmpDir"`
+	//
+	// **带 omitempty**，与 Dir 相反：设置页不再暴露这个字段（它属于"出问题才动的运维旋钮"，
+	// 缺省值适用于所有正常环境），于是 Web 的保存请求里根本没有 tmpDir 键。没有 omitempty 时
+	// 零值会被序列化出来交给 putSection，把用户手写在 config.json 里的落点静默抹成空 ——
+	// 带上它，缺席的键才能按 putSection 的约定保留旧值。改它请手改配置或 `tt file mirror --tmp`。
+	TmpDir string `json:"tmpDir,omitempty"`
 }
 
 // DictSettings 本地字典库（SQLite）的根目录（绝对路径）。
