@@ -43,7 +43,7 @@ v1 全部是 unary：没有 streaming、事务、参数绑定。`DBSession.Query
 
 ## 错误码
 
-所有错误以 Connect error detail 携带 `ErrorInfo{code, message, hint, env}`。调用方按 `code` 分支，禁止解析 `message`（它允许变化）。
+所有错误以 Connect error detail 携带 `ErrorInfo{code, message, hint, env}`。code 是稳定契约，已发布的不重命名；调用方按 `code` 分支，禁止解析 `message`（它允许变化）。
 
 | code | 含义 |
 |---|---|
@@ -67,3 +67,7 @@ v1 全部是 unary：没有 streaming、事务、参数绑定。`DBSession.Query
 | `UNAUTHENTICATED` | 传输层：token 缺失或无效 |
 | `BAD_ORIGIN` | 传输层：`Origin` 不是 loopback 或字面量 `null` |
 | `BAD_HOST` | 传输层：`Host` 不是 loopback 名称/IP |
+
+## 尚未实现
+
+插件实例 token 与 supervisor 尚未接入，外部插件当前无法通过这些服务建立会话；Host 侧连接实现已存在。

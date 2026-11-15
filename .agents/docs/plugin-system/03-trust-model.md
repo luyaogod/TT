@@ -17,7 +17,7 @@
 - 页面跑在 `iframe sandbox="allow-scripts"` 中，**不带** `allow-same-origin`。
 - 页面不能触碰宿主 DOM、Zustand store、desktop preload。
 - 页面不接收管理 API token。
-- 页面处于不透明源，`Origin` 为字面量 `null`；Host API 只在沙箱 iframe 场景接受这个值，其他来源返回 `BAD_ORIGIN`。
+- 页面处于不透明源，`Origin` 为字面量 `null`；Host API 接受 loopback 或这个字面量，其他来源返回 `BAD_ORIGIN`。
 
 页面隔离防止插件页面借宿主页面的身份调用管理面。它不防止插件进程读写用户文件，也不把插件变成不可信代码的安全容器。
 

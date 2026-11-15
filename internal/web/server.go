@@ -33,6 +33,7 @@ import (
 	"tt/internal/designer"
 	"tt/internal/envmove"
 	"tt/internal/host"
+	"tt/internal/plugin"
 )
 
 // DefaultListen 是 serve 未显式配置监听地址时的默认地址。
@@ -115,6 +116,9 @@ type Options struct {
 
 	// PluginUI 插件静态资源与私有 RPC 代理（/plugins/）。nil = 不挂载。
 	PluginUI http.Handler
+
+	// PluginMgr 插件管理面（/api/plugins*）。nil = 不注册管理端点。
+	PluginMgr *plugin.Manager
 }
 
 // ConfigReloader 由持有配置内存态的子系统实现；本服务在配置写入成功后调用它。
@@ -201,6 +205,19 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/update/apply", s.hUpdateApply)
 	if s.opt.Shutdown != nil {
 		m.HandleFunc("POST /api/shutdown", s.hShutdown)
+	}
+
+	// ---- 插件管理面（Core 管理面；插件令牌够不到这里） ----
+	//
+	// 只增注册，不改既有 /api/ 的行为：更具体的具名路由优先于字典子系统的 /api/ 前缀。
+	if s.opt.PluginMgr != nil {
+		m.HandleFunc("GET /api/plugins", s.hPluginsList)
+		m.HandleFunc("GET /api/plugins/{id}", s.hPluginInfo)
+		m.HandleFunc("POST /api/plugins/install", s.hPluginInstall)
+		m.HandleFunc("GET /api/plugins/{id}/doctor", s.hPluginDoctor)
+		m.HandleFunc("POST /api/plugins/{id}/enable", s.hPluginEnable)
+		m.HandleFunc("POST /api/plugins/{id}/disable", s.hPluginDisable)
+		m.HandleFunc("POST /api/plugins/{id}/uninstall", s.hPluginUninstall)
 	}
 
 	// ---- 调试子系统：挂在 /debug/api/（它自己的页面在 /debug/） ----

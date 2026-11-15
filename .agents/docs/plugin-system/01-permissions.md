@@ -10,7 +10,14 @@
 | `db.connect` | `TestDB` / `OpenDB`，从而建立 DB 会话 | 同时覆盖只读会话与可写会话 |
 | `ssh.connect` | `TestSSH` / `OpenSSH`，从而建立 SSH 会话 | |
 
-`HostService.GetCapabilities` 只要求有效 token，不要求 capability；它返回 Host API 版本、tt 版本、`features` 与服务/方法清单。
+`HostService.GetCapabilities` 只要求有效 token，不要求 capability；它返回 Host API 版本、tt 版本、`features` 与服务/方法清单。`features` 的取值：
+
+| feature | 含义 |
+|---|---|
+| `FEATURE_DB_QUERY` | `DBSession.Query` 可用 |
+| `FEATURE_DB_EXEC` | `DBSession.Exec` 可用；与内置只读防线无关 |
+| `FEATURE_SSH_EXEC` | `SSHSession.Exec` 可用 |
+| `FEATURE_DB_READONLY_SESSION` | 支持 `OpenDB(read_only=true)` |
 
 ## 贡献不是权限
 

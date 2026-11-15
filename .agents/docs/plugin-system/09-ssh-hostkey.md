@@ -23,4 +23,4 @@
 
 ## 尚未实现
 
-known-hosts 校验、指纹固定、按环境配置显式信任均未实现。这是后续的独立 hardening 项，不属于插件 v1。
+known-hosts 校验、显式信任配置均未实现。这是后续的独立 hardening 项，不属于插件 v1。

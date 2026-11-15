@@ -143,4 +143,3 @@ func TestHostsExportRejectsUnknownNameAndBadDir(t *testing.T) {
 		t.Fatalf("missing dir status = %d, want 400 (body %v)", rec.Code, body)
 	}
 }
-

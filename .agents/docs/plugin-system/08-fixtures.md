@@ -7,7 +7,7 @@
 ```
 testdata/plugins/
 ├─ reference/
-│  ├─ manifest.json
+│  ├─ plugin.json
 │  ├─ cli/
 │  ├─ service/
 │  ├─ frontend/
@@ -31,7 +31,7 @@ testdata/plugins/
 | 变体 | 构成 | 验证点 |
 |---|---|---|
 | `reference` | 四类贡献齐全 | 安装、启用、CLI 转发、Host API、四类注册均走通 |
-| `no-contribution` | 无任何贡献 | 合法安装/启用，不产生空注册，也不因“没东西可跑”而崩溃 |
+| `no-contribution` | 无任何贡献 | 安装拒绝：manifest 必须至少有一类贡献；registry 不出现记录 |
 | `invalid-manifest` | manifest 损坏或缺必填字段 | 安装拒绝，registry 不出现半条记录 |
 | `namespace-collision` | namespace 命中内置名、旧别名或 `plugin` | 安装/启用拒绝，内置命令不被遮住 |
 | `frontend-without-service` | 只有 frontend | 页面隔离成立；不要求 service 就绪 |

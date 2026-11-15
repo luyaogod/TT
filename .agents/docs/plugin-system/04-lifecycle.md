@@ -17,7 +17,7 @@
 | `disabled` | `enabling`、`upgrading`、`uninstalling`、`corrupt` | 可重新启用 |
 | `upgrading` | `installed_disabled`、`rolling_back`、`corrupt` | 只从非运行态进入；运行中先 `disabling` |
 | `rolling_back` | `installed_disabled`、`corrupt` | 旧版本恢复成功则回到未启用；回滚失败为 `corrupt` |
-| `uninstalling` | 移除 registry 条目 | 默认保留插件数据；清理失败标 `corrupt`，不假装已卸载 |
+| `uninstalling` | 移除 registry 条目（终态）、`corrupt` | 默认保留插件数据；清理失败标 `corrupt`，不假装已卸载 |
 | `corrupt` | `uninstalling` | 不允许启用；修复以重新安装完成 |
 
 ## 清理与规则

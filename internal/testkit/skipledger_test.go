@@ -212,6 +212,10 @@ var skipLedger = []skipSite{
 	{file: "internal/form42f/form42f_test.go", msg: "没有归档语料表（%v）—— 设 TT_FORM_CORPUS_MAP 指向 colname-fieldid.json", layer: layL3, why: "需真归档语料表：开关 TT_FORM_CORPUS_MAP"},
 	{file: "internal/form42f/form42f_test.go", msg: "归档语料表里没有 w_axmt500（换台机器/换份语料就跳）", layer: layL3Missing, why: "归档语料表在，但里面没有 w_axmt500（换台机器/换份语料就有）"},
 	{file: "internal/form42f/form42f_test.go", msg: "没有真样本（%v）", layer: layL3, why: "需真样本：开关 TT_FORM_SAMPLE_DIR"},
+	// 插件包里的符号链接必须被拒（copyTree 不跟随链接）。Windows 上创建符号链接要
+	// 开发者模式/管理员，本机没有 → 跳过。拒绝逻辑本身不靠这条用例兜底：
+	// zip 解包那一侧用**构造出来的 symlink 条目**覆盖了同一类判断，不需要任何系统权限。
+	{file: "internal/plugin/manager_test.go", msg: "本机不支持创建符号链接: %v", layer: layEnv, why: "Windows 创建符号链接需要开发者模式/管理员：没权限时跳过，属 L0-环境，不影响「全绿」——符号链接拒绝在 zip 解包用例里用构造条目覆盖（无需系统权限）"},
 }
 
 // reSkipCall 匹配 t.Skip / t.Skipf 且第一个参数是同行的字符串字面量。

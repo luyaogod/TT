@@ -17,7 +17,7 @@
 - 破坏性变更提升到新包（`tt.host.v2`），v1 保留；旧插件继续按 v1 工作，不被强制升级。
 - Host API 的 minor 只做加法；插件 manifest 的范围决定它接受哪些 minor。
 - `schemaVersion` 高于 TT 已知版本时拒绝，不猜测未知字段的含义。旧 TT 不应“尽力解析”新 manifest。
-- 插件版本必须是严格 SemVer；范围、预发布等语义由 manifest 解析器统一处理。
+- 插件版本必须是严格 SemVer；`hostApi` 范围按 SemVer 语义比较。
 
 ## 生成物与闸门
 

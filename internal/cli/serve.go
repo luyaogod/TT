@@ -18,6 +18,7 @@ import (
 	"tt/internal/debug"
 	dictserver "tt/internal/dict/server"
 	"tt/internal/hostrpc"
+	"tt/internal/plugin"
 	"tt/internal/web"
 )
 
@@ -197,6 +198,13 @@ func newServeCmd() *cobra.Command {
 				Auth:    hostrpc.NewTokenAuthenticator(tokenStore),
 			})
 
+			// 插件管理面：设置页的插件分区与 /api/plugins* 用它。
+			// 与 CLI 是同一份注册表（同一把锁），两边同时操作不会互相覆盖。
+			pluginStore := plugin.NewStore(config.LocationsAt(path))
+			pluginMgr := plugin.NewManager(pluginStore, reservedNamespaces())
+			pluginMgr.ConfigPath = path
+			pluginMgr.HostAPIVersion = connsvc.HostAPIVersion
+
 			err = debugcli.RunForeground(path, debugcli.ServeSpec{
 				Prefix:           "TT",
 				StopHint:         "tt serve --stop",
@@ -223,6 +231,8 @@ func newServeCmd() *cobra.Command {
 					// 设置页的"测试连接"与插件 Host API 用同一个连接服务实例。
 					ConnSvc: connSvc,
 					HostRPC: hostRPCHandler,
+					// 插件管理（安装/启停/授权/自检）。只碰元数据与载荷，不启动插件代码。
+					PluginMgr: pluginMgr,
 					// 配置写入后让持有内存态的子系统重新加载，否则它们内存里还是旧环境，
 					// 表现是"改了没生效"。连接服务还要把旧会话全部作废 —— 旧会话连着的是
 					// **旧目标**，而调用方看到的仍是同一个环境名。

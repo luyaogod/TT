@@ -124,6 +124,7 @@ func init() {
 	rootCmd.AddCommand(newServeCmd())
 	rootCmd.AddCommand(newInstallCmd())
 	rootCmd.AddCommand(newSkillsCmd())
+	rootCmd.AddCommand(newPluginCmd())
 	rootCmd.AddCommand(newVersionCmd())
 	rootCmd.AddCommand(newUpdateCmd())
 	// --at 的校验/落位：先于任何 RunE，且子命令自己的 --ent 还没被读。

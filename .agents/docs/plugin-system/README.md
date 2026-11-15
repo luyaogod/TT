@@ -30,10 +30,12 @@
 | [08-fixtures.md](08-fixtures.md) | 参考插件夹具布局与变体（设计） |
 | [09-ssh-hostkey.md](09-ssh-hostkey.md) | 当前 SSH 主机密钥行为与兼容约束 |
 
-## 现状
+## 已实现
 
-已实现：Host API proto 与生成物（`tt.host.v1`）、ConnectRPC `/hostrpc/`、Bearer 认证、能力探测、环境脱敏列表、连接测试/开关、DB 查询/执行、SSH 一次性执行、`ErrorInfo` 错误详情。
+Host API proto 与生成物（`tt.host.v1`）、ConnectRPC `/hostrpc/`、Bearer 认证、能力探测、环境脱敏列表、连接测试/开关、DB 查询/执行、SSH 一次性执行、`ErrorInfo` 错误详情。
 
-尚未实现：插件 manifest/registry/installer、CLI 分发、supervisor、插件实例 token、前端插件页面与 bridge、技能集成、插件升级/回滚。详见各篇的“尚未实现”。
+## 尚未实现
+
+插件 manifest/registry/installer、CLI 分发、supervisor、插件实例 token、前端插件页面与 bridge、技能集成、插件升级/回滚。详见各篇的“尚未实现”。
 
 v1 不含：流式、事务、参数绑定、PTY、SFTP。
