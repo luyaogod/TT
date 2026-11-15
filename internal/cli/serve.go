@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/luyaogod/TT/internal/audit"
 	"github.com/luyaogod/TT/internal/cli/common"
 	debugcli "github.com/luyaogod/TT/internal/cli/debug"
 	"github.com/luyaogod/TT/internal/config"
@@ -187,14 +188,23 @@ func newServeCmd() *cobra.Command {
 			pluginMgr.HostAPIVersion = connsvc.HostAPIVersion
 
 			auditLog := log.New(os.Stderr, "[connsvc] ", 0)
+			auditW, aerr := audit.Open(audit.DefaultPath(path))
+			if aerr != nil {
+				auditLog.Printf("打开审计日志失败: %v", aerr)
+			} else {
+				defer auditW.Close()
+			}
 			connSvc := connsvc.New(connsvc.Options{
 				ConfigPath: path,
 				TTVersion:  Version,
 				// 授权来源 = 插件注册表：每次判定现读，撤权立即生效（不需要重启）。
 				Authorizer: plugin.RegistryAuthorizer{Store: pluginStore},
 				Audit: func(ev connsvc.Event) {
+					if auditW != nil {
+						auditW.Log(ev)
+					}
 					if ev.OK {
-						return // 成功路径不刷日志：一次页面点三下会淹掉真正的错误
+						return // 成功路径不刷 stderr：一次页面点三下会淹掉真正的错误
 					}
 					auditLog.Printf("action=%s caller=%s env=%s kind=%s code=%s ms=%d",
 						ev.Action, ev.Caller, ev.Env, ev.Kind, ev.Code, ev.DurationMS)

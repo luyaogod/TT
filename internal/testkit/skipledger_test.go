@@ -103,6 +103,7 @@ var skipLedger = []skipSite{
 	{file: "internal/dev/pkgfile/zipshape_test.go", msg: "语料里没找到设计器形态的 .tap 包", layer: layL3Missing, why: "需真实语料：这一类形态只在真语料里出现"},
 	{file: "internal/dev/pkgfile/zipshape_test.go", msg: "语料里没有 Zip64 形态的 .tap 包", layer: layL3Missing, why: "需真实语料：这一类形态只在真语料里出现"},
 	{file: "internal/dev/store/store_test.go", msg: "环境里没有 git，跳过 git 相关断言", layer: layEnv, why: "本机没装 git（装了才跑 git 相关断言）"},
+	{file: "internal/host/dbprobe_test.go", msg: "WSL 的 bash 不继承 Windows 环境变量，跳过逐字展开断言", layer: layEnv, why: "Windows/WSL 下 go test 调用的 bash 不继承 NLS_LANG，${NLS_LANG%%.*} 展开与 Linux CI 不同；Linux CI 仍覆盖该断言"},
 	// 「发现环境」对真实设计器文件的冒烟检查:它**必须**在没装设计器的机器上跳过,
 	// 而那个跳过正是它的价值所在 —— 有设计器的机器(开发机)会真的拿 .NET 生成的密文
 	// 解一遍,没有的机器不假红。所以这两条不影响「全绿」这个结论。
