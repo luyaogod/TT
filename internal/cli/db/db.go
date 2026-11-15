@@ -21,8 +21,8 @@ import (
 
 	"github.com/luyaogod/TT/internal/cli/at"
 	"github.com/luyaogod/TT/internal/cli/common"
-	"github.com/luyaogod/TT/pkg/dbconfig"
 	"github.com/luyaogod/TT/internal/debug"
+	"github.com/luyaogod/TT/pkg/dbconfig"
 )
 
 // Register 把 db 组挂到根命令。

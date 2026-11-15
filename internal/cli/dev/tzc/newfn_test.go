@@ -1,9 +1,9 @@
 package tzc
 
 import (
+	"github.com/luyaogod/TT/internal/testkit"
 	"strings"
 	"testing"
-	"github.com/luyaogod/TT/internal/testkit"
 )
 
 // TestNewFnHeaderTemplate 逐字节钉住新函数模板：

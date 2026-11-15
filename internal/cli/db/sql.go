@@ -19,9 +19,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/luyaogod/TT/internal/cli/common"
-	"github.com/luyaogod/TT/pkg/dbconfig"
 	"github.com/luyaogod/TT/internal/debug"
 	"github.com/luyaogod/TT/internal/output"
+	"github.com/luyaogod/TT/pkg/dbconfig"
 	"github.com/luyaogod/TT/pkg/safesql"
 )
 

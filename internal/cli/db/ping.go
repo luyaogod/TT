@@ -20,8 +20,8 @@ import (
 
 	"github.com/luyaogod/TT/internal/cli/common"
 	"github.com/luyaogod/TT/internal/connsvc"
-	"github.com/luyaogod/TT/pkg/dbconfig"
 	"github.com/luyaogod/TT/internal/output"
+	"github.com/luyaogod/TT/pkg/dbconfig"
 )
 
 func newPingCmd() *cobra.Command {

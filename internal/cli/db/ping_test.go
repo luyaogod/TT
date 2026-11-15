@@ -18,11 +18,11 @@ import (
 
 	"github.com/luyaogod/TT/internal/config"
 	"github.com/luyaogod/TT/internal/connsvc"
+	"github.com/luyaogod/TT/internal/hostrpc"
 	"github.com/luyaogod/TT/pkg/dbconfig"
 	"github.com/luyaogod/TT/pkg/erpdb"
 	"github.com/luyaogod/TT/pkg/hostv1"
 	"github.com/luyaogod/TT/pkg/hostv1/hostv1connect"
-	"github.com/luyaogod/TT/internal/hostrpc"
 )
 
 // pingSession erpdb.Session 的替身：只回答取版本。

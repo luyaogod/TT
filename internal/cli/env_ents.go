@@ -21,9 +21,9 @@ import (
 
 	"github.com/luyaogod/TT/internal/cli/common"
 	"github.com/luyaogod/TT/internal/config"
-	"github.com/luyaogod/TT/pkg/dbconfig"
 	"github.com/luyaogod/TT/internal/debug"
 	"github.com/luyaogod/TT/internal/output"
+	"github.com/luyaogod/TT/pkg/dbconfig"
 )
 
 type envEntsView struct {

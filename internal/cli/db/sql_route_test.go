@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"github.com/luyaogod/TT/internal/cli/common"
-	"github.com/luyaogod/TT/pkg/dbconfig"
 	"github.com/luyaogod/TT/internal/output"
+	"github.com/luyaogod/TT/pkg/dbconfig"
 )
 
 func TestSQLRouteValid(t *testing.T) {

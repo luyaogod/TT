@@ -1,10 +1,10 @@
 package tzc
 
 import (
+	"github.com/luyaogod/TT/internal/testkit"
 	"path/filepath"
 	"strings"
 	"testing"
-	"github.com/luyaogod/TT/internal/testkit"
 
 	"github.com/luyaogod/TT/internal/dev/testutil"
 )

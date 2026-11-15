@@ -6,8 +6,8 @@ import (
 
 	"github.com/luyaogod/TT/internal/cli/common"
 	"github.com/luyaogod/TT/internal/config"
-	"github.com/luyaogod/TT/pkg/dbconfig"
 	"github.com/luyaogod/TT/internal/host"
+	"github.com/luyaogod/TT/pkg/dbconfig"
 
 	"github.com/spf13/cobra"
 )

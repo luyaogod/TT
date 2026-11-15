@@ -15,10 +15,10 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/luyaogod/TT/pkg/dbconfig"
 	"github.com/luyaogod/TT/internal/debug"
 	"github.com/luyaogod/TT/internal/host"
 	"github.com/luyaogod/TT/internal/output"
+	"github.com/luyaogod/TT/pkg/dbconfig"
 )
 
 // sqlSession 一次执行要用的连接。direct 与 ssh 恰有一个非空。
