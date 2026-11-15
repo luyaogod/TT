@@ -194,9 +194,9 @@ export function WsTestView() {
         )}
       </div>
 
-      {/* Request / Response 本文 */}
-      <div className="grid min-h-0 flex-1 grid-cols-2 gap-2 p-2">
-        <div className="flex min-h-0 flex-col border border-border bg-card">
+      {/* Request / Response 本文：两块紧挨着，中间只留一条分割线（不要外间距） */}
+      <div className="grid min-h-0 flex-1 grid-cols-2 border-b border-border">
+        <div className="flex min-h-0 flex-col border-r border-border bg-card">
           <div className="flex h-7 shrink-0 items-center justify-between border-b border-border px-2 text-[11px] text-muted-foreground">
             <span>Request 本文</span>
             <span className="opacity-70">可编辑</span>
@@ -206,7 +206,7 @@ export function WsTestView() {
               path={`wstest:${activeEnv}:req`} emptyHint="在这里填请求报文" />
           </div>
         </div>
-        <div className="flex min-h-0 flex-col border border-border bg-card">
+        <div className="flex min-h-0 flex-col bg-card">
           <div className="flex h-7 shrink-0 items-center justify-between border-b border-border px-2 text-[11px] text-muted-foreground">
             <span>Response 本文</span>
             {busy && <span>测试中…</span>}

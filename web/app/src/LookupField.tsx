@@ -33,7 +33,7 @@ export function OpenWindowButton({ onClick, disabled, title = '选择', classNam
   )
 }
 
-/** label + 可编辑 Input + 开窗按钮。 */
+/** label + 可编辑 Input + 开窗按钮（图标在字段内部，与输入框同一边框）。 */
 export function LookupField({ label, value, onChange, onOpen, onKeyDown, placeholder, title, disabled, className, buttonTitle }: {
   label: string
   value: string
@@ -49,16 +49,25 @@ export function LookupField({ label, value, onChange, onOpen, onKeyDown, placeho
   return (
     <div className={cn('flex min-w-0 items-center gap-1.5', className)} title={title}>
       <span className="w-20 shrink-0 text-xs text-muted-foreground">{label}</span>
-      <div className="flex min-w-0 flex-1 items-center gap-1">
+      <div className="relative min-w-0 flex-1">
         <Input
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={onKeyDown}
           placeholder={placeholder}
           disabled={disabled}
-          className="h-8 text-[13px]"
+          className="h-8 pr-9 text-[13px]"
         />
-        <OpenWindowButton title={buttonTitle || `选择${label}`} onClick={onOpen} disabled={disabled} />
+        <button
+          type="button"
+          title={buttonTitle || `选择${label}`}
+          aria-label={buttonTitle || `选择${label}`}
+          onClick={onOpen}
+          disabled={disabled}
+          className="absolute inset-y-0 right-0 flex w-8 items-center justify-center text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+        >
+          <Search className="h-4 w-4" />
+        </button>
       </div>
     </div>
   )

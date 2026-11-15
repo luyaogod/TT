@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Bug, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, ChevronUp, Copy, Fingerprint, RefreshCw, Undo2, X } from 'lucide-react'
 import { useStore } from './store'
 import { Button, Input, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../shared/ui'
-import { Checkbox, DatePicker, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../shared/ui-radix'
+import { DatePicker, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../shared/ui-radix'
 import type { WSLogItem } from './api'
 import { PayloadEditor } from './PayloadEditor'
 import { copyText } from './clipboard'
@@ -20,7 +20,6 @@ import { cn } from '../../shared/utils'
 type WsLogViewState = {
   draft: { service: string; job: string; result: string; origin: string; server: string }
   applied: { service: string; job: string; result: string; origin: string; server: string }
-  onlyFail: boolean
   from: string
   to: string
   ent: number
@@ -184,18 +183,15 @@ export function WsLogView() {
   // 才算忙碌。重放按钮不设禁用——后端重放会先自动收口现有会话(见 wslog 重放接口)
   const sessionBusy = !!sessionId && state !== 'idle' && state !== 'exit' && state !== ''
   // 顶部查询条件:四个输入框存 draft(正在编辑),回车/刷新才写入 applied 并查询;
-  // 日期/仅失败仍即时生效(沿用原有交互)。
+  // 日期仍即时生效(沿用原有交互)。
   // 条件语义对齐 T100 原生页 awsq990:服务名称 wsfa001(支持 * ? 通配)、
   // 处理结果 wsfa006、发起端 wsfa013、服务端 wsfa018(后三者等值)。
   const [draft, setDraft] = useState({ service: '', job: '', result: '', origin: '', server: '' })
   const [applied, setApplied] = useState(draft)
-  const [onlyFail, setOnlyFail] = useState(false)
   // 日期变化时要复用"最新已提交条件",用 ref 读避免把它写进 effect 依赖
   // (写进去会因输入框每次按键都触发查询);此前此处传空串,改日期会把已填条件清掉。
   const appliedRef = useRef(applied)
   appliedRef.current = applied
-  const onlyFailRef = useRef(onlyFail)
-  onlyFailRef.current = onlyFail
   // 默认过滤条件:当天(awsq990 查当天日志是最常用场景)
   const today = () => {
     const d = new Date()
@@ -230,8 +226,8 @@ export function WsLogView() {
   // 为什么不能共用:环境页 keep-alive,甲环境的企业编号在乙环境未必存在,
   // 甲环境的"已查询"状态套到乙环境上就会出现"空列表却没有查询按钮提示"这类怪相。
   const envRef = useRef(activeEnv)
-  const viewStateRef = useRef<WsLogViewState>({ draft, applied, onlyFail, from, to, ent, queried, collapsed })
-  viewStateRef.current = { draft, applied, onlyFail, from, to, ent, queried, collapsed }
+  const viewStateRef = useRef<WsLogViewState>({ draft, applied, from, to, ent, queried, collapsed })
+  viewStateRef.current = { draft, applied, from, to, ent, queried, collapsed }
   const suppressRequeryRef = useRef(false)
   useEffect(() => {
     if (envRef.current === activeEnv) return
@@ -241,13 +237,13 @@ export function WsLogView() {
     const saved = wsLogViewStateByEnv.get(activeEnv)
     suppressRequeryRef.current = true
     if (saved) {
-      setDraft(saved.draft); setApplied(saved.applied); setOnlyFail(saved.onlyFail)
+      setDraft(saved.draft); setApplied(saved.applied)
       setFrom(saved.from); setTo(saved.to); setEnt(saved.ent); setQueried(saved.queried)
       setCollapsed(!!saved.collapsed)
     } else {
       const d = today()
       const blank = { service: '', job: '', result: '', origin: '', server: '' }
-      setDraft(blank); setApplied(blank); setOnlyFail(false)
+      setDraft(blank); setApplied(blank)
       setFrom(d); setTo(d); setEnt(0); setQueried(false); setCollapsed(false)
     }
     // 还原这一轮里 from/to 的变化不算"用户改日期",放掉抑制标记给下一次用。
@@ -270,7 +266,7 @@ export function WsLogView() {
   useEffect(() => {
     if (suppressRequeryRef.current) return
     if (!queried || !entRef.current) return
-    void loadWsLogs({ ...appliedRef.current, onlyFail: onlyFailRef.current, page: 1, startFrom: from, endTo: to, ent: entRef.current })
+    void loadWsLogs({ ...appliedRef.current, page: 1, startFrom: from, endTo: to, ent: entRef.current })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [from, to])
 
@@ -279,16 +275,16 @@ export function WsLogView() {
     if (!entRef.current) { toast.error('先选企业编号'); return }
     if (!queried) setQueried(true)
     setApplied(draft)
-    void loadWsLogs({ ...draft, onlyFail, page: p, startFrom: from, endTo: to, ent: entRef.current })
+    void loadWsLogs({ ...draft, page: p, startFrom: from, endTo: to, ent: entRef.current })
   }
-  // 翻页/勾「仅失败」**沿用已提交条件**，不读 draft。
+  // 翻页**沿用已提交条件**，不读 draft。
   //
-  // 原来它们也调 doLoad，于是"输入框里刚敲了半个条件、没回车"会被当成正式条件发出去：
+  // 原来它也调 doLoad，于是"输入框里刚敲了半个条件、没回车"会被当成正式条件发出去：
   // 实测在服务名称里敲 `bom` 不回车直接点【下一页】，发出去的是 `service=bom&page=2` 的
   // **另一个查询**的第 2 页，列表变 0 条 —— 看着像"翻页把数据翻没了"。
   // 草稿只在回车/刷新那一下生效，这条边界必须守住。
   const loadPage = (p: number) => {
-    void loadWsLogs({ ...appliedRef.current, onlyFail: onlyFailRef.current, page: p, startFrom: from, endTo: to, ent: entRef.current })
+    void loadWsLogs({ ...appliedRef.current, page: p, startFrom: from, endTo: to, ent: entRef.current })
   }
   const onEnter = (e: React.KeyboardEvent) => { if (e.key === 'Enter') doLoad(1) }
   // 条件清除（T100 的 qbeclear）：只清条件，不自动查；日期清空 = 不限时间。
@@ -299,7 +295,6 @@ export function WsLogView() {
     suppressRequeryRef.current = true
     setDraft(blank)
     setApplied(blank)
-    setOnlyFail(false)
     setFrom('')
     setTo('')
     window.setTimeout(() => { suppressRequeryRef.current = false }, 0)
@@ -317,7 +312,7 @@ export function WsLogView() {
     suppressRequeryRef.current = true
     window.setTimeout(() => { suppressRequeryRef.current = false }, 0)
     setFrom(start); setTo(end); setQueried(true)
-    void loadWsLogs({ ...appliedRef.current, onlyFail: onlyFailRef.current, page: 1, startFrom: start, endTo: end, ent: entRef.current })
+    void loadWsLogs({ ...appliedRef.current, page: 1, startFrom: start, endTo: end, ent: entRef.current })
   }
 
   // ---- 宽度分配:左右两栏按比例分(默认 1:1),之和恒等于容器宽度 ----
@@ -614,23 +609,13 @@ export function WsLogView() {
               <div className="hidden xl:block" />
             </div>
 
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
-              <label className="flex items-center gap-1.5">
-                作业编号
+            <div className={QBE_ROW}>
+              <QueryCell label="作业编号" title="支持 * ? 通配；回车查询">
                 <Input value={draft.job} onChange={(e) => setDraft((d) => ({ ...d, job: e.target.value }))}
-                  onKeyDown={onEnter} placeholder="如 wssp01131（支持 * ?）" className="h-7 w-44 text-xs" />
-              </label>
-              <label className="flex items-center gap-1.5">
-                <Checkbox id="wslog-onlyfail" checked={onlyFail}
-                  onCheckedChange={(v) => {
-                    // 立即生效:显式传新值查询。条件只取**已提交**的那份:
-                    // 输入框里的草稿要等回车才算数(见 loadPage 的说明)。
-                    const on = v === true
-                    setOnlyFail(on)
-                    void loadWsLogs({ ...appliedRef.current, onlyFail: on, page: 1, startFrom: from, endTo: to, ent: entRef.current })
-                  }} />
-                <span className="cursor-pointer select-none">仅失败</span>
-              </label>
+                  onKeyDown={onEnter} placeholder="如 wssp01131（支持 * ?）" className="h-8 text-[13px]" />
+              </QueryCell>
+              <div className="hidden xl:block" />
+              <div className="hidden xl:block" />
             </div>
           </div>
         )}
@@ -726,7 +711,7 @@ export function WsLogView() {
                 <div className="flex flex-col items-center gap-2 p-4 text-center text-xs">
                   <div className="text-red-600 dark:text-red-400">查询失败，没有拿到日志</div>
                   <div className="max-w-2xl whitespace-pre-wrap text-muted-foreground">{err}</div>
-                  <button onClick={() => void loadWsLogs({ ...appliedRef.current, onlyFail: onlyFailRef.current, page: 1, startFrom: from, endTo: to, ent: entRef.current })}
+                  <button onClick={() => void loadWsLogs({ ...appliedRef.current, page: 1, startFrom: from, endTo: to, ent: entRef.current })}
                     className="rounded-ui border border-border px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground">
                     重试
                   </button>
