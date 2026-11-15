@@ -11,6 +11,22 @@
 
 import { isPluginRoute } from './routing'
 
+/** 宿主支持的槽位（与后端 plugin.KnownUISlots 同一份口径）。 */
+export const KNOWN_UI_SLOTS = ['nav', 'page', 'header.actions', 'settings.section', 'statusbar', 'overlay'] as const
+export type PluginUISlot = (typeof KNOWN_UI_SLOTS)[number]
+
+/** 一条同页 UI 贡献（清单 contributions.ui 的运行时投影）。 */
+export interface PluginUIEntry {
+  slot: PluginUISlot
+  id: string
+  route: string
+  title: string
+  icon: string
+  order: number
+  /** 包内相对路径（如 client.js）；由 pluginUIAssetURL 拼成可 import 的地址。 */
+  entry: string
+}
+
 /** 一条前端贡献的运行时描述。健康状态可选：后端暂时只给 lastError 时由它推导。 */
 export interface PluginDescriptor {
   id: string
@@ -21,9 +37,22 @@ export interface PluginDescriptor {
   route: string
   /** 菜单与页面标题；缺省按 name → route 兜底。 */
   title: string
+  /** 同页 UI 贡献；空 = 旧式 iframe 页面。 */
+  ui: PluginUIEntry[]
   /** undefined = 后端没说；false = 明确不健康（lastError 非空也按 false 处理）。 */
   healthy?: boolean
   lastError?: string
+}
+
+/** 一条 ui 贡献的原始形状（只列本模块关心的字段）。 */
+export interface PluginSummaryUI {
+  slot?: string
+  id?: string
+  route?: string
+  title?: string
+  icon?: string
+  order?: number
+  entry?: string
 }
 
 /** GET /api/plugins 的一条摘要（只列本模块关心的字段，其余忽略）。 */
@@ -35,6 +64,7 @@ export interface PluginSummary {
   namespace?: string
   route?: string
   routeTitle?: string
+  ui?: PluginSummaryUI[]
   healthy?: boolean
   lastError?: string
 }
@@ -66,12 +96,61 @@ function toDescriptor(raw: PluginSummary): PluginDescriptor | null {
   const title = (typeof raw.routeTitle === 'string' && raw.routeTitle.trim()) || name || route
   const version = typeof raw.version === 'string' ? raw.version : ''
   const enabled = raw.enabled === true
+  const ui = normalizeUIEntries(raw.ui)
   // 健康：后端给了布尔就用；没给但有 lastError，按“明确不健康”处理（错误是事实）。
   const healthy = typeof raw.healthy === 'boolean' ? raw.healthy : (raw.lastError ? false : undefined)
   return {
-    id, name, version, enabled, route, title, healthy,
+    id, name, version, enabled, route, title, ui, healthy,
     lastError: typeof raw.lastError === 'string' && raw.lastError ? raw.lastError : undefined,
   }
+}
+
+/** 包内相对路径：不接受绝对路径、`..`、空段与 NUL。 */
+function normalizeEntryPath(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const s = raw.trim().replace(/\\/g, '/')
+  if (!s || s.startsWith('/') || s.includes('\0')) return null
+  const parts = s.split('/')
+  if (parts.some((p) => p === '' || p === '.' || p === '..')) return null
+  return parts.join('/')
+}
+
+/** 逐条校验 ui 贡献；坏条目直接丢（不猜、不把半截路径塞给 import）。 */
+function normalizeUIEntries(raw: PluginSummaryUI[] | undefined): PluginUIEntry[] {
+  if (!Array.isArray(raw)) return []
+  const out: PluginUIEntry[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const slot = typeof item.slot === 'string' ? item.slot.trim() : ''
+    if (!(KNOWN_UI_SLOTS as readonly string[]).includes(slot)) continue
+    const route = typeof item.route === 'string' ? item.route.trim() : ''
+    if (route && !isPluginRoute(route)) continue
+    const entry = normalizeEntryPath(item.entry)
+    // page 与组件类槽位必须有入口；nav/settings.section 可以只有标题。
+    if (!entry && (slot === 'page' || slot === 'header.actions' || slot === 'statusbar' || slot === 'overlay')) continue
+    out.push({
+      slot: slot as PluginUISlot,
+      id: typeof item.id === 'string' ? item.id.trim() : '',
+      route,
+      title: typeof item.title === 'string' ? item.title.trim() : '',
+      icon: normalizeEntryPath(item.icon) ?? '',
+      order: typeof item.order === 'number' && Number.isFinite(item.order) ? item.order : 0,
+      entry: entry ?? '',
+    })
+  }
+  return out
+}
+
+/** 插件的页面贡献（同页渲染的入口）；没有就返回 null（走 legacy iframe）。 */
+export function pluginPageEntry(plugin: PluginDescriptor): PluginUIEntry | null {
+  return plugin.ui.find((u) => u.slot === 'page' && u.route === plugin.route) ?? null
+}
+
+/** ui 贡献的浏览器模块地址：/plugins/<id>/ui/<entry>。参数不合法返回 null。 */
+export function pluginUIAssetURL(id: string, entry: string): string | null {
+  if (!isPluginID(id)) return null
+  const e = normalizeEntryPath(entry)
+  return e ? `/plugins/${id}/ui/${e}` : null
 }
 
 /** 把应答压成菜单/页面能直接用的描述符清单。 */

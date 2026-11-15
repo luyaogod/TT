@@ -126,9 +126,6 @@ func (h *WebHandler) uiRoot(id string) (*Record, string, error) {
 	if !rec.Enabled {
 		return nil, "", errors.New("插件未启用")
 	}
-	if rec.Contributions.Frontend == nil {
-		return nil, "", errors.New("这个插件没有页面")
-	}
 	dir := h.Store.ActiveDir(rec)
 	if dir == "" {
 		return nil, "", errors.New("插件没有活跃版本")
@@ -137,7 +134,27 @@ func (h *WebHandler) uiRoot(id string) (*Record, string, error) {
 	if merr != nil {
 		return nil, "", errors.New("插件清单读不出来")
 	}
-	rel, rerr := man.ResolveFrontendEntry()
+	// 入口：v2 的 ui 贡献优先，其次 legacy frontend。资源根就是入口文件所在目录
+	// （client.js 的兄弟文件按相对路径取）。
+	var rel string
+	var rerr error
+	switch {
+	case len(man.Contributions.UI) > 0:
+		for _, u := range man.Contributions.UI {
+			if strings.TrimSpace(u.Entry) == "" {
+				continue
+			}
+			rel, rerr = man.ResolveUIEntry(u)
+			break
+		}
+		if rel == "" && rerr == nil {
+			return nil, "", errors.New("这个插件没有 ui 入口")
+		}
+	case man.Contributions.Frontend != nil:
+		rel, rerr = man.ResolveFrontendEntry()
+	default:
+		return nil, "", errors.New("这个插件没有页面")
+	}
 	if rerr != nil {
 		return nil, "", rerr
 	}

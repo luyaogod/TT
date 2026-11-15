@@ -375,3 +375,50 @@ func TestUIHandlerHostBridgeMintsIdentityForThePlugin(t *testing.T) {
 		t.Errorf("桥接后令牌该撤销，剩 %d", tokens.Count())
 	}
 }
+
+// TestUIHandlerServesV2ClientModule v2 清单只声明 ui（没有 legacy frontend）时，
+// 仍能从活跃版本目录取到浏览器模块，并且 Summary 带上 ui 投影。
+func TestUIHandlerServesV2ClientModule(t *testing.T) {
+	m, s := newManager(t)
+	src := t.TempDir()
+	manifest := `{
+  "schemaVersion": 2, "id": "com.example.v2", "version": "0.1.0",
+  "hostApi": ">=1.0.0 <2.0.0", "tt": ">=0.7.0 <0.8.0",
+  "contributions": {
+    "ui": [
+      {"slot": "nav", "id": "v2", "title": "V2 插件", "order": 10},
+      {"slot": "page", "route": "v2", "title": "V2 插件", "entry": "client.js"}
+    ]
+  }
+}`
+	writeFile(t, filepath.Join(src, ManifestFileName), manifest)
+	writeFile(t, filepath.Join(src, "client.js"),
+		"export function register(ctx){ ctx.slot('"+"page"+"', {route:'v2', component: () => null}) }")
+	rec, err := m.Install(InstallOptions{Source: src})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Enable(rec.ID, Grants{}); err != nil {
+		t.Fatal(err)
+	}
+
+	sum := Summarize(rec)
+	if len(sum.UI) != 2 {
+		t.Fatalf("Summary.UI 条数 = %d，期望 2", len(sum.UI))
+	}
+	if sum.Route != "v2" || sum.RouteTitle != "V2 插件" {
+		t.Errorf("page 贡献应回填 route/routeTitle，得 %q/%q", sum.Route, sum.RouteTitle)
+	}
+
+	h := NewWebHandler(s, nil).Handler()
+	res := do(h, "GET", "/plugins/com.example.v2/ui/client.js", "127.0.0.1:5000")
+	if res.Code != 200 {
+		t.Fatalf("status = %d（%s）", res.Code, res.Body.String())
+	}
+	if !strings.Contains(res.Body.String(), "register") {
+		t.Fatalf("没读到模块内容: %s", res.Body.String())
+	}
+	if ct := res.Header().Get("Content-Type"); !strings.Contains(ct, "javascript") {
+		t.Errorf("Content-Type = %q，期望 javascript", ct)
+	}
+}

@@ -420,23 +420,40 @@ func (s *Store) EnsureDirs() error {
 	return nil
 }
 
+// UIEntry 一条前端贡献的运行时投影（与清单 contributions.ui 一一对应）。
+type UIEntry struct {
+	Slot  string `json:"slot"`
+	ID    string `json:"id,omitempty"`
+	Route string `json:"route,omitempty"`
+	Title string `json:"title,omitempty"`
+	Icon  string `json:"icon,omitempty"`
+	Order int    `json:"order,omitempty"`
+	// Entry 包内相对路径（如 client.js）；前端拼成 /plugins/<id>/ui/<entry>。
+	Entry string `json:"entry,omitempty"`
+}
+
 // Summary 一条用于展示/帮助的记录投影（CLI 帮助与 Web 菜单都读它）。
 type Summary struct {
-	ID              string   `json:"id"`
-	Name            string   `json:"name,omitempty"`
-	Version         string   `json:"version"`
-	PreviousVersion string   `json:"previousVersion,omitempty"`
-	Enabled         bool     `json:"enabled"`
-	Namespace       string   `json:"namespace,omitempty"`
-	CLISummary      string   `json:"cliSummary,omitempty"`
-	Route           string   `json:"route,omitempty"`
-	RouteTitle      string   `json:"routeTitle,omitempty"`
-	HasService      bool     `json:"hasService"`
-	SkillDirs       []string `json:"skillDirs,omitempty"`
-	Permissions     []string `json:"permissions,omitempty"`
-	Capabilities    []string `json:"capabilities,omitempty"`
-	Envs            []string `json:"envs,omitempty"`
-	LastError       string   `json:"lastError,omitempty"`
+	ID              string `json:"id"`
+	Name            string `json:"name,omitempty"`
+	Version         string `json:"version"`
+	PreviousVersion string `json:"previousVersion,omitempty"`
+	Enabled         bool   `json:"enabled"`
+	Namespace       string `json:"namespace,omitempty"`
+	CLISummary      string `json:"cliSummary,omitempty"`
+	Route           string `json:"route,omitempty"`
+	RouteTitle      string `json:"routeTitle,omitempty"`
+	// UI 同页 UI 贡献（清单 contributions.ui 的运行时投影）。
+	//
+	// 有 ui 的插件由外壳**同页**渲染；route/routeTitle 继续填（取第一条 page），
+	// 让旧菜单代码与旧调用方不用改。
+	UI           []UIEntry `json:"ui,omitempty"`
+	HasService   bool      `json:"hasService"`
+	SkillDirs    []string  `json:"skillDirs,omitempty"`
+	Permissions  []string  `json:"permissions,omitempty"`
+	Capabilities []string  `json:"capabilities,omitempty"`
+	Envs         []string  `json:"envs,omitempty"`
+	LastError    string    `json:"lastError,omitempty"`
 
 	// 运行态：只有 Web 管理面在 supervisor 存在时才填（见 internal/web/plugins.go）。
 	// CLI 不填 —— `tt plugin list` 不该为了一行状态去碰 run 目录和进程表。
@@ -462,6 +479,24 @@ func Summarize(rec *Record) Summary {
 	}
 	if f := rec.Contributions.Frontend; f != nil {
 		s.Route, s.RouteTitle = f.Route, f.Title
+	}
+	// ui 贡献：完整投影给前端；page 同时回填 route/routeTitle（菜单与深链接复用）。
+	if len(rec.Contributions.UI) > 0 {
+		s.UI = make([]UIEntry, 0, len(rec.Contributions.UI))
+		for _, u := range rec.Contributions.UI {
+			s.UI = append(s.UI, UIEntry{
+				Slot: u.Slot, ID: u.ID, Route: u.Route, Title: u.Title,
+				Icon: u.Icon, Order: u.Order, Entry: u.Entry,
+			})
+		}
+		for _, u := range rec.Contributions.UI {
+			if u.Slot == "page" {
+				if s.Route == "" {
+					s.Route, s.RouteTitle = u.Route, u.Title
+				}
+				break
+			}
+		}
 	}
 	s.SkillDirs = append([]string(nil), rec.Contributions.Skills...)
 	return s
