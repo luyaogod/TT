@@ -54,6 +54,12 @@ enum Feature {
   FEATURE_SSH_EXEC = 3;
   // FEATURE_DB_READONLY_SESSION 支持 OpenDB(read_only=true) 建立库侧只读会话。
   FEATURE_DB_READONLY_SESSION = 4;
+  // FEATURE_DB_BATCH 批量执行与显式事务（DBSession.Batch/BeginTx/…）。
+  FEATURE_DB_BATCH = 5;
+  // FEATURE_PROFILE_ENTS Profile.ents 返回企业目录（ENT→账号）。
+  FEATURE_PROFILE_ENTS = 6;
+  // FEATURE_DB_OPEN_BY_ENT 支持 OpenDB(ent=…) 按企业解析账号。
+  FEATURE_DB_OPEN_BY_ENT = 7;
 }
 
 // ConnKind 连接种类。
@@ -61,6 +67,16 @@ enum ConnKind {
   CONN_KIND_UNSPECIFIED = 0;
   CONN_KIND_DB = 1;
   CONN_KIND_SSH = 2;
+}
+
+// Ent 一个企业编号 → 账号的映射（企业目录 gzou_t 的脱敏投影）。
+//
+// 只给编号与账号名，不含任何口令；placeholder 表示该企业在 gzou_t 里存在
+// 但没配可用账号。
+message Ent {
+  int32 ent = 1;
+  string account = 2;
+  bool placeholder = 3;
 }
 
 // Profile 一个环境的**脱敏**元数据。
@@ -84,4 +100,7 @@ message Profile {
   bool db_via_ssh = 11;
   // db_readonly_sql 该环境内置只读 SQL 开关的状态（信息性；不影响插件通用会话）。
   bool db_readonly_sql = 12;
+  // ents 该环境在 gzou_t 里启用的企业及其账号（企业目录快照的投影）。
+  // 空 = 该环境还没同步过企业目录（插件可提示用户先同步）。
+  repeated Ent ents = 13;
 }

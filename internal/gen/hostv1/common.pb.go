@@ -41,6 +41,12 @@ const (
 	Feature_FEATURE_SSH_EXEC Feature = 3
 	// FEATURE_DB_READONLY_SESSION 支持 OpenDB(read_only=true) 建立库侧只读会话。
 	Feature_FEATURE_DB_READONLY_SESSION Feature = 4
+	// FEATURE_DB_BATCH 批量执行与显式事务（DBSession.Batch/BeginTx/…）。
+	Feature_FEATURE_DB_BATCH Feature = 5
+	// FEATURE_PROFILE_ENTS Profile.ents 返回企业目录（ENT→账号）。
+	Feature_FEATURE_PROFILE_ENTS Feature = 6
+	// FEATURE_DB_OPEN_BY_ENT 支持 OpenDB(ent=…) 按企业解析账号。
+	Feature_FEATURE_DB_OPEN_BY_ENT Feature = 7
 )
 
 // Enum value maps for Feature.
@@ -51,6 +57,9 @@ var (
 		2: "FEATURE_DB_EXEC",
 		3: "FEATURE_SSH_EXEC",
 		4: "FEATURE_DB_READONLY_SESSION",
+		5: "FEATURE_DB_BATCH",
+		6: "FEATURE_PROFILE_ENTS",
+		7: "FEATURE_DB_OPEN_BY_ENT",
 	}
 	Feature_value = map[string]int32{
 		"FEATURE_UNSPECIFIED":         0,
@@ -58,6 +67,9 @@ var (
 		"FEATURE_DB_EXEC":             2,
 		"FEATURE_SSH_EXEC":            3,
 		"FEATURE_DB_READONLY_SESSION": 4,
+		"FEATURE_DB_BATCH":            5,
+		"FEATURE_PROFILE_ENTS":        6,
+		"FEATURE_DB_OPEN_BY_ENT":      7,
 	}
 )
 
@@ -340,6 +352,70 @@ func (x *ServiceCapability) GetMethods() []string {
 	return nil
 }
 
+// Ent 一个企业编号 → 账号的映射（企业目录 gzou_t 的脱敏投影）。
+//
+// 只给编号与账号名，不含任何口令；placeholder 表示该企业在 gzou_t 里存在
+// 但没配可用账号。
+type Ent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ent           int32                  `protobuf:"varint,1,opt,name=ent,proto3" json:"ent,omitempty"`
+	Account       string                 `protobuf:"bytes,2,opt,name=account,proto3" json:"account,omitempty"`
+	Placeholder   bool                   `protobuf:"varint,3,opt,name=placeholder,proto3" json:"placeholder,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Ent) Reset() {
+	*x = Ent{}
+	mi := &file_tt_host_v1_common_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Ent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Ent) ProtoMessage() {}
+
+func (x *Ent) ProtoReflect() protoreflect.Message {
+	mi := &file_tt_host_v1_common_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Ent.ProtoReflect.Descriptor instead.
+func (*Ent) Descriptor() ([]byte, []int) {
+	return file_tt_host_v1_common_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *Ent) GetEnt() int32 {
+	if x != nil {
+		return x.Ent
+	}
+	return 0
+}
+
+func (x *Ent) GetAccount() string {
+	if x != nil {
+		return x.Account
+	}
+	return ""
+}
+
+func (x *Ent) GetPlaceholder() bool {
+	if x != nil {
+		return x.Placeholder
+	}
+	return false
+}
+
 // Profile 一个环境的**脱敏**元数据。
 //
 // 默认不返回任何口令、私钥或完整配置；账号只给名字。
@@ -362,13 +438,16 @@ type Profile struct {
 	DbViaSsh bool `protobuf:"varint,11,opt,name=db_via_ssh,json=dbViaSsh,proto3" json:"db_via_ssh,omitempty"`
 	// db_readonly_sql 该环境内置只读 SQL 开关的状态（信息性；不影响插件通用会话）。
 	DbReadonlySql bool `protobuf:"varint,12,opt,name=db_readonly_sql,json=dbReadonlySql,proto3" json:"db_readonly_sql,omitempty"`
+	// ents 该环境在 gzou_t 里启用的企业及其账号（企业目录快照的投影）。
+	// 空 = 该环境还没同步过企业目录（插件可提示用户先同步）。
+	Ents          []*Ent `protobuf:"bytes,13,rep,name=ents,proto3" json:"ents,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Profile) Reset() {
 	*x = Profile{}
-	mi := &file_tt_host_v1_common_proto_msgTypes[3]
+	mi := &file_tt_host_v1_common_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -380,7 +459,7 @@ func (x *Profile) String() string {
 func (*Profile) ProtoMessage() {}
 
 func (x *Profile) ProtoReflect() protoreflect.Message {
-	mi := &file_tt_host_v1_common_proto_msgTypes[3]
+	mi := &file_tt_host_v1_common_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -393,7 +472,7 @@ func (x *Profile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Profile.ProtoReflect.Descriptor instead.
 func (*Profile) Descriptor() ([]byte, []int) {
-	return file_tt_host_v1_common_proto_rawDescGZIP(), []int{3}
+	return file_tt_host_v1_common_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Profile) GetEnv() string {
@@ -480,6 +559,13 @@ func (x *Profile) GetDbReadonlySql() bool {
 	return false
 }
 
+func (x *Profile) GetEnts() []*Ent {
+	if x != nil {
+		return x.Ents
+	}
+	return nil
+}
+
 var File_tt_host_v1_common_proto protoreflect.FileDescriptor
 
 const file_tt_host_v1_common_proto_rawDesc = "" +
@@ -499,7 +585,11 @@ const file_tt_host_v1_common_proto_rawDesc = "" +
 	"tt_version\x18\x04 \x01(\tR\tttVersion\"A\n" +
 	"\x11ServiceCapability\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
-	"\amethods\x18\x02 \x03(\tR\amethods\"\xcf\x02\n" +
+	"\amethods\x18\x02 \x03(\tR\amethods\"S\n" +
+	"\x03Ent\x12\x10\n" +
+	"\x03ent\x18\x01 \x01(\x05R\x03ent\x12\x18\n" +
+	"\aaccount\x18\x02 \x01(\tR\aaccount\x12 \n" +
+	"\vplaceholder\x18\x03 \x01(\bR\vplaceholder\"\xf4\x02\n" +
 	"\aProfile\x12\x10\n" +
 	"\x03env\x18\x01 \x01(\tR\x03env\x12\x12\n" +
 	"\x04zone\x18\x02 \x01(\tR\x04zone\x12\x15\n" +
@@ -516,13 +606,17 @@ const file_tt_host_v1_common_proto_rawDesc = "" +
 	" \x01(\tR\asshUser\x12\x1c\n" +
 	"\n" +
 	"db_via_ssh\x18\v \x01(\bR\bdbViaSsh\x12&\n" +
-	"\x0fdb_readonly_sql\x18\f \x01(\bR\rdbReadonlySql*\x84\x01\n" +
+	"\x0fdb_readonly_sql\x18\f \x01(\bR\rdbReadonlySql\x12#\n" +
+	"\x04ents\x18\r \x03(\v2\x0f.tt.host.v1.EntR\x04ents*\xd0\x01\n" +
 	"\aFeature\x12\x17\n" +
 	"\x13FEATURE_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10FEATURE_DB_QUERY\x10\x01\x12\x13\n" +
 	"\x0fFEATURE_DB_EXEC\x10\x02\x12\x14\n" +
 	"\x10FEATURE_SSH_EXEC\x10\x03\x12\x1f\n" +
-	"\x1bFEATURE_DB_READONLY_SESSION\x10\x04*J\n" +
+	"\x1bFEATURE_DB_READONLY_SESSION\x10\x04\x12\x14\n" +
+	"\x10FEATURE_DB_BATCH\x10\x05\x12\x18\n" +
+	"\x14FEATURE_PROFILE_ENTS\x10\x06\x12\x1a\n" +
+	"\x16FEATURE_DB_OPEN_BY_ENT\x10\a*J\n" +
 	"\bConnKind\x12\x19\n" +
 	"\x15CONN_KIND_UNSPECIFIED\x10\x00\x12\x10\n" +
 	"\fCONN_KIND_DB\x10\x01\x12\x11\n" +
@@ -541,23 +635,25 @@ func file_tt_host_v1_common_proto_rawDescGZIP() []byte {
 }
 
 var file_tt_host_v1_common_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_tt_host_v1_common_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_tt_host_v1_common_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_tt_host_v1_common_proto_goTypes = []any{
 	(Feature)(0),              // 0: tt.host.v1.Feature
 	(ConnKind)(0),             // 1: tt.host.v1.ConnKind
 	(*ErrorInfo)(nil),         // 2: tt.host.v1.ErrorInfo
 	(*Capabilities)(nil),      // 3: tt.host.v1.Capabilities
 	(*ServiceCapability)(nil), // 4: tt.host.v1.ServiceCapability
-	(*Profile)(nil),           // 5: tt.host.v1.Profile
+	(*Ent)(nil),               // 5: tt.host.v1.Ent
+	(*Profile)(nil),           // 6: tt.host.v1.Profile
 }
 var file_tt_host_v1_common_proto_depIdxs = []int32{
 	0, // 0: tt.host.v1.Capabilities.features:type_name -> tt.host.v1.Feature
 	4, // 1: tt.host.v1.Capabilities.services:type_name -> tt.host.v1.ServiceCapability
-	2, // [2:2] is the sub-list for method output_type
-	2, // [2:2] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	5, // 2: tt.host.v1.Profile.ents:type_name -> tt.host.v1.Ent
+	3, // [3:3] is the sub-list for method output_type
+	3, // [3:3] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_tt_host_v1_common_proto_init() }
@@ -571,7 +667,7 @@ func file_tt_host_v1_common_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tt_host_v1_common_proto_rawDesc), len(file_tt_host_v1_common_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   4,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

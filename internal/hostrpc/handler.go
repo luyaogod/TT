@@ -244,6 +244,32 @@ func (d *dbSessionServer) Exec(ctx context.Context, req *connect.Request[hostv1.
 	return connect.NewResponse(&hostv1.ExecResponse{RowsAffected: n}), nil
 }
 
+// ---- 批量与事务 ----
+//
+// 契约已在 proto 冻结（P0），实现随 P2「资源服务」落地。这组方法故意不注册
+// FEATURE_DB_BATCH，能力清单里没有它时插件本来就不该调用；真调了得到 Unimplemented
+// 而不是静默的半成品。
+
+func (d *dbSessionServer) Batch(_ context.Context, _ *connect.Request[hostv1.BatchRequest]) (*connect.Response[hostv1.BatchResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("批量执行尚未接入"))
+}
+
+func (d *dbSessionServer) BeginTx(_ context.Context, _ *connect.Request[hostv1.BeginTxRequest]) (*connect.Response[hostv1.BeginTxResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("显式事务尚未接入"))
+}
+
+func (d *dbSessionServer) TxExec(_ context.Context, _ *connect.Request[hostv1.TxExecRequest]) (*connect.Response[hostv1.TxExecResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("显式事务尚未接入"))
+}
+
+func (d *dbSessionServer) CommitTx(_ context.Context, _ *connect.Request[hostv1.CommitTxRequest]) (*connect.Response[hostv1.CommitTxResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("显式事务尚未接入"))
+}
+
+func (d *dbSessionServer) RollbackTx(_ context.Context, _ *connect.Request[hostv1.RollbackTxRequest]) (*connect.Response[hostv1.RollbackTxResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("显式事务尚未接入"))
+}
+
 // sshSessionServer SSHSessionService。
 type sshSessionServer struct {
 	svc *connsvc.Service

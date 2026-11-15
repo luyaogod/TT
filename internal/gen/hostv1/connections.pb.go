@@ -301,7 +301,10 @@ type OpenDBRequest struct {
 	// 也不会因为本方法存在而改变。read_only=false 时插件仍然只能用自己账号的库权限。
 	ReadOnly bool `protobuf:"varint,2,opt,name=read_only,json=readOnly,proto3" json:"read_only,omitempty"`
 	// account 可选账号名（限制在该环境账号清单内）；空 = 客户端直连惯例。
-	Account       string `protobuf:"bytes,3,opt,name=account,proto3" json:"account,omitempty"`
+	Account string `protobuf:"bytes,3,opt,name=account,proto3" json:"account,omitempty"`
+	// ent 企业编号：>0 时按企业目录（gzou_t）解析出该企业该用的账号，
+	// 与 account 互斥（同时给以 ent 为准）。0 = 不按企业解析。
+	Ent           int32 `protobuf:"varint,4,opt,name=ent,proto3" json:"ent,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -357,13 +360,24 @@ func (x *OpenDBRequest) GetAccount() string {
 	return ""
 }
 
+func (x *OpenDBRequest) GetEnt() int32 {
+	if x != nil {
+		return x.Ent
+	}
+	return 0
+}
+
 type OpenDBResponse struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	Handle string                 `protobuf:"bytes,1,opt,name=handle,proto3" json:"handle,omitempty"`
 	// read_only 实际生效的只读状态（capabilities 不支持只读会话时为 false）。
 	ReadOnly bool `protobuf:"varint,2,opt,name=read_only,json=readOnly,proto3" json:"read_only,omitempty"`
 	// db_type 实际连接类型。
-	DbType        string `protobuf:"bytes,3,opt,name=db_type,json=dbType,proto3" json:"db_type,omitempty"`
+	DbType string `protobuf:"bytes,3,opt,name=db_type,json=dbType,proto3" json:"db_type,omitempty"`
+	// account 实际使用的账号名（脱敏：只有名字，没有口令）。
+	Account string `protobuf:"bytes,4,opt,name=account,proto3" json:"account,omitempty"`
+	// ent 实际按企业解析时的企业编号；0 = 未按企业解析。
+	Ent           int32 `protobuf:"varint,5,opt,name=ent,proto3" json:"ent,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -417,6 +431,20 @@ func (x *OpenDBResponse) GetDbType() string {
 		return x.DbType
 	}
 	return ""
+}
+
+func (x *OpenDBResponse) GetAccount() string {
+	if x != nil {
+		return x.Account
+	}
+	return ""
+}
+
+func (x *OpenDBResponse) GetEnt() int32 {
+	if x != nil {
+		return x.Ent
+	}
+	return 0
 }
 
 type OpenSSHRequest struct {
@@ -612,15 +640,18 @@ const file_tt_host_v1_connections_proto_rawDesc = "" +
 	"\x05stage\x18\x03 \x01(\tR\x05stage\x12\x18\n" +
 	"\amessage\x18\x04 \x01(\tR\amessage\x12\x1f\n" +
 	"\vduration_ms\x18\x05 \x01(\x03R\n" +
-	"durationMs\"X\n" +
+	"durationMs\"j\n" +
 	"\rOpenDBRequest\x12\x10\n" +
 	"\x03env\x18\x01 \x01(\tR\x03env\x12\x1b\n" +
 	"\tread_only\x18\x02 \x01(\bR\breadOnly\x12\x18\n" +
-	"\aaccount\x18\x03 \x01(\tR\aaccount\"^\n" +
+	"\aaccount\x18\x03 \x01(\tR\aaccount\x12\x10\n" +
+	"\x03ent\x18\x04 \x01(\x05R\x03ent\"\x8a\x01\n" +
 	"\x0eOpenDBResponse\x12\x16\n" +
 	"\x06handle\x18\x01 \x01(\tR\x06handle\x12\x1b\n" +
 	"\tread_only\x18\x02 \x01(\bR\breadOnly\x12\x17\n" +
-	"\adb_type\x18\x03 \x01(\tR\x06dbType\"\"\n" +
+	"\adb_type\x18\x03 \x01(\tR\x06dbType\x12\x18\n" +
+	"\aaccount\x18\x04 \x01(\tR\aaccount\x12\x10\n" +
+	"\x03ent\x18\x05 \x01(\x05R\x03ent\"\"\n" +
 	"\x0eOpenSSHRequest\x12\x10\n" +
 	"\x03env\x18\x01 \x01(\tR\x03env\")\n" +
 	"\x0fOpenSSHResponse\x12\x16\n" +

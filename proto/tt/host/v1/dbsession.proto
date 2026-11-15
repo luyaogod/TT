@@ -1,7 +1,10 @@
-// 会话数据面：一次性数据库查询/执行。
+// 会话数据面：一次性数据库查询/执行、批量执行与显式事务。
 //
-// 首版只做 unary：不做流式、事务、参数绑定。是否可用由 Capabilities.features 明示
-// （FEATURE_DB_QUERY / FEATURE_DB_EXEC）；未启用时本服务不注册。
+// 首版只做 unary：不做流式。是否可用由 Capabilities.features 明示
+// （FEATURE_DB_QUERY / FEATURE_DB_EXEC / FEATURE_DB_BATCH）；未启用时对应方法不注册。
+//
+// 参数绑定：params 按占位符顺序替换。方言差异由 Host 处理（Oracle `:1..:n`、
+// Kingbase `$1..$n`），插件始终用 `?` 书写占位符。
 syntax = "proto3";
 
 package tt.host.v1;
@@ -14,6 +17,8 @@ message QueryRequest {
   // max_rows 本次最多返回多少行；0 = 由 Host 的默认上限决定。
   // 超限即截断并置 truncated=true —— 不静默丢行，也不无限返回。
   int32 max_rows = 3;
+  // params 绑定参数（按 ? 顺序）。
+  repeated string params = 4;
 }
 
 message Row {
@@ -31,6 +36,7 @@ message QueryResponse {
 message ExecRequest {
   string handle = 1;
   string sql = 2;
+  repeated string params = 3;
 }
 
 message ExecResponse {
@@ -38,7 +44,64 @@ message ExecResponse {
   int64 rows_affected = 1;
 }
 
+// Statement 批量执行里的一条语句。
+message Statement {
+  string sql = 1;
+  repeated string params = 2;
+}
+
+// BatchRequest 一次提交多条语句。atomic=true 时整批在一个事务里，
+// 任一条失败全部回滚，并以 failed_index 指出失败语句（0 基）。
+message BatchRequest {
+  string handle = 1;
+  repeated Statement statements = 2;
+  bool atomic = 3;
+}
+
+message BatchResponse {
+  int64 rows_affected = 1;
+  // failed_index 失败语句的下标；-1 表示没有失败。
+  int32 failed_index = 2;
+}
+
+// BeginTx 在会话上开启一个**显式事务**，返回事务句柄。
+// 事务句柄绑定会话与插件实例：会话关闭、插件卸载/崩溃时宿主回滚。
+message BeginTxRequest {
+  string handle = 1;
+}
+
+message BeginTxResponse {
+  string tx = 1;
+}
+
+message TxExecRequest {
+  string tx = 1;
+  string sql = 2;
+  repeated string params = 3;
+}
+
+message TxExecResponse {
+  int64 rows_affected = 1;
+}
+
+message CommitTxRequest {
+  string tx = 1;
+}
+
+message CommitTxResponse {}
+
+message RollbackTxRequest {
+  string tx = 1;
+}
+
+message RollbackTxResponse {}
+
 service DBSessionService {
   rpc Query(QueryRequest) returns (QueryResponse);
   rpc Exec(ExecRequest) returns (ExecResponse);
+  rpc Batch(BatchRequest) returns (BatchResponse);
+  rpc BeginTx(BeginTxRequest) returns (BeginTxResponse);
+  rpc TxExec(TxExecRequest) returns (TxExecResponse);
+  rpc CommitTx(CommitTxRequest) returns (CommitTxResponse);
+  rpc RollbackTx(RollbackTxRequest) returns (RollbackTxResponse);
 }
