@@ -30,12 +30,14 @@ type contextImpl struct {
 	dataDir string
 	jobs    *jobService
 	events  *eventService
+	cmds    *commandService
 }
 
 func newContext(ctx context.Context, baseURL, token, id, version, dataDir string) *contextImpl {
 	c := &contextImpl{ctx: ctx, cli: newHostClient(baseURL, token), id: id, version: version, dataDir: dataDir}
 	c.jobs = &jobService{c: c, runs: map[string]*jobRun{}}
 	c.events = &eventService{c: c, handlers: map[string][]func(json.RawMessage){}}
+	c.cmds = &commandService{c: c, defs: map[string]cmdDef{}}
 	return c
 }
 
@@ -56,8 +58,8 @@ func (c *contextImpl) Jobs() JobService { return c.jobs }
 // Events 轮询 Host API 的事件环（配置变更/插件重载）。
 func (c *contextImpl) Events() EventService { return c.events }
 
-// Commands 还没接入：返回 nil，插件必须判空后再用。
-func (c *contextImpl) Commands() CommandService { return nil }
+// Commands 进程内子命令注册表（宿主不动态改 CLI 帮助；插件在 main 里用 Dispatch 分发）。
+func (c *contextImpl) Commands() CommandService { return c.cmds }
 
 func errUnimplemented(what string) error {
 	return &Error{Code: CodeUnimplemented, Message: what + "尚未接入"}
@@ -400,4 +402,47 @@ func (s *eventService) dispatch(name string, payload json.RawMessage) {
 	for _, h := range handlers {
 		h(payload)
 	}
+}
+
+// ---- 子命令 ----
+
+type cmdDef struct {
+	summary string
+	handler func(context.Context, []string) error
+}
+
+type commandService struct {
+	c    *contextImpl
+	mu   sync.Mutex
+	defs map[string]cmdDef
+}
+
+func (s *commandService) Register(name, summary string, handler func(context.Context, []string) error) {
+	if name == "" || handler == nil {
+		return
+	}
+	s.mu.Lock()
+	s.defs[name] = cmdDef{summary: summary, handler: handler}
+	s.mu.Unlock()
+}
+
+// Dispatch 按名字执行一个已注册子命令；args 是命令名之后的参数。
+//
+// 它给"CLI 转发进来后想自己再分子命令"的插件用：插件 main 里
+// `sdk.Dispatch(ctx, os.Args[1:])` 即可，不必自己写 switch。
+func Dispatch(ctx Context, args []string) error {
+	if len(args) == 0 {
+		return &Error{Code: CodeInvalidArgument, Message: "缺少子命令"}
+	}
+	cs, ok := ctx.Commands().(*commandService)
+	if !ok || cs == nil {
+		return &Error{Code: CodeUnimplemented, Message: "子命令服务不可用"}
+	}
+	cs.mu.Lock()
+	def, ok := cs.defs[args[0]]
+	cs.mu.Unlock()
+	if !ok {
+		return &Error{Code: CodeInvalidArgument, Message: "未知子命令: " + args[0]}
+	}
+	return def.handler(ctx.Context(), args[1:])
 }

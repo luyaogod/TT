@@ -187,3 +187,22 @@ func TestEventsPollDispatches(t *testing.T) {
 		t.Fatal("没有收到事件")
 	}
 }
+
+// TestCommandsDispatch ctx.commands 注册与分发。
+func TestCommandsDispatch(t *testing.T) {
+	c := newContext(context.Background(), "http://127.0.0.1:1", "tok", "p", "0.1.0", t.TempDir())
+	var got []string
+	c.Commands().Register("hello", "打招呼", func(_ context.Context, args []string) error {
+		got = args
+		return nil
+	})
+	if err := Dispatch(c, []string{"hello", "a", "b"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0] != "a" {
+		t.Fatalf("args = %v", got)
+	}
+	if err := Dispatch(c, []string{"nope"}); err == nil {
+		t.Fatal("未知子命令该报错")
+	}
+}
