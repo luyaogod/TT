@@ -212,6 +212,14 @@ func newServeCmd() *cobra.Command {
 			sup.Logf = func(format string, a ...any) { auditLog.Printf(format, a...) }
 			pluginMgr.Hooks = servePluginHooks{sup: sup, tokens: tokenStore, conn: connSvc, logf: sup.Logf}
 
+			// 插件页面资源与私有 RPC 代理（/plugins/*）。
+			// Host API 桥的目标地址按请求自己的 Host 拼（回环），不需要等监听端口确定。
+			pluginUI := plugin.NewWebHandler(pluginStore, sup.Endpoint)
+			pluginUI.Tokens = tokenStore
+			// 技能期望态重算与命令行共用一份实现（skills_sync.go）：设置页里点启用/停用/
+			// 卸载，效果必须和 `tt plugin enable/disable/uninstall` 完全一样。
+			pluginMgr.SkillsSync = syncPluginSkills
+
 			err = debugcli.RunForeground(path, debugcli.ServeSpec{
 				Prefix:           "TT",
 				StopHint:         "tt serve --stop",
@@ -240,6 +248,7 @@ func newServeCmd() *cobra.Command {
 					HostRPC: hostRPCHandler,
 					// 插件管理（安装/启停/授权/自检）。只碰元数据与载荷，不启动插件代码。
 					PluginMgr: pluginMgr,
+					PluginUI:  pluginUI.Handler(),
 					// 配置写入后让持有内存态的子系统重新加载，否则它们内存里还是旧环境，
 					// 表现是"改了没生效"。连接服务还要把旧会话全部作废 —— 旧会话连着的是
 					// **旧目标**，而调用方看到的仍是同一个环境名。

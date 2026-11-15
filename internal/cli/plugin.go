@@ -57,6 +57,9 @@ CLI 命名空间与 TT 内置命令/其它已启用插件冲突时安装即失�
 //
 // 保留命名空间从命令树现算（并排除插件命名空间自身），所以"装了 plugin 插件叫 plugin
 // 的命名空间"这种冲突一定会在安装时被抓住。
+//
+// SkillsSync 接的是命令层的共享实现（skills_sync.go）：插件管理面自己不碰技能管线，
+// 但每次启用/停用/升级/卸载之后都要重算一次"已分发技能"的期望态。
 func pluginManager() (*plugin.Manager, error) {
 	cfgPath, err := common.ResolveConfig(true)
 	if err != nil {
@@ -65,6 +68,7 @@ func pluginManager() (*plugin.Manager, error) {
 	loc := config.LocationsAt(cfgPath)
 	m := plugin.NewManager(plugin.NewStore(loc), reservedNamespaces())
 	m.ConfigPath = cfgPath
+	m.SkillsSync = syncPluginSkills
 	return m, nil
 }
 

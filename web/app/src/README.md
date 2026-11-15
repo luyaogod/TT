@@ -59,12 +59,19 @@ terminal（下方面板）、bug-play（调试面板）、list-tree（大纲，�
 #env/<环境名>/<Tab>             环境页 create / wslogs
 #session/<会话 ID>/<Tab>         会话页 debug
 #settings/<分区>
+#plugin/<route>                 插件贡献的完整页面（第三方 iframe）
 ```
 
 环境名编码后进片段（设置里允许中文/空格），解析时解回来。认不出来的片段一律当成"没有目标"，
 由外壳落到第一个环境的「创建会话」；一个环境都没有就落到设置页（先配环境）。
 会话 ID 用白名单（`isSessionID`）：ID 里带空格/`..`/中文的**丢弃**，不静默截断 ——
 这个值会被用户粘给别人，猜错了就会打开另一条会话。
+
+插件路由分两层判：`routing.ts` 只判**语法**（`#plugin/<route>`，小写/数字/连字符）；
+“哪个插件提供这个 route”来自 `GET /api/plugins` 的运行时清单（`plugins.ts` 的
+`resolvePluginPage`）。语法错 → `plugin-error`；未知/已停用 → `PluginView` 的显式错误页。
+这两条都**不**回退到环境页或设置页。插件页面不进 `Pane` 的 keep-alive：切走就卸载 iframe、
+销毁消息桥并取消在途请求。
 
 **两条硬约束**（都是有原因的）：
 
@@ -76,6 +83,26 @@ terminal（下方面板）、bug-play（调试面板）、list-tree（大纲，�
 （规范化交给第二次），否则深链接会被默认目标覆盖。设置页那条「分区 → 片段」同步让的是同一件事。
 往后每换一次目标/Tab 都写片段（`replaceState`，不用 push：否则浏览器后退要一格一格走遍所有 Tab）。
 URL 停止不动同样是错的：点 Tab 切目标时地址栏不跟，刷新就落回旧页。
+
+## 插件页面与消息桥
+
+主 SPA **不静态 import 第三方代码**：插件页面只从 `/plugins/<id>/ui/` 加载进
+`sandbox="allow-scripts"` 的 iframe（没有 `allow-same-origin` / 顶层导航 / 弹窗权限）。
+每个 iframe 实例由 `pluginBridge.ts` 生成随机的 session + 32 字节 nonce；父页面绑定的是
+后端注册表里的真实插件 id 与 route，**不采信 iframe 自报的 id**。
+
+入站消息必须同时满足：`event.source === iframe.contentWindow`、nonce/session 匹配、
+类型在 v1 白名单（`host.request` / `rpc.request` / `cancel` / `error`）。未知类型、超限
+（> 1 MiB 或 > 5000 行）、重复消息 id 都会被拒绝，并把 `error` 回给 iframe、在页面上留一条
+可见提示。两条网络出口都不是 `/api/`：
+
+| 用途 | 父页面请求的路径 | 后端职责 |
+|---|---|---|
+| Host API 一元调用 | `/plugins/<id>/hostrpc/<service>/<method>` | 换成该插件的实例令牌，转发到 `/hostrpc/` |
+| 插件自身服务 | `/plugins/<id>/rpc/<path>` | 只转发到该插件实例（不转发到任意本机端口） |
+
+iframe 的 origin 是不透明的，`postMessage` 的 `targetOrigin` 只能用 `"*"`；认证靠 nonce +
+source，不靠 origin 字符串（`pluginProtocol.ts` 顶部有完整说明）。
 
 ## 渲染期异常：错误边界
 
@@ -146,6 +173,7 @@ URL 停止不动同样是错的：点 Tab 切目标时地址栏不跟，刷新�
 | 编辑器 | `monacoSetup.ts`、`PayloadEditor.tsx` |
 | 4GL 语言工具 | `fglTokens.ts`、`fgloutline.ts`、`fglparse.ts`、`fglPath.ts`、`fglHover.tsx` |
 | 数据与状态 | `api.ts`、`store.ts`、`routing.ts`、`clipboard.ts` |
+| 插件页面 | `PluginView.tsx`、`plugins.ts`（描述符/菜单/拒绝清单）、`pluginBridge.ts`（消息桥）、`pluginProtocol.ts`（v1 协议类型） |
 | 样式 | `index.css`（调试视图专属样式 + 外壳的 DSH 配色作用域；主题与基元在共享层） |
 
 `SessionPanel.tsx` 是旧外壳的会话栏（连环境 / 重启 / 结束），新外壳没有挂它：
@@ -154,7 +182,7 @@ URL 停止不动同样是错的：点 Tab 切目标时地址栏不跟，刷新�
 ## 判据
 
 ```bash
-cd web && npm run check:app     # 词法 / 大纲 / 状态容器
+cd web && npm run check:app     # 词法 / 大纲 / 状态容器 / 进度 / 插件桥
 cd web && npm run build         # 类型检查 + 打包
 ```
 
@@ -164,6 +192,8 @@ cd web && npm run build         # 类型检查 + 打包
 |---|---|
 | 状态容器的形状 | 全站视图；它同时被 Node 侧的检查项加载，**顶层不能碰 DOM**。容器里删字段/删联合成员（如侧栏 sheet 去掉 `session`）时，`store.test.mjs` 用 `setState` 灌的部分状态不会有编译期保护 —— 靠 `npm run build` 的 `tsc --noEmit` 找调用点 |
 | 路由键 | 深链接与设置页分区；键只有一份定义，别在别处再列一遍 |
+| 插件消息协议 | `pluginProtocol.ts` 的字段与 `pluginBridge.ts` 的校验是一对；改字段要同时改 `scripts/plugins.test.mjs`，并升 `BRIDGE_VERSION`（只有改语义/删字段才升，加可选字段留在 v1） |
+| 插件桥路径 | `/plugins/<id>/hostrpc/…` 与 `/plugins/<id>/rpc/…` 由后端转发；桥不经过 `/api/`，`DENIED_ADMIN_PATHS` 是必须保持的拒绝清单 |
 | 外壳的 Tab 键（`EnvTab` / `SessionTab`） | 路由的解析与生成、环境页/会话页、`routeView` 要一起改；键只有 `routing.ts` 一份定义 |
 | 左树的数据形状（`EnvBrief` / `SessionItem`） | `Sidebar` / `EnvView` / `SessionView` / store。`SessionItem` 是 `SessionBrief` 的投影（`indexFromList`）：`id` 是**服务端句柄**；改形状等于改树、绑定、结束会话那一路 |
 | 外壳的配色 | `index.css` 的 `.dark .dsh-shell` 一处覆盖；搬进来的旧画面也读同一套语义 token，别在组件里再写死颜色 |

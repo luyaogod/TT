@@ -41,11 +41,15 @@ func newSkillsCmd() *cobra.Command {
   claude      .claude/skills           Claude Code
   codex       .codex/skills            Codex
 
+技能来源三份：官方（<exe>/skills）、登记在配置里的第三方、以及**已启用插件**贡献的技能
+（取插件当前版本目录，随启停出现/消失）。同名时官方 > 第三方 > 插件，输的那条进告警。
+
 同步是**覆盖更新**：勾选的技能直接覆盖同名目录；取消勾选的（清单里记过的）删除。
 不做版本检测，不比较内容，也不需要 --force。
 
 清单只记“哪个平台装了哪些技能”，落在对应范围的 .agents/.tt-manifest.json：
 项目级在 <项目>/.agents/.tt-manifest.json，全局在 <用户目录>/.agents/.tt-manifest.json。
+清单是**唯一**的删除依据：清单外的目录（用户自己建的、别的工具装的）永远不动。
 `,
 		Example: `  tt skills list
   tt skills deploy --all
@@ -82,7 +86,7 @@ func newSkillsListCmd(project *string, global *bool) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			plan, err := buildSkillsPlan()
+			plan, _, err := buildSkillsPlan()
 			if err != nil {
 				return err
 			}
@@ -115,7 +119,7 @@ func newSkillsListCmd(project *string, global *bool) *cobra.Command {
 				}
 				for _, w := range plan.Warnings {
 					rows = append(rows, skillListRow{
-						Name: w.Name, Origin: string(skill.OriginExternal), Dir: w.Path,
+						Name: w.Name, Origin: warningOrigin(w), Plugin: w.Plugin, Dir: w.Path,
 						Available: false, Why: w.Why,
 					})
 				}
@@ -130,7 +134,7 @@ func newSkillsListCmd(project *string, global *bool) *cobra.Command {
 			} else {
 				fmt.Printf("技能 %d 个\n", len(plan.Skills))
 				for _, s := range plan.Skills {
-					fmt.Printf("  %-24s %s\n", s.Name, originLabel(s.Origin))
+					fmt.Printf("  %-24s %s\n", s.Name, originLabel(s))
 				}
 				for _, w := range plan.Warnings {
 					fmt.Printf("  %-24s 不可用：%s\n", w.Name, w.Why)
@@ -183,7 +187,7 @@ func newSkillsDeployCmd(project *string, global *bool) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			plan, err := buildSkillsPlan()
+			plan, _, err := buildSkillsPlan()
 			if err != nil {
 				return err
 			}
@@ -235,7 +239,7 @@ func newSkillsRemoveCmd(project *string, global *bool) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			plan, err := buildSkillsPlan()
+			plan, _, err := buildSkillsPlan()
 			if err != nil {
 				return err
 			}
@@ -270,6 +274,7 @@ func newSkillsRemoveCmd(project *string, global *bool) *cobra.Command {
 type skillListRow struct {
 	Name      string `json:"name"`
 	Origin    string `json:"origin"`
+	Plugin    string `json:"plugin,omitempty"`
 	Dir       string `json:"dir,omitempty"`
 	Available bool   `json:"available"`
 	Why       string `json:"why,omitempty"`
@@ -283,22 +288,7 @@ type skillListTarget struct {
 	Skills   []string `json:"skills"`
 }
 
-// buildSkillsPlan 读 <exe>/skills 与登记表，组一份安装计划。
-func buildSkillsPlan() (skill.Plan, error) {
-	src, err := skillsSource()
-	if err != nil {
-		return skill.Plan{}, err
-	}
-	if !isDir(src) {
-		return skill.Plan{}, fmt.Errorf("找不到 skills 目录: %s\n\nskills/ 与 tt.exe 同目录（免安装包里自带）；"+
-			"从源码运行时先执行 make build", src)
-	}
-	externals, err := externalSkillPaths()
-	if err != nil {
-		return skill.Plan{}, err
-	}
-	return skill.BuildPlan(src, externals)
-}
+// buildSkillsPlan 见 skills_sync.go：官方 + 第三方登记 + 已启用插件，一份组装点。
 
 // resolveProjectDir 解析 --project；缺省取当前目录，必须是已存在的目录。
 func resolveProjectDir(raw string) (string, error) {
@@ -452,11 +442,27 @@ func skillNames(src []skill.Source) []string {
 	return out
 }
 
-func originLabel(o skill.Origin) string {
-	if o == skill.OriginOfficial {
+// originLabel 是来源的中文说法。插件带上 ID：同一个技能名可能同时出现在官方与插件里
+// （那时插件那条会进 warnings），不写是谁带的就分不清。
+func originLabel(s skill.Source) string {
+	if s.Origin == skill.OriginPlugin {
+		if s.Plugin != "" {
+			return "插件 " + s.Plugin
+		}
+		return "插件"
+	}
+	if s.Origin == skill.OriginOfficial {
 		return "官方"
 	}
 	return "第三方"
+}
+
+// warningOrigin 一条告警的来源（清单里给前端/脚本分类用）。
+func warningOrigin(w skill.Warning) string {
+	if w.Plugin != "" {
+		return string(skill.OriginPlugin)
+	}
+	return string(skill.OriginExternal)
 }
 
 func printDeployReport(rep skill.DeployReport, scope string) error {

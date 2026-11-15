@@ -10,9 +10,11 @@
 // 设计取舍：
 //   - skills **不进二进制**（不用 go:embed）：技能内容是文档，随包发布、可被人直接改；
 //     每个技能是一个带 SKILL.md 的目录。
-//   - **两套来源彻底分开**：官方技能只来自 `<exe 目录>\skills`（发版包的一部分，走专用
-//     路径）；第三方只来自用户在设置页登记的路径（config.json 的 skills.externals）。
-//     装着陆后的合并、校验、冲突判定都在 internal/skill —— 设置页用的是同一份实现。
+//   - **三套来源彻底分开**：官方技能只来自 `<exe 目录>\skills`（发版包的一部分，走专用
+//     路径）；第三方只来自用户在设置页登记的路径（config.json 的 skills.externals）；
+//     插件只来自已启用插件当前版本目录里的 contributions.skills。装着陆后的合并、校验、
+//     冲突判定都在 internal/skill —— 设置页与 `tt skills deploy` 用的是同一份实现。
+//   - **官方树只读**：计划从 <exe>/skills 读，从不往它写。插件与第三方技能只进目标目录。
 //   - PATH 只动 HKCU\Environment，绝不碰 HKLM/系统 PATH；实现在 internal/pathinstall，
 //     与 Web 设置页的「加入 PATH」共用同一份。
 package cli
@@ -77,23 +79,30 @@ func newInstallSkillsCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "skills",
-		Short: "把官方技能与登记的第三方技能合并到目标目录（默认 .agents/skills）",
+		Short: "把官方技能、登记的第三方技能与已启用插件的技能合并到目标目录",
 		Long: `把技能合并到目标目录，默认是 <当前目录>/.agents/skills。
 
-技能有两个来源：
+技能有三个来源（同名的优先级就是这个顺序）：
 
   官方    与 tt 可执行文件同目录的 skills/。随包发布、走专用路径，不受本机配置影响。
   第三方  设置页「技能」里登记的路径（config.json 的 skills.externals），一行一个技能
           目录，位置任选。装它们之前会逐个校验 SKILL.md 的 frontmatter。
+  插件    已启用插件在它**当前版本目录**里贡献的技能（plugin.json 的 contributions.skills）。
+          它们随插件启停出现/消失，不写进任何登记表，也绝不会被写回 <exe>/skills ——
+          那棵官方树只读。
 
-第三方里出问题的（路径找不到、没有 SKILL.md、name 与目录名不符、与别的技能同名）
-只**告警并跳过**，官方技能与其它第三方照装 —— 用户勾在配置里的路径可能指向一块今天
-没插的移动硬盘，那不该让整次安装失败。官方技能不合规则是硬错误：那是发版包坏了。
+第三方与插件里出问题的（路径找不到、没有 SKILL.md、name 与目录名不符、与别的技能同名）
+只**告警并跳过**，官方技能与其它来源照装 —— 用户勾在配置里的路径可能指向一块今天
+没插的移动硬盘，插件包也可能被作者改坏，那都不该让整次安装失败。官方技能不合规则是
+硬错误：那是发版包坏了。
 
-同一批技能里名字撞车时，官方优先；两条第三方同名，先登记的优先（顺序写在配置里）。
+同一批技能里名字撞车时，官方优先；两条第三方同名，先登记的优先（顺序写在配置里）；
+插件永远排在最后（插件技能是"启用插件顺带带来的"，不该挤掉官方与用户登记的那些）。
+撞名的那条插件技能只告警，插件自己的 CLI/页面照常可用。
 
-第三方技能根级的 assets/ **不复制**：目标里的 SKILL.md 正文首行会被写一行指针，指回
-源目录的 assets（重复安装会替换那一行，不会堆）。这样知识库型技能不会把目标目录撑大。
+第三方（与插件）技能根级的 assets/ **不复制**：目标里的 SKILL.md 正文首行会被写一行
+指针，指回源目录的 assets（重复安装会替换那一行，不会堆）。这样知识库型技能不会把目标
+目录撑大。
 
 技能里的版本库元数据（.git / .hg / .svn，任何层级）**不复制**：登记的目录常常是一份
 clone 下来的工作副本，要装的是它的内容，不是它的历史。报告里只记被跳过的那个条目
@@ -126,23 +135,13 @@ clone 下来的工作副本，要装的是它的内容，不是它的历史。�
   tt install skills --to auto --strict`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			src, err := skillsSource()
-			if err != nil {
-				return err
-			}
-			if !isDir(src) {
-				return fmt.Errorf("找不到 skills 目录: %s\n\nskills/ 与 tt.exe 同目录（免安装包里自带）；"+
-					"从源码运行时先执行 make build（产物 tt.exe 与 skills/ 同目录）", src)
-			}
 			dst, why, terr := resolveSkillsTarget(to, agent)
 			if terr != nil {
 				return terr
 			}
-			externals, err := externalSkillPaths()
-			if err != nil {
-				return err
-			}
-			plan, err := skill.BuildPlan(src, externals)
+			// 官方 + 第三方登记 + 已启用插件，同一份组装点（见 skills_sync.go）：
+			// 与 `tt skills deploy` 共用，避免两条安装路径各拼一套来源。
+			plan, src, err := buildSkillsPlan()
 			if err != nil {
 				return err
 			}
@@ -261,59 +260,28 @@ func printInstallReport(rep skill.Report, src, why string) {
 // autoSkillsTarget 是 --to 的特殊值：不是目录，而是「替我挑一个 agent 会读的位置」。
 const autoSkillsTarget = "auto"
 
-// agentSkillsTarget 是一个「agent 读技能的位置」。
-type agentSkillsTarget struct {
-	Name    string   // --agent 接受的名字
-	Root    string   // 该 agent 在项目里的目录（= 检测用的路标，也是 skills/ 的父目录）
-	Aliases []string // 顺手接受的名字
-	Who     string   // 装完谁会读它（写进输出，让用户知道这个选择意味着什么）
-}
-
-// Dir 是目标目录：<agent 项目目录>/skills。
-func (a agentSkillsTarget) Dir() string { return filepath.Join(a.Root, skillsDirName) }
-
-// agentSkillsDirs 是「agent 各自读技能的位置」—— --agent 与 --to auto 的唯一依据。
-//
-// **表里的顺序就是 --to auto 的探测顺序**：.agents/skills 排第一，因为它是跨客户端
-// 公约数（Agent Skills 规范点名的互操作路径，pi、Codex、Cursor、Gemini CLI、OpenCode、
-// Copilot 都扫它），装一次伺候的人最多。其余四个与 `tt skills` 的平台表一致。
-var agentSkillsDirs = []agentSkillsTarget{
-	{Name: "agents", Root: ".agents", Aliases: []string{"universal"},
-		Who: "跨客户端公约数：pi、Codex、Cursor、Gemini CLI、OpenCode、Copilot 都读它"},
-	{Name: "dsh", Root: ".dsh", Aliases: []string{"deepseek", "deepseek-harness"},
-		Who: "DeepSeek Harness"},
-	{Name: "workbuddy", Root: ".codebuddy", Aliases: []string{"wb", "work-buddy"},
-		Who: "WorkBuddy"},
-	{Name: "claude-code", Root: ".claude", Aliases: []string{"claude"},
-		Who: "Claude Code"},
-	{Name: "codex", Root: ".codex", Aliases: []string{"codex-cli"},
-		Who: "Codex"},
-}
-
 // agentSkillNames 是 --agent 的全部合法名字（含别名），用于帮助与报错。
+//
+// 名字表只有一份：internal/skill 的 Targets。这里以前还有一张同形表，于是
+// `claude` 与 `claude-code` 谁是 id、谁是别名两处各说一套 —— 统一后两个名字都收
+// （id 是 claude，claude-code 是它的别名），旧命令行的写法不用改。
 func agentSkillNames() string {
 	var out []string
-	for _, a := range agentSkillsDirs {
-		out = append(out, a.Name)
-		out = append(out, a.Aliases...)
+	for _, t := range skill.Targets {
+		out = append(out, t.ID)
+		out = append(out, t.Aliases...)
 	}
 	return strings.Join(out, " / ")
 }
 
-func findAgentSkillsDir(name string) (agentSkillsTarget, error) {
-	n := strings.ToLower(strings.TrimSpace(name))
-	for _, a := range agentSkillsDirs {
-		if a.Name == n {
-			return a, nil
-		}
-		for _, al := range a.Aliases {
-			if al == n {
-				return a, nil
-			}
-		}
+// findAgentSkillsDir 按 id 或别名找一个平台（大小写不敏感，由 skill.TargetByID 判）。
+func findAgentSkillsDir(name string) (skill.Target, error) {
+	t, ok := skill.TargetByID(name)
+	if !ok {
+		return skill.Target{}, fmt.Errorf("不认识的 agent: %s\n可选: %s（或直接用 --to <目录> 给路径）",
+			name, agentSkillNames())
 	}
-	return agentSkillsTarget{}, fmt.Errorf("不认识的 agent: %s\n可选: %s（或直接用 --to <目录> 给路径）",
-		name, agentSkillNames())
+	return t, nil
 }
 
 // resolveSkillsTarget 把 --to / --agent 解析成目标目录，并给出「为什么是它」。
@@ -333,7 +301,7 @@ func resolveSkillsTarget(to, agent string) (dst, why string, err error) {
 		if cerr != nil {
 			return "", "", fmt.Errorf("取不到当前目录: %w", cerr)
 		}
-		return filepath.Join(cwd, a.Dir()), a.Who + " 会读它", nil
+		return a.AbsDir(cwd), a.Who + " 会读它", nil
 	}
 	if to != "" && to != autoSkillsTarget {
 		return to, "", nil
@@ -345,7 +313,11 @@ func resolveSkillsTarget(to, agent string) (dst, why string, err error) {
 	if to == autoSkillsTarget {
 		return resolveAutoTarget(cwd)
 	}
-	return filepath.Join(cwd, ".agents", skillsDirName), "", nil
+	a, aerr := findAgentSkillsDir("agents")
+	if aerr != nil {
+		return "", "", aerr
+	}
+	return a.AbsDir(cwd), "", nil
 }
 
 // resolveAutoTarget 挑一个落点：当前目录已经为某个 agent 初始化过就别另起一个，
@@ -354,16 +326,17 @@ func resolveSkillsTarget(to, agent string) (dst, why string, err error) {
 // 探的是 agent 的项目目录（.claude/ 之类）而不是 skills/ 本身：那才是「这人用这个 agent」
 // 的路标，而且第一次装的时候 skills/ 还不存在。
 func resolveAutoTarget(cwd string) (dst, why string, err error) {
-	for _, a := range agentSkillsDirs {
-		if isDir(filepath.Join(cwd, a.Root)) {
-			return filepath.Join(cwd, a.Dir()), "当前目录已有 " + a.Dir() + "（" + a.Who + "）", nil
+	// 顺序就是 skill.Targets 的表顺序：.agents 第一，读它的客户端最多。
+	for _, a := range skill.Targets {
+		if isDir(filepath.Join(cwd, filepath.FromSlash(a.Root))) {
+			return a.AbsDir(cwd), "当前目录已有 " + a.Dir + "（" + a.Who + "）", nil
 		}
 	}
 	a, err := findAgentSkillsDir("agents")
 	if err != nil {
 		return "", "", err
 	}
-	return filepath.Join(cwd, a.Dir()), "当前目录还没有 agent 目录，新建 " + a.Dir() + "（" + a.Who + "）", nil
+	return a.AbsDir(cwd), "当前目录还没有 agent 目录，新建 " + a.Dir + "（" + a.Who + "）", nil
 }
 
 func isDir(p string) bool {

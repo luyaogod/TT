@@ -4,8 +4,13 @@
 //   #env/<环境名>/<Tab>                环境页:create 创建会话 / wslogs 接口日志
 //   #session/<会话 ID>/<Tab>           会话页:debug 调试
 //   #settings/<分区>                   设置页的某个分区
+//   #plugin/<route>                    插件贡献的完整页面(第三方 iframe)
 //
 // 认不出来的一律给 `home`(由外壳决定落到哪个环境,绝不猜)。
+//
+// 插件路由分两层:**语法**（这条片段是不是一个插件路由）在本文件判；**这个路由有没有
+// 插件提供**只有拿到后端注册表才知道（plugins.ts 的 resolvePluginPage）。语法不合法给
+// `plugin-error`，未知/已停用由外壳渲染显式错误页 —— 两者都**不**回退到别的页面。
 //
 // 约束(踩过):本文件**不得被 store.ts 运行时导入**,且模块顶层不得访问 window/document/history。
 // 原因:check:store 用裸打包器把它打进 Node 里跑(桩 window/document),顶层碰 DOM 会在
@@ -35,8 +40,9 @@ export type SessionTab = 'debug'
  * 状态容器里的 `view`:它回答"此刻主面板上生效的是哪一块功能",
  * 供接口日志/设置页那些"进来就重拉一次"的 effect 判断自己是不是当前那一屏。
  * 新增的 create 是**外壳的 Tab**,不是新功能页 —— 它只用于让旧的判断落空。
+ * plugin 是第三方 iframe 页面,同样不是宿主的功能页:给它独立键,免得被别的页误认。
  */
-export type ViewKey = 'debug' | 'wslogs' | 'settings' | 'create'
+export type ViewKey = 'debug' | 'wslogs' | 'settings' | 'create' | 'plugin'
 
 /** 外壳当前该显示什么。`home` = 片段为空或认不出来,由 App 落到默认目标。 */
 export type Route =
@@ -44,6 +50,13 @@ export type Route =
   | { kind: 'settings'; section?: SettingsSectionKey }
   | { kind: 'env'; env: string; tab: EnvTab }
   | { kind: 'session'; id: string; tab: SessionTab }
+  | { kind: 'plugin'; route: string }
+  | { kind: 'plugin-error'; route: string; reason: 'malformed' }
+
+/** 插件路由的形态:与后端 manifest 校验同一套白名单(小写/数字/连字符,最长 32)。 */
+export function isPluginRoute(v: string): boolean {
+  return /^[a-z0-9][a-z0-9-]{0,31}$/.test(v)
+}
 
 export function isSettingsSection(v: string): v is SettingsSectionKey {
   return SETTINGS_SECTIONS.some((s) => s.key === v)
@@ -102,6 +115,17 @@ export function parseRoute(hash: string): Route {
     return { kind: 'session', id, tab }
   }
 
+  if (head === 'plugin') {
+    const route = parts[1] ? decodePart(parts[1]) : ''
+    // 只接受 `#plugin/<route>`。多出来的段不当成“子页面”静默忽略 —— 插件页面是
+    // 一个完整 iframe,宿主这一层没有第二个路径参数;宁可给明确错误页。
+    const extra = parts.slice(2).filter((p) => p !== '')
+    if (!route || !isPluginRoute(route) || extra.length > 0) {
+      return { kind: 'plugin-error', route, reason: 'malformed' }
+    }
+    return { kind: 'plugin', route }
+  }
+
   return { kind: 'home' }
 }
 
@@ -116,6 +140,10 @@ export function routeView(route: Route): ViewKey {
     case 'settings': return 'settings'
     case 'env': return route.tab
     case 'session': return route.tab
+    // 插件页不是设置/日志/调试中的任何一屏。给它一个独立键,免得那些
+    // "我在不在前台"的 effect 把插件页误判成自己。
+    case 'plugin':
+    case 'plugin-error': return 'plugin'
     // home 只出现在"片段为空 / 认不出来"的那一瞬,主面板这时候还没选目标 ——
     // 给 create 是为了不让设置页(它只在 view==='settings' 时回读配置)被误判成前台。
     default: return 'create'
@@ -134,6 +162,11 @@ export function routeHash(route: Route, section: SettingsSectionKey): string {
       return `#env/${encodeURIComponent(route.env)}/${route.tab}`
     case 'session':
       return `#session/${encodeURIComponent(route.id)}/${route.tab}`
+    case 'plugin':
+      return `#plugin/${encodeURIComponent(route.route)}`
+    // 语法错误的插件路由保留原片段,让人能直接看到/改地址栏。
+    case 'plugin-error':
+      return `#plugin/${encodeURIComponent(route.route)}`
     default:
       return '#'
   }

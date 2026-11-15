@@ -127,6 +127,14 @@ func (m *Manager) Install(opt InstallOptions) (*Record, error) {
 		_ = os.RemoveAll(target)
 		return nil, err
 	}
+	// 装上新版本后重算一次期望态：换版本时插件的技能目录指向新版本，已部署的副本
+	// 要靠这次重算刷新（assets 指针里是绝对路径，不刷就还指着旧版本目录）。
+	//
+	// 插件此刻**未启用**（上面已拒绝"启用中"），所以新版本的技能还不在计划里；
+	// 这次重算主要做两件事：撤走上一版遗留的副本、给启用后的那次重算留一份干净状态。
+	if serr := m.syncSkills(man.ID, "install "+man.ID+" "+man.Version); serr != nil {
+		return rec, fmt.Errorf("插件已安装，但技能没有同步：%w（修好后执行 tt skills deploy 重试）", serr)
+	}
 	return rec, nil
 }
 

@@ -8,8 +8,10 @@
 | `fgltokens.test.mjs` | `check:tokens` | 4GL 词法的检查项 |
 | `fgloutline.fixtures.mjs` | `check:outline` | 大纲/折叠对拍（跑 [fgl-fixtures](./fgl-fixtures/README.md) 里的夹具） |
 | `store.test.mjs` | `check:store` | 状态容器的检查项（桩 window/document，在 Node 里跑） |
+| `progress.test.mjs` | `check:progress` | 进度/速度取值的检查项 |
+| `plugins.test.mjs` | `check:plugins` | 插件路由/菜单/拒绝清单/消息桥的检查项 |
 
-三个检查项都是同一个套路：**用打包器把目标模块打成一个临时脚本，再交给 Node 执行**。
+五个检查项都是同一个套路：**用打包器把目标模块打成一个临时脚本，再交给 Node 执行**。
 所以被检查的模块必须在没有 DOM 的环境下能被**加载**（也就是模块顶层不能碰 DOM）。
 
 **中间产物 `.tmp-*.mjs` 不入库**，也**不能落在产出目录下** —— 打包脚本会先清空产出目录。
@@ -17,7 +19,7 @@
 ## 判据
 
 ```bash
-cd web && npm run check:app     # 三项一起跑（工作区根的脚本）
+cd web && npm run check:app     # 五项一起跑（工作区根的脚本）
 ```
 
 ## 细节去哪

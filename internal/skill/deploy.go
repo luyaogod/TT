@@ -181,6 +181,100 @@ func Deploy(plan Plan, req DeployRequest) (DeployReport, error) {
 	return rep, nil
 }
 
+// WithdrawRequest 一次「源已经不在期望态里」的收回请求。
+//
+// 与 Deploy 的分工：Deploy 管「源还在、这次没勾选」，并且坚持「源不可用时保留旧副本」
+// （移动硬盘没插不该删掉已装好的东西）；Withdraw 管「源确实撤走了」—— 插件被停用/
+// 卸载、新版本里删掉了这个技能。
+//
+// 两者都只碰平台清单记录过的条目：清单外的目录（用户自己建的、别的工具装的）永远不动。
+type WithdrawRequest struct {
+	Project string
+	// Targets 是这次仍要保留的期望态：Skills 里的名字一定不删。
+	Targets []DeployTarget
+	// Removable 是「确认源已撤走」的名字集合。不在集合里的记录一律保留 ——
+	// 第三方路径失联与"源被删"在盘上长得一模一样，只有调用方知道是哪一种；
+	// 它把答案放在这里，本函数不猜。
+	Removable map[string]bool
+	DryRun    bool
+}
+
+// Withdraw 按清单撤走「源已撤走且这次不在期望态里」的条目。
+//
+// 调用顺序：先 Withdraw 再 Deploy。Deploy 只删「源仍可用但没勾选」的条目，
+// 源消失的那些它刻意保留；把 Withdraw 放前面，清单里就只剩真正还在期望态里的名字。
+func Withdraw(req WithdrawRequest) (DeployReport, error) {
+	rep := DeployReport{Written: []DeployAction{}, Removed: []DeployAction{}, DryRun: req.DryRun}
+	project, err := filepath.Abs(req.Project)
+	if err != nil {
+		return rep, fmt.Errorf("解析根目录失败 %s: %w", req.Project, err)
+	}
+	rep.Project = project
+	if len(req.Targets) == 0 {
+		return rep, fmt.Errorf("没有选择平台")
+	}
+	m, exists, err := LoadManifest(project)
+	if err != nil {
+		return rep, err
+	}
+	if !exists {
+		// 没部署过 = 没有可撤的东西；不建目录、不写清单。
+		return rep, nil
+	}
+
+	seen := make(map[string]bool, len(req.Targets))
+	for _, dt := range req.Targets {
+		t, ok := TargetByID(dt.ID)
+		if !ok {
+			return rep, fmt.Errorf("不认识的平台: %s（可选：%s）", dt.ID, strings.Join(TargetIDs(), " / "))
+		}
+		if seen[t.ID] {
+			return rep, fmt.Errorf("平台重复: %s", t.ID)
+		}
+		seen[t.ID] = true
+
+		keep := make(map[string]bool, len(dt.Skills))
+		for _, n := range dt.Skills {
+			keep[strings.TrimSpace(n)] = true
+		}
+		kept := make([]string, 0, len(m.Skills(t.ID)))
+		for _, old := range m.Skills(t.ID) {
+			if keep[old] {
+				kept = append(kept, old)
+				continue
+			}
+			if !req.Removable[old] {
+				rep.Skipped = append(rep.Skipped, DeploySkip{
+					Target: t.ID, Skill: old, Why: "技能源状态不确定（可能只是暂时不可用），保留旧副本",
+				})
+				kept = append(kept, old)
+				continue
+			}
+			if !ValidName(old) {
+				rep.Skipped = append(rep.Skipped, DeploySkip{Target: t.ID, Skill: old, Why: "清单里的技能名不合规，未删除"})
+				continue
+			}
+			full := filepath.Join(t.AbsDir(project), old)
+			if filepath.Dir(full) != t.AbsDir(project) {
+				rep.Skipped = append(rep.Skipped, DeploySkip{Target: t.ID, Skill: old, Why: "路径越界，未删除"})
+				continue
+			}
+			if !req.DryRun {
+				if rerr := os.RemoveAll(full); rerr != nil {
+					return rep, fmt.Errorf("删除旧技能失败 %s: %w", full, rerr)
+				}
+			}
+			rep.Removed = append(rep.Removed, DeployAction{Target: t.ID, Skill: old})
+		}
+		if m.Set(t.ID, kept) && !req.DryRun {
+			if serr := m.Save(project); serr != nil {
+				return rep, serr
+			}
+		}
+	}
+	return rep, nil
+}
+
 // requestedSkills 校验并规整一次请求里的技能名。
 //
 // 未知名字直接报错：请求是界面/命令行生成的，出现未知名字说明两边口径不一致，

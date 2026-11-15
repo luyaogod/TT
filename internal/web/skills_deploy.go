@@ -42,6 +42,55 @@ type matrixTarget struct {
 	Skills   []string `json:"skills"`
 }
 
+// pluginSkillSources 已启用插件贡献的技能目录 → 计划来源。
+//
+// 与命令行走同一份注册表投影（plugin.Store.EnabledSkillSources）：目录取各插件的活跃
+// 版本目录，合不合法、撞不撞名由 internal/skill 判。没有插件管理面（裁剪版服务）时为空。
+func (s *Server) pluginSkillSources() ([]skill.Source, []skill.Warning) {
+	if s.opt.PluginMgr == nil {
+		return nil, nil
+	}
+	store := s.opt.PluginMgr.Store
+	srcs, err := store.EnabledSkillSources()
+	if err != nil {
+		// 注册表坏了不该让整份技能视图打不开：官方与第三方照常列，插件这一栏缺席，
+		// 但把原因带出去（否则"插件技能怎么没了"无从查起）。
+		return nil, []skill.Warning{{
+			Kind: skill.StateInvalid, Path: store.RegistryPath(),
+			Why: "插件注册表读不出来，本次不含插件技能：" + err.Error(),
+		}}
+	}
+	out := make([]skill.Source, 0, len(srcs))
+	for _, p := range srcs {
+		out = append(out, skill.Source{Origin: skill.OriginPlugin, Plugin: p.Plugin, Dir: p.Dir})
+	}
+	return out, nil
+}
+
+// skillsPlan 组计划：官方 + 登记第三方 + 已启用插件。与命令行的 buildSkillsPlan 同构，
+// 共用 internal/skill 的合并与校验 —— 页面与命令行不该有两套"哪些技能可用"的口径。
+//
+// 第二个返回值是"来源级"告警（注册表读不出来这类），即使计划失败也要带出去。
+func (s *Server) skillsPlan(officialDir string, externals []string) (skill.Plan, []skill.Warning, error) {
+	srcs, pre := s.pluginSkillSources()
+	plan, err := skill.BuildPlanWithPluginSkills(officialDir, externals, srcs)
+	if err != nil {
+		return skill.Plan{}, pre, err
+	}
+	plan.Warnings = append(plan.Warnings, pre...)
+	return plan, pre, nil
+}
+
+// pluginSkillRows 插件技能行（与第三方那一栏同形：不合规的也占一行并带 why）。
+func (s *Server) pluginSkillRows() []skillRow {
+	srcs, _ := s.pluginSkillSources()
+	rows := make([]skillRow, 0, len(srcs))
+	for _, src := range srcs {
+		rows = append(rows, skillRow{Info: skill.InspectPlugin(src)})
+	}
+	return rows
+}
+
 // hSkillsOverview 返回某个范围（项目 / 用户目录）的技能源、平台检测与清单。
 //
 // 不写盘、不联网。项目默认取服务进程的 cwd；scope=global 时根目录换成用户目录。
@@ -63,6 +112,26 @@ func (s *Server) hSkillsOverview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, officialDir, officialErr := skillMatrix(root)
+
+	// 插件技能排在官方/第三方之后，与命令行的计划顺序一致（同名的进 warnings）。
+	// 官方树读不出来时组不出计划 —— 此时 officialError 已经说明了原因，不硬凑。
+	var warnings = []skill.Warning{}
+	if officialDir != "" {
+		if plan, pre, perr := s.skillsPlan(officialDir, root.Skills.Paths()); perr == nil {
+			warnings = plan.Warnings
+			for _, src := range plan.Skills {
+				if src.Origin != skill.OriginPlugin {
+					continue
+				}
+				rows = append(rows, matrixSkill{
+					ID: src.Name, Name: src.Name,
+					Origin: string(skill.OriginPlugin), Dir: src.Dir, Available: true,
+				})
+			}
+		} else {
+			warnings = pre
+		}
+	}
 
 	m, exists, err := skill.LoadManifest(base)
 	if err != nil {
@@ -89,6 +158,7 @@ func (s *Server) hSkillsOverview(w http.ResponseWriter, r *http.Request) {
 		"manifest":      exists,
 		"skills":        rows,
 		"targets":       targets,
+		"warnings":      warnings,
 	})
 }
 
@@ -127,7 +197,9 @@ func (s *Server) hSkillsDeploy(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	plan, err := skill.BuildPlan(officialDir, root.Skills.Paths())
+	// 与命令行同一份计划（官方 + 登记第三方 + 已启用插件）：插件技能也走这条既有路径，
+	// 不另写一套复制/校验。
+	plan, _, err := s.skillsPlan(officialDir, root.Skills.Paths())
 	if err != nil {
 		// 官方技能树坏了 = 这个包坏了，不是用户配错了。
 		writeErr(w, http.StatusInternalServerError, err)

@@ -8,6 +8,8 @@
 // 共享端点(hosts 配置、dbprobe、dbaccverify、conntest)由统一服务在**顶层**各提供
 // 一份,所以不带前缀。注意 /debug/api/hosts 也能通,但那是调试子系统留给独立运行
 // (tt debug serve)用的只读副本 —— 统一服务下环境页读写的必须是顶层 /api/hosts。
+import type { PluginsReply } from './plugins'
+
 export const API_BASE = '/debug/api'
 
 export interface Frame { idx: number; func: string; file: string; line: number }
@@ -503,6 +505,9 @@ export interface SkillDeployResult {
 
 export const api = {
   status: () => req<any>(`${API_BASE}/status`),
+  // 插件前端贡献的摘要(顶层管理端点,不是 /debug/api)。只读元数据:
+  // 主 SPA 用它决定菜单与 iframe 地址,**不**加载第三方代码。
+  plugins: () => req<PluginsReply>('/api/plugins'),
   // 环境清单:读共享端点。合并前这里调 /api/settings(旧 debug 节的 sshs),
   // 现在 hosts 节是唯一数据源,整个界面看到的是同一份环境。
   settings: () => req<HostsView>('/api/hosts'),

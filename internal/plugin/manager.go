@@ -40,6 +40,16 @@ type Manager struct {
 	// Envs 当前配置里的环境名清单（校验授权时用）。nil = 读 Store 的配置路径。
 	Envs  func() ([]string, error)
 	Hooks Hooks
+	// SkillsSync 状态变更后重算「期望的已分发技能」的注入点。nil = 不做事。
+	//
+	// 为什么不在这里直接调 internal/skill：插件管理面只管注册表与载荷，而"技能怎么
+	// 装出去"（来源合并、冲突、assets 指针、平台清单）只有 internal/skill 一份实现。
+	// 命令层在两边之间接线（internal/cli/skills_sync.go），本包因此既不 import 技能
+	// 管线，也不把技能规则复制一遍。
+	//
+	// 纪律（P4-02）：**能从平台目录删除什么，只由 .agents/.tt-manifest.json 决定**。
+	// 注册表只说明"哪些技能应当出现"；撤销安装、刷新副本都只动平台清单记过的条目。
+	SkillsSync func(reason string) error
 
 	// ConfigPath 供缺省 Envs 实现读配置用。
 	ConfigPath string
@@ -138,6 +148,21 @@ func (m *Manager) Info(id string) (*Info, error) {
 	return info, nil
 }
 
+// syncSkills 触发一次期望态重算（未注入回调时是空操作）。
+//
+// 失败只记 LastError、不许悄悄吞掉：调用方决定这次失败要不要让本次操作报错 ——
+// 状态本身已经落盘，技能副本只是"还没跟上"，那是可重试的（tt skills deploy）。
+func (m *Manager) syncSkills(id, reason string) error {
+	if m.SkillsSync == nil {
+		return nil
+	}
+	if err := m.SkillsSync(reason); err != nil {
+		m.recordError(id, "技能同步失败: "+err.Error())
+		return err
+	}
+	return nil
+}
+
 // Enable 启用插件并写入授权。
 //
 // grants 是"这次给它什么权限"，不是"清单里声明了什么"：清单只声明诉求，
@@ -204,6 +229,13 @@ func (m *Manager) Enable(id string, grants Grants) (*Record, error) {
 			return nil, fmt.Errorf("启用失败（已回退为未启用）：%w", herr)
 		}
 	}
+	// 启用成功 → 重算期望态：插件的技能应当出现在已经部署过技能的平台目录里。
+	//
+	// 这里**不回退启用状态**：插件本身（CLI/页面/服务）已经可用，少的是平台目录里的
+	// 技能副本；回退会把一个能用的插件按掉，而用户真正要做的是把技能重装一次。
+	if serr := m.syncSkills(id, "enable "+id); serr != nil {
+		return out, fmt.Errorf("插件已启用，但技能没有同步：%w（修好后执行 tt skills deploy 重试）", serr)
+	}
 	// 返回最新状态。
 	return m.reloadRecord(id)
 }
@@ -245,6 +277,11 @@ func (m *Manager) Disable(id string) (*Record, error) {
 			return out, fmt.Errorf("插件已停用，但清理未完成：%w", herr)
 		}
 	}
+	// 停用成功 → 重算期望态：它的技能要从平台目录撤走（只撤平台清单记过的条目，
+	// 只撤"源确实已停用"的那些；见 skill.Withdraw）。
+	if serr := m.syncSkills(id, "disable "+id); serr != nil {
+		return out, fmt.Errorf("插件已停用，但技能没有同步：%w（修好后执行 tt skills deploy 重试）", serr)
+	}
 	return out, nil
 }
 
@@ -266,6 +303,12 @@ func (m *Manager) Uninstall(id string, opt UninstallOptions) error {
 	}
 	if rec.Enabled {
 		return fmt.Errorf("插件 %q 正在启用中：先 tt plugin disable %q 再卸载", id, id)
+	}
+
+	// 期望态重算放在删载荷**之前**：技能名只能从版本目录里的清单读出来，删完就再也
+	// 算不出"该从平台目录撤走哪些副本"。失败时直接中止 —— 此刻一个字节都还没删。
+	if serr := m.syncSkills(id, "uninstall "+id); serr != nil {
+		return fmt.Errorf("卸载前重算技能失败（没有删除任何内容）：%w", serr)
 	}
 
 	var removedVersions []string

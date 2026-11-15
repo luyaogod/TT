@@ -613,3 +613,15 @@ func instancePort(addr string) int {
 	fmt.Sscanf(port, "%d", &p)
 	return p
 }
+
+// Endpoint 取某插件服务的本机地址与实例令牌（插件私有 RPC 代理用）。
+//
+// 令牌一起给：代理是**代表插件**去调它自己的服务，不是以宿主身份去调；
+// 插件服务可以据此拒绝来路不明的请求。
+func (s *Supervisor) Endpoint(pluginID string) (addr, token string, ok bool) {
+	inst := s.Instance(pluginID)
+	if inst == nil || inst.Addr == "" || inst.State != "running" {
+		return "", "", false
+	}
+	return inst.Addr, inst.token, true
+}
