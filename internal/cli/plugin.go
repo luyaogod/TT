@@ -48,6 +48,7 @@ tt plugin rollback 切回上一个版本。TT 不做后台检查、不自动下�
 		newPluginListCmd(),
 		newPluginInfoCmd(),
 		newPluginInstallCmd(),
+		newPluginPackCmd(),
 		newPluginEnableCmd(),
 		newPluginDisableCmd(),
 		newPluginUninstallCmd(),
