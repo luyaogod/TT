@@ -1,0 +1,35 @@
+#!/bin/ksh
+Lang=`echo $LC_CTYPE`
+ 
+if [ $# -ne 1 ];
+   then 
+   echo "Use : oraq [sql file]"
+   echo "Ex  : oraq q_sess  "
+   echo "-----------------------------------------------------------------------------------------------------------"
+   if [ "$Lang" == "zh_CN.utf8" ]; then
+      cat /u1/etc/scripts/readme_cn.txt
+   elif [ "$Lang" == "zh_TW.utf8" ]; then
+      cat /u1/etc/scripts/readme_tw.txt
+   else
+      cat /u1/etc/scripts/readme.txt
+   fi
+   exit
+fi 
+
+cd /tmp
+outfile=`echo $1 |cut -d'.' -f1`'.out'
+if test -f $outfile
+   then
+   rm $outfile
+fi
+sqlplus du/du@$ORACLE_SID < /u1/etc/scripts/$1.sql > /tmp/out.tmp
+ed - /tmp/out.tmp <<%%
+1,12 d
+w
+q
+%%
+
+cd -
+cat  /tmp/out.tmp 
+rm   /tmp/out.tmp
+rm   /tmp/$outfile

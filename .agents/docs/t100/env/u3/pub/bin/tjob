@@ -1,0 +1,103 @@
+#!/bin/ksh
+## T100 schedule job
+## setup schedule variables
+## Modify:04013_v3.0.01
+
+#LOG=/u3/log;export LOG
+today=` date +"%a" `
+now_date=`date "+%F %H:%M:%S"`
+
+echo "T100 job Start: " $now_date >> /u3/log/T100_job_${today}.log 2>&1
+chown tiptop:tiptop /u3/log/T100_job_${today}.log
+
+echo ""
+echo "#--Drop dsrpt Temp tables (1 day ago)--" >> /u3/log/clr_dsrpt_${today}.log
+chown tiptop:tiptop /u3/log/clr_dsrpt_${today}.log
+echo "#===TOPPRD===" >> /u3/log/clr_dsrpt_${today}.log
+now_date=`date "+%F %H:%M:%S"`
+echo "Start: " $now_date  >> /u3/log/clr_dsrpt_${today}.log
+su tiptop -c '. /u1/usr/tiptop/.profile 31;$FGLRUN $FBIN/42m/drop_dsrept_temptable.42r >> /u3/log/clr_dsrpt_${today}.log 2>&1 &'
+sleep 6
+
+echo "#===TOPTST===" >> /u3/log/clr_dsrpt_${today}.log
+now_date=`date "+%F %H:%M:%S"`
+echo "Start: " $now_date  >> /u3/log/clr_dsrpt_${today}.log
+su tiptop -c '. /u1/usr/tiptop/.profile 35;$FGLRUN $FBIN/42m/drop_dsrept_temptable.42r >> /u3/log/clr_dsrpt_${today}.log 2>&1 &'
+sleep 6
+
+echo "#===TOPSTD===" >> /u3/log/clr_dsrpt_${today}.log
+now_date=`date "+%F %H:%M:%S"`
+echo "Start: " $now_date  >> /u3/log/clr_dsrpt_${today}.log
+su tiptop -c '. /u1/usr/tiptop/.profile 36;$FGLRUN $FBIN/42m/drop_dsrept_temptable.42r >> /u3/log/clr_dsrpt_${today}.log 2>&1 &'
+sleep 6
+
+echo "#===TOPPTH===" >> /u3/log/clr_dsrpt_${today}.log
+now_date=`date "+%F %H:%M:%S"`
+echo "Start: " $now_date  >> /u3/log/clr_dsrpt_${today}.log
+su tiptop -c '. /u1/usr/tiptop/.profile 39;$FGLRUN $FBIN/42m/drop_dsrept_temptable.42r >> /u3/log/clr_dsrpt_${today}.log 2>&1 &'
+sleep 6
+
+echo ""
+echo "--Drop TT* tables IN TEMPTABS--" >> /u3/log/clr_ttabs_${today}.log
+chown tiptop:tiptop /u3/log/clr_ttabs_${today}.log
+echo "#===TOPPRD===" >> /u3/log/clr_ttabs_${today}.log
+su tiptop -c '. /u1/usr/tiptop/.profile 31;$FGLRUN $FBIN/42m/newcleanttabs ALL >> /u3/log/clr_ttabs_${today}.log 2>&1 &'
+#su tiptop -c '. /u1/usr/tiptop/.profile 1;$FGLRUN $FBIN/42m/newcleanttabs ds >> /u3/log/clr_ttabs_${today}.log 2>&1 &'
+#su tiptop -c '. /u1/usr/tiptop/.profile 1;$FGLRUN $FBIN/42m/newcleanttabs dsdemo >> /u3/log/clr_ttabs_${today}.log 2>&1 &'
+#su tiptop -c '. /u1/usr/tiptop/.profile 1;$FGLRUN $FBIN/42m/newcleanttabs dsdata >> /u3/log/clr_ttabs_${today}.log 2>&1 &'
+#su tiptop -c '. /u1/usr/tiptop/.profile 1;$FGLRUN $FBIN/42m/newcleanttabs dsstd >> /u3/log/clr_ttabs_${today}.log 2>&1 &'
+sleep 6
+
+echo "#===TOPTST===" >> /u3/log/clr_ttabs_${today}.log
+su tiptop -c '. /u1/usr/tiptop/.profile 35;$FGLRUN $FBIN/42m/newcleanttabs ALL >> /u3/log/clr_ttabs_${today}.log 2>&1 &'
+#su tiptop -c '. /u1/usr/tiptop/.profile 2;$FGLRUN $FBIN/42m/newcleanttabs ds >> /u3/log/clr_ttabs_${today}.log 2>&1 &'
+#su tiptop -c '. /u1/usr/tiptop/.profile 2;$FGLRUN $FBIN/42m/newcleanttabs dsdemo >> /u3/log/clr_ttabs_${today}.log 2>&1 &'
+#su tiptop -c '. /u1/usr/tiptop/.profile 2;$FGLRUN $FBIN/42m/newcleanttabs dsdata >> /u3/log/clr_ttabs_${today}.log 2>&1 &'
+#su tiptop -c '. /u1/usr/tiptop/.profile 2;$FGLRUN $FBIN/42m/newcleanttabs dsstd >> /u3/log/clr_ttabs_${today}.log 2>&1 &'
+sleep 6
+
+echo "#===TOPSTD===" >> /u3/log/clr_ttabs_${today}.log
+su tiptop -c '. /u1/usr/tiptop/.profile 36;$FGLRUN $FBIN/42m/newcleanttabs ALL >> /u3/log/clr_ttabs_${today}.log 2>&1 &'
+#su tiptop -c '. /u1/usr/tiptop/.profile 3;$FGLRUN $FBIN/42m/newcleanttabs ds >> /u3/log/clr_ttabs_${today}.log 2>&1 &'
+#su tiptop -c '. /u1/usr/tiptop/.profile 3;$FGLRUN $FBIN/42m/newcleanttabs dsdemo >> /u3/log/clr_ttabs_${today}.log 2>&1 &'
+#su tiptop -c '. /u1/usr/tiptop/.profile 3;$FGLRUN $FBIN/42m/newcleanttabs dsdata >> /u3/log/clr_ttabs_${today}.log 2>&1 &'
+#su tiptop -c '. /u1/usr/tiptop/.profile 3;$FGLRUN $FBIN/42m/newcleanttabs dsstd >> /u3/log/clr_ttabs_${today}.log 2>&1 &'
+sleep 6
+
+echo "#===TOPPTH===" >> /u3/log/clr_ttabs_${today}.log
+su tiptop -c '. /u1/usr/tiptop/.profile 39;$FGLRUN $FBIN/42m/newcleanttabs ALL >> /u3/log/clr_ttabs_${today}.log 2>&1 &'
+#su tiptop -c '. /u1/usr/tiptop/.profile 4;$FGLRUN $FBIN/42m/newcleanttabs ds >> /u3/log/clr_ttabs_${today}.log 2>&1 &'
+#su tiptop -c '. /u1/usr/tiptop/.profile 4;$FGLRUN $FBIN/42m/newcleanttabs dsdemo >> /u3/log/clr_ttabs_${today}.log 2>&1 &'
+#su tiptop -c '. /u1/usr/tiptop/.profile 4;$FGLRUN $FBIN/42m/newcleanttabs dsdata >> /u3/log/clr_ttabs_${today}.log 2>&1 &'
+#su tiptop -c '. /u1/usr/tiptop/.profile 4;$FGLRUN $FBIN/42m/newcleanttabs dsstd >> /u3/log/clr_ttabs_${today}.log 2>&1 &'
+sleep 6
+
+#--VM Guard_reg schedule--
+#echo "如果為VM環境，出貨預設會執行guard service check設定!!"
+#echo "如果為實體機，請註解下列Guard Service Check設定!!"
+touch /u3/log/guard.log;chown tiptop:tiptop /u3/log/guard.log
+echo "Start: " $now_date  >> /u3/log/guard.log
+su tiptop -c 'date;. /u1/usr/tiptop/.profile 31;/u1/topkey/guard/gs.sh GSRegst >> /u3/log/guard.log 2>&1 &'
+
+echo ""
+echo "--Clear Oracle Audit 30 days ago--" >> /u3/log/clr_audit_${today}.log
+chown tiptop:tiptop /u3/log/clr_audit_${today}.log
+echo "#===TOPPRD===" >> /u3/log/clr_audit_${today}.log
+su tiptop -c '. /u1/usr/tiptop/.profile 31;/u3/bin/clean_audit_trail topprd >> /u3/log/clr_audit_${today}.log 2>&1 &'
+echo "#===TOPTST===" >> /u3/log/clr_audit_${today}.log
+su tiptop -c '. /u1/usr/tiptop/.profile 35;/u3/bin/clean_audit_trail toptst >> /u3/log/clr_audit_${today}.log 2>&1 &'
+echo "#===TOPSTD===" >> /u3/log/clr_audit_${today}.log
+su tiptop -c '. /u1/usr/tiptop/.profile 36;/u3/bin/clean_audit_trail topstd >> /u3/log/clr_audit_${today}.log 2>&1 &'
+echo "#===TOPPTH===" >> /u3/log/clr_audit_${today}.log
+su tiptop -c '. /u1/usr/tiptop/.profile 39;/u3/bin/clean_audit_trail toppth >> /u3/log/clr_audit_${today}.log 2>&1 &'
+
+cat /u3/log/clr_dsrpt_${today}.log >> /u3/log/T100_job_${today}.log
+cat /u3/log/clr_ttabs_${today}.log >> /u3/log/T100_job_${today}.log
+cat /u3/log/clr_audit_${today}.log >> /u3/log/T100_job_${today}.log
+
+rm -Rf /u3/log/clr_dsrpt_${today}.log
+rm -Rf /u3/log/clr_ttabs_${today}.log
+rm -Rf /u3/log/clr_audit_${today}.log
+
+now_date=`date "+%F %H:%M:%S"`
+echo "T100 job Finished: " $now_date  >> /u3/log/T100_job_${today}.log

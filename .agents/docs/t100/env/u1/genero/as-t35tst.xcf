@@ -1,0 +1,381 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+ FOURJS_START_COPYRIGHT(D,2000)
+ Property of Four Js*
+ (c) Copyright Four Js 2000, 2019. All Rights Reserved.
+ * Trademark of Four Js Development Tools Europe Ltd
+   in the United States and elsewhere
+ 
+ This file can be modified by licensees according to the
+ product manual.
+ FOURJS_END_COPYRIGHT
+ -->
+<!-- Configuration file for Application Server -->
+<CONFIGURATION
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:noNamespaceSchemaLocation="http://www.4js.com/ns/gas/3.20/cfas.xsd">
+  <APPLICATION_SERVER>
+    <!--The resource list contains the resources that can be used throughout the definition of the applications and components.-->
+    <RESOURCE_LIST>
+      <PLATFORM_INDEPENDENT>
+        <RESOURCE Id="res.fglgui" Source="INTERNAL">1</RESOURCE>
+        <RESOURCE Id="res.gwc-js" Source="INTERNAL">_default</RESOURCE>
+        <RESOURCE Id="res.gbc" Source="INTERNAL">$(res.gwc-js)</RESOURCE>
+        <RESOURCE Id="res.path.gbc.user" Source="INTERNAL">$(res.path.gwcjs.user)</RESOURCE>
+        <RESOURCE Id="res.path.gwcjs.user" Source="INTERNAL"/>
+        <RESOURCE Id="res.path.webcomponent.user" Source="INTERNAL"/>
+        <RESOURCE Id="res.path.user" Source="INTERNAL"/>
+
+        <!-- IDP Configuration -->
+        <RESOURCE Id="res.path.idp" Source="INTERNAL">$(res.path.home)</RESOURCE>
+        <RESOURCE Id="res.path.idp.home" Source="INTERNAL">$(res.path.idp)/.genero-sso</RESOURCE>
+        <RESOURCE Id="res.path.idp.services" Source="INTERNAL">$(res.path.idp.home)/services</RESOURCE>
+        <RESOURCE Id="res.path.idp.applications" Source="INTERNAL">$(res.path.idp.home)/applications</RESOURCE>
+        <RESOURCE Id="res.path.idp.docroot" Source="INTERNAL">$(res.path.idp.home)/doc</RESOURCE>
+        <RESOURCE Id="res.path.gip" Source="INTERNAL">$(res.fgldir)/web_utilities/services/gip</RESOURCE>
+        <RESOURCE Id="res.path.gip.starter" Source="INTERNAL">$(res.path.gip)/bin/starterapp</RESOURCE>
+        <RESOURCE Id="res.gip.log" Source="INTERNAL">ACCESS</RESOURCE>
+
+        <!-- Directories  -->
+        <RESOURCE Id="res.public.resources" Source="INTERNAL">common</RESOURCE>
+<!-- DSC Default:NOBODY -->
+        <RESOURCE Id="res.access.control" Source="INTERNAL">ALL</RESOURCE>
+<!-- DSC -->
+        <RESOURCE Id="res.path.fgldir.demo" Source="INTERNAL">$(res.fgldir)/demo</RESOURCE>
+        <RESOURCE Id="res.path.fgldir.demo.services" Source="INTERNAL">$(res.fgldir)/demo/WebServices</RESOURCE>
+        <RESOURCE Id="res.path.fgldir.services" Source="INTERNAL">$(res.fgldir)/web_utilities/services</RESOURCE>
+
+        <RESOURCE Id="res.path.app" Source="INTERNAL">$(res.appdata.path)/app</RESOURCE>
+        <RESOURCE Id="res.path.services" Source="INTERNAL">$(res.appdata.path)/services</RESOURCE>
+        <RESOURCE Id="res.path.docroot" Source="INTERNAL">$(res.path.as)/web</RESOURCE>
+        <!--RESOURCE Id="res.path.docroot.user" Source="INTERNAL"></RESOURCE-->
+        <RESOURCE Id="res.path.tmp" Source="INTERNAL">$(res.appdata.path)/tmp/$(dispatcher.name)</RESOURCE>
+        <RESOURCE Id="res.deployment.root" Source="INTERNAL">$(res.appdata.path)/deployment</RESOURCE>
+<!--
+        <RESOURCE Id="res.gbc.deployment" Source="INTERNAL">$(res.appdata.path)/gbc_deployment</RESOURCE>
+-->
+        <RESOURCE Id="res.gbc.deployment" Source="INTERNAL">/u1/genero/gbc</RESOURCE>
+        <RESOURCE Id="res.uaproxy.param" Source="INTERNAL"></RESOURCE>
+
+        <!-- TCP port-related resources of the connector interface -->
+        <RESOURCE Id="res.ic.base.port" Source="INTERNAL">6300</RESOURCE>
+        <RESOURCE Id="res.ic.port.offset" Source="INTERNAL">95</RESOURCE>
+        <RESOURCE Id="res.ic.admin.port" Source="INTERNAL">7999</RESOURCE>
+
+        <!-- Application default timeouts -->
+        <RESOURCE Id="app.timeout.useragent" Source="INTERNAL">300</RESOURCE>
+        <RESOURCE Id="app.timeout.requestresult" Source="INTERNAL">60</RESOURCE>
+        <RESOURCE Id="app.timeout.dvmavailable" Source="INTERNAL">10</RESOURCE>
+        <RESOURCE Id="app.timeout.autologout" Source="INTERNAL">0</RESOURCE>
+
+        <RESOURCE Id="gst.timeout.useragent" Source="INTERNAL">300</RESOURCE>
+        <RESOURCE Id="gst.timeout.requestresult" Source="INTERNAL">60</RESOURCE>
+        <RESOURCE Id="gst.timeout.dvmavailable" Source="INTERNAL">1440</RESOURCE>
+
+        <!-- Services default timeouts -->
+        <RESOURCE Id="ws.timeout.requestresult" Source="INTERNAL">60</RESOURCE>
+        <RESOURCE Id="ws.timeout.dvmavailable" Source="INTERNAL">10</RESOURCE>
+        <RESOURCE Id="ws.timeout.keepalive" Source="INTERNAL">3600</RESOURCE>
+
+        <!-- Default log resources -->
+        <RESOURCE Id="res.log.output.path" Source="INTERNAL">$(res.appdata.path)/log</RESOURCE>
+        <RESOURCE Id="res.log.output.type" Source="INTERNAL">DAILYFILE</RESOURCE>
+        <RESOURCE Id="res.log.format" Source="INTERNAL">time event-type event-params</RESOURCE>
+        <RESOURCE Id="res.log.categories_filter" Source="INTERNAL">GAS ACCESS PROCESS DEPRECATED ERROR WARNING</RESOURCE>
+        <RESOURCE Id="res.log.raw_data.maxlength" Source="INTERNAL">-1</RESOURCE>
+
+      </PLATFORM_INDEPENDENT>
+      <WNT>
+        <!-- Windows implementation can use TCP only. No support for Unix Domain sockets -->
+        <RESOURCE Id="res.dispatcher.socket.family" Source="INTERNAL">TCP</RESOURCE>
+        <RESOURCE Id="res.dispatcher.socket.path" Source="INTERNAL">C:\temp</RESOURCE>
+        <RESOURCE Id="res.dvm.wa" Source="INTERNAL">"$(res.fgldir)\bin\fglrun.exe"</RESOURCE>
+        <RESOURCE Id="res.fgldir" Source="INTERNAL">/u1/genero/fgl</RESOURCE>
+        <RESOURCE Id="res.gredir" Source="INTERNAL">/u1/genero/gre</RESOURCE>
+        <RESOURCE Id="res.path" Source="INTERNAL">$(res.path.user);;$(res.path.as)\bin;$(res.gredir)\bin;$(res.fgldir)\bin;$(res.fgldir)\lib</RESOURCE>
+        <RESOURCE Id="res.fglldpath" Source="INTERNAL">$(res.path.as)\lib;$(res.gredir)\lib;$(res.fgldir)\lib</RESOURCE>
+        <RESOURCE Id="res.path.as" Source="INTERNAL">/u1/genero/gas</RESOURCE>
+        <RESOURCE Id="res.path.separator" Source="INTERNAL">;</RESOURCE>
+        <RESOURCE Id="res.dir.separator" Source="INTERNAL">\</RESOURCE>
+        <RESOURCE Id="res.gwsproxy" Source="INTERNAL">"$(res.path.as)\bin\gwsproxy.exe"</RESOURCE>
+        <RESOURCE Id="res.uaproxy" Source="INTERNAL">"$(res.path.as)\bin\uaproxy.exe"</RESOURCE>
+        <RESOURCE Id="res.uaproxy.cmd" Source="INTERNAL">$(res.uaproxy) $(res.uaproxy.param)</RESOURCE>
+        <RESOURCE Id="res.appdata.path" Source="INTERNAL">#!APPDATADIR!#\gas\3.20.16-202111021127</RESOURCE>
+        <RESOURCE Id="res.homedrive" Source="ENVIRON">HOMEDRIVE</RESOURCE>
+        <RESOURCE Id="res.homepath" Source="ENVIRON">HOMEPATH</RESOURCE>
+        <RESOURCE Id="res.path.home" Source="INTERNAL">$(res.homedrive)$(res.homepath)</RESOURCE>
+      </WNT>
+      <UNX>
+        <!--
+             Using Unix Domain sockets by default for communication between the
+             dispatcher and proxies, default value configured is 'UNIX' then.
+             It can be changed to TCP by configuring the value 'TCP' instead.
+        -->
+        <RESOURCE Id="res.dispatcher.socket.family" Source="INTERNAL">UNIX</RESOURCE>
+        <RESOURCE Id="res.dispatcher.socket.path" Source="INTERNAL">/tmp</RESOURCE>
+        <RESOURCE Id="res.dvm.wa" Source="INTERNAL">"$(res.fgldir)/bin/fglrun"</RESOURCE>
+        <RESOURCE Id="res.fgldir" Source="INTERNAL">/u1/genero/fgl</RESOURCE>
+        <RESOURCE Id="res.gredir" Source="INTERNAL">/u1/genero/gre</RESOURCE>
+        <RESOURCE Id="res.path" Source="INTERNAL">$(res.path.user):$(res.path.as)/bin:$(res.gredir)/bin:$(res.fgldir)/bin:/usr/bin:/bin</RESOURCE>
+        <RESOURCE Id="res.fglldpath" Source="INTERNAL">$(res.path.as)/lib:$(res.gredir)/lib:$(res.fgldir)/lib</RESOURCE>
+        <RESOURCE Id="res.path.as" Source="INTERNAL">/u1/genero/gas</RESOURCE>
+        <RESOURCE Id="res.path.separator" Source="INTERNAL">:</RESOURCE>
+        <RESOURCE Id="res.dir.separator" Source="INTERNAL">/</RESOURCE>
+        <RESOURCE Id="res.gwsproxy" Source="INTERNAL">"$(res.path.as)/bin/gwsproxy"</RESOURCE>
+        <RESOURCE Id="res.uaproxy" Source="INTERNAL">"$(res.path.as)/bin/uaproxy"</RESOURCE>
+        <RESOURCE Id="res.uaproxy.cmd" Source="INTERNAL">$(res.uaproxy) $(res.uaproxy.param)</RESOURCE>
+<!-- DSC mark
+        <RESOURCE Id="res.appdata.path" Source="INTERNAL">$(res.path.as)/appdata</RESOURCE>
+-->
+        <RESOURCE Id="res.path.home" Source="ENVIRON">HOME</RESOURCE>
+<!-- DSC -->
+        <RESOURCE Id="res.appdata.path" Source="INTERNAL">/ut/t35tst/appdata</RESOURCE>
+        <RESOURCE Id="res.tempdir" Source="INTERNAL">/ut/t35tst/tmp</RESOURCE>
+        <RESOURCE Id="res.envdir" Source="INTERNAL">/u1/etc</RESOURCE>
+
+        <RESOURCE Id="zone" Source="INTERNAL">t35tst</RESOURCE>
+        <RESOURCE Id="res.zone" Source="INTERNAL">/u1/t35tst</RESOURCE>
+        <RESOURCE Id="res.zone.erp" Source="INTERNAL">$(res.zone)/erp</RESOURCE>
+        <RESOURCE Id="res.zone.config" Source="INTERNAL">$(res.zone.erp)/cfg</RESOURCE>
+<!-- DSC -->
+      </UNX>
+    </RESOURCE_LIST>
+
+    <!--The component list contains new items, known as component, that will be used later by applications. Components can be seen - in some ways - as macro definition. -->
+    <COMPONENT_LIST>
+
+      <SERVICE_APPLICATION_EXECUTION_COMPONENT Id="cpn.ws.execution.local">
+        <ENVIRONMENT_VARIABLE Id="FGLDIR">$(res.fgldir)</ENVIRONMENT_VARIABLE>
+        <ENVIRONMENT_VARIABLE Id="GREDIR">$(res.gredir)</ENVIRONMENT_VARIABLE>
+        <ENVIRONMENT_VARIABLE Id="PATH">$(res.path)</ENVIRONMENT_VARIABLE>
+        <ENVIRONMENT_VARIABLE Id="FGLLDPATH">$(res.fglldpath)</ENVIRONMENT_VARIABLE>
+        <!--To enable Web Services debug, set FGLWSDEBUG to 1, 2 or 3. -->
+        <ENVIRONMENT_VARIABLE Id="FGLWSDEBUG">0</ENVIRONMENT_VARIABLE>
+<!-- DSC -->
+        <ENVIRONMENT_VARIABLE Id="ZONE">t35tst</ENVIRONMENT_VARIABLE>
+        <ENVIRONMENT_VARIABLE Id="TOPVER">t10</ENVIRONMENT_VARIABLE>
+        <ENVIRONMENT_VARIABLE Id="ERPVER">3.0</ENVIRONMENT_VARIABLE>
+<!-- DSC -->
+        <DVM>$(res.dvm.wa)</DVM>
+        <POOL>
+<!-- DSC Default:0 0 1 -->
+          <START>0</START>
+          <MIN_AVAILABLE>0</MIN_AVAILABLE>
+          <MAX_AVAILABLE>1</MAX_AVAILABLE>
+        </POOL>
+      </SERVICE_APPLICATION_EXECUTION_COMPONENT>
+
+      <WEB_APPLICATION_EXECUTION_COMPONENT Id="cpn.wa.execution.local">
+        <ENVIRONMENT_VARIABLE Id="FGLDIR">$(res.fgldir)</ENVIRONMENT_VARIABLE>
+        <ENVIRONMENT_VARIABLE Id="GREDIR">$(res.gredir)</ENVIRONMENT_VARIABLE>
+        <ENVIRONMENT_VARIABLE Id="FGLGUI">$(res.fglgui)</ENVIRONMENT_VARIABLE>
+        <ENVIRONMENT_VARIABLE Id="PATH">$(res.path)</ENVIRONMENT_VARIABLE>
+        <ENVIRONMENT_VARIABLE Id="FGLLDPATH">$(res.fglldpath)</ENVIRONMENT_VARIABLE>
+<!-- DSC -->
+        <ENVIRONMENT_VARIABLE Id="ZONE">t35tst</ENVIRONMENT_VARIABLE>
+        <ENVIRONMENT_VARIABLE Id="TOPVER"></ENVIRONMENT_VARIABLE>
+        <ENVIRONMENT_VARIABLE Id="ERPVER">3.0</ENVIRONMENT_VARIABLE>
+<!-- DSC -->
+        <DVM>$(res.dvm.wa)</DVM>
+<!-- DSC mark
+        <WEB_COMPONENT_DIRECTORY>$(res.path.webcomponent.user);$(res.fgldir)/webcomponents;$(application.path)/webcomponents;$(res.path.as)/webcomponents</WEB_COMPONENT_DIRECTORY>
+-->
+<!-- DSC -->
+        <WEB_COMPONENT_DIRECTORY>$(res.zone)/www/components;$(res.zone)/components;$(res.fgldir)/webcomponents</WEB_COMPONENT_DIRECTORY>
+<!-- DSC -->
+      </WEB_APPLICATION_EXECUTION_COMPONENT>
+
+      <!-- Default component for Genero archive deploy and undeploy trigger -->
+      <WEB_APPLICATION_EXECUTION_COMPONENT Id="cpn.gar.execution.local">
+        <ENVIRONMENT_VARIABLE Id="FGLDIR">$(res.fgldir)</ENVIRONMENT_VARIABLE>
+        <ENVIRONMENT_VARIABLE Id="GREDIR">$(res.gredir)</ENVIRONMENT_VARIABLE>
+        <ENVIRONMENT_VARIABLE Id="FGLGUI">$(res.fglgui)</ENVIRONMENT_VARIABLE>
+        <ENVIRONMENT_VARIABLE Id="PATH">$(res.path)</ENVIRONMENT_VARIABLE>
+        <ENVIRONMENT_VARIABLE Id="FGLLDPATH">$(res.fglldpath)</ENVIRONMENT_VARIABLE>
+        <DVM>$(res.dvm.wa)</DVM>
+      </WEB_APPLICATION_EXECUTION_COMPONENT>
+
+      <WEB_APPLICATION_EXECUTION_COMPONENT Id="cpn.ja.execution.local">
+        <ENVIRONMENT_VARIABLE Id="FGLDIR">$(res.fgldir)</ENVIRONMENT_VARIABLE>
+        <ENVIRONMENT_VARIABLE Id="GREDIR">$(res.gredir)</ENVIRONMENT_VARIABLE>
+        <ENVIRONMENT_VARIABLE Id="FGLGUI">$(res.fglgui)</ENVIRONMENT_VARIABLE>
+        <ENVIRONMENT_VARIABLE Id="PATH">$(res.path)</ENVIRONMENT_VARIABLE>
+        <ENVIRONMENT_VARIABLE Id="FGLLDPATH">$(res.fglldpath)</ENVIRONMENT_VARIABLE>
+        <DVM>$(res.dvm.wa)</DVM>
+      </WEB_APPLICATION_EXECUTION_COMPONENT>
+
+      <!--Timeout component for WA applications -->
+      <WEB_APPLICATION_TIMEOUT_COMPONENT Id="cpn.wa.timeout">
+        <USER_AGENT>$(app.timeout.useragent)</USER_AGENT>
+        <REQUEST_RESULT>$(app.timeout.requestresult)</REQUEST_RESULT>
+        <DVM_AVAILABLE>$(app.timeout.dvmavailable)</DVM_AVAILABLE>
+      </WEB_APPLICATION_TIMEOUT_COMPONENT>
+
+      <!--Timeout component for GST debugging sessions -->
+      <WEB_APPLICATION_TIMEOUT_COMPONENT Id="cpn.wa.gst.debug.timeout">
+        <USER_AGENT>$(gst.timeout.useragent)</USER_AGENT>
+        <REQUEST_RESULT>$(gst.timeout.requestresult)</REQUEST_RESULT>
+        <DVM_AVAILABLE>$(gst.timeout.dvmavailable)</DVM_AVAILABLE>
+      </WEB_APPLICATION_TIMEOUT_COMPONENT>
+
+      <AUTO_LOGOUT_COMPONENT Id="cpn.wa.autologout">
+        <TIMEOUT>0</TIMEOUT>
+        <!--COMMAND Timeout="20">auto-logout-allowed.sh</COMMAND-->
+        <!--PROMPT Timeout="200" Type='URL'>http://localhost:6394/prompt.html</PROMPT-->
+        <!--PROMPT Timeout="200" Type='DELEGATE'>services/OpenIDConnectServiceProvider</PROMPT-->
+      </AUTO_LOGOUT_COMPONENT>
+
+      <UA_OUTPUT_COMPONENT Id="cpn.wa.output">
+         <PROXY>$(res.uaproxy.cmd)</PROXY>
+         <PUBLIC_IMAGEPATH>$(res.public.resources)</PUBLIC_IMAGEPATH>
+         <TIMEOUT Using="cpn.wa.timeout"/>
+         <GBC>$(res.gbc)</GBC>
+         <GDC_SHORTCUT>$(res.path.as)/tpl/shortcut/gdc-http.gdc</GDC_SHORTCUT>
+       </UA_OUTPUT_COMPONENT>
+
+      <!--Timeout component for WS applications -->
+      <SERVICE_APPLICATION_TIMEOUT_COMPONENT Id="cpn.ws.timeout">
+        <DVM_AVAILABLE>$(ws.timeout.dvmavailable)</DVM_AVAILABLE>
+        <KEEP_ALIVE>$(ws.timeout.keepalive)</KEEP_ALIVE>
+      </SERVICE_APPLICATION_TIMEOUT_COMPONENT>
+
+    </COMPONENT_LIST>
+
+    <INTERFACE_TO_CONNECTOR>
+      <!--ROOT_URL_PREFIX>http://localhost:6394</ROOT_URL_PREFIX-->
+      <TCP_BASE_PORT>$(res.ic.base.port)</TCP_BASE_PORT>
+      <TCP_PORT_OFFSET>$(res.ic.port.offset)</TCP_PORT_OFFSET>
+      <TCP_ADMIN_PORT>$(res.ic.admin.port)</TCP_ADMIN_PORT>
+      <DOCUMENT_ROOT>$(res.path.docroot.user);$(res.path.docroot);$(res.path.idp.docroot)</DOCUMENT_ROOT>
+      <GBC_LOOKUP_PATH>$(res.path.gbc.user);$(res.gbc.deployment);$(res.fgldir)/web_utilities/gbc</GBC_LOOKUP_PATH>
+      <TEMPORARY_DIRECTORY>$(res.path.tmp)</TEMPORARY_DIRECTORY>
+      <SESSION_DIRECTORY>$(res.appdata.path)/session</SESSION_DIRECTORY>
+      <REPORT_VIEWER_DIRECTORY>$(res.gredir)/viewer</REPORT_VIEWER_DIRECTORY>
+<!-- DSC 3.1.01 mark (s) -->
+      <REPORT_REMOTE_URL_PREFIX>http://172.16.1.110:6338</REPORT_REMOTE_URL_PREFIX>  
+<!-- DSC 3.1.01 mark (e) -->
+      <SOCKET_FAMILY>$(res.dispatcher.socket.family)</SOCKET_FAMILY>
+      <SOCKET_PATH>$(res.dispatcher.socket.path)</SOCKET_PATH>
+      <HTTP>
+        <SESSION_COOKIE Secure="FALSE" />
+        <CACHE_CONTROL_MAX_AGE>300</CACHE_CONTROL_MAX_AGE>
+        <!-- Applications custom headers -->
+        <APPLICATION>
+          <HEADER Name="X-XSS-Protection">1; mode=block</HEADER>
+          <HEADER Name="X-Content-Type-Options">nosniff</HEADER>
+          <HEADER Name="Strict-Transport-Security">max-age=31536000; includeSubDomains; preload</HEADER>
+          <!--HEADER Name="X-Frame-Options">SAMEORIGIN</HEADER-->
+        </APPLICATION>
+
+        <!-- Services custom headers -->
+        <SERVICE>
+          <!-- HEADER Name="...">value</HEADER-->
+        </SERVICE>
+      </HTTP>
+    </INTERFACE_TO_CONNECTOR>
+
+    <INTERFACE_TO_DVM>
+      <ADDRESS>172.16.1.109</ADDRESS>
+    </INTERFACE_TO_DVM>
+
+    <LOG>
+      <OUTPUT Type="$(res.log.output.type)">$(res.log.output.path)</OUTPUT>
+      <FORMAT Type="TEXT">$(res.log.format)</FORMAT>
+      <CATEGORIES_FILTER>$(res.log.categories_filter)</CATEGORIES_FILTER>
+      <RAW_DATA MaxLength="$(res.log.raw_data.maxlength)" />
+    </LOG>
+
+    <MONITOR>
+        <ALLOW_FROM>$(res.access.control)</ALLOW_FROM>
+        <!--
+          <ALLOW_FROM>192.168.</ALLOW_FROM>
+          <ALLOW_FROM>10.</ALLOW_FROM>
+          <ALLOW_FROM>193.111.222.123</ALLOW_FROM>
+        -->
+    </MONITOR>
+
+    <APPLICATION_LIST>
+      <!-- Empty abstract application - useless ? yes, but just here for backward compatibility.. -->
+      <APPLICATION Id="defaultgwc" Parent="defaultwa" Abstract="TRUE"/>
+      <APPLICATION Id="defaultgdc" Parent="defaultwa" Abstract="TRUE"/>
+
+      <!-- default group for external applications -->
+      <GROUP Id="_default">$(res.path.app)</GROUP>
+      <GROUP Id="idp">$(res.path.gip.starter)</GROUP>
+      <GROUP Id="admin">$(res.path.idp.applications)</GROUP>
+<!-- DSC -->
+      <GROUP Id="app">$(res.zone.config)/xcf/web</GROUP>
+<!-- DSC -->
+      <!-- here begin the application list -->
+      <APPLICATION Id="defaultwa" Abstract="TRUE">
+
+       <!-- This is the "default" application.
+            It is not used directly: it is used for defining a "root" application. -->
+       <EXECUTION Using="cpn.wa.execution.local"/>
+       <AUTO_LOGOUT Using="cpn.wa.autologout"/>
+       <UA_OUTPUT Using="cpn.wa.output"/>
+      </APPLICATION>
+
+      <!--This is the default application for GST debugging sessions -->
+      <APPLICATION Id="defaultgst-debug" Parent="defaultwa" Abstract="TRUE">
+        <UA_OUTPUT Using="cpn.wa.output">
+          <TIMEOUT Using="cpn.wa.gst.debug.timeout"/>
+        </UA_OUTPUT>
+      </APPLICATION>
+
+      <!--Sample application for GWC-->
+      <APPLICATION Id="gwc-demo" Parent="defaultwa">
+        <EXECUTION>
+          <PATH>$(res.path.fgldir.demo)</PATH>
+          <MODULE>demo.42m</MODULE>
+          <ACCESS_CONTROL>
+            <ALLOW_FROM>$(res.access.control)</ALLOW_FROM>
+          </ACCESS_CONTROL>
+        </EXECUTION>
+      </APPLICATION>
+
+      <APPLICATION Id="simple-demo" Parent="defaultwa">
+        <EXECUTION>
+          <PATH>$(res.path.fgldir.demo)/Widgets</PATH>
+          <MODULE>Edit.42m</MODULE>
+          <ACCESS_CONTROL>
+            <ALLOW_FROM>$(res.access.control)</ALLOW_FROM>
+          </ACCESS_CONTROL>
+        </EXECUTION>
+      </APPLICATION>
+
+    </APPLICATION_LIST>
+
+    <SERVICE_LIST>
+      <APPLICATION Id="ws.default" Abstract="TRUE">
+        <PROXY>$(res.gwsproxy)</PROXY>
+        <EXECUTION Using="cpn.ws.execution.local"/>
+        <TIMEOUT Using="cpn.ws.timeout"/>
+      </APPLICATION>
+
+      <!--This is the default service for GST debugging sessions -->
+      <APPLICATION Id="ws.defaultgst-debug" Parent="ws.default" Abstract="TRUE">
+        <EXECUTION>
+          <POOL>
+            <START>0</START>
+            <MIN_AVAILABLE>1</MIN_AVAILABLE>
+            <MAX_AVAILABLE>1</MAX_AVAILABLE>
+          </POOL>
+        </EXECUTION>
+      </APPLICATION>
+
+<!-- DSC mark
+      <GROUP Id="_default">$(res.path.services)</GROUP>
+-->
+<!-- DSC -->
+      <GROUP Id="_default">$(res.zone.config)/xcf/gws-ws</GROUP> 
+<!-- DSC -->
+<!-- DSC mark
+      <GROUP Id="demo">$(res.path.fgldir.demo.services)</GROUP>
+-->
+      <GROUP Id="services">$(res.path.fgldir.services)</GROUP>
+      <GROUP Id="admin">$(res.path.idp.services)</GROUP>
+    </SERVICE_LIST>
+
+  </APPLICATION_SERVER>
+</CONFIGURATION>

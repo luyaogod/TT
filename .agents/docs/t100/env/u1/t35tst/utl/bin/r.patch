@@ -1,0 +1,11 @@
+# patch(啟動patch程序)
+######
+umask 000
+#export TOPENT=99
+currtime=`date '+%Y%m%d%H%M%S'`  #ex:20150612163035
+
+# 執行adzp999, g_run_mode = 4
+log_file=$TEMPDIR/patch-${currtime}-detail.log
+r.r adzp999 4 ${1} 2>&1 |tee ${log_file}
+echo 'log file:' ${log_file}
+

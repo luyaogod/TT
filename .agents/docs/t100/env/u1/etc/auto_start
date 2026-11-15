@@ -1,0 +1,30 @@
+#!/bin/sh 
+# Modify:00317_v3.0.01_Start MongoDB
+# Modify:12731_v3.1.04_change WildFly
+
+# Start FLM
+. /u1/genero/flm/envflm;/u1/genero/flm/bin/flmprg -r
+
+# Mount T100_gr
+sh /u1/etc/mount_rs
+
+# Start Jetty
+su tiptop -c '. /u1/usr/tiptop/.profile 1;cd /u1/topjetty/;bin/jetty.sh start'
+
+# Clear GZWL_T
+su tiptop -c '. /u1/usr/tiptop/.profile 1;sh /u3/bin/rm_dscom > /ut/topprd/log/rm_gzwl_t.log'
+
+# Start WildFly
+#v3.1.04 add (s)
+#su tiptop -c '. /u1/usr/tiptop/.profile 1;$UTL/bin/check_bpm_wildfly'
+#su tiptop -c '. /u1/usr/tiptop/.profile 2;$UTL/bin/check_bpm_wildfly'
+#v3.1.04 add (e)
+
+# Start MongoDB
+sh /u3/bin/restart_mdb
+
+#T100V3.0.10&3.1.11版缺漏要補上
+dmesg > /var/log/systeminfo.log
+
+/usr/bin/mount -t nfs 10.40.40.35:/u6/scm /u6/scm
+/usr/bin/mount -t nfs 10.40.40.35:/u5/scm /u5/scm

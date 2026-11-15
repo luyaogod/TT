@@ -1,0 +1,23 @@
+dbi.database.ds.source= "t35pth"
+dbi.database.ds.username= "ds"
+dbi.database.ds.password= "<REDACTED>"
+dbi.database.ds.schema= "ds"
+dbi.database.ds.ifxemul.datatype.serial=false
+
+dbi.database.dsdemo.source= "t35pth"
+dbi.database.dsdemo.username= "dsdemo"
+dbi.database.dsdemo.password= "<REDACTED>"
+dbi.database.dsdemo.schema= "dsdemo"
+dbi.database.dsdemo.ifxemul.datatype.serial=false
+
+dbi.database.dsdata.source= "t35pth"
+dbi.database.dsdata.username= "dsdata"
+dbi.database.dsdata.password= "<REDACTED>"
+dbi.database.dsdata.schema= "dsdata"
+dbi.database.dsdata.ifxemul.datatype.serial=false
+
+dbi.database.dsstd.source= "t35pth"
+dbi.database.dsstd.username= "dsstd"
+dbi.database.dsstd.password= "<REDACTED>"
+dbi.database.dsstd.schema= "dsstd"
+dbi.database.dsstd.ifxemul.datatype.serial=false

@@ -1,0 +1,40 @@
+#2022/11/03 if not has 42x , tell FGLLDPATH don't collect
+
+cd $ERP
+sys=`ls -d [abcde]?? 2>/dev/null`
+for m in $sys
+{
+ if [ "$m" != "cfg" ]; then
+    M=`echo $m|tr 'a-z' 'A-Z'`
+    eval "export $M=$ERP/$m"              #A##=$ERP/a##;export A##
+    eval "export ${M}i=$ERP/$m/42r"       #A##i=$ERP/a##/42r;export A##i
+    #2022/11/03 add (s)
+    if [ -f $ERP/${m}/42m/${m}.42x ] ; then
+       FGLLDPATH=$ERP/$m/42m:$FGLLDPATH
+    fi
+    #2022/11/03 add (e)
+    #2022/11/03 mark (s)
+    #FGLLDPATH=$ERP/$m/42m:$FGLLDPATH
+    #2022/11/03 mark (e)
+ fi
+}
+
+cd $COM
+sys=`ls -d *lib *qry *sub lng *wss 2>/dev/null`
+for m in $sys
+{
+ M=`echo $m|tr 'a-z' 'A-Z'`
+ eval "export $M=$COM/$m"              #C##=$COM/a##;export C##
+ if [ "$m" == "wss" ]; then
+    eval "export ${M}i=$COM/$m/42r"       #WSSi=$COM/wss/42r;export WSSi
+ fi
+ if [ "$m" == "bwss" ]; then
+    eval "export ${M}i=$COM/$m/42r"       #WSSi=$COM/wss/42r;export WSSi
+ fi
+ if [ "$m" == "dwss" ]; then
+    eval "export ${M}i=$COM/$m/42r"       #WSSi=$COM/wss/42r;export WSSi
+ fi
+FGLLDPATH=$COM/$m/42m:$FGLLDPATH
+}
+
+export FGLLDPATH

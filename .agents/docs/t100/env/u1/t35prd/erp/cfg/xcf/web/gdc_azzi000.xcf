@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<APPLICATION Parent="defaultgdc"
+   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+   xsi:noNamespaceSchemaLocation="http://www.4js.com/ns/gas/2.50/cfas.xsd">
+    <EXECUTION AllowUrlParameters="TRUE">
+      <ENVIRONMENT_VARIABLE Id="GUIMODE">GDC</ENVIRONMENT_VARIABLE>
+      <PATH>$(res.zone.erp)/azz/42r</PATH>
+      <DVM>$(res.envdir)/webrun</DVM>
+      <MODULE>azzi000</MODULE>
+    </EXECUTION>
+</APPLICATION>
