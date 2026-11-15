@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"github.com/luyaogod/TT/internal/config"
-	"github.com/luyaogod/TT/pkg/dbconfig"
-	"github.com/luyaogod/TT/pkg/erpdb"
 	"github.com/luyaogod/TT/internal/host"
 	"github.com/luyaogod/TT/internal/sshtun"
+	"github.com/luyaogod/TT/pkg/dbconfig"
+	"github.com/luyaogod/TT/pkg/erpdb"
 )
 
 // TestDB 测一次数据库连通性：解析配置 → （按需）建隧道 → 建连 → 取版本 → 关闭。
@@ -128,6 +128,18 @@ func (s *Service) TestSSHConn(cfg config.SSHConfig) *TestSSHResult {
 // readOnly 由调用方显式选择（见 OpenDBRequest.read_only 的注释）：内置只读语义的那两层
 // 防线不随本方法的存在而改变，插件也不会因为调用通用会话就"继承"它。
 func (s *Service) OpenDB(ctx context.Context, caller Caller, env, account string, readOnly bool) (string, OpenDBResult, *Error) {
+	return s.openDB(ctx, caller, env, account, readOnly, 0)
+}
+
+// OpenDBWithEnt 按企业编号解析账号后打开会话（ent>0 时 account 被忽略）。
+//
+// 企业目录来自配置里的 gzou_t 同步副本；没同步过就是"该企业未知"，
+// 提示用户先 `tt env ents --refresh`。
+func (s *Service) OpenDBWithEnt(ctx context.Context, caller Caller, env, account string, readOnly bool, ent int) (string, OpenDBResult, *Error) {
+	return s.openDB(ctx, caller, env, account, readOnly, ent)
+}
+
+func (s *Service) openDB(ctx context.Context, caller Caller, env, account string, readOnly bool, ent int) (string, OpenDBResult, *Error) {
 	var out OpenDBResult
 	start := s.opt.Now()
 
@@ -137,6 +149,13 @@ func (s *Service) OpenDB(ctx context.Context, caller Caller, env, account string
 	}
 	if named.DB == nil {
 		return "", out, errf(CodeDBNoConfig, named.Name, "该环境没有配置数据库连接（hosts.sshs[].db）")
+	}
+	if ent > 0 {
+		acct, eerr := entAccount(named, ent)
+		if eerr != nil {
+			return "", out, eerr
+		}
+		account = acct
 	}
 	conn := *named.DB
 	if e := accountFor(&conn, account); e != nil {
@@ -186,8 +205,27 @@ func (s *Service) OpenDB(ctx context.Context, caller Caller, env, account string
 
 	out.ReadOnly = sess.ReadOnly()
 	out.DBType = conn.Type
+	out.Account = conn.Account
+	out.Ent = ent
 	s.emit(Event{Action: "db.open", Caller: caller, Env: named.Name, Kind: KindDB, OK: true, DurationMS: s.opt.Now().Sub(start).Milliseconds()})
 	return handle, out, nil
+}
+
+// entAccount 企业编号 → 账号；不在清单里 / 没配账号时给稳定错误码。
+func entAccount(e *config.NamedSsh, ent int) (string, *Error) {
+	for _, it := range e.Ents {
+		if it.Ent != ent {
+			continue
+		}
+		acct := strings.TrimSpace(it.Account)
+		if acct == "" {
+			return "", errf(CodeEntNoAccount, e.Name, "企业 %d 在 gzou_t 里没有配可用账号", ent).
+				WithHint("检查该企业的账号配置，或用 tt env ents --refresh 重新同步企业目录")
+		}
+		return acct, nil
+	}
+	return "", errf(CodeEntUnknown, e.Name, "企业 %d 不在该环境的启用清单里", ent).
+		WithHint("先用 tt env ents --refresh 同步企业目录（或确认企业编号）")
 }
 
 // OpenSSH 打开一条 SSH 会话，返回不透明句柄。
@@ -249,8 +287,27 @@ func (s *Service) Close(caller Caller, handle string) *Error {
 	return nil
 }
 
+// argsSession 支持参数绑定与批量执行的会话。
+//
+// 真实连接器（Oracle/Kingbase）都实现；测试替身可以只实现 Session。
+// 用可选接口而不是扩 Session：老替身与老调用方不用改，能力缺失时给出稳定错误。
+type argsSession interface {
+	QueryArgs(ctx context.Context, sql string, params []string) ([]string, [][]string, error)
+	ExecArgs(ctx context.Context, sql string, params []string) (int64, error)
+	ExecBatch(ctx context.Context, stmts []erpdb.Stmt, atomic bool) (int64, int, error)
+}
+
 // DBQuery 在数据库会话上执行一条查询，按 maxRows 截断后返回。
 func (s *Service) DBQuery(ctx context.Context, caller Caller, handle, sql string, maxRows int) (*QueryResult, *Error) {
+	return s.dbQuery(ctx, caller, handle, sql, nil, maxRows)
+}
+
+// DBQueryArgs 带参数查询（占位符 `?`，由驱动绑定）。
+func (s *Service) DBQueryArgs(ctx context.Context, caller Caller, handle, sql string, params []string, maxRows int) (*QueryResult, *Error) {
+	return s.dbQuery(ctx, caller, handle, sql, params, maxRows)
+}
+
+func (s *Service) dbQuery(ctx context.Context, caller Caller, handle, sql string, params []string, maxRows int) (*QueryResult, *Error) {
 	sess, lerr := s.lookup(caller, handle, KindDB)
 	if lerr != nil {
 		return nil, lerr
@@ -269,7 +326,18 @@ func (s *Service) DBQuery(ctx context.Context, caller Caller, handle, sql string
 	qctx, cancel := withDefaultTimeout(ctx, DefaultQueryTimeout)
 	defer cancel()
 	start := s.opt.Now()
-	cols, rows, err := sess.db.Query(qctx, sql)
+	var cols []string
+	var rows [][]string
+	var err error
+	if len(params) == 0 {
+		cols, rows, err = sess.db.Query(qctx, sql)
+	} else {
+		adv, ok := sess.db.(argsSession)
+		if !ok {
+			return nil, errf(CodeUnsupported, sess.env, "该会话不支持参数绑定")
+		}
+		cols, rows, err = adv.QueryArgs(qctx, sql, params)
+	}
 	dur := s.opt.Now().Sub(start)
 	if err != nil {
 		e := queryError(sess.env, err)
@@ -289,6 +357,15 @@ func (s *Service) DBQuery(ctx context.Context, caller Caller, handle, sql string
 //
 // 只读会话上调用它一律报 DB_SESSION_READONLY —— 不静默降级成查询，也不偷偷改成可写。
 func (s *Service) DBExec(ctx context.Context, caller Caller, handle, sql string) (int64, *Error) {
+	return s.dbExec(ctx, caller, handle, sql, nil)
+}
+
+// DBExecArgs 带参数写语句。
+func (s *Service) DBExecArgs(ctx context.Context, caller Caller, handle, sql string, params []string) (int64, *Error) {
+	return s.dbExec(ctx, caller, handle, sql, params)
+}
+
+func (s *Service) dbExec(ctx context.Context, caller Caller, handle, sql string, params []string) (int64, *Error) {
 	sess, lerr := s.lookup(caller, handle, KindDB)
 	if lerr != nil {
 		return 0, lerr
@@ -305,7 +382,17 @@ func (s *Service) DBExec(ctx context.Context, caller Caller, handle, sql string)
 	ectx, cancel := withDefaultTimeout(ctx, DefaultQueryTimeout)
 	defer cancel()
 	start := s.opt.Now()
-	n, err := sess.db.Exec(ectx, sql)
+	var n int64
+	var err error
+	if len(params) == 0 {
+		n, err = sess.db.Exec(ectx, sql)
+	} else {
+		adv, ok := sess.db.(argsSession)
+		if !ok {
+			return 0, errf(CodeUnsupported, sess.env, "该会话不支持参数绑定")
+		}
+		n, err = adv.ExecArgs(ectx, sql, params)
+	}
 	dur := s.opt.Now().Sub(start)
 	if err != nil {
 		code := CodeExecFailed
@@ -318,6 +405,50 @@ func (s *Service) DBExec(ctx context.Context, caller Caller, handle, sql string)
 	}
 	s.emit(Event{Action: "db.exec", Caller: caller, Env: sess.env, Kind: KindDB, OK: true, DurationMS: dur.Milliseconds()})
 	return n, nil
+}
+
+// DBBatch 批量执行多条语句。atomic=true 时整批一个事务，失败全部回滚。
+//
+// 返回 failedIndex（0 基）；-1 表示全部成功。失败语句下标写进错误消息，
+// 插件据此知道"卡在第几条"。
+func (s *Service) DBBatch(ctx context.Context, caller Caller, handle string, stmts []erpdb.Stmt, atomic bool) (int64, int, *Error) {
+	sess, lerr := s.lookup(caller, handle, KindDB)
+	if lerr != nil {
+		return 0, -1, lerr
+	}
+	if len(stmts) == 0 {
+		return 0, -1, errf(CodeBatchFailed, sess.env, "批量语句为空")
+	}
+	if sess.db.ReadOnly() {
+		e := errf(CodeSessionReadOnly, sess.env, "该会话以只读建立，不能执行写语句").
+			WithHint("需要写能力时用 OpenDB(read_only=false) 重开会话")
+		s.emit(Event{Action: "db.batch", Caller: caller, Env: sess.env, Kind: KindDB, OK: false, Code: e.Code})
+		return 0, -1, e
+	}
+	adv, ok := sess.db.(argsSession)
+	if !ok {
+		return 0, -1, errf(CodeUnsupported, sess.env, "该会话不支持批量执行")
+	}
+	bctx, cancel := withDefaultTimeout(ctx, DefaultQueryTimeout)
+	defer cancel()
+	start := s.opt.Now()
+	n, failed, err := adv.ExecBatch(bctx, stmts, atomic)
+	dur := s.opt.Now().Sub(start)
+	if err != nil {
+		code := CodeBatchFailed
+		if isTimeout(bctx, err) {
+			code = CodeTimeout
+		}
+		msg := err.Error()
+		if failed >= 0 {
+			msg = fmt.Sprintf("第 %d 条失败: %s", failed+1, msg)
+		}
+		e := &Error{Code: code, Env: sess.env, Stage: StageExec, Message: msg, Cause: err}
+		s.emit(Event{Action: "db.batch", Caller: caller, Env: sess.env, Kind: KindDB, OK: false, Code: code, DurationMS: dur.Milliseconds()})
+		return n, failed, e
+	}
+	s.emit(Event{Action: "db.batch", Caller: caller, Env: sess.env, Kind: KindDB, OK: true, DurationMS: dur.Milliseconds()})
+	return n, -1, nil
 }
 
 // SSHExec 在 SSH 会话上执行一条非交互命令。

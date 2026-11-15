@@ -15,10 +15,10 @@ import (
 
 	"github.com/luyaogod/TT/internal/config"
 	"github.com/luyaogod/TT/internal/connsvc"
-	"github.com/luyaogod/TT/pkg/dbconfig"
-	"github.com/luyaogod/TT/pkg/erpdb"
 	"github.com/luyaogod/TT/internal/gen/hostv1"
 	"github.com/luyaogod/TT/internal/gen/hostv1/hostv1connect"
+	"github.com/luyaogod/TT/pkg/dbconfig"
+	"github.com/luyaogod/TT/pkg/erpdb"
 )
 
 // ---- 夹具 ----

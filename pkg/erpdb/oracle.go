@@ -106,8 +106,8 @@ func (o *OracleConnector) Query(ctx context.Context, sql string) ([]string, [][]
 //
 // 与 queryReadOnly 的差别只有"没有 SET TRANSACTION READ ONLY 那一层" ——
 // 这是**插件通用会话**的语义：TT 不承诺替你只读，边界是数据库账号权限。
-func (o *OracleConnector) queryPlain(ctx context.Context, sql string) ([]string, [][]string, error) {
-	rows, err := o.db.QueryContext(ctx, sql)
+func (o *OracleConnector) queryPlain(ctx context.Context, sql string, args ...any) ([]string, [][]string, error) {
+	rows, err := o.db.QueryContext(ctx, sql, args...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("query: %w", err)
 	}
@@ -161,7 +161,7 @@ func scanRows(rows *sql.Rows) ([]string, [][]string, error) {
 //   - **所以 `defer tx.Rollback()` 必须写**：漏了就是连接泄漏（`Tx` 不还池）。
 //
 // 返回前 `rows` 已经读完/关闭，`Rollback` 打在一条没有未完成结果的连接上 —— 安全。
-func (o *OracleConnector) queryReadOnly(ctx context.Context, sql string) ([]string, [][]string, error) {
+func (o *OracleConnector) queryReadOnly(ctx context.Context, sql string, args ...any) ([]string, [][]string, error) {
 	// **不能**传 `&sql.TxOptions{ReadOnly: true}`：go-ora 会直接报
 	// "readonly transaction is not supported"（见上面的注释）。
 	tx, err := o.db.BeginTx(ctx, nil)
@@ -178,7 +178,7 @@ func (o *OracleConnector) queryReadOnly(ctx context.Context, sql string) ([]stri
 		return nil, nil, fmt.Errorf("query: %w", err)
 	}
 
-	rows, err := tx.QueryContext(ctx, sql)
+	rows, err := tx.QueryContext(ctx, sql, args...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("query: %w", err)
 	}

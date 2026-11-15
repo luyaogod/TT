@@ -6,14 +6,15 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/luyaogod/TT/internal/config"
-	"github.com/luyaogod/TT/pkg/dbconfig"
-	"github.com/luyaogod/TT/pkg/erpdb"
 	"github.com/luyaogod/TT/internal/host"
 	"github.com/luyaogod/TT/internal/sshtun"
+	"github.com/luyaogod/TT/pkg/dbconfig"
+	"github.com/luyaogod/TT/pkg/erpdb"
 )
 
 // HostAPIVersion 首版 Host API 的语义化版本。插件清单的 hostApi 范围按它判。
@@ -50,6 +51,12 @@ const (
 	FeatureDBExec            = "db.exec"
 	FeatureSSHExec           = "ssh.exec"
 	FeatureDBReadOnlySession = "db.readonly_session"
+	// FeatureDBBatch 参数绑定 + 批量执行（DBSession.Batch）。
+	FeatureDBBatch = "db.batch"
+	// FeatureProfileEnts Profile.ents 返回企业目录（ENT→账号）。
+	FeatureProfileEnts = "profile.ents"
+	// FeatureDBOpenByEnt 支持按企业编号打开会话（Connections.OpenDB.ent）。
+	FeatureDBOpenByEnt = "db.open_by_ent"
 )
 
 // CallerKind 调用方种类。内置调用方与第三方插件的权限来源不同，但走同一套会话规则。
@@ -105,6 +112,13 @@ func (builtinOnlyAuthorizer) AllowedEnvs(c Caller, _ Capability) ([]string, bool
 	return nil, c.IsBuiltin()
 }
 
+// ProfileEnt 企业编号 → 账号的脱敏投影（不含口令）。
+type ProfileEnt struct {
+	Ent         int
+	Account     string
+	Placeholder bool
+}
+
 // Profile 一个环境的脱敏元数据。**绝不含口令/私钥/完整配置 JSON**。
 type Profile struct {
 	Env           string
@@ -119,6 +133,10 @@ type Profile struct {
 	SSHUser       string
 	DBViaSSH      bool
 	DBReadonlySQL bool
+	// Ents 该环境在 gzou_t 里启用的企业（配置里的同步副本）；空 = 没同步过。
+	Ents []ProfileEnt
+	// EntsSyncedAt 那份清单的抄写时间（RFC3339，信息性）。
+	EntsSyncedAt string
 }
 
 // TestDBResult 一次数据库连通性测试的结果。
@@ -151,6 +169,10 @@ type TestSSHResult struct {
 type OpenDBResult struct {
 	ReadOnly bool
 	DBType   string
+	// Account 实际使用的账号名（脱敏：只有名字，没有口令）。
+	Account string
+	// Ent 按企业解析时的企业编号；0 = 未按企业解析。
+	Ent int
 }
 
 // QueryResult 一次查询的结果（已按 MaxRows 截断）。
@@ -327,12 +349,15 @@ func (s *Service) Capabilities() Capabilities {
 	return Capabilities{
 		HostAPIVersion: HostAPIVersion,
 		TTVersion:      s.opt.TTVersion,
-		Features:       []string{FeatureDBQuery, FeatureDBExec, FeatureSSHExec, FeatureDBReadOnlySession},
+		Features: []string{
+			FeatureDBQuery, FeatureDBExec, FeatureSSHExec, FeatureDBReadOnlySession,
+			FeatureDBBatch, FeatureProfileEnts, FeatureDBOpenByEnt,
+		},
 		Services: []ServiceCapability{
 			{Name: "HostService", Methods: []string{"GetCapabilities"}},
 			{Name: "ProfilesService", Methods: []string{"List"}},
 			{Name: "ConnectionsService", Methods: []string{"TestDB", "TestSSH", "OpenDB", "OpenSSH", "Close"}},
-			{Name: "DBSessionService", Methods: []string{"Query", "Exec"}},
+			{Name: "DBSessionService", Methods: []string{"Query", "Exec", "Batch"}},
 			{Name: "SSHSessionService", Methods: []string{"Exec"}},
 		},
 	}
@@ -419,6 +444,12 @@ func profileOf(e *config.NamedSsh) Profile {
 			}
 		}
 	}
+	// 企业目录：只给编号/账号名/是否有账号，口令一律不出现。
+	for _, ent := range e.Ents {
+		acct := strings.TrimSpace(ent.Account)
+		p.Ents = append(p.Ents, ProfileEnt{Ent: ent.Ent, Account: acct, Placeholder: acct == ""})
+	}
+	p.EntsSyncedAt = e.EntsSyncedAt
 	return p
 }
 

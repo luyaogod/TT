@@ -136,37 +136,13 @@ func (k *KingbaseConnector) Query(ctx context.Context, sql string) ([]string, []
 //
 // 用它的只有 `ServerVersion`（`SELECT version()` 是**代码字面量**，不是调用方给的语句）——
 // 于是"检查只做一遍、且做在唯一那个入口上"这件事是显式的，不是靠"没人从别处调"。
-func (k *KingbaseConnector) queryReadOnly(ctx context.Context, sql string) ([]string, [][]string, error) {
-	rows, err := k.pool.Query(ctx, sql)
+func (k *KingbaseConnector) queryReadOnly(ctx context.Context, sql string, args ...any) ([]string, [][]string, error) {
+	rows, err := k.pool.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("query: %w", err)
 	}
 	defer rows.Close()
-
-	fields := rows.FieldDescriptions()
-	columns := make([]string, len(fields))
-	for i, f := range fields {
-		columns[i] = f.Name
-	}
-
-	// Simple protocol returns results in text format, so RawValues() gives the
-	// raw text bytes per value — no decode/alloc per value. This is an order of
-	// magnitude faster than scanning into **string.
-	var result [][]string
-	for rows.Next() {
-		raw := rows.RawValues()
-		row := make([]string, len(raw))
-		for i, v := range raw {
-			if v != nil {
-				row[i] = string(v)
-			}
-		}
-		result = append(result, row)
-	}
-	if rows.Err() != nil {
-		return nil, nil, rows.Err()
-	}
-	return columns, result, nil
+	return scanPgxRows(rows)
 }
 
 func (k *KingbaseConnector) Close() {

@@ -56,6 +56,14 @@ const (
 	CodeTimeout = "TIMEOUT"
 	// CodeAccountUnknown 指定的账号不在该环境的账号清单里。
 	CodeAccountUnknown = "DB_ACCOUNT_UNKNOWN"
+	// CodeEntUnknown 企业编号不在该环境的启用清单里（没同步 ENT 或编号写错）。
+	CodeEntUnknown = "DB_ENT_UNKNOWN"
+	// CodeEntNoAccount 企业存在但 gzou_t 里没有配可用账号。
+	CodeEntNoAccount = "DB_ENT_NO_ACCOUNT"
+	// CodeBatchFailed 批量执行失败（消息里带失败语句下标）。
+	CodeBatchFailed = "DB_BATCH_FAILED"
+	// CodeUnsupported 会话/驱动不支持请求的能力（如参数绑定、批量）。
+	CodeUnsupported = "UNSUPPORTED"
 	// CodeClosed 服务已关闭（进程正在退出）。
 	CodeClosed = "SERVICE_CLOSED"
 )

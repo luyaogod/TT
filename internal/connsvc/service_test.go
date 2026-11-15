@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/luyaogod/TT/internal/config"
-	"github.com/luyaogod/TT/pkg/dbconfig"
-	"github.com/luyaogod/TT/pkg/erpdb"
 	"github.com/luyaogod/TT/internal/host"
 	"github.com/luyaogod/TT/internal/sshtun"
+	"github.com/luyaogod/TT/pkg/dbconfig"
+	"github.com/luyaogod/TT/pkg/erpdb"
 )
 
 // ---- 测试夹具 ----
@@ -32,6 +32,7 @@ func testConfig(t *testing.T) string {
 				Type: "oracle", Host: "db1", Port: 1521, Service: "t35prd",
 				Accounts: []dbconfig.DBAcct{{Account: "ds", Password: "db-secret-1"}},
 			},
+			Ents: []config.EntEntry{{Ent: 99, Account: "ds"}, {Ent: 2222, Account: ""}},
 		},
 		{
 			Name:      "test",
@@ -41,6 +42,7 @@ func testConfig(t *testing.T) string {
 				Accounts: []dbconfig.DBAcct{{Account: "ds", Password: "db-secret-2"}},
 				ViaSSH:   &dbconfig.ViaSSH{Host: "10.0.0.2", Port: 2222, User: "u2", Password: "ssh-secret-2"},
 			},
+			Ents: []config.EntEntry{{Ent: 99, Account: "ds"}, {Ent: 2222, Account: ""}},
 		},
 	}}
 	if err := config.SaveHosts(path, hosts); err != nil {
@@ -162,7 +164,10 @@ func TestCapabilitiesOnlyListWhatIsDelivered(t *testing.T) {
 	if c.HostAPIVersion != HostAPIVersion {
 		t.Fatalf("HostAPI 版本 = %q", c.HostAPIVersion)
 	}
-	want := map[string]bool{FeatureDBQuery: true, FeatureDBExec: true, FeatureSSHExec: true, FeatureDBReadOnlySession: true}
+	want := map[string]bool{
+		FeatureDBQuery: true, FeatureDBExec: true, FeatureSSHExec: true, FeatureDBReadOnlySession: true,
+		FeatureDBBatch: true, FeatureProfileEnts: true, FeatureDBOpenByEnt: true,
+	}
 	for _, f := range c.Features {
 		if !want[f] {
 			t.Errorf("声明了不存在的能力 %q", f)
