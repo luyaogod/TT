@@ -142,6 +142,7 @@ func (m *Manager) registerInstalled(man *Manifest, target string, source Source,
 		})
 		rec.ActiveVersion = man.Version
 		rec.Name = man.Name
+		rec.Description = man.Description
 		rec.Source = source
 		rec.Contributions = man.Contributions
 		rec.Permissions = append([]string(nil), man.Permissions...)

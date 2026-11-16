@@ -99,7 +99,15 @@ func (m *Manager) List() ([]Summary, error) {
 	}
 	out := make([]Summary, 0, len(reg.Plugins))
 	for _, rec := range reg.Plugins {
-		out = append(out, Summarize(rec))
+		s := Summarize(rec)
+		// 老注册表（0.6.x 之前装的）没有 description：按活跃版本的清单补一次。
+		// 只影响展示，不回写注册表 —— 清单是版本目录里的不可变事实，重装/升级时自然补齐。
+		if s.Description == "" && rec.ActiveVersion != "" {
+			if man, err := LoadManifest(m.Store.VersionDir(rec.ID, rec.ActiveVersion)); err == nil {
+				s.Description = man.Description
+			}
+		}
+		out = append(out, s)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil

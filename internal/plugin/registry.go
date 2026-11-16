@@ -81,6 +81,7 @@ type InstalledVersion struct {
 type Record struct {
 	ID            string `json:"id"`
 	Name          string `json:"name,omitempty"`
+	Description   string `json:"description,omitempty"`
 	ActiveVersion string `json:"activeVersion"`
 	// PreviousVersion 上一次切换前的活跃版本（`tt plugin rollback` 的落点）。
 	//
@@ -436,6 +437,8 @@ type UIEntry struct {
 type Summary struct {
 	ID              string `json:"id"`
 	Name            string `json:"name,omitempty"`
+	// Description 清单里的一句话说明（设置页卡片只留名称/描述/开关，用它）。
+	Description     string `json:"description,omitempty"`
 	Version         string `json:"version"`
 	PreviousVersion string `json:"previousVersion,omitempty"`
 	Enabled         bool   `json:"enabled"`
@@ -466,7 +469,8 @@ type Summary struct {
 // Summarize 把记录压成展示投影。
 func Summarize(rec *Record) Summary {
 	s := Summary{
-		ID: rec.ID, Name: rec.Name, Version: rec.ActiveVersion, Enabled: rec.Enabled,
+		ID: rec.ID, Name: rec.Name, Description: rec.Description,
+		Version: rec.ActiveVersion, Enabled: rec.Enabled,
 		PreviousVersion: rec.PreviousVersion,
 		Permissions:     append([]string(nil), rec.Permissions...),
 		Capabilities:    append([]string(nil), rec.Grants.Capabilities...),
