@@ -5,6 +5,14 @@
 
 import * as React from 'react'
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
   Checkbox,
   Progress,
   Select,
@@ -34,6 +42,17 @@ export interface PluginUIContext {
       Value: typeof SelectValue
       Content: typeof SelectContent
       Item: typeof SelectItem
+    }
+    /** shadcn AlertDialog：确认弹窗用，别再让插件弹原生 window.confirm。 */
+    AlertDialog: {
+      Root: typeof AlertDialog
+      Content: typeof AlertDialogContent
+      Header: typeof AlertDialogHeader
+      Footer: typeof AlertDialogFooter
+      Title: typeof AlertDialogTitle
+      Description: typeof AlertDialogDescription
+      Action: typeof AlertDialogAction
+      Cancel: typeof AlertDialogCancel
     }
   }
   log: (...args: unknown[]) => void
@@ -69,6 +88,16 @@ export function activatePlugin(pluginId: string, version: string, mod: PluginCli
         Value: SelectValue,
         Content: SelectContent,
         Item: SelectItem,
+      },
+      AlertDialog: {
+        Root: AlertDialog,
+        Content: AlertDialogContent,
+        Header: AlertDialogHeader,
+        Footer: AlertDialogFooter,
+        Title: AlertDialogTitle,
+        Description: AlertDialogDescription,
+        Action: AlertDialogAction,
+        Cancel: AlertDialogCancel,
       },
     },
     log: (...args: unknown[]) => { console.log(`[plugin:${pluginId}]`, ...args) },
