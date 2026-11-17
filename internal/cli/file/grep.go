@@ -9,6 +9,7 @@ import (
 	"path"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/spf13/cobra"
@@ -48,7 +49,7 @@ func newGrepCmd() *cobra.Command {
 	var opt grepOptions
 	var maxMatches int
 	c := &cobra.Command{
-		Use:   "grep [-rinl] [-m N] [--include G] <模式> <路径...>",
+		Use:   "grep [-rinl] [-m N] [-e G] <模式> <路径...>",
 		Short: "在文件里找内容（RE2 语法；服务端零进程）",
 		Long: `在文件里按正则找内容。默认 JSON（matches[]）；--human 才是 "路径:内容" 文本。
 
@@ -57,17 +58,28 @@ func newGrepCmd() *cobra.Command {
   -n             显示行号
   -l             只列有匹配的文件名
   -m N           每个文件最多 N 处匹配（0 = 不限）
-  --include G    只扫基名匹配 G 的文件（可重复；如 --include '*.4gl'）
+  -e G           只扫基名匹配 G 的文件（等价 --include；可重复）
+
+-e 的两种写法都可以，任选一种：
+  -e '*.4gl' -e '*.4fd'      重复给（任何 shell 都安全，推荐）
+  -e '*.4gl,*.4fd'           逗号分隔（tt 自己按逗号拆）
+
+注意：别写成 --include 'a|b' —— 在 PowerShell / CMD 里 | 是管道符，
+命令会被 shell 拆成两段执行（看起来像"tt 没报错但也没结果"），
+要"或"的关系就用上面的重复或逗号写法。
 
 路径必须显式给（不会默认扫整个 $TOP）。二进制文件按 NUL 判断后跳过。
-实现是纯 SFTP：文件逐个读过来在本地匹配，服务器上不起 grep 进程。`,
+实现是纯 SFTP：文件逐个读过来在本地匹配，服务器上不起 grep 进程。
+无匹配、或一个可扫文件都没有：退出码 1，且不打印任何东西（与 GNU grep 一致）。`,
 		Example: `  tt file grep -rn --at 主机109 'apmt520' erp/apm/4gl
-  tt file grep -rln --at 主机109 --include '*.4gl' 'SELECT .*bmaa_t' erp/apm`,
+  tt file grep -rln --at 主机109 -e '*.4gl' -e '*.4fd' 'SELECT .*bmaa_t' erp/apm
+  tt file grep -rn --at 主机109 -e '*.4gl,*.4fd' 's_apmt510_upd' com/sub/4gl`,
 		Args: cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pattern := args[0]
 			paths := args[1:]
 			opt.maxMatches = maxMatches
+			opt.include = splitIncludePatterns(opt.include)
 			if opt.ignoreCase {
 				pattern = "(?i)" + pattern
 			}
@@ -140,7 +152,7 @@ func newGrepCmd() *cobra.Command {
 	c.Flags().BoolVarP(&opt.lineNumber, "line-number", "n", false, "显示行号")
 	c.Flags().BoolVarP(&opt.listOnly, "files-with-matches", "l", false, "只列有匹配的文件名")
 	c.Flags().IntVarP(&maxMatches, "max-count", "m", 0, "每个文件最多 N 处匹配（0 = 不限）")
-	c.Flags().StringSliceVar(&opt.include, "include", nil, "只扫基名匹配该模式的文件（可重复）")
+	c.Flags().StringSliceVarP(&opt.include, "include", "e", nil, "只扫基名匹配该模式的文件（可重复，或逗号分隔）")
 	return c
 }
 
@@ -211,6 +223,23 @@ func includeOK(name string, patterns []string) bool {
 		}
 	}
 	return false
+}
+
+// splitIncludePatterns 把 -e 的取值拆开：既支持重复给（-e a -e b），
+// 也支持逗号分隔（-e 'a,b'）—— 后者是为了绕开 PowerShell/CMD 里
+// `--include 'a|b'` 会被当管道符的坑（命令被 shell 拆成两段，静默没结果）。
+// 名字里真带逗号就用重复写法。
+func splitIncludePatterns(raw []string) []string {
+	out := make([]string, 0, len(raw))
+	for _, item := range raw {
+		for _, part := range strings.Split(item, ",") {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				out = append(out, part)
+			}
+		}
+	}
+	return out
 }
 
 // grepAll 并发读文件、按原顺序汇总（输出稳定，AI 不会因并发看到乱序）。

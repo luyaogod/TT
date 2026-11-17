@@ -37,11 +37,12 @@ var (
 
 // target 一次调用点名的环境与它的只读文件视图。
 type target struct {
-	env  string
-	ssh  *config.NamedSsh
-	conn *host.SSHConn
-	fs   *host.FS
-	top  string // 服务器 TOP（不带尾斜杠）
+	env     string
+	ssh     *config.NamedSsh
+	conn    *host.SSHConn
+	fs      *host.FS
+	top     string // 服务器 TOP（不带尾斜杠）
+	cfgPath string // 本次用的 config.json（镜像护栏据此找镜像目录）
 }
 
 // cur 当前调用的目标；由组 PersistentPreRunE 设置，命令只读它。
@@ -54,17 +55,20 @@ func Register(root *cobra.Command) {
 		Short: "文件：看服务器文件、取文件（只读）+ 离线镜像",
 		Long: `文件：在服务器上看文件、取文件（只读），以及管理离线镜像。
 
-  tt file ls    [-la] [--human] [<路径>]                 列出目录（默认 $TOP）
+  tt file ls    [-la] [--limit N] [--sort name|time|size] [--desc] [--name-only] [<路径>]
+                                                 列出目录（默认 $TOP；默认只回 200 项，--limit 0 = 全看）
   tt file cat   <文件...>                        输出内容（多文件直接拼接）
   tt file head  [-n N] <文件...>                 前 N 行（默认 10）
   tt file tail  [-n N] <文件...>                 后 N 行（默认 10）
-  tt file grep  [-rinl] [-m N] [--include G] <模式> <路径...>
-  （grep 用 Go 的 RE2 语法，不是 GNU grep 的扩展语法）
+  tt file grep  [-rinl] [-m N] [-e G] <模式> <路径...>
+  （grep 用 Go 的 RE2 语法，不是 GNU grep 的扩展语法；-e G 只扫基名匹配 G 的文件，
+    可重复或逗号分隔 —— 别写 --include 'a|b'，PowerShell/CMD 会把它当管道拆开）
   tt file find  <路径...> [-name G] [-type f|d|l] [-maxdepth N]
   tt file stat  <路径...>                        类型/大小/时间/权限
   tt file wc    [-l] <文件...>                   行/词/字节
   tt file du    [-s] [--human] [<路径>]                   占用大小（按文件大小累计，1K 块）
-  tt file get   <路径> [-o <本地|->]             下载一个文件（默认同名落当前目录）
+  tt file get   <路径> [-o <本地|->] [--force]   下载一个文件（默认同名落当前目录；
+                                                 镜像里已有同一份就拒下并给出镜像路径，--force 可重下）
   tt file mirror dir|path|pull                   离线镜像（子集 + 全量）
 
 范围与保证：
@@ -143,7 +147,7 @@ func prepare() error {
 		conn.Close()
 		return output.Errorf(output.CodeConnFailed, 4, "打开 SFTP 失败: %v", err)
 	}
-	t := &target{env: ref.Name, ssh: ref.Env, conn: conn, fs: fs}
+	t := &target{env: ref.Name, ssh: ref.Env, conn: conn, fs: fs, cfgPath: cfgPath}
 	if err := t.resolveTop(cfgPath); err != nil {
 		t.close()
 		return err

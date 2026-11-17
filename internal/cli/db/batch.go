@@ -45,8 +45,10 @@ type batchItem struct {
 	Returned      int        `json:"returned"`
 	Truncated     bool       `json:"truncated,omitempty"`
 	TruncReason   string     `json:"truncReason,omitempty"`
+	RowLimit      int        `json:"rowLimit,omitempty"`
 	ServerLimited bool       `json:"serverLimited,omitempty"`
 	Elapsed       float64    `json:"elapsedSeconds,omitempty"`
+	Notes         []string   `json:"notes,omitempty"`
 	Code          string     `json:"code,omitempty"`
 	Error         string     `json:"error,omitempty"`
 }
@@ -79,14 +81,14 @@ func parseBatch(data []byte) ([]batchStmt, error) {
 
 // sqlQuerier 是 runBatchQueries 需要的最小能力面（离线单测用它注入假会话）。
 type sqlQuerier interface {
-	Query(ctx context.Context, sql string, timeout int) (*debug.DBQueryResult, error)
+	Query(ctx context.Context, sql string, timeout, maxRows int) (*debug.DBQueryResult, error)
 }
 
 // runBatchQueries 顺序执行，返回逐条结果与失败条数。
 //
 // 顺序执行而不是并发：同一个会话上并发查，行序与错误归属都会变得难解释；
 // 而批量省的是固定成本，不是墙钟并行度。
-func runBatchQueries(ctx context.Context, q sqlQuerier, stmts []batchStmt, timeout int) ([]batchItem, int) {
+func runBatchQueries(ctx context.Context, q sqlQuerier, stmts []batchStmt, timeout, maxRows int) ([]batchItem, int) {
 	items := make([]batchItem, 0, len(stmts))
 	failed := 0
 	for _, st := range stmts {
@@ -98,7 +100,7 @@ func runBatchQueries(ctx context.Context, q sqlQuerier, stmts []batchStmt, timeo
 			items = append(items, it)
 			continue
 		}
-		res, err := q.Query(ctx, st.SQL, timeout)
+		res, err := q.Query(ctx, st.SQL, timeout, maxRows)
 		if err != nil {
 			it.Code, it.Error = "DB_FAILED", err.Error()
 			failed++
@@ -109,14 +111,17 @@ func runBatchQueries(ctx context.Context, q sqlQuerier, stmts []batchStmt, timeo
 		it.Columns, it.Rows = res.Columns, res.Rows
 		it.TotalRows, it.Returned = res.TotalRows, len(res.Rows)
 		it.Truncated, it.TruncReason = res.Truncated, res.TruncReason
+		it.RowLimit = res.RowLimit
 		it.ServerLimited, it.Elapsed = res.ServerLimited, res.Elapsed
+		addRowLimitNote(res)
+		it.Notes = res.Notes
 		items = append(items, it)
 	}
 	return items, failed
 }
 
 // QueryBatch 执行一批只读 SQL 并渲染。
-func QueryBatch(arg string, ent, timeout int, route string) error {
+func QueryBatch(arg string, ent, timeout int, route string, maxRows int) error {
 	if common.OutputFormat() != output.FormatJSON {
 		return output.Errorf("USAGE", 2, "批量只输出 JSON（多结果集拼成 CSV/表格会误导）：去掉 --format/--csv/--human")
 	}
@@ -140,7 +145,7 @@ func QueryBatch(arg string, ent, timeout int, route string) error {
 	defer sess.Close()
 
 	start := time.Now()
-	items, failed := runBatchQueries(context.Background(), sess, stmts, timeout)
+	items, failed := runBatchQueries(context.Background(), sess, stmts, timeout, maxRows)
 	return printBatchResult(cfg, sess, note, items, failed, time.Since(start).Seconds())
 }
 
@@ -168,6 +173,15 @@ func printBatchResult(cfg *debug.Config, sess *sqlSession, note string, items []
 	notes := []string{"批量：top-level totalRows/returned 是语句条数，逐条行数看 items[].totalRows/rows"}
 	if note != "" {
 		notes = append(notes, note)
+	}
+	trunc := 0
+	for _, it := range items {
+		if it.Truncated && it.TruncReason == "rows" {
+			trunc++
+		}
+	}
+	if trunc > 0 {
+		notes = append(notes, fmt.Sprintf("有 %d 条被行数上限截断（看 items[].notes / --max-rows）", trunc))
 	}
 	if failed > 0 {
 		notes = append(notes, fmt.Sprintf("%d/%d 条失败（看 items[].ok / code / error）；单条失败不拖垮整批", failed, len(items)))

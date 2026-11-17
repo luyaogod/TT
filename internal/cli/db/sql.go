@@ -52,6 +52,43 @@ func normalizeSQLRoute(route string) string {
 	return route
 }
 
+// `tt db sql` 的返回行数上限：默认与 safesql.MaxRows 一致（保持老行为），
+// 但可以显式放宽到 sqlMaxRowsMax —— 上限是"保护库与调用方上下文"，不是"只准看 200 行"。
+const (
+	sqlMaxRowsDefault = 200
+	sqlMaxRowsMax     = 5000
+)
+
+// clampMaxRows 归一 --max-rows：<=0 用默认，超过硬上限直接拒（不静默夹到上限，
+// 否则调用方会以为"我要的 100000 生效了"）。
+func clampMaxRows(n int) (int, error) {
+	if n <= 0 {
+		return safesql.MaxRows, nil
+	}
+	if n > sqlMaxRowsMax {
+		return 0, output.Errorf("USAGE", 2,
+			"--max-rows 上限 %d（收到 %d）；要更多行请用 COUNT(*)/聚合，或加 WHERE 分批取", sqlMaxRowsMax, n)
+	}
+	return n, nil
+}
+
+// addRowLimitNote 截断了就把"下一步怎么办"写进 notes。
+//
+// 截断本身已经在信封的 totalRows/returned/truncated 里，但调用方最容易犯的错是
+// 把 200 行当全集 —— 所以这里必须明说"还有更多"以及三条可执行的出路。
+func addRowLimitNote(res *debug.DBQueryResult) {
+	if res == nil || !res.Truncated || res.TruncReason != "rows" {
+		return
+	}
+	limit := res.RowLimit
+	if limit <= 0 {
+		limit = safesql.MaxRows
+	}
+	res.Notes = append(res.Notes, fmt.Sprintf(
+		"结果按上限 %d 行截断（库侧实际回来 %d 行，说明还有更多）：要总数用 COUNT(*)，要别的样本加 WHERE 收窄或 --max-rows（上限 %d）",
+		limit, res.TotalRows, sqlMaxRowsMax))
+}
+
 func newSQLCmd() *cobra.Command {
 	var (
 		file    string
@@ -59,10 +96,11 @@ func newSQLCmd() *cobra.Command {
 		entFlag int
 		timeout int
 		route   string
+		maxRows int
 	)
 	cmd := &cobra.Command{
 		Use:   `sql "<查询语句>"`,
-		Short: "执行一条只读 SQL（单条 SELECT/WITH；只读事务；最多 200 行）",
+		Short: "执行一条只读 SQL（单条 SELECT/WITH；只读事务；默认最多 200 行，--max-rows 可放宽到 5000）",
 		Long: `对指定环境的库执行一条**只读** SQL，用来回答"这条业务数据到底有没有/是什么"。
 
   tt db sql --at 主机109@99 "select bmaa001,bmaastus from bmaa_t where bmaa001='FCPU010100003'"
@@ -116,7 +154,9 @@ grep -v '^# ' 切下去就是一个标准 CSV（逗号/引号/换行按 RFC4180 
 限制（都是刻意的，两条路线一致）：
   - 只允许**单条** SELECT / WITH；写操作、DDL、PL/SQL 块、多语句、sqlplus 命令一律拒绝；
   - 库会话是只读事务，常规写会被库自己挡回去；
-  - **最多回 200 行**，totalRows 是下界（库侧故意多取一行判"还有更多"）；要更多请加 WHERE 收窄。
+  - **默认最多回 200 行**（--max-rows N 可放到 5000；0 或负数按默认），totalRows 是下界
+    （库侧故意多取一行判"还有更多"）。被截断时 notes 里会写清"还有更多"以及三条出路：
+    要总数用 COUNT(*)、要别的样本加 WHERE 收窄、确要更多行用 --max-rows。**别把 200 行当全集**。
 
 不需要 tt serve 在跑；环境/企业用 --at 点名（不知道填什么：tt db sql --at-list）。`,
 		Args: cobra.MaximumNArgs(1),
@@ -139,12 +179,16 @@ grep -v '^# ' 切下去就是一个标准 CSV（逗号/引号/换行按 RFC4180 
 				if sqlText != "" || file != "" {
 					return fmt.Errorf("--batch 与「位置语句 / --file」三选一")
 				}
-				return QueryBatch(batch, entOf(entFlag), timeout, route)
+				n, err := clampMaxRows(maxRows)
+				if err != nil {
+					return err
+				}
+				return QueryBatch(batch, entOf(entFlag), timeout, route, n)
 			}
 			if sqlText == "" {
 				return fmt.Errorf(`需要一条查询语句（见 tt db sql --help），或用 --file / --batch 指定语句来源`)
 			}
-			return QueryOnce(sqlText, entOf(entFlag), timeout, route)
+			return QueryOnce(sqlText, entOf(entFlag), timeout, route, maxRows)
 		},
 	}
 	cmd.Flags().StringVar(&file, "file", "", "从本地文件读语句（与位置参数二选一）")
@@ -152,6 +196,8 @@ grep -v '^# ' 切下去就是一个标准 CSV（逗号/引号/换行按 RFC4180 
 		"批量：JSON 数组 [{id?,sql}] 的文件路径（- = stdin）；一次建连跑 N 条，只输出 JSON")
 	cmd.Flags().IntVar(&entFlag, "ent", 0, "企业编号（也可用 --at <环境>@<企业>）")
 	cmd.Flags().IntVar(&timeout, "timeout", 0, "查询超时秒数（默认 30，上限 120）")
+	cmd.Flags().IntVar(&maxRows, "max-rows", sqlMaxRowsDefault,
+		fmt.Sprintf("最多回 N 行（默认 %d，上限 %d）", sqlMaxRowsDefault, sqlMaxRowsMax))
 	cmd.Flags().StringVar(&route, "route", SQLRouteAuto,
 		"执行路线: auto(直连优先,建连失败回退) | direct(只直连) | server(服务器 sqlplus)")
 	return cmd
@@ -188,11 +234,16 @@ func prepareTarget(ent int, route string) (*debug.Config, error) {
 //
 // route 为空按 server 处理：旧调用方（tt debug sql）走的还是服务器 sqlplus 那一条，
 // 不能让一个隐藏的兼容命令悄悄换掉执行方式与取值格式。
-func QueryOnce(sqlText string, ent, timeout int, route string) error {
+// maxRows <=0 = 默认 200（旧调用方不带这个参数时行为一字不变）。
+func QueryOnce(sqlText string, ent, timeout int, route string, maxRows int) error {
 	route = normalizeSQLRoute(route)
 	// 只读闸门先行：拒绝要退 3（“这句不让查”），与“连不上/查出错”（4）分开。
 	if err := safesql.Check(sqlText); err != nil {
 		return output.Errorf("SQL_REJECTED", 3, "%v", err)
+	}
+	limit, err := clampMaxRows(maxRows)
+	if err != nil {
+		return err
 	}
 	cfg, err := prepareTarget(ent, route)
 	if err != nil {
@@ -204,10 +255,11 @@ func QueryOnce(sqlText string, ent, timeout int, route string) error {
 	}
 	defer sess.Close()
 
-	res, err := sess.Query(context.Background(), sqlText, timeout)
+	res, err := sess.Query(context.Background(), sqlText, timeout, limit)
 	if err != nil {
 		return output.Errorf("DB_FAILED", 4, "%v", err)
 	}
+	addRowLimitNote(res)
 	applySessionMeta(res, cfg, sess, note)
 	return printSQLResult(res)
 }

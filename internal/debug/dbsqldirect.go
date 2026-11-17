@@ -97,10 +97,15 @@ func (d *DirectQuery) Dialect() string { return d.l.Connector().Type() }
 
 // Query 在这条会话上执行一条只读 SQL。
 func (d *DirectQuery) Query(ctx context.Context, sqlText string) (*DBQueryResult, error) {
+	return d.QueryN(ctx, sqlText, 0)
+}
+
+// QueryN 同 Query，但行数上限由调用方给（0 = safesql.MaxRows）。
+func (d *DirectQuery) QueryN(ctx context.Context, sqlText string, maxRows int) (*DBQueryResult, error) {
 	if err := safesql.Check(sqlText); err != nil {
 		return nil, err
 	}
-	return directQuery(ctx, d.l.Connector(), sqlText)
+	return directQueryN(ctx, d.l.Connector(), sqlText, maxRows)
 }
 
 // Close 释放连接（幂等）。
@@ -124,9 +129,18 @@ type directConnector interface {
 
 // directQuery 执行并套用与服务器路线相同的行数/字段上限。
 func directQuery(ctx context.Context, q directConnector, sqlText string) (*DBQueryResult, error) {
+	return directQueryN(ctx, q, sqlText, 0)
+}
+
+// directQueryN 同 directQuery，行数上限可显式给（0 = safesql.MaxRows）。
+func directQueryN(ctx context.Context, q directConnector, sqlText string, maxRows int) (*DBQueryResult, error) {
+	limit := maxRows
+	if limit <= 0 {
+		limit = safesql.MaxRows
+	}
 	sql := sqlText
 	serverLimited := false
-	if wrapped, ok := safesql.WrapRowLimit(q.Type(), sqlText); ok {
+	if wrapped, ok := safesql.WrapRowLimitN(q.Type(), sqlText, limit); ok {
 		sql, serverLimited = wrapped, true
 	}
 
@@ -141,15 +155,19 @@ func directQuery(ctx context.Context, q directConnector, sqlText string) (*DBQue
 		Rows:          rows,
 		TotalRows:     len(rows),
 		ServerLimited: serverLimited,
+		RowLimit:      limit,
 		Elapsed:       time.Since(start).Seconds(),
 	}
 	if !serverLimited {
-		res.Notes = append(res.Notes,
-			"未在数据库侧限流(该语句无法安全包装:以 WITH 开头,或自带行限制),行数上限由客户端截断")
+		res.Notes = append(res.Notes, fmt.Sprintf(
+			"未在数据库侧限流(该语句无法安全包装:以 WITH 开头,或自带行限制)，所以这次的行数上限 %d **没有生效**：这条语句回多少行就是多少行；要控制输出请自己加 ROWNUM/LIMIT，或改成可包装的单条 SELECT",
+			limit))
 	}
 	// 包装时多取了一行，专门用来判"还有更多"——与服务器路线同一条规则。
-	if serverLimited && len(rows) > safesql.MaxRows {
-		res.Rows = rows[:safesql.MaxRows]
+	// 只对**真在库侧限了行**的结果截断：无法包装（WITH / 自带 LIMIT）的语句维持
+	// 旧契约"多少行回多少行"，不许悄悄改行为（见 TestDirectQueryUnwrappableWithStaysUnlimited）。
+	if serverLimited && len(rows) > limit {
+		res.Rows = rows[:limit]
 		res.Truncated = true
 		res.TruncReason = "rows"
 	}
