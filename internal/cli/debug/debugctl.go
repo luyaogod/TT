@@ -1615,7 +1615,8 @@ var debugSQLCmd = &cobra.Command{
 		if ent <= 0 {
 			return fmt.Errorf("需要 --at <环境>@<企业>（或 --env + --ent）：企业编号决定用哪个账号")
 		}
-		return cdb.QueryOnce(sqlText, ent, dbgTimeout, cdb.SQLRouteServer)
+		// maxRows=0：旧命令没有 --max-rows，走 safesql.MaxRows（200）——与迁移前一字不差。
+		return cdb.QueryOnce(sqlText, ent, dbgTimeout, cdb.SQLRouteServer, 0)
 	},
 }
 

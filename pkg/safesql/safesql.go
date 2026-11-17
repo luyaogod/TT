@@ -336,6 +336,18 @@ func isWordRune(r rune) bool {
 //
 // 注意:行数上限限的是**返回行数,不是工作量**。`count(*)` 与笛卡尔积照样能把库跑满。
 func WrapRowLimit(dialect, sql string) (string, bool) {
+	return WrapRowLimitN(dialect, sql, MaxRows)
+}
+
+// WrapRowLimitN 与 WrapRowLimit 同义,但行数上限由调用方给(limit<=0 时退回 MaxRows)。
+//
+// 为什么要能改:MaxRows 是"默认有界",不是"永远只准看这么多" —— 调用方要拿
+// 明细却只能拿到 200 行、且**不知道被砍过**,就会把"样本"当"全集"下结论。
+// 现在上限可显式放宽(见 tt db sql --max-rows),同时让截断这件事可见。
+func WrapRowLimitN(dialect, sql string, limit int) (string, bool) {
+	if limit <= 0 {
+		limit = MaxRows
+	}
 	code := Clean(sql)
 	if code == "" {
 		return sql, false
@@ -352,8 +364,8 @@ func WrapRowLimit(dialect, sql string) (string, bool) {
 	// 而字面量内容是**保留**的(Normalize 会掏空字面量,那是给扫描用的,拿去执行会丢值)。
 	switch dialect {
 	case "kingbase":
-		return fmt.Sprintf("SELECT * FROM (%s) _tdbg_cap LIMIT %d", code, MaxRows+1), true
+		return fmt.Sprintf("SELECT * FROM (%s) _tdbg_cap LIMIT %d", code, limit+1), true
 	default: // oracle
-		return fmt.Sprintf("SELECT * FROM (%s) WHERE ROWNUM <= %d", code, MaxRows+1), true
+		return fmt.Sprintf("SELECT * FROM (%s) WHERE ROWNUM <= %d", code, limit+1), true
 	}
 }

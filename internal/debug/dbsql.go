@@ -57,9 +57,10 @@ type DBQueryResult struct {
 	Dialect       string     `json:"dialect"`
 	Columns       []string   `json:"columns"`
 	Rows          [][]string `json:"rows"`
-	TotalRows     int        `json:"totalRows"` // 裁剪前数据库实际回来的行数(包装后最多 MaxRows+1)
+	TotalRows     int        `json:"totalRows"` // 裁剪前数据库实际回来的行数(包装后最多 RowLimit+1)
 	Truncated     bool       `json:"truncated"` // 有没有被裁
 	TruncReason   string     `json:"truncReason,omitempty"`
+	RowLimit      int        `json:"rowLimit,omitempty"` // 本次生效的行数上限(默认 safesql.MaxRows)
 	ServerLimited bool       `json:"serverLimited"` // 有没有在库侧限行(见 WrapRowLimit 的说明)
 	LocalPath     string     `json:"localPath,omitempty"`
 	SpillPartial  bool       `json:"spillPartial,omitempty"` // 落本地那份自己也被上限截断了
@@ -118,6 +119,10 @@ type ReadonlyQueryReq struct {
 	SQL     string
 	Ent     int // 0 = 用会话/配置的默认企业
 	Timeout int // 秒;0 = 默认
+	// MaxRows 回给调用方的行数上限;0 = safesql.MaxRows。
+	// 它是"上限可显式放宽",不是"永远只准看这么多":调用方要明细时能拿到更多，
+	// 但同时必须能看出自己被截断过（见 DBQueryResult.Truncated / RowLimit）。
+	MaxRows int
 }
 
 // RunReadonlyQuery 执行一条只读查询。
@@ -148,9 +153,13 @@ func (m *Manager) RunReadonlyQuery(conn *host.SSHConn, req ReadonlyQueryReq) (*D
 	}
 
 	// 库侧限行:能证安全才包装,包不了就如实标注
+	limit := req.MaxRows
+	if limit <= 0 {
+		limit = safesql.MaxRows
+	}
 	sql := req.SQL
 	serverLimited := false
-	if wrapped, ok := safesql.WrapRowLimit(d.conn.Type, req.SQL); ok {
+	if wrapped, ok := safesql.WrapRowLimitN(d.conn.Type, req.SQL, limit); ok {
 		sql = strings.TrimSuffix(wrapped, ";")
 		serverLimited = true
 	}
@@ -206,11 +215,11 @@ func (m *Manager) RunReadonlyQuery(conn *host.SSHConn, req ReadonlyQueryReq) (*D
 		// SSH 主机取**实际连上的那条连接**(不是配置里的当前环境),库地址取
 		// 实际执行用的那条连接(d.conn),两者才是这次查询真正落脚的地方。
 		Env: m.cfg.EnvName(), SSHHost: conn.Cfg().Host, Zone: d.zone, DBTarget: d.conn.Address(),
-		Dialect: d.conn.Type, ServerLimited: serverLimited, Elapsed: time.Since(start).Seconds(),
+		Dialect: d.conn.Type, ServerLimited: serverLimited, RowLimit: limit, Elapsed: time.Since(start).Seconds(),
 	}
 	if !serverLimited {
 		res.Notes = append(res.Notes,
-			fmt.Sprintf("未在数据库侧限流(该语句无法安全包装:以 WITH 开头,或自带行限制),行数上限由客户端截断"))
+			fmt.Sprintf("未在数据库侧限流(该语句无法安全包装:以 WITH 开头,或自带行限制)，所以这次的行数上限 %d **没有生效**：这条语句回多少行就是多少行；要控制输出请自己加 ROWNUM/LIMIT，或改成可包装的单条 SELECT", limit))
 	}
 
 	cols, rows, err := parseSQLOut(d.conn.Type, out)
@@ -219,9 +228,11 @@ func (m *Manager) RunReadonlyQuery(conn *host.SSHConn, req ReadonlyQueryReq) (*D
 	}
 	res.Columns = cols
 	res.TotalRows = len(rows)
-	// 包装时多取了一行,专门用来判"还有更多"
-	if serverLimited && len(rows) > safesql.MaxRows {
-		rows = rows[:safesql.MaxRows]
+	// 包装时多取了一行,专门用来判"还有更多";只对**真在库侧限了行**的结果截断 ——
+	// 无法包装的语句(WITH / 自带 LIMIT)维持旧契约"多少行回多少行"(见
+	// TestDirectQueryUnwrappableWithStaysUnlimited),并在 notes 里说明上限没生效。
+	if serverLimited && len(rows) > limit {
+		rows = rows[:limit]
 		res.Truncated = true
 		res.TruncReason = "rows"
 	}

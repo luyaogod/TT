@@ -75,12 +75,12 @@ func openSession(cfg *debug.Config, ent int, route string) (*sqlSession, string,
 	return &sqlSession{ent: ent, ssh: conn, mgr: debug.NewManager(cfg)}, fallbackNote, nil
 }
 
-// Query 在这条会话上跑一条只读 SQL。
-func (s *sqlSession) Query(ctx context.Context, sqlText string, timeout int) (*debug.DBQueryResult, error) {
+// Query 在这条会话上跑一条只读 SQL；maxRows 是回给调用方的行数上限（0 = 默认 200）。
+func (s *sqlSession) Query(ctx context.Context, sqlText string, timeout, maxRows int) (*debug.DBQueryResult, error) {
 	if s.direct != nil {
-		return s.direct.Query(ctx, sqlText)
+		return s.direct.QueryN(ctx, sqlText, maxRows)
 	}
-	res, err := s.mgr.RunReadonlyQuery(s.ssh, debug.ReadonlyQueryReq{SQL: sqlText, Ent: s.ent, Timeout: timeout})
+	res, err := s.mgr.RunReadonlyQuery(s.ssh, debug.ReadonlyQueryReq{SQL: sqlText, Ent: s.ent, Timeout: timeout, MaxRows: maxRows})
 	if err != nil {
 		return nil, err
 	}

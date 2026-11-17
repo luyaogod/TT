@@ -7,6 +7,7 @@ package safesql
 // "该拒的一条都不能漏"(漏了就是真出事),绕过尝试那一组尤其要看。
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -226,5 +227,42 @@ func TestWrapRowLimit(t *testing.T) {
 	}
 	if !strings.Contains(got, "select a from t") {
 		t.Errorf("语句本体丢了: %s", got)
+	}
+}
+
+// WrapRowLimitN 的契约：上限由调用方给，且**多取一行**用来判"还有更多"。
+func TestWrapRowLimitN(t *testing.T) {
+	// 显式上限要比默认值大：包装里出现的应该是 limit+1，而不是 MaxRows+1。
+	got, wrapped := WrapRowLimitN("oracle", "select a from t", 5000)
+	if !wrapped {
+		t.Fatal("普通 SELECT 应当被包装")
+	}
+	if !strings.Contains(got, "ROWNUM <= 5001") {
+		t.Errorf("应按调用方给的上限多取一行: %s", got)
+	}
+	if strings.Contains(got, "201") {
+		t.Errorf("不该退回默认上限: %s", got)
+	}
+	// 收紧也生效（"先看 5 行样例"）。
+	if got, _ := WrapRowLimitN("oracle", "select a from t", 5); !strings.Contains(got, "ROWNUM <= 6") {
+		t.Errorf("收紧到 5 行时应多取一行: %s", got)
+	}
+	if got, _ := WrapRowLimitN("kingbase", "select a from t", 5); !strings.Contains(got, "LIMIT 6") {
+		t.Errorf("金仓同样按上限多取一行: %s", got)
+	}
+	// limit<=0 = 默认（与 WrapRowLimit 一致）。
+	got, _ = WrapRowLimitN("oracle", "select a from t", 0)
+	if !strings.Contains(got, fmt.Sprintf("ROWNUM <= %d", MaxRows+1)) {
+		t.Errorf("0 应退回默认上限: %s", got)
+	}
+	// 包不了的情形与 WrapRowLimit 一致，且要让调用方能据此标注"上限没生效"。
+	for _, s := range []string{
+		"with c as (select 1 from dual) select * from c",
+		"select a from t fetch first 10 rows only",
+		"select a from t limit 10",
+	} {
+		if _, w := WrapRowLimitN("oracle", s, 10); w {
+			t.Errorf("不该被包装: %s", s)
+		}
 	}
 }

@@ -28,7 +28,7 @@ func TestSQLRouteValid(t *testing.T) {
 }
 
 func TestQueryOnceRejectsUnknownRoute(t *testing.T) {
-	err := QueryOnce("select 1 from dual", 99, 30, "sqlplus")
+	err := QueryOnce("select 1 from dual", 99, 30, "sqlplus", 0)
 	var oe *output.Error
 	if !errors.As(err, &oe) {
 		t.Fatalf("应是带码的错误，得到 %T: %v", err, err)
@@ -43,7 +43,7 @@ func TestQueryOnceRejectsUnknownRoute(t *testing.T) {
 
 func TestQueryOnceRejectsMissingEntBeforeAnythingElse(t *testing.T) {
 	// 没有企业编号就不该走任何路线（决定用哪个账号的是它）。
-	err := QueryOnce("select 1 from dual", 0, 30, SQLRouteAuto)
+	err := QueryOnce("select 1 from dual", 0, 30, SQLRouteAuto, 0)
 	var oe *output.Error
 	if !errors.As(err, &oe) || oe.Exit != 2 {
 		t.Fatalf("缺 ENT 应是 USAGE 退 2，得到 %v", err)
