@@ -81,14 +81,14 @@ func TestUIHandlerServesPageWithSecurityHeaders(t *testing.T) {
 		t.Errorf("index.html 该 no-cache，得 %q", got)
 	}
 
-	// 带哈希的静态资源可长缓存；普通文件不长缓存。
+	// 带哈希的静态资源可长缓存；普通文件只许协商缓存（no-cache），不能走启发式缓存。
 	hashed := do(h, "GET", "/plugins/com.example.ui/ui/assets/app-DCXJThG6.js", "127.0.0.1:5000")
 	if hashed.Code != 200 || !strings.Contains(hashed.Header().Get("Cache-Control"), "immutable") {
 		t.Errorf("带哈希资源该 immutable，得 %d %q", hashed.Code, hashed.Header().Get("Cache-Control"))
 	}
 	plain := do(h, "GET", "/plugins/com.example.ui/ui/note.txt", "127.0.0.1:5000")
-	if plain.Code != 200 || plain.Header().Get("Cache-Control") != "" {
-		t.Errorf("普通文件不该长缓存: %d %q", plain.Code, plain.Header().Get("Cache-Control"))
+	if plain.Code != 200 || plain.Header().Get("Cache-Control") != "no-cache" {
+		t.Errorf("普通文件该 no-cache: %d %q", plain.Code, plain.Header().Get("Cache-Control"))
 	}
 }
 

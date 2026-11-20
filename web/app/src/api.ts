@@ -349,6 +349,8 @@ export interface UpdateState {
 export interface PluginAdminSummary {
   id: string
   name?: string
+  /** 清单里的一句话说明；老安装记录没有时后端会从版本目录的 plugin.json 补。 */
+  description?: string
   version: string
   previousVersion?: string
   enabled: boolean

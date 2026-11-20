@@ -97,8 +97,9 @@ func (h *WebHandler) serveUI(w http.ResponseWriter, r *http.Request) {
 	info, _ := f.Stat()
 
 	h.setUIHeaders(w, full)
-	// index.html 每次都要最新（升级后不能拿到旧页面）；带哈希的静态资源可长缓存。
-	if filepath.Base(full) == "index.html" {
+	// 非哈希文件每次回源：插件同版本重装（版本号不变）也要立刻拿到新入口 js 与页面；
+	// 带哈希的产物由 setUIHeaders 设成 immutable。
+	if !hashedName(filepath.Base(full)) {
 		w.Header().Set("Cache-Control", "no-cache")
 	}
 	http.ServeContent(w, r, filepath.Base(full), info.ModTime(), f)

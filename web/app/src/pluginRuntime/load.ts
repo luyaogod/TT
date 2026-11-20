@@ -4,7 +4,23 @@
 // /* @vite-ignore */ 的动态 import：插件代码**不进宿主 bundle**，运行时才取。
 
 import * as React from 'react'
-import { Checkbox } from '../../../shared/ui-radix'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  Checkbox,
+  Progress,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../../shared/ui-radix'
 import { registerSlot } from './registry'
 import type { SlotRegistration } from './types'
 
@@ -16,7 +32,29 @@ export interface PluginUIContext {
   /** 注册一个槽位组件；页面卸载时宿主会清掉本插件的全部注册。 */
   slot: (slot: string, reg: SlotRegistration) => void
   /** 宿主提供的 shadcn/Radix 组件（与宿主共用同一个 React 实例）。 */
-  ui: { Checkbox: typeof Checkbox }
+  ui: {
+    Checkbox: typeof Checkbox
+    Progress: typeof Progress
+    /** shadcn Select 的五个部件：Root/Trigger/Value/Content/Item。 */
+    Select: {
+      Root: typeof Select
+      Trigger: typeof SelectTrigger
+      Value: typeof SelectValue
+      Content: typeof SelectContent
+      Item: typeof SelectItem
+    }
+    /** shadcn AlertDialog：确认弹窗用，别再让插件弹原生 window.confirm。 */
+    AlertDialog: {
+      Root: typeof AlertDialog
+      Content: typeof AlertDialogContent
+      Header: typeof AlertDialogHeader
+      Footer: typeof AlertDialogFooter
+      Title: typeof AlertDialogTitle
+      Description: typeof AlertDialogDescription
+      Action: typeof AlertDialogAction
+      Cancel: typeof AlertDialogCancel
+    }
+  }
   log: (...args: unknown[]) => void
 }
 
@@ -41,7 +79,27 @@ export function activatePlugin(pluginId: string, version: string, mod: PluginCli
     version,
     React,
     slot: (slot, reg) => { registerSlot(pluginId, slot, reg) },
-    ui: { Checkbox },
+    ui: {
+      Checkbox,
+      Progress,
+      Select: {
+        Root: Select,
+        Trigger: SelectTrigger,
+        Value: SelectValue,
+        Content: SelectContent,
+        Item: SelectItem,
+      },
+      AlertDialog: {
+        Root: AlertDialog,
+        Content: AlertDialogContent,
+        Header: AlertDialogHeader,
+        Footer: AlertDialogFooter,
+        Title: AlertDialogTitle,
+        Description: AlertDialogDescription,
+        Action: AlertDialogAction,
+        Cancel: AlertDialogCancel,
+      },
+    },
     log: (...args: unknown[]) => { console.log(`[plugin:${pluginId}]`, ...args) },
   }
   const ret = mod.register?.(context)

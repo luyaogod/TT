@@ -179,3 +179,41 @@ export const CellInput = React.forwardRef<HTMLInputElement, React.InputHTMLAttri
 // 用 ring 语义 token 而不是写死的颜色:合并前两套 SPA 各写了一份 sky 色,
 // 其中一份在暗色下对比度不够。
 export const CELL_EDITING = 'focus-within:ring-1 focus-within:ring-inset focus-within:ring-ring'
+
+/**
+ * 开关：`role="switch"` 的按钮，不引 Radix。
+ *
+ * 与 Checkbox 的分工：多选/确认用 Checkbox；"这一项现在是开还是关"用 Switch ——
+ * 它表达的是**立即生效的状态**，点一下就该落库（调用方在 onCheckedChange 里做异步）。
+ * 轨道用 primary/muted 语义 token，滑块用 background，亮暗两套主题都不写死颜色。
+ */
+export function Switch({ checked, onCheckedChange, className, ...props }:
+  Omit<React.ComponentProps<'button'>, 'onChange'> & {
+    checked: boolean
+    onCheckedChange: (checked: boolean) => void
+  }) {
+  return (
+    <button
+      {...props}
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onCheckedChange(!checked)}
+      className={cn(
+        'relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-transparent transition-colors outline-none',
+        'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+        'disabled:cursor-not-allowed disabled:opacity-40',
+        checked ? 'bg-primary' : 'bg-muted-foreground/30',
+        className,
+      )}
+    >
+      <span
+        aria-hidden
+        className={cn(
+          'pointer-events-none block h-4 w-4 rounded-full bg-background shadow-sm transition-transform',
+          checked ? 'translate-x-[18px]' : 'translate-x-0.5',
+        )}
+      />
+    </button>
+  )
+}
