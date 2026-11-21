@@ -29,11 +29,11 @@ import (
 
 	"github.com/luyaogod/TT/internal/config"
 	"github.com/luyaogod/TT/internal/connsvc"
-	"github.com/luyaogod/TT/pkg/dbconfig"
 	"github.com/luyaogod/TT/internal/designer"
 	"github.com/luyaogod/TT/internal/envmove"
 	"github.com/luyaogod/TT/internal/host"
 	"github.com/luyaogod/TT/internal/plugin"
+	"github.com/luyaogod/TT/pkg/dbconfig"
 )
 
 // DefaultListen 是 serve 未显式配置监听地址时的默认地址。
@@ -68,6 +68,13 @@ type Options struct {
 	// 它不再是"另一个页面"——合并前字典页有自己的一套 SPA，两套页面各占一个挂载前缀；
 	// 那个页面已并入统一设置页，于是它的端点直接挂在共享层 /api/ 下。
 	Dict http.Handler
+
+	// DevData 开发资料（给 model 准备的原材料：规格库/模板树/按程序成套）。
+	//
+	// **独立前缀** `/api/devdata/`，由它独占 —— 不与字典侧 /api/ 的具名路由重叠，
+	// 也不塞进字典包里（ADR-01：读写两条线在包、前缀、目录、命令组四个层面都分开）。
+	// nil = 未接入（该前缀 404，与 Debug/Dict 同规则）。
+	DevData http.Handler
 
 	// Reloaders 配置被本服务改写后需要重新加载内存态的子系统。
 	//
@@ -245,6 +252,15 @@ func (s *Server) routes() {
 		m.Handle("/api/", s.opt.Dict)
 	}
 
+	// ---- 开发资料：独立前缀 /api/devdata/（不参与上面的 /api/ catch-all） ----
+	//
+	// 为什么必须是独立前缀：字典侧的 /api/ 是一个兜底（未命中就 404 JSON），把
+	// devdata 挂在它下面，"接口不存在"与"devdata 没接进来"会混成同一种 404。
+	// 独立子树之后，两条线的路由各自可读，也不会因为字典侧改路由而互相影响。
+	if s.opt.DevData != nil {
+		m.Handle("/api/devdata/", s.opt.DevData)
+	}
+
 	// ---- Host API（ConnectRPC）：独立前缀，不参与 /api/ 的 catch-all ----
 	//
 	// 为什么要独立前缀：字典子系统的 /api/ 前缀是一个 catch-all（未命中就 404 JSON），
@@ -377,6 +393,7 @@ func (s *Server) hHostsGet(w http.ResponseWriter, r *http.Request) {
 		"query":   root.Query,
 		"mirror":  root.Mirror,
 		"dict":    root.Dict,
+		"devdata": root.DevData,
 		"sync":    root.Sync,
 		"tdev":    root.Tdev,
 		"version": s.opt.Version,
@@ -388,14 +405,15 @@ func (s *Server) hHostsGet(w http.ResponseWriter, r *http.Request) {
 // 只带要改的节：nil 表示"这一节不动"。这样设置页的各张卡片各改各的节时不会互相覆盖 ——
 // 原来 TDebug 的 hSettingsPut 就只替换自己那一节，这里沿用同样的约定。
 type hostsPutReq struct {
-	Hosts  *config.Hosts         `json:"hosts,omitempty"`
-	Listen *string               `json:"listen,omitempty"`
-	Debug  *config.DebugSettings `json:"debug,omitempty"`
-	Query  *config.QuerySettings `json:"query,omitempty"`
-	Mirror *config.MirrorSettings
-	Dict   *config.DictSettings
-	Sync   *config.SyncSettings
-	Tdev   *config.TdevSettings
+	Hosts   *config.Hosts         `json:"hosts,omitempty"`
+	Listen  *string               `json:"listen,omitempty"`
+	Debug   *config.DebugSettings `json:"debug,omitempty"`
+	Query   *config.QuerySettings `json:"query,omitempty"`
+	Mirror  *config.MirrorSettings
+	Dict    *config.DictSettings
+	DevData *config.DevDataSettings
+	Sync    *config.SyncSettings
+	Tdev    *config.TdevSettings
 }
 
 func (s *Server) hHostsPut(w http.ResponseWriter, r *http.Request) {
@@ -549,6 +567,12 @@ func (s *Server) hHostsPut(w http.ResponseWriter, r *http.Request) {
 					return nil
 				}
 				return putSection(root, "dict", req.Dict)
+			}},
+			{"devdata", func() error {
+				if req.DevData == nil {
+					return nil
+				}
+				return putSection(root, "devdata", req.DevData)
 			}},
 			{"sync", func() error {
 				if req.Sync == nil {
@@ -828,7 +852,11 @@ func carryOver(from, to map[string]any, keys []string) {
 }
 
 // ungovernedEnvKeys 配置页表单没有输入控件的**环境级**子键，保存时需从旧配置补回。
-var ungovernedEnvKeys = []string{"launchArgs", "watchdogSeconds"}
+//
+// devdataDir：设置页的「开发资料」分区只展示与拉取，不提供改路径的输入框（那是
+// "出问题才动的运维旋钮"，缺省值适用于所有正常环境）。不补回的话，打开环境页点一次
+// 保存，手工写的 devdataDir 会静默消失，而那之后所有材料都会悄悄地落到缺省目录。
+var ungovernedEnvKeys = []string{"launchArgs", "watchdogSeconds", "devdataDir"}
 
 // ungovernedDBKeys 配置页表单没有输入控件的 **db 级**子键，保存时需从旧配置补回。
 var ungovernedDBKeys = []string{"viaSsh"}

@@ -134,6 +134,34 @@ source，不靠 origin 字符串（`pluginProtocol.ts` 顶部有完整说明）�
 **连接**：与后端的实时通道是一条 WebSocket，**必须带接口前缀** —— 共享层也有同名路径，
 不带前缀会落到共享层去。事件到达后进状态容器，视图只读容器。
 
+## 设置页分区：开发资料（`DevDataView`）
+
+设置页有七个分区，路由键与中文名在 `routing.ts` 的 `SETTINGS_SECTIONS` 一处定义
+（左树与深链校验共用）。「开发资料」（`#settings/devdata`）排在「数据字典」之后，
+但两者是**两件事**：
+
+| | 数据字典（`data-dict`） | 开发资料（`devdata`） |
+|---|---|---|
+| 给谁用 | 查询（读侧） | **model**（原材料） |
+| 后端 | `/api/dbsync`、`/api/mirror` | `/api/devdata/*` |
+| 粒度 | 整库 / 全量镜像 | 共用资料 + **按程序成套** |
+
+页面本体在 `DevDataView.tsx`（`SettingsView.tsx` 只加一行渲染 —— 那个文件已经 142 KB，
+再往里堆就会变成"找一个字段要先滚 3000 行"）。组件内部：
+
+- **环境选择**默认第一个（与其它分区一致），不写全局 store；
+- **共用资料卡片**：规格表 / 模板 / 占用 / 上次同步四个数 + 「同步共用资料 / 仅规格表 / 仅模板」；
+- **按需资料卡片**：模块（可空，自动推断）+ 程序 + 两个复选框（含设计稿 / 含 .42f）+ 拉取；
+- **已拉取列表**：程序 | 大小 | 拉取时间 | 状态（最新/已过期）| 核对 | 重新拉取 | 删除。
+
+轮询：任务在跑时 1 秒一次 `status`，**结束即停**；离开分区（组件卸载）也停手但
+**不取消任务**（拉一半去看别的分区是常见操作）。删除用 `AlertDialog` 二次确认 ——
+删材料不可撤销，与"清缓存"不是同一类动作。
+
+状态一律从 `/api/devdata/status` 来（默认不出网；「核对」才走 `?probe=1` 与
+`/api/devdata/check`）。前端不自己算"新不新"：stale 的判据在后端 manifest 里，
+两边各算一次迟早会说两套话。
+
 ## 接口客户端
 
 一个文件管全部 HTTP 调用，分两类：
@@ -200,7 +228,7 @@ cd web && npm run build         # 类型检查 + 打包
 | 改什么 | 会波及 |
 |---|---|
 | 状态容器的形状 | 全站视图；它同时被 Node 侧的检查项加载，**顶层不能碰 DOM**。容器里删字段/删联合成员（如侧栏 sheet 去掉 `session`）时，`store.test.mjs` 用 `setState` 灌的部分状态不会有编译期保护 —— 靠 `npm run build` 的 `tsc --noEmit` 找调用点 |
-| 路由键 | 深链接与设置页分区；键只有一份定义，别在别处再列一遍 |
+| 路由键 | 深链接与设置页分区；键只有一份定义，别在别处再列一遍。新增分区（如 `devdata`）要同时改 `SETTINGS_SECTIONS`、`SettingsView` 的渲染行与 `plugins.test.mjs` 的深链断言 |
 | 插件消息协议 | `pluginProtocol.ts` 的字段与 `pluginBridge.ts` 的校验是一对；改字段要同时改 `scripts/plugins.test.mjs`，并升 `BRIDGE_VERSION`（只有改语义/删字段才升，加可选字段留在 v1） |
 | 插件桥路径 | `/plugins/<id>/hostrpc/…` 与 `/plugins/<id>/rpc/…` 由后端转发；桥不经过 `/api/`，`DENIED_ADMIN_PATHS` 是必须保持的拒绝清单 |
 | 外壳的 Tab 键（`EnvTab` / `SessionTab`） | 路由的解析与生成、环境页/会话页、`routeView` 要一起改；键只有 `routing.ts` 一份定义 |

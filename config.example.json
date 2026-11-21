@@ -72,6 +72,10 @@
     "dir": ""
   },
 
+  "devdata": {
+    "dir": ""
+  },
+
   "sync": {
     "target": ""
   },

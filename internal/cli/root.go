@@ -27,6 +27,7 @@ import (
 	"github.com/luyaogod/TT/internal/cli/db"
 	"github.com/luyaogod/TT/internal/cli/debug"
 	"github.com/luyaogod/TT/internal/cli/dev"
+	devdata "github.com/luyaogod/TT/internal/cli/devdata"
 	"github.com/luyaogod/TT/internal/cli/dict"
 	"github.com/luyaogod/TT/internal/cli/file"
 	"github.com/luyaogod/TT/internal/cli/interfacecmd"
@@ -114,6 +115,7 @@ func init() {
 	)
 	dev.Register(rootCmd)
 	dict.Register(rootCmd)
+	devdata.Register(rootCmd)
 	session.Register(rootCmd)
 	interfacecmd.Register(rootCmd)
 	outline.Register(rootCmd)
