@@ -346,13 +346,17 @@ func parseCount(rows [][]string) (int64, error) {
 
 // OnlineProgramVersion 在线取某程序当前的有效版次（`MAX(DZAA002) WHERE DZAASTUS='Y'`）。
 //
+// identity="c"（客制材料）时优先取 `DZAA009='c'` 的版次，取不到再退回不限身份：
+// 客制版次通常停在签出那一刻，而标准侧会继续升版 —— 不限身份的 MAX 会把标准
+// 的新版次记到客制材料头上（见 fetch.go 的 materialIdentity）。
+//
 // 这是本包里唯一"查库取一个值"的地方，也是「查询默认在线」这条口径的落点：
 // 版本锚点**先问在线库**，只有在线取不到时才看本地共用资料（见 fetch.go 的
 // programVersionAnchor）。理由：镜像暂不启用（材料范围等 model 定型后再定），
 // 而"这个程序现在第几版"这件事本来就该以库为准。
 //
 // 程序名已过白名单校验，内联进 SQL 是安全的（与 dict 侧同样的做法）。
-func OnlineProgramVersion(ctx context.Context, e *config.NamedSsh, ent int, prog string) (int, error) {
+func OnlineProgramVersion(ctx context.Context, e *config.NamedSsh, ent int, prog, identity string) (int, error) {
 	if err := ValidProgName(prog); err != nil {
 		return 0, err
 	}
@@ -366,19 +370,38 @@ func OnlineProgramVersion(ctx context.Context, e *config.NamedSsh, ent int, prog
 		return 0, fmt.Errorf("取版次失败：连接器不可用")
 	}
 	_, rows, err := db.conn.Query(ctx, fmt.Sprintf(
-		"SELECT MAX(CAST(DZAA002 AS DECIMAL(10,0))) FROM DZAA_T WHERE DZAA001 = '%s' AND DZAASTUS = 'Y'",
+		"SELECT COALESCE(MAX(CASE WHEN DZAA009 = 'c' THEN CAST(DZAA002 AS DECIMAL(10,0)) END),0),"+
+			" COALESCE(MAX(CAST(DZAA002 AS DECIMAL(10,0))),0)"+
+			" FROM DZAA_T WHERE DZAA001 = '%s' AND DZAASTUS = 'Y'",
 		strings.TrimSpace(prog)))
 	if err != nil {
 		return 0, err
 	}
-	if len(rows) == 0 || len(rows[0]) == 0 || strings.TrimSpace(rows[0][0]) == "" {
+	if len(rows) == 0 || len(rows[0]) == 0 {
 		return 0, nil
 	}
-	var v int
-	if _, err := fmt.Sscanf(strings.TrimSpace(rows[0][0]), "%d", &v); err != nil {
-		return 0, fmt.Errorf("版次不是数字: %q", rows[0][0])
+	cust := parseVersionCell(rows[0], 0)
+	anyVer := parseVersionCell(rows[0], 1)
+	if identity == "c" && cust > 0 {
+		return cust, nil
 	}
-	return v, nil
+	return anyVer, nil
+}
+
+// parseVersionCell 取聚合结果里第 i 列并转成整数；空值/NULL 返回 0。
+func parseVersionCell(row []string, i int) int {
+	if i >= len(row) {
+		return 0
+	}
+	s := strings.TrimSpace(row[i])
+	if s == "" {
+		return 0
+	}
+	var v int
+	if _, err := fmt.Sscanf(s, "%d", &v); err != nil {
+		return 0
+	}
+	return v
 }
 
 // OpenTableSource 按环境配置打开规格表来源（客户端直连，支持 viaSsh 隧道）。

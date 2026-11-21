@@ -58,6 +58,8 @@
 
 落点根：`<data>/devdata/<env>/prog/<prog>/`。`<mod>` 为程序所属模块（如 `axmt500_wf` → `CXM`）。
 
+模块判定（2026-11-21 已实现，`internal/devdata/fetch.go: resolveModule`）：缺省取程序名前三位；若标准模块有 a→c 的客制模块（`axm`→`cxm`）且客制模块下有该程序的蓝图，则**取客制**（与 T100 转客制后从 `c**` 启动、TT debug 的启动目录判定同口径），并在 manifest 的 `warnings[]` 里写明"两份都有、取了客制"。只有 `erp/cxm/dzx` 目录在不算客制（客制模块目录一直都在）；`--module` 可强制指定。
+
 | 角色 | 源路径（`$TOP` 相对） | 落点 | 必需性 | 上限 / 备注 |
 |---|---|---|---|---|
 | 蓝图 `.tab` | `erp/<mod>/dzx/tab/<prog>.tab` | `prog/<prog>/dzx/<prog>.tab` | **必需**（缺 → 整套失败） | 单文件 64 MB |
@@ -541,7 +543,7 @@ P0 时只看了行数，P5 真机拉取时才暴露第二类体量问题：**11 
 | 4 | `mdl/xrp/` 是否纳入 | 文件数与用途未测 | 影响模板数与 M 侧体积 |
 | 5 | `mdl/` 其余 16 个顶层文件是否纳入 | plan 只明列 `ComboxItemSetting.xml` | 影响「模板 171」之外的口径 |
 | 6 | 每个程序是否都有 `.tap` | plan §4.4 要求齐全；未逐个验证 | 若某些程序无 `.tap`，需回改 plan（ADR-04/§2.5）再放宽 |
-| 7 | `prog` → `<mod>` 的映射来源 | plan 只给 `--module CXM` 可选参数 | 影响 fetch 的源路径拼装（不能靠猜） |
+| 7 | `prog` → `<mod>` 的映射来源 | **已解决（2026-11-21）**：前三位推断 + a→c 客制模块探测（客制模块下有该程序蓝图才切），`--module` 可覆盖；见 `internal/devdata/fetch.go` 的 `resolveModule` 与 `customModuleOf` | 客制材料不再静默拉成标准材料；版本锚点同时按 `DZAA009='c'` 取客制版次 |
 | 8 | 409 的 `code` 名 | plan 未写死 | 影响 HTTP 契约文档与前端判断 |
 | 9 | `DZ*` 表内容 `sha256` 的算法 | M manifest 要求每表 sha，plan 未规定对什么取 sha | 影响 M manifest 实现与幂等判断 |
 

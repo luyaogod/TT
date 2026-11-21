@@ -54,7 +54,11 @@ type FetchResult struct {
 	Env    string `json:"env"`
 	Prog   string `json:"prog"`
 	Module string `json:"module"`
-	Dir    string `json:"dir"`
+	// ModuleOrigin 这次取的是哪一侧：standard | custom | explicit（--module 指定）。
+	ModuleOrigin string `json:"moduleOrigin,omitempty"`
+	// ModuleAlt 另一侧也有该程序材料时，那一侧的模块名（此时已取客制）。
+	ModuleAlt string `json:"moduleAlt,omitempty"`
+	Dir       string `json:"dir"`
 	// Files 落盘文件清单（与 manifest.files 同形）。
 	Files []FileEntry `json:"files"`
 	// Missing 可选素材的缺失项（不进 missing 的就是完整）。
@@ -80,6 +84,48 @@ func GuessModule(prog string) string {
 		return ""
 	}
 	return p[:3]
+}
+
+// 模块判定结果：取哪个模块、为什么取它、另一侧是不是也有材料。
+//
+// 为什么不是只回一个模块名：标准/客制并存是常态，**选了哪一侧必须能说出来** ——
+// 静默选错（标准材料全套齐全、看起来完全正常）正是 fetch 最坏的失败模式。
+type moduleChoice struct {
+	Module string
+	// Origin standard | custom | explicit
+	Origin string
+	// Alt 另一侧也有该程序材料时的模块名（空 = 只有一侧）
+	Alt string
+}
+
+const (
+	moduleOriginStandard = "standard"
+	moduleOriginCustom   = "custom"
+	moduleOriginExplicit = "explicit"
+)
+
+// customModuleOf 把标准模块名换成 T100 的客制模块名：a→c（axm→cxm）。
+//
+// 只对 a 开头的业务模块成立 —— T100 的客制目录规则就是首字母 a→c
+// （`internal/debug` 的启动目录与断点文件名用的是同一条规则，r.t 的
+// `sadzi140_db_get_module_code_by_dgenv` 也是按 gzzj_t 把 A 模块换 C 模块）；
+// b?? 的 d?? 是**行业模块**，属于另一条轴，不在这里判。已经是 c 开头或非 a
+// 开头 → 空（不能把 cxm 再换成 cxm）。
+func customModuleOf(mod string) string {
+	if len(mod) < 2 || mod[0] != 'a' {
+		return ""
+	}
+	return "c" + mod[1:]
+}
+
+// tabSrc 蓝图角色在服务器上的路径。只按 role 找，不假设它排在 FetchRoles 第一位。
+func tabSrc(mod, prog string) string {
+	for _, r := range FetchRoles {
+		if r.Role == "tab" {
+			return r.SrcPath(mod, prog)
+		}
+	}
+	return fmt.Sprintf("erp/%s/dzx/tab/%s.tab", mod, prog)
 }
 
 // Fetch 执行一次按程序拉取。onProgress 可为 nil。
@@ -126,20 +172,28 @@ func Fetch(ctx context.Context, req FetchRequest, onProgress ProgressFunc) (*Fet
 		defer closeAll()
 	}
 
-	mod, err := resolveModule(ctx, src, prog, req.Module)
+	choice, err := resolveModule(ctx, src, prog, req.Module)
 	if err != nil {
 		return nil, err
 	}
 
 	m := NewManifest(KindFetch, e.Name)
 	m.Prog = prog
-	m.Module = mod
+	m.Module = choice.Module
 	m.TTVersion = req.TTVersion
 	m.Source.TopDir = src.Top()
 	m.Source.Zone = e.Zone
 	m.Source.Ent = req.Ent
 
-	res := &FetchResult{Env: e.Name, Prog: prog, Module: mod, Dir: progDir}
+	// 标准与客制两份材料都在：必须把"取了哪份"说出来，否则标准那份看起来同样完整。
+	if choice.Alt != "" {
+		m.AddWarning(fmt.Sprintf(
+			"标准模块 %s 与客制模块 %s 都有该程序的材料，已取客制 %s（T100 转客制后从 c 模块启动）；要标准材料请用 --module %s",
+			choice.Alt, choice.Module, choice.Module, choice.Alt))
+	}
+
+	res := &FetchResult{Env: e.Name, Prog: prog, Module: choice.Module,
+		ModuleOrigin: choice.Origin, ModuleAlt: choice.Alt, Dir: progDir}
 	roles := FetchRoles[:0:0]
 	for _, r := range FetchRoles {
 		if r.Form && !req.Form {
@@ -152,19 +206,19 @@ func Fetch(ctx context.Context, req FetchRequest, onProgress ProgressFunc) (*Fet
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		srcRel := r.SrcPath(mod, prog)
+		srcRel := r.SrcPath(choice.Module, prog)
 		rel := r.RelPath(prog)
 		report(Progress{Phase: "fetch", Message: "下载 " + srcRel, Done: i, Total: total, CurrentFile: rel})
 		st, err := src.Stat(ctx, srcRel)
 		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, os.ErrNotExist) {
+			if isNotExist(err) {
 				if r.Required {
 					// 必需项缺失：先分清"这个程序根本不存在"与"程序在、但那件材料没产"
 					// —— 前者是 404（调用方要改程序名），后者是 404 加一句具体缺什么。
 					// 半套材料一律不落盘：让 model 拿到一半会得出"看起来对"的错结论。
-					if !programExists(ctx, src, mod, prog) {
+					if !programExists(ctx, src, choice.Module, prog) {
 						return nil, fmt.Errorf("%w: 服务器模块 %s 下找不到程序 %s（tab/tgl/4gl 都没有）",
-							ErrProgNotFound, mod, prog)
+							ErrProgNotFound, choice.Module, prog)
 					}
 					return nil, fmt.Errorf("%w: 程序 %s 缺必需素材 %s（服务器上没有 %s）",
 						ErrProgNotFound, prog, rel, srcRel)
@@ -235,8 +289,10 @@ func Fetch(ctx context.Context, req FetchRequest, onProgress ProgressFunc) (*Fet
 		}
 	}
 
-	// 版本锚点：版次**在线查**（取不到才看本地镜像），模板版本来自本地共用资料
-	tv, dzaa := versionAnchors(ctx, req.CfgPath, e.Name, prog, req.Ent)
+	// 版本锚点：版次**在线查**（取不到才看本地镜像），模板版本来自本地共用资料。
+	// 客制材料按身份取版次（DZAA009='c'）：客制版次停在 5、标准升到 7 时，
+	// 不限身份的 MAX 会给出 7 —— 一个不属于这份材料的版次。
+	tv, dzaa := versionAnchors(ctx, req.CfgPath, e.Name, prog, req.Ent, materialIdentity(choice, prog))
 	m.Versions.TemplateVersions = tv
 	m.Versions.DZAA002 = dzaa
 	if len(tv) == 0 {
@@ -281,41 +337,113 @@ func programExists(ctx context.Context, src FileSource, mod, prog string) bool {
 	return false
 }
 
-// resolveModule 决定模块目录：显式给的必须存在，没给的按前三位推断并验证。
+// isNotExist 判"服务器上就是没有这个路径"（Stat 的两种 not-exist 形态）。
+func isNotExist(err error) bool {
+	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, os.ErrNotExist)
+}
+
+// moduleProbe 查一个模块下有没有这个程序的材料（只 Stat，不读内容）。
 //
-// 验证有两条判据，从宽到严：
-//  1. `erp/<mod>/dzx` 目录在 —— 模块装了就有；
-//  2. 蓝图文件本身在 —— 少数站点没有 dzx 目录（早期版本）。
+// 两个判据分开回：hasProg（蓝图在）与 installed（dzx 目录在）。分开的理由是
+// 标准侧与客制侧的用法不同：
+//   - 标准侧沿用旧语义：模块装过就算"推断成立"，蓝图真缺时由 fetch 报
+//     「缺必需素材」—— 比误报成"模块推断不出来"更好定位（后者会把人引去改
+//     --module，而真相是这个程序没产过蓝图）；
+//   - 客制侧必须 hasProg 才算命中：客制模块目录（erp/cxm）是为整个标准模块
+//     存在的，只要 dzx 在就认为"这个程序被客制了"，会把所有标准程序都误路由
+//     到 c 目录，而且材料看起来齐全 —— 那正是本轮要修掉的静默错误。
+func moduleProbe(ctx context.Context, src FileSource, mod, prog string) (hasProg, installed bool, err error) {
+	st, err := src.Stat(ctx, tabSrc(mod, prog))
+	switch {
+	case err == nil && !st.IsDir:
+		return true, true, nil
+	case err != nil && !isNotExist(err):
+		return false, false, err
+	}
+	st, err = src.Stat(ctx, "erp/"+mod+"/dzx")
+	switch {
+	case err == nil && st.IsDir:
+		return false, true, nil
+	case err != nil && !isNotExist(err):
+		return false, false, err
+	}
+	return false, false, nil
+}
+
+// resolveModule 决定模块目录：显式给的直接用；没给的按前三位推断，并同时探测
+// 它的客制模块（a→c），**客制侧有这个程序的蓝图就取客制**。
 //
-// 两条都不成立才判"推断不出来"。**不要**只判蓝图文件：蓝图缺失本身就是一种要报
-// "必需素材缺失"的状态，提前把它误报成"模块推断不出来"会把用户引向错误的动作
-// （去改 --module，而不是去查为什么没蓝图）。
-func resolveModule(ctx context.Context, src FileSource, prog, explicit string) (string, error) {
+// 为什么客制优先：T100 转客制后作业从 c** 目录启动、FGLLDPATH 也 c 优先
+// （见 `.agents/docs/t100/r.t` 与 internal/debug 的启动目录判定）。取标准材料
+// 去回答"这行为什么长这样"，答案会看起来完整但对象错了。
+//
+// 只有**这个程序的蓝图真在客制模块下**才切客制；只看 erp/cxm/dzx 目录存在会
+// 误伤所有没被客制的程序（客制模块目录一直都在）。
+func resolveModule(ctx context.Context, src FileSource, prog, explicit string) (moduleChoice, error) {
 	mod := strings.ToLower(strings.TrimSpace(explicit))
 	if mod != "" {
 		if !reModule.MatchString(mod) {
-			return "", fmt.Errorf("%w: 模块名 %q（应为小写字母开头、仅含小写字母/数字/下划线）", ErrInvalidOpt, explicit)
+			return moduleChoice{}, fmt.Errorf("%w: 模块名 %q（应为小写字母开头、仅含小写字母/数字/下划线）", ErrInvalidOpt, explicit)
 		}
-		return mod, nil
+		return moduleChoice{Module: mod, Origin: moduleOriginExplicit}, nil
 	}
+
 	guess := GuessModule(prog)
 	if guess == "" {
-		return "", fmt.Errorf("%w: 无法从 %q 推断模块，请用 --module 指定", ErrInvalidOpt, prog)
+		return moduleChoice{}, fmt.Errorf("%w: 无法从 %q 推断模块，请用 --module 指定", ErrInvalidOpt, prog)
 	}
-	if st, err := src.Stat(ctx, "erp/"+guess+"/dzx"); err == nil && st.IsDir {
-		return guess, nil
-	} else if err != nil && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, os.ErrNotExist) {
-		return "", err
+
+	stdHas, stdInstalled, err := moduleProbe(ctx, src, guess, prog)
+	if err != nil {
+		return moduleChoice{}, err
 	}
-	rel := fmt.Sprintf(FetchRoles[0].Src, guess, prog)
-	if _, err := src.Stat(ctx, rel); err == nil {
-		return guess, nil
-	} else if !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, os.ErrNotExist) {
-		return "", err
+
+	cust := customModuleOf(guess)
+	custHas := false
+	if cust != "" {
+		custHas, _, err = moduleProbe(ctx, src, cust, prog)
+		if err != nil {
+			return moduleChoice{}, err
+		}
 	}
+
+	switch {
+	case custHas:
+		choice := moduleChoice{Module: cust, Origin: moduleOriginCustom}
+		if stdHas {
+			choice.Alt = guess // 两份都有 → 让调用方把"取了哪份"写进 warning
+		}
+		return choice, nil
+	case stdInstalled:
+		return moduleChoice{Module: guess, Origin: moduleOriginStandard}, nil
+	}
+
 	// 推断失败：给一条可操作的提示，而不是让调用方自己猜
-	return "", fmt.Errorf("%w: 按程序名前三位推断的模块 %q 下既没有 dzx/ 也没有 %s；请用 --module <模块> 指定",
-		ErrModuleUnknown, guess, rel)
+	if cust != "" {
+		return moduleChoice{}, fmt.Errorf("%w: 按程序名前三位推断的模块 %q 与客制模块 %q 下都没有 %s；请用 --module <模块> 指定",
+			ErrModuleUnknown, guess, cust, tabSrc(guess, prog))
+	}
+	return moduleChoice{}, fmt.Errorf("%w: 按程序名前三位推断的模块 %q 下既没有 dzx/ 也没有 %s；请用 --module <模块> 指定",
+		ErrModuleUnknown, guess, tabSrc(guess, prog))
+}
+
+// materialIdentity 这份材料所属的身份（DZAA_T.DZAA009 的取值）：客制 → "c"；
+// 其余返回空 = 不按身份过滤。
+//
+// 只对客制设值是有意的：标准侧保持原来的"不限身份取 MAX"，避免把没标身份的
+// 旧数据筛成 0；而客制侧必须过滤 —— 客制版次常停在签出那一刻，标准侧却会
+// 继续升版，不限身份的 MAX 会把标准的新版次记到客制材料头上。
+//
+// 显式 --module cxm 也认作客制（模块名正好等于 a→c 的换算结果），这样手动指定
+// 的客制材料同样拿到客制版次。
+func materialIdentity(c moduleChoice, prog string) string {
+	if c.Origin == moduleOriginCustom {
+		return "c"
+	}
+	if c.Module != "" && c.Module == customModuleOf(GuessModule(prog)) {
+		return "c"
+	}
+	return ""
 }
 
 // ErrModuleUnknown 推断不出模块（需要的程序极可能不在标准模块目录下）。
@@ -385,7 +513,7 @@ func describeWorkspace(ws string) string {
 // 镜像暂不启用（材料范围等 model 定型后再定），而"这个程序现在第几版"应以库为准。
 // 模板版本只能来自本地材料（它是 `$TOP/erp/mdl` 里的文件内容），共用资料没同步就是空，
 // 这种情况只记 warning，不影响材料本身。
-func versionAnchors(ctx context.Context, cfgPath, env, prog string, ent int) (map[string]int, int) {
+func versionAnchors(ctx context.Context, cfgPath, env, prog string, ent int, identity string) (map[string]int, int) {
 	tv := map[string]int{}
 	envDir := config.DevDataEnvDirForEnv(cfgPath, env)
 	if envDir == "" {
@@ -400,20 +528,20 @@ func versionAnchors(ctx context.Context, cfgPath, env, prog string, ent int) (ma
 		// 没有 manifest（或旧契约）：直接扫本地模板树，尽力给出锚点
 		tv = scanTemplateVersions(filepath.Join(envDir, config.DevDataSubdirMdl))
 	}
-	return tv, programVersionAnchor(ctx, cfgPath, env, prog, ent)
+	return tv, programVersionAnchor(ctx, cfgPath, env, prog, ent, identity)
 }
 
 // programVersionAnchor 版次锚点：**在线优先**，本地镜像只是兜底。
 //
 // 在线失败（环境没配库 / 连不上 / 账号不对）不判 fetch 失败：版本锚点缺失只是
 // "判断不了有没有换版"，材料本身仍然是完整的 —— 所以降级 + 记 warning。
-func programVersionAnchor(ctx context.Context, cfgPath, env, prog string, ent int) int {
+func programVersionAnchor(ctx context.Context, cfgPath, env, prog string, ent int, identity string) int {
 	if e, err := envInfo(cfgPath, env); err == nil && e.DB != nil {
-		if v, err := OnlineProgramVersion(ctx, e, ent, prog); err == nil && v > 0 {
+		if v, err := OnlineProgramVersion(ctx, e, ent, prog, identity); err == nil && v > 0 {
 			return v
 		}
 	}
-	return localDZAAVersion(cfgPath, env, prog)
+	return localDZAAVersion(cfgPath, env, prog, identity)
 }
 
 // scanTemplateVersions 扫一棵模板树，解析每个 `code_*.template` 的版本。
@@ -450,11 +578,14 @@ func scanTemplateVersions(mdlDir string) map[string]int {
 	return out
 }
 
-// localDZAAVersion 从本环境的规格库里读该程序的最大有效版次；读不到返回 0。
+// localDZAAVersion 从本环境的规格库里读该程序的有效版次；读不到返回 0。
+//
+// identity="c" 时优先取 `dzaa009='c'`（客制）的版次，取不到再退回不限身份 ——
+// 客制材料配标准版次比"没有锚点"更坏：它会让人以为换版判断是准的。
 //
 // 只查本地 SQLite：fetch 的来源是 SFTP，不该为了一个版本号再连一次数据库
 // （那会让"拉文件"变成"要库密码"的动作）。
-func localDZAAVersion(cfgPath, env, prog string) int {
+func localDZAAVersion(cfgPath, env, prog, identity string) int {
 	p := config.DevDataDictPathForEnv(cfgPath, env)
 	if p == "" {
 		return 0
@@ -467,12 +598,20 @@ func localDZAAVersion(cfgPath, env, prog string) int {
 		return 0
 	}
 	defer conn.Close()
-	var v sql.NullInt64
-	err = conn.QueryRow(`SELECT MAX(CAST(dzaa002 AS INTEGER)) FROM dzaa_t WHERE dzaa001 = ? AND dzaastus = 'Y'`, prog).Scan(&v)
-	if err != nil || !v.Valid {
+	var cust, anyVer sql.NullInt64
+	err = conn.QueryRow(`SELECT MAX(CASE WHEN dzaa009 = 'c' THEN CAST(dzaa002 AS INTEGER) END),
+	                            MAX(CAST(dzaa002 AS INTEGER))
+	                       FROM dzaa_t WHERE dzaa001 = ? AND dzaastus = 'Y'`, prog).Scan(&cust, &anyVer)
+	if err != nil {
 		return 0
 	}
-	return int(v.Int64)
+	if identity == "c" && cust.Valid && cust.Int64 > 0 {
+		return int(cust.Int64)
+	}
+	if !anyVer.Valid {
+		return 0
+	}
+	return int(anyVer.Int64)
 }
 
 // humanBytes 人类可读的体积（CLI/Web 的"大小"列都用它，单位只有一份）。

@@ -125,6 +125,9 @@ func emitMirror(res *devdata.MirrorResult) error {
 // emitFetch 输出按程序拉取的结果。
 func emitFetch(res *devdata.FetchResult) error {
 	rows := [][]string{{"程序", res.Prog, res.Module}, {"大小", fmtBytes(res.Bytes), fmt.Sprintf("%d 个文件", len(res.Files))}}
+	if label := moduleOriginLabel(res.ModuleOrigin); label != "" {
+		rows = append(rows, []string{"模块来源", res.Module, label})
+	}
 	for _, f := range res.Files {
 		rows = append(rows, []string{"文件", f.Rel, fmt.Sprintf("%d B", f.Size)})
 	}
@@ -135,6 +138,19 @@ func emitFetch(res *devdata.FetchResult) error {
 		rows = append(rows, []string{"提示", w, ""})
 	}
 	return emit(res, res.Env, 0, []string{"项目", "值", "备注"}, rows)
+}
+
+// moduleOriginLabel 材料取自标准还是客制模块（给人看的一列）。
+func moduleOriginLabel(origin string) string {
+	switch origin {
+	case "custom":
+		return "客制模块"
+	case "standard":
+		return "标准模块"
+	case "explicit":
+		return "--module 指定"
+	}
+	return ""
 }
 
 // emitCleanPlan 输出清理计划（dryRun=true 表示"只看不删"）。

@@ -143,13 +143,15 @@ func newFetchCmd() *cobra.Command {
 （含 .tgx/.tgx2）、产物 .4gl、编译引子 _mask/_rep.4gl。缺可选项只记进 manifest 的
 missing[]，缺必需项（tab/tgl/4gl）整次失败、不留半套。
 
-模块默认从程序名前三位推断（axmt500_wf → axm）；推断不出时用 --module 指定。
+模块默认从程序名前三位推断（axmt500_wf → axm）。客制程序会自动优先：标准模块
+有 a→c 的客制模块（axm→cxm）、且客制模块下有该程序的蓝图时，取客制那份，并在
+结果里给出 warning；要标准材料用 --module 指定。
 已拉过的程序要 --force 才覆盖。
 
 示例：
   tt gen fetch axmt500_wf --at 福联测试tst
   tt gen fetch axmt500_wf --at 福联测试tst --with-design --form
-  tt gen fetch cxm999 --at 福联测试tst --module cxm --force`,
+  tt gen fetch axmt500_wf --at 福联测试tst --module axm   # 两份都有时取标准`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withEnv(cmd, func(cfgPath, env string) error {
@@ -166,7 +168,7 @@ missing[]，缺必需项（tab/tgl/4gl）整次失败、不留半套。
 			})
 		},
 	}
-	cmd.Flags().StringVar(&module, "module", "", "模块目录名（缺省从程序名前三位推断）")
+	cmd.Flags().StringVar(&module, "module", "", "模块目录名（缺省从前三位推断；客制模块 a→c 自动优先）")
 	cmd.Flags().BoolVar(&withDesign, "with-design", false, "把本地工作区的设计稿（*.tzs）一并归档")
 	cmd.Flags().BoolVar(&form, "form", false, "连表单 .42f 一起拉（二进制，体积大）")
 	cmd.Flags().BoolVar(&force, "force", false, "已拉过也覆盖（整包替换）")

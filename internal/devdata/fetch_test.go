@@ -2,11 +2,14 @@ package devdata
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/luyaogod/TT/internal/config"
 )
 
 // newFetchFixture 造一套 axmt500_wf 的服务器文件。
@@ -139,9 +142,9 @@ func TestFetchUnknownProgram(t *testing.T) {
 func TestFetchModuleResolution(t *testing.T) {
 	_, files := newFetchFixture(t)
 
-	// ① 显式指定模块：直接用
-	if mod, err := resolveModule(context.Background(), files, "axmt500_wf", "AXM"); err != nil || mod != "axm" {
-		t.Fatalf("显式模块 = %q, %v", mod, err)
+	// ① 显式指定模块：直接用（不自动改客制）
+	if ch, err := resolveModule(context.Background(), files, "axmt500_wf", "AXM"); err != nil || ch.Module != "axm" || ch.Origin != moduleOriginExplicit {
+		t.Fatalf("显式模块 = %+v, %v", ch, err)
 	}
 	// ② 非法模块名
 	if _, err := resolveModule(context.Background(), files, "axmt500_wf", "../x"); err == nil {
@@ -154,9 +157,193 @@ func TestFetchModuleResolution(t *testing.T) {
 		t.Fatalf("错误应包 ErrModuleUnknown: %v", err)
 	}
 	// ④ 隐式推断成功
-	if mod, err := resolveModule(context.Background(), files, "axmt500_wf", ""); err != nil || mod != "axm" {
-		t.Fatalf("推断模块 = %q, %v", mod, err)
+	if ch, err := resolveModule(context.Background(), files, "axmt500_wf", ""); err != nil || ch.Module != "axm" || ch.Origin != moduleOriginStandard {
+		t.Fatalf("推断模块 = %+v, %v", ch, err)
 	}
+}
+
+// TestCustomModuleOf a→c 只对 a 开头的业务模块成立，且不能把 cxm 再换成 cxm。
+func TestCustomModuleOf(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"axm", "cxm"}, {"asf", "csf"}, {"adm", "cdm"},
+		{"cxm", ""}, {"bax", ""}, {"a", ""}, {"", ""},
+	}
+	for _, c := range cases {
+		if got := customModuleOf(c.in); got != c.want {
+			t.Errorf("customModuleOf(%q) = %q，应为 %q", c.in, got, c.want)
+		}
+	}
+}
+
+// addCustomFetchFiles 给夹具加一套客制模块（cxm）的材料（与标准侧同程序名）。
+func addCustomFetchFiles(files *fakeFiles) {
+	files.dirs["erp/cxm/dzx"] = true
+	files.files["erp/cxm/dzx/tab/axmt500_wf.tab"] = []byte("custom-tab")
+	files.files["erp/cxm/dzx/tgl/axmt500_wf.tgl"] = []byte("#+ Standard Version.....: SD版次:0000(1900-01-01 00:00:00), PR版次:\n")
+	files.files["erp/cxm/4gl/axmt500_wf.4gl"] = []byte("FUNCTION custom()\nEND FUNCTION\n")
+	files.files["com/inc/erp/cxm/axmt500_wf_mask.4gl"] = []byte("custom-mask")
+}
+
+// readLocal 读一个落盘文件（测试用）。
+func readLocal(t *testing.T, progDir string, parts ...string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(append([]string{progDir}, parts...)...))
+	if err != nil {
+		t.Fatalf("读 %v: %v", parts, err)
+	}
+	return string(b)
+}
+
+// TestFetchPrefersCustomModule 标准/客制都有材料 → 取客制，并把"另一侧也有"写进 warning。
+func TestFetchPrefersCustomModule(t *testing.T) {
+	cfgPath, files := newFetchFixture(t)
+	addCustomFetchFiles(files)
+
+	res, err := Fetch(context.Background(), FetchRequest{
+		CfgPath: cfgPath, Env: "福联测试tst", Prog: "axmt500_wf", Files: files}, nil)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if res.Module != "cxm" || res.ModuleOrigin != moduleOriginCustom || res.ModuleAlt != "axm" {
+		t.Errorf("模块判定 = %q/%q/%q，应为 cxm/custom/axm", res.Module, res.ModuleOrigin, res.ModuleAlt)
+	}
+	progDir, _ := ProgDir(cfgPath, "福联测试tst", "axmt500_wf")
+	if got := readLocal(t, progDir, "dzx", "axmt500_wf.tab"); got != "custom-tab" {
+		t.Errorf("取到的蓝图不是客制那份: %q", got)
+	}
+	if got := readLocal(t, progDir, "src", "axmt500_wf.4gl"); !strings.Contains(got, "custom") {
+		t.Errorf("取到的 4gl 不是客制那份: %q", got)
+	}
+	if !containsSubstr(res.Warnings, "已取客制 cxm") {
+		t.Errorf("标准/客制并存时应有 warning，得到 %v", res.Warnings)
+	}
+}
+
+// TestFetchCustomModuleOnly 标准模块没装、只有客制模块有这套材料 → 取客制，不报"推断不出来"。
+func TestFetchCustomModuleOnly(t *testing.T) {
+	cfgPath, files := newFetchFixture(t)
+	addCustomFetchFiles(files)
+	// 抹掉标准侧：模块本身都没装
+	delete(files.dirs, "erp/axm/dzx")
+	for k := range files.files {
+		if strings.HasPrefix(k, "erp/axm/") || strings.HasPrefix(k, "com/inc/erp/axm/") {
+			delete(files.files, k)
+		}
+	}
+
+	res, err := Fetch(context.Background(), FetchRequest{
+		CfgPath: cfgPath, Env: "福联测试tst", Prog: "axmt500_wf", Files: files}, nil)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if res.Module != "cxm" || res.ModuleOrigin != moduleOriginCustom || res.ModuleAlt != "" {
+		t.Errorf("模块判定 = %q/%q/%q，应为 cxm/custom/空", res.Module, res.ModuleOrigin, res.ModuleAlt)
+	}
+}
+
+// TestFetchCustomModuleDirWithoutProg 客制模块目录在、但这个程序没被客制 → 仍取标准。
+//
+// 这是最容易写错的一刀：只看 erp/cxm/dzx 存在就切客制，会把所有标准程序都
+// 路由到材料同样"齐全"的客制副本上（如果那里没有该程序，则是整套失败）。
+func TestFetchCustomModuleDirWithoutProg(t *testing.T) {
+	cfgPath, files := newFetchFixture(t)
+	files.dirs["erp/cxm/dzx"] = true // 客制模块装过，但没有 axmt500_wf 的材料
+
+	res, err := Fetch(context.Background(), FetchRequest{
+		CfgPath: cfgPath, Env: "福联测试tst", Prog: "axmt500_wf", Files: files}, nil)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if res.Module != "axm" || res.ModuleOrigin != moduleOriginStandard {
+		t.Errorf("模块判定 = %q/%q，应为 axm/standard", res.Module, res.ModuleOrigin)
+	}
+	if containsSubstr(res.Warnings, "已取客制") {
+		t.Errorf("没切客制不该有客制 warning: %v", res.Warnings)
+	}
+}
+
+// TestFetchExplicitModuleWins 显式 --module 是最强指令：即使客制侧有材料也不自动改。
+func TestFetchExplicitModuleWins(t *testing.T) {
+	cfgPath, files := newFetchFixture(t)
+	addCustomFetchFiles(files)
+
+	res, err := Fetch(context.Background(), FetchRequest{
+		CfgPath: cfgPath, Env: "福联测试tst", Prog: "axmt500_wf", Module: "axm", Files: files}, nil)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if res.Module != "axm" || res.ModuleOrigin != moduleOriginExplicit {
+		t.Errorf("模块判定 = %q/%q，应为 axm/explicit", res.Module, res.ModuleOrigin)
+	}
+	progDir, _ := ProgDir(cfgPath, "福联测试tst", "axmt500_wf")
+	if got := readLocal(t, progDir, "dzx", "axmt500_wf.tab"); strings.HasPrefix(got, "custom") {
+		t.Errorf("--module axm 不该取客制材料: %q", got)
+	}
+}
+
+// writeDictVersion 造一个只有 dzaa_t 的本地规格库（版次身份测试用）。
+func writeDictVersion(t *testing.T, cfgPath, env, prog string, sVer, cVer string) {
+	t.Helper()
+	p := config.DevDataDictPathForEnv(cfgPath, env)
+	if p == "" {
+		t.Fatal("取不到规格库路径")
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE dzaa_t (dzaa001 TEXT, dzaa002 TEXT, dzaa009 TEXT, dzaastus TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO dzaa_t VALUES (?,?,'s','Y'),(?,?,'c','Y')`, prog, sVer, prog, cVer); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestLocalDZAAVersionIdentity 客制身份取 dzaa009='c' 的版次；不限身份仍取最大值。
+func TestLocalDZAAVersionIdentity(t *testing.T) {
+	cfgPath := writeConfig(t, hostStub)
+	writeDictVersion(t, cfgPath, "福联测试tst", "axmt500_wf", "7", "5")
+
+	if got := localDZAAVersion(cfgPath, "福联测试tst", "axmt500_wf", "c"); got != 5 {
+		t.Errorf("客制版次 = %d，应为 dzaa009='c' 的 5", got)
+	}
+	if got := localDZAAVersion(cfgPath, "福联测试tst", "axmt500_wf", ""); got != 7 {
+		t.Errorf("不限身份版次 = %d，应为最大值 7", got)
+	}
+	if got := localDZAAVersion(cfgPath, "福联测试tst", "zzz500_wf", "c"); got != 0 {
+		t.Errorf("没有该程序时应为 0，得到 %d", got)
+	}
+}
+
+// TestFetchVersionAnchorUsesCustomIdentity 客制材料配客制版次（不是标准侧的新版次）。
+func TestFetchVersionAnchorUsesCustomIdentity(t *testing.T) {
+	cfgPath, files := newFetchFixture(t)
+	addCustomFetchFiles(files)
+	writeDictVersion(t, cfgPath, "福联测试tst", "axmt500_wf", "7", "5")
+
+	res, err := Fetch(context.Background(), FetchRequest{
+		CfgPath: cfgPath, Env: "福联测试tst", Prog: "axmt500_wf", Files: files}, nil)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if res.DZAA002 != 5 {
+		t.Errorf("客制材料的版次锚点 = %d，应为 5（标准侧是 7）", res.DZAA002)
+	}
+}
+
+// containsSubstr 判字符串清单里有没有某条包含子串（warning 是整句，不能整串比）。
+func containsSubstr(list []string, sub string) bool {
+	for _, s := range list {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
 }
 
 // TestFetchExistsNeedsForce 重复拉取要 --force（整包替换是显式动作）。
