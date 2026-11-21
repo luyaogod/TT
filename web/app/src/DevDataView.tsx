@@ -204,7 +204,7 @@ export function DevDataView() {
 
       {/* ============ 共用资料 ============ */}
       <Card id="card-devdata-shared" title="共用资料"
-        description="整个环境共用：规格表与程序样板。" right={
+        description="整个环境共用：规格表与程序样板。暂时不启用（等 model 定型后再定范围）。" right={
           runningMirror ? (
             <Button variant="outline" size="sm" onClick={() => void stopJob('mirror')}>
               <Square className="mr-1 h-3 w-3" />停止

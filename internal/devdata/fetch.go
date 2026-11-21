@@ -235,15 +235,15 @@ func Fetch(ctx context.Context, req FetchRequest, onProgress ProgressFunc) (*Fet
 		}
 	}
 
-	// 版本锚点来自本环境的共用资料
-	tv, dzaa := versionAnchors(req.CfgPath, e.Name, prog)
+	// 版本锚点：版次**在线查**（取不到才看本地镜像），模板版本来自本地共用资料
+	tv, dzaa := versionAnchors(ctx, req.CfgPath, e.Name, prog, req.Ent)
 	m.Versions.TemplateVersions = tv
 	m.Versions.DZAA002 = dzaa
 	if len(tv) == 0 {
-		m.AddWarning("共用资料尚未同步：模板版本锚点缺失（先跑 tt gen mirror，才能判断模板是否换版）")
+		m.AddWarning("没有共用资料：模板版本锚点缺失（要看模板版本需先 tt gen mirror --only mdl）")
 	}
 	if dzaa == 0 {
-		m.AddWarning("共用资料里没有该程序的版次（DZAA_T）：无法判断规格是否换版")
+		m.AddWarning("取不到该程序的版次（在线库不可用、本地也没有共用资料）：无法判断规格是否换版")
 	}
 	ConsistencyWarnings(m)
 
@@ -379,8 +379,13 @@ func describeWorkspace(ws string) string {
 	return "工作区 " + ws
 }
 
-// versionAnchors 从本环境的共用资料里取版本锚点（纯本地，不联网）。
-func versionAnchors(cfgPath, env, prog string) (map[string]int, int) {
+// versionAnchors 取版本锚点。
+//
+// **版次默认在线查**（`DZAA_T` 的 `MAX(DZAA002)`），在线取不到才看本地共用资料 ——
+// 镜像暂不启用（材料范围等 model 定型后再定），而"这个程序现在第几版"应以库为准。
+// 模板版本只能来自本地材料（它是 `$TOP/erp/mdl` 里的文件内容），共用资料没同步就是空，
+// 这种情况只记 warning，不影响材料本身。
+func versionAnchors(ctx context.Context, cfgPath, env, prog string, ent int) (map[string]int, int) {
 	tv := map[string]int{}
 	envDir := config.DevDataEnvDirForEnv(cfgPath, env)
 	if envDir == "" {
@@ -395,7 +400,20 @@ func versionAnchors(cfgPath, env, prog string) (map[string]int, int) {
 		// 没有 manifest（或旧契约）：直接扫本地模板树，尽力给出锚点
 		tv = scanTemplateVersions(filepath.Join(envDir, config.DevDataSubdirMdl))
 	}
-	return tv, localDZAAVersion(cfgPath, env, prog)
+	return tv, programVersionAnchor(ctx, cfgPath, env, prog, ent)
+}
+
+// programVersionAnchor 版次锚点：**在线优先**，本地镜像只是兜底。
+//
+// 在线失败（环境没配库 / 连不上 / 账号不对）不判 fetch 失败：版本锚点缺失只是
+// "判断不了有没有换版"，材料本身仍然是完整的 —— 所以降级 + 记 warning。
+func programVersionAnchor(ctx context.Context, cfgPath, env, prog string, ent int) int {
+	if e, err := envInfo(cfgPath, env); err == nil && e.DB != nil {
+		if v, err := OnlineProgramVersion(ctx, e, ent, prog); err == nil && v > 0 {
+			return v
+		}
+	}
+	return localDZAAVersion(cfgPath, env, prog)
 }
 
 // scanTemplateVersions 扫一棵模板树，解析每个 `code_*.template` 的版本。

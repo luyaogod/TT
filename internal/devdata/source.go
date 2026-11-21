@@ -344,6 +344,43 @@ func parseCount(rows [][]string) (int64, error) {
 	return n, nil
 }
 
+// OnlineProgramVersion 在线取某程序当前的有效版次（`MAX(DZAA002) WHERE DZAASTUS='Y'`）。
+//
+// 这是本包里唯一"查库取一个值"的地方，也是「查询默认在线」这条口径的落点：
+// 版本锚点**先问在线库**，只有在线取不到时才看本地共用资料（见 fetch.go 的
+// programVersionAnchor）。理由：镜像暂不启用（材料范围等 model 定型后再定），
+// 而"这个程序现在第几版"这件事本来就该以库为准。
+//
+// 程序名已过白名单校验，内联进 SQL 是安全的（与 dict 侧同样的做法）。
+func OnlineProgramVersion(ctx context.Context, e *config.NamedSsh, ent int, prog string) (int, error) {
+	if err := ValidProgName(prog); err != nil {
+		return 0, err
+	}
+	src, err := OpenTableSource(ctx, e, ent)
+	if err != nil {
+		return 0, err
+	}
+	defer src.Close()
+	db, ok := src.(*dbTableSource)
+	if !ok {
+		return 0, fmt.Errorf("取版次失败：连接器不可用")
+	}
+	_, rows, err := db.conn.Query(ctx, fmt.Sprintf(
+		"SELECT MAX(CAST(DZAA002 AS DECIMAL(10,0))) FROM DZAA_T WHERE DZAA001 = '%s' AND DZAASTUS = 'Y'",
+		strings.TrimSpace(prog)))
+	if err != nil {
+		return 0, err
+	}
+	if len(rows) == 0 || len(rows[0]) == 0 || strings.TrimSpace(rows[0][0]) == "" {
+		return 0, nil
+	}
+	var v int
+	if _, err := fmt.Sscanf(strings.TrimSpace(rows[0][0]), "%d", &v); err != nil {
+		return 0, fmt.Errorf("版次不是数字: %q", rows[0][0])
+	}
+	return v, nil
+}
+
 // OpenTableSource 按环境配置打开规格表来源（客户端直连，支持 viaSsh 隧道）。
 //
 // 与 `tt dict db sync` 走的是同一条链路（connsvc.OpenBuiltin）：只读事务、隧道编排、

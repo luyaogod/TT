@@ -13,6 +13,10 @@
 环境一律点名（`--at <环境>` 或 `--env <环境>`），没有默认环境。
 `--at <环境>@<企业>` 里的企业决定规格库用哪个数据库账号（不给就用账号清单首项）。
 
+> **当前状态（2026-11-21）**：镜像功能保留但**暂不启用**，`mirror` 不会被自动执行；
+> `fetch` 独立可用，它需要的版次（`dzaa002`）**默认在线查**，本地共用资料只作兜底。
+> 镜像要镜哪些表/镜多大，等 model 的能力边界确定后再定（plan ADR-08）。
+
 ### `tt gen status [--probe]`
 
 共用资料 + 各程序的状态。**默认不出网**（只读本地 manifest 与文件，打开即快）；
@@ -28,6 +32,8 @@ JSON 载荷：`{env, dir, present, dict, mdl, progs[], jobs[], warnings[]}`。
 `remote-gone` / `version-changed`）。
 
 ### `tt gen mirror [--only dict|mdl] [--force]`
+
+> **暂不启用**（见文件开头的「当前状态」）。功能保留：等 model 定型后用它按确定的范围备料。
 
 把本环境的规格表（53 张 `DZ*_T` → SQLite）与模板树（`$TOP/erp/mdl`）拉到
 `devdata/<环境>/`。**幂等**：已同步过就跳过（`skippedPull=true`，不报错）；`--force` 重拉。
