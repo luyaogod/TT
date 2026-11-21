@@ -86,14 +86,20 @@ export function DevDataView() {
     return () => window.clearInterval(t)
   }, [running.length, env, refresh])
 
-  // 任务结束时给一句结果（成功/取消/失败三种语气不同）
-  const lastJob = useRef<{ key: string; phase: string }>({ key: '', phase: '' })
+  // 任务结束时给一句结果（成功/取消/失败三种语气不同）。
+  //
+  // status 里会带**已结束**的任务（后端 JobsFor），所以不能"看到结束态就提示"——
+  // 否则一进设置页就会为上一次跑完的任务弹提示。只在**见过它跑**之后收尾时提示。
+  const seenRunning = useRef<Set<string>>(new Set())
   useEffect(() => {
     for (const j of st?.jobs ?? []) {
       const key = `${j.kind}:${j.prog ?? ''}`
-      const prev = lastJob.current
-      if (j.running || (prev.key === key && prev.phase === j.phase)) continue
-      lastJob.current = { key, phase: j.phase }
+      if (j.running) {
+        seenRunning.current.add(key)
+        continue
+      }
+      if (!seenRunning.current.has(key)) continue
+      seenRunning.current.delete(key)
       if (j.phase === 'done') toast.success(j.message || '完成')
       else if (j.phase === 'cancelled') toast.info('已停止')
       else if (j.phase === 'error') toast.error(j.error || '失败')
