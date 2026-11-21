@@ -189,7 +189,7 @@ func Check(ctx context.Context, req StatusRequest) (*ProgStatus, error) {
 		return nil, err
 	}
 	if _, serr := os.Stat(progDir); serr != nil {
-		return nil, fmt.Errorf("%w: %s", ErrProgNotFound, strings.TrimSpace(req.Prog))
+		return nil, fmt.Errorf("%w（本地没有该程序的材料，先 tt gen fetch %s）", ErrProgNotFound, strings.TrimSpace(req.Prog))
 	}
 	req.Probe = true
 	return progStatus(ctx, req, progDir, strings.TrimSpace(req.Prog))

@@ -101,6 +101,31 @@ func TestManagerProgress(t *testing.T) {
 	}
 }
 
+// TestManagerJobsForIncludesFinished 结束的任务仍要能被 status 看到。
+//
+// 回归用例：status 原来只回 `Running` 的任务，于是任务一结束就从列表消失 ——
+// 界面上"点停止/拉取完成后什么都没说"（既看不到成功，也看不到失败原因）。
+func TestManagerJobsForIncludesFinished(t *testing.T) {
+	m := NewManager()
+	m.Start(KindFetch, "e1", "axmt500_wf", func(ctx context.Context, report ProgressFunc) (any, error) {
+		return "ok", nil
+	})
+	j := m.Wait(KindFetch, "e1", "axmt500_wf")
+	if j.Running || j.Phase != "done" {
+		t.Fatalf("任务应收尾: %+v", j)
+	}
+	jobs := m.JobsFor("e1")
+	if len(jobs) != 1 || jobs[0].Prog != "axmt500_wf" || jobs[0].Running {
+		t.Fatalf("结束的任务应仍在 JobsFor 里: %+v", jobs)
+	}
+	if got := m.Running("e1"); len(got) != 0 {
+		t.Errorf("Running 只应含在跑的: %+v", got)
+	}
+	if got := m.JobsFor("别的环境"); len(got) != 0 {
+		t.Errorf("别的环境不该看到它: %+v", got)
+	}
+}
+
 // TestManagerError 失败 → Phase=error 且 Error 带原文。
 func TestManagerError(t *testing.T) {
 	m := NewManager()

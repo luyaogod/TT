@@ -264,7 +264,7 @@ func mirrorDict(ctx context.Context, e *config.NamedSsh, envDir string, req Mirr
 		res.Tables = append(res.Tables, TableEntry{Table: spec.Name, Rows: got, Desc: spec.Desc})
 		// LOB 列是就地截断到 4000 字节取的：命中时留一句，别让"少了一截"悄悄发生
 		if len(meta.LOB) > 0 {
-			warn := fmt.Sprintf("%s 有大字段列 %s，按 %d 字节截断写入（TO_CHAR/SUBSTR）",
+			warn := fmt.Sprintf("%s 有大字段列 %s，按 %d 字符截断；完整内容请直查库",
 				spec.Name, strings.Join(sortedKeys(meta.LOB), ","), lobCapChars)
 			m.AddWarning(warn)
 			res.Warnings = append(res.Warnings, warn)

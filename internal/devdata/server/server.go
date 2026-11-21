@@ -127,7 +127,7 @@ func (s *Server) hStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	st, err := s.deps.Status(r.Context(), devdata.StatusRequest{
 		CfgPath: s.cfgPath, Env: env, Probe: probe, Prog: prog,
-		Jobs: s.mgr.Running(env),
+		Jobs: s.mgr.JobsFor(env),
 	})
 	if err != nil {
 		s.failDomain(w, err)

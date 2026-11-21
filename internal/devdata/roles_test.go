@@ -4,57 +4,51 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"testing"
 )
 
-// TestMirrorTablesMatchPlanAppendix 钉住"代码里的 53 张表"与计划文件附录 A 一致。
+// TestMirrorTablesMatchDoc 钉住"代码里的 53 张表"与**入库文档**一致。
 //
-// 为什么要有这条测试：清单是**双份存在**的（代码 + 文档）。漂移的后果不是编译错误，
+// 为什么要有这条测试：清单是双份存在的（代码 + 文档）。漂移的后果不是编译错误，
 // 而是"文档说镜了 53 张、实际镜了 52 张"，而这种缺失要等到某次 model 结论错得离谱
 // 才会被发现。
 //
-// 计划文件在全部完成后会被改名成 `✓tt-devdata-plan.md`（项目规范），所以按通配找，
-// 不写死文件名。找不到就是**失败**而不是跳过 —— 计划文件是入库文件，它不在仓库里
-// 说明测试环境不对，而"跳过"会让这条一致性断言静默空转。
-func TestMirrorTablesMatchPlanAppendix(t *testing.T) {
-	matches, err := filepath.Glob("../../.agents/plan/*tt-devdata-plan.md")
-	if err != nil || len(matches) == 0 {
-		t.Fatalf("找不到计划文件（.agents/plan/*tt-devdata-plan.md），无法做表清单一致性断言: %v", err)
-	}
-	b, err := os.ReadFile(matches[0])
+// 对照的是 `.agents/docs/t100/devdata-materials.md` 的 §2 表（该文件入库）；
+// 计划文件 `.agents/plan/*.md` **不入库**（.gitignore 里），拿它做断言在别的克隆上必挂。
+func TestMirrorTablesMatchDoc(t *testing.T) {
+	const docPath = "../../.agents/docs/t100/devdata-materials.md"
+	b, err := os.ReadFile(docPath)
 	if err != nil {
-		t.Fatalf("读计划文件 %s 失败: %v", matches[0], err)
+		t.Fatalf("读不了材料文档 %s（它已入库，读不到说明仓库不完整）: %v", docPath, err)
 	}
-	text := string(b)
-	// 附录 A 是唯一一处连续列出全部表名的地方（DZAA DZAB … DZZC）
-	idx := strings.Index(text, "## 附录 A")
-	if idx < 0 {
-		t.Fatalf("计划文件里找不到「## 附录 A」")
-	}
-	tail := text[idx:]
-	codeBlock := regexp.MustCompile("(?s)```\n(.*?)```")
-	mm := codeBlock.FindStringSubmatch(tail)
-	if mm == nil {
-		t.Fatalf("附录 A 里没有代码块")
-	}
-	fields := strings.Fields(mm[1])
-	var want []string
-	for _, f := range fields {
-		if regexp.MustCompile(`^DZ[A-Z]{2}$`).MatchString(f) {
-			want = append(want, f+"_T")
+	lines := strings.Split(string(b), "\n")
+	// 取 "## 2." 到 "## 3." 之间的小节
+	in := false
+	seen := map[string]bool{}
+	row := regexp.MustCompile("^\\|\\s*`(DZ[A-Z]{2}_T)`")
+	for _, ln := range lines {
+		if strings.HasPrefix(ln, "## 2.") {
+			in = true
+			continue
+		}
+		if in && strings.HasPrefix(ln, "## 3.") {
+			break
+		}
+		if !in {
+			continue
+		}
+		if m := row.FindStringSubmatch(ln); m != nil {
+			seen[m[1]] = true
 		}
 	}
-	if len(want) != 53 {
-		t.Fatalf("附录 A 解析出 %d 张表，应为 53: %v", len(want), want)
+	if len(seen) != len(MirrorTables) {
+		t.Fatalf("文档 §2 解析出 %d 张表，代码有 %d 张：文档与代码漂移", len(seen), len(MirrorTables))
 	}
-	sort.Strings(want)
-	got := MirrorTableNames()
-	sort.Strings(got)
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("代码与文档的表清单不一致\n代码 %d 张: %v\n文档 %d 张: %v",
-			len(got), got, len(want), want)
+	for _, spec := range MirrorTables {
+		if !seen[spec.Name] {
+			t.Errorf("代码里有 %s，文档 §2 没写", spec.Name)
+		}
 	}
 }
 

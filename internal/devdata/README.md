@@ -43,8 +43,8 @@ model（生成器语义层，`tt gen model/why/expect`）要的不是全量源�
 ## 材料角色表
 
 **唯一事实来源是 [roles.go](roles.go)**（`MirrorTables` / `FetchRoles`）。
-`roles_test.go` 会拿它跟 `.agents/plan/tt-devdata-plan.md` 附录 A 做一致性断言 ——
-代码与文档不许漂移。
+`roles_test.go` 会拿它跟**入库文档** `.agents/docs/t100/devdata-materials.md` 的 §2 表做
+一致性断言 —— 代码与文档不许漂移（计划文件不入库，所以不能拿它当断言对象）。
 
 ### M（共用资料，环境级）
 

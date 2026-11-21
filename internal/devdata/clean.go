@@ -57,7 +57,7 @@ func PlanClean(cfgPath, env, prog string) (*CleanPlan, error) {
 		}
 		dir := filepath.Join(envDir, config.DevDataSubdirProg, strings.TrimSpace(prog))
 		if _, serr := os.Stat(dir); serr != nil {
-			return nil, fmt.Errorf("%w: %s", ErrProgNotFound, prog)
+			return nil, fmt.Errorf("%w（本地没有该程序的材料）: %s", ErrProgNotFound, prog)
 		}
 		files, bytes := dirUsage(dir)
 		plan.Items = append(plan.Items, CleanItem{Kind: "prog", Env: e.Name, Prog: strings.TrimSpace(prog), Path: dir, Files: files, Bytes: bytes})

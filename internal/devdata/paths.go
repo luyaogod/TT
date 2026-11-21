@@ -27,8 +27,11 @@ import (
 var (
 	// ErrEnvNotFound 环境不在 config.json 的 hosts.sshs 清单里 → 404。
 	ErrEnvNotFound = errors.New("环境不存在")
-	// ErrProgNotFound 该程序没有拉过（本地没有目录）→ 404。
-	ErrProgNotFound = errors.New("该程序尚未拉取")
+	// ErrProgNotFound 没有这个程序（服务器上没有 / 本地没拉过）→ 404。
+	//
+	// 两种情况共用同一个哨兵：对调用方来说都是"你要的这个程序拿不到材料"，
+	// 区别写在包装后的文案里（fetch 说"服务器上没有"，check 说"本地没有"）。
+	ErrProgNotFound = errors.New("该程序不存在")
 	// ErrInvalidProg 程序名非法 → 400。
 	ErrInvalidProg = errors.New("程序名非法")
 	// ErrInvalidEnv 环境名非法（空/含路径分隔符等）→ 400。

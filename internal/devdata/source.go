@@ -72,12 +72,23 @@ type TableMeta struct {
 // Known 是否取到了列清单。取不到时一律退回 `SELECT *`。
 func (m TableMeta) Known() bool { return len(m.Columns) > 0 }
 
-// lobCapChars LOB 列每次取多少字节（SQL 里 VARCHAR2 的安全上限）。
+// lobCapChars LOB 列每次取多少**字符**（截断上限）。
 //
-// 取 4000 是 SQL 里 VARCHAR2 的安全上限（标准模式下 4000 字节）。声明长度超过它的
-// CLOB（T100 里少见）会被截断，所以命中 LOB 的表会在 manifest 的 warnings 里记一句
-// （见 mirror.go），而不是让"少了一截"悄悄发生。
-const lobCapChars = 4000
+// 实测（2026-11-21 福联测试tst）：`DZBB_T.dzbb098`（设计点内容）单列合计 **2.63 GB**
+// （单行最长 687,979 字符），`DZFK_T.dzfk009` 823 MB。整份材料会变成 GB 级，与本计划
+// "几十 MB"的量级假设完全不同；而且这些内容属于"逐行大字段"，与"按程序成套的原材料"
+// 不是一回事（详见 plan 的 ADR-07）。
+//
+// 取 1000 **字符**，写法 `TO_CHAR(SUBSTR(col, 1, 1000))`。两个坑都实测过：
+//   - `SUBSTRB`（按字节）在多字节字符集上直接失败：`ORA-22998: CLOB or NCLOB in
+//     multibyte character set not supported`；
+//   - `SUBSTR` 到 4000 字符再 `TO_CHAR` 会 `ORA-64203: destination buffer too small`
+//     （字符集转换后超过 VARCHAR2 的 4000 字节上限）。1000 字符在最坏 4 字节/字符时
+//     是 4000 字节，正好不溢出。
+//
+// 截断**不是静默的**：命中 LOB 的表会在 manifest 的 warnings 里逐表记一句（见 mirror.go），
+// `tt gen status` 也会带出来。要看完整内容请直查库（`tt db sql` / `tt dict`）。
+const lobCapChars = 1000
 
 // FileSource 服务器文件的来源（生产实现走 host.FS 只读 SFTP；测试注入内存实现）。
 type FileSource interface {
@@ -152,7 +163,7 @@ func selectList(meta TableMeta) string {
 			// 为什么是 `TO_CHAR(SUBSTR(...))` 而不是 `DBMS_LOB.SUBSTR`：
 			//   1. `DBMS_*` 被只读文本层（internal/safesql）当受限函数拒绝 ——
 			//      那是 tt 的安全边界，不能为了这条查询开口子；
-			//   2. 先 SUBSTR 截到 4000 再 TO_CHAR，绕开 `ORA-22835`（CLOB 超过 4000
+			//   2. 先按字符截断再 TO_CHAR，绕开 `ORA-22835` / `ORA-64203`（CLOB 超过 4000
 			//      字节时直接 TO_CHAR 会报"缓冲区太小"）。
 			parts = append(parts, fmt.Sprintf("TO_CHAR(SUBSTR(%s, 1, %d)) AS %s", q, lobCapChars, q))
 			continue

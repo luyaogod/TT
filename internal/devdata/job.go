@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 )
@@ -207,28 +208,44 @@ func (m *Manager) Snapshot(kind, env, prog string) (Job, bool) {
 
 // Running 某环境当前在跑的任务（status 一次给出，前端不用逐个问）。
 func (m *Manager) Running(env string) []Job {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	var out []Job
-	for _, st := range m.jobs {
-		if st.job.Running && st.job.Env == env {
-			out = append(out, st.job)
-		}
-	}
-	// 顺序稳定：kind 再 prog
-	for i := 1; i < len(out); i++ {
-		for j := i; j > 0 && less(out[j], out[j-1]); j-- {
-			out[j], out[j-1] = out[j-1], out[j]
+	for _, j := range m.JobsFor(env) {
+		if j.Running {
+			out = append(out, j)
 		}
 	}
 	return out
 }
 
-func less(a, b Job) bool {
-	if a.Kind != b.Kind {
-		return a.Kind < b.Kind
+// JobsFor 某环境相关的任务快照：**跑着的在前，其次是最近结束的**（同一键只留最近一次）。
+//
+// 为什么要带"已结束"的：界面靠 status 里这一项判断"这次拉取是成功、取消还是失败"，
+// 并据此弹提示。只回 running 的话，任务一结束它就从列表里消失，用户永远看不到结果
+// （实测：点停止之后界面什么也没说）。
+func (m *Manager) JobsFor(env string) []Job {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []Job
+	for _, st := range m.jobs {
+		if st.job.Env != env {
+			continue
+		}
+		out = append(out, st.job)
 	}
-	return a.Prog < b.Prog
+	// 顺序稳定：运行中优先，其次 kind，再次 prog，最后按开始时间倒序
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Running != out[j].Running {
+			return out[i].Running
+		}
+		if out[i].Kind != out[j].Kind {
+			return out[i].Kind < out[j].Kind
+		}
+		if out[i].Prog != out[j].Prog {
+			return out[i].Prog < out[j].Prog
+		}
+		return out[i].StartedAt > out[j].StartedAt
+	})
+	return out
 }
 
 // All 全部任务快照（测试与排障用）。
