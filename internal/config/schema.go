@@ -95,8 +95,11 @@ type NamedSsh struct {
 	// 只到**目录**这一级：文件名始终是 <环境>.db（见 DictDBFileName）。不允许直接指到某个 .db ——
 	// 那样同一个环境可能被 CLI 指向 A、被界面指向 B，而"读到另一个库"与"数据不存在"
 	// 在输出上分不出来。
-	DictDir string               `json:"dictDir,omitempty"`
-	DB      *dbconfig.Connection `json:"db,omitempty"` // 该环境的数据库连接（与 SSH 一对一）
+	DictDir string `json:"dictDir,omitempty"`
+	// DevDataDir 这个环境的开发资料根目录（绝对路径）；空 = 用顶层 devdata.dir，
+	// 再空 = <数据目录>/devdata。环境目录名仍是环境名（见 config.DevDataEnvDirForEnv）。
+	DevDataDir string               `json:"devdataDir,omitempty"`
+	DB         *dbconfig.Connection `json:"db,omitempty"` // 该环境的数据库连接（与 SSH 一对一）
 	// Ents 这个环境支持的企业编号与各自的账号（gzou_t 的 gzou001/gzou003）。
 	//
 	// 为什么存进配置（而不是每次现查 gzou_t）：企业清单是**慢变量**，而“能不能看
@@ -314,6 +317,17 @@ type DictSettings struct {
 	Dir string `json:"dir"` // 同 MirrorSettings：空串有意义，不能 omitempty
 }
 
+// DevDataSettings 「开发资料」（给 model 的原材料）的根目录（绝对路径）。
+//
+// 空 = 缺省落点 `<数据目录>/devdata`。各环境仍是 `<根目录>/<环境>` —— 只挪根，
+// 不按环境各指一个目录：CLI、Web、后续 model 三边读同一份配置才不会各读各的。
+//
+// 与 dict/mirror 分开的理由见 devdata.go 的包注释：这是**原材料**，不是"方便读的镜像"，
+// 清理口径也不同（不进 `tt cache` 的白名单，只走 `tt gen clean`）。
+type DevDataSettings struct {
+	Dir string `json:"dir"` // 同 MirrorSettings：空串有意义，不能 omitempty
+}
+
 // SyncSettings 旧版单文件字典库落点（绝对路径）。
 //
 // 现在本地库按环境分文件（<数据目录>/dict/<环境>.db），Target 不再参与新落点；
@@ -423,6 +437,7 @@ type Root struct {
 	Query         QuerySettings
 	Mirror        MirrorSettings
 	Dict          DictSettings
+	DevData       DevDataSettings
 	Sync          SyncSettings
 	Tdev          TdevSettings
 	Tzs           TzsSettings
@@ -457,6 +472,9 @@ func Load(path string) (*Root, error) {
 		return nil, err
 	}
 	if err := decodeSection(root, "dict", &r.Dict); err != nil {
+		return nil, err
+	}
+	if err := decodeSection(root, "devdata", &r.DevData); err != nil {
 		return nil, err
 	}
 	if err := decodeSection(root, "sync", &r.Sync); err != nil {

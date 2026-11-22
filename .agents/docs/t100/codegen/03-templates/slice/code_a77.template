@@ -1,0 +1,6 @@
+            #應用 a77 樣板自動產生(Version:2)
+            CALL FGL_DIALOG_GETBUFFER() RETURNING lp_str
+            IF NOT cl_null(lp_str) THEN
+               LET lp_str = cl_ap_code_fuzzyquery(lp_str)   #模糊查詢功能
+               CALL FGL_DIALOG_SETBUFFER(lp_str)
+            END IF

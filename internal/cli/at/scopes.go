@@ -36,6 +36,15 @@ var scopes = map[string]Scope{
 	"dict mirror":     Env,  // 隐藏转发到 tt file mirror（下版删）
 	"dict mirror dir": Env,  // 转发到 tt file mirror dir；带 --at 时只改该环境
 
+	// ---- 开发资料（为 model 准备原材料）：只认环境；企业可选（决定规格库用哪个账号）----
+	"gen": EnvEnt,
+
+	// ---- 任务工作区（tt dev open/update/status/…）----
+	// 只有 open 需要环境（它要连服务器拉材料，企业可选）。update 的环境记在 task.json 里，
+	// 其余读命令（status/brief/find/at/search）完全离线 —— 它们给了 --at 一律报错，
+	// 免得"以为在对某个环境操作，其实读的是工作区里那份快照"。
+	"dev open": EnvEnt,
+
 	// ---- 服务器文件：只读，只认环境 ----
 	"file":            Env,
 	"file mirror dir": Env, // 不带 --at=全局根；带 --at=该环境单独目录

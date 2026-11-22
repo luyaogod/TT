@@ -1,0 +1,38 @@
+#應用 a75 樣板自動產生(Version:2)
+      &ifndef v1   #區分版本
+         #依據選取的模式開啟相對應的畫面，並做初始化處理
+         IF g_simple_mode_exists = "Y" THEN
+            #當選擇的模式與現行模式不同時，才需要重新轉換畫面
+            IF (g_simple_mode = TRUE AND g_current_mode = "standard") OR
+               (g_simple_mode = FALSE AND g_current_mode = "simple") THEN
+                
+               IF g_simple_mode = TRUE THEN
+                  CLOSE WINDOW w_${general_prefix}
+                  OPEN WINDOW w_${general_prefix} WITH FORM cl_ap_formpath("${general_simple_mode_module}",g_simple_name)
+                  LET g_current_mode = "simple"
+               ELSE
+                  CLOSE WINDOW w_${general_prefix}
+                  OPEN WINDOW w_${general_prefix} WITH FORM cl_ap_formpath("${general_module}",g_code)
+                  LET g_current_mode = "standard"
+               END IF
+  
+               #瀏覽頁簽資料初始化
+               CALL cl_ui_init()
+               
+               #判斷是否是第一次進入init()段
+               #若是第一次進入init段時才跑default_search()，以避免後續作畫面轉換時因為重複執行init()段而導致g_wc條件值被異動
+               LET gs_first_time = "N"
+               #程式初始化
+               CALL ${general_prefix}_init()
+  
+               ${general_i10_mark}${general_c01a_mark}${general_i13_mark}#判斷主畫面摺疊與否
+               ${general_i10_mark}${general_c01a_mark}${general_i13_mark}IF g_main_hidden THEN
+               ${general_i10_mark}${general_c01a_mark}${general_i13_mark}   CALL gfrm_curr.setElementHidden("mainlayout",1)
+               ${general_i10_mark}${general_c01a_mark}${general_i13_mark}   CALL gfrm_curr.setElementHidden("worksheet",0)
+               ${general_i10_mark}${general_c01a_mark}${general_i13_mark}ELSE
+               ${general_i10_mark}${general_c01a_mark}${general_i13_mark}   CALL gfrm_curr.setElementHidden("mainlayout",0)
+               ${general_i10_mark}${general_c01a_mark}${general_i13_mark}   CALL gfrm_curr.setElementHidden("worksheet",1)
+               ${general_i10_mark}${general_c01a_mark}${general_i13_mark}END IF
+            END IF
+         END IF
+      &endif

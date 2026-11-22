@@ -1,0 +1,61 @@
+#!/bin/ksh
+######
+# Contorl file not too big
+# 20220409 BY 12731 : r.h timeout ( contorl file not too big )
+# 220802-00017#1 by 12731 : r.h 優化 程式 close r.h 要把 r.h_lim 停止
+######
+
+echo "run r.h monitor timeout "
+
+date_c=`date '+%s'`
+
+hour=`expr $date_c + 3600`
+
+echo $date_c","$hour
+
+date=`date '+%s'`
+
+echo "start r.h monitor timeout "
+
+chk_r="N"  #220802-00017#1 add
+
+while [ $date -lt $hour ] ;
+
+   do
+      sleep 1
+      chk=`du -s $1 | awk '{print $1}'`
+
+      #1505 大約 1.5k
+      #60000000 = 大約 500 MB
+      if [ "$chk" -ge 60000000 ] ; then
+         echo "r.h log too big "
+	 break
+      fi
+
+      #220802-00017#1 add (s)
+      chk2=`echo $1 | awk -F / '{print $(NF)}'`
+      chk2=`ps -ef | grep $chk2 | grep -v grep | grep -v r.h_lim | wc -l`
+
+      if [ "$chk_r" != "Y" ] ;then
+         if [ "$chk2" -ge 1 ] ; then
+            echo -e "\nr.h process is open"
+            chk_r="Y"
+         fi
+      else
+         if [ "$chk2" -lt 1 ] ; then
+            echo -e "\nr.h process is close"
+            break
+         fi
+      fi
+      #220802-00017#1 add (e)      
+
+      date=`date '+%s'`
+      #echo $date
+
+   done
+cp -p $1 ${1}.bak
+echo ${1}.bak
+rm $1
+
+
+

@@ -35,6 +35,9 @@ func newCacheCmd() *cobra.Command {
   spill       查询被截断时落盘的完整结果
 
 **config.json 不是缓存**,清除时一律不动;正在运行的服务状态文件也不动。
+**devdata 也不在本清单里**:那份是给 model 的原材料(tt gen 的产物),按程序成套、带
+manifest 指纹,删了要重新拉(几十 MB + 数据库查询)。清理由 tt gen clean 负责,
+默认只打印将删内容,--yes 才真删。
 
 tt serve 启动时会自动清掉超过 7 天的缓存 —— 刻意不"启动即全清":spill 里那些文件
 的用途正是"刚才那条查询的完整结果,想看全量去读它",启动就删会把上一条命令刚
@@ -68,6 +71,7 @@ tt serve 启动时会自动清掉超过 7 天的缓存 —— 刻意不"启动�
 			}
 			fmt.Fprintf(out, "\n共 %s / %d 个文件;tt serve 启动时清理超过 %d 小时的\n",
 				humanBytes(st.Bytes), st.Files, st.MaxAgeHours)
+			fmt.Fprintf(out, "devdata(开发资料)不在本清单里,清理由 tt gen clean 负责\n")
 			return nil
 		},
 	}

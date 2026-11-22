@@ -47,6 +47,7 @@ import {
 import { Card, Field, InfoRow, SectionTitle, SettingRow } from '../../shared/settings'
 import { DirPicker } from './DirPicker'
 import { PluginsSettings } from './PluginsSettings'
+import { DevDataView } from './DevDataView'
 import { PluginSettingsSections } from './pluginRuntime/SlotHost'
 import { SkillsView } from './SkillsView'
 import { useToast } from './toast'
@@ -2040,6 +2041,11 @@ export function SettingsView() {
 
             </>
           )}
+
+          {/* ============ 开发资料（给 model 的原材料） ============ */}
+          {/* 页面本体独立成组件:设置页单文件已经 142 KB,再往里堆就会变成
+              "找一个字段要先滚 3000 行"。这里只留一行渲染。 */}
+          {section === 'devdata' && <DevDataView />}
 
           {/* ============ DEBUG ============ */}
           {section === 'debug' && (

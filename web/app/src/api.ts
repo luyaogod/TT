@@ -476,6 +476,96 @@ export interface DBSyncResp {
   job: DBSyncJob
 }
 
+// GET /api/devdata/status：开发资料（给 model 的原材料）的状态
+//
+// 与「数据字典」分区的镜像**不是同一份东西**：这里的材料按程序成套、带 manifest 指纹，
+// 不进 `tt cache` 的清理清单（清理由 `tt gen clean` 负责）。
+export interface DevDataTable {
+  table: string
+  rows: number
+  skipped?: boolean
+  missing?: boolean
+  desc?: string
+}
+export interface DevDataStaleReason {
+  code: string // missing-local | sha-mismatch | remote-newer | remote-gone | version-changed
+  detail: string
+}
+export interface DevDataDict {
+  present: boolean
+  path: string
+  size: number
+  tables: number
+  skipped: number
+  rows: number
+  syncedAt?: string
+  sha256?: string
+}
+export interface DevDataMdl {
+  present: boolean
+  dir: string
+  files: number
+  bytes: number
+  syncedAt?: string
+  templateVersions?: Record<string, number>
+  templateCount: number
+}
+export interface DevDataProg {
+  prog: string
+  module?: string
+  dir: string
+  exists: boolean
+  files: number
+  bytes: number
+  fetchedAt?: string
+  stale: boolean
+  staleReasons?: DevDataStaleReason[]
+  missing?: string[]
+  warnings?: string[]
+  probed?: boolean
+}
+// 一次（或最近一次）拉取任务的状态；前端按 running 决定轮询还是收手。
+export interface DevDataJob {
+  running: boolean
+  kind: string // mirror | fetch
+  env: string
+  prog?: string
+  phase: string
+  message: string
+  done: number
+  total: number
+  currentFile?: string
+  startedAt?: string
+  finishedAt?: string
+  elapsed?: string
+  error?: string
+  cancelled?: boolean
+}
+export interface DevDataStatus {
+  ok: boolean
+  env: string
+  dir: string
+  present: boolean
+  dict: DevDataDict
+  mdl: DevDataMdl
+  progs: DevDataProg[]
+  jobs?: DevDataJob[]
+  warnings?: string[]
+}
+export interface DevDataCleanItem {
+  kind: 'env' | 'prog'
+  env: string
+  prog?: string
+  path: string
+  files: number
+  bytes: number
+}
+export interface DevDataCleanPlan {
+  items: DevDataCleanItem[]
+  files: number
+  bytes: number
+}
+
 // GET /api/config/meta:配置元信息
 export interface ConfigMeta {
   config: string
@@ -720,6 +810,39 @@ export const api = {
     req<{ ok: boolean; path?: string; freed?: number; removed?: number; error?: string }>('/api/dbsync/clear', {
       method: 'POST', body: JSON.stringify({ env }),
     }),
+
+  // ---- 开发资料（给 model 的原材料）：独立前缀 /api/devdata/ ----
+  // `probe` 只在显式"核对服务器"时给 true：默认不出网，设置页一打开就要出结果。
+  devdataStatus: (env: string, probe = false, prog?: string) => {
+    const q = new URLSearchParams({ env })
+    if (probe) q.set('probe', '1')
+    if (prog) q.set('prog', prog)
+    return req<DevDataStatus>('/api/devdata/status?' + q.toString())
+  },
+  // 共用资料同步（幂等：已同步过就跳过；force 才重拉）。返回启动瞬间的任务快照。
+  devdataMirror: (env: string, opts?: { only?: 'dict' | 'mdl'; force?: boolean }) =>
+    req<{ ok: boolean; job: DevDataJob }>('/api/devdata/mirror', {
+      method: 'POST', body: JSON.stringify({ env, ...opts }),
+    }),
+  // 按程序拉取（成套）。同一程序不许并发（409），不同程序可以。
+  devdataFetch: (env: string, prog: string,
+    opts?: { module?: string; withDesign?: boolean; form?: boolean; force?: boolean }) =>
+    req<{ ok: boolean; job: DevDataJob }>('/api/devdata/fetch', {
+      method: 'POST', body: JSON.stringify({ env, prog, ...opts }),
+    }),
+  devdataStop: (env: string, kind: 'mirror' | 'fetch', prog?: string) =>
+    req<{ ok: boolean; error?: string }>('/api/devdata/stop', {
+      method: 'POST', body: JSON.stringify({ env, kind, prog }),
+    }),
+  // 删除某程序的原材料目录。**必须** yes=true（删除不可撤销，默认拒绝）。
+  devdataRemoveProg: (env: string, prog: string) =>
+    req<{ ok: boolean; removed: DevDataCleanPlan }>(
+      `/api/devdata/prog?env=${encodeURIComponent(env)}&prog=${encodeURIComponent(prog)}&yes=1`,
+      { method: 'DELETE' }),
+  // 只比对服务器（出网），输出 stale 明细。
+  devdataCheck: (env: string, prog: string) =>
+    req<{ ok: boolean; prog: DevDataProg }>(
+      `/api/devdata/check?env=${encodeURIComponent(env)}&prog=${encodeURIComponent(prog)}`),
   list: () => req<{ sessions: SessionBrief[] }>(`${API_BASE}/sessions`),
   launch: (module: string, prog: string, opts?: { ssh?: string; zone?: string; session?: string; ent?: string }) =>
     req<{ sessionId: string; module?: string; prog?: string; runProg?: string }>(`${API_BASE}/sessions`, { method: 'POST', body: JSON.stringify({ module, prog, ...opts }), timeoutMs: 180000 }),

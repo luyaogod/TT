@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>T100 表关联：FK 与 upper 的分工</title>
+<style>
+  :root{
+    --bg:#0a1730; --line:#1d3f6e;
+    --ink:#e8f1ff; --ink2:#b9d4f2; --muted:#7fa6cf;
+    --amber:#f6c453; --cyan:#4dd0e1; --green:#6ee7a8; --pink:#f78fb3; --red:#ff8a8a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 620px at 18% -10%,#123059 0%,var(--bg) 55%,#071024 100%);
+       color:var(--ink);font-family:"Segoe UI","Microsoft YaHei",system-ui,-apple-system,sans-serif;line-height:1.65}
+  .wrap{max-width:1620px;margin:0 auto;padding:26px 20px 90px}
+  h1{font-size:29px;margin:0 0 6px;letter-spacing:.4px}
+  h1 small{display:block;font-size:14.5px;font-weight:400;color:var(--muted);margin-top:10px;line-height:1.7}
+  .legend{display:flex;gap:20px;flex-wrap:wrap;margin:16px 0 4px;font-size:13px;color:var(--ink2)}
+  .legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:7px;vertical-align:-1px}
+  .panel{background:linear-gradient(180deg,#0d1e3d,#0b1a33);border:1px solid var(--line);border-radius:16px;padding:18px 22px;margin-top:24px}
+  .panel h2{font-size:18px;margin:0 0 12px}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:4px}
+  th,td{border-bottom:1px solid #17335b;padding:8px 10px;text-align:left;vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12.5px;letter-spacing:.3px}
+  tr:last-child td{border-bottom:none}
+  code,.mono{font-family:"Cascadia Code",Consolas,monospace;font-size:12.5px}
+  .k{color:var(--amber)} .c{color:var(--cyan)} .g{color:var(--green)} .p{color:var(--pink)} .r{color:var(--red)}
+  pre{margin:8px 0 0;background:#08182f;border:1px solid #17335b;border-radius:10px;padding:12px 14px;overflow:auto}
+  pre code{font-size:12.5px;line-height:1.65;color:#cfe3ff}
+  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:16px}
+  .card{background:#0e2140;border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card b{display:block;font-size:15px;margin-bottom:6px}
+  .card p{margin:0;font-size:13px;color:var(--ink2)}
+  .foot{margin-top:26px;color:var(--muted);font-size:12.5px}
+  svg{width:100%;height:auto;display:block;border-radius:16px;border:1px solid var(--line)}
+  svg text{font-family:"Segoe UI","Microsoft YaHei",sans-serif}
+  .sec{font-size:19px;font-weight:700;fill:#e8f1ff}
+  .sub{font-size:12.5px;fill:#7fa6cf}
+  .bt{font-size:14.5px;font-weight:700;fill:#e8f1ff}
+  .b2{font-size:13px;fill:#b9d4f2}
+  .b3{font-size:12px;fill:#7fa6cf}
+  .cd{font-family:"Cascadia Code",Consolas,monospace;font-size:12px;fill:#f6c453}
+  .cd2{font-family:"Cascadia Code",Consolas,monospace;font-size:12px;fill:#6ee7a8}
+  .cd3{font-family:"Cascadia Code",Consolas,monospace;font-size:12px;fill:#ff8a8a}
+  .cdx{font-family:"Cascadia Code",Consolas,monospace;font-size:15px}
+  @media (max-width:1100px){ .cards{grid-template-columns:1fr} h1{font-size:23px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>FK 与 upper 的分工 · 子表到底挂在谁身上
+  <small>FK 回答"属于哪张单"，upper 回答"属于哪一笔单身"；两者拼成同一句 JOIN 的前后半段</small>
+</h1>
+
+<div class="legend">
+  <span><i style="background:#f6c453"></i>FK（fk_master / fk_detail）</span>
+  <span><i style="background:#4dd0e1"></i>upper（upper_key / this_key）</span>
+  <span><i style="background:#6ee7a8"></i>等价写法</span>
+  <span><i style="background:#ff8a8a"></i>半填的后果</span>
+</div>
+
+<svg viewBox="0 0 1560 1512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="FK 与 upper 分工图解">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#12294a" stroke-width="1"/>
+    </pattern>
+    <marker id="arA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f6c453"/>
+    </marker>
+    <marker id="arC" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#4dd0e1"/>
+    </marker>
+    <marker id="arR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#ff8a8a"/>
+    </marker>
+    <marker id="arG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#6ee7a8"/>
+    </marker>
+  </defs>
+
+  <rect width="1560" height="1512" fill="#081428"/>
+  <rect width="1560" height="1512" fill="url(#grid)"/>
+
+  <!-- ============ ① 三层树 ============ -->
+  <text class="sec" x="40" y="52">① 三层结构：两种线，各管一层</text>
+  <text class="sub" x="330" y="52">主档 → 单身 → 子表；FK 连第一段，upper 连第二段</text>
+
+  <rect x="560" y="82" width="380" height="84" rx="14" fill="#0f2445" stroke="#2f5c94" stroke-width="1.5"/>
+  <text class="bt" x="582" y="110">xmda_t　订单单头</text>
+  <text class="b3" x="582" y="132">键：ent + docno</text>
+  <text class="b3" x="582" y="152">主档（main = Y）</text>
+
+  <rect x="190" y="250" width="350" height="96" rx="14" fill="#0f2445" stroke="#2f5c94" stroke-width="1.5"/>
+  <text class="bt" x="212" y="278">xmdc_t　订单单身</text>
+  <text class="b3" x="212" y="300">键：ent + docno + seq</text>
+  <text class="b3" x="212" y="322">一棵树里的"中间层"</text>
+
+  <rect x="950" y="250" width="400" height="96" rx="14" fill="#0f2445" stroke="#2f5c94" stroke-width="1.5"/>
+  <text class="bt" x="972" y="278">xmdd_t / xmdduc_t　子表</text>
+  <text class="b3" x="972" y="300">键：ent + docno + seq (+seq1)</text>
+  <text class="b3" x="972" y="322">交期明细 / EPI 信息</text>
+
+  <line x1="700" y1="166" x2="380" y2="246" stroke="#f6c453" stroke-width="1.7" marker-end="url(#arA)"/>
+  <text class="b3" x="440" y="200">FK：ent, docno</text>
+
+  <line x1="820" y1="166" x2="1080" y2="246" stroke="#f6c453" stroke-width="1.7" marker-end="url(#arA)"/>
+  <text class="cd" x="880" y="200">FK：属于哪张单</text>
+
+  <line x1="544" y1="298" x2="946" y2="298" stroke="#4dd0e1" stroke-width="1.7" stroke-dasharray="9 5" marker-end="url(#arC)"/>
+  <text class="cd" x="590" y="286" style="fill:#4dd0e1">upper：属于哪一笔单身（+ seq）</text>
+
+  <!-- ============ ② 三个属性 ============ -->
+  <text class="sec" x="40" y="424">② 三个属性是一组，按位置配对</text>
+  <text class="sub" x="360" y="424">upper_table 指表，upper_key ↔ this_key 指字段；数量必须相等</text>
+
+  <text class="cd" x="90" y="500">upper_table</text>
+  <line x1="240" y1="496" x2="300" y2="496" stroke="#4dd0e1" stroke-width="1.5" marker-end="url(#arC)"/>
+  <rect x="310" y="476" width="260" height="42" rx="9" fill="#0d3038" stroke="#4dd0e1" stroke-width="1.4"/>
+  <text class="cd" x="330" y="503" style="fill:#7ef0ff">xmdc_t</text>
+  <text class="b3" x="600" y="503">上阶表格＝中间层（订单单身）</text>
+
+  <text class="cd" x="90" y="592">upper_key</text>
+  <rect x="310" y="568" width="235" height="42" rx="9" fill="#0d3038" stroke="#4dd0e1" stroke-width="1.4"/>
+  <text class="cd" x="330" y="595" style="fill:#7ef0ff">xmdcent</text>
+  <rect x="555" y="568" width="235" height="42" rx="9" fill="#0d3038" stroke="#4dd0e1" stroke-width="1.4"/>
+  <text class="cd" x="575" y="595" style="fill:#7ef0ff">xmdcdocno</text>
+  <rect x="800" y="568" width="235" height="42" rx="9" fill="#0d3038" stroke="#4dd0e1" stroke-width="1.6"/>
+  <text class="cd" x="820" y="595" style="fill:#7ef0ff;font-weight:700">xmdcseq</text>
+
+  <text class="cd" x="90" y="684">this_key</text>
+  <rect x="310" y="660" width="235" height="42" rx="9" fill="#20123a" stroke="#b9a6ff" stroke-width="1.4"/>
+  <text class="cd" x="330" y="687" style="fill:#cbb9ff">xmdducent</text>
+  <rect x="555" y="660" width="235" height="42" rx="9" fill="#20123a" stroke="#b9a6ff" stroke-width="1.4"/>
+  <text class="cd" x="575" y="687" style="fill:#cbb9ff">xmdducdocno</text>
+  <rect x="800" y="660" width="235" height="42" rx="9" fill="#20123a" stroke="#b9a6ff" stroke-width="1.6"/>
+  <text class="cd" x="820" y="687" style="fill:#cbb9ff;font-weight:700">xmdducseq</text>
+
+  <line x1="432" y1="616" x2="432" y2="654" stroke="#4dd0e1" stroke-width="1.3" stroke-dasharray="4 4" marker-end="url(#arC)"/>
+  <line x1="677" y1="616" x2="677" y2="654" stroke="#4dd0e1" stroke-width="1.3" stroke-dasharray="4 4" marker-end="url(#arC)"/>
+  <line x1="917" y1="616" x2="917" y2="654" stroke="#4dd0e1" stroke-width="1.8" marker-end="url(#arC)"/>
+
+  <text class="b3" x="1070" y="590">← 同一个位置的字段必须一一对应</text>
+  <text class="b3" x="1070" y="614">← 两边数量不等 = 设计器直接报错</text>
+  <text class="b3" x="1070" y="638">← 只有 ent/docno 对上、seq 没填 = 生成半截条件</text>
+
+  <!-- ============ ③ 落到 SQL ============ -->
+  <text class="sec" x="40" y="772">③ 落到 SQL：FK 拼前半句，upper 拼后半句</text>
+  <text class="sub" x="460" y="772">以 xmdd_t 的实际生成结果为例</text>
+
+  <rect x="60" y="792" width="1440" height="104" rx="12" fill="#08182f" stroke="#2a4a78" stroke-width="1.4"/>
+  <text class="cdx" x="88" y="852"><tspan fill="#8fb3d9">LEFT JOIN xmdd_t ON </tspan><tspan fill="#f6c453" font-weight="700">xmddent = xmdaent AND xmdadocno = xmdddocno</tspan><tspan fill="#8fb3d9"> AND </tspan><tspan fill="#4dd0e1" font-weight="700">xmdcseq = xmddseq</tspan></text>
+
+  <line x1="420" y1="866" x2="350" y2="926" stroke="#f6c453" stroke-width="1.5" marker-end="url(#arA)"/>
+  <rect x="80" y="930" width="540" height="76" rx="11" fill="#2a2410" stroke="#f6c453" stroke-width="1.5"/>
+  <text class="bt" x="100" y="957" style="fill:#f6c453">FK 这一段</text>
+  <text class="b3" x="100" y="980">fk_detail[i] = fk_master[i]　（哪张单）</text>
+  <text class="b3" x="100" y="1000">两个字段都来自表的键，不涉及项次</text>
+
+  <line x1="800" y1="866" x2="1140" y2="926" stroke="#4dd0e1" stroke-width="1.5" marker-end="url(#arC)"/>
+  <rect x="940" y="930" width="560" height="76" rx="11" fill="#0d3038" stroke="#4dd0e1" stroke-width="1.5"/>
+  <text class="bt" x="960" y="957" style="fill:#4dd0e1">upper 这一段</text>
+  <text class="b3" x="960" y="980">upper_key[i] = this_key[i]　（哪一笔单身）</text>
+  <text class="b3" x="960" y="1000">ent/docno 已由 FK 保证，所以只留 seq</text>
+
+  <text class="b3" x="90" y="1042">注意：生成器不会把 ent/docno 再写一遍——这就是为什么实际输出里只剩 <tspan class="cd" style="fill:#4dd0e1">AND xmdcseq = xmddseq</tspan> 一个条件。</text>
+
+  <!-- ============ ④ 什么时候要 ============ -->
+  <text class="sec" x="40" y="1112">④ 什么时候需要 upper</text>
+  <text class="sub" x="300" y="1112">判定只看一句：子表里的 seq，是不是"单身项次"</text>
+
+  <rect x="60" y="1130" width="690" height="120" rx="12" fill="#0d3038" stroke="#4dd0e1" stroke-width="1.5"/>
+  <text class="bt" x="80" y="1158" style="fill:#4dd0e1">需要：seq 就是单身项次</text>
+  <text class="b3" x="80" y="1182">xmdd_t（交期明细）、xmdduc_t（EPI 信息）</text>
+  <text class="b3" x="80" y="1204">它们有「项次」，同一订单不同项次的数据要分开</text>
+  <text class="b3" x="80" y="1226">→ 要么放进 FK，要么放进 upper（二选一）</text>
+
+  <rect x="810" y="1130" width="690" height="120" rx="12" fill="#101f3a" stroke="#3a6ea5" stroke-width="1.4"/>
+  <text class="bt" x="830" y="1158">不需要：seq 只是自己的流水号</text>
+  <text class="b3" x="830" y="1182">xmdcuc_t（挑片信息）、xmdjwf_t（芯片信息）</text>
+  <text class="b3" x="830" y="1204">生成物里 key 只有 ent+docno，seq/seq1 是本表流水</text>
+  <text class="b3" x="830" y="1226">→ upper 留空，填了反而会多出错误条件</text>
+
+  <!-- ============ ⑤ 两种写法 + 坏写法 ============ -->
+  <text class="sec" x="40" y="1306">⑤ 两种等价写法，和一种翻车写法</text>
+
+  <rect x="60" y="1322" width="470" height="150" rx="12" fill="#0e2a22" stroke="#6ee7a8" stroke-width="1.5"/>
+  <rect x="60" y="1322" width="470" height="30" rx="12" fill="#123c2e"/>
+  <text class="bt" x="80" y="1344" style="fill:#6ee7a8">A：FK 直接指到单身（推荐）</text>
+  <text class="cd2" x="80" y="1374">fk_master = xmdcent,xmdcdocno,xmdcseq</text>
+  <text class="cd2" x="80" y="1396">fk_detail = xmdducent,xmdducdocno,xmdducseq</text>
+  <text class="b3" x="80" y="1420">upper = 空</text>
+  <text class="b3" x="80" y="1444">→ JOIN 里天然带 seq</text>
+
+  <rect x="545" y="1322" width="470" height="150" rx="12" fill="#0e2a22" stroke="#6ee7a8" stroke-width="1.5"/>
+  <rect x="545" y="1322" width="470" height="30" rx="12" fill="#123c2e"/>
+  <text class="bt" x="565" y="1344" style="fill:#6ee7a8">B：FK 指主档 + upper 补单身</text>
+  <text class="cd2" x="565" y="1374">fk_master = xmdaent,xmdadocno</text>
+  <text class="cd2" x="565" y="1396">upper_table = xmdc_t　键 = …seq</text>
+  <text class="b3" x="565" y="1420">upper_key = xmdcent,xmdcdocno,xmdcseq</text>
+  <text class="b3" x="565" y="1444">this_key　= xmdducent,xmdducdocno,xmdducseq</text>
+
+  <rect x="1030" y="1322" width="470" height="150" rx="12" fill="#2a1622" stroke="#ff8a8a" stroke-width="1.6"/>
+  <rect x="1030" y="1322" width="470" height="30" rx="12" fill="#3a1a24"/>
+  <text class="bt" x="1050" y="1344" style="fill:#ffb3b3">C：半填（现在就是）</text>
+  <text class="cd3" x="1050" y="1374">upper_key = （空）</text>
+  <text class="cd3" x="1050" y="1396">this_key　= xmdducseq,xmdducseq1</text>
+  <text class="cd3" x="1050" y="1424">→ AND  = xmdducseq AND  = xmdducseq1</text>
+  <text class="b3" x="1050" y="1448">左边空白，SQL 跑不动 / 编译不过</text>
+
+  <text class="b2" x="62" y="1490" style="font-size:13px">A 与 B 生成的 JOIN 完全等价（都得到 <tspan class="cd" style="fill:#4dd0e1">AND xmdcseq = xmdducseq</tspan>）；区别只是 seq 放在 FK 里还是放在 upper 里 —— <tspan fill="#ff8a8a">千万别各放一半</tspan>。</text>
+
+</svg>
+
+<div class="cards">
+  <div class="card">
+    <b>一句话分工</b>
+    <p><code class="k">FK</code> 决定"这张单"，<code class="c">upper</code> 决定"这一笔单身"。合成一句 JOIN，就是 FK 半句 + upper 半句。</p>
+  </div>
+  <div class="card">
+    <b>为什么要有 upper</b>
+    <p>因为 T100 里子表的 parent 永远挂主档（型态判定要），中间那层（单身）的关系只能另开一组属性表达，这就是"三层二显"。</p>
+  </div>
+  <div class="card">
+    <b>最常见的坑</b>
+    <p>只填了 <code class="c">this_key</code> 没填 <code class="c">upper_table/upper_key</code>，生成器就吐出 <code class="r">AND&nbsp;&nbsp;=&nbsp;xmdducseq</code> 这种空列。</p>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>附：属性 → 含义 → 落到哪里</h2>
+  <table>
+    <thead><tr><th style="width:150px">属性</th><th style="width:330px">含义</th><th>生成物 / 用途</th></tr></thead>
+    <tbody>
+      <tr><td><code class="k">fk_master</code></td><td>主档上的键字段（一般 ent, docno）</td><td>JOIN 的 <code>ON</code> 前半段；insert/delete 的键数组 <code>gs_keys[1..2]</code></td></tr>
+      <tr><td><code class="k">fk_detail</code></td><td>本表对应主档的字段</td><td>同上，与 <code>fk_master</code> 按位置配对</td></tr>
+      <tr><td><code class="c">upper_table</code></td><td>上阶表（中间层，如 xmdc_t）</td><td>决定 JOIN 里补哪张表的条件；留空则不补</td></tr>
+      <tr><td><code class="c">upper_key</code></td><td>上阶表上用来对应的字段（ent, docno, seq）</td><td>JOIN 的 <code>AND</code> 左侧</td></tr>
+      <tr><td><code class="c">this_key</code></td><td>本表对应字段（ent, docno, seq）</td><td>JOIN 的 <code>AND</code> 右侧；与 upper_key 数量必须相等</td></tr>
+      <tr><td><code>parent</code></td><td>树上的父节点（一般就是主档）</td><td>决定这个页签在表单里挂哪一层、属于哪个输入数组</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="panel">
+  <h2>真代码：正确 vs 半填</h2>
+  <p class="sub" style="margin:0 0 6px">xmdd_t（正确，upper 填了 seq）</p>
+  <pre><code>" LEFT JOIN xmdd_t ON xmddent = xmdaent AND xmdadocno = xmdddocno"
+" AND xmdcseq = xmddseq "        <span class="c">← upper 贡献的这一句</span></code></pre>
+  <p class="sub" style="margin:14px 0 6px">xmdduc_t（半填，upper 只有本阶）</p>
+  <pre><code>" LEFT JOIN xmdduc_t ON xmdducent = xmdaent AND xmdadocno = xmdducdocno AND  = xmdducseq AND  = xmdducseq1"
+<span class="r">                        ↑ 两个空列：生成器不知道拿哪张表的哪个字段来比</span></code></pre>
+</div>
+
+<div class="panel">
+  <h2>上手检查清单（30 秒）</h2>
+  <table>
+    <thead><tr><th style="width:60px">#</th><th>检查什么</th><th>不对的症状</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>r.t 里这张表有没有 <code>&lt;fk fk_table="…" fk_detail="…" fk_master="…"&gt;</code></td><td>设计器里连线后 FK 永远是空的</td></tr>
+      <tr><td>2</td><td>FK 里包不包含 <code>seq</code>？包含 → upper 留空；不包含 → upper 必须填 seq</td><td>同一订单不同项次的数据串在一起 / JOIN 少一句</td></tr>
+      <tr><td>3</td><td><code>upper_key</code> 与 <code>this_key</code> 数量是否相等、位置是否对齐</td><td>设计器报"FKMaster 與 FkDetail 設定數量不同"或生成空列</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="foot">
+  规则出自设计器反编译源码（TBLControl.ParentTBL 连线取 FK、TBLModifyBox 三层二显校验）与 axmt500_wf 的生成结果（b_fill 的 JOIN 段）。
+</div>
+
+</div>
+</body>
+</html>

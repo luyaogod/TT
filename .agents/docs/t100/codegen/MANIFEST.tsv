@@ -1,0 +1,222 @@
+path	bytes	sha256_12	source
+01-server\blueprint\sadzp030_tab_de.4gl	48404	18536F54EC8B	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\blueprint\sadzp030_tab_file.4gl	7571	EBEE9F07FB61	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\blueprint\sadzp030_tab_ma.4gl	89065	FEF623A037FA	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\blueprint\sadzp030_tab_relation.4gl	73883	74BEEA0B1B24	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\blueprint\sadzp030_tab.4gl	204080	8A151AED3CE9	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\blueprint\sadzp030_tsd.4gl	114976	52254EF8FAC4	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\common\sadzi100_extract.4gl	8448	4D5C2D3F1F8A	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\common\sadzi100_load_diff.4gl	3369	6A2A40987EA5	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\generator-other\adzp031.4gl	4318	DB68B45F2F3B	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\generator-other\adzp151.4gl	112040	C491FD0FF081	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\generator-other\adzp152.4gl	162950	7E3EB8C84BF4	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\generator-other\adzp161.4gl	158031	87E55BC249FD	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\generator\adzp150_global.inc	358	4BA55B2A4EB6	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\generator\adzp150.4gl	213228	33F6AA1B57E6	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\generator\sadzp150_action.4gl	31656	793B57115975	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\generator\sadzp150_common.4gl	20537	8F7320B48A88	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\generator\sadzp150_ctrlp.4gl	9444	A1DBD86AA331	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\generator\sadzp150_fieldchk.4gl	67427	6CEE24ED9A84	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\generator\sadzp150_lang.4gl	105065	F5AE3E867ADA	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\generator\sadzp150_make.4gl	19096	172612C16BEC	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\generator\sadzp150_mdl.4gl	13374	0419542C234D	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\generator\sadzp150_multitable.4gl	145713	D940918A169C	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\generator\sadzp150_object.4gl	61789	52939784D138	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\generator\sadzp150_query.4gl	7494	35F1AE63AD41	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\generator\sadzp150_stus.4gl	12788	3938DDDDC90E	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\orchestration\adzp040.4gl	62663	CD7559C5BE04	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\orchestration\adzp060.4gl	2628	C0B26967E8AC	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\orchestration\adzp080_cnst.inc	2125	4C384FBB1111	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\orchestration\adzp080_type.inc	1490	AA2648F4D6C3	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\orchestration\adzp080.4gl	44416	D5FE1036A07B	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\orchestration\sadzp060_1.4gl	215086	B2643135477E	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\orchestration\sadzp060_2.4gl	133477	31152BBAFDDE	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\orchestration\sadzp060_3.4gl	11084	1EC49EB5B9E3	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\orchestration\sadzp060_4.4gl	141608	EA3C0F7130EE	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\orchestration\sadzp060_8.4gl	9456	7506C0652261	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\orchestration\sadzp060_ind.4gl	32043	A83B2A7997B4	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\orchestration\sadzp060_type.inc	879	874F92232DDB	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\orchestration\sadzp060.4gl	94848	FBC5A88084DE	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\tgl\adzp155.4gl	26989	1EAB8B7D8DB6	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\tgl\adzp175.4gl	10620	95ED929B12FC	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\tgl\adzp176.4gl	20517	E7D058E67ADA	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+01-server\tgl\adzp177.4gl	9789	E1FD9460720F	D:\APPS\TT Desktop\mirror\福联测试tst\erp\adz\4gl\
+02-launcher\profile	1174	8B07E1D357F1	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\profile
+02-launcher\r.help	771	44825AF65A9C	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\r.help
+02-launcher\r.r	334	6513639C9460	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\r.r
+02-launcher\readme	1507	4E5396369754	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\readme
+02-launcher\tools\r.42s	351	B49DFCBE46B1	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.42s
+02-launcher\tools\r.c	1769	375CEC0B1F9B	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.c
+02-launcher\tools\r.c3	277	87AF5B67DFAD	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.c3
+02-launcher\tools\r.c35	214	996DEFDEB9A3	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.c35
+02-launcher\tools\r.cov	346	E492882FAA3E	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.cov
+02-launcher\tools\r.cov_ana	925	0D90D3FF9298	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.cov_ana
+02-launcher\tools\r.cov_clean	152	CD16B0B86B97	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.cov_clean
+02-launcher\tools\r.cov_merge	343	B98B3A2F1A28	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.cov_merge
+02-launcher\tools\r.cs	1794	353EA95B5645	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.cs
+02-launcher\tools\r.d	2342	548EB993CAE1	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.d
+02-launcher\tools\r.dg	1524	40F76B417298	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.dg
+02-launcher\tools\r.diff	37	C5555790572B	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.diff
+02-launcher\tools\r.ent	394	2F133B7CFF7E	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.ent
+02-launcher\tools\r.f	1120	10C6DF866BDF	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.f
+02-launcher\tools\r.g42s	341	D33CC198E7BD	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.g42s
+02-launcher\tools\r.gx	118	AD058165D97E	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.gx
+02-launcher\tools\r.h	1117	2E170BFEC663	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.h
+02-launcher\tools\r.h_lim	1185	C0D0D8F9C2F9	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.h_lim
+02-launcher\tools\r.l	1158	0B71BD488C40	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.l
+02-launcher\tools\r.patch	265	907E98C06043	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.patch
+02-launcher\tools\r.patch_drop_dspatch	281	99E1412AA5B2	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.patch_drop_dspatch
+02-launcher\tools\r.patch_ver	160	C22DBBC7E39D	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.patch_ver
+02-launcher\tools\r.patch_ver2	12	B2E346F81BF8	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.patch_ver2
+02-launcher\tools\r.patch2	557	064BDF78DEB1	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.patch2
+02-launcher\tools\r.ps	33	FA83D18C8E9D	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.ps
+02-launcher\tools\r.rd	152	C9CC3BEC7A3B	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.rd
+02-launcher\tools\r.rs	449	BDD989381705	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.rs
+02-launcher\tools\r.s	4496	C17B30B5F634	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.s
+02-launcher\tools\r.sco	52	3D1D6AAC7043	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.sco
+02-launcher\tools\r.tool_ver	28	E65D16E751F7	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.tool_ver
+02-launcher\tools\r.v	310	F49EF451E74B	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.v
+02-launcher\tools\r.vi	52	F569945C8785	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.vi
+02-launcher\tools\r.xr_ver	33	00B8FA4B8390	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\tools\r.xr_ver
+02-launcher\topalias	895	DEE79F3214C9	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\topalias
+02-launcher\topenv	6851	2D07D1F941BA	D:\我的项目\TT\.agents\docs\t100\r.t\launcher\topenv
+03-templates\slice\code_a00.template	460	2291F3080911	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a01.template	229	7E25BB52EC5C	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a02.template	319	4646848DE072	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a03.template	257	EFFE0EB2D0A1	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a04.template	224	9C52BE653FEF	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a05.template	373	57635F56EFFE	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a06.template	2904	9317534A8A81	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a07.template	1177	E6DC27330A26	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a08.template	431	57C02F700AEA	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a09.template	8392	E4E709F5F304	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a11.template	2083	466736BE3BAD	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a12.template	43	6104C21F5BED	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a13.template	413	134FF47E6902	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a14.template	496	AF7A7291CD9D	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a15.template	286	179391EA8F10	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a16.template	244	D481B57F0D4E	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a17.template	763	D33CF4727B21	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a18.template	245	00AC8F1B4FDC	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a19.template	876	AA84C4DB43E6	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a20.template	342	533CC1615FAF	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a21.template	441	5EE0319E8770	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a22.template	611	97CD7CCC043F	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a23.template	599	25CA29CAA218	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a24.template	412	B14F413B881F	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a25.template	724	8CB41F4CD0CC	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a26.template	4681	57E8EBEE7087	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a27.template	3911	F496F643478C	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a28.template	403	679F06B0BA7B	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a29.template	6432	BFAED5CC39BE	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a30.template	15401	127EC2AC254B	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a31.template	3364	45FF386FE736	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a32.template	447	22021FE3440D	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a33.template	394	3AB347A4D88C	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a34.template	444	F822FC88660E	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a35.template	407	194FC28AFB19	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a36.template	1562	8D8D2F0559CE	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a37.template	443	0936D2288FED	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a38.template	2361	593CDE6BED39	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a39.template	2989	17C3CED58E32	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a40.template	1350	8B7F288538B1	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a41.template	526	297DA1AE2A9A	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a42.template	1157	722957E6984D	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a43.template	709	2C1EC82B7119	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a44.template	342	C5DE5AA26955	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a45.template	104	04925FAB1B20	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a46.template	1140	6241BF70042D	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a47.template	344	24F685C37AFB	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a48.template	239	4E1920830A6C	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a49.template	384	72AFBE852FD1	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a50.template	4836	D77AC7BAD7C4	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a51.template	1592	DC59C07FA68C	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a52.template	0	E3B0C44298FC	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a53.template	1283	B785650A14EF	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a54.template	482	1AAF67691CF8	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a55.template	878	14F956E34B06	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a56.template	561	5E0E2DED86A1	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a57.template	863	F17F0F50C43E	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a58.template	660	AC03712B4163	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a59.template	240	09E41187AFE7	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a60.template	508	4D9A3AEA570E	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a61.template	451	BAC821FD8DA9	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a62.template	439	FD4138EDCADE	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a63.template	217	120A0D62561E	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a64.template	962	539CBECA62C3	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a65.template	1999	89644ECAB6E4	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a66.template	1217	B6F35399D875	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a67.template	800	3EA3EFE558BD	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a68.template	1278	4D49F91726F2	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a69.template	1501	BAE30B379312	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a70.template	334	E39F6F1E7852	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a71.template	1393	3F40D33C4E9F	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a72.template	741	A970E815E1E1	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a73.template	3043	2F7245160D20	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a74.template	1700	F270BDB53204	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a75.template	2292	FB0D425F2E5C	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a76.template	2679	B1A235AC136F	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_a77.template	299	0C1E4524F5AA	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_d01.template	647	E7E179340B2F	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_d02.template	1338	E5B6EE904CFC	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_d03.template	2336	888A2D3B6551	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_d04.template	2665	70FC66F4BA8D	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_d05.template	994	938D08B514F1	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_d06.template	1349	2E8D1FFF748B	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_d07.template	475	B8BF9F64E5BD	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_d08.template	7037	E94C2A89B924	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_d09.template	6648	9B1761DA799D	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_d10.template	352	0BC1225A0F4A	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_qs01.template	3182	2C49E27A87FA	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_qs02.template	556	7D3471F2D415	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_qs03.template	556	F67F43A2848C	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_qs04.template	3855	C2F888CF3F17	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_qs05.template	2245	6447C66204CE	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_qs06.template	232	4FDC279AA3E1	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_qs07.template	3365	404713CBA0A2	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_qs08.template	1056	DC192D977CA3	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_qs09.template	205	28B986CFC523	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_qs10.template	427	3E997773772F	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_qs11.template	211	6ED75E121F10	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_qs12.template	175	0967B54F2CA2	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_qs13.template	2111	B7B649051003	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_qs14.template	1678	FB8637AE0ADE	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_qs15.template	1557	43BAB48B64E5	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_qs16.template	310	E694EA35DDDC	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_qs17.template	1021	9BE3C523E681	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_qs18.template	167	BD93D35C9F8D	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_qs19.template	1850	8260E2D491BE	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_qs20.template	299	0D7F64CBAF5A	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_qs21.template	3262	D268E47236FB	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_qs22.template	994	1D4F8AB43D78	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_qs23.template	1451	CFCEBFC40839	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_qs24.template	705	C694E80976BD	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_qs25.template	265	4D2FAC3F5E24	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_qs26.template	467	B870E8D5628C	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_qs27.template	467	01FABC91C810	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_ss01.template	520	2427C41C4221	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_ss02.template	512	4C8E4F3DF97D	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_ss03.template	1293	DC2D233523D4	D:\t100_wrok_dir\fulian\172prd\slice
+03-templates\slice\code_ss04.template	664	ABC82EA96993	D:\t100_wrok_dir\fulian\172prd\slice
+04-designer\Common\Helpers\TableColumnHelper.cs	14965	6B36C150885D	D:\我的项目\TT\.agents\docs\t100\designer-src
+04-designer\Common\SettingManager.cs	29101	87BCC2E82385	D:\我的项目\TT\.agents\docs\t100\designer-src
+04-designer\Common\TzpManager.cs	30107	5706BE8796B7	D:\我的项目\TT\.agents\docs\t100\designer-src
+04-designer\Common\ViewModel\TBLModel.cs	13534	991E894D3091	D:\我的项目\TT\.agents\docs\t100\designer-src
+04-designer\Infrastructure\Model\AddPointModel.cs	40707	D44080A72BCA	D:\我的项目\TT\.agents\docs\t100\designer-src
+04-designer\Infrastructure\Model\SectionModel.cs	6340	54B640AB49AE	D:\我的项目\TT\.agents\docs\t100\designer-src
+04-designer\Infrastructure\ResourceController.cs	11573	50E0B8B25661	D:\我的项目\TT\.agents\docs\t100\designer-src
+04-designer\Infrastructure\XMLParser.cs	4595	101D4D81FAC4	D:\我的项目\TT\.agents\docs\t100\designer-src
+04-designer\Relation\RelationshipSpace.xaml	11424	95803837A341	D:\我的项目\TT\.agents\docs\t100\designer-src
+04-designer\Relation\RelationshipSpace.xaml.cs	33502	8505B62CEB68	D:\我的项目\TT\.agents\docs\t100\designer-src
+04-designer\Relation\TBLControl.xaml	8438	2785D2339992	D:\我的项目\TT\.agents\docs\t100\designer-src
+04-designer\Relation\TBLControl.xaml.cs	9050	ACD01E727701	D:\我的项目\TT\.agents\docs\t100\designer-src
+04-designer\Relation\TBLModifyBox.xaml	6494	6B4D3B10B7A3	D:\我的项目\TT\.agents\docs\t100\designer-src
+04-designer\Relation\TBLModifyBox.xaml.cs	12967	5FBD01B3816A	D:\我的项目\TT\.agents\docs\t100\designer-src
+diagrams\case-aqct300-4levels.html	18948	1C1AE3E3E9CB	C:\Users\18526\Desktop\福联工作目录（工作稿，已改英文名）
+diagrams\case-aqct300-4levels.png	529538	057B7D49FA1D	C:\Users\18526\Desktop\福联工作目录（工作稿，已改英文名）
+diagrams\fk-vs-upper.html	18058	E1DE1958ACC0	C:\Users\18526\Desktop\福联工作目录（工作稿，已改英文名）
+diagrams\fk-vs-upper.png	439069	77B3F64314F0	C:\Users\18526\Desktop\福联工作目录（工作稿，已改英文名）
+diagrams\pipeline-overview.html	21671	E631F30520B1	C:\Users\18526\Desktop\福联工作目录（工作稿，已改英文名）
+diagrams\pipeline-overview.png	488443	3F3A004B8B88	C:\Users\18526\Desktop\福联工作目录（工作稿，已改英文名）
+diagrams\relation-to-crud.html	19663	A8E658C527D5	C:\Users\18526\Desktop\福联工作目录（工作稿，已改英文名）
+diagrams\relation-to-crud.png	502743	F126AE4A14E6	C:\Users\18526\Desktop\福联工作目录（工作稿，已改英文名）

@@ -1,0 +1,20 @@
+#!/bin/ksh
+
+echo ""
+echo "  選擇使用企業"
+echo "---------------"
+echo -e " (1)T100開發用測試企業 (99) "
+echo -e " (2)大數據量測試 (999)  "
+echo ""
+echo -e "    查看方式:可以執行echo $TOPENTERPRISE 數字比對上方提示"
+echo -e " (*)Exit :\c"
+echo ""
+read ans
+  ans="$1"
+  case $ans in 
+  1) export TOPENTERPRISE=99
+  ;;
+  2) export TOPENTERPRISE=999
+  ;;
+  esac
+

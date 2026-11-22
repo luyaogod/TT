@@ -1,0 +1,26 @@
+               #應用 a71 樣板自動產生(Version:2)
+               IF NOT cl_null(${mdl_pk_field})
+                  #mdls - Start -
+                  AND NOT cl_null(${mdl_pk_field${mdl}})
+                  #mdls -  End  -
+               THEN
+                  CALL ${mdl_lang_4gl}(${mdl_pk_list})
+                  INITIALIZE g_ref_fields TO NULL
+                  LET g_ref_fields[1] = ${mdl_pk_field}
+                  #mdls - Start -
+                  LET g_ref_fields[${mdl}] = ${mdl_pk_field${mdl}}
+                  #mdls -  End  -
+                  #同一個多語言表格，預設只產生第一個欄位的多語言開窗，若有多個欄位請自行調整以下程式段
+                  LET ls_mdl_str = "SELECT ${mdl_rtn_tbl_field} FROM ${mdl_lang_table} ",
+                                   " WHERE ${mdl_fk_tbl_field} = ? ",
+                                   #mdls2 - Start -
+                                     " AND ${mdl_fk_tbl_field${mdl}} = ? ",
+                                   #mdls -  End  -
+                                     " AND ${mdl_ent},
+                                     " AND ${mdl_lang_field} = '",g_lang,"'"
+          
+                  CALL ap_ref_array2(g_ref_fields, ls_mdl_str,"") RETURNING g_rtn_fields
+                  LET ${mdl_rtn_field} = g_rtn_fields[1]
+                  DISPLAY BY NAME ${mdl_rtn_field}
+               END IF
+

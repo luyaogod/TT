@@ -18,6 +18,7 @@ import (
 	"github.com/luyaogod/TT/internal/config"
 	"github.com/luyaogod/TT/internal/connsvc"
 	"github.com/luyaogod/TT/internal/debug"
+	devdataserver "github.com/luyaogod/TT/internal/devdata/server"
 	dictserver "github.com/luyaogod/TT/internal/dict/server"
 	"github.com/luyaogod/TT/internal/eventbus"
 	"github.com/luyaogod/TT/internal/hostrpc"
@@ -173,6 +174,10 @@ func newServeCmd() *cobra.Command {
 			// 统一层的配置状态仍用「单文件」口径；设置页已改为按环境显示库目录。
 			syncDefault := config.LocationsAt(path).SyncTarget("", "")
 			dictSrv := dictserver.New(path)
+			// 开发资料（给 model 的原材料）。与字典侧**不同一个包、不同一个前缀**：
+			// /api/devdata/* 由它独占（见 internal/web 的 routes），任务状态也在它自己
+			// 的 Manager 里 —— 与 /api/mirror、/api/dbsync 的长跑任务互不干扰。
+			devdataSrv := devdataserver.New(devdataserver.Options{ConfigPath: path, Version: Version})
 
 			// ---- 连接服务与 Host API ----
 			//
@@ -259,6 +264,7 @@ func newServeCmd() *cobra.Command {
 					BareVersion: Version,
 					Debug:       debugSrv.Handler(),
 					Dict:        dictSrv.Handler(),
+					DevData:     devdataSrv.Handler(),
 					// 设置页的"测试连接"与插件 Host API 用同一个连接服务实例。
 					ConnSvc: connSvc,
 					HostRPC: hostRPCHandler,

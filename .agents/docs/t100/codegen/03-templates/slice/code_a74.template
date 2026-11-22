@@ -1,0 +1,41 @@
+#應用 a74 樣板自動產生(Version:2)
+   &ifdef v1   #區分版本
+      CALL gfrm_curr.setElementHidden("ui_change",1)   #隱藏畫面切換action
+   &else
+      #有設定簡化畫面，才可顯示畫面轉換功能按鍵
+      IF g_simple_mode_exists = "Y" THEN
+         CALL gfrm_curr.setElementHidden("ui_change",0)   #顯示畫面切換action
+  
+         #更換按鍵圖片及說明
+         LET tpl_msg = NULL
+         IF g_simple_mode THEN   #簡化模式
+            #更換按鍵圖片
+            CALL gfrm_curr.setElementImage("ui_change","tb/standard_mode.png")
+            #更換按鍵說明
+            CALL cl_getmsg("azz-00834",g_lang) RETURNING tpl_msg
+            CALL gfrm_curr.setElementText("ui_change",tpl_msg)
+         ELSE
+            #更換按鍵圖片
+            CALL gfrm_curr.setElementImage("ui_change","tb/simple_mode.png")
+            #更換按鍵說明
+            CALL cl_getmsg("azz-00833",g_lang) RETURNING tpl_msg
+            CALL gfrm_curr.setElementText("ui_change",tpl_msg)
+         END IF
+  
+         #更換按鍵show hint說明
+         LET tpl_node = gfrm_curr.getNode()
+         LET tpl_nodelist = tpl_node.selectByPath("//Form//*")
+         FOR tpl_i = 1 TO tpl_nodelist.getLength()
+            LET tpl_node = tpl_nodelist.item(tpl_i)
+            LET tpl_node_name = tpl_node.getAttribute("name")
+            LET tpl_node_tagname = tpl_node.getTagName()
+  
+            IF tpl_node_name = "ui_change" THEN
+               CALL tpl_node.setAttribute("comment",tpl_msg)
+               EXIT FOR
+            END IF
+         END FOR
+      ELSE
+         CALL gfrm_curr.setElementHidden("ui_change",1)   #隱藏畫面切換action
+      END IF
+   &endif

@@ -1,0 +1,10 @@
+export T100RUNWAIT=1
+export DBDATE=Y4MD/
+r.r azzp195 $1 
+r.r azzp190 $1
+r.r azzp191 $1 zh_TW
+r.r azzp191 $1 zh_CN
+r.r azzp193 $1 4ad zh_TW
+r.r azzp193 $1 4ad zh_CN
+r.r azzp193 $1 4tm zh_TW
+r.r azzp193 $1 4tm zh_CN

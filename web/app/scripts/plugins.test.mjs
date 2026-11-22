@@ -11,7 +11,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-import { isPluginRoute, isSettingsSection, parseRoute, routeHash, routeView, SETTINGS_SECTIONS } from '../src/routing'
+import { isPluginRoute, isSettingsSection, parseRoute, routeHash, routeView, settingsHash, SETTINGS_SECTIONS } from '../src/routing'
 import {
   CAPABILITY_LABELS,
   capabilityLabel,
@@ -70,12 +70,21 @@ import {
   const plugins = normalizePlugins({
     ok: true,
     plugins: [
-      { id: 'com.example.on', version: '1.2.3', enabled: true, route: 'on', routeTitle: '可用页面' },
-      { id: 'com.example.off', version: '0.1.0', enabled: false, route: 'off', routeTitle: '停用页面' },
+      { id: 'com.example.on', version: '1.2.3', enabled: true, route: 'on', routeTitle: '可用页面',
+        ui: [{ slot: 'page', id: 'on', route: 'on', title: '可用页面', entry: 'client.js' }] },
+      { id: 'com.example.off', version: '0.1.0', enabled: false, route: 'off', routeTitle: '停用页面',
+        ui: [{ slot: 'page', id: 'off', route: 'off', title: '停用页面', entry: 'client.js' }] },
       { id: 'com.example.cli', version: '1.0.0', enabled: true, namespace: 'x' }, // 没有页面贡献
     ],
   })
-  assert.equal(plugins.length, 2, '没有 route 的插件不进前端描述符')
+  // 没有 page 贡献的插件（只出 nav/statusbar 之类）**保留**在描述符里 ——
+  // 它可能仍有槽位贡献，丢掉等于静默不显示。但它的 route 为空，所以：
+  //   - 不进菜单（pluginMenuItems 只看有 page 槽位的）；
+  //   - 任何 `#plugin/<route>` 都解析不到它（route 是空串）。
+  assert.equal(plugins.length, 3, '只贡献槽位的插件也要进描述符（只是没有 route）')
+  const cliOnly = plugins.find((p) => p.id === 'com.example.cli')
+  assert.equal(cliOnly.route, '', '没有 page 的插件 route 为空')
+  assert.equal(pluginMenuItems(plugins).filter((p) => p.enabled).length, 1, '没有 page 的插件不进菜单（停用的也不进）')
   const ok = resolvePluginPage('on', plugins)
   assert.equal(ok.kind, 'ok')
   assert.equal(ok.plugin.title, '可用页面')
@@ -95,10 +104,13 @@ import {
 // 3) 菜单顺序与过滤
 // ---------------------------------------------------------------------------
 {
+  // 菜单条目要求**显式声明 page 槽位**（3c46636 之后：route 字段只表示"有页面"，
+  // 真正决定是否进菜单的是 contributions.ui 里那条 slot=page）。夹具按这个形态给。
+  const page = (route) => [{ slot: 'page', id: route, route, title: route, entry: 'client.js' }]
   const plugins = normalizePlugins([
-    { id: 'com.example.beta', version: '1', enabled: true, route: 'beta', routeTitle: 'Beta' },
-    { id: 'com.example.alpha', version: '1', enabled: true, route: 'alpha', routeTitle: 'Alpha' },
-    { id: 'com.example.off', version: '1', enabled: false, route: 'off', routeTitle: 'Alpha' },
+    { id: 'com.example.beta', version: '1', enabled: true, route: 'beta', routeTitle: 'Beta', ui: page('beta') },
+    { id: 'com.example.alpha', version: '1', enabled: true, route: 'alpha', routeTitle: 'Alpha', ui: page('alpha') },
+    { id: 'com.example.off', version: '1', enabled: false, route: 'off', routeTitle: 'Alpha', ui: page('off') },
   ])
   assert.deepEqual(pluginMenuItems(plugins).map((p) => p.route), ['alpha', 'beta'])
   assert.deepEqual(pluginMenuItems([...plugins].reverse()).map((p) => p.route), ['alpha', 'beta'],
@@ -106,8 +118,8 @@ import {
 
   // 同名时按 route 兜底，仍然是确定的
   const tie = normalizePlugins([
-    { id: 'com.example.two', version: '1', enabled: true, route: 'zzz', routeTitle: '同名' },
-    { id: 'com.example.one', version: '1', enabled: true, route: 'aaa', routeTitle: '同名' },
+    { id: 'com.example.two', version: '1', enabled: true, route: 'zzz', routeTitle: '同名', ui: page('zzz') },
+    { id: 'com.example.one', version: '1', enabled: true, route: 'aaa', routeTitle: '同名', ui: page('aaa') },
   ])
   assert.deepEqual(pluginMenuItems(tie).map((p) => p.route), ['aaa', 'zzz'])
   console.log('OK 3) 菜单只列已启用，按标题稳定排序')
@@ -481,4 +493,25 @@ function makeBridge(transport = {}) {
   console.log('OK 17) 环境页 Tab：wslogs 旧键保留、wstest 新增')
 }
 
-console.log('\n全部通过：插件路由 / 菜单 / 拒绝清单 / 消息桥 / 设置页管理 / 环境页 Tab 共 17 组判定')
+// ---------------------------------------------------------------------------
+// 18) 设置页分区：#settings/devdata 深链可达（anti-regression）
+//
+// 「开发资料」是与「数据字典」并列的独立分区：路由键、左树条目、深链三者必须同时成立。
+// 只加页面不加路由键 → 深链静默落回站点管理；只加路由键不加条目 → 左树里点不到。
+// ---------------------------------------------------------------------------
+{
+  assert.equal(isSettingsSection('devdata'), true, 'devdata 必须是合法分区键')
+  assert.deepEqual(parseRoute('#settings/devdata'), { kind: 'settings', section: 'devdata' })
+  assert.equal(settingsHash('devdata'), '#settings/devdata')
+  assert.equal(routeHash({ kind: 'settings', section: 'devdata' }, 'devdata'), '#settings/devdata')
+  // 分区顺序：开发资料紧跟数据字典
+  const keys = SETTINGS_SECTIONS.map((s) => s.key)
+  assert.equal(keys.indexOf('devdata'), keys.indexOf('data-dict') + 1, '开发资料应紧跟数据字典')
+  assert.equal(SETTINGS_SECTIONS.find((s) => s.key === 'devdata')?.label, '开发资料')
+  // 其余分区与默认值不变（新增分区不能改变它们的深链与默认落点）
+  assert.deepEqual(keys, ['sites', 'data-dict', 'devdata', 'skills', 'plugins', 'debug', 'app'])
+  assert.deepEqual(parseRoute('#settings/nope'), { kind: 'settings' })
+  console.log('OK 18) 设置页分区：#settings/devdata 深链可达，其余分区不变')
+}
+
+console.log('\n全部通过：插件路由 / 菜单 / 拒绝清单 / 消息桥 / 设置页管理 / 环境页 Tab / 设置页分区共 18 组判定')

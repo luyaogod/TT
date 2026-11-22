@@ -41,7 +41,8 @@ func openOracle(ctx context.Context, c dbconfig.Connection, readOnly bool) (*Ora
 	if server == "" || service == "" {
 		return nil, fmt.Errorf("Oracle 连接缺少地址或服务名 (需填 host/port/service)")
 	}
-	dsn := goOraDSN(server, port, service, c.User, c.Password)
+	dsn := goOraDSN(server, port, service, c.User, c.Password) +
+		fmt.Sprintf("?PREFETCH_ROWS=%d", oraclePrefetchRows)
 	db, err := sql.Open("oracle", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("解析 Oracle 连接配置失败: %w", err)
@@ -55,10 +56,21 @@ func openOracle(ctx context.Context, c dbconfig.Connection, readOnly bool) (*Ora
 	return &OracleConnector{addr: c.Address(), typ: c.Type, db: db, readOnly: readOnly}, nil
 }
 
+// goOraDSN 拼 DSN（只负责转义与拼装，不加任何可选项 —— 那由 openOracle 决定）。
 func goOraDSN(host string, port int, service, user, password string) string {
 	return fmt.Sprintf("oracle://%s:%s@%s/%s", urlEscape(user), urlEscape(password),
 		net.JoinHostPort(host, strconv.Itoa(port)), urlEscape(service))
 }
+
+// oraclePrefetchRows 每次往返取回的行数。
+//
+// 为什么调：go-ora 的缺省预取只有 **25 行** —— 每 25 行就一次往返。读大表时这就是
+// 主瓶颈：实测分页读 `DZBB_T`（52 万行）时一页 2 万行要 800 次往返，几十页要几分钟，
+// 而库侧执行只要 1.5 秒。500 行一批把往返压到 1/20，单批内存代价是几十行 × 列数。
+//
+// 影响面：所有 Oracle 调用方（`tt db sql`、字典直查、`tt dict db sync`、开发资料镜像）。
+// 它们要么有返回行数上限、要么本来就是整表读，预取大一点只赚不亏。
+const oraclePrefetchRows = 500
 
 func urlEscape(s string) string {
 	r := strings.NewReplacer("%", "%25", ":", "%3A", "@", "%40", "/", "%2F", "?", "%3F")

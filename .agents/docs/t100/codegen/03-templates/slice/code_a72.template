@@ -1,0 +1,17 @@
+#應用 a72 樣板自動產生(Version:1)
+            #畫面模式轉換
+            ON ACTION ui_change
+               &ifndef v1   #區分版本
+                  LET g_action_choice = "ui_change"
+                  IF g_simple_mode = TRUE THEN
+                     LET g_simple_mode = FALSE
+                  ELSE
+                     LET g_simple_mode = TRUE
+                  END IF
+                  CALL cl_ui_record_mode(g_simple_mode)   #紀錄最新的畫面模式
+                  EXIT DIALOG
+                
+                  #add-point:ON ACTION ui_change name="ui_dialog.${mdl_addpoint}.ui_change"
+                  {<point name="ui_dialog.${mdl_addpoint}.ui_change"/>}
+                  #END add-point
+               &endif

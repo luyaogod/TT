@@ -16,13 +16,16 @@
 // 原因:check:store 用裸打包器把它打进 Node 里跑(桩 window/document),顶层碰 DOM 会在
 // 测试启动前就抛错。所以 DOM 访问全部留在函数体内、由 React effect 调用。
 
-/** 设置页的六个分区 */
-export type SettingsSectionKey = 'sites' | 'data-dict' | 'plugins' | 'skills' | 'debug' | 'app'
+/** 设置页的七个分区 */
+export type SettingsSectionKey = 'sites' | 'data-dict' | 'devdata' | 'plugins' | 'skills' | 'debug' | 'app'
 
 /** 分区清单(键 + 显示名)。左树与深链接校验共用这一份,免得两处各列一遍。 */
 export const SETTINGS_SECTIONS: { key: SettingsSectionKey; label: string }[] = [
   { key: 'sites', label: '站点管理' },
+  // 「开发资料」紧跟「数据字典」：两者都是"按环境准备的材料"，但一个是给查询用的字典库、
+  // 一个是给 model 的原材料。放在一起是为了让"这两份东西是分开的"一眼可见。
   { key: 'data-dict', label: '数据字典' },
+  { key: 'devdata', label: '开发资料' },
   // 技能管理在前、插件管理紧随其后（用户 2026-11-15 定的顺序，改这里一处就够）：
   // 两者都是"外部装进来的东西"，但一个是技能副本、一个是程序+页面，先看用得上什么，再看装了什么。
   { key: 'skills', label: '技能管理' },

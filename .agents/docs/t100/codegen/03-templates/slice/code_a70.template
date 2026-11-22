@@ -1,0 +1,9 @@
+   #應用 a70 樣板自動產生(Version:1)
+   #單身多語言複製刪除站存檔段  #1.0版不此功能
+
+   #刪除TEMP TABLE
+   DROP TABLE mdl_${mdl_lang_tbl}
+
+   #add-point:單身複製後1 name="detail_reproduce.lang${lang}.table1.a_insert"
+   {<point name="detail_reproduce.lang${lang}.table1.a_insert"/>}
+   #end add-point

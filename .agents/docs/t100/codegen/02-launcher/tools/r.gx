@@ -1,0 +1,6 @@
+#!/bin/ksh
+if [ "$1" = "" ] ; then
+   echo "Usage: r.gx [lib|sub|qry]\n"
+   exit 1
+fi
+$FGLRUN $FBIN/42m/gen42x.42m $1

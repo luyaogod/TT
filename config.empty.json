@@ -8,6 +8,9 @@
   "query": {
     "source": "auto"
   },
+  "devdata": {
+    "dir": ""
+  },
   "skills": {
     "externals": []
   },
