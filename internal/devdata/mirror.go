@@ -274,7 +274,6 @@ func mirrorDict(ctx context.Context, e *config.NamedSsh, envDir string, req Mirr
 		synced[strings.ToLower(spec.Name)] = true
 	}
 	report(Progress{Phase: "index", Message: "建主键索引…", Done: total, Total: total})
-	report(Progress{Phase: "index", Message: "建主键索引…", Done: total, Total: total})
 	for _, wmsg := range w.CreatePKIndexes(synced) {
 		m.AddWarning(wmsg)
 		res.Warnings = append(res.Warnings, wmsg)
@@ -383,7 +382,7 @@ func sortedKeys(m map[string]bool) []string {
 
 // versionWhere ADR-03 的补充口径：只镜 DZAA_T 的当前有效版。
 //
-// 实测依据（2026-11-21 福联测试tst）：53 张表合计 18,371,187 行 ≫ 50 万，所以不是
+// 实测依据（2026-11-21 测试环境）：53 张表合计 18,371,187 行 ≫ 50 万，所以不是
 // "全版次"；而 DZAA_T 单表 702,438 行 / 5,445 个程序，按"每程序最大版次且有效"筛完
 // 是 272,355 行。
 func versionWhere(spec TableSpec) string {

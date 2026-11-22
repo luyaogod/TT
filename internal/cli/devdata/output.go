@@ -140,6 +140,274 @@ func emitFetch(res *devdata.FetchResult) error {
 	return emit(res, res.Env, 0, []string{"项目", "值", "备注"}, rows)
 }
 
+// emitMap 输出「蓝图 ↔ 代码」索引的摘要（索引本体在 link.json；--full 才整份吐）。
+func emitMap(doc *devdata.LinkDoc, full bool) error {
+	st := doc.Stats
+	mode := fmt.Sprintf("版型 %s", doc.Mode.Type)
+	if doc.Mode.Type == "" {
+		mode = "版型未知（无 .tab）"
+	}
+	if doc.Mode.Identity != "" {
+		mode += fmt.Sprintf("，身份 %s", doc.Mode.Identity)
+	}
+	if doc.Mode.CusVer == "0000" {
+		mode += "，从未客制"
+	}
+	if doc.Mode.UnfoldedSection {
+		mode += "，未解開Section"
+	}
+	if doc.Mode.Freestyle {
+		mode += "，freestyle"
+	}
+
+	pointNote := fmt.Sprintf("客制 %d（%d 行）、注释 %d、缺 %d、多 %d",
+		st.PointsCustom, st.CustomLines, st.PointsCommented, st.PointsMissing, st.PointsExtra)
+	if st.SlotsTap == 0 {
+		pointNote = "无 .tap：点位全部来自 .4gl（客制/标准未知）"
+	}
+	fieldNote := "按 .tab 的 page_id + 字段归组"
+	if st.FieldsLinked == 0 {
+		fieldNote = "该版型没有页面字段（报表/批次）"
+	}
+	rows := [][]string{
+		{"程序", doc.Prog, mode},
+		{"规模", fmt.Sprintf("%d 行 / %d sections", st.G4Lines, st.SectionsG4),
+			fmt.Sprintf("槽位 .tap %d / .4gl %d", st.SlotsTap, st.SlotsG4)},
+		{"点位", fmt.Sprintf("%d 个", st.Points), pointNote},
+		{"声明", fmt.Sprintf("%d 个", st.DeclTotal),
+			fmt.Sprintf("客制 %d（%d 行）、无标记的函数 %d、孤儿 %d（客制 %d）",
+				st.DeclCustom, st.DeclCustomLines, st.DeclUnmarked, st.DeclOrphans, st.DeclOrphansCustom)},
+		{"字段", fmt.Sprintf("%d 个有逻辑 / %d 个栏位", st.FieldsLinked, st.ColumnsTotal), fieldNote},
+		{"页面", fmt.Sprintf("%d 个", len(doc.Pages)), "序号与 page_id 不同；--pages 可列"},
+		{"切片", fmt.Sprintf("%d 处 / %d 种", st.SlicesTotal, st.SlicesDistinct), ""},
+		{"索引", doc.Path, "整份索引；脚本用 --full 或直接读它"},
+	}
+	for _, c := range doc.Checks {
+		rows = append(rows, []string{"检查", c.ID + " [" + c.Level + "]", c.Detail})
+	}
+	for _, d := range doc.Slices.Drift {
+		rows = append(rows, []string{"脱版", d.Code, fmt.Sprintf("产物 v%d / 模板 v%d", d.Used, d.Current)})
+	}
+	// 客制点前 20 条（人读时最想看的就是这个）
+	shown := 0
+	for _, p := range doc.Points {
+		if !p.Custom || shown >= 20 {
+			continue
+		}
+		shown++
+		rows = append(rows, []string{"客制点", p.Name,
+			fmt.Sprintf("%s:%d-%d  %s", doc.Prog+".4gl", p.Line0, p.Line1, p.Preview)})
+	}
+	if st.PointsCustom > shown {
+		rows = append(rows, []string{"客制点", fmt.Sprintf("…另 %d 个", st.PointsCustom-shown),
+			"清单：--custom（或 link.json 的 points[custom=true]）"})
+	}
+	if st.DeclOrphans > 0 {
+		rows = append(rows, []string{"孤儿", fmt.Sprintf("%d 个（客制 %d）", st.DeclOrphans, st.DeclOrphansCustom),
+			"名单：--orphans"})
+	}
+
+	// JSON 默认只给摘要：整份 doc 有几百 KB，直接吐到 stdout 对调用方是灾难。
+	data := any(map[string]any{
+		"schema": doc.Schema, "prog": doc.Prog, "env": doc.Env,
+		"generatedAt": doc.GeneratedAt, "path": doc.Path,
+		"mode": doc.Mode, "stats": st, "checks": doc.Checks,
+		"drift": doc.Slices.Drift, "pages": doc.Pages,
+		"notes": append(doc.Notes, "整份索引在 path；--full 输出到 stdout"),
+	})
+	if full {
+		data = doc
+	}
+	return emit(data, doc.Env, 0, []string{"项目", "值", "备注"}, rows)
+}
+
+// emitOrphans 列出"写了不生效"的声明（--orphans）。
+func emitOrphans(doc *devdata.LinkDoc) error {
+	rows := make([][]string, 0, len(doc.Orphans))
+	for _, o := range doc.Orphans {
+		rows = append(rows, []string{o.Name, o.Src, fmt.Sprintf("%d", o.Lines), o.Reason, o.Preview})
+	}
+	return emit(map[string]any{
+		"prog": doc.Prog, "count": len(doc.Orphans),
+		"custom": doc.Stats.DeclOrphansCustom, "orphans": doc.Orphans, "link": doc.Path,
+	}, doc.Env, 0, []string{"点名", "来源", "声明行", "原因", "内容首行"}, rows)
+}
+
+// emitPages 列页面（--pages）：解决"客户说的第 12 个页签是哪个 page_id"。
+func emitPages(prog string, doc *devdata.LinkDoc) error {
+	rows := make([][]string, 0, len(doc.Pages))
+	for _, p := range doc.Pages {
+		rows = append(rows, []string{p.Page, p.PageID, p.Record,
+			fmt.Sprintf("%d", p.Columns), fmt.Sprintf("%d", p.Fields)})
+	}
+	return emit(map[string]any{
+		"prog": prog, "pages": doc.Pages, "link": doc.Path,
+		"note": "点名用的是 page_id（第三列起）：input.a.page<page_id>.<字段>",
+	}, doc.Env, 0, []string{"页签序号", "page_id", "record", "栏位数", "有逻辑的字段"}, rows)
+}
+
+// emitGrep 输出检索命中（tt gen grep）。
+func emitGrep(res *devdata.GrepResult) error {
+	rows := make([][]string, 0, len(res.Hits))
+	kind := map[bool]string{true: "加点内", false: "正文"}
+	for _, h := range res.Hits {
+		src := "—"
+		if h.Point != "" {
+			src = h.Kind
+		}
+		rows = append(rows, []string{
+			fmt.Sprintf("%s:%d", res.Prog+".4gl", h.Line),
+			src, kind[h.Inside],
+			fmt.Sprintf("%s | %s", h.Section, h.SliceCode),
+			h.Text,
+		})
+	}
+	data := res
+	if res.StaleNote != "" {
+		rows = append(rows, []string{"提示", res.StaleNote, "", "", ""})
+	}
+	return emit(data, res.Env, 0, []string{"位置", "来源", "范围", "section|切片", "代码"}, rows)
+}
+
+// emitMapPoints 只列点位（--field / --custom）：给"我要改这个字段"这类问题用。
+func emitMapPoints(doc *devdata.LinkDoc, field string, customOnly bool) error {
+	var rows [][]string
+	// 与 gen show 用同一套匹配（精确 → 后缀 → 子串），避免同一个词在两个命令里结论相反。
+	pts, how := doc.Points, ""
+	if field != "" {
+		pts, how = devdata.MatchPoints(doc, field)
+		if len(pts) == 0 {
+			rows = append(rows, []string{"提示",
+				fmt.Sprintf("没有匹配 %q 的点（用 gen fields 看字段名，或 gen grep 按内容找）", field), "", "", ""})
+		} else if how != "" && how != "exact" {
+			rows = append(rows, []string{"提示",
+				fmt.Sprintf("按%s匹配 %d 个点（不是精确点名）", map[string]string{"suffix": "字段名后缀", "substring": "子串"}[how], len(pts)), "", "", ""})
+		}
+	}
+	n := 0
+	for _, p := range pts {
+		if customOnly && !p.Custom {
+			continue
+		}
+		n++
+		where := fmt.Sprintf("%s:%d-%d", doc.Prog+".4gl", p.Line0, p.Line1)
+		if p.Line0 == 0 {
+			where = "（4gl 里没有）"
+		}
+		kind := "模板"
+		switch {
+		case p.Custom:
+			kind = "客制"
+		case p.Src == "s":
+			kind = "标准"
+		case p.Unmarked:
+			kind = "客制函数"
+		case p.Extra:
+			kind = "生成器自加"
+		case p.Missing:
+			kind = "未落地"
+		}
+		rows = append(rows, []string{p.Name, kind, where,
+			fmt.Sprintf("%d 行", p.DeclLines), p.Preview})
+	}
+	return emit(map[string]any{
+		"prog": doc.Prog, "field": field, "customOnly": customOnly,
+		"count": n, "points": rows, "link": doc.Path,
+	}, doc.Env, 0, []string{"点位", "来源", "行区间", "声明行数", "内容首行"}, rows)
+}
+
+// emitShow 输出点位内容（tt gen show）。
+func emitShow(res *devdata.ShowResult) error {
+	rows := [][]string{}
+	if res.Note != "" {
+		rows = append(rows, []string{"提示", res.Note, "", ""})
+	}
+	for _, p := range res.Points {
+		decl := "—"
+		if p.DeclLines > 0 {
+			decl = fmt.Sprintf("%d 行非空", p.DeclLines)
+		}
+		rows = append(rows, []string{
+			p.Name, p.Kind(),
+			fmt.Sprintf("%d-%d", p.Line0, p.Line1),
+			fmt.Sprintf("section=%s  slot=%s  slice=%s  声明=%s",
+				p.Section, p.Slot, strings.Join(p.SliceCodes, ","), decl),
+		})
+		for i, ln := range p.Content {
+			rows = append(rows, []string{"", fmt.Sprintf("L%d", p.Line0+i), "", ln})
+		}
+		if p.Truncated {
+			rows = append(rows, []string{"", "…", "", "（内容超过 --max，已截断）"})
+		}
+	}
+	return emit(res, res.Env, 0, []string{"点名", "来源", "行号", "代码 / 属性"}, rows)
+}
+
+// emitAt 输出行号归属（tt gen at）。
+func emitAt(res *devdata.AtResult) error {
+	rows := [][]string{
+		{"行号", fmt.Sprintf("%d", res.Line), fmt.Sprintf("文件共 %d 行", res.TotalLine)},
+		{"结论", res.Verdict, ""},
+	}
+	if res.Stale && res.StaleNote != "" {
+		rows = append(rows, []string{"注意", res.StaleNote, ""})
+	}
+	if res.Point != nil {
+		rows = append(rows, []string{"点位", res.Point.Name,
+			fmt.Sprintf("%s，第 %d-%d 行", res.Point.Kind(), res.Point.Line0, res.Point.Line1)})
+	}
+	if res.Section != nil {
+		tapNote := ""
+		if res.Section.TapLine > 0 {
+			tapNote = fmt.Sprintf("（.tap 第 %d 行）", res.Section.TapLine)
+		}
+		rows = append(rows, []string{"section", res.Section.ID,
+			fmt.Sprintf("第 %d-%d 行%s", res.Section.Line0, res.Section.Line1, tapNote)})
+	}
+	if res.Slice != nil {
+		rel := "该行之前最近的标记（不保证覆盖此行）"
+		if res.SliceRelation == "in-point" {
+			rel = "在这个点内"
+		}
+		rows = append(rows, []string{"切片", res.Slice.Code,
+			fmt.Sprintf("Version %d，标记在第 %d 行（%s）", res.Slice.Ver, res.Slice.Line, rel)})
+	}
+	for i, ln := range res.Content {
+		no := res.Line - len(res.Content)/2 + i
+		rows = append(rows, []string{fmt.Sprintf("L%d", no), ln, ""})
+	}
+	return emit(res, res.Env, 0, []string{"项目", "值", "备注"}, rows)
+}
+
+// emitFields 输出字段清单（tt gen fields）。
+func emitFields(prog string, fs []devdata.LinkField, doc *devdata.LinkDoc) error {
+	rows := make([][]string, 0, len(fs))
+	for _, f := range fs {
+		rows = append(rows, []string{
+			fmt.Sprintf("%s/%s", f.Page, f.PageID), f.Record, f.Column,
+			fmt.Sprintf("%d", len(f.Points)), strings.Join(f.Points, ", "),
+		})
+	}
+	return emit(map[string]any{
+		"prog": prog, "count": len(fs), "fields": fs, "link": doc.Path,
+	}, doc.Env, 0, []string{"页签/page_id", "record", "字段", "点位数", "点位"}, rows)
+}
+
+// emitPack 输出打包结果（tt gen pack）。
+func emitPack(res *devdata.PackResult) error {
+	rows := [][]string{
+		{"包", res.Path, fmtBytes(res.Bytes)},
+		{"程序", res.Prog, res.Identity},
+	}
+	for _, e := range res.Entries {
+		rows = append(rows, []string{"成员", e.Name, fmt.Sprintf("%d B  %s", e.Size, e.SHA256[:12])})
+	}
+	for _, w := range res.Warnings {
+		rows = append(rows, []string{"提示", w, ""})
+	}
+	return emit(res, res.Env, 0, []string{"项目", "值", "备注"}, rows)
+}
+
 // moduleOriginLabel 材料取自标准还是客制模块（给人看的一列）。
 func moduleOriginLabel(origin string) string {
 	switch origin {

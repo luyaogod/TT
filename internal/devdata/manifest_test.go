@@ -11,7 +11,7 @@ import (
 // TestManifestRoundTrip schema 读写往返（含空数组要序列化成 []，不是 null）。
 func TestManifestRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	m := NewManifest(KindFetch, "福联测试tst")
+	m := NewManifest(KindFetch, "测试环境")
 	m.Prog = "axmt500_wf"
 	m.Module = "axm"
 	m.FetchedAt = "2026-11-21T14:30:00+08:00"

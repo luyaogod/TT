@@ -1,0 +1,25 @@
+   #應用 a68 樣板自動產生(Version:3)
+   #若是修改，須視權限加上條件
+#  IF g_action_choice = "modify" OR g_action_choice = "modify_detail" THEN   #(ver:2) mark
+   IF g_action_choice = "modify" OR g_action_choice = "modify_detail"
+      ${detail_action_choice_insert}
+   THEN
+      LET ls_owndept_list = NULL
+      LET ls_ownuser_list = NULL
+
+      #若有設定部門權限
+      CALL cl_get_owndept_list("${detail_tbl_name}","modify") RETURNING ls_owndept_list
+      IF NOT cl_null(ls_owndept_list) THEN
+      #  LET g_sql = g_sql, " AND ${mdl_field02} IN (",ls_owndept_list,")"   #180201-00054 mark
+         LET g_sql = g_sql, " AND (${mdl_field02} IN (",ls_owndept_list,")",  #180201-00054 modify
+                                 " OR (${mdl_field03} = '",g_user,"' AND ${mdl_field04} = '",g_dept,"'))"   #180201-00054 modify
+      END IF
+
+      #若有設定個人權限
+      CALL cl_get_ownuser_list("${detail_tbl_name}","modify") RETURNING ls_ownuser_list
+      IF NOT cl_null(ls_ownuser_list) THEN
+      #  LET g_sql = g_sql," AND ${mdl_field01} IN (",ls_ownuser_list,")"   ##180201-00054 mark
+         LET g_sql = g_sql," AND (${mdl_field01} IN (",ls_ownuser_list,") OR ${mdl_field03} = '",g_user,"')"   #180201-00054 modify
+      END IF
+   END IF
+

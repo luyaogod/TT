@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>T100 关系 → CRUD 模型 · 图解</title>
+<style>
+  :root{
+    --bg:#0a1730; --line:#1d3f6e;
+    --ink:#e8f1ff; --ink2:#b9d4f2; --muted:#7fa6cf;
+    --amber:#f6c453; --cyan:#4dd0e1; --green:#6ee7a8; --pink:#f78fb3; --red:#ff8a8a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 620px at 18% -10%,#123059 0%,var(--bg) 55%,#071024 100%);
+       color:var(--ink);font-family:"Segoe UI","Microsoft YaHei",system-ui,-apple-system,sans-serif;line-height:1.65}
+  .wrap{max-width:1620px;margin:0 auto;padding:26px 20px 90px}
+  h1{font-size:29px;margin:0 0 6px;letter-spacing:.4px}
+  h1 small{display:block;font-size:14.5px;font-weight:400;color:var(--muted);margin-top:10px;line-height:1.7}
+  .legend{display:flex;gap:20px;flex-wrap:wrap;margin:16px 0 4px;font-size:13px;color:var(--ink2)}
+  .legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:7px;vertical-align:-1px}
+  .panel{background:linear-gradient(180deg,#0d1e3d,#0b1a33);border:1px solid var(--line);border-radius:16px;padding:18px 22px;margin-top:24px}
+  .panel h2{font-size:18px;margin:0 0 12px}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:4px}
+  th,td{border-bottom:1px solid #17335b;padding:8px 10px;text-align:left;vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12.5px;letter-spacing:.3px}
+  tr:last-child td{border-bottom:none}
+  code,.mono{font-family:"Cascadia Code",Consolas,monospace;font-size:12.5px}
+  .k{color:var(--amber)} .c{color:var(--cyan)} .g{color:var(--green)} .p{color:var(--pink)} .r{color:var(--red)} .v{color:#b9a6ff}
+  pre{margin:8px 0 0;background:#08182f;border:1px solid #17335b;border-radius:10px;padding:12px 14px;overflow:auto}
+  pre code{font-size:12.5px;line-height:1.6;color:#cfe3ff}
+  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:16px}
+  .card{background:#0e2140;border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card b{display:block;font-size:15px;margin-bottom:6px}
+  .card p{margin:0;font-size:13px;color:var(--ink2)}
+  .foot{margin-top:26px;color:var(--muted);font-size:12.5px}
+  svg{width:100%;height:auto;display:block;border-radius:16px;border:1px solid var(--line)}
+  svg text{font-family:"Segoe UI","Microsoft YaHei",sans-serif}
+  .sec{font-size:19px;font-weight:700;fill:#e8f1ff}
+  .sub{font-size:12.5px;fill:#7fa6cf}
+  .bt{font-size:15px;font-weight:700;fill:#e8f1ff}
+  .b2{font-size:13px;fill:#b9d4f2}
+  .b3{font-size:12px;fill:#7fa6cf}
+  .cd{font-family:"Cascadia Code",Consolas,monospace;font-size:11.5px;fill:#f6c453}
+  .cd2{font-family:"Cascadia Code",Consolas,monospace;font-size:11.5px;fill:#6ee7a8}
+  .cd3{font-family:"Cascadia Code",Consolas,monospace;font-size:11.5px;fill:#ff8a8a}
+  @media (max-width:1100px){ .cards{grid-template-columns:1fr} h1{font-size:23px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>关系 → CRUD 模型 · 生成器到底在翻译什么
+  <small>左边是它看到的关系（键 / 层级 / 页组），右边是它吐出来的代码（数据数组 / 五支子程序 / 固定段落）</small>
+</h1>
+
+<div class="legend">
+  <span><i style="background:#2f5c94"></i>表 / 容器</span>
+  <span><i style="background:#f6c453"></i>键·关系</span>
+  <span><i style="background:#4dd0e1"></i>生成规则</span>
+  <span><i style="background:#6ee7a8"></i>生成的代码</span>
+  <span><i style="background:#ff8a8a"></i>关系不全的后果</span>
+</div>
+
+<svg viewBox="0 0 1560 1462" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="关系到 CRUD 模型图解">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#12294a" stroke-width="1"/>
+    </pattern>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#4dd0e1"/>
+    </marker>
+    <marker id="arA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f6c453"/>
+    </marker>
+    <marker id="arG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#6ee7a8"/>
+    </marker>
+    <marker id="arR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#ff8a8a"/>
+    </marker>
+  </defs>
+
+  <rect width="1560" height="1462" fill="#081428"/>
+  <rect width="1560" height="1462" fill="url(#grid)"/>
+
+  <!-- ================= ① 关系 ================= -->
+  <text class="sec" x="40" y="50">① 关系</text>
+  <text class="sub" x="118" y="50">生成器只认四样东西：键（pk/fk）、层级（upper）、页组（group）、型态（type）</text>
+
+  <rect x="590" y="76" width="380" height="86" rx="14" fill="#0f2445" stroke="#f6c453" stroke-width="1.8"/>
+  <text class="bt" x="612" y="104">xmda_t　订单单头</text>
+  <text class="b3" x="612" y="126">pk = ent + docno　·　main = Y</text>
+  <text class="b3" x="612" y="148">→ 单头记录 g_xmda_m</text>
+
+  <rect x="170" y="250" width="350" height="96" rx="14" fill="#0f2445" stroke="#2f5c94" stroke-width="1.5"/>
+  <text class="bt" x="192" y="278">xmdc_t　订单单身</text>
+  <text class="b3" x="192" y="300">parent = xmda_t　fk = ent, docno</text>
+  <text class="b3" x="192" y="322">页组 '1','2','8'　→ 数组 g_xmdc_d</text>
+
+  <rect x="590" y="250" width="350" height="96" rx="14" fill="#0f2445" stroke="#2f5c94" stroke-width="1.5"/>
+  <text class="bt" x="612" y="278">xmdd_t　交期明细</text>
+  <text class="b3" x="612" y="300">upper = xmdc_t　upper_key = seq</text>
+  <text class="b3" x="612" y="322">页组 '3'　→ 数组 g_xmdc3_d</text>
+
+  <rect x="1010" y="250" width="400" height="96" rx="14" fill="#2a1622" stroke="#ff8a8a" stroke-width="1.8" stroke-dasharray="7 5"/>
+  <text class="bt" x="1032" y="278" style="fill:#ffb3b3">xmdduc_t　EPI信息（本次新增）</text>
+  <text class="b3" x="1032" y="300">pk / fk / upper 都还没填全</text>
+  <text class="b3" x="1032" y="322">页组 '12'　→ 数组 g_xmdc73_d</text>
+
+  <line x1="780" y1="162" x2="360" y2="246" stroke="#f6c453" stroke-width="1.6" marker-end="url(#arA)"/>
+  <text class="b3" x="470" y="200">fk_detail = fk_master</text>
+
+  <line x1="780" y1="162" x2="760" y2="246" stroke="#f6c453" stroke-width="1.6" marker-end="url(#arA)"/>
+  <text class="b3" x="790" y="200">fk ent, docno</text>
+
+  <line x1="970" y1="162" x2="1200" y2="246" stroke="#ff8a8a" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#arR)"/>
+  <text class="cd3" x="1010" y="196">缺 fk/pk → 半截 SQL</text>
+
+  <line x1="524" y1="298" x2="586" y2="298" stroke="#f6c453" stroke-width="1.6" marker-end="url(#arA)"/>
+  <text class="b3" x="470" y="376">upper_key = this_key（三层）</text>
+
+  <!-- ================= ② 四条翻译规则 ================= -->
+  <text class="sec" x="40" y="440">② 四条翻译规则</text>
+  <text class="sub" x="238" y="440">关系不同，只是换这一段；CRUD 骨架永远一样</text>
+
+  <rect x="60" y="458" width="345" height="92" rx="12" fill="#11284a" stroke="#2f5c94" stroke-width="1.4"/>
+  <text class="bt" x="80" y="484">R1　main 表 → 1 个 RECORD</text>
+  <text class="b3" x="80" y="508">单头只可能有一笔，所以是 RECORD</text>
+  <text class="cd" x="80" y="532">g_xmda_m</text>
+
+  <rect x="430" y="458" width="345" height="92" rx="12" fill="#11284a" stroke="#2f5c94" stroke-width="1.4"/>
+  <text class="bt" x="450" y="484">R2　parent 表 → 1 个 ARRAY</text>
+  <text class="b3" x="450" y="508">一对多 → 动态数组 + 旧值备份 _t / _o</text>
+  <text class="cd" x="450" y="532">g_xmdc_d / g_xmdc_d_t</text>
+
+  <rect x="800" y="458" width="345" height="92" rx="12" fill="#11284a" stroke="#2f5c94" stroke-width="1.4"/>
+  <text class="bt" x="820" y="484">R3　FK / upper → 键 + JOIN</text>
+  <text class="b3" x="820" y="508">fk_detail[i]=fk_master[i] 拼 ON；upper 拼 AND</text>
+  <text class="cd" x="820" y="532">gs_keys[] / LEFT JOIN</text>
+
+  <rect x="1170" y="458" width="345" height="92" rx="12" fill="#11284a" stroke="#2f5c94" stroke-width="1.4"/>
+  <text class="bt" x="1190" y="484">R4　页组 → 同组一起动</text>
+  <text class="b3" x="1190" y="508">同组表在 insert / delete 里一起处理</text>
+  <text class="cd" x="1190" y="532">'1','2','8' / '3' / '12'</text>
+
+  <!-- ================= ③ 生成的 CRUD ================= -->
+  <text class="sec" x="40" y="610">③ 生成物：五支子程序 + 一段固定流程</text>
+  <text class="sub" x="580" y="610">每张表的 SQL 只出现一次，靠 ps_keys[] 与 ps_page 复用</text>
+
+  <rect x="60" y="630" width="470" height="150" rx="12" fill="#0e2a22" stroke="#6ee7a8" stroke-width="1.5"/>
+  <text class="bt" x="80" y="656" style="fill:#6ee7a8">insert_b（新增）</text>
+  <text class="cd2" x="80" y="682">INSERT INTO xmdc_t</text>
+  <text class="cd2" x="80" y="704">(ent, docno, seq, 001, 002, …)</text>
+  <text class="cd2" x="80" y="726">VALUES(g_enterprise, ps_keys[1],</text>
+  <text class="cd2" x="80" y="748">       ps_keys[2], 数组栏位…)</text>
+  <text class="b3" x="80" y="770">键从 ps_keys 来 → 同一段可服务任何行</text>
+
+  <rect x="555" y="630" width="470" height="150" rx="12" fill="#0e2a22" stroke="#6ee7a8" stroke-width="1.5"/>
+  <text class="bt" x="575" y="656" style="fill:#6ee7a8">update_b（改值 / 改键）</text>
+  <text class="cd2" x="575" y="682">UPDATE xmdc_t SET (…)=(数组)</text>
+  <text class="cd2" x="575" y="704"> WHERE key = g_xmdc_d_t.*   ← 旧值备份</text>
+  <text class="cd2" x="575" y="726">IF 新键≠旧键 THEN key_update_b()</text>
+  <text class="b3" x="575" y="752">"改主键"要连带改下层子表的 FK</text>
+
+  <rect x="1050" y="630" width="465" height="150" rx="12" fill="#0e2a22" stroke="#6ee7a8" stroke-width="1.5"/>
+  <text class="bt" x="1070" y="656" style="fill:#6ee7a8">delete_b（删）</text>
+  <text class="cd2" x="1070" y="682">DELETE FROM xmdc_t</text>
+  <text class="cd2" x="1070" y="704"> WHERE key = ps_keys_bak[1..n]</text>
+  <text class="cd2" x="1070" y="726">CALL 数组.deleteElement(li_idx)</text>
+  <text class="b3" x="1070" y="752">一层一层按 key 删 → 级联删除</text>
+
+  <rect x="60" y="796" width="470" height="132" rx="12" fill="#101f3a" stroke="#3a6ea5" stroke-width="1.3"/>
+  <text class="bt" x="80" y="822">key_update_b / key_delete_b</text>
+  <text class="b3" x="80" y="846">上层 key 变动 → 修正下层单身的 FK；</text>
+  <text class="b3" x="80" y="868">上层删除 → 连带先删下层。</text>
+  <text class="b3" x="80" y="890">这是唯一需要"跨层"的两支子程序。</text>
+
+  <rect x="555" y="796" width="470" height="132" rx="12" fill="#101f3a" stroke="#3a6ea5" stroke-width="1.3"/>
+  <text class="bt" x="575" y="822">lock_b / unlock_b / b_fill</text>
+  <text class="b3" x="575" y="846">每张表一个 FOR UPDATE 游标：</text>
+  <text class="cd" x="575" y="868">OPEN axmt500_bcl USING ent, docno, seq</text>
+  <text class="b3" x="575" y="890">键有几位，参数就几个（还是关系的投影）</text>
+
+  <rect x="1050" y="796" width="465" height="132" rx="12" fill="#101f3a" stroke="#3a6ea5" stroke-width="1.3"/>
+  <text class="bt" x="1070" y="822">固定段落（不是子程序）</text>
+  <text class="b3" x="1070" y="846">BEFORE INSERT：锁 + 初始化 + 默认值</text>
+  <text class="b3" x="1070" y="868">AFTER FIELD：校验 / 带值</text>
+  <text class="b3" x="1070" y="890">AFTER INSERT：查重 → 组键 → 调 insert_b</text>
+
+  <!-- ================= ④ 时序 ================= -->
+  <text class="sec" x="40" y="978">④ 一次新增：数据怎么走到库里</text>
+
+  <rect x="60" y="998" width="250" height="86" rx="11" fill="#101f3a" stroke="#3a6ea5" stroke-width="1.3"/>
+  <text class="bt" x="78" y="1024">1. BEFORE INSERT</text>
+  <text class="b3" x="78" y="1046">锁住这一行</text>
+  <text class="b3" x="78" y="1066">初始化 + 默认值</text>
+
+  <rect x="366" y="998" width="250" height="86" rx="11" fill="#101f3a" stroke="#3a6ea5" stroke-width="1.3"/>
+  <text class="bt" x="384" y="1024">2. AFTER FIELD</text>
+  <text class="b3" x="384" y="1046">校验存在、带值</text>
+  <text class="b3" x="384" y="1066">（你写的客制逻辑）</text>
+
+  <rect x="672" y="998" width="250" height="86" rx="11" fill="#101f3a" stroke="#3a6ea5" stroke-width="1.3"/>
+  <text class="bt" x="690" y="1024">3. AFTER INSERT</text>
+  <text class="b3" x="690" y="1046">SELECT COUNT 查重</text>
+  <text class="b3" x="690" y="1066">组 gs_keys[1..n]</text>
+
+  <rect x="978" y="998" width="250" height="86" rx="11" fill="#0e2a22" stroke="#6ee7a8" stroke-width="1.5"/>
+  <text class="bt" x="996" y="1024" style="fill:#6ee7a8">4. insert_b</text>
+  <text class="b3" x="996" y="1046">按页组命中 → INSERT</text>
+  <text class="b3" x="996" y="1066">出错 cl_err 回滚</text>
+
+  <rect x="1284" y="998" width="236" height="86" rx="11" fill="#101f3a" stroke="#3a6ea5" stroke-width="1.3"/>
+  <text class="bt" x="1302" y="1024">5. AFTER ROW</text>
+  <text class="b3" x="1302" y="1046">解锁、提交</text>
+  <text class="b3" x="1302" y="1066">刷新页签</text>
+
+  <line x1="312" y1="1041" x2="362" y2="1041" stroke="#4dd0e1" stroke-width="1.5" marker-end="url(#ar)"/>
+  <line x1="618" y1="1041" x2="668" y2="1041" stroke="#4dd0e1" stroke-width="1.5" marker-end="url(#ar)"/>
+  <line x1="924" y1="1041" x2="974" y2="1041" stroke="#4dd0e1" stroke-width="1.5" marker-end="url(#ar)"/>
+  <line x1="1230" y1="1041" x2="1280" y2="1041" stroke="#4dd0e1" stroke-width="1.5" marker-end="url(#ar)"/>
+
+  <!-- ================= ⑤ 反例 ================= -->
+  <text class="sec" x="40" y="1140">⑤ 关系没填全，会发生什么</text>
+  <text class="sub" x="330" y="1140">生成器不猜，它只会把你给的关系原样复印成 SQL</text>
+
+  <rect x="60" y="1160" width="700" height="190" rx="12" fill="#2a1622" stroke="#ff8a8a" stroke-width="1.6"/>
+  <text class="bt" x="80" y="1188" style="fill:#ffb3b3">现在的 xmdduc_t（pk / fk / upper 缺失）</text>
+  <text class="cd3" x="80" y="1216">UPDATE xmdduc_t</text>
+  <text class="cd3" x="80" y="1238">   SET  = g_xmda_m.xmdadocno        ← 空列</text>
+  <text class="cd3" x="80" y="1260"> WHERE xmdducent = g_enterprise AND</text>
+  <text class="cd3" x="80" y="1282">         = g_xmdadocno_t             ← 空列</text>
+  <text class="cd3" x="80" y="1310">INSERT INTO xmdduc_t (xmdducent, , xmdducdocno) ← 编译不过</text>
+  <text class="b3" x="80" y="1336">JOIN 里也会出现 "AND  = xmdducseq"</text>
+
+  <rect x="800" y="1160" width="700" height="190" rx="12" fill="#0e2a22" stroke="#6ee7a8" stroke-width="1.6"/>
+  <text class="bt" x="820" y="1188" style="fill:#6ee7a8">关系填全后（pk + fk + upper）</text>
+  <text class="cd2" x="820" y="1216">UPDATE xmdduc_t</text>
+  <text class="cd2" x="820" y="1238">   SET xmdducdocno = g_xmda_m.xmdadocno</text>
+  <text class="cd2" x="820" y="1260"> WHERE xmdducent = g_enterprise AND</text>
+  <text class="cd2" x="820" y="1282">       xmdducdocno = g_xmdadocno_t</text>
+  <text class="cd2" x="820" y="1310">INSERT INTO xmdduc_t (xmdducent, xmdducdocno,</text>
+  <text class="cd2" x="820" y="1332">   xmdducseq, xmdducseq1, 001, 002, 003)</text>
+
+  <text class="b2" x="62" y="1400">记法：<tspan fill="#f6c453">键</tspan> 决定 gs_keys 与 WHERE　·　<tspan fill="#f6c453">层级</tspan> 决定 LEFT JOIN 与 FK 传播　·　<tspan fill="#f6c453">页组</tspan> 决定哪几张表一起动。</text>
+  <text class="b3" x="62" y="1430">所以改表单结构之后必须重新产生：关系变了，键的个数、组的成员、JOIN 的条数都会跟着变。</text>
+
+</svg>
+
+<div class="cards">
+  <div class="card">
+    <b>为什么 SQL 只写一遍</b>
+    <p>因为键从 <code class="k">ps_keys[]</code> 传进来，页组从 <code class="k">ps_page</code> 传进来。表名/栏位是编译期固定的，键是运行期给的。</p>
+  </div>
+  <div class="card">
+    <b>三层关系怎么表达</b>
+    <p>主档→单身→子表时，子表多两组条件：<code class="k">fk ent,docno</code> 和 <code class="k">upper seq</code>。前者拼 JOIN，后者拼 AND。</p>
+  </div>
+  <div class="card">
+    <b>客制代码放哪里最安全</b>
+    <p>放 add-point（<code class="p">.tap</code>）。生成段（数组、SQL、段落实体）都会随重产被覆盖，只有加点内容会被保留并重新填回孔位。</p>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>附：关系 → 生成物 对照（axmt500_wf 实测）</h2>
+  <table>
+    <thead><tr><th style="width:210px">关系</th><th style="width:330px">生成物</th><th>代码位置 / 证据</th></tr></thead>
+    <tbody>
+      <tr><td>主档 main=Y</td><td>单头 RECORD <code>g_xmda_m</code> + <code>s_browse</code></td><td>DEFINE 段；单头 INPUT BY NAME</td></tr>
+      <tr><td>明细 parent=主档</td><td>数组 <code>g_xmdc_d</code> + 备份 <code>g_xmdc_d_t</code></td><td>INPUT ARRAY g_xmdc_d（约 30016 行开始）</td></tr>
+      <tr><td>同表多页签</td><td>两个数组 <code>g_xmdc_d</code> / <code>g_xmdc2_d</code>，但只发一条 INSERT</td><td><code>INSERT INTO xmdc_t</code> 同时取两个数组的栏位（56641 起）</td></tr>
+      <tr><td>页组</td><td><code>IF ls_group.getIndexOf(ps_page,1)&gt;0</code> 一段处理一组表</td><td>insert_b 56671 / delete_b 56181 / update_b 57748</td></tr>
+      <tr><td>三层 upper</td><td>子表键多一层：<code>xmdducseq</code> / <code>xmddseq1</code></td><td>delete_b 里 <code>AND xmddseq=ps_keys_bak[3]</code>（56232）</td></tr>
+      <tr><td>FK 传播</td><td>改上层单据号 → 逐表 UPDATE 子表 FK</td><td><code>modify.body.b_fk_updateN</code>（23311 / 23352 起）</td></tr>
+      <tr><td>主键变更</td><td><code>key_update_b(gs_keys,'xmdc_t')</code></td><td>update_b 里改键判断（约 50510 行）</td></tr>
+      <tr><td>并发锁</td><td>每表一个 FOR UPDATE 游标</td><td>lock_b 57981 起（<code>OPEN axmt500_bcl</code>）</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="panel">
+  <h2>真代码长什么样（截自生成结果）</h2>
+  <p class="sub" style="margin:0 0 6px">新增：查重 → 组键 → 调 insert_b</p>
+  <pre><code># 1) 查重（同键已存在则报 std-00006）
+SELECT COUNT(1) INTO l_count FROM xmdc_t
+ WHERE xmdcent = g_enterprise AND xmdcdocno = g_xmda_m.xmdadocno
+   AND xmdcseq = g_xmdc_d[l_ac].xmdcseq
+IF l_count = 0 THEN
+   # 2) 组键：顺序就是 pk 的顺序
+   LET gs_keys[1] = g_xmda_m.xmdadocno
+   LET gs_keys[2] = g_xmdc_d[g_detail_idx].xmdcseq
+   # 3) 交给通用子程序，页组号 "'1'"
+   CALL axmt500_insert_b('xmdc_t',gs_keys,"'1'")
+END IF</code></pre>
+  <p class="sub" style="margin:14px 0 6px">删除：按页组级联，并同步内存数组</p>
+  <pre><code>LET ls_group = "'1','2','8',"
+IF ls_group.getIndexOf(ps_page,1) > 0 THEN
+   DELETE FROM xmdc_t
+    WHERE xmdcent = g_enterprise AND
+          xmdcdocno = ps_keys_bak[1] AND xmdcseq = ps_keys_bak[2]
+   CALL g_xmdc_d.deleteElement(li_idx)
+END IF</code></pre>
+</div>
+
+<div class="foot">
+  对照的生成结果取自 axmt500_wf 的 .4gl/.tgl；关系判定与拼装逻辑见服务器端 sadzp030_tab_relation（g_table[]）与 sadzp150_multitable（#tables 展开）。
+</div>
+
+</div>
+</body>
+</html>

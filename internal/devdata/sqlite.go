@@ -191,20 +191,34 @@ func (w *sqliteWriter) Exec(query string) error {
 //
 // 「一条都没建成」必须开口（与 dbsync 同一个教训）：dzed_t 没同步到、列名大小写对不上，
 // 都会让这里静默地一个索引都不建，而镜像照样显示成功。
+// 两阶段是必须的：openSQLite 的池固定 1 条连接（SQLite 单写者），而 database/sql
+// 在 rows.Close 之前一直占着这条连接 —— 边扫 rows 边 Exec 会在单连接上等自己，
+// 真机上表现为 `tt gen mirror` 永久卡在建索引这一步。所以先把 dzed_t 读完关掉，
+// 再逐条发 CREATE INDEX。
 func (w *sqliteWriter) CreatePKIndexes(synced map[string]bool) []string {
+	type idxDef struct{ table, key, fields string }
+	var defs []idxDef
 	rows, err := w.db.Query(`SELECT dzed001, dzed002, dzed004 FROM dzed_t WHERE dzed003='P'`)
 	if err != nil {
 		return []string{"建主键索引跳过：读不到本地 dzed_t（" + err.Error() + "）"}
 	}
-	defer rows.Close()
+	for rows.Next() {
+		var d idxDef
+		if err := rows.Scan(&d.table, &d.key, &d.fields); err != nil {
+			rows.Close()
+			return []string{"建主键索引跳过：读 dzed_t 出错（" + err.Error() + "）"}
+		}
+		defs = append(defs, d)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return []string{"建主键索引跳过：读 dzed_t 出错（" + err.Error() + "）"}
+	}
 	var warnings []string
 	expected, created := 0, 0
-	for rows.Next() {
-		var table, key, fields string
-		if err := rows.Scan(&table, &key, &fields); err != nil {
-			warnings = append(warnings, "建主键索引跳过：读 dzed_t 出错（"+err.Error()+"）")
-			break
-		}
+	for _, d := range defs {
+		table, key, fields := d.table, d.key, d.fields
 		if !synced[strings.ToLower(table)] {
 			continue
 		}

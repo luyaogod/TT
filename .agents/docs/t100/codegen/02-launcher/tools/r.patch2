@@ -1,0 +1,21 @@
+# patch(啟動patch程序)
+#210324-00014    : 2021/03/24 by 02785 限定tiptop帳號使用
+######
+umask 000
+#export TOPENT=99 #2017/10/16 取消切換
+currtime=`date '+%Y%m%d%H%M%S'`  #ex:20150612163035
+
+log_file=$TEMPDIR/patch-adzp777-${currtime}-detail.log
+
+#210324-00014 (s)
+if [ $USER != "tiptop" ]
+then
+  echo "ERROR:patch解包工具限定tiptop帳號使用,請更換帳號後重新執行..." 2>&1 |tee ${log_file}
+  echo ""
+  echo 'log file:' ${log_file}
+  exit
+fi
+#210324-00014 (e)
+
+r.r adzp777 -p 2>&1 |tee ${log_file}
+echo 'log file:' ${log_file}

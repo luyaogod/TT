@@ -68,13 +68,13 @@ func TestUsageOrFailMapping(t *testing.T) {
 // TestEmitFormatsAgree --human 与 JSON 的**内容**一致（表格只换形态，不丢字段）。
 func TestEmitFormatsAgree(t *testing.T) {
 	res := &devdata.MirrorResult{
-		Env: "福联测试tst", Dir: "/tmp/devdata/福联测试tst",
+		Env: "测试环境", Dir: "/tmp/devdata/测试环境",
 		TableCount: 51, RowTotal: 1234, MdlFiles: 281, MdlBytes: 3221007,
 		Elapsed: "1m2s",
 	}
 	// JSON：字段都在
 	jsonOut := captureEmit(t, output.FormatJSON, func() error { return emitMirror(res) })
-	for _, want := range []string{"福联测试tst", "51", "1234", "281", "3221007"} {
+	for _, want := range []string{"测试环境", "51", "1234", "281", "3221007"} {
 		if !strings.Contains(jsonOut, want) {
 			t.Errorf("JSON 输出缺 %q: %s", want, jsonOut)
 		}

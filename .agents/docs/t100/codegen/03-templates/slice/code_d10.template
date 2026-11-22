@@ -1,0 +1,14 @@
+   #報表 d10 樣板自動產生(Version:1)
+   #備註子報表暫存檔及select欄位準備
+   CALL ${component_name}_${sub_name}_sel_prep()	
+
+   IF g_rep_success = 'N' THEN
+      RETURN
+   END IF   
+   
+   #備註子報表insert的prepare
+   CALL ${component_name}_${sub_name}_ins_prep() 
+ 
+   IF g_rep_success = 'N' THEN
+      RETURN
+   END IF   

@@ -27,11 +27,15 @@ import (
 // DevDataDirName 数据目录下存放各环境开发资料的子目录名。
 const DevDataDirName = "devdata"
 
-// DevDataSubdirDict / DevDataSubdirMdl / DevDataSubdirProg 是环境目录下的固定子目录名。
+// DevDataSubdirDict / DevDataSubdirMdl / DevDataSubdirProg / DevDataSubdirPack
+// 是环境目录下的固定子目录名。
 const (
 	DevDataSubdirDict = "dict"
 	DevDataSubdirMdl  = "mdl"
 	DevDataSubdirProg = "prog"
+	// DevDataSubdirPack 存本地重打出来的 .tzc（tt gen pack 的产物）：
+	// 与 prog/ 分开，避免"材料"与"从材料造出的夹具"混在一棵目录里。
+	DevDataSubdirPack = "pack"
 )
 
 // DevDataDir 开发资料根目录（数据目录下 devdata/）。
@@ -156,6 +160,15 @@ func DevDataMdlDirForEnv(cfgPath, env string) string {
 		return ""
 	}
 	return filepath.Join(envDir, DevDataSubdirMdl)
+}
+
+// DevDataPackDirForEnv 某环境的包目录（读配置，含环境级覆盖）。
+func DevDataPackDirForEnv(cfgPath, env string) string {
+	envDir := DevDataEnvDirForEnv(cfgPath, env)
+	if envDir == "" {
+		return ""
+	}
+	return filepath.Join(envDir, DevDataSubdirPack)
 }
 
 // DevDataEnvName 把环境名还原成"目录名"（目前就是原样，保留这个函数是为了让

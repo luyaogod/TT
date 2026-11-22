@@ -1,0 +1,67 @@
+{<section id="${app_id}.ui_chk" >}
+#190108-00038 ---start---
+#應用 a73 樣板自動產生(Version:3)
+#+ 確認畫面模式
+PRIVATE FUNCTION ${general_prefix}_ui_chk() RETURNS ()   #200213-00032
+   DEFINE ls_path         STRING
+   DEFINE ls_gzyj003      LIKE gzyj_t.gzyj003
+   DEFINE ls_mod          LIKE dzzc_t.dzzc004
+
+
+   &ifndef v1   #區分版本
+      #判斷是否有設定簡易畫面
+      LET g_simple_name = NULL
+      SELECT dzzc002,dzzc004 INTO g_simple_name,ls_mod FROM dzzc_t
+       WHERE dzzcstus = 'Y'
+         AND dzzc001 = g_code
+ 
+      IF cl_null(g_simple_name) THEN
+         #若未設定或為失效者，則開啟標準模式
+         CALL gfrm_curr.setElementHidden("ui_change",1)
+         LET g_simple_mode = FALSE   #標準模式
+         LET g_current_mode = "standard"   #標準模式
+         LET g_simple_mode_exists = "N"   #無簡化模式可轉換
+      ELSE
+         #若有設定，需再檢查簡易畫面是否實際存在
+         #註：因為簡易畫面是透過設定而來，所以有可能標準畫面已客製，但簡易畫面仍為標準
+         #    或是標準畫面仍為標準，但簡易畫面改為客製的狀況
+         #    所以簡易畫面需以dzzc_t中紀錄的實際模組(dzzc004)為主
+         LET ls_path = os.Path.join(os.Path.join(FGL_GETENV(ls_mod),"4fd"),g_simple_name||".4fd")
+         IF os.Path.exists(ls_path) THEN
+            CALL gfrm_curr.setElementHidden("ui_change",0)
+            LET g_simple_mode = TRUE   #簡化模式
+            LET g_current_mode = "simple"   #簡化模式
+            LET g_simple_mode_exists = "Y"    #有簡化模式可轉換
+         ELSE
+            #若無簡體畫面實體檔，即使有設定簡易畫面，仍需視為未設定，因此需走標準模式
+            CALL gfrm_curr.setElementHidden("ui_change",1)
+            LET g_simple_mode = FALSE   #標準模式
+            LET g_current_mode = "standard"   #標準模式
+            LET g_simple_mode_exists = "N"   #無簡化模式可轉換
+         END IF
+      END IF
+ 
+      #依據上一次最後開啟的模式開啟
+      #只有當有簡化模式可轉換的才需要判斷，因為它會有標準及簡化兩種模式，
+      #另外，若有簡化模式可轉換，但取不到上一次最後開啟模式的資料時，則預設為簡化畫面
+      IF g_simple_mode_exists = "Y" THEN
+         LET ls_gzyj003 = NULL
+         SELECT gzyj003 INTO ls_gzyj003
+           FROM gzyj_t
+          WHERE gzyjent = g_enterprise
+            AND gzyj001 = g_user
+            AND gzyj002 = g_prog   #在此應以運行作業的角度看，而非4gl檔案的角度
+ 
+         IF ls_gzyj003 = "N" THEN   #若最後一次選擇為標準畫面
+            LET g_simple_mode = FALSE   #標準模式
+            LET g_current_mode = "standard"   #標準模式
+         ELSE
+            LET g_simple_mode = TRUE   #簡化模式
+            LET g_current_mode = "simple"   #簡化模式
+         END IF
+      END IF
+   &endif
+
+END FUNCTION
+#190108-00038 --- end ---
+{</section>}

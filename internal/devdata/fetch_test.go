@@ -34,14 +34,14 @@ func newFetchFixture(t *testing.T) (cfgPath string, files *fakeFiles) {
 func TestFetchHappyPath(t *testing.T) {
 	cfgPath, files := newFetchFixture(t)
 	res, err := Fetch(context.Background(), FetchRequest{
-		CfgPath: cfgPath, Env: "福联测试tst", Prog: "axmt500_wf", Files: files}, nil)
+		CfgPath: cfgPath, Env: "测试环境", Prog: "axmt500_wf", Files: files}, nil)
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
 	if res.Module != "axm" {
 		t.Errorf("模块推断 = %q，应为 axm", res.Module)
 	}
-	progDir, _ := ProgDir(cfgPath, "福联测试tst", "axmt500_wf")
+	progDir, _ := ProgDir(cfgPath, "测试环境", "axmt500_wf")
 
 	// 每个落盘文件的字节必须与服务器一致（原样保真），manifest 的 sha 必须能对上
 	m, err := ReadManifest(progDir)
@@ -102,7 +102,7 @@ func TestFetchRequiredMissingFails(t *testing.T) {
 	cfgPath, files := newFetchFixture(t)
 	delete(files.files, "erp/axm/dzx/tab/axmt500_wf.tab")
 	_, err := Fetch(context.Background(), FetchRequest{
-		CfgPath: cfgPath, Env: "福联测试tst", Prog: "axmt500_wf", Files: files}, nil)
+		CfgPath: cfgPath, Env: "测试环境", Prog: "axmt500_wf", Files: files}, nil)
 	if err == nil {
 		t.Fatal("缺 tab 应失败")
 	}
@@ -112,7 +112,7 @@ func TestFetchRequiredMissingFails(t *testing.T) {
 	if !errors.Is(err, ErrProgNotFound) {
 		t.Errorf("缺必需素材应包 ErrProgNotFound（→ 404），得到 %v", err)
 	}
-	progDir, _ := ProgDir(cfgPath, "福联测试tst", "axmt500_wf")
+	progDir, _ := ProgDir(cfgPath, "测试环境", "axmt500_wf")
 	if _, serr := os.Stat(progDir); serr == nil {
 		t.Error("失败后不该留下程序目录")
 	}
@@ -129,7 +129,7 @@ func TestFetchUnknownProgram(t *testing.T) {
 	}
 	// 模块目录还在（说明模块装过），但这个程序一条材料都没有
 	_, err := Fetch(context.Background(), FetchRequest{
-		CfgPath: cfgPath, Env: "福联测试tst", Prog: "axmt500_wf", Files: files}, nil)
+		CfgPath: cfgPath, Env: "测试环境", Prog: "axmt500_wf", Files: files}, nil)
 	if !errors.Is(err, ErrProgNotFound) {
 		t.Fatalf("应报 ErrProgNotFound，得到 %v", err)
 	}
@@ -200,14 +200,14 @@ func TestFetchPrefersCustomModule(t *testing.T) {
 	addCustomFetchFiles(files)
 
 	res, err := Fetch(context.Background(), FetchRequest{
-		CfgPath: cfgPath, Env: "福联测试tst", Prog: "axmt500_wf", Files: files}, nil)
+		CfgPath: cfgPath, Env: "测试环境", Prog: "axmt500_wf", Files: files}, nil)
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
 	if res.Module != "cxm" || res.ModuleOrigin != moduleOriginCustom || res.ModuleAlt != "axm" {
 		t.Errorf("模块判定 = %q/%q/%q，应为 cxm/custom/axm", res.Module, res.ModuleOrigin, res.ModuleAlt)
 	}
-	progDir, _ := ProgDir(cfgPath, "福联测试tst", "axmt500_wf")
+	progDir, _ := ProgDir(cfgPath, "测试环境", "axmt500_wf")
 	if got := readLocal(t, progDir, "dzx", "axmt500_wf.tab"); got != "custom-tab" {
 		t.Errorf("取到的蓝图不是客制那份: %q", got)
 	}
@@ -232,7 +232,7 @@ func TestFetchCustomModuleOnly(t *testing.T) {
 	}
 
 	res, err := Fetch(context.Background(), FetchRequest{
-		CfgPath: cfgPath, Env: "福联测试tst", Prog: "axmt500_wf", Files: files}, nil)
+		CfgPath: cfgPath, Env: "测试环境", Prog: "axmt500_wf", Files: files}, nil)
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestFetchCustomModuleDirWithoutProg(t *testing.T) {
 	files.dirs["erp/cxm/dzx"] = true // 客制模块装过，但没有 axmt500_wf 的材料
 
 	res, err := Fetch(context.Background(), FetchRequest{
-		CfgPath: cfgPath, Env: "福联测试tst", Prog: "axmt500_wf", Files: files}, nil)
+		CfgPath: cfgPath, Env: "测试环境", Prog: "axmt500_wf", Files: files}, nil)
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -268,14 +268,14 @@ func TestFetchExplicitModuleWins(t *testing.T) {
 	addCustomFetchFiles(files)
 
 	res, err := Fetch(context.Background(), FetchRequest{
-		CfgPath: cfgPath, Env: "福联测试tst", Prog: "axmt500_wf", Module: "axm", Files: files}, nil)
+		CfgPath: cfgPath, Env: "测试环境", Prog: "axmt500_wf", Module: "axm", Files: files}, nil)
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
 	if res.Module != "axm" || res.ModuleOrigin != moduleOriginExplicit {
 		t.Errorf("模块判定 = %q/%q，应为 axm/explicit", res.Module, res.ModuleOrigin)
 	}
-	progDir, _ := ProgDir(cfgPath, "福联测试tst", "axmt500_wf")
+	progDir, _ := ProgDir(cfgPath, "测试环境", "axmt500_wf")
 	if got := readLocal(t, progDir, "dzx", "axmt500_wf.tab"); strings.HasPrefix(got, "custom") {
 		t.Errorf("--module axm 不该取客制材料: %q", got)
 	}
@@ -307,15 +307,15 @@ func writeDictVersion(t *testing.T, cfgPath, env, prog string, sVer, cVer string
 // TestLocalDZAAVersionIdentity 客制身份取 dzaa009='c' 的版次；不限身份仍取最大值。
 func TestLocalDZAAVersionIdentity(t *testing.T) {
 	cfgPath := writeConfig(t, hostStub)
-	writeDictVersion(t, cfgPath, "福联测试tst", "axmt500_wf", "7", "5")
+	writeDictVersion(t, cfgPath, "测试环境", "axmt500_wf", "7", "5")
 
-	if got := localDZAAVersion(cfgPath, "福联测试tst", "axmt500_wf", "c"); got != 5 {
+	if got := localDZAAVersion(cfgPath, "测试环境", "axmt500_wf", "c"); got != 5 {
 		t.Errorf("客制版次 = %d，应为 dzaa009='c' 的 5", got)
 	}
-	if got := localDZAAVersion(cfgPath, "福联测试tst", "axmt500_wf", ""); got != 7 {
+	if got := localDZAAVersion(cfgPath, "测试环境", "axmt500_wf", ""); got != 7 {
 		t.Errorf("不限身份版次 = %d，应为最大值 7", got)
 	}
-	if got := localDZAAVersion(cfgPath, "福联测试tst", "zzz500_wf", "c"); got != 0 {
+	if got := localDZAAVersion(cfgPath, "测试环境", "zzz500_wf", "c"); got != 0 {
 		t.Errorf("没有该程序时应为 0，得到 %d", got)
 	}
 }
@@ -324,10 +324,10 @@ func TestLocalDZAAVersionIdentity(t *testing.T) {
 func TestFetchVersionAnchorUsesCustomIdentity(t *testing.T) {
 	cfgPath, files := newFetchFixture(t)
 	addCustomFetchFiles(files)
-	writeDictVersion(t, cfgPath, "福联测试tst", "axmt500_wf", "7", "5")
+	writeDictVersion(t, cfgPath, "测试环境", "axmt500_wf", "7", "5")
 
 	res, err := Fetch(context.Background(), FetchRequest{
-		CfgPath: cfgPath, Env: "福联测试tst", Prog: "axmt500_wf", Files: files}, nil)
+		CfgPath: cfgPath, Env: "测试环境", Prog: "axmt500_wf", Files: files}, nil)
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -349,7 +349,7 @@ func containsSubstr(list []string, sub string) bool {
 // TestFetchExistsNeedsForce 重复拉取要 --force（整包替换是显式动作）。
 func TestFetchExistsNeedsForce(t *testing.T) {
 	cfgPath, files := newFetchFixture(t)
-	req := FetchRequest{CfgPath: cfgPath, Env: "福联测试tst", Prog: "axmt500_wf", Files: files}
+	req := FetchRequest{CfgPath: cfgPath, Env: "测试环境", Prog: "axmt500_wf", Files: files}
 	if _, err := Fetch(context.Background(), req, nil); err != nil {
 		t.Fatalf("第一次: %v", err)
 	}
@@ -366,11 +366,11 @@ func TestFetchExistsNeedsForce(t *testing.T) {
 func TestFetchWithForm(t *testing.T) {
 	cfgPath, files := newFetchFixture(t)
 	res, err := Fetch(context.Background(), FetchRequest{
-		CfgPath: cfgPath, Env: "福联测试tst", Prog: "axmt500_wf", Form: true, Files: files}, nil)
+		CfgPath: cfgPath, Env: "测试环境", Prog: "axmt500_wf", Form: true, Files: files}, nil)
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
-	progDir, _ := ProgDir(cfgPath, "福联测试tst", "axmt500_wf")
+	progDir, _ := ProgDir(cfgPath, "测试环境", "axmt500_wf")
 	b, err := os.ReadFile(filepath.Join(progDir, "form", "axmt500_wf.42f"))
 	if err != nil || string(b) != "\x00\x01binary" {
 		t.Fatalf("二进制没原样落盘: %q, %v", b, err)
@@ -387,15 +387,15 @@ func TestFetchWithDesign(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, "axmt500_wf(c).tzs"), design, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfgPath := writeConfig(t, `{"name":"福联测试tst","host":"10.0.0.1","zone":"2","workspace":`+
+	cfgPath := writeConfig(t, `{"name":"测试环境","host":"10.0.0.1","zone":"2","workspace":`+
 		quote(ws)+`}`)
 	_, files := newFetchFixture(t)
 	res, err := Fetch(context.Background(), FetchRequest{
-		CfgPath: cfgPath, Env: "福联测试tst", Prog: "axmt500_wf", WithDesign: true, Files: files}, nil)
+		CfgPath: cfgPath, Env: "测试环境", Prog: "axmt500_wf", WithDesign: true, Files: files}, nil)
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
-	progDir, _ := ProgDir(cfgPath, "福联测试tst", "axmt500_wf")
+	progDir, _ := ProgDir(cfgPath, "测试环境", "axmt500_wf")
 	b, err := os.ReadFile(filepath.Join(progDir, "design", "axmt500_wf(c).tzs"))
 	if err != nil || string(b) != string(design) {
 		t.Fatalf("设计稿没归档: %q, %v", b, err)
@@ -415,8 +415,8 @@ func TestFetchWithDesign(t *testing.T) {
 func TestFetchVersionAnchors(t *testing.T) {
 	cfgPath, files := newFetchFixture(t)
 	// 先造一份共用资料的 manifest（不必真拉表）
-	envDir, _ := EnvDir(cfgPath, "福联测试tst")
-	m := NewManifest(KindMirror, "福联测试tst")
+	envDir, _ := EnvDir(cfgPath, "测试环境")
+	m := NewManifest(KindMirror, "测试环境")
 	m.FetchedAt = "2026-11-21T10:00:00+08:00"
 	m.Versions.TemplateVersions["a05"] = 3
 	m.Versions.TemplateVersions["i02"] = 12
@@ -424,14 +424,14 @@ func TestFetchVersionAnchors(t *testing.T) {
 		t.Fatal(err)
 	}
 	res, err := Fetch(context.Background(), FetchRequest{
-		CfgPath: cfgPath, Env: "福联测试tst", Prog: "axmt500_wf", Files: files}, nil)
+		CfgPath: cfgPath, Env: "测试环境", Prog: "axmt500_wf", Files: files}, nil)
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
 	if res.TemplateVersions["a05"] != 3 || res.TemplateVersions["i02"] != 12 {
 		t.Errorf("模板版本锚点 = %v", res.TemplateVersions)
 	}
-	progDir, _ := ProgDir(cfgPath, "福联测试tst", "axmt500_wf")
+	progDir, _ := ProgDir(cfgPath, "测试环境", "axmt500_wf")
 	pm, _ := ReadManifest(progDir)
 	if pm.Versions.TemplateVersions["a05"] != 3 {
 		t.Errorf("程序 manifest 里应带模板版本: %v", pm.Versions.TemplateVersions)
@@ -441,10 +441,10 @@ func TestFetchVersionAnchors(t *testing.T) {
 // TestFetchCancelNoResidue 取消后不落半套。
 func TestFetchCancelNoResidue(t *testing.T) {
 	cfgPath, files := newFetchFixture(t)
-	progDir, _ := ProgDir(cfgPath, "福联测试tst", "axmt500_wf")
+	progDir, _ := ProgDir(cfgPath, "测试环境", "axmt500_wf")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // 立刻取消：连第一个文件都不该落盘
-	_, err := Fetch(ctx, FetchRequest{CfgPath: cfgPath, Env: "福联测试tst", Prog: "axmt500_wf", Files: files}, nil)
+	_, err := Fetch(ctx, FetchRequest{CfgPath: cfgPath, Env: "测试环境", Prog: "axmt500_wf", Files: files}, nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("取消应返回 context.Canceled，得到 %v", err)
 	}

@@ -118,7 +118,7 @@ func TestTableSpecs(t *testing.T) {
 		total += s.Rows
 	}
 	if total != 18371187 {
-		t.Fatalf("实测行数合计 = %d，应为 18371187（2026-11-21 福联测试tst 实测）；改了数据请同步文档", total)
+		t.Fatalf("实测行数合计 = %d，应为 18371187（2026-11-21 测试环境 实测）；改了数据请同步文档", total)
 	}
 }
 
@@ -200,13 +200,13 @@ func TestPathValidation(t *testing.T) {
 
 // TestEnvMustBeInConfig 环境名必须在配置清单里（否则 404），且**校验先于建目录**。
 func TestEnvMustBeInConfig(t *testing.T) {
-	cfg := writeConfig(t, `{"name":"福联测试tst","host":"10.0.0.1","zone":"2"}`)
+	cfg := writeConfig(t, `{"name":"测试环境","host":"10.0.0.1","zone":"2"}`)
 	if _, err := EnvDir(cfg, "没有这个环境"); err == nil {
 		t.Fatal("未配置的环境应报错")
 	} else if !osIs(err, ErrEnvNotFound) {
 		t.Fatalf("错误应包 ErrEnvNotFound: %v", err)
 	}
-	dir, err := EnvDir(cfg, "福联测试tst")
+	dir, err := EnvDir(cfg, "测试环境")
 	if err != nil {
 		t.Fatalf("已配置的环境应能解析: %v", err)
 	}

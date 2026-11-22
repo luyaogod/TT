@@ -1,0 +1,10 @@
+# 清除(釋放)patch過程中用到的資料庫空間(dspatch)
+######
+umask 000
+export TOPENT=99
+currtime=`date '+%Y%m%d%H%M%S'`  #ex:20150612163035
+
+# 執行
+log_file=$TEMPDIR/patch-${currtime}-drop_dspatch.log
+r.r adzp888 drop 2>&1 |tee ${log_file}
+echo 'log file:' ${log_file}

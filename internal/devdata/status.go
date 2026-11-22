@@ -29,10 +29,20 @@ type StatusRequest struct {
 	Prog string
 	// Probe true = 向服务器核对 mtime/大小（慢，显式请求）。
 	Probe bool
+	// Dir 覆盖程序材料目录（工作区用；空 = <环境>/prog/<程序>）。
+	Dir string
 	// Files 仅供测试注入（probe 时才需要）；nil = 按环境打开真 SFTP。
 	Files FileSource
 	// Jobs 当前在跑的任务（由 Manager 提供；nil = 不出这一项）。
 	Jobs []Job
+}
+
+// materialDir 本次要核对的材料目录（工作区显式给 Dir 时不再问配置）。
+func (r StatusRequest) materialDir(prog string) (string, error) {
+	if d := strings.TrimSpace(r.Dir); d != "" {
+		return filepath.Abs(d)
+	}
+	return ProgDir(r.CfgPath, r.Env, prog)
 }
 
 // EnvStatus 一个环境的开发资料状态。
@@ -184,7 +194,7 @@ func Check(ctx context.Context, req StatusRequest) (*ProgStatus, error) {
 	if err := ValidProgName(req.Prog); err != nil {
 		return nil, err
 	}
-	progDir, err := ProgDir(req.CfgPath, req.Env, req.Prog)
+	progDir, err := req.materialDir(strings.TrimSpace(req.Prog))
 	if err != nil {
 		return nil, err
 	}

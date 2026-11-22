@@ -25,7 +25,7 @@ const (
 const (
 	// MaxTableRows 单表行数上限：超过则该表记为 skipped 并写 warnings（不判失败）。
 	//
-	// 实测（2026-11-21 福联测试tst）：53 张表合计 18,371,187 行，其中 DZBA_T 7,810,349、
+	// 实测（2026-11-21 测试环境）：53 张表合计 18,371,187 行，其中 DZBA_T 7,810,349、
 	// DZAZ_T 4,622,785 —— 这两张是生成器的**运行时产物/计数**，不是入参。上限挡住它们，
 	// 也挡住任何一次"某环境数据量暴涨把镜像拖死"。
 	MaxTableRows = 2_000_000
@@ -45,7 +45,7 @@ type TableSpec struct {
 	Desc string
 	// Fields 字段数（取自 DZEB_T，2026-11-21 实测）。
 	Fields int
-	// Rows 首次实测行数（2026-11-21 福联测试tst@1108）。只作参考基线：
+	// Rows 首次实测行数（2026-11-21 测试环境@1108）。只作参考基线：
 	// 真正的行数以每次 mirror 的实测为准，写进 manifest。
 	Rows int64
 	// Note 生成器侧用途的一句话说明（详见 .agents/docs/t100/devdata-materials.md）。
@@ -217,6 +217,9 @@ type FileRole struct {
 var FetchRoles = []FileRole{
 	{Role: "tab", Src: "erp/%s/dzx/tab/%s.tab", Rel: "dzx/%s.tab", Required: true},
 	{Role: "tsd", Src: "erp/%s/dzx/tsd/%s.tsd", Rel: "dzx/%s.tsd"},
+	// 4fd 是表单定义（页面结构）：它把 .tab 的 screen record 与 .tsd 的页签键接起来，
+	// 是"客户说的第 12 个页签到底是哪个 page_id"的唯一硬证据。约 0.9 MB，可缺。
+	{Role: "4fd", Src: "erp/%s/4fd/%s.4fd", Rel: "dzx/%s.4fd"},
 	{Role: "tap", Src: "erp/%s/dzx/tap/%s.tap", Rel: "dzx/%s.tap"},
 	{Role: "tgl", Src: "erp/%s/dzx/tgl/%s.tgl", Rel: "dzx/%s.tgl", Required: true},
 	{Role: "tgx", Src: "erp/%s/dzx/tgl/%s.tgx", Rel: "dzx/%s.tgx"},

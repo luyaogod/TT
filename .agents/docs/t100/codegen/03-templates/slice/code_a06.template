@@ -1,0 +1,86 @@
+#應用 a06 樣板自動產生(Version:8)
+#次要單頭table相關處理
+PRIVATE FUNCTION ${general_prefix}_${mdl_tbl_name}(ps_type) RETURNS ()   #200213-00032
+   DEFINE li_cnt    LIKE type_t.num10
+   DEFINE ps_type   STRING  
+   DEFINE ls_sql    STRING 
+   DEFINE l_${master_field_pk01} LIKE ${master_tbl_name}.${master_field_pk01}
+   #master_keys - Start -
+   DEFINE l_${master_field_pk${key}} LIKE ${master_tbl_name}.${master_field_pk${key}}
+   #keys -  End  -
+    
+   IF ps_type = "s" THEN 
+      ${mdl_select}                           
+      RETURN 
+   END IF 
+
+   #g_xxxx.xxxx001   新值
+   #g_xxxx_t.xxxx001 舊值
+   #l_xxxx001        where條件的值
+   
+   ##################################################
+   # 1.決定WHERE條件是要用 "新值" or "舊值" 何者來判斷 #
+   ##################################################
+   IF ps_type = "d" THEN
+      #刪除不會異動到key，所以一律採用舊值
+      LET l_${master_field_pk01} = g_${master_field_pk01}_t
+      #master_keys - Start -
+      LET l_${master_field_pk${key}} = g_${master_field_pk${key}}_t
+      #keys -  End  -
+   ELSE
+      LET l_${master_field_pk01} = ${master_var_pk01}
+      #master_keys - Start -
+      LET l_${master_field_pk${key}} = ${master_var_pk${key}}
+      #keys -  End  -
+      LET li_cnt = 0
+      ${mdl_chk}
+      IF li_cnt > 0 THEN
+         #若新值已存在，代表trigger已在異動主表時也一併異動行業表
+         #後續where條件採用新值
+         LET l_${master_field_pk01} = ${master_var_pk01}
+         #master_keys - Start -
+         LET l_${master_field_pk${key}} = ${master_var_pk${key}}
+         #keys -  End  -
+      ELSE
+         #若新值不存在，代表可能沒有建trigger，須由程式來異動行業表
+         #後續where條件採用舊值
+         LET l_${master_field_pk01} = g_${master_field_pk01}_t
+         #master_keys - Start -
+         LET l_${master_field_pk${key}} = g_${master_field_pk${key}}_t
+         #keys -  End  -
+      END IF
+   END IF
+ 
+   ##########################
+   # 2.判斷此值是否掃的到資料 #
+   ##########################
+   LET li_cnt = 0
+   ${mdl_chk}
+      
+   ######################################
+   # 3.判斷走INSERT OR UPDATE OR DELETE #
+   ######################################
+   IF (ps_type = "i" OR ps_type = "u") THEN
+      #新增/修改才走INSERT OR UPDATE
+      IF li_cnt = 0 THEN
+         #沒有行業表資料的話，則採用INSERT
+         ${mdl_insert}
+      ELSE
+         #有行業表資料的話，則採用UPDATE
+         ${mdl_update}
+      END IF
+   END IF
+ 
+   IF li_cnt > 0 AND ps_type = "d" THEN 
+      ${mdl_delete}
+   END IF 
+ 
+   IF SQLCA.sqlcode THEN
+      INITIALIZE g_errparam TO NULL
+      LET g_errparam.extend = "${mdl_tbl_name}:"
+      LET g_errparam.code   = SQLCA.sqlcode
+      LET g_errparam.popup  = FALSE
+      CALL cl_err()
+   END IF 
+   
+END FUNCTION

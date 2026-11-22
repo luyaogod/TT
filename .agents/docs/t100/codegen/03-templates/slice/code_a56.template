@@ -1,0 +1,15 @@
+#應用 a56 樣板自動產生(Version:6)
+   #檢查此單據是否需顯示BPM簽核狀況按鈕 
+#  IF cl_bpm_chk() THEN   #181128-00048 mark
+   IF cl_bpm_chk_status() THEN   #181128-00048
+      CALL cl_set_act_visible("bpm_status",TRUE)
+   ELSE
+      CALL cl_set_act_visible("bpm_status",FALSE)
+   END IF
+ 
+   #181128-00048 ---start---
+   #若由BPM端開啟T100作業只能查詢，不能維護
+   IF FGL_GETENV("BPMUSER") = "Y" THEN
+      CALL cl_set_act_visible("insert,modify,delete,modify_detail,reproduce",FALSE)
+   END IF
+   #181128-00048 --- end ---

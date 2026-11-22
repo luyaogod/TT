@@ -320,7 +320,8 @@ func (s *Server) validProg(w http.ResponseWriter, prog string) bool {
 // 映射只按哨兵错误（errors.Is），不按文案 —— 改文案不该改状态码。
 func (s *Server) failDomain(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, devdata.ErrEnvNotFound), errors.Is(err, devdata.ErrProgNotFound):
+	case errors.Is(err, devdata.ErrEnvNotFound), errors.Is(err, devdata.ErrProgNotFound),
+		errors.Is(err, devdata.ErrMaterialIncomplete):
 		fail(w, http.StatusNotFound, CodeNotFound, err)
 	case errors.Is(err, devdata.ErrInvalidProg), errors.Is(err, devdata.ErrInvalidEnv),
 		errors.Is(err, devdata.ErrInvalidOpt), errors.Is(err, devdata.ErrModuleUnknown):

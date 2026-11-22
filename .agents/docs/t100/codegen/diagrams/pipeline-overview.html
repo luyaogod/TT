@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>T100 代码生成模型 · 一张蓝图看懂</title>
+<style>
+  :root{
+    --bg:#0a1730; --line:#1d3f6e;
+    --ink:#e8f1ff; --ink2:#b9d4f2; --muted:#7fa6cf;
+    --amber:#f6c453; --cyan:#4dd0e1; --green:#6ee7a8; --pink:#f78fb3; --violet:#b9a6ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;
+       background:radial-gradient(1200px 620px at 18% -10%,#123059 0%,var(--bg) 55%,#071024 100%);
+       color:var(--ink);
+       font-family:"Segoe UI","Microsoft YaHei",system-ui,-apple-system,sans-serif;line-height:1.6}
+  .wrap{max-width:1620px;margin:0 auto;padding:26px 20px 90px}
+  h1{font-size:30px;margin:0 0 6px;letter-spacing:.4px}
+  h1 small{display:block;font-size:14.5px;font-weight:400;color:var(--muted);margin-top:10px;letter-spacing:0;line-height:1.7}
+  .legend{display:flex;gap:20px;flex-wrap:wrap;margin:16px 0 4px;font-size:13px;color:var(--ink2)}
+  .legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:7px;vertical-align:-1px}
+  .panel{background:linear-gradient(180deg,#0d1e3d,#0b1a33);border:1px solid var(--line);border-radius:16px;padding:18px 22px;margin-top:24px}
+  .panel h2{font-size:18px;margin:0 0 12px}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:4px}
+  th,td{border-bottom:1px solid #17335b;padding:7px 10px;text-align:left;vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12.5px;letter-spacing:.3px}
+  tr:last-child td{border-bottom:none}
+  code,.mono{font-family:"Cascadia Code",Consolas,monospace;font-size:12.5px}
+  .k{color:var(--amber)} .c{color:var(--cyan)} .g{color:var(--green)} .p{color:var(--pink)} .v{color:var(--violet)}
+  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:16px}
+  .card{background:#0e2140;border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card b{display:block;font-size:15px;margin-bottom:6px}
+  .card p{margin:0;font-size:13px;color:var(--ink2)}
+  .foot{margin-top:26px;color:var(--muted);font-size:12.5px}
+  svg{width:100%;height:auto;display:block;border-radius:16px;border:1px solid var(--line)}
+  svg text{font-family:"Segoe UI","Microsoft YaHei",sans-serif}
+  .sec{font-size:19px;font-weight:700;fill:#e8f1ff}
+  .sub{font-size:12.5px;fill:#7fa6cf}
+  .bt{font-size:16px;font-weight:700;fill:#e8f1ff}
+  .b2{font-size:13px;fill:#b9d4f2}
+  .b3{font-size:12px;fill:#7fa6cf}
+  .cd{font-family:"Cascadia Code",Consolas,monospace;font-size:12px;fill:#f6c453}
+  .cd2{font-family:"Cascadia Code",Consolas,monospace;font-size:12px;fill:#6ee7a8}
+  .cd3{font-family:"Cascadia Code",Consolas,monospace;font-size:12px;fill:#f78fb3}
+  @media (max-width:1100px){ .cards{grid-template-columns:1fr} h1{font-size:24px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>T100 代码生成模型 · 一张蓝图看懂
+  <small>规格（.tzs）→ 上传（adzp080 / adzp060 / adzp040）→ 蓝图 .tab → 样板展开（adzp150）→ 填孔（compose_path）→ 编译链接（gen42f / gen42m / gen42r）</small>
+</h1>
+
+<div class="legend">
+  <span><i style="background:#2f5c94"></i>输入 / 容器</tspan>
+  <span><i style="background:#f6c453"></i>规格 · 蓝图 · 模板</tspan>
+  <span><i style="background:#4dd0e1"></i>服务器作业</tspan>
+  <span><i style="background:#f78fb3"></i>客制代码（.tap）</tspan>
+  <span><i style="background:#6ee7a8"></i>产物 / 可执行</tspan>
+</div>
+
+<svg viewBox="0 0 1560 1700" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="T100 代码生成模型总览">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#12294a" stroke-width="1"/>
+    </pattern>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#4dd0e1"/>
+    </marker>
+    <marker id="arA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f6c453"/>
+    </marker>
+    <marker id="arP" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f78fb3"/>
+    </marker>
+    <marker id="arG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#6ee7a8"/>
+    </marker>
+  </defs>
+
+  <rect width="1560" height="1700" fill="#081428"/>
+  <rect width="1560" height="1700" fill="url(#grid)"/>
+
+  <!-- ============ ① 输入 ============ -->
+  <text class="sec" x="40" y="52">① 输入</text>
+  <text class="sub"  x="130" y="52">规格、客制代码、表字典 —— 三样东西决定最终代码</text>
+
+  <rect x="40" y="72" width="470" height="130" rx="14" fill="#0f2445" stroke="#2f5c94" stroke-width="1.5"/>
+  <text class="bt" x="62" y="102">设计器：.tzs 画面规格</text>
+  <text class="b2" x="62" y="128">页签 / 栏位 / 网格 / 表关联</text>
+  <text class="b2" x="62" y="150">开窗、校验带值、按钮动作</text>
+  <text class="b3" x="62" y="174">→ 上传后写入 dz* 规格表，并产出 .4fd / .tsd</text>
+
+  <rect x="540" y="72" width="470" height="130" rx="14" fill="#0f2445" stroke="#2f5c94" stroke-width="1.5"/>
+  <text class="bt" x="562" y="102">设计器：.tzc 程式包</text>
+  <text class="cd" x="562" y="128">.tgl</text><text class="b2" x="612" y="128">模板（带孔位）</text>
+  <text class="cd3" x="562" y="150">.tap</text><text class="b2" x="612" y="150">客制代码（add-point）</text>
+  <text class="cd2" x="562" y="172">.4gl</text><text class="b2" x="612" y="172">已产出的程式</text>
+
+  <rect x="1040" y="72" width="480" height="130" rx="14" fill="#0f2445" stroke="#2f5c94" stroke-width="1.5"/>
+  <text class="bt" x="1062" y="102">r.t 表字典（tables.xml）</text>
+  <text class="cd" x="1062" y="128">fk_table / fk_master / fk_detail</text>
+  <text class="b2" x="1062" y="152">表关联 → 直接决定生成出来的 JOIN</text>
+  <text class="b3" x="1062" y="176">缺 &lt;fk&gt; 就会生成空列（如 AND&nbsp;&nbsp;=&nbsp;xmdducseq）</text>
+
+  <line x1="320" y1="202" x2="320" y2="248" stroke="#4dd0e1" stroke-width="1.6" marker-end="url(#ar)"/>
+  <line x1="1280" y1="202" x2="1280" y2="248" stroke="#4dd0e1" stroke-width="1.6" marker-end="url(#ar)"/>
+
+  <!-- ============ ② 上传 ============ -->
+  <text class="sec" x="40" y="232">② 上传</text>
+  <text class="sub" x="130" y="232">客户端只发一条 telnet 命令，其余全在服务器</text>
+
+  <rect x="40" y="252" width="560" height="130" rx="14" fill="#102846" stroke="#4dd0e1" stroke-width="1.6"/>
+  <text class="cd2" x="62" y="282">r.r adzp080 '包名' 模块 SPECRC3|CODE '本地目录'</text>
+  <text class="b2" x="62" y="308">F7 = 上传规格并产生程式（SPECRC3）</text>
+  <text class="b2" x="62" y="330">F6 = 上传（规格 SPEC / 程式 CODE）</text>
+  <text class="b3" x="62" y="356">客户端到此为止，只等服务器回传日志</text>
+
+  <rect x="640" y="252" width="380" height="130" rx="14" fill="#102846" stroke="#4dd0e1" stroke-width="1.6"/>
+  <text class="bt" x="662" y="282">adzp060 上包</text>
+  <text class="cd" x="662" y="308">unzip -o → $TEMPDIR</text>
+  <text class="b2" x="662" y="332">→ $ERP/〈模块〉/4gl | 4fd</text>
+  <text class="b3" x="662" y="356">.tap 加点内容落库 dzf* 表</text>
+
+  <rect x="1060" y="252" width="460" height="130" rx="14" fill="#102846" stroke="#4dd0e1" stroke-width="1.6"/>
+  <text class="bt" x="1082" y="282">adzp040 产生编排</text>
+  <text class="b2" x="1082" y="308">SPECRC3：入库 → r.f → .tab → r.c3 A</text>
+  <text class="b2" x="1082" y="330">CODE：tap 入库 →（必要时）.tab → r.c3</text>
+  <text class="b3" x="1082" y="356">每步行首打 [COMMAND]，回传设计器「联机记录」</text>
+
+  <line x1="600" y1="317" x2="636" y2="317" stroke="#4dd0e1" stroke-width="1.6" marker-end="url(#ar)"/>
+  <line x1="1020" y1="317" x2="1056" y2="317" stroke="#4dd0e1" stroke-width="1.6" marker-end="url(#ar)"/>
+  <line x1="1290" y1="382" x2="1290" y2="430" stroke="#4dd0e1" stroke-width="1.6" marker-end="url(#ar)"/>
+
+  <!-- ============ ③ 生成工厂 ============ -->
+  <rect x="40" y="440" width="1480" height="830" rx="18" fill="#0b1d38" stroke="#2f5c94" stroke-width="1.6" stroke-dasharray="8 6"/>
+  <text class="sec" x="62" y="476">③ 生成工厂</text>
+  <text class="sub" x="182" y="476">由 adzp040 调度；每一步产物都是服务器上的实体文件</text>
+
+  <!-- 3-1 -->
+  <text class="bt" x="62" y="510" style="font-size:15px;fill:#f6c453">3-1 蓝图：规格 → .tab（sadzp030_tab）</text>
+  <rect x="60" y="522" width="320" height="118" rx="12" fill="#122a4c" stroke="#3a6ea5" stroke-width="1.3"/>
+  <text class="b2" x="80" y="550">输入：规格表</text>
+  <text class="cd" x="80" y="574">dzaa / dzal / dzeb / dzax</text>
+  <text class="b3" x="80" y="598">页签、栏位、网格、表关联、按钮</text>
+  <text class="b3" x="80" y="620">（由 .tzs 上传后写入）</text>
+
+  <rect x="420" y="522" width="560" height="118" rx="12" fill="#122a4c" stroke="#3a6ea5" stroke-width="1.3"/>
+  <text class="b2" x="440" y="550">判型：看结构，不看名字</text>
+  <text class="b3" x="440" y="574">有无 browse（Table / Tree / 无）× 单档 / 双档 / 假双档 × grid 数</text>
+  <text class="cd" x="440" y="600">&lt;assembly type="t01"&gt;　→ i01｜t01｜i02｜t02｜i07 …</text>
+  <text class="b3" x="440" y="622">名义 c03a → 实际 t01（客制样板映射到共用样板）</text>
+
+  <rect x="1020" y="522" width="480" height="118" rx="12" fill="#2a2410" stroke="#f6c453" stroke-width="1.6"/>
+  <text class="bt" x="1040" y="550" style="font-size:15px">输出：.tab 蓝图</text>
+  <text class="cd" x="1040" y="576">&lt;prog&gt;.tab</text>
+  <text class="b2" x="1094" y="576">= 这支程序的全部结构 + 型态 + 参数</text>
+  <text class="b3" x="1040" y="600">后面所有代码，都是按这份蓝图「套模板」套出来的</text>
+
+  <line x1="380" y1="581" x2="416" y2="581" stroke="#4dd0e1" stroke-width="1.6" marker-end="url(#ar)"/>
+  <line x1="980" y1="581" x2="1016" y2="581" stroke="#f6c453" stroke-width="1.6" marker-end="url(#arA)"/>
+
+  <!-- 3-2 -->
+  <text class="bt" x="62" y="690" style="font-size:15px;fill:#f6c453">3-2 展开：adzp150（内含 adzp175 / 176 / 177 / 155）</text>
+  <rect x="60" y="702" width="1440" height="300" rx="14" fill="#0d2140" stroke="#3a6ea5" stroke-width="1.4"/>
+
+  <rect x="84" y="722" width="400" height="238" rx="12" fill="#2a2410" stroke="#f6c453" stroke-width="1.5"/>
+  <text class="bt" x="104" y="750" style="font-size:15px">主样板：整支骨架</text>
+  <text class="cd" x="104" y="778">mdl/code_〈type〉.template</text>
+  <text class="b2" x="104" y="804">i01 单档 ｜ t01 双档 ｜ i02 单档多栏</text>
+  <text class="b2" x="104" y="826">t02 双档多栏 ｜ i07 假双档 ｜ i05 树状 …</text>
+  <text class="b3" x="104" y="854">模板里不写死代码，只留「符号」：</text>
+  <text class="cd" x="104" y="880">#pages - Start -</text>
+  <text class="cd" x="104" y="902">#tables - Start -</text>
+  <text class="cd" x="104" y="924">#master_keys / #detail_keys</text>
+  <text class="b3" x="104" y="948">MD5 校验：模板与产生器版本必须配套</text>
+
+  <rect x="510" y="722" width="400" height="238" rx="12" fill="#2a2410" stroke="#f6c453" stroke-width="1.5"/>
+  <text class="bt" x="530" y="750" style="font-size:15px">切片：段落小样板</text>
+  <text class="cd" x="530" y="778">mdl/slice/code_〈XX〉.template</text>
+  <text class="b2" x="530" y="804">a01 BEFORE FIELD</text>
+  <text class="b2" x="530" y="826">a02 AFTER FIELD ｜ a03 开窗 controlp</text>
+  <text class="b2" x="530" y="848">a17 检查存在并带值 ｜ a43 按钮动作</text>
+  <text class="b2" x="530" y="870">a77 模糊查询 ｜ d0x ｜ qs0x ｜ ss0x</text>
+  <text class="b3" x="530" y="898">本机镜像共 118 个（a00–a77 / d01–d10 …）</text>
+  <text class="b3" x="530" y="922">axmt500_wf 实测：t01×1，a01×679，a02×674，</text>
+  <text class="b3" x="530" y="944">a03×675，a77×209，a43×29 …</text>
+
+  <rect x="935" y="722" width="541" height="238" rx="12" fill="#122a4c" stroke="#3a6ea5" stroke-width="1.3"/>
+  <text class="bt" x="955" y="750" style="font-size:15px">产物链（一路写文件）</text>
+  <text class="cd" x="955" y="780">.tgx</text><text class="b2" x="1010" y="780">主样板展开（读 .tab 的参数）</text>
+  <text class="b3" x="955" y="806">↓ adzp175（tgl 整理）</text>
+  <text class="cd" x="955" y="832">.tgx2</text><text class="b2" x="1010" y="832">加入 section 结构</text>
+  <text class="b3" x="955" y="858">↓ adzp176（section parser）</text>
+  <text class="b3" x="955" y="884">↓ adzp177（section combiner）</text>
+  <text class="cd" x="955" y="910">.tgl</text><text class="b2" x="1010" y="910">带孔位的模板（{&lt;point&gt;}）</text>
+  <text class="b3" x="955" y="938">↓ adzp155（特定样板才产 mask）</text>
+
+  <line x1="484" y1="841" x2="506" y2="841" stroke="#4dd0e1" stroke-width="1.6" marker-end="url(#ar)"/>
+  <line x1="910" y1="841" x2="931" y2="841" stroke="#f6c453" stroke-width="1.6" marker-end="url(#arA)"/>
+  <text class="b3" x="84" y="978">参数化：模板里的 ${mdl_var1} 由 .tab 给值；#mdls 是循环展开 ——「模板决定长相，蓝图决定内容」</text>
+
+  <line x1="1200" y1="640" x2="1200" y2="698" stroke="#f6c453" stroke-width="1.6" marker-end="url(#arA)"/>
+
+  <line x1="1200" y1="1002" x2="1200" y2="1116" stroke="#6ee7a8" stroke-width="1.6" marker-end="url(#arG)"/>
+
+  <!-- 3-3 -->
+  <text class="bt" x="62" y="1110" style="font-size:15px;fill:#6ee7a8">3-3 填孔：r.c3 → compose_path</text>
+  <rect x="60" y="1122" width="1440" height="96" rx="12" fill="#122a4c" stroke="#3a6ea5" stroke-width="1.3"/>
+  <rect x="84" y="1140" width="330" height="60" rx="10" fill="#2a2410" stroke="#f6c453" stroke-width="1.4"/>
+  <text class="cd" x="102" y="1168">.tgl</text><text class="b2" x="148" y="1168">孔位 {&lt;point name&gt;}</text>
+  <text class="b3" x="102" y="1190">由 3-2 产出</text>
+
+  <text class="bt" x="426" y="1178" style="font-size:20px">+</text>
+
+  <rect x="455" y="1140" width="330" height="60" rx="10" fill="#2a1622" stroke="#f78fb3" stroke-width="1.4"/>
+  <text class="cd3" x="473" y="1168">.tap</text><text class="b2" x="519" y="1168">客制内容（add-point）</text>
+  <text class="b3" x="473" y="1190">设计器里写的那些行</text>
+
+  <line x1="790" y1="1170" x2="826" y2="1170" stroke="#6ee7a8" stroke-width="1.8" marker-end="url(#arG)"/>
+
+  <rect x="840" y="1140" width="636" height="60" rx="10" fill="#0f2c22" stroke="#6ee7a8" stroke-width="1.5"/>
+  <text class="cd2" x="860" y="1168">.4gl</text><text class="b2" x="912" y="1168">最终程式：孔位被 .tap 填满（再由 gen42m 编译）</text>
+  <text class="b3" x="860" y="1190">参数 d：0 全部｜1 只产生+组合｜2 只编译链接（tzc 日常）｜3 组合不编译</text>
+
+  <line x1="1240" y1="1218" x2="1240" y2="1268" stroke="#6ee7a8" stroke-width="1.6" marker-end="url(#arG)"/>
+
+  <!-- ============ ④ 编译 ============ -->
+  <text class="sec" x="40" y="1288">④ 编译 / 链接</text>
+  <text class="sub" x="196" y="1288">由 r.c3 的 d 参数决定是否走到这里；出错就停在这一步</text>
+
+  <rect x="60" y="1300" width="420" height="112" rx="14" fill="#102846" stroke="#4dd0e1" stroke-width="1.5"/>
+  <text class="bt" x="82" y="1328">r.f → gen42f</text>
+  <text class="b2" x="82" y="1354">画面：4fd → 42f / 42s</text>
+  <text class="b3" x="82" y="1378">（M 类传 tiptop；非 M 另调 azzp191 重产 42s）</text>
+
+  <rect x="510" y="1300" width="420" height="112" rx="14" fill="#102846" stroke="#4dd0e1" stroke-width="1.5"/>
+  <text class="bt" x="532" y="1328">r.c → gen42m</text>
+  <text class="b2" x="532" y="1354">程式：4gl → 42m</text>
+  <text class="b3" x="532" y="1378">编译错误行号 = $ERP/〈模块〉/4gl/&lt;prog&gt;.4gl</text>
+
+  <rect x="960" y="1300" width="540" height="112" rx="14" fill="#102846" stroke="#4dd0e1" stroke-width="1.5"/>
+  <text class="bt" x="982" y="1328">r.l → gen42r.42r</text>
+  <text class="b2" x="982" y="1354">链接：42m + 子程式 → 42r（可执行）</text>
+  <text class="b3" x="982" y="1378">r.r → azzp000.42r（所有 r.* 的入口）</text>
+
+  <!-- ============ ⑤ 产物 ============ -->
+  <text class="sec" x="40" y="1468">⑤ 产物 &amp; 三条铁律</text>
+
+  <rect x="60" y="1482" width="470" height="78" rx="12" fill="#0f2c22" stroke="#6ee7a8" stroke-width="1.4"/>
+  <text class="cd2" x="80" y="1512">服务器文件</text>
+  <text class="b2" x="80" y="1538">.tab → .tgx → .tgx2 → .tgl → .4gl → .42m / .42r</text>
+
+  <rect x="560" y="1482" width="430" height="78" rx="12" fill="#0f2c22" stroke="#6ee7a8" stroke-width="1.4"/>
+  <text class="cd2" x="580" y="1512">画面文件</text>
+  <text class="b2" x="580" y="1538">.4fd → .42f / .42s</text>
+
+  <rect x="1020" y="1482" width="480" height="78" rx="12" fill="#2a1622" stroke="#f78fb3" stroke-width="1.4"/>
+  <text class="cd3" x="1040" y="1512">客制代码只住在 .tap</text>
+  <text class="b2" x="1040" y="1538">所以重产不会丢 add-point；但会覆盖手改的生成段</text>
+
+  <text class="b2" x="62" y="1600">铁律 ①　<tspan fill="#f6c453">型态决定骨架</tspan>：i01 单档 / t01 双档 / i02 单档多栏 …… 结构一变，骨架整体换一套。</text>
+  <text class="b2" x="62" y="1628">铁律 ②　<tspan fill="#f6c453">切片决定段落</tspan>：勾一个「检查带值」= 多贴一段 code_a17.template；勾开窗 = a07 / a08 / a03。</text>
+  <text class="b2" x="62" y="1656">铁律 ③　<tspan fill="#f6c453">加点决定客制</tspan>：.tap 的内容由 compose_path 填进 .tgl 的孔位生成 .4gl，再交给 gen42m / gen42r。</text>
+
+</svg>
+
+<div class="cards">
+  <div class="card">
+    <b>看一次上传，先认三样东西</b>
+    <p>① 型态（.tab 里的 assembly type）② 模板（mdl/code_*.template + slice/*）③ 加点（.tap）。缺一样，代码就不对。</p>
+  </div>
+  <div class="card">
+    <b>改前端规格后为什么必须重产</b>
+    <p>规格 → .tab → 型态/骨架可能变；直接手改 .4gl 的生成段，下次重产必被覆盖。客制逻辑写进 add-point 才留得住。</p>
+  </div>
+  <div class="card">
+    <b>为什么会出现空列的 SQL</b>
+    <p>r.t 缺 FK（或设计器 tables.xml 过期）→ .tab 里关联为空 → 生成的 JOIN 出现 <code class="k">AND&nbsp;&nbsp;=&nbsp;xmdducseq</code> 这种半截条件。</p>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>附：程式骨架型态（.tab 的 type 白名单与判定）</h2>
+  <table>
+    <thead><tr><th style="width:120px">型态</th><th style="width:330px">结构特征</th><th>说明 / 共用映射</th></tr></thead>
+    <tbody>
+      <tr><td><code class="k">i01</code></td><td>有查询计划（browse=Table）+ 单档</td><td>最一般的单档维护；i10 → i01，i13 → i01</td></tr>
+      <tr><td><code class="k">t01</code></td><td>有查询计划 + 双档（主档 + 单身）</td><td>axmt500_wf 就是这一型；i09 → t01，c03a → t01</td></tr>
+      <tr><td><code class="k">i02</code> / <code class="k">t02</code></td><td>单档多栏 / 双档多栏</td><td>c02a → i02，c04a → t02</td></tr>
+      <tr><td><code class="k">i07</code> / <code class="k">i12</code></td><td>假双档（单档做成双档的样子）</td><td>i12 → i07</td></tr>
+      <tr><td><code class="k">i05</code> / <code class="k">i13</code></td><td>树状单档（左右排 / 六阶）</td><td>i13 生成时复用 i01 骨架</td></tr>
+      <tr><td><code class="k">i04</code> / <code class="k">i08</code></td><td>树状双档（主从）/ 树状单档+单身</td><td>—</td></tr>
+      <tr><td><code class="k">m00</code> / <code class="k">p00</code> / <code class="k">r01</code></td><td>Web Service / WS 元件 / 报表</td><td>走各自专用样板</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="panel">
+  <h2>附：两层样板怎么配合</h2>
+  <table>
+    <thead><tr><th style="width:220px">层级</th><th style="width:330px">文件</th><th>作用</th></tr></thead>
+    <tbody>
+      <tr><td>整支骨架</td><td><code class="k">$ERP/mdl/code_&lt;type&gt;.template</code></td><td>决定 i01 / t01 / i02… 的流程结构；里面是 <code>#pages</code>、<code>#tables</code>、<code>#master_keys</code> 这类符号</td></tr>
+      <tr><td>段落切片</td><td><code class="k">$ERP/mdl/slice/code_&lt;XX&gt;.template</code></td><td>a01 BEFORE FIELD、a02 AFTER FIELD、a03 开窗、a17 检查带值、a43 按钮动作、a77 模糊查询…</td></tr>
+      <tr><td>客制内容</td><td><code class="p">.tap</code></td><td>add-point 里的真实代码，由 <code class="g">compose_path</code> 填进 .tgl 的孔位</td></tr>
+      <tr><td>参数</td><td><code class="k">.tab</code></td><td>模板里的 <code>${mdl_var1}</code> / <code>#mdls</code> 循环，值全部来自蓝图</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="foot">
+  图由 designer-src（TBLControl/TBLModifyBox/TableColumnHelper）、服务器 4GL（adzp080 / adzp040 / sadzp030_tab / adzp150 / sadzp150_mdl）与 launcher 脚本（r.r / r.c3 / r.c / r.f / r.l）交叉核对；axmt500_wf 的样板统计取自 tzc 内的 .tgl。
+</div>
+
+</div>
+</body>
+</html>

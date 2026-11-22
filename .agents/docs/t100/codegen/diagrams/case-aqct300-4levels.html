@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>案例解剖：aqct300_wf 质量检验记录维护 · 四层结构</title>
+<style>
+  :root{
+    --bg:#0a1730; --line:#1d3f6e;
+    --ink:#e8f1ff; --ink2:#b9d4f2; --muted:#7fa6cf;
+    --amber:#f6c453; --cyan:#4dd0e1; --green:#6ee7a8; --pink:#f78fb3; --red:#ff8a8a; --violet:#b9a6ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 620px at 18% -10%,#123059 0%,var(--bg) 55%,#071024 100%);
+       color:var(--ink);font-family:"Segoe UI","Microsoft YaHei",system-ui,-apple-system,sans-serif;line-height:1.65}
+  .wrap{max-width:1620px;margin:0 auto;padding:26px 20px 90px}
+  h1{font-size:29px;margin:0 0 6px;letter-spacing:.4px}
+  h1 small{display:block;font-size:14.5px;font-weight:400;color:var(--muted);margin-top:10px;line-height:1.7}
+  .legend{display:flex;gap:20px;flex-wrap:wrap;margin:16px 0 4px;font-size:13px;color:var(--ink2)}
+  .legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:7px;vertical-align:-1px}
+  .panel{background:linear-gradient(180deg,#0d1e3d,#0b1a33);border:1px solid var(--line);border-radius:16px;padding:18px 22px;margin-top:24px}
+  .panel h2{font-size:18px;margin:0 0 12px}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:4px}
+  th,td{border-bottom:1px solid #17335b;padding:8px 10px;text-align:left;vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12.5px;letter-spacing:.3px}
+  tr:last-child td{border-bottom:none}
+  code,.mono{font-family:"Cascadia Code",Consolas,monospace;font-size:12.5px}
+  .k{color:var(--amber)} .c{color:var(--cyan)} .g{color:var(--green)} .p{color:var(--pink)} .r{color:var(--red)} .v{color:var(--violet)}
+  pre{margin:8px 0 0;background:#08182f;border:1px solid #17335b;border-radius:10px;padding:12px 14px;overflow:auto}
+  pre code{font-size:12.5px;line-height:1.65;color:#cfe3ff}
+  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:16px}
+  .card{background:#0e2140;border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card b{display:block;font-size:15px;margin-bottom:6px}
+  .card p{margin:0;font-size:13px;color:var(--ink2)}
+  .foot{margin-top:26px;color:var(--muted);font-size:12.5px}
+  svg{width:100%;height:auto;display:block;border-radius:16px;border:1px solid var(--line)}
+  svg text{font-family:"Segoe UI","Microsoft YaHei",sans-serif}
+  .sec{font-size:19px;font-weight:700;fill:#e8f1ff}
+  .sub{font-size:12.5px;fill:#7fa6cf}
+  .bt{font-size:14px;font-weight:700;fill:#e8f1ff}
+  .b2{font-size:12.5px;fill:#b9d4f2}
+  .b3{font-size:11.5px;fill:#7fa6cf}
+  .cd{font-family:"Cascadia Code",Consolas,monospace;font-size:11.5px;fill:#f6c453}
+  .cd2{font-family:"Cascadia Code",Consolas,monospace;font-size:11.5px;fill:#6ee7a8}
+  @media (max-width:1100px){ .cards{grid-template-columns:1fr} h1{font-size:23px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>案例解剖：aqct300_wf 质量检验记录维护
+  <small>四层结构（单头 → 单身 → 缺点原因 → 制造批序号）+ 两个平行分支，正好把「层级 = 键的拼接」讲透</small>
+</h1>
+
+<div class="legend">
+  <span><i style="background:#f6c453"></i>FK / 键</span>
+  <span><i style="background:#4dd0e1"></i>单身层</span>
+  <span><i style="background:#b9a6ff"></i>第三层</span>
+  <span><i style="background:#f78fb3"></i>第四层</span>
+  <span><i style="background:#6ee7a8"></i>生成物</span>
+</div>
+
+<svg viewBox="0 0 1560 1230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="aqct300_wf 四层结构与键拼装">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#12294a" stroke-width="1"/>
+    </pattern>
+    <marker id="arA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f6c453"/>
+    </marker>
+    <marker id="arC" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#4dd0e1"/>
+    </marker>
+    <marker id="arV" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b9a6ff"/>
+    </marker>
+    <marker id="arP" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f78fb3"/>
+    </marker>
+  </defs>
+
+  <rect width="1560" height="1230" fill="#081428"/>
+  <rect width="1560" height="1230" fill="url(#grid)"/>
+
+  <!-- ============ ① 数据模型 ============ -->
+  <text class="sec" x="40" y="46">① 数据模型：一棵四层的树</text>
+  <text class="sub" x="330" y="46">方框里标了主键长度和它对应的页签；每条箭头都是一条 FK（都会变成 JOIN 的一句 ON）</text>
+
+  <rect x="600" y="70" width="360" height="92" rx="13" fill="#2a2410" stroke="#f6c453" stroke-width="1.8"/>
+  <text class="bt" x="622" y="96" style="fill:#f6c453">qcba_t　质量检验单头档</text>
+  <text class="b3" x="622" y="118">PK：ent + docno　（2 段）</text>
+  <text class="b3" x="622" y="140">页签：基本资料　·　main = Y</text>
+
+  <rect x="90" y="222" width="340" height="92" rx="13" fill="#0f2445" stroke="#2f5c94" stroke-width="1.4"/>
+  <text class="bt" x="112" y="248">qcbb_t　批序号</text>
+  <text class="b3" x="112" y="270">PK：ent+docno+001+002+003（5）</text>
+  <text class="b3" x="112" y="292">页签：批序号　组 '3'</text>
+
+  <rect x="600" y="222" width="360" height="92" rx="13" fill="#0d3038" stroke="#4dd0e1" stroke-width="1.8"/>
+  <text class="bt" x="622" y="248" style="fill:#7ef0ff">qcbd_t　质量检验单身档</text>
+  <text class="b3" x="622" y="270">PK：ent + docno + seq　（3 段）</text>
+  <text class="b3" x="622" y="292">页签：抽样与结果　组 '1'</text>
+
+  <rect x="1030" y="222" width="340" height="92" rx="13" fill="#0f2445" stroke="#2f5c94" stroke-width="1.4"/>
+  <text class="bt" x="1052" y="248">qcbc_t　判定结果</text>
+  <text class="b3" x="1052" y="270">PK：ent + docno + seq　（3 段）</text>
+  <text class="b3" x="1052" y="292">页签：联产品与结果判定　组 '4'</text>
+
+  <rect x="600" y="366" width="360" height="92" rx="13" fill="#1c1636" stroke="#b9a6ff" stroke-width="1.8"/>
+  <text class="bt" x="622" y="392" style="fill:#cbb9ff">qcbe_t　缺点原因</text>
+  <text class="b3" x="622" y="414">PK：ent+docno+seq+001　（4 段）</text>
+  <text class="b3" x="622" y="436">页签：缺点原因　组 '2'</text>
+
+  <rect x="1030" y="366" width="340" height="92" rx="13" fill="#1c1636" stroke="#b9a6ff" stroke-width="1.4"/>
+  <text class="bt" x="1052" y="392" style="fill:#cbb9ff">qcbg_t　测量值</text>
+  <text class="b3" x="1052" y="414">PK：ent+docno+seq+001　（4 段）</text>
+  <text class="b3" x="1052" y="436">页签：测量值　组 '5'</text>
+
+  <rect x="600" y="510" width="360" height="92" rx="13" fill="#2a1622" stroke="#f78fb3" stroke-width="1.8"/>
+  <text class="bt" x="622" y="536" style="fill:#ffb3d1">qcbf_t　问题制造批序号</text>
+  <text class="b3" x="622" y="558">PK：ent+docno+seq+001+002+003（6）</text>
+  <text class="b3" x="622" y="580">嵌在「缺点原因」页签里　组 '99'</text>
+
+  <line x1="640" y1="166" x2="360" y2="218" stroke="#f6c453" stroke-width="1.5" marker-end="url(#arA)"/>
+  <text class="b3" x="400" y="196">FK：ent, docno</text>
+  <line x1="780" y1="166" x2="780" y2="218" stroke="#f6c453" stroke-width="1.5" marker-end="url(#arA)"/>
+  <line x1="930" y1="166" x2="1160" y2="218" stroke="#f6c453" stroke-width="1.5" marker-end="url(#arA)"/>
+  <text class="b3" x="960" y="196">FK：ent, docno</text>
+
+  <line x1="780" y1="318" x2="780" y2="362" stroke="#b9a6ff" stroke-width="1.5" marker-end="url(#arV)"/>
+  <line x1="900" y1="318" x2="1160" y2="362" stroke="#b9a6ff" stroke-width="1.5" marker-end="url(#arV)"/>
+  <text class="b3" x="930" y="344">FK：ent, docno, seq</text>
+
+  <line x1="780" y1="462" x2="780" y2="506" stroke="#f78fb3" stroke-width="1.5" marker-end="url(#arP)"/>
+  <text class="b3" x="800" y="488">FK：ent, docno, seq, 001</text>
+
+  <text class="b3" x="90" y="344">↑ 批序号 / 判定结果 直接挂单头（单头页签）</text>
+  <text class="b3" x="90" y="366">（所以键 = docno + 自己的序号）</text>
+  <text class="b3" x="90" y="398">页签归属 ≠ 数据层级：</text>
+  <text class="b3" x="90" y="420">「缺点原因 / 测量值」是单身页签，数据却已到第 2 层</text>
+
+  <!-- ============ ② 键拼装 ============ -->
+  <text class="sec" x="40" y="656">② 键怎么拼：每往下走一层，gs_keys 就多长一段</text>
+  <text class="sub" x="520" y="656">以「新增一笔制造批序号（第四层）」为例</text>
+
+  <rect x="70" y="680" width="420" height="52" rx="10" fill="#2a2410" stroke="#f6c453" stroke-width="1.4"/>
+  <text class="cd" x="90" y="712">① 单头　g_qcba_m.qcbadocno</text>
+  <rect x="70" y="742" width="420" height="52" rx="10" fill="#0d3038" stroke="#4dd0e1" stroke-width="1.4"/>
+  <text class="cd" x="90" y="774" style="fill:#7ef0ff">② 单身　g_qcbd_d[g_detail_idx].qcbdseq</text>
+  <rect x="70" y="804" width="420" height="52" rx="10" fill="#1c1636" stroke="#b9a6ff" stroke-width="1.4"/>
+  <text class="cd" x="90" y="836" style="fill:#cbb9ff">③ 缺点原因　g_qcbd2_d[g_detail_idx2].qcbe001</text>
+  <rect x="70" y="866" width="420" height="52" rx="10" fill="#2a1622" stroke="#f78fb3" stroke-width="1.4"/>
+  <text class="cd" x="90" y="898" style="fill:#ffb3d1">④ 本层　..qcbf002 + ..qcbf003</text>
+
+  <rect x="560" y="680" width="420" height="44" rx="9" fill="#0f2445" stroke="#2f5c94" stroke-width="1.2"/>
+  <text class="cd" x="578" y="708">gs_keys[1] ← qcbadocno</text>
+  <rect x="560" y="732" width="420" height="44" rx="9" fill="#0f2445" stroke="#2f5c94" stroke-width="1.2"/>
+  <text class="cd" x="578" y="760">gs_keys[2] ← qcbdseq</text>
+  <rect x="560" y="784" width="420" height="44" rx="9" fill="#0f2445" stroke="#2f5c94" stroke-width="1.2"/>
+  <text class="cd" x="578" y="812">gs_keys[3] ← qcbe001</text>
+  <rect x="560" y="836" width="420" height="44" rx="9" fill="#0f2445" stroke="#2f5c94" stroke-width="1.2"/>
+  <text class="cd" x="578" y="864">gs_keys[4] ← qcbf002</text>
+  <rect x="560" y="888" width="420" height="44" rx="9" fill="#0f2445" stroke="#2f5c94" stroke-width="1.2"/>
+  <text class="cd" x="578" y="916">gs_keys[5] ← qcbf003</text>
+
+  <line x1="496" y1="706" x2="554" y2="702" stroke="#f6c453" stroke-width="1.4" marker-end="url(#arA)"/>
+  <line x1="496" y1="768" x2="554" y2="754" stroke="#4dd0e1" stroke-width="1.4" marker-end="url(#arC)"/>
+  <line x1="496" y1="830" x2="554" y2="806" stroke="#b9a6ff" stroke-width="1.4" marker-end="url(#arV)"/>
+  <line x1="496" y1="888" x2="554" y2="858" stroke="#f78fb3" stroke-width="1.4" marker-end="url(#arP)"/>
+  <line x1="496" y1="900" x2="554" y2="910" stroke="#f78fb3" stroke-width="1.4" marker-end="url(#arP)"/>
+
+  <rect x="1020" y="680" width="500" height="252" rx="10" fill="#08182f" stroke="#2a4a78" stroke-width="1.3"/>
+  <text class="cd2" x="1040" y="710">INITIALIZE gs_keys TO NULL</text>
+  <text class="cd2" x="1040" y="736">LET gs_keys[1] = g_qcba_m.qcbadocno</text>
+  <text class="cd2" x="1040" y="762">LET gs_keys[2] = g_qcbd_d[g_detail_idx].qcbdseq</text>
+  <text class="cd2" x="1040" y="788">LET gs_keys[3] = g_qcbd2_d[g_detail_idx2].qcbe001</text>
+  <text class="cd2" x="1040" y="814">LET gs_keys[4] = g_qcbd3_d[g_detail_idx3].qcbf002</text>
+  <text class="cd2" x="1040" y="840">LET gs_keys[5] = g_qcbd3_d[g_detail_idx3].qcbf003</text>
+  <text class="cd" x="1040" y="872">CALL aqct300_insert_b(</text>
+  <text class="cd" x="1040" y="896">  'qcbf_t', gs_keys, "'99'")</text>
+  <text class="b3" x="1040" y="920">键的段数 = 这一层的 PK 段数</text>
+
+  <!-- ============ ③ 三个索引 ============ -->
+  <text class="sec" x="40" y="1000">③ 三个索引：一层一个，平行表共用</text>
+
+  <rect x="70" y="1020" width="460" height="76" rx="11" fill="#0d3038" stroke="#4dd0e1" stroke-width="1.4"/>
+  <text class="cd" x="90" y="1046" style="fill:#7ef0ff">g_detail_idx</text>
+  <text class="b3" x="90" y="1070">第 1 层：g_qcbd_d / g_qcbd4_d / g_qcbd5_d</text>
+
+  <rect x="550" y="1020" width="460" height="76" rx="11" fill="#1c1636" stroke="#b9a6ff" stroke-width="1.4"/>
+  <text class="cd" x="570" y="1046" style="fill:#cbb9ff">g_detail_idx2</text>
+  <text class="b3" x="570" y="1070">第 2 层：g_qcbd2_d（缺点原因）/ g_qcbd7_d（测量值）</text>
+
+  <rect x="1030" y="1020" width="460" height="76" rx="11" fill="#2a1622" stroke="#f78fb3" stroke-width="1.4"/>
+  <text class="cd" x="1050" y="1046" style="fill:#ffb3d1">g_detail_idx3</text>
+  <text class="b3" x="1050" y="1070">第 3 层：g_qcbd3_d（制造批序号）</text>
+
+  <text class="b2" x="70" y="1148" style="font-size:13px">层级越深，键越长、索引越多，但代码骨架完全一样：<tspan fill="#6ee7a8">查重 → 组 gs_keys → 调 insert_b</tspan>。四条路径都是同一段模板。</text>
+  <text class="b3" x="70" y="1180">旁注：qcbd_t 还拆成了两个页签——「抽样与结果」用 g_qcbd_d，「检验规格」用 g_qcbd99_d（同一条记录，只显示 012–019 那组字段）。</text>
+
+</svg>
+
+<div class="cards">
+  <div class="card">
+    <b>四层，不是四套代码</b>
+    <p>qcba → qcbd → qcbe → qcbf 四层，生成出来还是同一套 <code class="c">insert_b / update_b / delete_b</code>，区别只在键数组的长度和索引变量。</p>
+  </div>
+  <div class="card">
+    <b>平行分支靠"组号"分开</b>
+    <p>qcbb / qcbc / qcbg 与主干同页面不同页签，靠 <code class="k">ls_group</code>（'1','2','3','4','5','99'）在子程序里各自一段。</p>
+  </div>
+  <div class="card">
+    <b>一表两页签</b>
+    <p>qcbd_t 被拆成「抽样与结果」和「检验规格」两个页签，各用一个数组，但都是同一行记录的不同字段子集。</p>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>附：层级 ↔ 表 ↔ 页签 ↔ 数组 ↔ 组号</h2>
+  <table>
+    <thead><tr><th style="width:80px">层级</th><th style="width:120px">表</th><th style="width:230px">主键（段数）</th><th style="width:180px">页签</th><th style="width:170px">数组 / 索引</th><th>组号</th></tr></thead>
+    <tbody>
+      <tr><td>L0 单头</td><td><code class="k">qcba_t</code></td><td>ent + docno（2）</td><td>基本资料</td><td><code>g_qcba_m</code></td><td>—</td></tr>
+      <tr><td>L1</td><td><code class="c">qcbd_t</code></td><td>ent + docno + seq（3）</td><td>抽样与结果 / 检验规格</td><td><code>g_qcbd_d</code> / <code>g_qcbd99_d</code>（idx）</td><td>'1'</td></tr>
+      <tr><td>L1 平行</td><td>qcbb_t</td><td>ent + docno + 001 + 002 + 003（5）</td><td>批序号</td><td><code>g_qcbd4_d</code>（idx）</td><td>'3'</td></tr>
+      <tr><td>L1 平行</td><td>qcbc_t</td><td>ent + docno + seq（3）</td><td>联产品与结果判定</td><td><code>g_qcbd5_d</code>（idx）</td><td>'4'</td></tr>
+      <tr><td>L2</td><td><code class="v">qcbe_t</code></td><td>ent + docno + seq + 001（4）</td><td>缺点原因</td><td><code>g_qcbd2_d</code>（idx2）</td><td>'2'</td></tr>
+      <tr><td>L2 平行</td><td><code class="v">qcbg_t</code></td><td>ent + docno + seq + 001（4）</td><td>测量值</td><td><code>g_qcbd7_d</code>（idx2）</td><td>'5'</td></tr>
+      <tr><td>L3</td><td><code class="p">qcbf_t</code></td><td>ent + docno + seq + 001 + 002 + 003（6）</td><td>嵌在「缺点原因」里</td><td><code>g_qcbd3_d</code>（idx3）</td><td>'99'</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="panel">
+  <h2>真代码：第四层新增时发生的事</h2>
+  <p class="sub" style="margin:0 0 6px">① 查重：四层的键全部来自各自的来源（单头记录、上层数组、本层数组）</p>
+  <pre><code>SELECT COUNT(1) INTO l_count FROM qcbf_t
+ WHERE qcbfent = g_enterprise AND qcbfdocno = g_qcba_m.qcbadocno
+   AND qcbfseq = g_qcbd_d[g_detail_idx].qcbdseq
+   AND qcbf001 = g_qcbd2_d[g_detail_idx2].qcbe001
+   AND qcbf002 = g_qcbd3_d[g_detail_idx3].qcbf002
+   AND qcbf003 = g_qcbd3_d[g_detail_idx3].qcbf003</code></pre>
+
+  <p class="sub" style="margin:14px 0 6px">② 组键后交给通用子程序，组号 '99' 对应 qcbf_t 那一段</p>
+  <pre><code>CALL aqct300_insert_b('qcbf_t', gs_keys, "'99'")
+
+# insert_b 内部（按组号命中）：
+INSERT INTO qcbf_t
+     (qcbfent, qcbfdocno, qcbfseq, qcbf001, qcbf002, qcbf003, qcbf004, qcbfsite)
+VALUES(g_enterprise, ps_keys[1], ps_keys[2], ps_keys[3], ps_keys[4], ps_keys[5],
+       g_qcbd3_d[g_detail_idx2].qcbf004, g_qcbd3_d[g_detail_idx2].qcbfsite)</code></pre>
+</div>
+
+<div class="panel">
+  <h2>和 axmt500_wf 对照：同一套模型，不同深度</h2>
+  <table>
+    <thead><tr><th style="width:190px">对比项</th><th style="width:330px">axmt500_wf（3 层）</th><th>aqct300_wf（4 层 + 平行）</th></tr></thead>
+    <tbody>
+      <tr><td>层级</td><td>主档 → 单身 → 子表</td><td>单头 → 单身 → 缺点原因 → 制造批序号</td></tr>
+      <tr><td>键最长</td><td>4 段（ent,docno,seq,seq1）</td><td>6 段（ent,docno,seq,001,002,003）</td></tr>
+      <tr><td>索引变量</td><td>g_detail_idx、g_detail_idx2</td><td>g_detail_idx、idx2、idx3</td></tr>
+      <tr><td>页组数</td><td>6 组（'1','2','3','8','11','12'…）</td><td>6 组（'1','2','3','4','5','99'）</td></tr>
+      <tr><td>一表两页签</td><td>无</td><td>有（qcbd 拆「抽样与结果 / 检验规格」）</td></tr>
+      <tr><td>CRUD 子程序</td><td colspan="2">完全相同：insert_b / update_b / delete_b / key_update_b / key_delete_b + lock_b / b_fill</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="panel">
+  <h2>学完这个案例，你应该能回答</h2>
+  <table>
+    <thead><tr><th style="width:60px">#</th><th>问题</th><th style="width:40%">答案在哪</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>为什么第四层的键要 6 段？</td><td>每层贡献自己的主键：docno / seq / 001 / 002+003，层层串起来才是唯一记录</td></tr>
+      <tr><td>2</td><td>为什么平行表不用新索引？</td><td>它们与主干同深度（都挂 qcbd 或都挂 qcba），共用一个 <code>g_detail_idx</code></td></tr>
+      <tr><td>3</td><td>加一个新页签要动生成器吗？</td><td>不用：r.t 补 FK、表单连线、产生程序，模板会自动多生成一段 <code>ls_group</code> + INSERT</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="foot">
+  数据取自 aqct300_wf.4gl（本地镜像 2026-03-13 版）与 qcba–qcbg 的 r.t 键值定义；页签名称取自 zh_CN/aqct300_wf.42s。
+</div>
+
+</div>
+</body>
+</html>

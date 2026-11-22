@@ -143,7 +143,7 @@ func TestStatusEmptyThenFilled(t *testing.T) {
 	cfgPath, tables, files := newMirrorFixture(t)
 	ctx := context.Background()
 
-	st, err := Status(ctx, StatusRequest{CfgPath: cfgPath, Env: "福联测试tst"})
+	st, err := Status(ctx, StatusRequest{CfgPath: cfgPath, Env: "测试环境"})
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
@@ -155,10 +155,10 @@ func TestStatusEmptyThenFilled(t *testing.T) {
 	}
 
 	// 拉一次共用资料
-	if _, err := Mirror(ctx, MirrorRequest{CfgPath: cfgPath, Env: "福联测试tst", Tables: tables, Files: files}, nil); err != nil {
+	if _, err := Mirror(ctx, MirrorRequest{CfgPath: cfgPath, Env: "测试环境", Tables: tables, Files: files}, nil); err != nil {
 		t.Fatal(err)
 	}
-	st, err = Status(ctx, StatusRequest{CfgPath: cfgPath, Env: "福联测试tst"})
+	st, err = Status(ctx, StatusRequest{CfgPath: cfgPath, Env: "测试环境"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,10 +186,10 @@ func TestStatusEmptyThenFilled(t *testing.T) {
 func TestStatusListsProgsAndStale(t *testing.T) {
 	cfgPath, files := newFetchFixture(t)
 	ctx := context.Background()
-	if _, err := Fetch(ctx, FetchRequest{CfgPath: cfgPath, Env: "福联测试tst", Prog: "axmt500_wf", Files: files}, nil); err != nil {
+	if _, err := Fetch(ctx, FetchRequest{CfgPath: cfgPath, Env: "测试环境", Prog: "axmt500_wf", Files: files}, nil); err != nil {
 		t.Fatal(err)
 	}
-	st, err := Status(ctx, StatusRequest{CfgPath: cfgPath, Env: "福联测试tst"})
+	st, err := Status(ctx, StatusRequest{CfgPath: cfgPath, Env: "测试环境"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,11 +204,11 @@ func TestStatusListsProgsAndStale(t *testing.T) {
 	}
 
 	// 本地改一个文件 → 下一次 status 必须报 stale（本地 sha 不一致，不需要联网）
-	progDir, _ := ProgDir(cfgPath, "福联测试tst", "axmt500_wf")
+	progDir, _ := ProgDir(cfgPath, "测试环境", "axmt500_wf")
 	if err := os.WriteFile(filepath.Join(progDir, "dzx", "axmt500_wf.tab"), []byte("改了"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	st, err = Status(ctx, StatusRequest{CfgPath: cfgPath, Env: "福联测试tst"})
+	st, err = Status(ctx, StatusRequest{CfgPath: cfgPath, Env: "测试环境"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +223,7 @@ func TestStatusListsProgsAndStale(t *testing.T) {
 	}
 
 	// Check 强制 probe：用注入的假来源比对服务器
-	prog, err := Check(ctx, StatusRequest{CfgPath: cfgPath, Env: "福联测试tst", Prog: "axmt500_wf", Files: files})
+	prog, err := Check(ctx, StatusRequest{CfgPath: cfgPath, Env: "测试环境", Prog: "axmt500_wf", Files: files})
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestStatusListsProgsAndStale(t *testing.T) {
 func TestCheckNotFetched(t *testing.T) {
 	cfgPath, files := newFetchFixture(t)
 	_, err := Check(context.Background(), StatusRequest{
-		CfgPath: cfgPath, Env: "福联测试tst", Prog: "axmt500_wf", Files: files})
+		CfgPath: cfgPath, Env: "测试环境", Prog: "axmt500_wf", Files: files})
 	if !errors.Is(err, ErrProgNotFound) {
 		t.Fatalf("应报 ErrProgNotFound，得到 %v", err)
 	}
@@ -245,17 +245,17 @@ func TestCheckNotFetched(t *testing.T) {
 // TestCleanDryRunThenExecute 清理默认只看不删；执行后目录消失。
 func TestCleanDryRunThenExecute(t *testing.T) {
 	cfgPath, files := newFetchFixture(t)
-	if _, err := Fetch(context.Background(), FetchRequest{CfgPath: cfgPath, Env: "福联测试tst", Prog: "axmt500_wf", Files: files}, nil); err != nil {
+	if _, err := Fetch(context.Background(), FetchRequest{CfgPath: cfgPath, Env: "测试环境", Prog: "axmt500_wf", Files: files}, nil); err != nil {
 		t.Fatal(err)
 	}
-	plan, err := PlanClean(cfgPath, "福联测试tst", "axmt500_wf")
+	plan, err := PlanClean(cfgPath, "测试环境", "axmt500_wf")
 	if err != nil {
 		t.Fatalf("PlanClean: %v", err)
 	}
 	if plan.Empty() || plan.Files == 0 || plan.Bytes == 0 {
 		t.Fatalf("计划应有内容: %+v", plan)
 	}
-	progDir, _ := ProgDir(cfgPath, "福联测试tst", "axmt500_wf")
+	progDir, _ := ProgDir(cfgPath, "测试环境", "axmt500_wf")
 	if _, err := os.Stat(progDir); err != nil {
 		t.Fatal("dry-run 不该删东西")
 	}
@@ -266,7 +266,7 @@ func TestCleanDryRunThenExecute(t *testing.T) {
 		t.Fatal("执行后程序目录应消失")
 	}
 	// 再删一次 → ErrProgNotFound
-	if _, err := PlanClean(cfgPath, "福联测试tst", "axmt500_wf"); !errors.Is(err, ErrProgNotFound) {
+	if _, err := PlanClean(cfgPath, "测试环境", "axmt500_wf"); !errors.Is(err, ErrProgNotFound) {
 		t.Fatalf("已删除的程序应报 ErrProgNotFound，得到 %v", err)
 	}
 }
@@ -274,11 +274,11 @@ func TestCleanDryRunThenExecute(t *testing.T) {
 // TestCleanEnvLevel 只给环境 = 删整棵环境目录。
 func TestCleanEnvLevel(t *testing.T) {
 	cfgPath, tables, files := newMirrorFixture(t)
-	if _, err := Mirror(context.Background(), MirrorRequest{CfgPath: cfgPath, Env: "福联测试tst", Tables: tables, Files: files}, nil); err != nil {
+	if _, err := Mirror(context.Background(), MirrorRequest{CfgPath: cfgPath, Env: "测试环境", Tables: tables, Files: files}, nil); err != nil {
 		t.Fatal(err)
 	}
-	envDir, _ := EnvDir(cfgPath, "福联测试tst")
-	plan, err := PlanClean(cfgPath, "福联测试tst", "")
+	envDir, _ := EnvDir(cfgPath, "测试环境")
+	plan, err := PlanClean(cfgPath, "测试环境", "")
 	if err != nil {
 		t.Fatalf("PlanClean: %v", err)
 	}
@@ -292,7 +292,7 @@ func TestCleanEnvLevel(t *testing.T) {
 		t.Fatal("环境目录应消失")
 	}
 	// 环境没了以后再计划 → ErrProgNotFound（"还没有任何开发资料"）
-	if _, err := PlanClean(cfgPath, "福联测试tst", ""); !errors.Is(err, ErrProgNotFound) {
+	if _, err := PlanClean(cfgPath, "测试环境", ""); !errors.Is(err, ErrProgNotFound) {
 		t.Fatalf("应报 ErrProgNotFound，得到 %v", err)
 	}
 }

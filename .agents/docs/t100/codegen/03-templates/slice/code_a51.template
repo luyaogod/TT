@@ -1,0 +1,44 @@
+#應用 a51 樣板自動產生(Version:11)
+#+ 給予pk_array內容
+PRIVATE FUNCTION ${general_prefix}_set_pk_array() RETURNS ()   #200213-00032
+   #add-point:set_pk_array段define name="set_pk_array.define_customerization"
+   {<point name="set_pk_array.define_customerization" edit="c" mark="Y"/>}
+   #end add-point
+   #add-point:set_pk_array段define(請盡量不要在客製環境修改此段落內容, 否則將後續patch的調整需人工處理) name="set_pk_array.define"
+   {<point name="set_pk_array.define"/>}
+   #end add-point
+   
+   #add-point:Function前置處理 name="set_pk_array.before"
+   {<point name="set_pk_array.before"/>}
+   #end add-point  
+
+
+   #181105-00036 ---modify start---  
+   #210120-00006 ---modify start---
+   CALL g_pk_array.clear()
+
+   #應檢查單頭是否有資料
+   ${mdl_mark_m}IF cl_null(${mdl_var_pk}) THEN
+   ${mdl_mark_m}   RETURN
+   ${mdl_mark_m}END IF
+   ${mdl_mark_d}#若是單檔多欄型態，則應檢查陣列長度
+   ${mdl_mark_d}#若${mdl_detail_flag}<=0代表沒有資料
+   ${mdl_mark_d}IF ${mdl_detail_flag} <= 0 THEN
+   ${mdl_mark_d}   RETURN
+   ${mdl_mark_d}END IF
+   #210120-00006 --- modify end ---
+   #181105-00036 --- modify end ---
+   
+   LET g_pk_array[1].values = ${mdl_var_pk}
+   LET g_pk_array[1].column = '${mdl_field_pk}'
+   #mdls - Start -   
+   LET g_pk_array[${mdl}].values = ${mdl_var_pk${mdl}}
+   LET g_pk_array[${mdl}].column = '${mdl_field_pk${mdl}}'
+   #mdls -  End  -
+   
+   #add-point:set_pk_array段之後 name="set_pk_array.after"
+   {<point name="set_pk_array.after"/>}
+   #end add-point  
+   
+END FUNCTION
+

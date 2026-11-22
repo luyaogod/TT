@@ -526,9 +526,11 @@ func (p *Package) Plan(r Rebuild) ([]EntryAction, error) {
 			Method:    e.Method,
 		}
 		if nd, ok := repl[e.Name]; ok {
-			a.Changed = true
 			a.NewSize = len(nd)
 			a.NewSha256 = sha256hex(nd)
+			// 只有内容真的变了才算"改写"：apply 每次都会把 tap/tgl 传进来（哪怕视图没动），
+			// 按"传了就改写"标记会让 --dry-run 永远显示「改写 3.6 MB → 3.6 MB」，像在乱写。
+			a.Changed = a.NewSha256 != e.Sha256
 		} else {
 			a.NewSize = len(e.Data)
 			a.NewSha256 = e.Sha256

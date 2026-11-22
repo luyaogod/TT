@@ -10,7 +10,7 @@ import (
 )
 
 // hostStub 一个只够路径解析用的环境（不真的连）。
-const hostStub = `{"name":"福联测试tst","host":"10.0.0.1","user":"tiptop","zone":"2","password":"x"}`
+const hostStub = `{"name":"测试环境","host":"10.0.0.1","user":"tiptop","zone":"2","password":"x"}`
 
 // newMirrorFixture 造一套"服务器上有一份标准材料"的假来源。
 func newMirrorFixture(t *testing.T) (cfgPath string, tables *fakeTable, files *fakeFiles) {
@@ -35,13 +35,13 @@ func newMirrorFixture(t *testing.T) (cfgPath string, tables *fakeTable, files *f
 // TestMirrorHappyPath 一次成功的共用资料同步：规格库落盘、模板树落盘、manifest 齐全。
 func TestMirrorHappyPath(t *testing.T) {
 	cfgPath, tables, files := newMirrorFixture(t)
-	envDir, err := EnvDir(cfgPath, "福联测试tst")
+	envDir, err := EnvDir(cfgPath, "测试环境")
 	if err != nil {
 		t.Fatal(err)
 	}
 	var phases []string
 	res, err := Mirror(context.Background(), MirrorRequest{
-		CfgPath: cfgPath, Env: "福联测试tst", TTVersion: "test",
+		CfgPath: cfgPath, Env: "测试环境", TTVersion: "test",
 		Tables: tables, Files: files,
 	}, func(p Progress) { phases = append(phases, p.Phase) })
 	if err != nil {
@@ -76,7 +76,7 @@ func TestMirrorHappyPath(t *testing.T) {
 	}
 
 	// 落盘检查
-	dbPath := filepath.Join(envDir, "dict", "福联测试tst.db")
+	dbPath := filepath.Join(envDir, "dict", "测试环境.db")
 	if _, err := os.Stat(dbPath); err != nil {
 		t.Fatalf("规格库没落盘: %v", err)
 	}
@@ -101,13 +101,13 @@ func TestMirrorHappyPath(t *testing.T) {
 	if err != nil || m == nil {
 		t.Fatalf("manifest: %v", err)
 	}
-	if m.Kind != KindMirror || m.Env != "福联测试tst" || m.TTVersion != "test" {
+	if m.Kind != KindMirror || m.Env != "测试环境" || m.TTVersion != "test" {
 		t.Errorf("manifest 基本字段: %+v", m)
 	}
 	if len(m.Tables) != 53 {
 		t.Errorf("manifest.tables 应有 53 条，实际 %d", len(m.Tables))
 	}
-	if m.FileByRel(filepath.ToSlash(filepath.Join("dict", "福联测试tst.db"))) == nil {
+	if m.FileByRel(filepath.ToSlash(filepath.Join("dict", "测试环境.db"))) == nil {
 		t.Error("manifest 里缺 dict 条目")
 	}
 	if countRole(m, "mdl") != 3 {
@@ -131,7 +131,7 @@ func TestMirrorHappyPath(t *testing.T) {
 // TestMirrorIdempotent 第二次同步默认跳过（不重写、不报错、不再连库）。
 func TestMirrorIdempotent(t *testing.T) {
 	cfgPath, tables, files := newMirrorFixture(t)
-	req := MirrorRequest{CfgPath: cfgPath, Env: "福联测试tst", Tables: tables, Files: files}
+	req := MirrorRequest{CfgPath: cfgPath, Env: "测试环境", Tables: tables, Files: files}
 	if _, err := Mirror(context.Background(), req, nil); err != nil {
 		t.Fatalf("第一次: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestMirrorIdempotent(t *testing.T) {
 
 	// --force 必须重拉
 	res, err = Mirror(context.Background(), MirrorRequest{
-		CfgPath: cfgPath, Env: "福联测试tst", Force: true, Tables: tables, Files: files}, nil)
+		CfgPath: cfgPath, Env: "测试环境", Force: true, Tables: tables, Files: files}, nil)
 	if err != nil {
 		t.Fatalf("force: %v", err)
 	}
@@ -169,13 +169,13 @@ func TestMirrorIdempotent(t *testing.T) {
 // TestMirrorOnlyKeepsOtherHalf --only dict 不能把 mdl 的记录抹掉。
 func TestMirrorOnlyKeepsOtherHalf(t *testing.T) {
 	cfgPath, tables, files := newMirrorFixture(t)
-	req := MirrorRequest{CfgPath: cfgPath, Env: "福联测试tst", Tables: tables, Files: files}
+	req := MirrorRequest{CfgPath: cfgPath, Env: "测试环境", Tables: tables, Files: files}
 	if _, err := Mirror(context.Background(), req, nil); err != nil {
 		t.Fatalf("第一次: %v", err)
 	}
-	envDir, _ := EnvDir(cfgPath, "福联测试tst")
+	envDir, _ := EnvDir(cfgPath, "测试环境")
 	res, err := Mirror(context.Background(), MirrorRequest{
-		CfgPath: cfgPath, Env: "福联测试tst", Only: OnlyDict, Force: true,
+		CfgPath: cfgPath, Env: "测试环境", Only: OnlyDict, Force: true,
 		Tables: tables, Files: files}, nil)
 	if err != nil {
 		t.Fatalf("only dict: %v", err)
@@ -198,7 +198,7 @@ func TestMirrorOnlyKeepsOtherHalf(t *testing.T) {
 // TestMirrorCancelNoResidue 取消后：不报"失败"（是 context.Canceled）、不落半套。
 func TestMirrorCancelNoResidue(t *testing.T) {
 	cfgPath, tables, files := newMirrorFixture(t)
-	envDir, _ := EnvDir(cfgPath, "福联测试tst")
+	envDir, _ := EnvDir(cfgPath, "测试环境")
 	ctx, cancel := context.WithCancel(context.Background())
 	// 数到第 5 张表就取消（模拟用户点"停止"）
 	n := 0
@@ -211,7 +211,7 @@ func TestMirrorCancelNoResidue(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_, err := Mirror(ctx, MirrorRequest{CfgPath: cfgPath, Env: "福联测试tst", Tables: tables, Files: files},
+		_, err := Mirror(ctx, MirrorRequest{CfgPath: cfgPath, Env: "测试环境", Tables: tables, Files: files},
 			func(p Progress) {
 				if p.Phase == "table" {
 					n++
@@ -226,7 +226,7 @@ func TestMirrorCancelNoResidue(t *testing.T) {
 	}()
 	<-done
 
-	if _, err := os.Stat(filepath.Join(envDir, "dict", "福联测试tst.db")); err == nil {
+	if _, err := os.Stat(filepath.Join(envDir, "dict", "测试环境.db")); err == nil {
 		t.Error("取消后不该留下规格库")
 	}
 	if _, err := os.Stat(filepath.Join(envDir, "manifest.json")); err == nil {
@@ -243,17 +243,17 @@ func TestMirrorCancelNoResidue(t *testing.T) {
 // TestMirrorTableWriteFailureRollsBack 写库失败 → 整体失败、不留正式落点。
 func TestMirrorTableWriteFailureRollsBack(t *testing.T) {
 	cfgPath, tables, files := newMirrorFixture(t)
-	envDir, _ := EnvDir(cfgPath, "福联测试tst")
+	envDir, _ := EnvDir(cfgPath, "测试环境")
 	tables.failOn["DZAC_T"] = errors.New("模拟查询失败")
 	_, err := Mirror(context.Background(), MirrorRequest{
-		CfgPath: cfgPath, Env: "福联测试tst", Tables: tables, Files: files}, nil)
+		CfgPath: cfgPath, Env: "测试环境", Tables: tables, Files: files}, nil)
 	if err == nil {
 		t.Fatal("应当失败")
 	}
 	if !strings.Contains(err.Error(), "DZAC_T") {
 		t.Errorf("错误里应点名失败的表: %v", err)
 	}
-	if _, serr := os.Stat(filepath.Join(envDir, "dict", "福联测试tst.db")); serr == nil {
+	if _, serr := os.Stat(filepath.Join(envDir, "dict", "测试环境.db")); serr == nil {
 		t.Error("失败后不该留下规格库")
 	}
 	if m, _ := ReadManifest(envDir); m != nil {
@@ -265,7 +265,7 @@ func TestMirrorTableWriteFailureRollsBack(t *testing.T) {
 func TestMirrorVersionWhere(t *testing.T) {
 	cfgPath, tables, files := newMirrorFixture(t)
 	if _, err := Mirror(context.Background(), MirrorRequest{
-		CfgPath: cfgPath, Env: "福联测试tst", Tables: tables, Files: files}, nil); err != nil {
+		CfgPath: cfgPath, Env: "测试环境", Tables: tables, Files: files}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if w := tables.where["DZAA_T"]; !strings.Contains(w, "DZAASTUS='Y'") || !strings.Contains(w, "MAX(B.DZAA002)") {
@@ -286,7 +286,7 @@ func TestMirrorEmptyTableIsKept(t *testing.T) {
 	tables.missing["DZAS_T"] = false
 	tables.setTable("DZAS_T", []string{"dzas001", "dzas002"}) // 有列、没有行
 	res, err := Mirror(context.Background(), MirrorRequest{
-		CfgPath: cfgPath, Env: "福联测试tst", Tables: tables, Files: files}, nil)
+		CfgPath: cfgPath, Env: "测试环境", Tables: tables, Files: files}, nil)
 	if err != nil {
 		t.Fatalf("空表不该让整次镜像失败: %v", err)
 	}
@@ -306,8 +306,8 @@ func TestMirrorEmptyTableIsKept(t *testing.T) {
 		t.Error("空表不该进 missing")
 	}
 	// 空表真的建出来了（status 要能区分"空表"与"缺表"）
-	envDir, _ := EnvDir(cfgPath, "福联测试tst")
-	if _, err := os.Stat(filepath.Join(envDir, "dict", "福联测试tst.db")); err != nil {
+	envDir, _ := EnvDir(cfgPath, "测试环境")
+	if _, err := os.Stat(filepath.Join(envDir, "dict", "测试环境.db")); err != nil {
 		t.Fatalf("规格库没落盘: %v", err)
 	}
 }

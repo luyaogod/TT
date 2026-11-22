@@ -32,9 +32,15 @@ var (
 	// 两种情况共用同一个哨兵：对调用方来说都是"你要的这个程序拿不到材料"，
 	// 区别写在包装后的文案里（fetch 说"服务器上没有"，check 说"本地没有"）。
 	ErrProgNotFound = errors.New("该程序不存在")
+	// ErrMaterialIncomplete 程序存在，但本地这套材料缺件 —— 最典型的是从未客制过的
+	// 标准程序：服务器上端到端就没有 .tap/.tsd（只有 .tab + .4gl）。
+	// 对外同样是"拿不到材料"（HTTP 404 / 退出码 4），但文案必须说清"是缺件、
+	// 不是没这个程序"，否则会被误读成程序编号打错。
+	ErrMaterialIncomplete = errors.New("材料不成套")
+	// ErrPointNotFound 点名不存在（程序与材料都正常，只是查不到这个点）→ 404。
+	ErrPointNotFound = errors.New("没有匹配的点位")
 	// ErrInvalidProg 程序名非法 → 400。
-	ErrInvalidProg = errors.New("程序名非法")
-	// ErrInvalidEnv 环境名非法（空/含路径分隔符等）→ 400。
+	ErrInvalidProg = errors.New("程序名非法")	// ErrInvalidEnv 环境名非法（空/含路径分隔符等）→ 400。
 	ErrInvalidEnv = errors.New("环境名非法")
 	// ErrExists 目标已存在且未给 force → 409 语义（由调用方决定 HTTP 码）。
 	ErrExists = errors.New("目标已存在")

@@ -1,0 +1,30 @@
+#---OS---
+alias echo="echo -e"
+EXECSHELL='/bin/ksh';export EXECSHELL
+alias sh='/bin/ksh'
+alias pg='more'
+alias sz='/usr/bin/sz'
+#alias rz='/usr/bin/rz'
+alias ex='ex -E'
+alias echo='echo -e'
+#alias chenv='. /u3/pub/bin/chenv'
+readonly LOGNAME 2>/dev/null
+alias rm='rm -i'
+alias rz='rzchmod.sh'
+
+#---T100---
+alias r.t="r.r adzi140"
+#alias r.a="r.r adzp030"
+alias r.a="r.r adzp168"
+#alias r.a="r.r adzp167"  #2013/04/18 Saki
+alias account="r.r azzi800"
+alias program="r.r azzi900"
+alias r.q="r.r adzi210"   #2012/12/19 Hiko
+#alias r.v="r.r adzi220"   #2012/12/19 Hiko
+alias r.v="r.r adzi220"   #2013/05/24 Hiko
+alias r.p="r.r azzp189"   #2013/05/24 Hiko
+#alias r.b="r.r adzq250"   #2013/05/24 Hiko
+alias r.b="r.r adzq255"   #2014/01/07 Hiko
+alias menu="r.r azzi000"   #2013/06/20 Raymon
+alias rz='/usr/bin/rz -v 2>/tmp/rz.$$;rzchmod.sh /tmp/rz.$$'
+alias topstatus="r.r adzq810"   #2019/07/30 00317

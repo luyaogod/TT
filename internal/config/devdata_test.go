@@ -12,7 +12,7 @@ import (
 // 且与读侧的 <data>/dict 不共用。
 func TestDevDataLayout(t *testing.T) {
 	data := t.TempDir()
-	env := "福联测试tst"
+	env := "测试环境"
 	envDir := DevDataEnvDir(data, env)
 	if want := filepath.Join(data, "devdata", env); envDir != want {
 		t.Fatalf("环境目录 = %q, want %q", envDir, want)
@@ -54,10 +54,10 @@ func TestDevDataDirEmpty(t *testing.T) {
 func TestDevDataRootDirForThreeLayers(t *testing.T) {
 	root := t.TempDir()
 	cfgPath := filepath.Join(root, "config.json")
-	env := "福联测试tst"
+	env := "测试环境"
 
 	// ① 都没有 → <data>/devdata
-	if err := os.WriteFile(cfgPath, []byte(`{"hosts":{"sshs":[{"name":"福联测试tst"}]}}`), 0o644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte(`{"hosts":{"sshs":[{"name":"测试环境"}]}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	want := filepath.Join(root, "devdata", env)
@@ -67,7 +67,7 @@ func TestDevDataRootDirForThreeLayers(t *testing.T) {
 
 	// ② 顶层 devdata.dir
 	topDir := filepath.Join(root, "top-devdata")
-	body := fmt.Sprintf(`{"devdata":{"dir":%q},"hosts":{"sshs":[{"name":"福联测试tst"}]}}`, topDir)
+	body := fmt.Sprintf(`{"devdata":{"dir":%q},"hosts":{"sshs":[{"name":"测试环境"}]}}`, topDir)
 	if err := os.WriteFile(cfgPath, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestDevDataRootDirForThreeLayers(t *testing.T) {
 
 	// ③ 环境级覆盖压过顶层
 	envRoot := filepath.Join(root, "env-root")
-	body = fmt.Sprintf(`{"devdata":{"dir":%q},"hosts":{"sshs":[{"name":"福联测试tst","devdataDir":%q}]}}`, topDir, envRoot)
+	body = fmt.Sprintf(`{"devdata":{"dir":%q},"hosts":{"sshs":[{"name":"测试环境","devdataDir":%q}]}}`, topDir, envRoot)
 	if err := os.WriteFile(cfgPath, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -44,9 +44,26 @@ type FetchRequest struct {
 	// Force 目标程序目录已存在时是否覆盖。false → ErrExists。
 	Force     bool
 	TTVersion string
+	// Dir 材料落点（空 = <环境>/prog/<程序>）。工作区把它指到 <工作区>/materials。
+	Dir string
 
 	// Files 仅供测试注入；nil 时按环境打开真 SFTP。
 	Files FileSource
+}
+
+// materialDir 材料落点：显式 Dir 优先，否则用环境的程序目录。
+//
+// 显式 Dir 也要走 ValidProgName 的同一套校验（由调用方先做），这里只负责绝对化 ——
+// 相对路径在 fetch 中途改 working dir 的场景下会指向别处。
+func (r FetchRequest) materialDir(envName string) (string, error) {
+	if d := strings.TrimSpace(r.Dir); d != "" {
+		abs, err := filepath.Abs(d)
+		if err != nil {
+			return "", fmt.Errorf("材料目录不可用 (%s): %w", d, err)
+		}
+		return abs, nil
+	}
+	return ProgDir(r.CfgPath, envName, r.Prog)
 }
 
 // FetchResult 一次拉取的结果。
@@ -139,7 +156,7 @@ func Fetch(ctx context.Context, req FetchRequest, onProgress ProgressFunc) (*Fet
 	if err != nil {
 		return nil, err
 	}
-	progDir, err := ProgDir(req.CfgPath, e.Name, prog)
+	progDir, err := req.materialDir(e.Name)
 	if err != nil {
 		return nil, err
 	}

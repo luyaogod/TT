@@ -1,0 +1,167 @@
+#報表 d09 樣板自動產生(Version:1)
+{<section id="${component_name}.${sub_name}.ins_prep" readonly="Y" type="s" >}
+PRIVATE FUNCTION ${component_name}_${sub_name}_ins_prep()
+DEFINE l_prep_str     STRING
+#add-point:${sub_name}.ins_prep.define (客製用) name="${sub_name}.ins_prep.define_customerization"
+{<point name="${sub_name}.ins_prep.define_customerization"/>}
+#end add-point
+#add-point:${sub_name}.ins_prep.define (請盡量不要在客製環境修改此段落內容, 否則將後續patch的調整需人工處理) name="${sub_name}.ins_prep.define"
+{<point name="${sub_name}.ins_prep.define"/>}
+#end add-point
+
+   #可切換資料庫，避免大量資料佔資源及空間
+   #add-point:create_tmp.before name="${sub_name}.create_tmp.before"
+   {<point name="${sub_name}.create_tmp.before"/>}
+   #end add-point:create_tmp.before
+ 
+   #主報表TEMP TABLE的欄位SQL   
+   LET g_sql = "${sub_temp_query}"
+   
+   #建立TEMP TABLE,子報表序號${sub_seq}
+   IF NOT cl_xr_create_tmptable(g_sql,${sub_seq}) THEN
+      LET g_rep_success = 'N'            
+   END IF
+   #可切換資料庫，避免大量資料佔資源及空間
+   #add-point:create_tmp.after name="${sub_name}.create_tmp.after"
+   {<point name="${sub_name}.create_tmp.after"/>}
+   #end add-point:create_tmp.after
+   
+    LET g_sql = " INSERT /*+APPEND*/ INTO ",g_rep_db CLIPPED,g_rep_tmpname[${sub_seq}] CLIPPED," VALUES(${sub_temp_ins_prep})"
+    PREPARE ${sub_name}_insert_prep FROM g_sql
+    IF STATUS THEN
+       LET l_prep_str ="${sub_name}_insert_prep",${sub_seq}
+       INITIALIZE g_errparam TO NULL
+       LET g_errparam.extend = l_prep_str
+       LET g_errparam.code = status
+       LET g_errparam.popup = TRUE
+       CALL cl_err()
+       CALL cl_xr_drop_tmptable()
+       LET g_rep_success = 'N'           
+    END IF 
+    #add-point:${sub_name}.insert_prep段 name="${sub_name}.insert_prep"
+    {<point name="${sub_name}.ins_prep"/>}
+    #end add-point
+
+END FUNCTION
+{</section>}
+
+{<section id="${component_name}.${sub_name}.sel_prep" readonly="Y" type="s" >}
+#+ 選單功能實際執行處
+PRIVATE FUNCTION ${component_name}_${sub_name}_sel_prep()
+DEFINE g_select      STRING
+DEFINE g_from        STRING
+DEFINE g_where       STRING
+#add-point:sel_prep段define(客製用) name="${sub_name}.sel_prep.define_customerization"
+{<point name="${sub_name}.sel_prep.define_customerization" edit="c" mark="Y"/>}
+#end add-point
+#add-point:sel_prep段define (請盡量不要在客製環境修改此段落內容, 否則將後續patch的調整需人工處理) name="sel_prep.define"
+{<point name="${sub_name}.sel_prep.define"/>}
+#end add-point
+
+   #add-point:sel_prep before name="${sub_name}.sel_prep.before"
+   {<point name="${sub_name}.sel_prep.before" mark="Y"/>}
+   #end add-point
+ 
+   #add-point:sel_prep g_select name="${sub_name}.sel_prep.g_select"
+   {<point name="${sub_name}.sel_prep.g_select" mark="Y"/>}
+   #end add-point
+   ${sub_select_query}
+ 
+   #add-point:sel_prep g_from name="${sub_name}.sel_prep.g_from"
+   {<point name="${sub_name}.sel_prep.g_from" mark="Y"/>}
+   #end add-point
+   ${sub_from_query}
+ 
+   #add-point:sel_prep g_where name="${sub_name}.sel_prep.g_where"
+   {<point name="${sub_name}.sel_prep.g_where" mark="Y"/>}
+   #end add-point
+   ${sub_where_query}
+ 
+   #add-point:sel_prep g_order name="${sub_name}.sel_prep.g_order"
+   {<point name="${sub_name}.sel_prep.g_order" mark="Y"/>}
+   #end add-point
+ 
+   #add-point:sel_prep.sql.before name="${sub_name}.sel_prep.sql.before"
+   {<point name="${sub_name}.sel_prep.sql.before" mark="Y"/>}
+   #end add-point:sel_prep.sql.before
+   LET g_where = g_where ,cl_sql_add_filter("${subtable}")   #資料過濾功能
+   LET g_sql = g_select CLIPPED ," ",g_from CLIPPED ," ",g_where CLIPPED
+   LET g_sql = cl_sql_add_mask(g_sql)    #遮蔽特定資料, 若寫至add-point也需複製此段
+ 
+   #add-point:sel_prep.sql.after name="${sub_name}.sel_prep.sql.after"
+   {<point name="${sub_name}.sel_prep.sql.after" mark="Y"/>}
+   #end add-point
+   PREPARE ${component_name}_${sub_name}_prepare FROM g_sql
+   IF STATUS THEN
+      INITIALIZE g_errparam TO NULL
+      LET g_errparam.extend = 'prepare:'
+      LET g_errparam.code = STATUS
+      LET g_errparam.popup = TRUE
+      CALL cl_err()
+      LET g_rep_success = 'N' 
+   END IF
+   DECLARE ${component_name}_${sub_name}_curs CURSOR FOR ${component_name}_${sub_name}_prepare
+ 
+END FUNCTION
+{</section>}
+ 
+{<section id="${component_name}.${sub_name}.ins_data" readonly="Y" type="s" >}
+PRIVATE FUNCTION ${component_name}_${sub_name}_ins_data()
+DEFINE sr sr_r
+#add-point:ins_data段define (客製用) name="${sub_name}.ins_data.define_customerization"
+{<point name="${sub_name}.ins_data.define_customerization" edit="c" mark="Y"/>}
+#end add-point
+#add-point:ins_data段define (請盡量不要在客製環境修改此段落內容, 否則將後續patch的調整需人工處理) name="${sub_name}.ins_data.define"
+{<point name="${sub_name}.ins_data.define"/>}
+#end add-point
+ 
+    #add-point:ins_data段before name="${sub_name}.ins_data.before"
+    {<point name="${sub_name}.ins_data.before" mark="Y"/>}
+    #end add-point
+ 
+    LET g_rep_success = 'Y'
+ 
+    FOREACH ${component_name}_${sub_name}_curs USING ${sub_param} INTO sr.*                               
+       IF STATUS THEN
+          INITIALIZE g_errparam TO NULL
+          LET g_errparam.extend = 'foreach:'
+          LET g_errparam.code = STATUS
+          LET g_errparam.popup = TRUE
+          CALL cl_err()
+          LET g_rep_success = 'N'
+          EXIT FOREACH
+       END IF
+    
+       #add-point:ins_data段foreach name="${sub_name}.ins_data.foreach"
+       {<point name="${sub_name}.ins_data.foreach" mark="Y"/>}
+       #end add-point
+    
+       #add-point:ins_data段before.save name="${sub_name}.ins_data.before.save"
+       {<point name="${sub_name}.ins_data.before.save" mark="Y"/>}
+       #end add-point
+    
+       #EXECUTE
+       EXECUTE ${sub_name}_insert_prep USING ${sub_sr_rep_str}
+    
+       IF SQLCA.SQLCODE THEN
+          INITIALIZE g_errparam TO NULL
+          LET g_errparam.extend = "${component_name}_execute"
+          LET g_errparam.code = SQLCA.SQLCODE
+          LET g_errparam.popup = FALSE
+          CALL cl_err()       
+          LET g_rep_success = 'N'
+          EXIT FOREACH
+       END IF
+    
+       #add-point:ins_data段after_save name="${sub_name}.ins_data.after.save"
+       {<point name="${sub_name}.ins_data.after.save" mark="Y"/>}
+       #end add-point
+       
+    END FOREACH
+    
+    #add-point:ins_data段after name="${sub_name}.ins_data.after"
+    {<point name="${sub_name}.ins_data.after" mark="Y"/>}
+    #end add-point
+ 
+END FUNCTION
+{</section>}

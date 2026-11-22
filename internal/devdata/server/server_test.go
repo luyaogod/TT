@@ -26,7 +26,7 @@ func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.json")
-	body := `{"hosts":{"sshs":[{"name":"福联测试tst","host":"10.0.0.1","user":"u","zone":"2"}]},"schemaVersion":4}`
+	body := `{"hosts":{"sshs":[{"name":"测试环境","host":"10.0.0.1","user":"u","zone":"2"}]},"schemaVersion":4}`
 	if err := os.WriteFile(cfgPath, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -117,8 +117,8 @@ func TestEnvValidation(t *testing.T) {
 func TestProgValidation(t *testing.T) {
 	f := newFixture(t)
 	for _, prog := range []string{"../x", "Axmt500", "a", "axmt500-wf"} {
-		code, out := f.do(t, http.MethodPost, "/api/devdata/fetch?env=福联测试tst",
-			`{"env":"福联测试tst","prog":`+quote(prog)+`}`)
+		code, out := f.do(t, http.MethodPost, "/api/devdata/fetch?env=测试环境",
+			`{"env":"测试环境","prog":`+quote(prog)+`}`)
 		if code != http.StatusBadRequest {
 			t.Errorf("prog %q → %d，应为 400（%v）", prog, code, out)
 		}
@@ -134,17 +134,17 @@ func TestProgValidation(t *testing.T) {
 // TestFetchStartBusyAndStop 启动 → 再启动 409 → stop → 结束。
 func TestFetchStartBusyAndStop(t *testing.T) {
 	f := newFixture(t)
-	code, out := f.do(t, http.MethodPost, "/api/devdata/fetch", `{"env":"福联测试tst","prog":"axmt500_wf"}`)
+	code, out := f.do(t, http.MethodPost, "/api/devdata/fetch", `{"env":"测试环境","prog":"axmt500_wf"}`)
 	if code != http.StatusOK || out["ok"] != true {
 		t.Fatalf("首次启动 = %d %v", code, out)
 	}
 	// 等任务真的跑起来（Manager 的 Start 是同步建状态，这里不用等）
-	code, out = f.do(t, http.MethodPost, "/api/devdata/fetch", `{"env":"福联测试tst","prog":"axmt500_wf"}`)
+	code, out = f.do(t, http.MethodPost, "/api/devdata/fetch", `{"env":"测试环境","prog":"axmt500_wf"}`)
 	if code != http.StatusConflict || out["code"] != CodeConflict {
 		t.Fatalf("重复启动应 409: %d %v", code, out)
 	}
 	// status 里应能看到在跑的任务
-	code, out = f.do(t, http.MethodGet, "/api/devdata/status?env=福联测试tst", "")
+	code, out = f.do(t, http.MethodGet, "/api/devdata/status?env=测试环境", "")
 	if code != http.StatusOK {
 		t.Fatalf("status = %d %v", code, out)
 	}
@@ -153,14 +153,14 @@ func TestFetchStartBusyAndStop(t *testing.T) {
 		t.Fatalf("status 应带 1 个在跑任务: %v", out["jobs"])
 	}
 	// 停止
-	code, out = f.do(t, http.MethodPost, "/api/devdata/stop", `{"env":"福联测试tst","kind":"fetch","prog":"axmt500_wf"}`)
+	code, out = f.do(t, http.MethodPost, "/api/devdata/stop", `{"env":"测试环境","kind":"fetch","prog":"axmt500_wf"}`)
 	if code != http.StatusOK || out["ok"] != true {
 		t.Fatalf("stop = %d %v", code, out)
 	}
 	// 再停 → 409（没有任务可停）
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		code, out = f.do(t, http.MethodPost, "/api/devdata/stop", `{"env":"福联测试tst","kind":"fetch","prog":"axmt500_wf"}`)
+		code, out = f.do(t, http.MethodPost, "/api/devdata/stop", `{"env":"测试环境","kind":"fetch","prog":"axmt500_wf"}`)
 		if code == http.StatusConflict {
 			break
 		}
@@ -174,18 +174,18 @@ func TestFetchStartBusyAndStop(t *testing.T) {
 // TestDeleteRequiresYes 删除必须 ?yes=1；没拉过的程序 → 404。
 func TestDeleteRequiresYes(t *testing.T) {
 	f := newFixture(t)
-	code, out := f.do(t, http.MethodDelete, "/api/devdata/prog?env=福联测试tst&prog=axmt500_wf", "")
+	code, out := f.do(t, http.MethodDelete, "/api/devdata/prog?env=测试环境&prog=axmt500_wf", "")
 	if code != http.StatusBadRequest || out["code"] != CodeUsage {
 		t.Fatalf("无 yes 应 400: %d %v", code, out)
 	}
 	if f.calls["executeClean"] != 0 {
 		t.Error("没有 yes 时不该真的删")
 	}
-	code, out = f.do(t, http.MethodDelete, "/api/devdata/prog?env=福联测试tst&prog=notthere&yes=1", "")
+	code, out = f.do(t, http.MethodDelete, "/api/devdata/prog?env=测试环境&prog=notthere&yes=1", "")
 	if code != http.StatusNotFound || out["code"] != CodeNotFound {
 		t.Fatalf("没拉过的程序应 404: %d %v", code, out)
 	}
-	code, out = f.do(t, http.MethodDelete, "/api/devdata/prog?env=福联测试tst&prog=axmt500_wf&yes=1", "")
+	code, out = f.do(t, http.MethodDelete, "/api/devdata/prog?env=测试环境&prog=axmt500_wf&yes=1", "")
 	if code != http.StatusOK || out["ok"] != true {
 		t.Fatalf("删除应成功: %d %v", code, out)
 	}
@@ -197,11 +197,11 @@ func TestDeleteRequiresYes(t *testing.T) {
 // TestMirrorOnlyValidation only 只认 dict/mdl。
 func TestMirrorOnlyValidation(t *testing.T) {
 	f := newFixture(t)
-	code, out := f.do(t, http.MethodPost, "/api/devdata/mirror", `{"env":"福联测试tst","only":"all"}`)
+	code, out := f.do(t, http.MethodPost, "/api/devdata/mirror", `{"env":"测试环境","only":"all"}`)
 	if code != http.StatusBadRequest || out["code"] != CodeUsage {
 		t.Fatalf("非法 only 应 400: %d %v", code, out)
 	}
-	code, out = f.do(t, http.MethodPost, "/api/devdata/mirror", `{"env":"福联测试tst","only":"dict"}`)
+	code, out = f.do(t, http.MethodPost, "/api/devdata/mirror", `{"env":"测试环境","only":"dict"}`)
 	if code != http.StatusOK {
 		t.Fatalf("启动 mirror 应成功: %d %v", code, out)
 	}
@@ -231,7 +231,7 @@ func TestCheckNotFetched(t *testing.T) {
 	f.srv.deps.Check = func(context.Context, devdata.StatusRequest) (*devdata.ProgStatus, error) {
 		return nil, devdata.ErrProgNotFound
 	}
-	code, out := f.do(t, http.MethodGet, "/api/devdata/check?env=福联测试tst&prog=axmt500_wf", "")
+	code, out := f.do(t, http.MethodGet, "/api/devdata/check?env=测试环境&prog=axmt500_wf", "")
 	if code != http.StatusNotFound || out["code"] != CodeNotFound {
 		t.Fatalf("未拉取应 404: %d %v", code, out)
 	}
@@ -246,6 +246,7 @@ func TestDomainErrorMapping(t *testing.T) {
 	}{
 		{devdata.ErrEnvNotFound, 404, CodeNotFound},
 		{devdata.ErrProgNotFound, 404, CodeNotFound},
+		{devdata.ErrMaterialIncomplete, 404, CodeNotFound},
 		{devdata.ErrInvalidProg, 400, CodeUsage},
 		{devdata.ErrInvalidEnv, 400, CodeUsage},
 		{devdata.ErrInvalidOpt, 400, CodeUsage},
