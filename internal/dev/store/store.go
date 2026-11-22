@@ -331,6 +331,23 @@ func (w *Workspace) Manifest() (*Manifest, error) {
 	return &m, nil
 }
 
+// RebindPackagePath 把 manifest 里记的"源包路径"改成新路径。
+//
+// 为什么需要：apply 默认写回 manifest.pkg.path，而它是**绝对路径**。工作区被复制/移动/
+// 发给同事之后，清单还指着原目录 —— 一次 apply 就会静默写进别人的包（实测踩过）。
+// 由调用方（工作区命令）在 apply 之前把路径改到当前工作区，并自行校验包内容是否对得上。
+func (w *Workspace) RebindPackagePath(newPath string) error {
+	m, err := w.Manifest()
+	if err != nil {
+		return err
+	}
+	if newPath == "" || m.Pkg.Path == newPath {
+		return nil
+	}
+	m.Pkg.Path = newPath
+	return w.writeManifest(m)
+}
+
 // UnlockState 是 workspace 的解锁状态视图。
 type UnlockState struct {
 	State         model.SectionState
