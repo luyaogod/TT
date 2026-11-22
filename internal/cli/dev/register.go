@@ -19,6 +19,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/luyaogod/TT/internal/cli/dev/common"
+	"github.com/luyaogod/TT/internal/cli/dev/task"
 	"github.com/luyaogod/TT/internal/cli/dev/tzc"
 	"github.com/luyaogod/TT/internal/cli/dev/tzs"
 )
@@ -52,8 +53,26 @@ func SetEnvNameFunc(get func() string, set func(string)) {
 func Register(parent *cobra.Command) { parent.AddCommand(Group) }
 
 // devLong 是命令组的 --help 文本。参数与退出码契约沿用 tdev 自己的说明（common.Usage），
-// 这里只补一句在 tt 里的调用方式。
-const devLong = `T100 设计器包工具：.tzc 代码包 + .tzs 表单包
+// 这里补两段：工作区用法（新的主线）与"在 tt 里的调用方式"。
+const devLong = `T100 设计器工具：任务工作区 + .tzc 代码包 + .tzs 表单包
+
+两条用法，先想清楚是"做一次开发"还是"改一个现成的包"。
+
+【推荐】做一次开发：一个任务 = 一个自包含目录
+  tt dev open axmt500_wf --at <环境>   # 拉材料 + 建索引 + 打包 + 导出可编辑视图
+  cd axmt500_wf
+  tt dev brief                         # 一页纸画像：判型/页签/客制逻辑/风险（离线）
+  tt dev find --intent check --field 刻号   # 要改哪个加点、参考哪个切片（离线）
+  <编辑 ws/prog.full.4gl>
+  tt dev verify                        # 只审计
+  tt dev apply                         # 写回 pkg/<程序>(c).tzc（交给设计器上传）
+  tt dev update [--check]              # 刷新材料；有未落盘改动时拒绝
+
+  读命令（status/brief/find/at/search）完全离线，地址是**当前目录**（或 --dir），
+  环境只在 open 时需要一次（update 也联网，但环境从 task.json 读，不用再点 --at）。
+  退出码：0 成功 / 2 用法 / 3 校验失败（verify/apply）/ 4 未找到或拒绝 / 5 IO·网络。
+
+改一个现成的包：tt dev tzc …（参数写法与退出码与 tdev 完全一致）
 
 在 tt 里，原来 tdev 的命令整体后移一级：
   tdev tzc export …   →  tt dev tzc export …
@@ -68,7 +87,7 @@ const devLong = `T100 设计器包工具：.tzc 代码包 + .tzs 表单包
 func newDevCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "dev",
-		Short: "T100 设计器包工具（.tzc 代码包 + .tzs 表单包）",
+		Short: "T100 设计器工具：任务工作区 + .tzc 代码包 + .tzs 表单包",
 		Long:  devLong,
 		// 错误已由动词/本组自己打好（exitCode.AlreadyReported），cobra 不再重复输出；
 		// 根命令的 Silence* 也兜着这一层。
@@ -88,6 +107,9 @@ func newDevCmd() *cobra.Command {
 		},
 	}
 	cmd.AddCommand(newTzcCmd(), newTzsCmd(), newInstallTombstone())
+	// 工作区命令组：open/update/status/brief/find/at/search + apply/verify/unlock（直通 tzc）。
+	// 与 tzc/tzs 的差别只在"地址"：这组命令的地址是工作区目录，环境只在 open/update 需要。
+	cmd.AddCommand(task.Verbs()...)
 	return cmd
 }
 

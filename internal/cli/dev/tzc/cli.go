@@ -613,6 +613,7 @@ func cmdUnlock(args []string) int {
 	common.Line(w, "  可编辑区段：%d 个（其余仍 READONLY：锚点区段 / readonly=\"Y\" / topstd 规则）", editableSections)
 	common.Line(w, "  围栏已重渲染：可编辑区段标 [EDITABLE-SEC]")
 	common.Line(w, "  pending_unlock=true（apply 时才会把 TAP 根 section_flag 置 Y）")
+	common.Line(w, "  注意：解锁会按解锁态重渲染工作区并把基线同步成解锁态，所以 status 仍显示「无改动」属正常")
 	common.Line(w, "")
 	common.Line(w, "代价提醒：解开框架后，规格的任何调整都不会再产生对应的程序代码（不可逆）。")
 	common.Line(w, "下一步：编辑区段正文 → `tt dev tzc apply %s`（已在该目录内可省 <dir>）", dir)
@@ -652,6 +653,7 @@ func cmdStatus(args []string) int {
 
 	// 预估写回面
 	var predicted []pkgfile.EntryAction
+	var changedSections []string
 	if mf.Pkg.Path != "" {
 		if pkg, err := pkgfile.Open(mf.Pkg.Path, pkgfile.OpenOptions{}); err == nil {
 			tapDoc, _ := tapfile.Parse(pkg.Tap().Data)
@@ -663,6 +665,7 @@ func cmdStatus(args []string) int {
 						newTgl := applyTglPatches(pkg, plan)
 						if acts, err := pkg.Plan(pkgfile.Rebuild{Tap: newTap, Tgl: newTgl}); err == nil {
 							predicted = acts
+							changedSections = plan.Sections
 						}
 					}
 				}
@@ -679,9 +682,10 @@ func cmdStatus(args []string) int {
 		"summary":  g1.Summary(),
 		"entries":  predicted,
 		// 改动清单带行号：name + file:line + 该行内容，AI 可直接跳到该行
-		"changed_regions": changed,
-		"added_regions":   added,
-		"deleted_regions": deleted,
+		"changed_regions":  changed,
+		"added_regions":    added,
+		"deleted_regions":  deleted,
+		"changed_sections": changedSections,
 	}
 	if *asJSON {
 		common.EmitJSON(w, rep)
@@ -693,6 +697,12 @@ func cmdStatus(args []string) int {
 		printRegionRefs(w, "  改动的点  ", changed)
 		printRegionRefs(w, "  新增的点  ", added)
 		printRegionRefs(w, "  删除的点  ", deleted)
+		if len(changedSections) > 0 {
+			common.Line(w, "  改动的区段  %d 个（改区段正文会触发整段重写：section_flag=Y + .tgl 补丁）", len(changedSections))
+			for _, n := range changedSections {
+				common.Line(w, "    %s", n)
+			}
+		}
 		common.Line(w, "")
 		common.Line(w, "验证（gate1）：%s", g1.Summary())
 		printFindings(w, g1.Findings, false)
@@ -1229,7 +1239,7 @@ func cmdApply(args []string) int {
 	fs := flag.NewFlagSet("apply", flag.ContinueOnError)
 	outPkg := fs.String("o", "", "写到另一个包路径（默认覆盖原包）")
 	dryRun := fs.Bool("dry-run", false, "跑完管线并输出逐条目 diff，不落盘、不 commit")
-	yes := fs.Bool("yes", false, "对「写区段（解开框架）」做二次确认")
+	yes := fs.Bool("yes", false, "已废弃：apply 不弹二次确认；写区段请先 tt dev tzc unlock --yes")
 	asJSON := fs.Bool("json", false, "输出 JSON")
 	if err := common.ParseArgs(fs, args, "o", "only", "accept-ver"); err != nil {
 		return 2
@@ -1296,8 +1306,16 @@ func cmdApply(args []string) int {
 		return common.Fail(&store.IOError{Msg: "读不到源包 " + pkgPath, Err: err}, *asJSON)
 	}
 	if mf.Pkg.Sha256 != "" && curSha != mf.Pkg.Sha256 {
-		return common.Fail(&store.IOError{Msg: "源包自 export 之后已被改动，拒绝写回",
-			Err: fmt.Errorf("manifest 记录 %s，当前 %s；请重新 export", common.Short(mf.Pkg.Sha256), common.Short(curSha))}, *asJSON)
+		// 这是"包被替换/工作区是复制来的"，不是 IO 故障：用户要做的是 relink 或把
+		// 基线包放回来（任务层 ErrPackageMismatch 同一口径）。退 4 而不是 5，
+		// 否则 `tt dev apply` 只给一个不指向出路的一般失败。
+		return common.Fail(&verify.DeniedError{
+			Msg: "源包自 export 之后已被改动，拒绝写回",
+			Detail: []string{
+				fmt.Sprintf("manifest 记录 %s，当前 %s", common.Short(mf.Pkg.Sha256), common.Short(curSha)),
+				"出路：tt dev relink（以当前包重建视图；未落盘的改动会丢），或把基线那份包放回来",
+			},
+		}, *asJSON)
 	}
 	pkg, err := pkgfile.Open(pkgPath, pkgfile.OpenOptions{})
 	if err != nil {

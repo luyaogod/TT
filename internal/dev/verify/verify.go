@@ -278,7 +278,16 @@ func firstDiffDesc(a, b []byte) string {
 			if lo < 0 {
 				lo = 0
 			}
-			return fmt.Sprintf("偏移 %d，原 %q 新 %q", i, clip(string(a[lo:i+20])), clip(string(b[lo:i+20])))
+			// 上界必须夹到两侧实际长度：首个差异落在较短串末尾 20 字节内时，
+			// 写死 i+20 会越界 panic（本该返回退出码 3 的预检变成崩溃）。
+			hi := i + 20
+			if hi > len(a) {
+				hi = len(a)
+			}
+			if hi > len(b) {
+				hi = len(b)
+			}
+			return fmt.Sprintf("偏移 %d，原 %q 新 %q", i, clip(string(a[lo:hi])), clip(string(b[lo:hi])))
 		}
 	}
 	return fmt.Sprintf("长度不同：原 %d 新 %d", len(a), len(b))
@@ -710,6 +719,21 @@ func buildI3(names []string) *regexp.Regexp {
 // gate3：装载模拟
 //----------------------------------------------------------------------------
 
+// tempDirForPkg 为 gate3 造一个临时目录：**优先放在包旁边**，其次才用系统临时目录。
+//
+// 为什么不去抢 %TEMP%：企业 EDR / 组策略会把它设成不可写（实测某台机器上
+// `os.MkdirTemp("", "tdev-gate3-")` 直接 `Access is denied`，apply 全线失败，而错因
+// 与包本身毫无关系）。gate3 只是"把新包写一份再读回"，放在包所在目录既绕开策略，
+// 又保证同一个文件系统（不会因为跨盘出现半截文件）。
+func tempDirForPkg(pkgPath string) (string, error) {
+	if base := filepath.Dir(pkgPath); base != "" && base != "." {
+		if d, err := os.MkdirTemp(base, "tdev-gate3-"); err == nil {
+			return d, nil
+		}
+	}
+	return os.MkdirTemp("", "tdev-gate3-")
+}
+
 // Gate3 对**将要产出的新包字节**重跑合成，等价于问「设计器打得开吗」。
 //
 // 它不写用户的原包：只写到临时文件再读回。
@@ -720,7 +744,7 @@ func Gate3(pkg *pkgfile.Package, newTap, newTgl []byte) (*Report, error) {
 		rep.Add(Finding{Code: "gate3.build", Severity: SevError, Message: "新包构建失败", Detail: []string{err.Error()}})
 		return rep, nil
 	}
-	dir, err := os.MkdirTemp("", "tdev-gate3-")
+	dir, err := tempDirForPkg(pkg.Path)
 	if err != nil {
 		return nil, err
 	}

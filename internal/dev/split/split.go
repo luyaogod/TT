@@ -489,6 +489,14 @@ func renameBlock(doc *model.Document, base, edited *model.Region, toFn string, p
 			Detail: []string{edited.Name},
 		}
 	}
+	// 坐标也可能来自老 regions.json / 手工构造：越界时给退出码 3 的 VerifyError，
+	// 不能在切片处 panic（写回路径崩溃比"报错不写"更糟）。
+	inDoc := func(sp model.ByteRange) bool {
+		return sp.Start >= 0 && sp.End >= sp.Start && sp.End <= len(doc.Text)
+	}
+	if !inDoc(*edited.SignatureSpan) || !inDoc(edited.ContentSpan) {
+		return nil, &VerifyError{Msg: "内部错误：签名行/正文区间越界", Detail: []string{edited.Name}}
+	}
 	sig := doc.Text[edited.SignatureSpan.Start:edited.SignatureSpan.End]
 	scope := pr.EditedMeta.KV["scope"]
 	if scope == "" {
