@@ -120,7 +120,7 @@ TT/
 │  ├─ fgl-fixtures/     FGL 解析/写回夹具
 │  ├─ plugins/          插件夹具：reference（可构建的最小示例）+ variants（故意装不上的三个变体）
 └─ skills/              对外技能手册（评测中执行者唯一能读的东西）
-   ├─ tt-dev-tzc/       .tzc 代码包安全编辑
+   ├─ tt-dev/           任务工作区 + .tzc 代码包（唯一开发技能）
    ├─ tt-erp-architecture/  T100 整体架构与代码地图
    ├─ tt-erp-debug/     T100 作业调试
    └─ tt-erp-read/      T100 代码阅读（含 SCC/ACC 识别）

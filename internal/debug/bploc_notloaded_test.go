@@ -2,7 +2,7 @@ package debug
 
 // 下断前核"这个文件这次运行到底加载了没有"（P1）。
 //
-// 现场（2026-11-11，福联 1108）：`bp add s_bsft001_wf_...` 被 fgldb 落成
+// 现场（2026-11-11，某客户 1108）：`bp add s_bsft001_wf_...` 被 fgldb 落成
 // `Breakpoint 4 at 0x00000000: file sub_s_bsft001_wf.4gl, line 2648` —— 编号、位置、
 // 落盘一切正常，然后 0 命中。真正被加载的是 `csub_s_bsft001_wf.4gl`（客制副本），
 // `info sources` 里根本没有 `sub_` 那份。
