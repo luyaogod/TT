@@ -76,10 +76,59 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; WorkingDir: "{app
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
-; 装进去的整个目录都带走（升级留下的旧文件也一并清掉）
-Type: filesandordirs; Name: "{app}"
-; 壳自己的缓存/窗口状态/日志；%APPDATA%\tt（配置与业务数据）**不动**，与其它软件一致
+; **不要递归删 {app}**（0.6.1 起）：
+;   - 程序文件由卸载日志逐条删除（升级是往旧日志追加，旧版本文件也在里面），不需要整个目录扫掉；
+;   - 用户放在安装目录里的东西（典型：config.json 的 mirror.dir 指到 {app}\mirror 的源码镜像，
+;     实测可达数 GB / 数万文件）**不在卸载日志里**，递归删 {app} 会把它一起删掉。
+;   镜像删不删由人在卸载时选（见下方 [Code]），静默默认**保留**。
+; 壳自己的缓存/窗口状态/日志可以删；%APPDATA%\tt（配置与业务数据）**永远不动**，与其它软件一致。
 Type: filesandordirs; Name: "{userappdata}\TT Desktop"
 
-; 两个安装包共用同一份中文文案（错误/日志路径没覆盖的仍是英文）
+// 两个安装包共用同一份中文文案（含 UninstallMirrorPrompt；错误/日志路径没覆盖的仍是英文）
 #include "..\..\installer\zh-CN-messages.iss"
+
+[Code]
+// 卸载时"删不删用户镜像"是三态：
+//   /DELETEMIRROR      脚本/静默卸载显式要求删（可复现、可自动化）
+//   /VERYSILENT|/SILENT 没给上面那个开关 → 保留（静默场景不能弹窗，默认最安全）
+//   交互卸载           弹「是/否」，默认按钮是「否」
+// 无论选哪项，%APPDATA%\tt（配置与业务数据）都不动；升级更不会跑卸载器，也动不到镜像。
+function HasUninstallParam(const Value: String): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+    if CompareText(ParamStr(I), Value) = 0 then
+    begin
+      Result := True;
+      Exit;
+    end;
+end;
+
+function ShouldDeleteMirror(): Boolean;
+begin
+  Result := False;
+  if HasUninstallParam('/DELETEMIRROR') then
+  begin
+    Result := True;
+    Exit;
+  end;
+  if UninstallSilent then
+    Exit;
+  Result := MsgBox(ExpandConstant('{cm:UninstallMirrorPrompt}'), mbConfirmation,
+    MB_YESNO or MB_DEFBUTTON2) = IDYES;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  // usPostUninstall：程序文件已按卸载日志删完，此时剩下的就是用户自己的东西。
+  // 只有用户明确选了「是」才删 {app}\mirror；删完顺手清掉空目录（非空会失败，正好保留残料）。
+  if (CurUninstallStep = usPostUninstall) and ShouldDeleteMirror() then
+  begin
+    DelTree(ExpandConstant('{app}\mirror'), True, True, True);
+    RemoveDir(ExpandConstant('{app}'));
+  end;
+end;
+
+
