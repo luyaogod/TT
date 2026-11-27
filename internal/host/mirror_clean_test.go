@@ -14,13 +14,14 @@ import (
 	"time"
 )
 
-// 打包脚本必须是**纯全量**：没有 -newer、没有 touch mark、没有 set -e。
-// 前三者任一残留，都意味着服务器上会重新长出长期存在的状态文件。
-func TestMirrorPackScriptIsFullOnly(t *testing.T) {
-	s := mirrorPackScript("/tmp/.tt-mirror-x-source-abc", "/u1/t35prd", MirrorSource)
+// 打包脚本分两种模式，**两种都不许在服务器上留状态文件**：
+// 全量没有 -newer/touch/.mark；增量有 -newermt 但基准来自命令行参数(本地标记)，
+// 依旧不 touch 任何 mark。set -e 一律不许有(每一步自己收尾)。
+func TestMirrorPackScriptModes(t *testing.T) {
+	full := mirrorPackScript("/tmp/.tt-mirror-x-source-abc", "/u1/t35prd", MirrorSource, "")
 	for _, bad := range []string{"-newer", "touch", ".mark", "set -e"} {
-		if strings.Contains(s, bad) {
-			t.Errorf("全量脚本里不该出现 %q:\n%s", bad, s)
+		if strings.Contains(full, bad) {
+			t.Errorf("全量脚本里不该出现 %q:\n%s", bad, full)
 		}
 	}
 	for _, want := range []string{
@@ -29,19 +30,34 @@ func TestMirrorPackScriptIsFullOnly(t *testing.T) {
 		"TDICT_MIRROR_OK",      // 成功标记
 		"TDICT_MIRROR_CD",      // 进不去 TOP
 		"TDICT_MIRROR_TARFAIL", // tar 失败也要有标记
+		"TDICT_MIRROR_STAMP",   // 基准时间(增量靠它,全量也顺手记)
 		"rm -f",                // 失败路径自清
 	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("脚本缺少 %q:\n%s", want, s)
+		if !strings.Contains(full, want) {
+			t.Errorf("脚本缺少 %q:\n%s", want, full)
 		}
 	}
 	// 清单成功路径必须删掉（否则每次拉取在临时目录里留一个几 MB 的清单）
-	if !strings.Contains(s, `rm -f `+"\""+"/tmp/.tt-mirror-x-source-abc.list\"") {
-		t.Errorf("成功路径没有删清单:\n%s", s)
+	if !strings.Contains(full, `rm -f `+"\""+"/tmp/.tt-mirror-x-source-abc.list\"") {
+		t.Errorf("成功路径没有删清单:\n%s", full)
 	}
 	// tar 失败时半截归档也要删
-	if !strings.Contains(s, `rm -f "`+"/tmp/.tt-mirror-x-source-abc.tar.gz"+`" "`+"/tmp/.tt-mirror-x-source-abc.list"+`"`) {
-		t.Errorf("tar 失败路径没有删半截归档:\n%s", s)
+	if !strings.Contains(full, `rm -f "`+"/tmp/.tt-mirror-x-source-abc.tar.gz"+`" "`+"/tmp/.tt-mirror-x-source-abc.list"+`"`) {
+		t.Errorf("tar 失败路径没有删半截归档:\n%s", full)
+	}
+
+	// 增量：带 -newermt 与基准值，但依旧不 touch 服务器上的任何 mark 文件。
+	inc := mirrorPackScript("/tmp/.tt-mirror-x-source-abc", "/u1/t35prd", MirrorSource, "2026-11-26T05:56:17Z")
+	if !strings.Contains(inc, "-newermt") {
+		t.Errorf("增量脚本缺少 -newermt:\n%s", inc)
+	}
+	if !strings.Contains(inc, "2026-11-26T05:56:17Z") {
+		t.Errorf("增量脚本没带基准时间:\n%s", inc)
+	}
+	for _, bad := range []string{"touch", ".mark", "set -e"} {
+		if strings.Contains(inc, bad) {
+			t.Errorf("增量脚本里不该出现 %q(服务器侧零状态):\n%s", bad, inc)
+		}
 	}
 }
 
@@ -52,19 +68,21 @@ func TestParseMirrorPackOutput(t *testing.T) {
 		out     string
 		n       int
 		size    int64
+		stamp   string
 		wantErr string
 	}{
-		{"成功", "tar: 警告\nTDICT_MIRROR_OK 34704 278409071\n", 34704, 278409071, ""},
-		{"无文件", "TDICT_MIRROR_NONE\n", 0, 0, ""},
-		{"取最后一个标记", "TDICT_MIRROR_NONE\nTDICT_MIRROR_OK 5 100\n", 5, 100, ""},
-		{"进不去TOP", "TDICT_MIRROR_CD\n", 0, 0, "进不去服务器 TOP"},
-		{"find失败", "TDICT_MIRROR_FINDFAIL\n", 0, 0, "find 失败"},
-		{"tar失败", "TDICT_MIRROR_TARFAIL\n", 0, 0, "tar 打包失败"},
-		{"没有标记", "bash: tar: command not found\n", 0, 0, "未输出预期标记"},
-		{"标记残缺", "TDICT_MIRROR_OK abc def\n", 0, 0, "解析打包标记失败"},
+		{"成功", "tar: 警告\nTDICT_MIRROR_OK 34704 278409071\n", 34704, 278409071, "", ""},
+		{"带基准时间", "TDICT_MIRROR_STAMP 2026-11-26T05:56:17Z\nTDICT_MIRROR_OK 3 900\n", 3, 900, "2026-11-26T05:56:17Z", ""},
+		{"无文件", "TDICT_MIRROR_NONE\n", 0, 0, "", ""},
+		{"取最后一个标记", "TDICT_MIRROR_NONE\nTDICT_MIRROR_OK 5 100\n", 5, 100, "", ""},
+		{"进不去TOP", "TDICT_MIRROR_CD\n", 0, 0, "", "进不去服务器 TOP"},
+		{"find失败", "TDICT_MIRROR_FINDFAIL\n", 0, 0, "", "find 失败"},
+		{"tar失败", "TDICT_MIRROR_TARFAIL\n", 0, 0, "", "tar 打包失败"},
+		{"没有标记", "bash: tar: command not found\n", 0, 0, "", "未输出预期标记"},
+		{"标记残缺", "TDICT_MIRROR_OK abc def\n", 0, 0, "", "解析打包标记失败"},
 	}
 	for _, c := range cases {
-		n, size, err := parseMirrorPackOutput(c.out, "/u1/t35prd")
+		n, size, stamp, err := parseMirrorPackOutput(c.out, "/u1/t35prd")
 		if c.wantErr == "" {
 			if err != nil {
 				t.Errorf("%s: 不该报错: %v", c.name, err)
@@ -72,6 +90,9 @@ func TestParseMirrorPackOutput(t *testing.T) {
 			}
 			if n != c.n || size != c.size {
 				t.Errorf("%s: got (%d,%d), want (%d,%d)", c.name, n, size, c.n, c.size)
+			}
+			if stamp != c.stamp {
+				t.Errorf("%s: stamp = %q, want %q", c.name, stamp, c.stamp)
 			}
 			continue
 		}

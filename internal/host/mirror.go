@@ -19,8 +19,17 @@ package host
 // 备份/临时文件(x.4gl.bak、x.bck、x.bck1、*~ 等)不拉,并会清理本地残留。
 //
 // 传输:服务器侧 tar 打包(绝对路径,exec 通道不经登录 profile) → SFTP 流式
-// 下载 → 本地标准库解压(gzip+tar),全程不进内存。**只有全量拉取这一种模式**:
-// 每次都在服务器上重压一遍白名单内的全部文件,本地整目录替换(含删除服务器已删的文件)。
+// 下载 → 本地标准库解压(gzip+tar),全程不进内存。
+//
+// 两种拉取方式，**服务器侧都不留任何状态文件**：
+//   - 增量（默认，有基线时）：拿本地标记(.tdict-mirror.ok)里记下的时间戳当基准，
+//     只打包服务器上比它新的文件；本地按文件原子替换（先写同卷临时名再 rename），
+//     不碰其它文件。服务器上已删的文件**不会**因此消失 —— 要那个语义就用全量。
+//   - 全量：重压白名单内全部文件，本地整目录替换（含删除服务器已删的文件）。
+//
+// 基准时间戳由服务器在 find **之前**给出（date -u）并存进本地标记：既避开了
+// 客户端与服务器的时钟差，也不会像旧实现那样在打包**之后**才推进基准
+// （tar 期间改动的文件会永久漏掉）。
 //
 // 归档放**服务器临时目录**(默认 ${TMPDIR:-/tmp},可用 mirror.tmpDir 覆盖),
 // 不进 $TOP —— 既不要求 ERP 顶级目录可写,也不在 ERP 目录里留任何东西。
@@ -81,24 +90,29 @@ func (p MirrorProfile) Label() string {
 type MirrorStats struct {
 	Env     string        // 环境名
 	Profile MirrorProfile // source | interface
+	Full    bool          // true=全量(整目录替换),false=增量(只替换变过的文件)
+	Since   string        // 增量基准(服务器时间,空=全量或首次)
 	TopDir  string        // 服务器 TOP(打包根)
 	TmpDir  string        // 服务器临时目录(归档落点)
 	Files   int           // 归档内文件数(白名单内一个都没有时为 0)
 	Bytes   int64         // 下载字节数(压缩后)
 	Pruned  int           // 本地清理掉的残留备份文件数(历史拉取留下)
 	Elapsed string        // 耗时
-	Note    string        // 附加说明(如 "白名单内没有文件")
+	Note    string        // 附加说明(如 "无变更")
 }
 
-// MirrorOptions 拉取的附加参数;零值即全部缺省。
+// MirrorOptions 拉取的附加参数;零值即全部缺省(能增量就增量)。
 type MirrorOptions struct {
 	// TmpDir 服务器临时目录。空 = 服务器上的 ${TMPDIR:-/tmp}。
 	TmpDir string
+	// Full 强制全量:整目录替换,连服务器上已删的文件一起清掉。
+	// 没有本地基线(首次拉取/标记版本不符/没拉过这个 profile)时无论如何都是全量。
+	Full bool
 }
 
 // localMarkName 本地镜像目录内的"上次成功"标记文件:存在表示该目录曾完整拉取成功。
-// 全量模式下它不再参与任何拉取决策,只用于判断"这个目录有没有内容"(MirrorReadyDir)
-// 以及记下这份目录拉过哪几类(见 localMark)。
+// 它同时是**增量的唯一基准来源**(里面记的时间戳 = 上次打包前服务器的时间),
+// 所以删掉它只会让下一次拉取退回全量,不会留下不一致。
 const localMarkName = ".tdict-mirror.ok"
 
 // mirrorTag 环境名 → 服务器 marker 文件名 ASCII 尾缀。
@@ -147,11 +161,12 @@ type MirrorProgress struct {
 // ProgressFunc 进度回调(可能被多次调用,实现需自行加锁)。
 type ProgressFunc func(MirrorProgress)
 
-// MirrorPull 对指定环境做一次**全量拉取**(4gl/**/*.4gl + 42f + 42s/zh_CN + *.inc)
+// MirrorPull 对指定环境做一次镜像拉取(4gl/**/*.4gl + 42f + 42s/zh_CN + *.inc)
 // 到 mirrorDir/<环境名>/。
 //
-// 只有全量：不再有服务器侧基线，也不再有"只拉变更"。成功结束后写入/刷新本地
-// .tdict-mirror.ok 标记(只表示"这个目录拉成功过哪几类")。
+// 默认增量：只拉服务器上比上次基准更新的文件，本地按文件替换；opts.Full 或
+// 没有可用基线(首次/标记版本不符)时退回全量。成功结束后写入/刷新本地
+// .tdict-mirror.ok 标记(记下"拉过哪几类"和"下次增量的基准时间")。
 // 镜像目录本身(mirrorDir)由调用方保证已配置;本函数只负责连服务器与落盘。
 // ctx 见 MirrorPullProgress(它才是实现,这里是给不需要取消的调用方的薄封装)。
 func MirrorPull(ctx context.Context, e *NamedSsh, mirrorDir string, opts MirrorOptions) (*MirrorStats, error) {
@@ -188,8 +203,14 @@ func MirrorPullToDirProgress(ctx context.Context, e *NamedSsh, envDir string, op
 // （全量解压也会把它们原样搬进新目录，见 extractFull）；想只要一类的干净目录，
 // 给 interface profile 单独配一个目录。
 //
+// 全量 vs 增量：本地标记版本对得上、这个 profile 拉过、且记着时间基准时才走增量
+// （只打包服务器上比基准新的文件，本地就地覆盖，服务器上已删的文件保留）。
+// 其余情况(opts.Full、首次、标记版本不符、标记被删)一律全量，整目录替换。
+// 两条路都不在服务器上留状态文件：基准只存在本地标记里。
+//
 // 服务器流程：探测 TOP → 探测临时目录(含陈旧清扫、可写与剩余空间预检) → 估算归档大小
-// → tar 打包 → SFTP 下载 → 本地解压 → 字节数校验 → 写本地标记 → 删服务器归档。
+// → tar 打包(增量时带 -newermt 基准) → SFTP 下载 → 本地解压 → 字节数校验
+// → 写本地标记 → 删服务器归档。
 // 归档只存在于临时目录，$TOP 一个字节都不写(见 mirrorTempBase)。
 //
 // ctx 用来**中途取消**:界面上的「停止」按钮走的就是它。取消点选在连接、预检、
@@ -257,22 +278,44 @@ func MirrorPullToDirProfileProgress(ctx context.Context, e *NamedSsh, envDir str
 	// 本地上次被强杀留下的 .staging-* / .old-*（只清 1 小时前的，别碰另一台正在跑的）
 	cleanLocalStaging(envDir)
 
+	// 决定全量还是增量：只有"版本对得上 + 这个 profile 拉过 + 记着时间基准"三者
+	// 同时成立才敢只拉变更。缺任何一条都退回全量 —— 全量永远是对的，只是慢。
+	mark := readLocalMark(envDir)
+	prev := mark.StampOf(profile)
+	full := opts.Full || mark.Version != mirrorWhitelistVersion || !mark.Has(profile) || prev.IsZero()
+	since := ""
+	if !full {
+		since = prev.UTC().Format(time.RFC3339)
+	}
+	st.Full = full
+	st.Since = since
+	if !full {
+		report(MirrorProgress{Phase: "probe", Message: "增量基准 " + since})
+	}
+
 	// 预估归档大小：既是打包阶段进度条的分母，也是空间预检的依据。
-	est := packEstimate(ctx, conn, top, profile)
+	est := packEstimate(ctx, conn, top, profile, since)
 	if err := mirrorCheckSpace(tmp, est); err != nil {
 		return nil, err
 	}
 
 	report(MirrorProgress{Phase: "pack", Message: "服务器打包中…", Total: est})
-	n, size, err := mirrorPackProgress(ctx, conn, base, top, profile, est, report)
+	n, size, stamp, err := mirrorPackProgress(ctx, conn, base, top, profile, since, est, report)
 	if err != nil {
 		return nil, fmt.Errorf("服务器打包失败: %w", err)
 	}
 	if n == 0 {
-		// 白名单内一个文件都没找到(服务器那棵树是空的)。没有归档可下,但本地
-		// 仍可能残留旧版本拉下来的备份文件。
+		// 增量时这是常态(没变过)；全量时说明服务器那棵树是空的。
 		st.Elapsed = time.Since(start).Round(100 * time.Millisecond).String()
-		st.Note = "白名单内没有可打包的文件(服务器 " + profile.Label() + " 是空的?)"
+		if full {
+			st.Note = "白名单内没有可打包的文件(服务器 " + profile.Label() + " 是空的?)"
+		} else {
+			st.Note = "无变更(服务器 " + profile.Label() + " 自 " + since + " 后没改过)"
+			// 没有新文件也要把基准往前推，否则下次还得重新扫一遍全树。
+			if err := writeLocalMark(envDir, profile, parseStamp(stamp)); err != nil {
+				logfMirror("推进本地基准失败(下次仍按旧基准增量): %v", err)
+			}
+		}
 		st.Pruned = pruneBackupFiles(envDir)
 		if st.Pruned > 0 {
 			st.Note += fmt.Sprintf(";已清理本地备份 %d 个", st.Pruned)
@@ -299,7 +342,12 @@ func MirrorPullToDirProfileProgress(ctx context.Context, e *NamedSsh, envDir str
 
 	report(MirrorProgress{Phase: "download", Message: "下载并解压…", Total: size})
 	cr := &countingReader{ctx: ctx, r: rf, total: size, report: report}
-	files, err := extractFull(cr, envDir, profile)
+	var files int
+	if full {
+		files, err = extractFull(cr, envDir, profile)
+	} else {
+		files, err = extractIncremental(cr, envDir, profile)
+	}
 	if err != nil {
 		// 用户中途取消:原样返回 context.Canceled(调用方据此标"已停止",不当失败)。
 		// 此时**不写基线标记**，.staging 临时目录由 extractFull 自己清掉。
@@ -327,7 +375,7 @@ func MirrorPullToDirProfileProgress(ctx context.Context, e *NamedSsh, envDir str
 		return nil, err
 	}
 	st.Files = files
-	if err := writeLocalMark(envDir, profile); err != nil {
+	if err := writeLocalMark(envDir, profile, parseStamp(stamp)); err != nil {
 		return nil, fmt.Errorf("写入本地基线标记失败: %w", err)
 	}
 	// 历史版本可能留下备份文件(全量解压不会带进来,但旧目录里可能有)
@@ -336,11 +384,22 @@ func MirrorPullToDirProfileProgress(ctx context.Context, e *NamedSsh, envDir str
 	// 服务器归档与清单由 defer cleanRemoteArchive 删除(成功/失败/取消都走)。
 	st.Elapsed = time.Since(start).Round(100 * time.Millisecond).String()
 	msg := fmt.Sprintf("完成:%d 个文件", files)
+	if !full {
+		msg = fmt.Sprintf("增量完成:%d 个文件", files)
+	}
 	if st.Pruned > 0 {
 		msg += fmt.Sprintf(",清理本地备份 %d 个", st.Pruned)
 	}
 	report(MirrorProgress{Phase: "done", Message: msg, Bytes: size, Total: size, Files: files})
 	return st, nil
+}
+
+// parseStamp 解析服务器给的基准时间;解析不了返回零值(让 writeLocalMark 退回本地时钟)。
+func parseStamp(s string) time.Time {
+	if t, err := time.Parse(time.RFC3339, strings.TrimSpace(s)); err == nil {
+		return t
+	}
+	return time.Time{}
 }
 
 // countingReader 统计已读字节并节流回调进度(下载/解压阶段共用;压缩字节即下载量)。
@@ -384,11 +443,11 @@ func (c *countingReader) Read(p []byte) (int, error) {
 const archiveSizeRatio = 0.15
 
 // packEstimate 估算这次打包的归档大小：按与 mirrorPack **完全相同**的选文件规则
-// （白名单 + 备份排除）量出源文件总字节，再按经验压缩比折算。全量模式没有 `-newer`。
+// （白名单 + 备份排除 + 增量时的 -newermt 基准）量出源文件总字节，再按经验压缩比折算。
 //
 // 两个用途：打包阶段进度条的分母、以及空间预检的门槛。任何一步失败都返回 0 ——
 // 拿不到预估时前端退化成"总量未知"，预检退化成 300 MB 兜底下限，都不阻断拉取。
-func packEstimate(ctx context.Context, conn *SSHConn, top string, profile MirrorProfile) int64 {
+func packEstimate(ctx context.Context, conn *SSHConn, top string, profile MirrorProfile, since string) int64 {
 	findExpr := mirrorWhitelistFindExpr(profile) + " " + mirrorBackupFindExpr()
 	script := `cd ` + shdq(top) + ` 2>/dev/null || exit 0
 R=""
@@ -396,7 +455,7 @@ for d in erp com; do
   [ -d "$d" ] && R="$R $d"
 done
 [ -z "$R" ] && exit 0
-find $R -type f ` + findExpr + ` -printf '%s\n' 2>/dev/null | awk '{s+=$1} END{print s+0}'`
+find $R -type f ` + findExpr + mirrorNewerFlag(since) + ` -printf '%s\n' 2>/dev/null | awk '{s+=$1} END{print s+0}'`
 	if err := ctx.Err(); err != nil {
 		return 0
 	}
@@ -422,7 +481,7 @@ func lastLine(s string) string {
 // 打包本身跑在**受 ctx 约束**的 goroutine 里：取消时用 OutputContext 关掉远端 session，
 // 服务器上的 tar 收到 SIGHUP 立刻退出（旧实现只是本端不再等它，tar 会继续把
 // 265 MB 写完 —— 在白拿一份 CPU 和磁盘 IO）。
-func mirrorPackProgress(ctx context.Context, conn *SSHConn, base, top string, profile MirrorProfile, est int64, report ProgressFunc) (int, int64, error) {
+func mirrorPackProgress(ctx context.Context, conn *SSHConn, base, top string, profile MirrorProfile, since string, est int64, report ProgressFunc) (int, int64, string, error) {
 	var stopped atomic.Bool
 	done := make(chan struct{})
 	defer func() {
@@ -452,36 +511,70 @@ func mirrorPackProgress(ctx context.Context, conn *SSHConn, base, top string, pr
 		}
 	}()
 	type packResult struct {
-		n    int
-		size int64
-		err  error
+		n     int
+		size  int64
+		stamp string
+		err   error
 	}
 	ch := make(chan packResult, 1)
 	go func() {
-		n, size, err := mirrorPack(ctx, conn, base, top, profile)
-		ch <- packResult{n, size, err}
+		n, size, stamp, err := mirrorPack(ctx, conn, base, top, profile, since)
+		ch <- packResult{n: n, size: size, stamp: stamp, err: err}
 	}()
 	select {
 	case <-ctx.Done():
-		return 0, 0, ctx.Err()
+		return 0, 0, "", ctx.Err()
 	case r := <-ch:
-		return r.n, r.size, r.err
+		return r.n, r.size, r.stamp, r.err
 	}
 }
 
 // localMark 是本地基线标记(.tdict-mirror.ok)的内容。
 //
+//	v7 起: "v7 source@2026-11-26T10:00:00Z,interface@2026-11-26T09:00:00Z"
+//	       (每个 profile 各自一个基准 —— 同一目录先后拉两类时,基准不能互相顶掉)
+//	v7 早期(未发布): "v7 source,interface 2026-11-26T10:00:00Z"(共用一个基准,
+//	       读的时候把它当作"列出的 profile 都用它",写的时候一律写成按 profile 记)
 //	v5 起: "v5 source,interface 2026-10-26T10:00:00Z"
 //	更早:   "v4 2026-10-26T10:00:00Z"(无 profile 列表)或纯时间戳
 //
 // profiles 记的是“这份目录拉过哪些 profile”,它是**并集**:第二次拉另一个 profile
 // 不能把前一个从记录里抹掉,否则日志/判断会把“两类都在”误报成“只有一类”。
+//
+// Stamps 里的时间是**服务器**给出的(打包前 date -u 取,不是本地时钟),它就是该类
+// 下次增量的 `find -newermt` 基准。**必须按 profile 分开记**:source 与 interface
+// 是两次独立的打包,各自推进自己的基准;共用一个的话,后拉的那次会把基准推到更晚,
+// 前一类在那段时间里的改动就永久漏掉了。
 type localMark struct {
 	Version  int
 	Profiles map[MirrorProfile]bool
+	Stamps   map[MirrorProfile]time.Time
 }
 
 func (m localMark) Has(p MirrorProfile) bool { return m.Profiles[p] }
+
+// StampOf 返回该 profile 上次拉取时服务器给的时间;没有可用基准时返回零值。
+func (m localMark) StampOf(p MirrorProfile) time.Time { return m.Stamps[p] }
+
+// content 生成落盘内容:版本 + 按固定顺序的 `profile@基准`(没有基准的只写 profile)。
+func (m localMark) content() string {
+	var parts []string
+	for _, p := range []MirrorProfile{MirrorSource, MirrorInterface} {
+		if !m.Profiles[p] {
+			continue
+		}
+		if ts := m.Stamps[p]; !ts.IsZero() {
+			parts = append(parts, string(p)+"@"+ts.UTC().Format(time.RFC3339))
+		} else {
+			parts = append(parts, string(p))
+		}
+	}
+	label := strings.Join(parts, ",")
+	if label == "" {
+		label = "(无记录)"
+	}
+	return fmt.Sprintf("v%d %s\n", mirrorWhitelistVersion, label)
+}
 
 // ProfilesLabel 按固定顺序列出已拉过的 profile(日志与测试需要稳定输出)。
 func (m localMark) ProfilesLabel() string {
@@ -497,10 +590,10 @@ func (m localMark) ProfilesLabel() string {
 	return strings.Join(out, ",")
 }
 
-// readLocalMark 读本地基线标记;无标记、旧格式、字段缺失都返回零值(版本 0、空集合),
-// 调用方据此当作“无基线”处理,不会凭空认为镜像完整。
+// readLocalMark 读本地基线标记;无标记、旧格式、字段缺失都返回零值(版本 0、空集合、
+// 无基准),调用方据此当作“无基线”处理,不会凭空认为镜像完整。
 func readLocalMark(envDir string) localMark {
-	m := localMark{Profiles: map[MirrorProfile]bool{}}
+	m := localMark{Profiles: map[MirrorProfile]bool{}, Stamps: map[MirrorProfile]time.Time{}}
 	b, err := os.ReadFile(filepath.Join(envDir, localMarkName))
 	if err != nil {
 		return m
@@ -512,21 +605,49 @@ func readLocalMark(envDir string) localMark {
 	if n, err := strconv.Atoi(strings.TrimPrefix(fields[0], "v")); err == nil {
 		m.Version = n
 	}
+	var shared time.Time // 旧的"共用一个基准"写法:末尾单独一个时间字段
 	for _, f := range fields[1:] {
+		if ts, err := time.Parse(time.RFC3339, f); err == nil {
+			shared = ts
+			continue
+		}
 		// profile 集合写成一个逗号分隔的字段（source,interface）；也容忍空格分隔的旧写法。
 		for _, name := range strings.Split(f, ",") {
-			switch p := MirrorProfile(strings.ToLower(strings.TrimSpace(name))); p {
+			name = strings.TrimSpace(name)
+			// v7 起每个 profile 自带基准：source@2026-11-26T10:00:00Z
+			if i := strings.LastIndex(name, "@"); i > 0 {
+				if ts, err := time.Parse(time.RFC3339, name[i+1:]); err == nil {
+					if p := MirrorProfile(strings.ToLower(name[:i])); p == MirrorSource || p == MirrorInterface {
+						m.Profiles[p] = true
+						m.Stamps[p] = ts
+						continue
+					}
+				}
+				name = name[:i]
+			}
+			switch p := MirrorProfile(strings.ToLower(name)); p {
 			case MirrorSource, MirrorInterface:
 				m.Profiles[p] = true
+			}
+		}
+	}
+	// 旧写法(共用一个基准)：把它补给所有还没自带基准的 profile。
+	if !shared.IsZero() {
+		for p := range m.Profiles {
+			if m.Stamps[p].IsZero() {
+				m.Stamps[p] = shared
 			}
 		}
 	}
 	return m
 }
 
-// writeLocalMark 在镜像环境目录写入完整基线标记(白名单版本 + 已拉 profile 集合 + 时间)。
-// profile 取并集:同目录先后拉两种 profile 后,记录里两种都在。
-func writeLocalMark(envDir string, profile MirrorProfile) error {
+// writeLocalMark 在镜像环境目录写入完整基线标记
+// (白名单版本 + 已拉 profile 集合 + 每个 profile 各自的下次增量基准)。
+// profile 取并集:同目录先后拉两种 profile 后,记录里两种都在,各自保留自己的基准。
+// stamp 必须是**服务器**在本次打包前给出的时间;零值表示这次没有可靠基准,
+// 此时落本地时钟 —— 它只影响下一次增量是否保守(可能重打一遍),不会漏文件。
+func writeLocalMark(envDir string, profile MirrorProfile, stamp time.Time) error {
 	if err := os.MkdirAll(envDir, 0o755); err != nil {
 		return err
 	}
@@ -535,16 +656,24 @@ func writeLocalMark(envDir string, profile MirrorProfile) error {
 		// 版本升级:旧的 profile 记录不再作数(白名单变了,那一类可能得重新拉),
 		// 但保留本次这个 —— 它刚刚被完整解压过。
 		mark.Profiles = map[MirrorProfile]bool{}
+		mark.Stamps = map[MirrorProfile]time.Time{}
 	}
 	if mark.Profiles == nil {
 		mark.Profiles = map[MirrorProfile]bool{}
 	}
+	if mark.Stamps == nil {
+		mark.Stamps = map[MirrorProfile]time.Time{}
+	}
 	if profile != "" {
 		mark.Profiles[profile] = true
+		if stamp.IsZero() {
+			stamp = time.Now()
+		}
+		// 只动本次这个 profile 的基准：另一个 profile 的基准是它自己那次打包的时间，
+		// 拿这次的去覆盖会让它漏掉中间那段改动。
+		mark.Stamps[profile] = stamp
 	}
-	return os.WriteFile(filepath.Join(envDir, localMarkName),
-		[]byte(fmt.Sprintf("v%d %s %s\n", mirrorWhitelistVersion, mark.ProfilesLabel(),
-			time.Now().UTC().Format(time.RFC3339))), 0o644)
+	return os.WriteFile(filepath.Join(envDir, localMarkName), []byte(mark.content()), 0o644)
 }
 
 // localMarkVersion 读本地基线标记里的白名单版本;无标记或旧格式(纯时间戳)返回 0。
@@ -561,7 +690,7 @@ func MirrorEnvDir(mirrorDir, envName string) string {
 }
 
 // MirrorReady 本地是否已有完整镜像(.tdict-mirror.ok 标记存在)。
-// 只用于界面显示"拉过没有";拉取本身不依赖它(每次都是全量)。
+// 只用于界面显示"拉过没有";拉取本身只在有标记时才敢走增量,否则退回全量。
 func MirrorReady(mirrorDir, envName string) bool {
 	return MirrorReadyDir(MirrorEnvDir(mirrorDir, envName))
 }
@@ -622,8 +751,8 @@ func mirrorPathInProfile(profile MirrorProfile, rel string) bool {
 
 // mirrorWhitelistVersion 白名单版本:新增文件类型时 +1。
 //
-// 只写进本地标记(.tdict-mirror.ok)供排查:全量模式下**不需要**靠版本判定补拉 ——
-// 每次拉取本来就会重压全部白名单文件,新增的类自然就进来了。
+// 它同时是**增量能否复用的判据**:本地标记里的版本与它不一致时，说明白名单变过、
+// 旧目录可能缺新类型的文件，下一次一律走全量(见 MirrorPullToDirProfileProgress)。
 //
 //	v1: 4gl/4fd
 //	v2: +42s/zh_CN、*.inc
@@ -631,7 +760,8 @@ func mirrorPathInProfile(profile MirrorProfile, rel string) bool {
 //	v4: source 收紧为 4gl/**/*.4gl；interface 保留 42f/42s
 //	v5: source 恢复为 4gl + 42f + 42s/zh_CN + *.inc（一个镜像目录必须装齐所有读者的并集）
 //	v6: 删除增量,只剩全量拉取(服务器临时目录 + 四层清理)
-const mirrorWhitelistVersion = 6
+//	v7: 恢复增量(服务器零状态:基准存在本地标记里,find -newermt 只打变更)
+const mirrorWhitelistVersion = 7
 
 // mirrorBackupSuffixes 备份/临时文件名特征(不含点全名包含即算备份)。
 // 服务器侧打包排除与本地残留清理共用同一份列表,避免两边规则漂移:
@@ -706,8 +836,12 @@ func shdq(s string) string {
 	return `"` + s + `"`
 }
 
-// mirrorPack 在服务器临时目录里打一个**全量** tar.gz。返回 (文件数, 归档字节);
-// 白名单内一个文件都没有时返回 (0, 0) 且不产生归档。
+// mirrorPack 在服务器临时目录里打一个 tar.gz。返回 (文件数, 归档字节, 基准时间);
+// 白名单内一个文件都没有时返回 (0, 0, 基准) 且不产生归档。
+//
+// since 非空时只打比它新的文件(增量)；空则全量。无论哪种，脚本都在 find **之前**
+// 先取一次服务器时间并回吐(TDICT_MIRROR_STAMP)，客户端把它记进本地标记当作
+// 下次的基准 —— 这样"tar 运行期间被改动的文件"下次一定还会被 -newermt 抓到。
 //
 // 脚本里没有 `set -e`：每一步自己收尾。这是"打包失败也不留垃圾"的第一层 ——
 // 清单在成功/失败两条路上都删，tar 失败连半截归档一起删。
@@ -721,20 +855,30 @@ func shdq(s string) string {
 //	TDICT_MIRROR_CD            进不去 TOP
 //	TDICT_MIRROR_FINDFAIL      find 失败（清单已删）
 //	TDICT_MIRROR_TARFAIL       tar 失败（半截归档与清单已删）
-func mirrorPack(ctx context.Context, conn *SSHConn, base, top string, profile MirrorProfile) (int, int64, error) {
-	out, err := conn.OutputContext(ctx, mirrorPackScript(base, top, profile), 20*time.Minute)
+//	TDICT_MIRROR_STAMP <RFC3339>  find 之前取的服务器时间（可能先于上面任一行输出）
+func mirrorPack(ctx context.Context, conn *SSHConn, base, top string, profile MirrorProfile, since string) (int, int64, string, error) {
+	out, err := conn.OutputContext(ctx, mirrorPackScript(base, top, profile, since), 20*time.Minute)
 	if err != nil {
 		if ctx.Err() != nil {
-			return 0, 0, ctx.Err()
+			return 0, 0, "", ctx.Err()
 		}
-		return 0, 0, fmt.Errorf("%s(输出: %s)", err, strings.TrimSpace(out))
+		return 0, 0, "", fmt.Errorf("%s(输出: %s)", err, strings.TrimSpace(out))
 	}
 	return parseMirrorPackOutput(out, top)
 }
 
+// mirrorNewerFlag 生成增量用的 `-newermt` 条件;since 为空时返回空串(全量)。
+// 值经 shdq 转义后放进单引号之外的普通参数位,服务器侧 find 直接按字面时间比较。
+func mirrorNewerFlag(since string) string {
+	if strings.TrimSpace(since) == "" {
+		return ""
+	}
+	return " -newermt " + shdq(since)
+}
+
 // mirrorPackScript 生成服务器侧的打包脚本。单独成函数是为了能被单测钉住：
 // 这里少一句 `rm -f`，服务器上就会多一个 265 MB 的文件，而且很难在生产环境复现。
-func mirrorPackScript(base, top string, profile MirrorProfile) string {
+func mirrorPackScript(base, top string, profile MirrorProfile, since string) string {
 	o := shdq(base + ".tar.gz")
 	l := shdq(base + ".list")
 	t := shdq(top)
@@ -750,7 +894,9 @@ if [ -z "$R" ]; then
   echo TDICT_MIRROR_NONE
   exit 0
 fi
-if ! find $R -type f ` + findExpr + ` > ` + l + `; then
+stamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+echo "TDICT_MIRROR_STAMP $stamp"
+if ! find $R -type f ` + findExpr + mirrorNewerFlag(since) + ` > ` + l + `; then
   rm -f ` + l + `
   echo TDICT_MIRROR_FINDFAIL
   exit 8
@@ -770,14 +916,19 @@ rm -f ` + l + `
 echo "TDICT_MIRROR_OK $n $(wc -c < ` + o + `)"`
 }
 
-// parseMirrorPackOutput 解析打包脚本的输出，取**最后**一个标记行。
+// parseMirrorPackOutput 解析打包脚本的输出，取**最后**一个标记行，并单独捞基准时间。
 //
 // 取最后一行的原因：tar 会把警告打到同一个通道里，前面的行不可信。
-func parseMirrorPackOutput(out, top string) (int, int64, error) {
+// 基准时间单独扫(它总是先于结果行输出)，失败路径也可能已经给了 —— 但那种情况
+// 调用方不会用它，因为整次拉取会直接报错。
+func parseMirrorPackOutput(out, top string) (int, int64, string, error) {
 	mark := ""
+	stamp := ""
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
 		switch {
+		case strings.HasPrefix(line, "TDICT_MIRROR_STAMP"):
+			stamp = strings.TrimSpace(strings.TrimPrefix(line, "TDICT_MIRROR_STAMP"))
 		case strings.HasPrefix(line, "TDICT_MIRROR_OK"),
 			line == "TDICT_MIRROR_NONE",
 			line == "TDICT_MIRROR_CD",
@@ -791,19 +942,19 @@ func parseMirrorPackOutput(out, top string) (int, int64, error) {
 		var n int
 		var s int64
 		if _, err := fmt.Sscanf(mark, "TDICT_MIRROR_OK %d %d", &n, &s); err != nil {
-			return 0, 0, fmt.Errorf("解析打包标记失败: %q", mark)
+			return 0, 0, stamp, fmt.Errorf("解析打包标记失败: %q", mark)
 		}
-		return n, s, nil
+		return n, s, stamp, nil
 	case mark == "TDICT_MIRROR_NONE":
-		return 0, 0, nil
+		return 0, 0, stamp, nil
 	case mark == "TDICT_MIRROR_CD":
-		return 0, 0, fmt.Errorf("进不去服务器 TOP: %s", top)
+		return 0, 0, stamp, fmt.Errorf("进不去服务器 TOP: %s", top)
 	case mark == "TDICT_MIRROR_FINDFAIL":
-		return 0, 0, fmt.Errorf("服务器 find 失败(清单已清理)")
+		return 0, 0, stamp, fmt.Errorf("服务器 find 失败(清单已清理)")
 	case mark == "TDICT_MIRROR_TARFAIL":
-		return 0, 0, fmt.Errorf("服务器 tar 打包失败(半截归档已清理,通常是磁盘满或权限)")
+		return 0, 0, stamp, fmt.Errorf("服务器 tar 打包失败(半截归档已清理,通常是磁盘满或权限)")
 	default:
-		return 0, 0, fmt.Errorf("服务器脚本未输出预期标记(输出: %s)", strings.TrimSpace(out))
+		return 0, 0, stamp, fmt.Errorf("服务器脚本未输出预期标记(输出: %s)", strings.TrimSpace(out))
 	}
 }
 
@@ -951,6 +1102,20 @@ func cleanLocalStaging(envDir string) {
 	}
 }
 
+// extractIncremental 增量解压:直接在 envDir 里按文件覆盖(先写同卷临时名再 rename)。
+//
+// 与 extractFull 的区别是**不整目录替换**:归档里只有变过的文件,没变的一个都不碰,
+// 因此服务器上已删的文件会留在本地 —— 要那个语义就用全量(opts.Full)。
+// 每个文件单独原子替换,中途失败/取消只会留下"一部分新、一部分旧",不会出现
+// 半截文件;.tdict-mirror.ok 也只在全部成功后才推进(见调用方),所以失败后
+// 下次仍按旧基准重拉一遍这批文件。
+func extractIncremental(r io.Reader, envDir string, profile MirrorProfile) (int, error) {
+	if err := os.MkdirAll(envDir, 0o755); err != nil {
+		return 0, err
+	}
+	return extractTarGzReplace(r, envDir, profile)
+}
+
 // extractFull 全量解压:先写 .staging 临时目录,再把**本 profile 之外**的旧文件搬进去,
 // 最后整目录替换。
 //
@@ -975,6 +1140,14 @@ func extractFull(r io.Reader, envDir string, profile MirrorProfile) (int, error)
 		return 0, kerr
 	} else if kept > 0 {
 		logfMirror("全量拉取保留另一类文件 %d 个(不属于 %s 的白名单)", kept, profile)
+	}
+	// 基线标记也要带过去:它记着**另一个** profile 的基准,整目录替换把它一起删掉的话,
+	// 那一类下次就没基准了(白拉一次全量),严重时还会把它的改动漏掉。
+	// 本次这个 profile 的基准由调用方的 writeLocalMark 覆盖,这里只需保住别人的。
+	if src := filepath.Join(envDir, localMarkName); fileExists(src) {		if err := copyRegularFile(src, filepath.Join(staging, localMarkName)); err != nil {
+			os.RemoveAll(staging)
+			return 0, fmt.Errorf("保留本地基线标记失败: %w", err)
+		}
 	}
 	old := envDir + ".old-" + ts
 	if _, err := os.Stat(envDir); err == nil {
@@ -1045,6 +1218,12 @@ func keepOtherProfileFiles(oldDir, staging string, profile MirrorProfile) (int, 
 	return kept, err
 }
 
+// fileExists 判断路径是否是存在的普通文件(用于"有旧标记才搬")。
+func fileExists(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && st.Mode().IsRegular()
+}
+
 // copyRegularFile 复制单个普通文件（保留 mtime，与原解压行为一致）。
 func copyRegularFile(src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
@@ -1072,6 +1251,13 @@ func copyRegularFile(src, dst string) error {
 // extractTarGz 从 tar.gz 流解压到 dest(标准库;不做任何 shell)。返回文件数。
 // tar 头路径做穿越防护;回写 mtime 便于与服务器比对;文件 0644。
 func extractTarGz(r io.Reader, dest string) (int, error) {
+	return extractTarGzReplace(r, dest, "")
+}
+
+// extractTarGzReplace 是 extractTarGz 的实现。profile 非空时走**增量语义**:
+// 归档里不属于该 profile 白名单的文件跳过(防止旧服务器归档/手工 tar 带进杂项)，
+// 每个文件先写 <name>.tt-tmp-<n> 再 rename，做到单文件原子替换。
+func extractTarGzReplace(r io.Reader, dest string, profile MirrorProfile) (int, error) {
 	gz, err := gzip.NewReader(r)
 	if err != nil {
 		return 0, fmt.Errorf("解压 gzip: %w", err)
@@ -1079,6 +1265,8 @@ func extractTarGz(r io.Reader, dest string) (int, error) {
 	defer gz.Close()
 	tr := tar.NewReader(gz)
 	files := 0
+	incremental := profile != ""
+	seq := 0
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -1091,6 +1279,9 @@ func extractTarGz(r io.Reader, dest string) (int, error) {
 		if name == "." || filepath.IsAbs(name) || name == ".." || strings.HasPrefix(name, ".."+string(filepath.Separator)) {
 			return files, fmt.Errorf("归档含非法路径: %q", hdr.Name)
 		}
+		if incremental && hdr.Typeflag != tar.TypeDir && !mirrorPathInProfile(profile, name) {
+			continue // 增量:只收本 profile 的文件
+		}
 		target := filepath.Join(dest, name)
 		switch hdr.Typeflag {
 		case tar.TypeDir:
@@ -1101,15 +1292,27 @@ func extractTarGz(r io.Reader, dest string) (int, error) {
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return files, err
 			}
-			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+			writeTo := target
+			if incremental {
+				seq++
+				writeTo = target + fmt.Sprintf(".tt-tmp-%d", seq)
+			}
+			f, err := os.OpenFile(writeTo, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 			if err != nil {
 				return files, err
 			}
 			if _, err := io.Copy(f, tr); err != nil {
 				f.Close()
+				os.Remove(writeTo)
 				return files, err
 			}
 			f.Close()
+			if incremental {
+				if err := os.Rename(writeTo, target); err != nil {
+					os.Remove(writeTo)
+					return files, err
+				}
+			}
 			_ = os.Chtimes(target, hdr.ModTime, hdr.ModTime)
 			files++
 		default:

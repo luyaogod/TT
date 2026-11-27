@@ -43,8 +43,11 @@ profile=interface 只取 42f/42s，想只要画面时配一个独立目录用。
 4fd 不镜像（设计期 fieldId 不稳定）。per、其它语言目录、.4gl.src 等不拉；
 备份文件（*.bak/*.bck/*~）也排除。目录结构与服务器同构：<镜像目录>/erp/... com/...。
 
-拉取方式只有一种：**全量拉取**。每次都在服务器上重压一遍白名单内的全部文件，
-本地整目录替换（服务器上已删的文件，镜像里也会消失）。没有增量、没有服务器侧基线。
+拉取方式有两种，**服务器侧都不留状态文件**：
+  默认走增量 —— 拿本地标记(.tdict-mirror.ok)里记下的时间戳当基准，只打包服务器上
+  比它新的文件，本地按文件原子替换，不碰其它文件。快，但服务器上已删的文件会留下。
+  --full 走全量 —— 重压全部白名单文件，本地整目录替换（服务器上已删的也会消失）。
+  没有本地基线（首次/标记版本不符/换 profile）时无论加不加 --full 都是全量。
 
 服务器上**不留文件**：归档先写到服务器临时目录（默认 ${TMPDIR:-/tmp}，可用
 --tmp 或配置 mirror.tmpDir 改），下完就删；中途取消、失败也删。只有客户端被强杀
@@ -52,7 +55,7 @@ profile=interface 只取 42f/42s，想只要画面时配一个独立目录用。
 
 子命令：
   dir [<目录>]      查看/设置全局根目录；加 --at <环境> 则设置该环境单独目录
-  pull [<环境>]     全量拉取该环境镜像
+  pull [<环境>]     拉取该环境镜像（默认增量，--full 全量）
   path [<环境>]     打印该环境镜像目录的绝对路径（AI 直接前往）
 
 环境用 --at <环境> 点名（也可给位置参数，二选一）；全局根与该环境单独目录都未设置时，
@@ -62,7 +65,7 @@ profile=interface 只取 42f/42s，想只要画面时配一个独立目录用。
 	dirCmd := newMirrorDirCmd()
 	pullCmd := newMirrorPullCmd(&full, &profile, &tmpDir)
 	pathCmd := newMirrorPathCmd()
-	pullCmd.Flags().BoolVar(&full, "full", false, "已弃用：现在只有全量拉取，此开关无作用")
+	pullCmd.Flags().BoolVar(&full, "full", false, "强制全量：重压全部白名单文件并整目录替换（服务器上已删的也会消失）；不加则走增量")
 	pullCmd.Flags().StringVar(&tmpDir, "tmp", "", "服务器临时目录（覆盖配置 mirror.tmpDir；空=服务器 ${TMPDIR:-/tmp}）")
 	pullCmd.Flags().StringVar(&profile, "profile", "source", "镜像白名单：source(4gl+42f+42s+inc) | interface(只 42f/42s)")
 	g.AddCommand(dirCmd, pullCmd, pathCmd)
@@ -286,20 +289,24 @@ func newMirrorDirCmd() *cobra.Command {
 func newMirrorPullCmd(full *bool, profile *string, tmpDir *string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "pull [<环境>]",
-		Short: "全量拉取该环境镜像（每次重压全部白名单文件）",
+		Short: "拉取该环境镜像（默认增量，--full 全量）",
 		Long: `SSH 登录环境，按 profile 的白名单打包：source 取 4gl 目录下的 .4gl + 42f + 42s/zh_CN + *.inc；interface 只取 42f/42s，供 tt interface 合成画面。
 下载到该环境的镜像目录（环境单独指定，未指定则用全局根目录/<环境名>）。
 
-**只有全量拉取**：每次都在服务器上重压一遍白名单内的全部文件，本地整目录替换。
+**默认增量**：拿本地标记(.tdict-mirror.ok)里记的服务器时间当基准，只打包比它新的
+文件，本地按文件原子替换（先写同卷临时名再 rename），不碰其它文件。没有本地基线
+（首次拉取/标记版本不符/这个 profile 没拉过）时自动退回全量。
+**--full 全量**：重压全部白名单文件，本地整目录替换 —— 服务器上已删的文件，镜像里
+也会消失。增量不负责"删除"，需要这个语义就加 --full。
+
 只对本 profile 的白名单负责：不属于它的既有文件（如给 interface 拉取时的 4gl/inc）
-原样保留。服务器上已删的文件，镜像里也会消失。
+原样保留。
 
 归档先写到**服务器临时目录**（默认 ${TMPDIR:-/tmp}，可用 --tmp <目录> 或配置
 mirror.tmpDir 指定），下载完立即删除；取消、失败也删。所以 $TOP 里不会多出任何文件，
-也不要求登录账号对 $TOP 有写权限。
+也不要求登录账号对 $TOP 有写权限。服务器侧不写任何标记：增量基准只存在本地。
 
-打包根（$TOP）按登录区域动态探测；探测失败直接报错。
---full 已弃用（现在恒为全量），保留只是为了不打断旧脚本。`,
+打包根（$TOP）按登录区域动态探测；探测失败直接报错。`,
 		Example: `  tt file mirror pull --at 主机109
   tt file mirror pull --at 主机109 --profile interface
   tt file mirror pull --at 主机109 --tmp /u2/tmp`,
@@ -336,13 +343,14 @@ mirror.tmpDir 指定），下载完立即删除；取消、失败也删。所以
 				tmp = strings.TrimSpace(*tmpDir)
 			}
 			jsonOut := common.IsJSON()
-			if !jsonOut {
-				fmt.Printf("正在拉取 %s 镜像（全量，%s）: %s -> %s\n", e.Name, prof.Label(), e.Host, envDir)
-				if *full {
-					fmt.Println("(--full 已弃用：现在恒为全量拉取，此开关无作用)")
-				}
+			mode := "增量"
+			if *full {
+				mode = "全量"
 			}
-			st, err := host.MirrorPullToDirProfile(cmd.Context(), e, envDir, prof, host.MirrorOptions{TmpDir: tmp})
+			if !jsonOut {
+				fmt.Printf("正在拉取 %s 镜像（%s，%s）: %s -> %s\n", e.Name, mode, prof.Label(), e.Host, envDir)
+			}
+			st, err := host.MirrorPullToDirProfile(cmd.Context(), e, envDir, prof, host.MirrorOptions{TmpDir: tmp, Full: *full})
 			if err != nil {
 				return outputErrConn(err)
 			}
@@ -352,12 +360,17 @@ mirror.tmpDir 指定），下载完立即删除；取消、失败也删。所以
 					"files": st.Files, "bytes": st.Bytes, "pruned": st.Pruned,
 					"elapsed": st.Elapsed, "topDir": st.TopDir, "tmpDir": st.TmpDir,
 					"note": st.Note, "profile": string(st.Profile),
+					"full": st.Full, "since": st.Since,
 				})
 			}
 			if st.Note != "" {
 				fmt.Printf("%s\n", st.Note)
 			} else {
-				fmt.Printf("镜像完成: %d 个文件, %s, 用时 %s\n", st.Files, fmtBytes(st.Bytes), st.Elapsed)
+				head := "镜像完成"
+				if !st.Full {
+					head = "增量完成"
+				}
+				fmt.Printf("%s: %d 个文件, %s, 用时 %s\n", head, st.Files, fmtBytes(st.Bytes), st.Elapsed)
 				if st.Pruned > 0 {
 					fmt.Printf("已清理本地残留备份文件: %d 个（如 *.bak/*.bck；本 profile 只保留 %s）\n", st.Pruned, st.Profile.Label())
 				}
