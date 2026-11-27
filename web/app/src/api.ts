@@ -420,13 +420,15 @@ export interface MirrorEnv {
   zone: string
   path: string
   exists: boolean // 目录存在(哪怕没拉完)——「清理」按它决定能不能点
-  ready: boolean // 本地已有完整基线(增量前提)
+  ready: boolean // 本地已有基线(增量能直接跑的前提;没基线时拉取会自动转全量)
 }
 export interface MirrorJob {
   running: boolean
   env: string
   phase: string // connect|probe|pack|download|done|error|cancelled
   message: string
+  full: boolean // true=全量(整目录替换),false=增量(只覆盖变更文件)
+  since?: string // 增量基准(服务器时间);全量时为空
   bytes: number
   total: number // 下载阶段为归档总字节;0=未知(pack 阶段)
   files: number
@@ -791,9 +793,11 @@ export const api = {
   // 字典类动作(源码镜像拉取、字典同步)。合并前它们在 /dict/api/* 下 —— 那是字典页
   // 私有 API;字典页并进设置页之后升到共享层,设置页因此不必跨子系统调用。
   mirror: () => req<MirrorResp>('/api/mirror'),
-  // 全量拉取：服务端只有这一种模式，不再传 full。
-  mirrorPull: (env: string) =>
-    req<{ ok: boolean }>('/api/mirror/pull', { method: 'POST', body: JSON.stringify({ env }) }),
+  // 拉取源码镜像。full=false(默认)走增量:只覆盖服务器上变过的文件,不删本地其它文件;
+  // full=true 走全量:重压全部并整目录替换(服务器上已删的本地也消失)。
+  // 没有本地基线时服务端会自己转全量,传 false 也不会出错。
+  mirrorPull: (env: string, full = false) =>
+    req<{ ok: boolean }>('/api/mirror/pull', { method: 'POST', body: JSON.stringify({ env, full }) }),
   // 中途取消:ok=false 表示当时没有任务在跑(用户在轮询间隙多点了一次,不算错误)
   mirrorStop: () => req<{ ok: boolean; error?: string }>('/api/mirror/stop', { method: 'POST' }),
   // 「清理」:删掉该环境在本机那份数据(不可撤销)。服务端会拒绝共用目录/根目录/任务在跑,

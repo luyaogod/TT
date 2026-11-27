@@ -175,7 +175,7 @@ function ThemeCards({ value, onChange }: { value: ThemeMode; onChange: (t: Theme
  */
 function JobProgress({ env, phaseLabel, tag, pct, cells, error, message, stopping, onStop, onDismiss }: {
   env: string; phaseLabel: string
-  /** 右上角的小标记(全量拉取、进行中/已结束) */
+  /** 右上角的小标记(增量/全量、进行中/已结束) */
   tag?: string
   /** 0-100。算不出来(总量未知)时传 undefined:百分比显示为 —,不假装 0% */
   pct?: number
@@ -199,7 +199,7 @@ function JobProgress({ env, phaseLabel, tag, pct, cells, error, message, stoppin
         <span className="text-muted-foreground">{phaseLabel}</span>
         <div className="ml-auto flex items-center gap-2">
           {onStop && (
-            // 停止放在这一行的最右:它作用的对象就是这条进度(误点「全量拉取」后想收手)
+            // 停止放在这一行的最右:它作用的对象就是这条进度(误点拉取后想收手)
             <Button variant="outline" size="sm" className="h-6 px-2 text-[11px]"
               disabled={stopping} onClick={onStop}>
               {stopping ? '正在停止…' : '停止'}
@@ -669,7 +669,7 @@ export function SettingsView() {
       })
 
       // 镜像目录保存后立刻回读：表格里的实际路径/基线随之更新，
-      // 不要让用户点“全量拉取”时还用着保存前的旧路径。
+      // 不要让用户点拉取时还用着保存前的旧路径。
       if (keys.includes('hosts') || keys.includes('mirror')) {
         void api.mirror().then(setMirror).catch(() => { /* 提示性信息，失败不打断保存 */ })
       }
@@ -1188,15 +1188,19 @@ export function SettingsView() {
   }, [sync?.job?.done, sync?.job?.running, refreshSync])
 
   // 环境名由调用的那一行给出 —— 表格里每行一个按钮,不再有"先选环境"这一步。
-  // 只有一种模式(全量拉取),而且它会整目录替换本地镜像,所以先弹确认;
-  // 确认后走 doMirror(动作与确认分开,弹窗那一侧只负责 setAsk 与描述文案)。
-  const pullMirror = (env: string) => {
+  // 两种模式,确认策略不同:
+  //   · 增量(默认)—— 只覆盖服务器上变过的文件,不动本地其它文件,可逆且快,直接跑;
+  //   · 全量(--full)—— 整目录替换,服务器上已删的本地也会消失,先弹确认。
+  // 没有本地基线时后端会自己转全量(见 internal/host/mirror.go 的 full 判定),
+  // 那种情况下增量按钮也会做全量的事,所以按钮文案与确认都按"有没有基线"分流。
+  const pullMirror = (env: string, full: boolean, hasBaseline: boolean) => {
     if (!env) return
+    if (!full && hasBaseline) { void doMirror(env, false); return }
     setAsk({
       title: `全量拉取环境「${env}」?`,
       desc: '将在服务器上重压全部白名单文件,并整目录替换本地镜像\n(服务器上已删除的文件,本地也会消失)。耗时约几分钟。',
       confirmText: '全量拉取',
-      run: () => void doMirror(env),
+      run: () => void doMirror(env, true),
     })
   }
   // 目录选择器（前端自绘，后端 /api/fs/list 列目录）；选中后写回该环境的 mirrorDir。
@@ -1210,10 +1214,10 @@ export function SettingsView() {
     })
   }
 
-  const doMirror = async (env: string) => {
+  const doMirror = async (env: string, full: boolean) => {
     setOpBusy('mirror')
     try {
-      await api.mirrorPull(env)
+      await api.mirrorPull(env, full)
       await refreshMirror()
       // 刻意不给"已开始…"这种成功提示:进度块马上就会出现,并写着环境与进行中状态 ——
       // 同一件事在一屏里说两遍就是噪音。
@@ -1996,15 +2000,25 @@ export function SettingsView() {
                             </TableCell>
                             <TableCell className="px-2">
                               <div className="flex items-center gap-1 whitespace-nowrap">
-                                {/* 同上:都走 ghost 文本按钮。以前这里并排两个动作
-                                    (增量更新 / 全量),现在只有一种模式:**全量拉取**。
+                                {/* 同上:都走 ghost 文本按钮。两个动作:
+                                    「增量更新」只覆盖服务器上变过的文件,可逆、快,是日常动作;
+                                    「全量」整目录替换,连服务器上已删的也一起消失,是修烂镜像的手段。
+                                    有基线才让「增量更新」可点 —— 没基线时后端会自己转全量,
+                                    那样点"增量"实际做的是全量,名不副实(所以那种情况只剩「全量」)。
                                     去掉 Download 图标:同一格几个按钮,一个带图标一个不带
                                     会让它们看着不是一类东西;动作名已经把事说清了。
                                     「清理」排在最后：破坏性动作离常用按钮远一点，点完还要过确认。 */}
+                                <Button variant="ghost" size="sm" disabled={mirrorBusy || !rowReady || !e.ready}
+                                  title={!e.ready
+                                    ? '还没有本地基线：先用「全量」拉一次，之后才能增量'
+                                    : (rowTitle || '只拉服务器上变过的文件；本地其它文件与服务器上已删的文件都不动')}
+                                  onClick={() => pullMirror(e.name, false, e.ready)}>
+                                  增量更新
+                                </Button>
                                 <Button variant="ghost" size="sm" disabled={mirrorBusy || !rowReady}
                                   title={rowTitle || '在服务器上重压全部白名单文件，本地整目录替换（服务器上已删的也会消失）'}
-                                  onClick={() => void pullMirror(e.name)}>
-                                  全量拉取
+                                  onClick={() => pullMirror(e.name, true, e.ready)}>
+                                  全量
                                 </Button>
                                 <Button variant="ghost" size="sm" disabled={mirrorBusy || !e.exists}
                                   title={e.exists
@@ -2025,7 +2039,7 @@ export function SettingsView() {
                   <JobProgress
                     env={mirror.job.env}
                     phaseLabel={MIRROR_PHASE[mirror.job.phase] || mirror.job.phase}
-                    tag={`全量拉取 · ${mirror.job.running ? '进行中' : '已结束'}`}
+                    tag={`${mirror.job.full ? '全量' : '增量'} · ${mirror.job.running ? '进行中' : '已结束'}`}
                     pct={mirrorPct(mirror.job)}
                     error={mirror.job.phase === 'error' ? (mirror.job.error || mirror.job.message) : undefined}
                     message={mirror.job.running ? undefined

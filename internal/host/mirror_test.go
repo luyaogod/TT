@@ -23,7 +23,7 @@ func TestMirrorEnvDirAndReady(t *testing.T) {
 	if MirrorReady(dir, "envA") {
 		t.Fatal("无基线标记应为 false")
 	}
-	if err := writeLocalMark(filepath.Join(dir, "envA"), MirrorSource); err != nil {
+	if err := writeLocalMark(filepath.Join(dir, "envA"), MirrorSource, time.Time{}); err != nil {
 		t.Fatalf("writeLocalMark: %v", err)
 	}
 	if !MirrorReady(dir, "envA") {
@@ -159,7 +159,7 @@ func TestLocalMarkVersion(t *testing.T) {
 	if got := localMarkVersion(dir); got != 0 {
 		t.Fatalf("无标记应为 0, got %d", got)
 	}
-	if err := writeLocalMark(dir, MirrorSource); err != nil {
+	if err := writeLocalMark(dir, MirrorSource, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := localMarkVersion(dir); got != mirrorWhitelistVersion {
@@ -272,14 +272,14 @@ func TestLocalMarkProfilesUnion(t *testing.T) {
 	if got := readLocalMark(dir); got.Version != 0 || got.Has(MirrorSource) || got.Has(MirrorInterface) {
 		t.Fatalf("无标记时应是零值, got %+v", got)
 	}
-	if err := writeLocalMark(dir, MirrorSource); err != nil {
+	if err := writeLocalMark(dir, MirrorSource, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	m := readLocalMark(dir)
 	if !m.Has(MirrorSource) || m.Has(MirrorInterface) {
 		t.Fatalf("只拉过 source, got %s", m.ProfilesLabel())
 	}
-	if err := writeLocalMark(dir, MirrorInterface); err != nil {
+	if err := writeLocalMark(dir, MirrorInterface, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	m = readLocalMark(dir)
@@ -297,7 +297,7 @@ func TestLocalMarkProfilesUnion(t *testing.T) {
 	if got := readLocalMark(old); got.Version != 3 || !got.Has(MirrorSource) {
 		t.Fatalf("旧标记应能读出 v3/source, got %+v", got)
 	}
-	if err := writeLocalMark(old, MirrorInterface); err != nil {
+	if err := writeLocalMark(old, MirrorInterface, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := readLocalMark(old); got.Has(MirrorSource) || !got.Has(MirrorInterface) {
@@ -431,8 +431,10 @@ func TestExtractFullKeepsOtherProfilesFiles(t *testing.T) {
 	if exists(filepath.Join(envDir, "erp/asf/4gl/x.bak")) {
 		t.Error("备份文件不该被搬进新目录")
 	}
-	if exists(filepath.Join(envDir, localMarkName)) {
-		t.Error("基线标记不该被搬（解压完成后由 writeLocalMark 重写）")
+	// 基线标记必须**保留**:它记着另一个 profile 的基准，整目录替换把它删掉的话，
+	// 那一类下次就没基准了(白拉一次全量)。本次这个 profile 的基准随后由 writeLocalMark 覆盖。
+	if !exists(filepath.Join(envDir, localMarkName)) {
+		t.Error("基线标记应被保留(里面记着另一个 profile 的基准)")
 	}
 	// 临时目录不该留在镜像父目录里
 	entries, err := os.ReadDir(filepath.Dir(envDir))
@@ -463,6 +465,162 @@ func TestExtractFullKeepsOtherProfilesFiles(t *testing.T) {
 	for _, rel := range []string{"erp/asf/42f/s_new.42f", "erp/asf/42s/zh_CN/s_new.42s"} {
 		if !exists(filepath.Join(envDir2, rel)) {
 			t.Errorf("interface 归档文件应落盘: %s", rel)
+		}
+	}
+}
+
+// 增量解压：只覆盖归档里带的文件，其它文件（含服务器上已删的）一律不动，
+// 且必须真的把内容换掉（不是"看着有就行"），也不留临时文件。
+func TestExtractIncrementalOnlyTouchesChangedFiles(t *testing.T) {
+	envDir := filepath.Join(t.TempDir(), "envA")
+	mkFile := func(rel, body string) string {
+		p := filepath.Join(envDir, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	read := func(p string) string {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("读 %s: %v", p, err)
+		}
+		return string(b)
+	}
+
+	changed := mkFile("erp/asf/4gl/changed.4gl", "old-body")
+	untouched := mkFile("erp/asf/4gl/untouched.4gl", "keep-me")
+	// 服务器上已经删掉的文件：增量感知不到，必须留在本地（这就是要用 --full 的理由）
+	gone := mkFile("erp/asf/4gl/server_deleted.4gl", "still-here")
+
+	n, err := extractIncremental(makeTarGz(t, map[string]string{
+		"erp/asf/4gl/changed.4gl":  "new-body",
+		"erp/asf/4gl/added.4gl":    "added",
+		"erp/asf/per/skipped.4gl":  "not-in-profile",
+		"erp/asf/4fd/skip.4fd":     "not-in-profile",
+		"erp/asf/42s/en_US/en.42s": "not-in-profile",
+	}), envDir, MirrorSource)
+	if err != nil {
+		t.Fatalf("extractIncremental: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("落盘文件数 = %d, want 2(只算白名单内的)", n)
+	}
+	if got := read(changed); got != "new-body" {
+		t.Errorf("变更文件内容 = %q, want new-body", got)
+	}
+	if got := read(untouched); got != "keep-me" {
+		t.Errorf("未变更文件被动了: %q", got)
+	}
+	if got := read(gone); got != "still-here" {
+		t.Errorf("增量不该删除服务器上已删的文件(那是 --full 的职责): %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(envDir, "erp/asf/4gl/added.4gl")); err != nil {
+		t.Errorf("新增文件应落盘: %v", err)
+	}
+	// 白名单外的一律不落盘：per 目录的 4gl、4fd(已不镜像)、非 zh_CN 的 42s
+	for _, rel := range []string{
+		"erp/asf/per/skipped.4gl",
+		"erp/asf/4fd/skip.4fd",
+		"erp/asf/42s/en_US/en.42s",
+	} {
+		if _, err := os.Stat(filepath.Join(envDir, rel)); err == nil {
+			t.Errorf("不属于本 profile 的文件不该落盘: %s", rel)
+		}
+	}
+	// 不允许留下 .tt-tmp-* 半成品
+	_ = filepath.WalkDir(envDir, func(p string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && strings.Contains(d.Name(), ".tt-tmp-") {
+			t.Errorf("残留临时文件: %s", p)
+		}
+		return nil
+	})
+}
+
+// 本地标记必须记住**服务器**给的基准时间：它是下次增量的唯一依据。
+// 也验证旧格式(v6 及更早、没有可信基准)读出来是零值 —— 那样下次会安全地退回全量。
+func TestLocalMarkStamp(t *testing.T) {
+	dir := t.TempDir()
+	stamp := time.Date(2026, 11, 26, 5, 56, 17, 0, time.UTC)
+	if err := writeLocalMark(dir, MirrorSource, stamp); err != nil {
+		t.Fatal(err)
+	}
+	m := readLocalMark(dir)
+	if !m.StampOf(MirrorSource).Equal(stamp) {
+		t.Fatalf("source 基准 = %v, want %v", m.StampOf(MirrorSource), stamp)
+	}
+	if m.Version != mirrorWhitelistVersion {
+		t.Fatalf("版本 = %d, want %d", m.Version, mirrorWhitelistVersion)
+	}
+
+	// 关键：两个 profile 的基准**各自独立**。先 source 后 interface，
+	// 后者不能把前者的基准推掉，否则 source 在这段时间的改动就永久漏了。
+	later := stamp.Add(30 * time.Minute)
+	if err := writeLocalMark(dir, MirrorInterface, later); err != nil {
+		t.Fatal(err)
+	}
+	m = readLocalMark(dir)
+	if !m.Has(MirrorSource) || !m.Has(MirrorInterface) {
+		t.Fatalf("profile 并集丢失: %s", m.ProfilesLabel())
+	}
+	if !m.StampOf(MirrorSource).Equal(stamp) {
+		t.Fatalf("source 基准被 interface 顶掉了: %v, want %v", m.StampOf(MirrorSource), stamp)
+	}
+	if !m.StampOf(MirrorInterface).Equal(later) {
+		t.Fatalf("interface 基准 = %v, want %v", m.StampOf(MirrorInterface), later)
+	}
+	// 落盘格式要能被人肉读:每个 profile 自带 @基准
+	raw, err := os.ReadFile(filepath.Join(dir, localMarkName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "source@2026-11-26T05:56:17Z") ||
+		!strings.Contains(string(raw), "interface@2026-11-26T06:26:17Z") {
+		t.Fatalf("标记内容不对: %q", string(raw))
+	}
+
+	// v7 早期(未发布)的"共用一个基准"写法:读的时候补给列出的每个 profile
+	shared := t.TempDir()
+	if err := os.WriteFile(filepath.Join(shared, localMarkName),
+		[]byte("v7 source,interface 2026-11-26T05:56:17Z\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := readLocalMark(shared); !got.StampOf(MirrorSource).Equal(stamp) || !got.StampOf(MirrorInterface).Equal(stamp) {
+		t.Fatalf("共用基准应补给每个 profile, got %+v", got.Stamps)
+	}
+
+	// 旧格式：v6 只有时间戳字段但版本不同 → 版本不符，调用方会走全量；
+	// 时间戳本身仍能读出来（便于日志排查），但不会被当作可用基准。
+	old := t.TempDir()
+	if err := os.WriteFile(filepath.Join(old, localMarkName),
+		[]byte("v6 source 2026-10-26T00:00:00Z\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := readLocalMark(old); got.Version == mirrorWhitelistVersion {
+		t.Fatalf("v6 标记不该等于当前版本 %d", mirrorWhitelistVersion)
+	}
+
+	// 完全没有时间字段：零值，必须退回全量
+	noStamp := t.TempDir()
+	if err := os.WriteFile(filepath.Join(noStamp, localMarkName), []byte("v7 source\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := readLocalMark(noStamp); !got.StampOf(MirrorSource).IsZero() {
+		t.Fatalf("没有时间字段时基准应为零值, got %v", got.StampOf(MirrorSource))
+	}
+}
+
+// parseStamp 只认 RFC3339；解析不了就返回零值，让 writeLocalMark 退回本地时钟。
+func TestParseStamp(t *testing.T) {
+	if got := parseStamp("2026-11-26T05:56:17Z"); got.IsZero() || got.Year() != 2026 {
+		t.Errorf("合法时间戳解析失败: %v", got)
+	}
+	for _, bad := range []string{"", "  ", "not-a-time", "2026-11-26 05:56:17"} {
+		if got := parseStamp(bad); !got.IsZero() {
+			t.Errorf("%q 应解析成零值, got %v", bad, got)
 		}
 	}
 }

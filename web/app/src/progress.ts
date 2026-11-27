@@ -50,6 +50,7 @@ export interface MirrorJobLike {
   elapsed: string
   files: number
   running: boolean
+  full?: boolean // true=全量,false/缺省=增量
 }
 
 /**

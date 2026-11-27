@@ -17,6 +17,8 @@ import (
 type mirrorJob struct {
 	Running   bool   `json:"running"`
 	Env       string `json:"env"`
+	Full      bool   `json:"full"`  // true=全量(整目录替换),false=增量(只换变过的文件)
+	Since     string `json:"since"` // 增量基准(服务器时间);空=全量或首次
 	Phase     string `json:"phase"` // connect|probe|pack|download|done|error|cancelled
 	Message   string `json:"message"`
 	Bytes     int64  `json:"bytes"`
@@ -74,8 +76,9 @@ func (s *Server) hMirrorGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, resp)
 }
 
-// hMirrorPull 启动一次**全量拉取**(单实例:已有任务在跑返回 409);返回后前端轮询 /api/mirror。
-// 请求体只需要 {"env": "..."}；老客户端带的 "full" 字段会被忽略(只打一行日志)。
+// hMirrorPull 启动一次拉取(单实例:已有任务在跑返回 409);返回后前端轮询 /api/mirror。
+// 请求体 {"env": "...", "full": true|false}：full 省略/false = 增量(有基线时),
+// true = 强制全量(整目录替换,连服务器上已删的文件一起清掉)。
 func (s *Server) hMirrorPull(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Env  string `json:"env"`
@@ -84,10 +87,7 @@ func (s *Server) hMirrorPull(w http.ResponseWriter, r *http.Request) {
 	if !readBody(w, r, &req) {
 		return
 	}
-	if req.Full != nil && !*req.Full {
-		// 旧版前端会传 full=false 表示"增量"；现在没有增量了,静默按全量执行。
-		fmt.Fprintln(os.Stderr, "[mirror] 收到已弃用的 full=false 请求,按全量拉取执行")
-	}
+	full := req.Full != nil && *req.Full
 	envName := strings.TrimSpace(req.Env)
 	if envName == "" {
 		fail(w, 400, fmt.Errorf("请选择环境"))
@@ -123,6 +123,7 @@ func (s *Server) hMirrorPull(w http.ResponseWriter, r *http.Request) {
 	s.mirror = mirrorJob{
 		Running:   true,
 		Env:       e.Name,
+		Full:      full,
 		Phase:     "connect",
 		Message:   "准备中…",
 		StartedAt: time.Now().Format(time.RFC3339),
@@ -135,7 +136,7 @@ func (s *Server) hMirrorPull(w http.ResponseWriter, r *http.Request) {
 	s.mirrorCancel = cancel
 	s.mirrorMu.Unlock()
 
-	go s.runMirror(ctx, e, envDir, host.MirrorOptions{TmpDir: tmpDir})
+	go s.runMirror(ctx, e, envDir, host.MirrorOptions{TmpDir: tmpDir, Full: full})
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -160,7 +161,7 @@ func (s *Server) hMirrorStop(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
-// runMirror 后台执行一次全量拉取,把 host 的进度回调同步到任务状态。
+// runMirror 后台执行一次拉取,把 host 的进度回调同步到任务状态。
 func (s *Server) runMirror(ctx context.Context, e *host.NamedSsh, envDir string, opts host.MirrorOptions) {
 	onProgress := func(p host.MirrorProgress) {
 		s.mirrorMu.Lock()
@@ -198,7 +199,13 @@ func (s *Server) runMirror(ctx context.Context, e *host.NamedSsh, envDir string,
 		// 服务器上的归档也由 defer 删掉了。
 		if errors.Is(err, context.Canceled) {
 			s.mirror.Phase = "cancelled"
-			s.mirror.Message = "已停止;本地镜像未写完,下次拉取会重新全量拉取"
+			if opts.Full {
+				s.mirror.Message = "已停止;本地镜像未写完,下次拉取会重新全量拉取"
+			} else {
+				// 增量是逐文件原子替换:停在中途只会让"部分文件已更新",基线标记没推进,
+				// 下次仍按同一个基准重拉这批文件,不会漏。
+				s.mirror.Message = "已停止;已更新的文件保持更新,基线未推进,下次拉取会重拉这批变更"
+			}
 			return
 		}
 		s.mirror.Phase = "error"
@@ -206,6 +213,8 @@ func (s *Server) runMirror(ctx context.Context, e *host.NamedSsh, envDir string,
 		return
 	}
 	s.mirror.Phase = "done"
+	s.mirror.Full = st.Full
+	s.mirror.Since = st.Since
 	s.mirror.Bytes = st.Bytes
 	s.mirror.Total = st.Bytes
 	s.mirror.Files = st.Files
@@ -214,7 +223,11 @@ func (s *Server) runMirror(ctx context.Context, e *host.NamedSsh, envDir string,
 		s.mirror.Note = st.Note
 		s.mirror.Message = st.Note
 	} else {
-		s.mirror.Message = fmt.Sprintf("完成:%d 个文件,共 %s", st.Files, humanBytes(st.Bytes))
+		head := "完成"
+		if !st.Full {
+			head = "增量完成"
+		}
+		s.mirror.Message = fmt.Sprintf("%s:%d 个文件,共 %s", head, st.Files, humanBytes(st.Bytes))
 		if st.Pruned > 0 {
 			s.mirror.Message += fmt.Sprintf(";清理本地备份 %d 个", st.Pruned)
 		}
