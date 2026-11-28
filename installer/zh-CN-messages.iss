@@ -69,3 +69,7 @@ UninstallStatusLabel=正在移除 %1，请稍候…
 CreateDesktopIcon=创建桌面快捷方式(&D)
 LaunchProgram=运行 %1
 AdditionalIcons=附加图标：
+
+[CustomMessages]
+; 卸载时问"要不要连镜像一起删"（桌面版与 CLI 版共用；见各自 .iss 的 [Code]）
+UninstallMirrorPrompt=是否同时删除源码镜像（安装目录下的 mirror 文件夹，可能数 GB）？选择「否」会保留镜像与安装目录内你的其它文件（下次安装可直接复用）；选择「是」会永久删除它们。TT 的配置数据（AppData 下的 tt 目录）不在删除范围内，任何选择都不会动它。

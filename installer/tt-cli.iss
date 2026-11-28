@@ -95,9 +95,10 @@ Filename: "{app}\{#AppExe}"; Parameters: "install bdl"; StatusMsg: "正在解压
 Filename: "{app}\{#AppExe}"; Parameters: "install path --remove"; RunOnceId: "RemoveUserPath"; Flags: runhidden waituntilterminated skipifdoesntexist
 
 [UninstallDelete]
-; 装进去的整个目录都带走（升级留下的旧文件也一并清掉）
-Type: filesandordirs; Name: "{app}"
-; %APPDATA%\tt（配置与业务数据）**不动**，与其它软件一致
+; **不要递归删 {app}**（0.6.1 起）：程序文件由卸载日志逐条删除（升级是往旧日志追加，
+; 旧版本文件也在里面）；用户放在安装目录里的东西（例如把 mirror.dir 指到 {app}\mirror 的
+; 源码镜像）不在日志里，递归删 {app} 会把它一并删掉。删不删镜像由人在卸载时选（见 [Code]），
+; 静默默认保留；%APPDATA%\tt（配置与业务数据）**永远不动**，与其它软件一致。
 
 #include "zh-CN-messages.iss"
 
@@ -138,4 +139,44 @@ function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   RemoveLegacyMSI;
   Result := '';
+end;
+
+// 卸载时"删不删用户镜像"是三态（与桌面版同一套口径）：
+//   /DELETEMIRROR      脚本/静默卸载显式要求删
+//   /VERYSILENT|/SILENT 没给上面那个开关 → 保留（静默不能弹窗，默认最安全）
+//   交互卸载           弹「是/否」，默认按钮是「否」
+function HasUninstallParam(const Value: String): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+    if CompareText(ParamStr(I), Value) = 0 then
+    begin
+      Result := True;
+      Exit;
+    end;
+end;
+
+function ShouldDeleteMirror(): Boolean;
+begin
+  Result := False;
+  if HasUninstallParam('/DELETEMIRROR') then
+  begin
+    Result := True;
+    Exit;
+  end;
+  if UninstallSilent then
+    Exit;
+  Result := MsgBox(ExpandConstant('{cm:UninstallMirrorPrompt}'), mbConfirmation,
+    MB_YESNO or MB_DEFBUTTON2) = IDYES;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if (CurUninstallStep = usPostUninstall) and ShouldDeleteMirror() then
+  begin
+    DelTree(ExpandConstant('{app}\mirror'), True, True, True);
+    RemoveDir(ExpandConstant('{app}'));
+  end;
 end;
