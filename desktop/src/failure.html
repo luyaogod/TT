@@ -40,22 +40,16 @@
         width: 26px; height: 26px; border-radius: 6px;
         background: var(--accent); color: #fff; font-weight: 700; font-size: 12px; letter-spacing: .5px;
       }
-      h1 { font-size: 15px; font-weight: 600; margin: 18px 0 6px; }
-      h1.error { color: var(--danger); }
+      h1 { font-size: 15px; font-weight: 600; margin: 18px 0 6px; color: var(--danger); }
       .detail { color: var(--muted); margin: 0 0 14px; white-space: pre-wrap; word-break: break-word; }
-      .bar { height: 3px; background: var(--line); border-radius: 3px; overflow: hidden; }
-      .bar > i {
-        display: block; height: 100%; width: 35%; background: var(--accent); border-radius: 3px;
-        animation: slide 1.1s ease-in-out infinite;
-      }
-      @keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(320%); } }
-      .actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+      .actions { display: flex; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
       button {
         font: inherit; color: var(--fg); background: var(--card);
         border: 1px solid var(--line); border-radius: 6px; padding: 5px 14px; cursor: pointer;
         -webkit-app-region: no-drag;
       }
       button:hover { border-color: #3c3c3c; }
+      button:disabled { opacity: .55; cursor: default; }
       button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
       button.primary:hover { background: #1f8ce0; }
       button.ghost { background: transparent; border-color: transparent; color: var(--muted); }
@@ -69,10 +63,9 @@
   </head>
   <body>
     <div class="brand"><span class="logo">TT</span><span id="brand">TT Desktop · T100 人机协同调试</span></div>
-    <h1 id="title">正在启动…</h1>
+    <h1 id="title">启动失败</h1>
     <p class="detail" id="detail"></p>
-    <div class="bar" id="bar"><i></i></div>
-    <div class="actions" id="actions" hidden>
+    <div class="actions">
       <button class="primary" id="retry">重试</button>
       <button id="open-log">打开日志</button>
       <button id="copy-diag">复制诊断信息</button>
@@ -80,29 +73,28 @@
     </div>
     <pre id="log" hidden></pre>
     <script>
-      // 三种状态共用这一页：loading / error / crashed（由主进程用 query 传进来）。
+      // 只在"起不来"的时候出现：服务没能起来 / 服务意外退出 / 界面进程退出。
       // 文案只讲"发生了什么、下一步点哪"，不讲端口与服务实现（用户不关心）。
       const q = new URLSearchParams(location.search)
-      const stateName = q.get('state') || 'loading'
       const api = window.ttDesktop
       const $ = (id) => document.getElementById(id)
 
-      $('title').textContent = q.get('title') || (stateName === 'loading' ? '正在启动…' : '启动失败')
-      if (stateName !== 'loading') $('title').classList.add('error')
+      $('title').textContent = q.get('title') || '启动失败'
       $('detail').textContent = q.get('detail') || ''
       const logText = q.get('log') || ''
       if (logText) {
         $('log').textContent = logText
         $('log').hidden = false
       }
-      if (stateName === 'loading') {
-        $('bar').hidden = false
-      } else {
-        $('bar').hidden = true
-        $('actions').hidden = false
-      }
 
-      $('retry').addEventListener('click', () => api && api.retry())
+      // 重试：服务在后台重新拉起，成功了会直接开主窗、这一页随之关掉，
+      // 所以这里不给进度条，只把按钮锁住，免得连点。
+      $('retry').addEventListener('click', () => {
+        if (!api) return
+        $('retry').disabled = true
+        $('retry').textContent = '正在重启…'
+        api.retry()
+      })
       $('open-log').addEventListener('click', () => api && api.openLog())
       $('copy-diag').addEventListener('click', async () => {
         if (!api) return
@@ -112,7 +104,7 @@
       $('quit').addEventListener('click', () => api && api.quit())
 
       if (api) {
-        api.boot().then((info) => {
+        api.info().then((info) => {
           if (info && info.version) $('brand').textContent = `TT Desktop ${info.version} · T100 人机协同调试`
         })
       }
