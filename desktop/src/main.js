@@ -2,7 +2,7 @@
 //
 // 它做的四件事：
 //   1. 把内置的 tt 服务拉起来（前台子进程），等它就绪拿到真实地址；
-//   2. 窗口生命：启动页 → 主窗（加载服务提供的同一套 SPA）→ 失败页；
+//   2. 窗口生命：服务就绪直接开主窗（加载服务提供的同一套 SPA）；起不来才开失败页；
 //   3. 收尾：关窗即退出，并且只收掉**自己拉起来的**那份服务；
 //   4. 壳级能力：单实例、菜单、外链、日志、PATH 一键、更新提示。
 //
@@ -45,7 +45,7 @@ const S = {
   origin: '',
   configPath: '',
   exePath: '',
-  splash: null,
+  failure: null,
   main: null,
   starting: false,
   quitting: false,
@@ -142,8 +142,11 @@ function iconPath() {
   return fs.existsSync(p) ? p : undefined
 }
 
-// ---------- 启动页 ----------
-
+// ---------- 失败页 ----------
+//
+// **启动时不弹任何窗口**：服务就绪后直接开主窗，用户先看到的就是工作台。
+// 这一页只在"起不来"时出现 —— 服务没能起来、服务意外退出、界面进程退出 ——
+// 并把最近日志带出来，用户能把问题发回来。
 
 function asQuery(obj) {
   const out = {}
@@ -151,26 +154,24 @@ function asQuery(obj) {
   return out
 }
 
-function showSplash(payload) {
-  const loading = (payload.state || 'loading') === 'loading'
-  const width = loading ? 460 : 560
-  const height = loading ? 300 : 470
-  if (S.splash && !S.splash.isDestroyed()) {
-    S.splash.setSize(width, height)
-    S.splash.loadFile(path.join(here, 'splash.html'), { query: asQuery(payload) })
-    S.splash.show()
-    return S.splash
+function showFailurePage({ title, detail, log: logText = '' }) {
+  const payload = { title, detail, log: logText }
+  const width = 560
+  const height = 470
+  if (S.failure && !S.failure.isDestroyed()) {
+    S.failure.loadFile(path.join(here, 'failure.html'), { query: asQuery(payload) })
+    S.failure.show()
+    return S.failure
   }
   const win = new BrowserWindow({
     width,
     height,
-    // 启动页/失败页没有标题栏：它只活几秒，顶一条系统浅色标题栏会闪一下 ——
-    // 而 tt 是暗色的。整页可拖（见 splash.html 的 app-region），按钮自己标 no-drag。
+    // 失败页没有标题栏：它不是正常工作画面，顶一条系统浅色标题栏会闪一下 ——
+    // 而 tt 是暗色的。整页可拖（见 failure.html 的 app-region），按钮自己标 no-drag。
     frame: false,
     resizable: false,
     maximizable: false,
     fullscreenable: false,
-    skipTaskbar: true,
     title: 'TT Desktop',
     backgroundColor: '#181818',
     show: false,
@@ -183,17 +184,17 @@ function showSplash(payload) {
     },
   })
   win.once('ready-to-show', () => win.show())
-  win.loadFile(path.join(here, 'splash.html'), { query: asQuery(payload) })
+  win.loadFile(path.join(here, 'failure.html'), { query: asQuery(payload) })
   win.on('closed', () => {
-    if (S.splash === win) S.splash = null
+    if (S.failure === win) S.failure = null
   })
-  S.splash = win
+  S.failure = win
   return win
 }
 
-function closeSplash() {
-  if (S.splash && !S.splash.isDestroyed()) S.splash.destroy()
-  S.splash = null
+function closeFailurePage() {
+  if (S.failure && !S.failure.isDestroyed()) S.failure.destroy()
+  S.failure = null
 }
 
 
@@ -279,7 +280,7 @@ function createMain(hash) {
   hardenMain(win)
   win.once('ready-to-show', () => {
     win.show()
-    closeSplash()
+    closeFailurePage()
   })
   win.on('close', () => saveWindowState(win))
   win.on('closed', () => {
@@ -325,8 +326,7 @@ function openMain(hash = '') {
 /** 主窗口没救了：换成失败页（先建失败页再毁主窗，避免"全部窗口关闭"把应用带走）。 */
 function dropMainAndShowError({ title, detail }) {
   if (S.quitting) return
-  const payload = { state: 'crashed', title, detail, log: S.recent.slice(-20).join('\n') }
-  showSplash(payload)
+  showFailurePage({ title, detail, log: S.recent.slice(-20).join('\n') })
   if (S.main && !S.main.isDestroyed()) S.main.destroy()
   S.main = null
 }
@@ -360,9 +360,8 @@ async function boot(retry = false) {
   if (S.starting) return
   S.starting = true
   try {
-    // 先立启动页，再拆旧的：中间不留"一个窗口都没有"的瞬间（window-all-closed 会把应用带走）
-    showSplash({ state: 'loading', title: '正在启动…', detail: '正在准备本地服务，第一次启动会稍慢一点。' })
-
+    // 启动过程中**不建任何窗口**：用户要的是"点开就是工作台"，不再先弹一张加载页。
+    // 这期间本来就没有窗口，window-all-closed 不会因为"没开过窗"而触发。
     if (retry) {
       if (S.main && !S.main.isDestroyed()) S.main.destroy()
       S.main = null
@@ -402,7 +401,7 @@ async function boot(retry = false) {
     const msg = err?.message || String(err)
     const tail = err?.tail || ''
     log(`启动失败: ${msg}${tail ? '\n' + tail : ''}`)
-    showSplash({ state: 'error', title: '本地服务没能起来', detail: msg, log: tail })
+    showFailurePage({ title: '本地服务没能起来', detail: msg, log: tail })
   } finally {
     S.starting = false
   }
@@ -526,7 +525,7 @@ async function showAbout() {
   })
 }
 
-// ---------- IPC（只服务启动页这个本地窗口） ----------
+// ---------- IPC（只服务失败页这个本地窗口） ----------
 
 ipcMain.handle('desktop:info', () => ({ version: app.getVersion(), logPath: S.logFile }))
 ipcMain.on('desktop:retry', () => {
@@ -554,7 +553,7 @@ if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
   app.on('second-instance', () => {
-    const win = S.main || S.splash
+    const win = S.main || S.failure
     if (!win || win.isDestroyed()) return
     if (win.isMinimized()) win.restore()
     win.show()
@@ -563,9 +562,9 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on('window-all-closed', () => {
     if (S.quitting) return
-    // 启动页→主窗的切换会有极短的"零窗口"窗口期，那时引用还在 ——
+    // 失败页→主窗的切换会有极短的"零窗口"窗口期，那时引用还在 ——
     // 用户没关应用，不该把它带走。
-    if (S.main || S.splash) return
+    if (S.main || S.failure) return
     app.quit()
   })
 

@@ -4,6 +4,8 @@
 来自 Go 服务（`tt serve` 的同一套 `/debug/` 与 `/api/*`）。浏览器版与桌面版因此永远看到同一份
 界面、同一份 `%APPDATA%\tt` 配置、同一批调试会话。
 
+启动时**不弹任何窗口**：本地服务就绪后直接开主窗（工作台）；起不来才转失败页。
+
 ```
 desktop/
 ├─ package.json          私有包；version 与仓库 VERSION 同步（make version-check 管）
@@ -12,12 +14,12 @@ desktop/
 ├─ build/icon.ico        窗口与安装包图标（沿用 installer/icon.ico）
 ├─ src/main.js           生命周期、单实例、窗口、标题栏按钮配色、外链、日志、IPC
 ├─ src/serve.js          起服务 / 等就绪 / 判断所有权 / 收尾（纯 Node，可单测）
-├─ src/splash.html       启动页与失败页（无边框；loading / error / crashed 三态）
-├─ src/preload.cjs       只挂给启动页这个本地窗口
+├─ src/failure.html      失败页（无边框；服务起不来 / 服务退出 / 界面进程退出时才出现）
+├─ src/preload.cjs       只挂给失败页这个本地窗口
 ├─ src/shell-preload.cjs 主窗口的白名单窗口 API（换色 / 打开数据目录 / 检查更新…）
 ├─ scripts/dev.mjs       npm run dev
 ├─ scripts/check-syntax.mjs  语法闸门（main.js 没法单测，但语法错会让它双击没反应）
-└─ test/serve.test.mjs   node --test
+└─ test/                 node --test（纯 Node，不启 Electron：serve 契约 + 启动顺序 + 插件页隔离）
 ```
 
 ## 与 Go 侧的契约
@@ -42,7 +44,7 @@ desktop/
 - 标题栏与菜单由 SPA 自己画：[../web/app/src/DesktopTitleBar.tsx](../web/app/src/DesktopTitleBar.tsx)，
   高度 36px，与 `main.js` 的 `TITLEBAR_HEIGHT` 必须一致；
 - 主窗口的 preload 只有一份**白名单窗口 API**（`src/shell-preload.cjs`），业务数据一条都不经过它；
-- 启动页/失败页是**无边框**的（只活几秒，顶一条系统浅色标题栏会闪）。
+- 失败页是**无边框**的（它不是正常工作画面，顶一条系统浅色标题栏会闪）。
 
 ## 跑起来
 
@@ -92,7 +94,7 @@ make version-check         # desktop/package.json 与 VERSION 同版
 Electron 的窗口、菜单、退出收尾没法在 CI 里跑 —— **每次改 `main.js` 都要在真桌面上过一遍**
 这几条（`node --test` 覆盖不到它们）：
 
-1. 冷启动到出界面，全程不出现终端窗口；
+1. 冷启动到出界面，全程不出现终端窗口、不弹加载页（服务就绪后直接出主窗）；
 2. 关窗后任务管理器里没有残留的 `tt.exe`；
 3. 任务管理器强杀壳，`tt.exe` 随之退出（stdin EOF）；
 4. 命令行先 `tt serve` 再开壳：附着，关窗后命令行那条仍在跑；
